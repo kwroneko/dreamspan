@@ -408,7 +408,7 @@ function Section({
         <Input
           type="search"
           aria-label={`Search ${noun}`}
-          placeholder={cards ? "Search by name, version or in-chat name" : "Search by name"}
+          placeholder={cards ? "Search by name, version or nickname" : "Search by name"}
           value={search}
           onChange={(e) => setSearch(e.currentTarget.value)}
           className="min-w-0 flex-1 basis-60"

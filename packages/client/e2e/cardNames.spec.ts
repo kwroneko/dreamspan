@@ -57,7 +57,7 @@ for (const width of [1440, 390]) {
     // The names in the header, each renamed in place (no identity section).
     await expect(page.getByRole("heading", { level: 1, name: "Aria Vance", exact: true })).toBeVisible()
     await expect(page.getByRole("main").getByText("1", { exact: true }).first()).toBeVisible()
-    await expect(page.getByRole("button", { name: "Rename the chat name", exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Rename the nickname", exact: true })).toBeVisible()
     await shoot("editor")
     // Fork pair checks; the chosen names become the fork revision, with parent unchanged.
     await page.getByRole("button", { name: "Fork", exact: true }).click()
@@ -147,7 +147,7 @@ for (const width of [1440, 390]) {
     // A normal name/version save refreshes the mounted sidebar, and History cannot
     // restore an occupied imported pair. All surrounding data is the realistic import.
     await page.goto(`${server().url}/library/${aria.id}`)
-    // Aria has a chat name, so changing the display name asks nothing.
+    // Aria has a nickname, so changing the display name asks nothing.
     await renameCard(page, "display", `Aria revised ${width}`)
     await renameCard(page, "version", `revised-${width}`)
     await saveButton(page).click()

@@ -97,7 +97,7 @@ const rename = async (scope: Locator, which: string, field: string, value: strin
   await scope.getByRole("textbox", { name: field, exact: true }).fill(value)
   await scope.getByRole("textbox", { name: field, exact: true }).press("Enter")
 }
-const renameNickname = (scope: Locator, value: string) => rename(scope, "the chat name", "Chat name (nickname)", value)
+const renameNickname = (scope: Locator, value: string) => rename(scope, "the nickname", "In-chat nickname", value)
 const renameDisplay = (scope: Locator, value: string) => rename(scope, "the display name", "Display name", value)
 
 for (const width of [1440, 390])
@@ -116,7 +116,7 @@ for (const width of [1440, 390])
       await expect(tab.getByRole("tablist", { name: "Card fields" })).toBeVisible({ timeout: 30_000 })
       // The names, without labels on screen, and the token counts.
       await expect(tab.getByRole("heading", { name })).toBeVisible()
-      await expect(tab.getByText("Add a chat name", { exact: true })).toBeVisible()
+      await expect(tab.getByText("Add an in-chat nickname", { exact: true })).toBeVisible()
       await expect(tab.getByText("1.0", { exact: true })).toBeVisible()
       await expect(tab.locator("[data-card-tokens]")).toHaveText(/^~\d+ tokens · ~\d+ permanent$/)
       // The actions are buttons, each with its explanation; no More menu.
@@ -232,7 +232,7 @@ test("a rename asks about past messages on confirm, as the owner's matrix says",
   await page.keyboard.press("Escape")
   await page.keyboard.press("Escape")
   await expect(dialog).toHaveCount(0)
-  await expect(tab.getByRole("textbox", { name: "Chat name (nickname)", exact: true })).toHaveValue("Mio")
+  await expect(tab.getByRole("textbox", { name: "In-chat nickname", exact: true })).toHaveValue("Mio")
   await tab.getByRole("button", { name: "Cancel renaming", exact: true }).click()
   await expect(tab.getByText("In chat: Mio Tanaka", { exact: true })).toBeVisible()
 
@@ -248,7 +248,7 @@ test("a rename asks about past messages on confirm, as the owner's matrix says",
   await renameNickname(tab, "")
   await expect(dialog).toHaveAccessibleName("Replace the name in past messages?")
   await dialog.getByRole("button", { name: "No. Past messages will keep “Mio”.", exact: true }).click()
-  await expect(tab.getByText("Add a chat name", { exact: true })).toBeVisible()
+  await expect(tab.getByText("Add an in-chat nickname", { exact: true })).toBeVisible()
   expect(await messages(chat.id)).toContain("Mio waves from the pier.")
 
   // A first nickname equal to the display name: nothing asked.
@@ -256,7 +256,7 @@ test("a rename asks about past messages on confirm, as the owner's matrix says",
   await expect(tab.getByText("In chat: Mio Tan", { exact: true })).toBeVisible()
   await expect(dialog).toHaveCount(0)
   await renameNickname(tab, "")
-  await expect(tab.getByText("Add a chat name", { exact: true })).toBeVisible()
+  await expect(tab.getByText("Add an in-chat nickname", { exact: true })).toBeVisible()
 
   // Display name with no nickname again: rename everywhere replaces in all its chats.
   await renameDisplay(tab, "Mio")
@@ -285,7 +285,7 @@ for (const width of [1440, 390])
       const { ref } = await seed(page, name)
       await page.goto(`${server().url}/library/${ref.id}`)
       await expect(page.getByRole("heading", { level: 1, name })).toBeVisible({ timeout: 30_000 })
-      await expect(page.getByText("Add a chat name", { exact: true })).toBeVisible()
+      await expect(page.getByText("Add an in-chat nickname", { exact: true })).toBeVisible()
       await expect(page.locator("[data-card-tokens]")).toHaveText(/^~\d+ tokens · ~\d+ permanent$/)
       // No separate identity section: no labelled Display name box.
       await expect(page.getByRole("textbox", { name: "Display name", exact: true })).toHaveCount(0)

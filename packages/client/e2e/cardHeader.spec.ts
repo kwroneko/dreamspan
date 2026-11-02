@@ -1,6 +1,6 @@
 // A card's header at the top of its tab in the chat's panel and of the full editor
 // (CardNameHeader.tsx `CardHeader`, DESIGN §4, owner 2026-11-02): the portrait as tall as the
-// names beside it, top and bottom aligned; "You play" a badge on the portrait, so a persona's
+// names beside it, stacked from the top; "You play" a badge on the portrait, so a persona's
 // header has the same shape as any character's; Adjust cutout and View full image over the
 // picture, reachable by keyboard. Screenshots of each case at the panel's minimum, default
 // and a wide width, on a phone, light and dark. Every card here is made up.
@@ -8,6 +8,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { DISPLAY_HINT, NICKNAME_HINT } from "../src/features/editor/cardNameHints.ts"
 import { cardFieldsTab } from "./support/cardEditor.ts"
 import { portraitPng } from "./support/portrait.ts"
 import { asUser } from "./support/rpc.ts"
@@ -27,7 +28,8 @@ const shoot = async (target: Page | Locator, name: string) => {
 const PERSONA = "Shannon"
 const PLAIN = "Wren"
 const NAMED = "Mio"
-const LONG = "Seraphina Valentina Montgomery-Blackwood of the Silver Marches"
+const LONG =
+  "Seraphina Valentina Montgomery-Blackwood of the Silver Marches, keeper of the northern lighthouse and envoy of the winter court beyond the mountains and the never-ending eastern sea"
 const CARDS: ReadonlyArray<{ name: string; data?: Record<string, unknown>; image?: boolean }> = [
   { name: PERSONA, image: true },
   { name: PLAIN },
@@ -39,8 +41,12 @@ const CARDS: ReadonlyArray<{ name: string; data?: Record<string, unknown>; image
   {
     name: LONG,
     data: {
-      character_version: "Extended edition with the northern chapters",
-      nickname: "Lady Seraphina of the Marches"
+      character_version:
+        "Extended edition with the northern chapters and the winter court, annotated by the lighthouse keepers. ".repeat(
+          3
+        ),
+      nickname:
+        "Lady Seraphina of the Marches, keeper of the northern lighthouse and envoy of the winter court beyond the mountains and the never-ending eastern sea"
     }
   }
 ]
@@ -106,6 +112,57 @@ const measure = async (panel: Locator) => {
   return { header: await box(header), portrait, first, last }
 }
 
+/** Check visible text fragments, so a two-line heading cannot leave its pencil on line one. */
+const expectInlineNames = async (scope: Locator) => {
+  const header = scope.locator("[data-card-header]")
+  const geometry = await header.evaluate((element) => {
+    const bounds = element.getBoundingClientRect()
+    return [...element.querySelectorAll<HTMLElement>("[data-card-header-row]")].slice(0, 3).map((text) => {
+      const area = text.getBoundingClientRect()
+      const pencil = text.parentElement!.querySelector("button")!
+      const button = pencil.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(text)
+      const fragments = [...range.getClientRects()].filter((r) => r.top < area.bottom && r.bottom > area.top)
+      const last = fragments.at(-1)!
+      const title = text.hasAttribute("data-inline-rename-text")
+      const clipped = text.scrollHeight > text.clientHeight + 1
+      const ellipsis = document.createElement("span")
+      ellipsis.style.cssText = `position:fixed;visibility:hidden;font:${getComputedStyle(text).font}`
+      ellipsis.textContent = "…"
+      document.body.append(ellipsis)
+      const ellipsisWidth = ellipsis.getBoundingClientRect().width
+      ellipsis.remove()
+      const end = title ? Math.min(area.right, last.right + (clipped ? ellipsisWidth : 0)) : area.right
+      return {
+        title,
+        gap: button.left - end,
+        pencilBottom: button.bottom,
+        textBottom: area.bottom,
+        right: button.right,
+        headerRight: bounds.right,
+        height: area.height,
+        lineHeight: parseFloat(getComputedStyle(text).lineHeight),
+        top: text.parentElement!.getBoundingClientRect().top,
+        bottom: text.parentElement!.getBoundingClientRect().bottom,
+        overflow: getComputedStyle(text).textOverflow
+      }
+    })
+  })
+  expect.soft(geometry).toHaveLength(3)
+  for (const row of geometry) {
+    expect.soft(row.gap, JSON.stringify(row)).toBeGreaterThanOrEqual(1)
+    expect.soft(row.gap, JSON.stringify(row)).toBeLessThanOrEqual(3)
+    expect.soft(row.right).toBeLessThanOrEqual(row.headerRight + 1)
+    expect.soft(Math.abs(row.pencilBottom - row.textBottom)).toBeLessThanOrEqual(row.title ? 1 : 6)
+    expect.soft(row.height).toBeLessThanOrEqual(row.lineHeight * (row.title ? 2 : 1) + (row.title ? 1 : 7))
+    if (!row.title) expect.soft(row.overflow).toBe("ellipsis")
+  }
+  // A normal 4 px stack instead of space distributed over the portrait's height.
+  for (let i = 1; i < geometry.length; i++)
+    expect.soft(Math.abs(geometry[i]!.top - geometry[i - 1]!.bottom - 4)).toBeLessThanOrEqual(1)
+}
+
 const open = async (page: Page, name: string) => {
   await page.goto(`${server().url}/chats/${chat}?panel=card:${ids[name]}`)
   const panel = page.getByRole("tabpanel", { name, exact: true })
@@ -136,26 +193,17 @@ for (const scheme of ["light", "dark"] as const)
         const header = panel.locator("[data-card-header]")
         const slug = name.split(" ")[0]!.toLowerCase()
         await shoot(phone ? page : page.getByRole("complementary", { name: "Chat panel" }), `${mode}-${scheme}-${slug}`)
-        // The portrait's top and bottom are the names' top and bottom, whatever the names.
-        const { header: whole, portrait, first, last } = await measure(panel)
+        // The names start at the portrait's top, without stretching the stack to its bottom.
+        const { header: whole, portrait, first } = await measure(panel)
         expect.soft(Math.abs(portrait.y - first.y), `${name}: top`).toBeLessThanOrEqual(1)
-        expect
-          .soft(Math.abs(portrait.y + portrait.height - (last.y + last.height)), `${name}: bottom`)
-          .toBeLessThanOrEqual(1)
-        expect.soft(Math.abs(whole.height - portrait.height), `${name}: header height`).toBeLessThanOrEqual(1)
+        await expectInlineNames(panel)
         heights.push(whole.height)
         // "You play" is on the persona's portrait, and only there.
         const badge = header.locator("[data-card-header-portrait]").getByText("You play", { exact: true })
         await expect.soft(badge).toHaveCount(name === PERSONA ? 1 : 0)
-        // Every pencil on one vertical line.
-        const pencils = await header
-          .getByRole("button", { name: /^Rename / })
-          .evaluateAll((buttons) => buttons.map((button) => Math.round(button.getBoundingClientRect().left)))
-        expect.soft(pencils.length, `${name}: pencils`).toBe(3)
-        expect.soft(new Set(pencils).size, `${name}: one pencil axis ${pencils.join(",")}`).toBe(1)
       }
       // A persona's header is the same shape as a character's.
-      expect.soft(Math.max(...heights) - Math.min(...heights), `heights ${heights.join(",")}`).toBeLessThanOrEqual(1)
+      expect.soft(Math.abs(heights[0]! - heights[1]!), `short-card heights ${heights.join(",")}`).toBeLessThanOrEqual(1)
     })
 
 test("the picture's controls are over it, and reached by keyboard", async ({ page }) => {
@@ -208,11 +256,9 @@ test("the full editor's header is the same", async ({ page }) => {
         await page.mouse.move(0, 0)
         await page.waitForTimeout(300)
         await shoot(page, `editor-${width}-${scheme}-${name.split(" ")[0]!.toLowerCase()}`)
-        const { portrait, first, last } = await measure(page.locator("main"))
+        const { portrait, first } = await measure(page.locator("main"))
         expect.soft(Math.abs(portrait.y - first.y), `${name}: top`).toBeLessThanOrEqual(1)
-        expect
-          .soft(Math.abs(portrait.y + portrait.height - (last.y + last.height)), `${name}: bottom`)
-          .toBeLessThanOrEqual(1)
+        await expectInlineNames(page.locator("main"))
         // The same picture controls over it as in a character tab (View full image only over a chat).
         const over = page.locator("[data-card-header-portrait]")
         await expect(over.getByRole("button", { name: "Adjust cutout", exact: true })).toHaveCount(
@@ -279,4 +325,26 @@ test("a tag is added from a short field at the end of the chips", async ({ page 
       `tags-${panel ? "panel" : "editor"}`
     )
   }
+})
+
+test("the name explanations and nickname field use the owner's wording", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const panel = await open(page, PLAIN)
+  await expect(panel.getByText("Add an in-chat nickname", { exact: true })).toBeVisible()
+  const header = panel.locator("[data-card-header]")
+  for (const [name, hint] of [
+    ["display name", DISPLAY_HINT],
+    ["nickname", NICKNAME_HINT]
+  ]) {
+    const pencil = header.getByRole("button", { name: `Rename the ${name}`, exact: true })
+    await pencil.hover()
+    await expect(page.getByText(hint!, { exact: true })).toBeVisible()
+    await page.mouse.move(0, 0)
+    await page.keyboard.press("Tab")
+    await pencil.focus()
+    await expect(page.getByText(hint!, { exact: true })).toBeVisible()
+  }
+  await header.getByRole("button", { name: "Rename the nickname", exact: true }).click()
+  await expect(header.getByRole("textbox", { name: "In-chat nickname", exact: true })).toHaveValue("")
+  await header.getByRole("button", { name: "Cancel renaming" }).click()
 })

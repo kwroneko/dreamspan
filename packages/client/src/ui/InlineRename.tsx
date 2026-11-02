@@ -1,8 +1,7 @@
 // A name with a pencil beside it: the pencil turns the name into a field with Save and Cancel
-// beside it; Enter saves, Escape cancels. The usual way to rename one thing in place. With
-// `cells`, the name and its pencil are a grid's cells (`display: contents`), so a column of
-// names keeps every pencil on one line; the field then spans the grid's whole row.
-import { type ReactNode, useEffect, useRef, useState } from "react"
+// beside it; Enter saves, Escape cancels. The usual way to rename one thing in place.
+// `lastLine` keeps the pencil after the last visible line of a clamped heading.
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Input } from "./Field.tsx"
 import { IconButton } from "./Tooltip.tsx"
 
@@ -17,7 +16,7 @@ export function InlineRename({
   hint = "Rename",
   fieldLabel,
   goTo,
-  cells = false
+  lastLine = false
 }: {
   /** The name as it is, what the field starts with. */
   value: string
@@ -37,11 +36,47 @@ export function InlineRename({
   fieldLabel?: string
   /** A search match in the name: opens the field with that part selected. */
   goTo?: { readonly at: number; readonly length: number } | undefined
-  /** The name and pencil as two cells of the grid it's in; the field spans the row. */
-  cells?: boolean
+  /** Position the pencil after the last visible line of [data-inline-rename-text]. */
+  lastLine?: boolean
 }) {
   const [typed, setTyped] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null)
+  const display = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    if (!lastLine || typed !== null) return
+    const root = display.current!
+    const text = root.querySelector<HTMLElement>("[data-inline-rename-text]")!
+    const pencil = root.querySelector<HTMLElement>("button")!
+    const metrics = document.createElement("canvas").getContext("2d")!
+    const place = () => {
+      const bounds = root.getBoundingClientRect()
+      const area = text.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(text)
+      const lines = [...range.getClientRects()].filter((line) => line.top < area.bottom && line.bottom > area.top)
+      const last = lines.at(-1)
+      if (!last) return
+      const clipped = text.scrollHeight > text.clientHeight + 1
+      // A clamped line can end at a word well before its box's right edge. Include
+      // the ellipsis there instead of leaving that unused line width before the pencil.
+      metrics.font = getComputedStyle(text).font
+      const end = Math.min(area.right, last.right + (clipped ? metrics.measureText("…").width : 0))
+      pencil.style.left = `${end - bounds.left + 2}px`
+      pencil.style.top = `${area.bottom - bounds.top - pencil.offsetHeight}px`
+    }
+    place()
+    const observer = new ResizeObserver(place)
+    observer.observe(root)
+    observer.observe(text)
+    let active = true
+    void document.fonts.ready.then(() => {
+      if (active) place()
+    })
+    return () => {
+      active = false
+      observer.disconnect()
+    }
+  }, [lastLine, typed, children])
   const [lastGoTo, setLastGoTo] = useState(goTo)
   if (goTo !== lastGoTo) {
     setLastGoTo(goTo)
@@ -67,22 +102,28 @@ export function InlineRename({
   }
   if (typed === null)
     return (
-      <span className={`${cells ? "contents" : "flex min-w-0 items-center gap-0.5"} ${className}`}>
+      <span
+        ref={display}
+        data-layout-audit-ignore={
+          lastLine ? "inset: Borderless name and pencil share the header's content inset" : undefined
+        }
+        className={`${lastLine ? "relative block w-fit max-w-full pr-[30px]" : "flex min-w-0 items-center gap-0.5"} ${className}`}
+      >
         {children ?? <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>}
         <IconButton
           label={`Rename ${label}`}
           hint={hint}
           icon="edit"
-          className="size-7! shrink-0"
+          data-layout-overlay={
+            lastLine ? "Pencil follows the text inside the blank part of a multiline heading's box" : undefined
+          }
+          className={`size-7! shrink-0 ${lastLine ? "absolute" : ""}`}
           onClick={() => setTyped(value)}
         />
       </span>
     )
   return (
-    <span
-      data-renaming=""
-      className={`flex min-w-0 flex-1 items-center gap-1 ${cells ? "col-span-full" : ""} ${className}`}
-    >
+    <span data-renaming="" className={`flex min-w-0 flex-1 items-center gap-1 ${className}`}>
       <Input
         aria-label={fieldLabel ?? `New name for ${label}`}
         ref={input}

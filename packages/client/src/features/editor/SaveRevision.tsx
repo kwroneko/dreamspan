@@ -1,7 +1,7 @@
 // Saving a revision from an editor (owner, 2026-11-01 and 2026-11-02; ARCHITECTURE §14.6):
 // `ui/SaveControls` bound to the store; a failed save shows on Save itself. Save asks nothing:
 // what's typed is used as it's typed, and a revision is a checkpoint. Only fields another tab
-// or an update changed meanwhile open a dialog, to pick per field. A card's chat name asks about past messages where it's renamed (`CardNameHeader`),
+// or an update changed meanwhile open a dialog, to pick per field. A card's nickname asks about past messages where it's renamed (`CardNameHeader`),
 // never after a save. Every editor uses it: the library page, the chat's tabs, a card's or
 // chat's notes.
 import { parseField } from "@rp/shared/editing.ts"

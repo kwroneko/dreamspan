@@ -17,7 +17,7 @@ test.beforeAll(async () => {
   adminCookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
 })
 const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), adminCookie, use)
-/** Renames the chat name (nickname) in the header; a change asks about past messages at once. */
+/** Renames the nickname (nickname) in the header; a change asks about past messages at once. */
 const rename = (page: Page, name: string) => renameCard(page, "nickname", name)
 /** Closes the question, past the focused answer's explanation. */
 const closePrompt = async (page: Page) =>
@@ -217,7 +217,7 @@ test("closing the question cancels the rename and leaves nothing to resume", asy
     await rename(page, name)
     await expect(prompt(page)).toBeVisible()
     await closePrompt(page)
-    await expect(page.getByRole("textbox", { name: "Chat name (nickname)", exact: true })).toHaveValue(name)
+    await expect(page.getByRole("textbox", { name: "In-chat nickname", exact: true })).toHaveValue(name)
     await page.getByRole("button", { name: "Cancel renaming", exact: true }).click()
     await expect(chatNameLine(page, "Aria")).toBeVisible()
   }
