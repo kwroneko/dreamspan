@@ -145,12 +145,13 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
   expect(actual.scrolls).toBe(true)
   const viewer = column("Tall").locator("[data-image-viewer]")
   const box = (await viewer.boundingBox())!
-  const before = await viewer.evaluate((node) => node.scrollTop)
+  const image = page.getByRole("img", { name: "Tall's full portrait" })
+  const before = (await image.boundingBox())!.y
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
   await page.mouse.down()
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - 150, { steps: 5 })
   await page.mouse.up()
-  expect(await viewer.evaluate((node) => node.scrollTop)).toBeGreaterThan(before + 100)
+  expect((await image.boundingBox())!.y).toBeLessThan(before - 100)
   await shoot(page, "desktop-tall-100")
   await column("Tall").getByRole("button", { name: "Fit", exact: true }).click()
 
@@ -180,11 +181,11 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
       await page.getByRole("button", { name: "Close the panel" }).click()
     } else {
       await openPanel(page, shape.name)
-      // The tab's own portrait changes the picture (owner, 2026-11-01); View full image beside
-      // it shows the whole image, staying open when it's the one shown.
+      // The tab's own portrait shows the whole image (owner, 2026-11-02), staying open when
+      // it's the one shown.
       await page
         .getByRole("tabpanel", { name: shape.name })
-        .getByRole("button", { name: "View full image", exact: true })
+        .getByRole("button", { name: `View ${shape.name}'s picture`, exact: true })
         .click()
       await expect(column(shape.name)).toBeVisible()
       await page.getByRole("button", { name: "Close the panel" }).click()

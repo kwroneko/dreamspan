@@ -8,7 +8,7 @@ import { type CSSProperties, type KeyboardEvent, type PointerEvent, useRef, useS
 import { Button } from "./Button.tsx"
 import { Dialog, DialogActions } from "./Dialog.tsx"
 import { IMAGES_SHORTCUT, useImagePrefs } from "./imagePrefs.ts"
-import type { CutoutChooserProps } from "./portraitParts.ts"
+import { type CutoutChooserProps, PICTURE_ACCEPT } from "./portraitParts.ts"
 import { Spinner } from "./Spinner.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 import { initials } from "./Avatar.tsx"
@@ -95,8 +95,10 @@ export function CutoutChooser({
   pending,
   error,
   onSave,
-  onCancel
+  onCancel,
+  onReplace
 }: CutoutChooserProps) {
+  const picker = useRef<HTMLInputElement>(null)
   const images = useImagePrefs()
   const [image, setImage] = useState<Size | null>(null)
   const [failed, setFailed] = useState(false)
@@ -199,6 +201,7 @@ export function CutoutChooser({
     <Dialog
       open
       wide
+      closeButton
       onOpenChange={(open) => !open && !pending && onCancel()}
       // Focus starts on the image, not a button whose tooltip would cover Save on a phone.
       initialFocus={() => stage.current}
@@ -290,6 +293,7 @@ export function CutoutChooser({
                         key={corner}
                         aria-hidden="true"
                         data-cutout-corner={corner}
+                        data-layout-overlay="Resize handles sit on the cutout's corners"
                         onPointerDown={(event) => startDrag(event, corner)}
                         onPointerMove={moveDrag}
                         onPointerUp={endDrag}
@@ -373,6 +377,29 @@ export function CutoutChooser({
         </p>
       )}
       <DialogActions>
+        {onReplace && (
+          <>
+            <input
+              ref={picker}
+              type="file"
+              accept={PICTURE_ACCEPT}
+              className="sr-only"
+              tabIndex={-1}
+              aria-label="Choose a new picture"
+              data-replace-picker
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0]
+                event.currentTarget.value = ""
+                if (file) onReplace(file)
+              }}
+            />
+            <Tooltip label="Replace the picture: choose another image, then its cutout. PNG, JPEG, GIF or WebP, up to 16 MB.">
+              <Button variant="ghost" disabled={pending} className="sm:mr-auto" onClick={() => picker.current?.click()}>
+                Replace picture…
+              </Button>
+            </Tooltip>
+          </>
+        )}
         <Tooltip label="Close without changing the portrait">
           <Button variant="ghost" disabled={pending} onClick={onCancel}>
             Cancel

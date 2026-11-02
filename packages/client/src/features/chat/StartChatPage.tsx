@@ -26,7 +26,7 @@ import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { Effect, Option } from "effect"
-import { type CSSProperties, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
@@ -48,7 +48,8 @@ import {
   pendingGroupChatCopy
 } from "../editor/backup.ts"
 import { useTitle } from "../shell.tsx"
-import { CastContext, castView } from "./cast.ts"
+import { CastContext, type CastView, castView } from "./cast.ts"
+import { ChatPortraitProvider } from "./ChatPortraitProvider.tsx"
 import { PendingChatHeader } from "./ChatHeader.tsx"
 import { ChatSidePanel, usePanel } from "./ChatPanels.tsx"
 import { composerCarryCopy } from "./composerCarry.ts"
@@ -415,7 +416,7 @@ function Pending({
   }
 
   return (
-    <CastContext value={cast}>
+    <PendingSurface cast={cast} wide={wide} ready={view.cast !== null}>
       <div
         className="flex min-h-0 flex-1"
         style={
@@ -548,7 +549,7 @@ function Pending({
           />
         )}
       </div>
-    </CastContext>
+    </PendingSurface>
   )
 }
 
@@ -692,5 +693,26 @@ export function StartGroupChatPage() {
         </div>
       )}
     </div>
+  )
+}
+
+/** The pending chat's cast, and its portrait viewer as a saved chat's: its portraits open beside it. */
+function PendingSurface({
+  cast,
+  wide,
+  ready,
+  children
+}: {
+  cast: CastView
+  wide: boolean
+  ready: boolean
+  children: ReactNode
+}) {
+  return (
+    <CastContext value={cast}>
+      <ChatPortraitProvider wide={wide} cast={cast} ready={ready}>
+        {children}
+      </ChatPortraitProvider>
+    </CastContext>
   )
 }

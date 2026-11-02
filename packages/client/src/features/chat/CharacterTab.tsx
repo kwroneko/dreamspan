@@ -3,7 +3,7 @@ import { useChatCards } from "./chatCards.ts"
 // has, in the same tabs (`CardEditor`, `layout: "panel"`), edited right here with the editor's
 // store and field histories (ARCHITECTURE §14.6), each long field openable large over the
 // chat. At the top, the portrait beside the names renamed in place and the token counts
-// (`CardHeader`; "You play" is a badge on the persona's portrait), then
+// (`CardHeader`; "You" is a badge on the persona's portrait), then
 // the card's actions as buttons: New chat with them, Full editor, Fork for this chat, Export…
 // and what else is registered (`chatCardActions`). The persona's tab is the same card editor
 // (DESIGN §2.2: a persona is a card), with Switch persona. Card data and actions stay in their
@@ -18,7 +18,6 @@ import { ErrorAlert } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { buttonClass } from "../../ui/Button.tsx"
-import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { CardEditor } from "../editor/CardEditor.tsx"
@@ -90,7 +89,7 @@ function ChatCharacterPanel({ session, view, entityId }: { session: ChatSession;
     <div className="flex flex-col gap-4">
       <CardHeader
         portrait={
-          <CardHeaderPortrait badge={persona ? "You play" : undefined}>
+          <CardHeaderPortrait badge={persona ? "You" : undefined}>
             <Avatar
               id={entityId}
               name={card.name}
@@ -171,13 +170,11 @@ function CardPanel({
   const store = useCardStore(info.refId)
   const workspace = usePresetWorkspace()
   const call = useCaller()
-  const viewer = usePortraitViewer()
   const state = useEditorState(store)
   useEffect(() => {
     if (store.snapshot === null) void store.load()
   }, [store])
   useLeaveGuard(store)
-  const portrait = { id: card.entityId, name: card.name, mediaId: card.avatarMediaId }
   // A new chat with only them is this one, while it's pending with no one else.
   const alone =
     pending !== null &&
@@ -191,9 +188,8 @@ function CardPanel({
             call={call}
             id={card.entityId}
             shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
-            onViewFull={viewer && card.avatarMediaId !== null ? () => viewer.show(portrait) : undefined}
             {...(session === null ? {} : { onChanged: () => void session.rereadCast() })}
-            badge={persona ? "You play" : undefined}
+            badge={persona ? "You" : undefined}
           />
         }
       >

@@ -37,6 +37,7 @@ import { CardEditor } from "./CardEditor.tsx"
 import { CardHeader, CardNameHeader, CardTokens } from "./CardNameHeader.tsx"
 import { CARD_TAB_LOREBOOK } from "./cardTabs.ts"
 import { StorePortrait } from "./PortraitControls.tsx"
+import { EnsurePortraitViewer } from "../../ui/Portrait.tsx"
 import { NoteFields } from "./notes.tsx"
 import { PresetEditor } from "./PresetEditor.tsx"
 import { ForkDialog, RefName } from "./RefDialogs.tsx"
@@ -507,5 +508,9 @@ export function EditorPage() {
   const { refId }: { refId?: string } = useParams({ strict: false })
   // `?focus=lorebook` opens a card on its own lorebook, as the chat's workspace does.
   const { focus } = useSearch({ strict: false }) as { focus?: unknown }
-  return <Editor key={refId} refId={refId as RefId} focus={typeof focus === "string" ? focus : undefined} />
+  return (
+    <EnsurePortraitViewer>
+      <Editor key={refId} refId={refId as RefId} focus={typeof focus === "string" ? focus : undefined} />
+    </EnsurePortraitViewer>
+  )
 }

@@ -6,11 +6,12 @@ import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { Button } from "./Button.tsx"
 import { initials } from "./Avatar.tsx"
-import { ImageViewer, type NaturalSize, type Zoom } from "./ImageViewer.tsx"
+import { ImageViewer, MAX_ZOOM, type NaturalSize, type Zoom } from "./ImageViewer.tsx"
 import { useImagePrefs } from "./imagePrefs.ts"
 import { mediaUrl } from "./mediaImage.ts"
 import { close, even, keepOnly, replace, show, split, type Stack, toggle } from "./portraitStack.ts"
-import { IconButton } from "./Tooltip.tsx"
+import { ToolbarSlider } from "./Slider.tsx"
+import { IconButton, Tooltip } from "./Tooltip.tsx"
 import { useViewPrefs } from "./viewPrefs.ts"
 
 export interface Portrait {
@@ -101,12 +102,24 @@ export function PortraitProvider({
 export const useOpenPortrait = () => useContext(Context)?.open
 export const usePortraitViewer = () => useContext(Context)
 
+/**
+ * A viewer for pages outside a chat (the full editor's own page): a full-screen one, unless a
+ * host above already gives one. Every portrait that can be edited opens its picture on a click,
+ * wherever it is (owner, 2026-11-02).
+ */
+export function EnsurePortraitViewer({ children }: { children: ReactNode }) {
+  return useContext(Context) ? children : <PortraitProvider inline={false}>{children}</PortraitProvider>
+}
+
 /** The phone's viewer: the whole screen, the image fitted to it or at 100% to pan and pinch. */
 function PortraitScreen({ portrait, onClose }: { portrait: Portrait; onClose: () => void }) {
   return (
     <BaseDialog.Root open onOpenChange={(open) => !open && onClose()}>
       <BaseDialog.Portal>
-        <BaseDialog.Popup className="fixed inset-0 z-50 flex h-dvh flex-col bg-surface text-text outline-none">
+        <BaseDialog.Popup
+          data-layout-overlay="The full-screen viewer covers the page"
+          className="fixed inset-0 z-50 flex h-dvh flex-col bg-surface text-text outline-none"
+        >
           <PortraitView
             key={portrait.id}
             portrait={portrait}
@@ -121,10 +134,19 @@ function PortraitScreen({ portrait, onClose }: { portrait: Portrait; onClose: ()
   )
 }
 
+/** The zoom slider's steps, spread evenly over the scale's logarithm, so each part of it zooms alike. */
+const SLIDER_STEPS = 200
+const toSlider = (scale: number, min: number) =>
+  min >= MAX_ZOOM ? 0 : Math.round((Math.log(scale / min) / Math.log(MAX_ZOOM / min)) * SLIDER_STEPS)
+const fromSlider = (value: number, min: number) => min * (MAX_ZOOM / min) ** (value / SLIDER_STEPS)
+const percent = (scale: number) => `${Math.round(scale * 100)}%`
+
 /**
- * A portrait's name, Fit / 100%, the scale shown and a close button over its whole image.
+ * A portrait's name and one toolbar row over its whole image (owner, 2026-11-02): a zoom
+ * slider with the scale shown beside it, Fit and 100%, then the host's buttons (`close`).
  * Fit shows all of it, as large as the box allows (a small one enlarged at most
- * `MAX_UPSCALE` times); 100% is one image pixel to a CSS pixel, dragged or pinched about.
+ * `MAX_UPSCALE` times); 100% is one image pixel to a CSS pixel. The wheel, a drag, a pinch
+ * and a double click or tap work on the image itself (ImageViewer.tsx).
  */
 export function PortraitView({
   portrait,
@@ -137,32 +159,71 @@ export function PortraitView({
 }) {
   const { mode } = useImagePrefs()
   const [zoom, setZoom] = useState<Zoom>("fit")
-  const [scale, setScale] = useState<{ value: number; natural: NaturalSize | null } | null>(null)
+  const [scale, setScale] = useState<{ value: number; natural: NaturalSize | null; min: number } | null>(null)
   const visible = portrait.mediaId !== null && mode === "show"
+  const shownScale = scale?.value ?? 1
+  const min = scale?.min ?? 1
+  const atOwnSize = zoom !== "fit" && Math.abs(shownScale - 1) < 0.005
   return (
     <div className="@container flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1 border-b border-border px-3 py-1.5">
+      <div
+        data-portrait-toolbar
+        className="flex min-h-11 flex-wrap items-center gap-x-1 border-b border-border px-3 @max-[22rem]:pt-2"
+      >
         {title(portrait.name)}
-        {visible && (
-          <>
-            {scale?.natural && (
-              <span
-                className="shrink-0 px-1 text-xs text-muted tabular-nums @max-[17rem]:hidden"
-                title={`${scale.natural.width} × ${scale.natural.height} pixels, shown at ${Math.round(scale.value * 100)}%`}
-              >
-                {Math.round(scale.value * 100)}%
-              </span>
-            )}
-            <Button
-              variant="ghost"
-              className="h-8 shrink-0 px-2.5"
-              aria-pressed={zoom !== "fit"}
-              title={zoom === "fit" ? "Show it at its own size, to drag around" : "Show all of it"}
-              onClick={() => setZoom(zoom === "fit" ? 1 : "fit")}
+        {visible && scale && (
+          // Narrower than its row (a narrow column), the zoom takes a row of its own under the name.
+          <div
+            data-zoom-controls
+            className="flex h-11 items-center gap-1 @max-[22rem]:order-last @max-[22rem]:h-12 @max-[22rem]:w-full"
+          >
+            <ToolbarSlider
+              label="Zoom"
+              hint="Zoom: drag to enlarge or shrink the picture. The wheel and a pinch zoom too."
+              className="w-20 shrink-0 @max-[22rem]:w-auto @max-[22rem]:min-w-10 @max-[22rem]:flex-1"
+              value={toSlider(shownScale, min)}
+              min={0}
+              max={SLIDER_STEPS}
+              step={1}
+              valueText={(value) => percent(value === toSlider(shownScale, min) ? shownScale : fromSlider(value, min))}
+              onValueChange={(value) => {
+                const next = fromSlider(value, min)
+                // The slider's low end is the fit, unless the fit enlarges the picture (then 100%).
+                setZoom(value === 0 && min < 1 ? "fit" : next)
+              }}
+            />
+            <Tooltip
+              label={
+                scale.natural
+                  ? `Shown at ${percent(shownScale)} of its own size, ${scale.natural.width} × ${scale.natural.height} pixels`
+                  : `Shown at ${percent(shownScale)} of its own size`
+              }
             >
-              {zoom === "fit" ? "100%" : "Fit"}
-            </Button>
-          </>
+              <span data-zoom-percent className="w-11 shrink-0 text-right text-xs leading-8 text-muted tabular-nums">
+                {percent(shownScale)}
+              </span>
+            </Tooltip>
+            <Tooltip label="Fit: show all of the picture">
+              <Button
+                variant="ghost"
+                className="h-8 shrink-0 px-2! aria-pressed:bg-surface-raised aria-pressed:text-text"
+                aria-pressed={zoom === "fit"}
+                onClick={() => setZoom("fit")}
+              >
+                Fit
+              </Button>
+            </Tooltip>
+            <Tooltip label="100%: one pixel of the picture to one pixel of the screen">
+              <Button
+                variant="ghost"
+                className="h-8 shrink-0 px-2! aria-pressed:bg-surface-raised aria-pressed:text-text"
+                aria-pressed={atOwnSize}
+                onClick={() => setZoom(1)}
+              >
+                100%
+              </Button>
+            </Tooltip>
+          </div>
         )}
         {close}
       </div>
@@ -179,7 +240,7 @@ export function PortraitView({
             alt={`${portrait.name}'s full portrait`}
             zoom={visible ? zoom : "fit"}
             onZoom={(next) => visible && setZoom(next)}
-            onScale={(value, natural) => setScale({ value, natural })}
+            onScale={(value, natural, least) => setScale({ value, natural, min: least })}
             initials={initials(portrait.name)}
           />
         ) : (

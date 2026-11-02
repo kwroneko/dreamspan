@@ -476,6 +476,22 @@ test.describe("synthetic library and every app surface", () => {
             await card.getByRole("tab", { name, exact: true }).first().click()
             await audit(`panel-card-${name}${suffix}`)
           }
+          // The card's picture: its whole image in the viewer, and the Picture dialog (portraitview).
+          const view = card.getByRole("button", { name: /^View .*'s picture$/ })
+          if (selected.test(`portrait-viewer${suffix}`) && (await view.count()) > 0) {
+            await view.first().click()
+            await expect(page.locator("[data-image-viewer]").first()).toBeVisible()
+            await audit(`portrait-viewer${suffix}`)
+            await page.keyboard.press("Escape")
+            await expect(page.locator("[data-image-viewer]")).toHaveCount(0)
+          }
+          if (selected.test(`dialog-picture${suffix}`) && (await view.count()) > 0) {
+            await card.getByRole("button", { name: "Picture", exact: true }).click()
+            await expect(page.locator("[data-cutout-box]")).toBeVisible()
+            await audit(`dialog-picture${suffix}`)
+            await page.keyboard.press("Escape")
+            await expect(page.locator("[data-cutout-box]")).toHaveCount(0)
+          }
         }
         await sweep("")
         if (width >= 1024) {

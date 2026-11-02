@@ -1,7 +1,7 @@
 // A portrait's cutout (ARCHITECTURE.md §14.5c): setting a new picture opens the cutout chooser
-// before it's saved, Adjust cutout chooses again later, every small portrait follows the cutout
-// (its URL names it), and the full-image viewer still shows the whole original. The character
-// tab's portrait changes the picture (owner, 2026-11-01). At 1440 with a mouse and the keyboard,
+// before it's saved, the Picture button's dialog chooses again later and replaces the picture,
+// every small portrait follows the cutout (its URL names it), and the full-image viewer still
+// shows the whole original. A click on the portrait opens it (owner, 2026-11-02). At 1440 with a mouse and the keyboard,
 // at 390 with touch. CUTOUT_SHOTS=<dir> saves the chooser's screenshots in both themes.
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
@@ -78,7 +78,7 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   await page.goto(`${server().url}/library/${refId}`)
   await cardFieldsTab(page, "Metadata")
   await page.getByLabel("Choose an avatar, or drop it here").setInputFiles(file("wide.png", shapeCard(wide, 80)))
-  const chooser = page.getByRole("dialog", { name: "Cut out Tall's new picture" })
+  const chooser = page.getByRole("dialog", { name: "Tall's new picture" })
   await expect(chooser).toBeVisible()
   await expect(chooser.locator("[data-cutout-box]")).toBeVisible()
   const stage = await stageOf(chooser)
@@ -119,12 +119,12 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   await chooser.getByRole("button", { name: "Save picture" }).click()
   await expect(chooser).toHaveCount(0)
 
-  // The editor's portrait shows the cutout chosen; Adjust cutout opens the original whole.
-  const portrait = page.getByRole("tabpanel", { name: "Metadata" }).locator("[data-change-portrait] img")
+  // The editor's portrait shows the cutout chosen; the Picture button opens the original whole.
+  const portrait = page.getByRole("tabpanel", { name: "Metadata" }).locator("[data-view-portrait] img")
   const first = await named(portrait)
   expect(first.crop).not.toBe("auto")
-  await page.getByRole("tabpanel", { name: "Metadata" }).getByRole("button", { name: "Adjust cutout" }).click()
-  const adjust = page.getByRole("dialog", { name: "Adjust Tall's cutout" })
+  await page.getByRole("tabpanel", { name: "Metadata" }).getByRole("button", { name: "Picture", exact: true }).click()
+  const adjust = page.getByRole("dialog", { name: "Tall's picture" })
   await expect(adjust).toBeVisible()
   const original = new URL(
     (await adjust.getByRole("img", { name: "Tall's whole image" }).getAttribute("src"))!,
@@ -163,28 +163,40 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   expect(await full.evaluate((img: HTMLImageElement) => img.naturalHeight)).toBe(wide.height)
   await page.getByRole("button", { name: "Close the portrait" }).click()
 
-  // The character tab: the portrait says what a click does, and changes the picture.
+  // The character tab: the portrait says what a click does; the one Picture button replaces the
+  // picture from its dialog, going straight to the new picture's cutout.
   await openPanel(page, "Tall")
   const tab = page.getByRole("tabpanel", { name: "Tall" })
-  const change = tab.getByRole("button", { name: "Change Tall's picture" })
-  await change.hover()
-  await expect(page.getByText("Change the picture", { exact: true })).toBeVisible()
+  const view = tab.getByRole("button", { name: "View Tall's picture" })
+  await view.hover()
+  await expect(page.getByText("View the whole picture", { exact: true })).toBeVisible()
   await shoot(page, "tab-portrait-desktop")
-  await tab.getByRole("button", { name: "Adjust cutout" }).hover()
-  await expect(page.getByText("Adjust cutout: which part of the picture small portraits show")).toBeVisible()
+  const pictureButton = tab.getByRole("button", { name: "Picture", exact: true })
+  await pictureButton.hover()
+  await expect(
+    page.getByText("Picture: adjust the cutout small portraits show, or replace the picture", { exact: true })
+  ).toBeVisible()
+  await pictureButton.click()
+  const pictureDialog = page.getByRole("dialog", { name: "Tall's picture" })
+  await expect(pictureDialog.locator("[data-cutout-box]")).toBeVisible()
+  // Closed without a decision: its X in the corner.
+  await expect(pictureDialog.getByRole("button", { name: "Close", exact: true })).toBeVisible()
+  await shoot(page, "picture-dialog-desktop")
   const picked = page.waitForEvent("filechooser")
-  await change.click()
+  await pictureDialog.getByRole("button", { name: "Replace picture…" }).click()
   await (await picked).setFiles(file("tall.png", shapeCard(tall, 120)))
-  const fromTab = page.getByRole("dialog", { name: "Cut out Tall's new picture" })
-  await expect(fromTab).toBeVisible()
+  const fromTab = page.getByRole("dialog", { name: "Tall's new picture" })
+  await expect(fromTab.locator("[data-cutout-box]")).toBeVisible()
   await fromTab.getByRole("button", { name: "Save picture" }).click()
   await expect(fromTab).toHaveCount(0)
-  await expect.poll(async () => (await named(tab.locator("[data-change-portrait] img"))).id).not.toBe(second.id)
+  await expect(pictureDialog).toHaveCount(0)
+  await expect.poll(async () => (await named(tab.locator("[data-view-portrait] img"))).id).not.toBe(second.id)
   // A 2:3 image's default is all of it.
-  expect((await named(tab.locator("[data-change-portrait] img"))).crop).toBe("0_0_10000_10000")
-  await expectEveryPortrait(page, (await named(tab.locator("[data-change-portrait] img"))).id, "0_0_10000_10000", 2)
-  // View full image beside it opens the column.
-  await tab.getByRole("button", { name: "View full image" }).click()
+  expect((await named(tab.locator("[data-view-portrait] img"))).crop).toBe("0_0_10000_10000")
+  await expectEveryPortrait(page, (await named(tab.locator("[data-view-portrait] img"))).id, "0_0_10000_10000", 2)
+  // A click on the portrait opens the column; clicking a picture never replaces it.
+  await view.click()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.getByRole("complementary", { name: "Tall's portrait", exact: true })).toBeVisible()
 })
 
@@ -194,7 +206,7 @@ test("at 390: the chooser fits a phone, drags by touch, and follows the blur set
   await page.goto(`${server().url}/library/${refId}`)
   await cardFieldsTab(page, "Metadata")
   await page.getByLabel("Choose an avatar, or drop it here").setInputFiles(file("wide.png", shapeCard(wide, 160)))
-  const chooser = page.getByRole("dialog", { name: "Cut out Tall's new picture" })
+  const chooser = page.getByRole("dialog", { name: "Tall's new picture" })
   await expect(chooser.locator("[data-cutout-box]")).toBeVisible()
   const dialog = (await chooser.boundingBox())!
   expect(dialog.x).toBeGreaterThanOrEqual(0)
@@ -234,14 +246,14 @@ test("at 390: the chooser fits a phone, drags by touch, and follows the blur set
   expect(Math.abs(after.x - stage.x)).toBeLessThan(3)
   await chooser.getByRole("button", { name: "Save picture" }).click()
   await expect(chooser).toHaveCount(0)
-  const saved = await named(page.getByRole("tabpanel", { name: "Metadata" }).locator("[data-change-portrait] img"))
+  const saved = await named(page.getByRole("tabpanel", { name: "Metadata" }).locator("[data-view-portrait] img"))
   expect(saved.crop.startsWith("0_")).toBe(true)
 
   // Blurred images stay blurred in the chooser.
   await page.keyboard.press("Alt+Shift+B")
   await expect(page.locator("html")).toHaveAttribute("data-images", "blur")
-  await page.getByRole("tabpanel", { name: "Metadata" }).getByRole("button", { name: "Adjust cutout" }).click()
-  const adjust = page.getByRole("dialog", { name: "Adjust Tall's cutout" })
+  await page.getByRole("tabpanel", { name: "Metadata" }).getByRole("button", { name: "Picture", exact: true }).click()
+  const adjust = page.getByRole("dialog", { name: "Tall's picture" })
   const whole = adjust.getByRole("img", { name: "Tall's whole image" })
   await expect(whole).toBeVisible()
   expect(await whole.evaluate((img) => getComputedStyle(img).filter)).toContain("blur")

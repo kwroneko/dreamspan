@@ -4,6 +4,7 @@ import { AlertDialog as BaseAlertDialog } from "@base-ui/react/alert-dialog"
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { useRef, type ReactNode } from "react"
 import { Button } from "./Button.tsx"
+import { IconButton } from "./Tooltip.tsx"
 
 const backdrop =
   "fixed inset-0 z-40 min-h-dvh bg-overlay transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none supports-[-webkit-touch-callout:none]:absolute"
@@ -18,6 +19,7 @@ export function Dialog({
   wide = false,
   finalFocus,
   initialFocus,
+  closeButton = false,
   children
 }: {
   open: boolean
@@ -30,6 +32,8 @@ export function Dialog({
   finalFocus?: (() => boolean) | undefined
   /** The element to focus on open, such as the field a link opened the dialog at. */
   initialFocus?: (() => HTMLElement | null) | undefined
+  /** A close X in the top-right corner, for a dialog closed without a decision (owner, 2026-11-02). */
+  closeButton?: boolean
   children: ReactNode
 }) {
   const content = useRef<HTMLDivElement>(null)
@@ -63,13 +67,30 @@ export function Dialog({
           initialFocus={focusOnOpen}
           className={wide ? `${popup} sm:max-w-5xl` : popup}
         >
-          <div className="flex flex-col gap-1">
+          <div className={`flex flex-col gap-1 ${closeButton ? "mr-8" : ""}`}>
             <BaseDialog.Title className="text-base font-semibold">{title}</BaseDialog.Title>
             {description && (
               <BaseDialog.Description className="text-sm text-muted">{description}</BaseDialog.Description>
             )}
           </div>
           {children}
+          {closeButton && (
+            <>
+              {/* Last in the tab order, so focus still starts on the dialog's own first control
+              (owner, 2026-11-02: a dialog closed without a decision has a visible X). */}
+              <BaseDialog.Close
+                render={
+                  <IconButton
+                    label="Close"
+                    hint="Close without changing anything"
+                    icon="close"
+                    data-dialog-close
+                    className="absolute top-3 right-3"
+                  />
+                }
+              />
+            </>
+          )}
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>

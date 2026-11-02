@@ -96,7 +96,7 @@ test("This chat leads with the chat's name, your persona and summaries; the rest
 test("the persona's tab is a full card, edited in place, and Switch persona", async ({ page }) => {
   await open(page, `card:${persona}`)
   const tab = page.getByRole("tabpanel", { name: "Juniper Ashgrove" })
-  await expect(tab.getByText("You play", { exact: true })).toBeVisible()
+  await expect(tab.getByText("You", { exact: true })).toBeVisible()
   await expectTextBox(tab.getByRole("textbox", { name: "Description", exact: true }), PERSONA)
   // A persona is a card: every field, in the card's tabs; no New chat, no count of chats, no
   // card actions meant for characters.
