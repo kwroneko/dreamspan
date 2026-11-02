@@ -51,7 +51,8 @@ const measured = (page: Page) =>
 const p95 = (values: ReadonlyArray<number>) =>
   values.length === 0 ? 0 : [...values].sort((a, b) => a - b)[Math.floor(0.95 * values.length)]!
 
-const ready = (page: Page) => expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+const ready = (page: Page) =>
+  expect(page.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
 
 const check = (scenario: string, openMs: number, m: { loaf: Array<number>; inputs: Array<number> }) => {
   const values = {
@@ -104,7 +105,9 @@ test("a card with a 50 KB description: typing in it, and in another field", asyn
   await page.keyboard.type(" Another line, typed key by key.", { delay: 40 })
   await page.getByRole("textbox", { name: /^Scenario/ }).focus()
   await page.keyboard.type("A storm.", { delay: 40 })
-  await expect(page.getByRole("status").filter({ hasText: "kept as drafts" })).toBeVisible()
+  await expect(page.getByRole("status").filter({ hasText: /^Changed since revision \d+$/ })).toBeVisible()
+  // The token counts follow the typing (tokenCounts.ts): each field counted once it rests.
+  await expect(page.locator("[data-card-tokens]")).toHaveText(/^~?[\d,]+ tokens · ~?[\d,]+ permanent$/)
   check("editor-long-card", openMs, await measured(page))
 })
 
