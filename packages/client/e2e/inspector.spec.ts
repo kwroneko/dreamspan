@@ -198,8 +198,10 @@ test("a reply's context opens from the reply, with its sources and the cache bre
   const messages = page.getByRole("region", { name: "Messages" })
   await expect(messages.getByText("Card “Mira”: description")).toBeVisible()
   await expect(messages.getByText("Preset prompt “Main Prompt”")).toBeVisible()
-  await expect(messages.getByText("Cache breakpoint: the end of the preset's part")).toBeVisible()
-  await expect(messages.getByText("Cache breakpoint: the end of the history the next request repeats")).toBeVisible()
+  await expect(messages.getByText("Above this line: reused by every reply")).toBeVisible()
+  await expect(messages.getByText("Above this line: reused until old messages drop out")).toBeVisible()
+  await messages.getByText("Above this line: reused by every reply").scrollIntoViewIfNeeded()
+  await shoot(page, "inspector-reuse-lines")
   await expect(page.getByText("fake-small on Local model server (openai-chat)")).toBeVisible()
   // What the provider reported: 100 tokens read from its cache, 6 written.
   // The attempt reads "1: finished" since smallfixes3.

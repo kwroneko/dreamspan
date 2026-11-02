@@ -76,6 +76,7 @@ export function CardTextEditor({
     <>
       <CodeEditor
         value={value}
+        autoFocus={autoFocus}
         selection={searchMatch}
         onRevealSelection={scrollToSearchField}
         base={comparison?.revision === revision ? comparison.value : value}

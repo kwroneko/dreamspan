@@ -133,7 +133,8 @@ export function TextField({
   labelHidden = false,
   source,
   hint,
-  aside
+  aside,
+  autoFocus
 }: {
   store: EditorStore
   path: FieldPath
@@ -150,6 +151,8 @@ export function TextField({
   labelHidden?: boolean
   /** A snippet's own text: its editor offers no sending to a snippet. */
   source?: "snippet" | undefined
+  /** Focused as it mounts: a prompt just added, ready to type. */
+  autoFocus?: boolean
 }) {
   const [large, setLarge] = useState(false)
   const match = useSearchMatch(path)
@@ -236,6 +239,7 @@ export function TextField({
             source={source}
             tools={tools}
             status={status}
+            autoFocus={autoFocus}
             onChange={(value) => store.setText(path, value)}
             onBlur={props.onBlur}
           />

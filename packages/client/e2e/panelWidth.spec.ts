@@ -337,11 +337,10 @@ const wideControls = (scope: Locator, max: number, selector = GROUPED) =>
   )
 /**
  * What stays a control's width however wide the panel: buttons (but a disclosure's heading,
- * which spans its section, and the preset's dashed Add a prompt bar under its list), dropdowns
+ * which spans its section), dropdowns
  * and switches. Multi-line fields and editors take the whole width.
  */
-const GROUPED =
-  'button:not([aria-expanded]):not([aria-label="Add a prompt at the end"]), select, [role=combobox]:not(input), [role=switch]'
+const GROUPED = "button:not([aria-expanded]), select, [role=combobox]:not(input), [role=switch]"
 
 /** A row of controls that belong together (`max-w-controls`, styles.css): 40rem. */
 const GROUP = 640

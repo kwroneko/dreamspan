@@ -15,6 +15,7 @@ import type {
 } from "@rp/shared/inspectorApi.ts"
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
+import { type Reuse, ReuseLine, reuseByMessage } from "../editor/promptLines.tsx"
 import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from "react"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
@@ -29,13 +30,6 @@ import { useTitle } from "../shell.tsx"
 const PREVIEW = 200
 
 const count = (n: number | null) => (n === null ? "unknown" : n.toLocaleString())
-
-const breakpointText = {
-  summary: "Cache breakpoint: the end of the summary layer",
-  prefix: "Cache breakpoint: the end of the preset's part",
-  pinned: "Cache breakpoint: the end of the lore pinned above the history",
-  history: "Cache breakpoint: the end of the history the next request repeats"
-} as const
 
 const activationText = (activation: SourceActivation): string => {
   if (activation.kind === "note") {
@@ -329,13 +323,16 @@ function Message({
   index,
   chatId,
   open,
-  setOpen
+  setOpen,
+  reuse
 }: {
   message: ContextMessage
   index: number
   chatId: ChatId
   open: boolean
   setOpen: (open: boolean) => void
+  /** The reuse line after it, and whether it's the only one. */
+  reuse: { kind: Reuse; alone: boolean } | undefined
 }) {
   const [raw, setRaw] = useState(false)
   const preview = message.content.length > PREVIEW ? `${message.content.slice(0, PREVIEW)}…` : message.content
@@ -421,11 +418,7 @@ function Message({
           </div>
         )}
       </details>
-      {message.breakpoint && (
-        <p className="border-t-2 border-dashed border-accent pt-1 font-sans text-xs text-accent">
-          {breakpointText[message.breakpoint]}
-        </p>
-      )}
+      {reuse && <ReuseLine kind={reuse.kind} alone={reuse.alone} />}
     </div>
   )
 }
@@ -575,6 +568,8 @@ function Messages({ run }: { run: RunContext }) {
     gap: 12
   })
   const everyOpen = expanded.size === run.messages.length
+  const reuse = reuseByMessage(run.messages.map((m) => m.breakpoint ?? undefined))
+  const reuseAlone = ![...reuse.values()].includes("every")
   return (
     <>
       <Button className="self-start" onClick={() => setExpanded(everyOpen ? new Set() : all())}>
@@ -601,6 +596,7 @@ function Messages({ run }: { run: RunContext }) {
                 message={run.messages[item.index]!}
                 index={item.index}
                 chatId={run.chatId}
+                reuse={reuse.has(item.index) ? { kind: reuse.get(item.index)!, alone: reuseAlone } : undefined}
                 open={expanded.has(item.index)}
                 setOpen={(open) =>
                   setExpanded((previous) => {
