@@ -102,6 +102,30 @@ const roundOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("rounds", () => {
+  it.live("a second tab continuing an already running round receives the current queue", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, sent, mira, tobin, wren, describe } = yield* setup(api)
+      const first = yield* posted(
+        api.Generate({
+          chatId: chat.id,
+          parentSlotId: sent.slotId,
+          branch: false,
+          speakerEntityId: mira,
+          round: [tobin, wren]
+        })
+      )
+      yield* gate(first.entry.version.id)
+      yield* api.StopGeneration({ versionId: first.entry.version.id })
+      yield* pathBecomes(api, chat.id, describe, ["you: m0", "Mira (stopped)"])
+      const firstContinue = yield* api.Round({ chatId: chat.id, forkId: null, action: "continue" })
+      const secondContinue = yield* api.Round({ chatId: chat.id, forkId: null, action: "continue" })
+      assert.deepStrictEqual(secondContinue, firstContinue)
+      assert.deepStrictEqual(secondContinue, yield* api.ListQueued({ chatId: chat.id }))
+      yield* pathBecomes(api, chat.id, describe, ["you: m0", "Mira (stopped)", "Tobin (generating)"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
   it.live("each reply of a round posts when the one before ends", () =>
     Effect.gen(function* () {
       const api = yield* client()

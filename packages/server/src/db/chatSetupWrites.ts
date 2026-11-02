@@ -643,7 +643,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const fork = yield* graph.ownedFork(userId, chatId, forkId)
           const held = yield* sql<{ id: string }>`
             SELECT id FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 AND held = 1`
-          if (held.length === 0 || fork.tip_slot_id === null) return { chatId, ...nothing }
+          if (held.length === 0 || fork.tip_slot_id === null)
+            return { chatId, ...nothing, queue: yield* chatQueue(sql, chatId) }
           // They wait at the tip as it is now (after an edit, a deletion or a new version there),
           // and post at once unless a reply is still being written there.
           yield* sql`UPDATE queued_messages SET held = 0, reply_slot_id = ${fork.tip_slot_id}, updated_at = ${Date.now()}
