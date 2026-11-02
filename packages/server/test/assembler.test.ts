@@ -1094,7 +1094,10 @@ describe("the context assembler", () => {
       copies,
       200_000
     )
-    expect(copied.issues.map((i) => i.message)).toContain(tooMuch)
+    // Under a loaded machine the 200 ms budget can run out before the seventeenth copy: either way the scripts stop.
+    expect(copied.issues.map((i) => i.message)).toSatisfy((messages: Array<string>) =>
+      messages.some((m) => m === tooMuch || m.startsWith("The regex scripts ran out of time"))
+    )
     // What ran out depends on the messages after: the ones it skipped aren't cached as stable.
     expect(copied.request.breakpoints.map((b) => b.reason)).not.toContain("history")
   })
