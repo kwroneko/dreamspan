@@ -607,9 +607,7 @@ function ContextToggle({
       pressed={out}
       disabled={rule !== null || busy}
       onClick={onToggle}
-      className={`absolute top-1 right-1 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 ${
-        out ? "" : "opacity-0 group-hover:opacity-100"
-      }`}
+      className="tile-toggle absolute top-1 right-1"
     />
   )
 }
@@ -659,7 +657,11 @@ function ImageThumbnails({
             </button>
           )
           return (
-            <div key={`${image.mediaId}:${index}`} className="group relative" data-image-sent={reason ? "no" : "yes"}>
+            <div
+              key={`${image.mediaId}:${index}`}
+              className="tile-toggle-surface relative"
+              data-image-sent={reason ? "no" : "yes"}
+            >
               {reason ? <Tooltip label={`Not sent to the model: ${reason}`}>{view}</Tooltip> : view}
               {controls && (
                 <ContextToggle
