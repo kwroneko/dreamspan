@@ -25,7 +25,7 @@ import type { CastCard, ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { type CSSProperties, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -58,6 +58,8 @@ import { expandForDisplay } from "./macros.ts"
 import { useIsPanelTab } from "./panels.tsx"
 import { PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
 import { chatColumns } from "./presentation.tsx"
+import { seedChat } from "./session.ts"
+import { preloadChatPage } from "./chatPageLoader.ts"
 
 /**
  * One greeting of the chat not made yet, as the saved chat shows a message: the portrait, the
@@ -172,6 +174,8 @@ function Pending({
   const entityId = card.card.entityId
   const copyKey = group === null ? pendingChatCopy(entityId) : pendingGroupChatCopy(group.name, groupMembers ?? [])
   const durable = useUserDraft(copyKey, "First message", "")
+  // The saved chat's page, ready before the first send opens it.
+  useEffect(preloadChatPage, [])
   const sending = useRef<string | null>(null)
   const destination = useRef<string | null>(null)
   useEffect(() => {
@@ -311,6 +315,33 @@ function Pending({
                 speakerEntityId: replyId
               })
             )
+          }
+          // What the saved chat's page opens on, so it shows the chat at once rather than
+          // loading it (no skeleton, no placeholder title); it reads it all again behind.
+          const opened = yield* Effect.option(
+            Effect.gen(function* () {
+              const path = yield* client("ReadPath", {
+                chatId: started.chat.id,
+                forkId: null,
+                leafSlotId: null,
+                range: { _tag: "Bottom" },
+                limit: 60
+              })
+              const cast = yield* client("GetCast", { chatId: started.chat.id, slotId: path.leafSlotId })
+              return { path, cast }
+            })
+          )
+          if (Option.isSome(opened)) {
+            const { path, cast } = opened.value
+            seedChat(started.chat.id, {
+              chat: started.chat,
+              forkId: path.forkId,
+              leafSlotId: path.leafSlotId,
+              entries: path.entries,
+              older: path.older,
+              newer: path.newer,
+              cast
+            })
           }
           return started
         }),

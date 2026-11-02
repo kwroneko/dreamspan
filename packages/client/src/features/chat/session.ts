@@ -135,6 +135,15 @@ const withPosition = (entry: PathEntry, position: number | undefined) =>
 /** A streamed text's change (`Delta`, `Reasoning`, `Section`); `replace`: from `offset` on. */
 type LiveDelta = { readonly offset: number; readonly text: string; readonly replace?: boolean }
 
+/**
+ * What a chat's page shows before its first read: a chat a pending page just saved, as its
+ * first send left it (StartChatPage.tsx), so the saved page opens on it with no loading
+ * state in between (owner, 2026-11-02: nothing flashes or jumps). Taken when the session starts.
+ */
+export type ChatSeed = Pick<ChatView, "chat" | "forkId" | "leafSlotId" | "entries" | "older" | "newer" | "cast">
+const seeds = new Map<ChatId, ChatSeed>()
+export const seedChat = (chatId: ChatId, seed: ChatSeed) => void seeds.set(chatId, seed)
+
 export class ChatSession {
   private view: ChatView = {
     chat: null,
@@ -209,6 +218,10 @@ export class ChatSession {
     this.userId = userId
     this.requestedFork = requestedFork
     this.registry = registry
+    // A chat just saved from its pending page opens on what that page had, and reads it again.
+    const seed = requestedFork === null ? seeds.get(chatId) : undefined
+    if (seed !== undefined)
+      this.view = { ...this.view, ...seed, follow: seed.newer === null, opened: 1, loading: false }
   }
 
   // --- For React (useSyncExternalStore)
@@ -541,6 +554,8 @@ export class ChatSession {
    */
   start(anchor: SlotId | null) {
     this.disposed = false
+    seeds.delete(this.chatId)
+    for (const entry of this.view.entries) this.track(entry.version)
     this.hellos = 0
     const subscribe = Effect.flatMap(Registry.getResult(this.registry, AppClient.runtime), (services) =>
       Context.get(services, AppClient)("SubscribeChat", { chatId: this.chatId }).pipe(

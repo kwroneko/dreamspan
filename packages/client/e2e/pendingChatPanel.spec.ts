@@ -72,6 +72,35 @@ test("a pending chat's side panel resizes and has the saved chat's tabs", async 
   expect(await tabNames(page)).toEqual(pendingTabs)
 })
 
+test("the first send opens the saved chat with no loading skeleton or placeholder title", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { wren } = await setup(page)
+  await page.goto(`${server().url}/cards/${wren.entityId}/chat`)
+  await expect(page.getByRole("article", { name: "Greeting from Panel Wren" })).toBeVisible()
+  // Everything the page adds from here on: the messages' skeleton, the header's placeholder name.
+  await page.evaluate(() => {
+    const seen: Array<string> = []
+    ;(window as unknown as { seen: Array<string> }).seen = seen
+    const check = (node: Node) => {
+      if (!(node instanceof Element)) return
+      for (const [selector, what] of [
+        ['[data-testid="messages-loading"]', "skeleton"],
+        ['[aria-label="Loading the chat"]', "placeholder title"]
+      ] as const)
+        if (node.matches(selector) || node.querySelector(selector)) seen.push(what)
+    }
+    new MutationObserver((records) => {
+      for (const record of records) record.addedNodes.forEach(check)
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+  await page.getByLabel("Message", { exact: true }).fill("Hello again, Wren.")
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(page).toHaveURL(/\/chats\/[^/?]+/)
+  await expect(page.getByRole("article", { name: "Your message" })).toContainText("Hello again, Wren.")
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Panel Wren, /)
+  expect(await page.evaluate(() => (window as unknown as { seen: Array<string> }).seen)).toEqual([])
+})
+
 test("a character added in the pending Cast tab is in the chat the first send makes", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { wren } = await setup(page)
