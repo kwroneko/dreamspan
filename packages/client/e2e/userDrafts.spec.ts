@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
-import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
 import { openPanel, closePanel, openSummarySettings } from "./support/panel.ts"
 
@@ -15,6 +15,20 @@ test.beforeAll(async () => {
   cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
   ownerId = await api((client) => Effect.map(client.Whoami(), (user) => user.id))
 })
+// Fresh browser storage is what these tests need; authentication itself is
+// covered elsewhere. Reuse the file's login instead of spending one per device.
+const authenticate = async (page: Page) => {
+  const at = cookie.indexOf("=")
+  await page.context().addCookies([
+    {
+      name: cookie.slice(0, at),
+      value: cookie.slice(at + 1),
+      url: server().url,
+      httpOnly: true,
+      sameSite: "Strict"
+    }
+  ])
+}
 const draftText = (targetId: string, field: string) =>
   api((client) => Effect.map(client.GetUserDraft({ ownerId, targetId, field }), (draft) => draft?.content))
 const shots = process.env.SCREENSHOT_DIR
@@ -33,7 +47,7 @@ for (const width of [1440, 390])
       test.setTimeout(180_000)
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await authenticate(page)
       await page.goto(`${server().url}/settings/chats`)
       const instruction = page.getByLabel("Summarization instruction", { exact: true })
       const prose = `Summary direction ${width} ${theme}: preserve the lighthouse keeper's promises.`
@@ -46,7 +60,7 @@ for (const width of [1440, 390])
       // Another device has no IndexedDB copies at all.
       const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: theme })
       const other = await context.newPage()
-      await apiLogin(other.request, server(), ADMIN.handle, ADMIN.password)
+      await authenticate(other)
       await other.goto(`${server().url}/settings/chats`)
       await expect(other.getByLabel("Summarization instruction", { exact: true })).toHaveValue(prose)
       await context.close()
@@ -112,7 +126,7 @@ for (const width of [1440, 390])
       await page.getByRole("textbox", { name: "Name", exact: true }).fill(`Uncommitted connection ${width}`)
       await page.getByRole("textbox", { name: "Base URL", exact: true }).fill("http://127.0.0.1:9876/v1")
       await expect
-        .poll(async () => JSON.parse((await draftText(`connection:${connection.id}`, "Settings")) ?? "{}").baseUrl)
+        .poll(async () => JSON.parse((await draftText(`connection:${connection.id}`, "Settings")) || "{}").baseUrl)
         .toBe("http://127.0.0.1:9876/v1")
       await page.reload()
       await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
@@ -156,7 +170,7 @@ for (const width of [1440, 390])
       await shot(page, `pending-${width}-${theme}`)
       const fresh = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: theme })
       const device = await fresh.newPage()
-      await apiLogin(device.request, server(), ADMIN.handle, ADMIN.password)
+      await authenticate(device)
       await device.goto(`${server().url}/cards/${ref.entityId}/chat`)
       await expect(device.getByRole("textbox", { name: "Message", exact: true })).toHaveValue(
         `Unsent opening ${width} ${theme}`
@@ -211,7 +225,7 @@ for (const scope of ["account", "fork"] as const)
       })
       upstream.onMessage((data) => socket.send(data))
     })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await authenticate(page)
     let targetId = "Settings → Chats"
     let chatId = ""
     if (scope === "fork") {
@@ -292,13 +306,13 @@ for (const scope of ["account", "fork"] as const)
   })
 
 test("creation and rename forms keep non-secret text without copying a typed key", async ({ page }) => {
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await authenticate(page)
   await page.goto(`${server().url}/settings/connections/new`)
   await page.getByLabel("Name", { exact: true }).fill("Unfinished connection")
   await page.getByLabel("Base URL", { exact: true }).fill("http://127.0.0.1:4321/v1")
   await page.getByLabel("API key", { exact: true }).fill("synthetic-secret-never-drafted")
   await expect
-    .poll(async () => JSON.parse((await draftText("connection:new", "Settings")) ?? "{}").baseUrl)
+    .poll(async () => JSON.parse((await draftText("connection:new", "Settings")) || "{}").baseUrl)
     .toBe("http://127.0.0.1:4321/v1")
   expect(await draftText("connection:new", "Settings")).not.toContain("synthetic-secret")
   await page.reload()
@@ -450,7 +464,7 @@ test("a refused server draft and interrupted closing save replay the browser cop
     })
     upstream.onMessage((data) => socket.send(data))
   })
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await authenticate(page)
   await page.goto(`${server().url}/settings/connections/new`)
   await page.getByLabel("Name", { exact: true }).fill("Only in this browser until replay")
   await expect.poll(() => refused).toBeGreaterThan(0)
@@ -458,7 +472,7 @@ test("a refused server draft and interrupted closing save replay the browser cop
   await page.reload()
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Only in this browser until replay")
   await expect
-    .poll(async () => JSON.parse((await draftText("connection:new", "Settings")) ?? "{}").name)
+    .poll(async () => JSON.parse((await draftText("connection:new", "Settings")) || "{}").name)
     .toBe("Only in this browser until replay")
 })
 
@@ -490,7 +504,7 @@ test("connection settings typed during Save can be saved again on their own ackn
       }
     })
   )
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await authenticate(page)
   await page.goto(`${server().url}/settings/connections/${connection.id}`)
   const name = page.getByLabel("Name", { exact: true })
   await name.fill("First submitted connection name")
@@ -502,7 +516,7 @@ test("connection settings typed during Save can be saved again on their own ackn
   await expect(page.getByRole("heading", { name: "First submitted connection name", exact: true })).toBeVisible()
   await expect(name).toHaveValue("Connection name typed during Save")
   await expect
-    .poll(async () => JSON.parse((await draftText(`connection:${connection.id}`, "Settings")) ?? "{}").rowVersion)
+    .poll(async () => JSON.parse((await draftText(`connection:${connection.id}`, "Settings")) || "{}").rowVersion)
     .toBe(connection.rowVersion + 1)
   await page.reload()
   await expect(name).toHaveValue("Connection name typed during Save")
@@ -536,7 +550,7 @@ test("a refused draft save leaves the library fork form available for retry and 
     upstream.onMessage((data) => socket.send(data))
   })
   const card = await api((client) => client.CreateCard({ name: "Fork retry fixture", label: "Fork retry fixture" }))
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await authenticate(page)
   await page.goto(`${server().url}/library/${card.id}`)
   await page.getByRole("button", { name: "Fork", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Fork card", exact: true })
@@ -567,7 +581,7 @@ for (const width of [1440, 390])
         })
         upstream.onMessage((data) => socket.send(data))
       })
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await authenticate(page)
       await page.goto(`${server().url}/settings/chats`)
       const box = page.getByLabel("Summarization instruction", { exact: true })
       const local = `Keep the lighthouse keeper's promises, debts and unresolved questions. ${width} ${theme}`
@@ -576,7 +590,7 @@ for (const width of [1440, 390])
       const context = await browser.newContext()
       try {
         const device = await context.newPage()
-        await apiLogin(device.request, server(), ADMIN.handle, ADMIN.password)
+        await authenticate(device)
         await device.goto(`${server().url}/settings/chats`)
         await expect(device.getByLabel("Summarization instruction", { exact: true })).toHaveValue(local)
         // Keep a save on the old observed base in flight. A clean editor now learns

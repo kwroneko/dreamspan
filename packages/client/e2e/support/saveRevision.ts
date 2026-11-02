@@ -11,6 +11,7 @@ export const saveButton = (scope: Page | Locator) => scope.getByRole("button", {
 
 /** Saves a revision from the SaveControls in `scope`, with a message when given, and waits for it. */
 export const saveRevision = async (scope: Page | Locator, message?: string) => {
+  const state = revisionStatus(scope)
   if (message === undefined) await saveButton(scope).click()
   else {
     await scope.getByRole("button", { name: "Save with a message…", exact: true }).click()
@@ -18,6 +19,10 @@ export const saveRevision = async (scope: Page | Locator, message?: string) => {
     await scope.getByRole("textbox", { name: "Revision message", exact: true }).press("Enter")
     await expect(scope.getByRole("textbox", { name: "Revision message", exact: true })).toHaveCount(0)
   }
+  // Pending also disables Save. Wait for the saved state and the end of the
+  // request; a valid no-op save clears drafts without advancing the revision.
+  await expect(state).toHaveText(/^Saved as revision \d+$/)
+  await expect(saveButton(scope)).not.toHaveAttribute("aria-busy", "true")
   await expect(saveButton(scope)).toBeDisabled()
 }
 

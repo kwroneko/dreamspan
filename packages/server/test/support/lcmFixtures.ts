@@ -13,9 +13,12 @@ export const fixtureSql = (
   Effect.tryPromise(
     () =>
       new Promise<Array<Array<Record<string, unknown>>>>((resolve, reject) => {
-        const worker = new Worker(new URL("./lcmFixtureWorker.ts", import.meta.url), {
-          workerData: { dbPath: databaseFile(dataDir), statements, readOnly: options.readOnly ?? false }
-        })
+        const worker = new Worker(
+          process.env.RP_TEST_LCM_FIXTURE_WORKER ?? new URL("./lcmFixtureWorker.ts", import.meta.url),
+          {
+            workerData: { dbPath: databaseFile(dataDir), statements, readOnly: options.readOnly ?? false }
+          }
+        )
         let result: { error?: string; results: Array<Array<Record<string, unknown>>> } | undefined
         worker.once("message", (message: typeof result) => {
           result = message

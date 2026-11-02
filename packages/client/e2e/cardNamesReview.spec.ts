@@ -201,7 +201,7 @@ test("Save rechecks names and disables the action after an unannounced collision
   )
   // Save asks nothing, so the recheck happens on the click itself.
   await save.click()
-  await expect(page.getByText("Another card is already called Late target · 1").first()).toBeVisible()
+  await expect(page.getByRole("alert")).toContainText("Another card is already called Late target · 1")
   await expect(save).toBeDisabled()
   const refs = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListLibrary({ kind: "card" }))
   expect(refs.find((ref) => ref.id === original.id)?.label).toBe("Late save")

@@ -495,7 +495,10 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
 }
 function ImageProvider(props: ChatSurfaceProps) {
   const user = useSession().user.id
-  const scope = `${user}:${props.session.chatId}:${props.view.forkId ?? "current"}`
+  // Opening the temporary "current" scope can overwrite this fork's durable send
+  // marker before ReadPath resolves it. Only the resolved fork may reconcile images.
+  if (props.view.forkId === null) return props.children
+  const scope = `${user}:${props.session.chatId}:${props.view.forkId}`
   return <ImageScope key={scope} {...props} scope={scope} />
 }
 function DraftThumbnail({ entry }: { entry: ImageDraftEntry }) {

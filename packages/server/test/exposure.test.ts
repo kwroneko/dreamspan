@@ -331,11 +331,15 @@ const lanIp = Object.values(networkInterfaces())
   .flat()
   .find((address) => address && address.family === "IPv4" && !address.internal)?.address
 
-/** GET /healthz from `from` to `to`, resolving to the status code. */
-const healthz = (from: string, to: string, headers: Record<string, string> = {}) =>
+/**
+ * GET /healthz with the chosen source address. Dial loopback even for a LAN
+ * source: the peer identity is unchanged, without sending the request through a
+ * host's LAN HTTP intermediary (which can replace an early refusal with a 500).
+ */
+const healthz = (from: string, headers: Record<string, string> = {}) =>
   Effect.flatMap(serverPort, (port) =>
     Effect.callback<number, Error>((resume) => {
-      const req = request({ host: to, port, path: "/healthz", localAddress: from, headers }, (res) => {
+      const req = request({ host: "127.0.0.1", port, path: "/healthz", localAddress: from, headers }, (res) => {
         res.resume()
         resume(Effect.succeed(res.statusCode ?? 0))
       })
@@ -352,7 +356,7 @@ const pipelined = (from: string) =>
   Effect.flatMap(serverPort, (port) =>
     Effect.callback<string>((resume) => {
       let received = ""
-      const socket = connect({ host: from, port, localAddress: from, allowHalfOpen: true }, () => {
+      const socket = connect({ host: "127.0.0.1", port, localAddress: from, allowHalfOpen: true }, () => {
         socket.write("GET /healthz HTTP/1.1\r\nHost: x\r\n\r\nGET /index.html HTTP/1.1\r\nHost: x\r\n\r\n")
       })
       socket.on("data", (chunk) => (received += String(chunk)))
@@ -381,7 +385,7 @@ describe.skipIf(lanIp === undefined)("exposure gate", () => {
       assert.include(warnings[0], `from ${lanIp}: AUTH_MODE=single accepts loopback, 192.0.2.1 only`)
       yield* Effect.sleep("200 millis")
       assert.deepStrictEqual(handled, [])
-      assert.strictEqual(yield* healthz("127.0.0.1", "127.0.0.1"), 200)
+      assert.strictEqual(yield* healthz("127.0.0.1"), 200)
       assert.lengthOf(handled, 1) // the collector does see handled requests
     }).pipe(withServer(config), Effect.provide(Logger.layer([collector])))
   })
@@ -389,16 +393,16 @@ describe.skipIf(lanIp === undefined)("exposure gate", () => {
   it.live("single mode turns away an address not on the list, before any route", () => {
     const config = testConfig({ host: "0.0.0.0", allowedIps: ["192.0.2.1"] })
     return Effect.gen(function* () {
-      assert.strictEqual(yield* healthz("127.0.0.1", "127.0.0.1"), 200)
-      assert.strictEqual(yield* healthz(lanIp!, lanIp!), 403)
+      assert.strictEqual(yield* healthz("127.0.0.1"), 200)
+      assert.strictEqual(yield* healthz(lanIp!), 403)
     }).pipe(withServer(config))
   })
 
   it.live("proxy mode serves the named proxy and turns away loopback", () => {
     const config = testConfig({ host: "0.0.0.0", authMode: "proxy", trustedProxies: [lanIp!] })
     return Effect.gen(function* () {
-      assert.strictEqual(yield* healthz(lanIp!, lanIp!), 200)
-      assert.strictEqual(yield* healthz("127.0.0.1", "127.0.0.1"), 403)
+      assert.strictEqual(yield* healthz(lanIp!), 200)
+      assert.strictEqual(yield* healthz("127.0.0.1"), 403)
     }).pipe(withServer(config))
   })
 })
@@ -430,7 +434,7 @@ describe("cross-site guard", () => {
       // DNS rebinding: the attacker's name, re-resolved to loopback, is same-origin with itself.
       // (WebSocket clients won't send a custom Host, so this one is plain HTTP.)
       const rebound = `evil.example:${port}`
-      assert.strictEqual(yield* healthz("127.0.0.1", "127.0.0.1", { Host: rebound, Origin: `http://${rebound}` }), 403)
+      assert.strictEqual(yield* healthz("127.0.0.1", { Host: rebound, Origin: `http://${rebound}` }), 403)
     }).pipe(withServer(config))
   })
 })
@@ -491,8 +495,8 @@ describe("cross-site guard in proxy mode", () => {
     return Effect.gen(function* () {
       const port = yield* serverPort
       const rebound = `evil.example:${port}`
-      assert.strictEqual(yield* healthz("127.0.0.1", "127.0.0.1", { Host: rebound, Origin: `http://${rebound}` }), 403)
-      assert.strictEqual(yield* healthz("127.0.0.1", "127.0.0.1", { Host: `localhost:${port}` }), 200)
+      assert.strictEqual(yield* healthz("127.0.0.1", { Host: rebound, Origin: `http://${rebound}` }), 403)
+      assert.strictEqual(yield* healthz("127.0.0.1", { Host: `localhost:${port}` }), 200)
     }).pipe(withServer(config))
   })
 })

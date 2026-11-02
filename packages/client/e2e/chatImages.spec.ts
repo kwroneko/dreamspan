@@ -132,10 +132,13 @@ test("an attachment added during a send survives its acknowledgement, and an una
 }) => {
   let release: (() => void) | null = null
   let hold = true
+  let holdPath = false
+  const paths: Array<() => void> = []
   await page.routeWebSocket("**/rpc", (socket) => {
     const upstream = socket.connectToServer()
     socket.onMessage((message) => {
       if (hold && String(message).includes('"tag":"SendMessage"')) release = () => upstream.send(message)
+      else if (holdPath && String(message).includes('"tag":"ReadPath"')) paths.push(() => upstream.send(message))
       else upstream.send(message)
     })
     upstream.onMessage((message) => socket.send(message))
@@ -159,7 +162,15 @@ test("an attachment added during a send survives its acknowledgement, and an una
   release = null
   await page.getByRole("button", { name: "Send", exact: true }).click()
   await expect.poll(() => release !== null).toBe(true)
+  holdPath = true
   await page.reload()
+  await expect.poll(() => paths.length > 0).toBe(true)
+  await expect(page.getByLabel("Message", { exact: true })).toBeVisible()
+  // No image reconciler may open a temporary current-fork scope while the real
+  // fork is unknown: it could erase the durable marker before the fork reads it.
+  await expect(page.getByRole("button", { name: "Attach images", exact: true })).toHaveCount(0)
+  holdPath = false
+  for (const forward of paths.splice(0)) forward()
   await expect(page.getByRole("button", { name: "Remove next.png" })).toBeVisible()
   await expect(page.getByRole("alert")).toContainText("previous send was not acknowledged")
   hold = false

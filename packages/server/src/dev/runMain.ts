@@ -28,6 +28,8 @@ const options = Config.all({
   tokensPerSecond: Config.option(Config.Number(serverEnvironment.FAKE_GENERATOR_TPS)),
   /** About how many tokens each generation has. */
   tokens: Config.Int(serverEnvironment.FAKE_GENERATOR_TOKENS).pipe(Config.withDefault(400)),
+  /** A repeatable reply body, independent of random version ids (browser fixtures). */
+  seed: Config.option(Config.Int(serverEnvironment.FAKE_GENERATOR_SEED)),
   /** Set, tokens come in bursts this many milliseconds apart (the performance harness). */
   burstMs: Config.option(Config.Int(serverEnvironment.FAKE_GENERATOR_BURST_MS)),
   /** Set, each fake reply streams about this many tokens of reasoning first, as a reasoning model's. */
@@ -40,7 +42,7 @@ const options = Config.all({
 
 Effect.gen(function* () {
   if (process.env[serverEnvironment.NODE_ENV] === "production") return yield* new FakeGeneratorInProduction()
-  const { tokensPerSecond, tokens, burstMs, reasoningTokens, sectionTokens, cotTokens } = yield* options
+  const { tokensPerSecond, tokens, seed, burstMs, reasoningTokens, sectionTokens, cotTokens } = yield* options
   const server = Option.match(tokensPerSecond, {
     onNone: () => serverWith(ContextGenerator.layer),
     onSome: (rate) =>
@@ -48,6 +50,7 @@ Effect.gen(function* () {
         FakeGenerator.layer({
           tokensPerSecond: rate,
           tokens,
+          seed: Option.getOrUndefined(seed),
           burstMs: Option.getOrUndefined(burstMs),
           reasoningTokens: Option.getOrUndefined(reasoningTokens),
           sectionTokens: Option.getOrUndefined(sectionTokens),

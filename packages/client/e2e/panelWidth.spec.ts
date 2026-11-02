@@ -11,12 +11,13 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { openPanel, panelTab } from "./support/panel.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
-import { asUser } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { shapeCard } from "./support/shapes.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let adminCookie = ""
+const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), adminCookie, use)
 const shots = process.env.RP_SCREENS
 test.setTimeout(120_000)
 
@@ -36,6 +37,8 @@ const importCard = async (page: Page, data: Record<string, unknown>) => {
 }
 
 test.beforeAll(async ({ browser }) => {
+  // Setup RPCs share a login, so a longer file cannot exhaust the login limit.
+  adminCookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
   provider = await startProvider({ reply: "Mira checks the tide table and nods toward the harbor mouth." })
   const connection = await admin((api) =>
     api.CreateConnection({

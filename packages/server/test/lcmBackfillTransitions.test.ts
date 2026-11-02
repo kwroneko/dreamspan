@@ -1,5 +1,7 @@
 import { assert } from "@effect/vitest"
-import { Effect } from "effect"
+import { Deferred, Effect } from "effect"
+import { vi } from "vitest"
+import { eventually } from "./support/generation.ts"
 import { environment } from "./support/backfillReview.ts"
 import { lcmTest } from "./support/lcmHarness.ts"
 import { completionChunks, sse } from "./support/mockProvider.ts"
@@ -105,16 +107,36 @@ for (const held of ["pause", "cap"] as const)
         const a = { chatId: p.chatId, leafSlotId: p.leaf }
         yield* h.api.EnableLcm({ ...a, choice: "scratch" })
         yield* h.api.SetLcmBackfill({ ...a, action: "summarizeNow" })
-        for (let i = 0; i < 100 && pending.length === 0; i++) yield* Effect.sleep(50)
-        assert.isAbove(pending.length, 0)
+        yield* eventually(() => pending.length > 0)
+        const waiting = yield* Deferred.make<void>()
+        const released = yield* Deferred.make<void>()
+        // Escalation happens inside the real runway wait, after planning found
+        // unfinished summaries. Observe it instead of assuming 500 ms was enough.
+        const escalate = h.writer.EscalateSummaryJob
+        const escalated = vi
+          .spyOn(h.writer, "EscalateSummaryJob")
+          .mockImplementation((args) => escalate(args).pipe(Effect.tap(() => Deferred.succeed(waiting, undefined))))
+        const beforeReply = h.summarizer.beforeReply
+        const finishedWait = vi
+          .spyOn(h.summarizer, "beforeReply")
+          .mockImplementation((args) => beforeReply(args).pipe(Effect.tap(() => Deferred.succeed(released, undefined))))
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            escalated.mockRestore()
+            finishedWait.mockRestore()
+            for (const done of pending.splice(0)) done()
+          })
+        )
         // Exercise the actual generation RPC while the first summary request is in flight.
-        const generated = yield* h.api.Generate({
-          chatId: p.chatId,
-          parentSlotId: p.leaf,
-          branch: false,
-          speakerEntityId: null
-        })
-        yield* Effect.sleep(500)
+        const generated = yield* posted(
+          h.api.Generate({
+            chatId: p.chatId,
+            parentSlotId: p.leaf,
+            branch: false,
+            speakerEntityId: null
+          })
+        )
+        yield* Deferred.await(waiting)
         if (held === "pause") yield* h.api.SetLcmBackfill({ ...a, action: "pause" })
         else {
           yield* fixtureSql(server.config.dataDir, [
@@ -124,38 +146,35 @@ for (const held of ["pause", "cap"] as const)
             }
           ])
         }
+        // The pause/cap must release before any held summary is answered.
+        yield* Deferred.await(released)
         for (const done of pending.splice(0)) done()
-        yield* Effect.sleep(2000)
+        const completed = (slotId: typeof p.leaf) =>
+          Effect.gen(function* () {
+            for (;;) {
+              const slot = yield* h.reader.GetSlot({ userId: h.userId, slotId })
+              if (slot.entry.version.status !== "generating") {
+                assert.strictEqual(slot.entry.version.status, "complete")
+                assert.isNotEmpty(slot.entry.version.content)
+                return
+              }
+              yield* Effect.sleep(10)
+            }
+          })
+        yield* completed(generated.entry.slotId)
         const state = yield* h.api.GetLcmBackfill(a)
-        const rows = yield* fixtureSql(server.config.dataDir, [
-          {
-            sql: "SELECT v.id,v.status,v.content FROM slots s JOIN versions v ON v.id=s.selected_version_id WHERE s.chat_id=? ORDER BY s.depth DESC LIMIT 1",
-            params: [p.chatId]
-          },
-          {
-            sql: "SELECT status,count(*) AS n FROM summarization_jobs WHERE chat_id=? GROUP BY status",
-            params: [p.chatId]
-          }
-        ])
         assert.strictEqual(state!.state, held === "pause" ? "paused" : "capped")
-        assert.strictEqual(rows[0]![0]!.status, "complete")
-        assert.isNotEmpty(rows[0]![0]!.content)
 
         // A new send begun while already paused goes through promptly.
-        yield* h.api.Generate({
-          chatId: p.chatId,
-          parentSlotId: (yield* posted(Effect.succeed(generated))).entry.slotId,
-          branch: false,
-          speakerEntityId: null
-        })
-        yield* Effect.sleep(1000)
-        const last = yield* fixtureSql(server.config.dataDir, [
-          {
-            sql: "SELECT v.status,v.content FROM slots s JOIN versions v ON v.id=s.selected_version_id WHERE s.chat_id=? ORDER BY s.depth DESC LIMIT 1",
-            params: [p.chatId]
-          }
-        ])
-        assert.strictEqual(last![0]![0]!.status, "complete")
+        const next = yield* posted(
+          h.api.Generate({
+            chatId: p.chatId,
+            parentSlotId: generated.entry.slotId,
+            branch: false,
+            speakerEntityId: null
+          })
+        )
+        yield* completed(next.entry.slotId)
       }).pipe(Effect.scoped),
     { pool: true, timeout: 60000 }
   )
