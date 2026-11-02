@@ -5,6 +5,7 @@
 // A card's or the chat's switch is a state event at the leaf shown, so from there on, on this
 // branch. It shows at once and is confirmed in the background, put back with a message if it
 // fails. A preset's book is switched in the preset, for every chat using it.
+import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import type { PresetLorebook } from "@rp/shared/docs/preset.ts"
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { LibraryRef, RefId } from "@rp/shared/library.ts"
@@ -127,7 +128,7 @@ function Book({
   const hintId = useId()
   return (
     <li
-      className={`flex items-start gap-1 rounded-md px-1 py-1.5 ${selected ? "bg-surface-raised ring-1 ring-accent/50" : ""}`}
+      className={`flex items-start gap-1 rounded-md py-1.5 ps-1 ${rowActionInsetClass} ${selected ? "bg-surface-raised ring-1 ring-accent/50" : ""}`}
       data-selected={selected || undefined}
       // Switched here, not confirmed yet: the row says so without changing its name.
       aria-busy={row.pending || undefined}

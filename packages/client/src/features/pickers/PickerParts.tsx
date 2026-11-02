@@ -6,6 +6,7 @@ import { type ReactNode, type RefObject, useEffect, useRef, useState } from "rea
 import { Input } from "../../ui/Field.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
+import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 
 /** Where focus goes as a picker opens: the filter, or on a touch screen the current row (no keyboard pops up). */
@@ -176,7 +177,7 @@ export function PickerList({
           <div
             key={item.value}
             data-picker-row={item.value}
-            className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 rounded-md hover:bg-surface-raised"
+            className={`grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 rounded-md hover:bg-surface-raised ${item.action ? `${rowActionInsetClass} [--row-action-inset:2rem]` : ""}`}
           >
             <Tooltip label={item.tooltip}>
               <button

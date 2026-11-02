@@ -16,6 +16,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
+import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { sidebarCleared } from "../characters/shellData.tsx"
@@ -129,7 +130,7 @@ function BranchRow({
           {fork.tipExcerpt || "No messages yet"}
         </span>
       </button>
-      <div className="flex shrink-0 items-center py-0.5 pr-0.5">
+      <div className={`flex shrink-0 items-center py-0.5 ${rowActionInsetClass}`}>
         <IconButton
           label={`Rename ${label}`}
           icon="edit"

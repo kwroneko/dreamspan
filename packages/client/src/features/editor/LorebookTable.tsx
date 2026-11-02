@@ -6,6 +6,7 @@
 // moving into the entry's Settings. Rows are virtualized, so a book of hundreds of entries
 // stays fast; the order is fixed when the search, filter or sort changes, so a row never
 // jumps away while it's edited.
+import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
 import { type FieldPath, getAt, parseField, valueField } from "@rp/shared/editing.ts"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -341,7 +342,11 @@ const EntryRow = memo(function EntryRow({
       className={`border-b border-border py-1.5 ${entry.enabled ? "" : "[&_input]:text-muted"} ${open ? "bg-surface" : ""} ${selected ? "bg-accent/5" : ""}`}
     >
       {!compact ? (
-        <div data-entry-header className="grid items-start gap-2 px-1" style={{ gridTemplateColumns: template }}>
+        <div
+          data-entry-header
+          className={`grid items-start gap-2 ps-1 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
+          style={{ gridTemplateColumns: template }}
+        >
           <div className="flex items-center gap-1 pt-0.5">
             {select}
             {chevron}
@@ -356,7 +361,10 @@ const EntryRow = memo(function EntryRow({
           <div className="flex justify-end">{menu}</div>
         </div>
       ) : (
-        <div data-entry-header className="flex items-start gap-1 px-1">
+        <div
+          data-entry-header
+          className={`flex items-start gap-1 ps-1 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
+        >
           {select}
           {chevron}
           <span className="pt-1.5">{enabled}</span>

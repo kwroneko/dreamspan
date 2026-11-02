@@ -739,6 +739,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+- **[D]** Row-action spacing (owner, 2026-11-02): "The archive button for presets touches the edge of the box it's in. This is such a basic UI visual mistake." Trailing actions in scrolling lists keep at least the left content inset before the box edge and scrollbar, at every width, with or without scrolling; tooltips use shared placement and stay inside the viewport. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
 - **[D]** Accessible from a browser and usable remotely (the owner runs it in Docker behind Authelia on their own domain). It must work well on phones for a real release, though not perfectly from day one.
 - **[D]** Every view has a URL. Refresh and the back button work.
 - **[D]** **Multiple tabs work from day one**, e.g. comparing an old branch in another tab. In-app side-by-side panels come later.

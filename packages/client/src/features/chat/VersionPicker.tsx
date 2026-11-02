@@ -15,6 +15,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { Badge } from "../../ui/Surface.tsx"
+import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { ValueDiff } from "../editor/diff.tsx"
 import { formatWhen } from "./chatTitle.ts"
@@ -151,7 +152,7 @@ function Row({
         </button>
       )}
       {!comparing && (
-        <div className="flex shrink-0 items-center py-0.5 pr-0.5">
+        <div className={`flex shrink-0 items-center py-0.5 ${rowActionInsetClass}`}>
           <IconButton
             label={version.starred ? `Unstar version ${number}` : `Star version ${number}`}
             icon="star"
