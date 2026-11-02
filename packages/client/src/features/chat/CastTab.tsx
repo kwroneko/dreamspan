@@ -179,7 +179,7 @@ function Member({
 function You({ session, card }: { session: ChatSession; card: CastCard | undefined }) {
   const showPanel = useShowPanel()
   return (
-    <div role="group" aria-label="Your persona" className="flex items-center gap-3">
+    <div role="group" aria-label="Your persona" className="flex max-w-controls items-center gap-3">
       {card && (
         <Avatar
           id={card.entityId}
@@ -285,7 +285,10 @@ export function CastTab({ session }: { session: ChatSession }) {
         {characters.length === 0 ? (
           <p className="py-2 text-sm text-muted">No one is in this chat. Add a character below to start.</p>
         ) : (
-          <ul aria-label="Characters in this chat" className="grid gap-x-6 @3xl:grid-cols-2">
+          <ul
+            aria-label="Characters in this chat"
+            className="grid gap-x-6 @3xl:grid-cols-[repeat(auto-fill,minmax(22rem,1fr))]"
+          >
             {characters.map((id) => {
               const card = view.cards.get(id)
               if (card === undefined) return null

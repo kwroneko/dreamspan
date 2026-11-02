@@ -674,7 +674,7 @@ export function LorebookTable({
             Add entry
           </Button>
           {/* Wide enough for its placeholder: on a phone it takes its own line. */}
-          <div className={`${panel ? "min-w-[11rem]" : "min-w-[16rem]"} flex-1`}>
+          <div className={`${panel ? "min-w-[11rem]" : "min-w-[16rem]"} max-w-controls flex-1`}>
             <Tooltip label="Shows only the entries whose title, keys or text have every word typed. Search and replace changes text.">
               <Input
                 type="search"

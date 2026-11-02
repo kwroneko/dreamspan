@@ -37,9 +37,10 @@ export interface PanelDescriptor {
    */
   readonly placement?: "tools" | "cast"
   /**
-   * How wide its body goes in a wide panel: "readable" (the default), at most 52rem from the
-   * left, so forms and prose keep a readable line however far the panel is dragged; "full",
-   * the panel's whole width, for a body that lays itself out in columns as it widens.
+   * How wide its body goes in a wide panel (owner, 2026-11-02: "Tabs should be able to fully
+   * utilize horizontal space"): "full" (the default), the panel's whole width, its paragraphs
+   * at a readable measure and its controls each at their own width; "readable", at most 52rem
+   * from the left, for a body of controls that would only stretch.
    */
   readonly width?: "readable" | "full"
   /** Dynamic tab families, such as the cast's cards. Exact registered IDs take precedence. */
