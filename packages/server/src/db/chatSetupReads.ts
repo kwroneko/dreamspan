@@ -21,7 +21,7 @@ import { chatQueue } from "./queueRows.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 import { withoutPurged } from "./stateRefs.ts"
-import { currentForkSql, selectedInSql, shownInSql, slotDeletedInSql } from "./forkState.ts"
+import { currentForkSql, forkAt, selectedInSql, shownInSql, slotDeletedInSql } from "./forkState.ts"
 import { lastShown } from "./forks.ts"
 import { displayLength, pathPieces, placedInsertions } from "./displayPath.ts"
 
@@ -189,10 +189,10 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
     ListCards: ({ userId }) => loadCastCards(sql, userId, null).pipe(query("ListCards")),
 
     // One query for the whole grid (DESIGN §2.1): each live card that isn't a persona, read
-    // from the ref loadCards picks, with the chats it joined on any branch (a card that left a
-    // chat still took part in it), the last message among them, and the latest of them: the
+    // from the ref loadCards picks, with chats containing an authored version that records it
+    // in its cast or as its speaker (a card that left still took part), the last message among them, and the latest of them: the
     // one with the last message, a chat without messages only when none has any. Per
-    // card, an index seek on the cards each chat joined (`state_events_participants`); the
+    // card, an index seek on `version_participants`; the
     // `+` keeps the column's affinity off the indexed expression, so the seek is used.
     // CROSS JOIN keeps the indexed participant seek first: reordering chats first probes
     // every live chat for every card (5 million probes in the scale fixture).
@@ -223,9 +223,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               'last', max(c.last_message_at),
               'latest', substr(max(
                 (c.last_message_at IS NOT NULL) || printf('%016d', coalesce(c.last_message_at, c.created_at)) || c.id), 18))
-            FROM state_events s CROSS JOIN chats c ON c.id = s.chat_id
-            WHERE json_extract(s.value_json, '$.entity') = +cards.entity_id
-              AND s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL
+            FROM card_chat_membership s CROSS JOIN chats c ON c.id = s.chat_id
+            WHERE s.entity_id = +cards.entity_id
               AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
         FROM cards LEFT JOIN card_summaries cs ON cs.revision_id = cards.head_revision_id
         ORDER BY cards.label COLLATE NOCASE, cards.entity_id`.pipe(
@@ -286,8 +285,31 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
 
     CastCards: ({ userId, entityIds, chat }) =>
       Effect.gen(function* () {
-        const cards = yield* loadCastCards(sql, userId, entityIds)
+        let cards = yield* loadCastCards(sql, userId, entityIds)
         if (chat === undefined) return cards
+        if (chat.history !== undefined) {
+          const [owned] = yield* sql<{ id: string }>`SELECT id FROM chats WHERE id = ${chat.chatId}
+            AND owner_user_id = ${userId} AND deleted_at IS NULL`
+          if (!owned) return []
+          const fork = chat.history.forkId ?? (yield* forkAt(sql, chat.chatId, chat.history.slotId))
+          const [view] = yield* sql<{ tip_slot_id: string | null }>`SELECT tip_slot_id FROM forks
+            WHERE id = ${fork} AND chat_id = ${chat.chatId} AND deleted_at IS NULL`
+          if (!view) return []
+          const pieces = (yield* pathPieces(sql, chat.chatId, fork, view.tip_slot_id)).map((p) => [
+            p.chainId,
+            p.kind === "inserted" ? p.depth : p.lo,
+            p.kind === "inserted" ? p.depth : p.hi
+          ])
+          const used = yield* sql<{ entity_id: string }>`SELECT j.value AS entity_id
+            FROM json_each(${JSON.stringify(entityIds)}) j WHERE EXISTS (
+              SELECT 1 FROM version_participants p CROSS JOIN versions v ON v.id = p.version_id
+                CROSS JOIN slots s ON s.id = v.slot_id
+              WHERE p.entity_id = j.value AND s.chat_id = ${chat.chatId} AND v.purged_at IS NULL
+                AND s.purged_at IS NULL AND EXISTS (SELECT 1 FROM json_each(${JSON.stringify(pieces)}) g
+                  WHERE s.chain_id = g.value ->> 0 AND s.depth BETWEEN g.value ->> 1 AND g.value ->> 2))`
+          const keep = new Set([...chat.history.active, ...used.map((row) => row.entity_id)])
+          cards = cards.filter((card) => keep.has(card.entityId))
+        }
         // The name the chat uses is the one the model reads: its own version's, say.
         return yield* Effect.forEach(cards, (card) =>
           Effect.flatMap(

@@ -776,6 +776,12 @@
     },
     {
       "type": "index",
+      "name": "version_participants_version",
+      "tbl_name": "version_participants",
+      "sql": "CREATE INDEX version_participants_version ON version_participants(version_id, entity_id)"
+    },
+    {
+      "type": "index",
       "name": "versions_bin_item",
       "tbl_name": "versions",
       "sql": "CREATE INDEX versions_bin_item ON versions(bin_item_id) WHERE bin_item_id IS NOT NULL"
@@ -1232,9 +1238,15 @@
     },
     {
       "type": "table",
+      "name": "version_participants",
+      "tbl_name": "version_participants",
+      "sql": "CREATE TABLE version_participants ( version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE, PRIMARY KEY (entity_id, version_id) ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
       "name": "versions",
       "tbl_name": "versions",
-      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, -- The text and reasoning as they were before regex scripts rewrote them (ARCHITECTURE §12), -- null when unchanged; never sent anywhere. What the scripts did: rewrite_json. raw_content TEXT, raw_reasoning TEXT, -- The reply sections before the reasoning scripts rewrote their text, as JSON. raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)), rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)), frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL CHECK (origin IN ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')), source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), -- An imported version's model, and its times and token count, as its app recorded them -- (rows.ts); null for none and for this app's own generations (model_id, usage_json). recorded_model_json TEXT CHECK (recorded_model_json IS NULL OR json_valid(recorded_model_json)), recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), -- Cast when this version was written, independent of later cast changes. NULL only -- while an imported version awaits its file's cast at StImportFinishChat. cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, -- The text and reasoning as they were before regex scripts rewrote them (ARCHITECTURE §12), -- null when unchanged; never sent anywhere. What the scripts did: rewrite_json. raw_content TEXT, raw_reasoning TEXT, -- The reply sections before the reasoning scripts rewrote their text, as JSON. raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)), rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)), frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL CHECK (origin IN ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')), source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), -- An imported version's model, and its times and token count, as its app recorded them -- (rows.ts); null for none and for this app's own generations (model_id, usage_json). recorded_model_json TEXT CHECK (recorded_model_json IS NULL OR json_valid(recorded_model_json)), recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -2140,7 +2152,7 @@
       "type": "trigger",
       "name": "shell_versions_update",
       "tbl_name": "versions",
-      "sql": "CREATE TRIGGER shell_versions_update AFTER UPDATE OF slot_id, speaker_entity_id, content, origin, source_version_id, created_at, deleted_at, purged_at, fork_id ON versions BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = (SELECT chat_id FROM slots WHERE id = NEW.slot_id); END"
+      "sql": "CREATE TRIGGER shell_versions_update AFTER UPDATE OF slot_id, speaker_entity_id, content, origin, source_version_id, created_at, deleted_at, purged_at, fork_id, cast_json ON versions BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = (SELECT chat_id FROM slots WHERE id = NEW.slot_id); END"
     },
     {
       "type": "trigger",
@@ -2642,6 +2654,18 @@
     },
     {
       "type": "trigger",
+      "name": "version_participants_insert",
+      "tbl_name": "versions",
+      "sql": "CREATE TRIGGER version_participants_insert AFTER INSERT ON versions BEGIN INSERT OR IGNORE INTO version_participants (version_id, entity_id) SELECT NEW.id, value FROM json_each(NEW.cast_json) UNION SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL; END"
+    },
+    {
+      "type": "trigger",
+      "name": "version_participants_update",
+      "tbl_name": "versions",
+      "sql": "CREATE TRIGGER version_participants_update AFTER UPDATE OF cast_json, speaker_entity_id ON versions BEGIN DELETE FROM version_participants WHERE version_id = NEW.id; INSERT OR IGNORE INTO version_participants (version_id, entity_id) SELECT NEW.id, value FROM json_each(NEW.cast_json) UNION SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL; END"
+    },
+    {
+      "type": "trigger",
       "name": "versions_amend_history",
       "tbl_name": "versions",
       "sql": "CREATE TRIGGER versions_amend_history AFTER UPDATE OF content ON versions WHEN OLD.writer = 'human' AND OLD.status <> 'generating' AND NEW.content IS NOT OLD.content BEGIN INSERT INTO version_history (version_id, content, replaced_at, images_json) VALUES (OLD.id, OLD.content, NEW.updated_at, (SELECT json_group_array(json_object( 'mediaId', media_id, 'altText', coalesce(alt_text, ''))) FROM (SELECT media_id, alt_text FROM version_attachments WHERE version_id = OLD.id ORDER BY ordinal))); END"
@@ -2753,6 +2777,12 @@
       "name": "versions_source_same_slot",
       "tbl_name": "versions",
       "sql": "CREATE TRIGGER versions_source_same_slot BEFORE INSERT ON versions WHEN NEW.source_version_id IS NOT NULL AND (SELECT slot_id FROM versions WHERE id = NEW.source_version_id) IS NOT NEW.slot_id BEGIN SELECT RAISE(ABORT, 'a version''s source must be another version of its slot'); END"
+    },
+    {
+      "type": "view",
+      "name": "card_chat_membership",
+      "tbl_name": "card_chat_membership",
+      "sql": "CREATE VIEW card_chat_membership AS SELECT DISTINCT p.entity_id, s.chat_id FROM version_participants p CROSS JOIN versions v ON v.id = p.version_id CROSS JOIN slots s ON s.id = v.slot_id WHERE v.purged_at IS NULL AND s.purged_at IS NULL"
     }
   ]
 }

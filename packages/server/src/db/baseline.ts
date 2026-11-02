@@ -60,7 +60,7 @@ const shellSummaries: ReadonlyArray<string> = [
   `CREATE TRIGGER shell_versions_insert AFTER INSERT ON versions
     BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = NEW.slot_id)")} END`,
   `CREATE TRIGGER shell_versions_update AFTER UPDATE OF slot_id, speaker_entity_id, content, origin, source_version_id,
-    created_at, deleted_at, purged_at, fork_id ON versions
+    created_at, deleted_at, purged_at, fork_id, cast_json ON versions
     BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = NEW.slot_id)")} END`,
   `CREATE TRIGGER shell_versions_delete AFTER DELETE ON versions
     BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = OLD.slot_id)")} END`,
@@ -345,6 +345,9 @@ export const baseline: ReadonlyArray<string> = [
     ordinal INTEGER NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')),
     speaker_entity_id TEXT REFERENCES entities(id),
+    -- Cast when this version was written, independent of later cast changes. NULL only
+    -- while an imported version awaits its file's cast at StImportFinishChat.
+    cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')),
     writer TEXT NOT NULL CHECK (writer IN ('human', 'model')),
     content TEXT NOT NULL DEFAULT '',
     macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')),
@@ -386,6 +389,29 @@ export const baseline: ReadonlyArray<string> = [
   // Startup's InterruptGenerations finds the few generating versions without scanning every
   // message: 8.5 s at 500,000 messages before (fux1).
   `CREATE INDEX versions_generating ON versions(id) WHERE status = 'generating'`,
+  // An indexed projection of each version's cast and author; no join event establishes
+  // historical participation. Copies carry cast_json with their other version fields.
+  `CREATE TABLE version_participants (
+    version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+    entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    PRIMARY KEY (entity_id, version_id)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX version_participants_version ON version_participants(version_id, entity_id)`,
+  `CREATE TRIGGER version_participants_insert AFTER INSERT ON versions BEGIN
+    INSERT OR IGNORE INTO version_participants (version_id, entity_id)
+      SELECT NEW.id, value FROM json_each(NEW.cast_json)
+      UNION SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL;
+  END`,
+  `CREATE TRIGGER version_participants_update AFTER UPDATE OF cast_json, speaker_entity_id ON versions BEGIN
+    DELETE FROM version_participants WHERE version_id = NEW.id;
+    INSERT OR IGNORE INTO version_participants (version_id, entity_id)
+      SELECT NEW.id, value FROM json_each(NEW.cast_json)
+      UNION SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL;
+  END`,
+  `CREATE VIEW card_chat_membership AS
+    SELECT DISTINCT p.entity_id, s.chat_id FROM version_participants p
+      CROSS JOIN versions v ON v.id = p.version_id CROSS JOIN slots s ON s.id = v.slot_id
+    WHERE v.purged_at IS NULL AND s.purged_at IS NULL`,
   `CREATE TABLE version_history (
     id INTEGER PRIMARY KEY,
     version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,

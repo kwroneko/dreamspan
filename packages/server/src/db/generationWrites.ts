@@ -148,6 +148,11 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           updated_at: now
         })}`
         yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
+        // Pin the cast actually assembled, including an earlier-message swipe and a cast
+        // change racing the placeholder's creation. Later undo cannot rewrite this evidence.
+        yield* sql`UPDATE versions SET cast_json = (
+          SELECT json_group_array(value ->> '$.entity') FROM json_each(${snapshot}, '$.inputs.cards')
+        ) WHERE id = ${versionId}`
         // The preset it's written with was last used now (the preset picker's Last used): the ref
         // the snapshot names, and for a chat's own copy the entry it follows too.
         const [used] = yield* sql<{ ref: string | null }>`

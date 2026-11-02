@@ -14,7 +14,8 @@ import type { CommitDraft } from "./drafts.ts"
 import { makeDraftCarry } from "./carryDrafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
 import { forkThrough, onForkPath } from "./forks.ts"
-import { hiddenAtFork, pathPieces, slotPlace } from "./displayPath.ts"
+import { displayEndOf, hiddenAtFork, pathPieces, slotPlace } from "./displayPath.ts"
+import { castAt } from "./participation.ts"
 import {
   forkAt,
   nextSeq,
@@ -101,7 +102,14 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       { discard: true }
     )
 
-  const insertVersion = (slotId: string, ordinal: number, version: NewVersion, at: number, owner?: string) =>
+  const insertVersion = (
+    slotId: string,
+    ordinal: number,
+    version: NewVersion,
+    at: number,
+    owner?: string,
+    cast: ReadonlyArray<string> = []
+  ) =>
     Effect.gen(function* () {
       yield* checkSource(slotId, version.sourceVersionId)
       const row = yield* sql<VersionRow>`INSERT INTO versions ${sql.insert({
@@ -110,6 +118,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         ordinal,
         status: version.status,
         speaker_entity_id: version.speakerEntityId,
+        cast_json: JSON.stringify(cast),
         writer: version.writer,
         content: version.content,
         macro_mode: version.macroMode,
@@ -172,8 +181,17 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         (yield* sql<{ id: string | null }>`SELECT current_fork_id AS id FROM chats WHERE id = ${chatId}`)[0]?.id ??
         null
       const [owner] = yield* sql<{ id: string }>`SELECT owner_user_id AS id FROM chats WHERE id=${chatId}`
-      const rows = [yield* insertVersion(slotId, 0, version, at, owner!.id)]
-      for (const [i, next] of more.entries()) rows.push(yield* insertVersion(slotId, i + 1, next, at, owner!.id))
+      const [view] = yield* sql<{
+        id: string
+        tip_slot_id: string | null
+      }>`SELECT id, tip_slot_id FROM forks WHERE id = ${fork}`
+      const leaf =
+        !inserted && view?.tip_slot_id === (parent?.id ?? null)
+          ? yield* displayEndOf(sql, chatId, view)
+          : (parent?.id ?? null)
+      const cast = yield* castAt(sql, chatId, leaf, fork)
+      const rows = [yield* insertVersion(slotId, 0, version, at, owner!.id, cast)]
+      for (const [i, next] of more.entries()) rows.push(yield* insertVersion(slotId, i + 1, next, at, owner!.id, cast))
       yield* sql`INSERT INTO slots ${sql.insert({
         id: slotId,
         chat_id: chatId,

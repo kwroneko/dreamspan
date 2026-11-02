@@ -194,7 +194,7 @@ it.live("shell rows retain interior checkpoints, same-tip peers and empty forks 
     })
     const swapped = (yield* api.GetShellLibrary()).forks.find((f) => f.forkId === original.id)!
     assert.include(swapped.joined, b.entityId)
-    assert.include(swapped.joined, c.entityId)
+    assert.notInclude(swapped.joined, c.entityId, "a swap alone configures the next turn; no version used Cora yet")
     assert.include(swapped.departed, b.entityId)
     assert.include(swapped.cast, c.entityId)
     assert.strictEqual(swapped.activity.find((x) => x.entityId === b.entityId)!.slot, continuation.entry.slotId)

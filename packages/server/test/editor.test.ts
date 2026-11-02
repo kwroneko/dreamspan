@@ -3,6 +3,7 @@
 // Cross-user probes are in isolation.test.ts.
 import { readFileSync } from "node:fs"
 import { assert, layer } from "@effect/vitest"
+import { NewVersion } from "@rp/shared/chat.ts"
 import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { textField, validateDoc, valueField } from "@rp/shared/editing.ts"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
@@ -543,6 +544,23 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         participants: [card.entityId],
         greeting: null
       })
+      const say = (parentSlotId: typeof chat.activeLeafSlotId) =>
+        writer.AppendMessage({
+          userId: me.id,
+          chatId: chat.id,
+          parentSlotId,
+          branch: false,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: "human",
+            content: "A turn.",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          })
+        })
+      const root = yield* say(null)
       yield* writer.CreateChat({
         userId: me.id,
         kind: "rp",
@@ -572,12 +590,14 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.strictEqual(opened.usedByChats, 0)
       // The original went back to its revision: nothing unsaved there, the text in its history.
       assert.isEmpty((yield* api.OpenEditor({ refId: card.id })).drafts.filter((d) => d.status === "active"))
-      // Swapping the card puts the fork to use in that chat.
+      // Swapping configures the next turn; that turn puts the fork to use.
       yield* api.ChangeCast({
         chatId: chat.id,
         slotId: null,
         change: { _tag: "Swap", entityId: variant.entityId, replaces: card.entityId }
       })
+      assert.strictEqual((yield* api.OpenEditor({ refId: variant.id })).usedByChats, 0)
+      yield* say(root.slotId)
       assert.strictEqual((yield* api.OpenEditor({ refId: variant.id })).usedByChats, 1)
       const renamed = yield* api.RenameRef({
         refId: variant.id,

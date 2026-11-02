@@ -11,6 +11,7 @@ import type { Bin } from "./bin.ts"
 import { onDisplayPath, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import { selectionIn, shownIn, slotDeletedIn, versionAsShown, writeInsert } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
+import { castAt } from "./participation.ts"
 import { InsertRefused } from "@rp/shared/messagesApi.ts"
 import { InsertResult, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toVersion } from "./rows.ts"
@@ -155,6 +156,8 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
               created_at: at,
               inserted: 1
             })}`
+            yield* sql`UPDATE versions SET cast_json = ${JSON.stringify(yield* castAt(sql, chatId, anchor!.id, fork.id))}
+              WHERE id = ${versionId}`
           }
 
           yield* writeInsert(sql, { id: fork.id, chatId }, slotId, 1)
