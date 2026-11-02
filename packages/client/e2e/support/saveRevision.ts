@@ -11,7 +11,6 @@ export const saveButton = (scope: Page | Locator) => scope.getByRole("button", {
 
 /** Saves a revision from the save cluster in `scope`, with a message when given, and waits for it. */
 export const saveRevision = async (scope: Page | Locator, message?: string) => {
-  const state = revisionStatus(scope)
   if (message === undefined) await saveButton(scope).click()
   else {
     await scope.getByRole("button", { name: "Save with a message…", exact: true }).click()
@@ -21,7 +20,7 @@ export const saveRevision = async (scope: Page | Locator, message?: string) => {
   }
   // Pending also disables Save. Wait for the saved state and the end of the
   // request; a valid no-op save clears drafts without advancing the revision.
-  await expect(state).toHaveText(/^Saved as revision \d+$/)
+  await expect(saveCluster(scope)).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
   await expect(saveButton(scope)).not.toHaveAttribute("aria-busy", "true")
   await expect(saveButton(scope)).toBeDisabled()
 }
