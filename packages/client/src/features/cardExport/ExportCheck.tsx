@@ -5,6 +5,7 @@
 // revision" (without them), or Cancel. With nothing unsaved it downloads at once, as before.
 // The changes are the ones an open editor has (its typing flushed first), or the server's
 // drafts when none is open.
+import { HELD_FIELD } from "@rp/shared/editing.ts"
 import type { NoteEntry } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { useEffect, useRef, useState } from "react"
@@ -38,12 +39,10 @@ const storeFor = async (refId: RefId, userId: string, call: Caller) => {
 
 const unsavedOf = (store: EditorStore, prefix = ""): Unsaved => ({
   store,
-  names: unsavedFieldNames(
-    store.snapshot?.ref.kind ?? "card",
-    store.working().doc,
-    store.head,
-    store.dirtyFields()
-  ).map((name) => `${prefix}${name}`)
+  names: unsavedFieldNames(store.snapshot?.ref.kind ?? "card", store.working().doc, store.head, [
+    ...store.dirtyFields(),
+    ...(store.held() === null ? [] : [HELD_FIELD])
+  ]).map((name) => `${prefix}${name}`)
 })
 
 /** A card's exportable notes as the export takes them: each slot, or the shared note it shows. */
