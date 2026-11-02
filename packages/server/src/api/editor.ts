@@ -7,7 +7,7 @@ import { builtinPreset } from "../db/assemblySources.ts"
 import { CARD_SCHEMA_VERSION } from "@rp/shared/docs/card.ts"
 import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import { newCardDoc, parseField, validateDoc } from "@rp/shared/editing.ts"
-import { EditRefused, InvalidDocument, SavedRef } from "@rp/shared/editorApi.ts"
+import { EditRefused, type ForkMergeApi, InvalidDocument, SavedRef } from "@rp/shared/editorApi.ts"
 import { NotFound, ServerError } from "@rp/shared/errors.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -395,4 +395,38 @@ export const makeEditorHandlers = Effect.gen(function* () {
       }).pipe(settle("DeleteNote"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
   return handlers
+})
+
+/** ForkMergeApi's handlers, served by their own layer (AppCoreApi's note). */
+export const makeForkMergeHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const writer = yield* Writer
+  const warmth = yield* CacheWarmth
+  const userId = Effect.map(CurrentUser, (user) => user.id)
+  const changed =
+    (id: UserId) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Effect.tap(effect, () => warmth.refreshUser(id))
+  return {
+    ForkMergeStatus: (input) =>
+      Effect.flatMap(userId, (id) => reader.ForkMergeStatus({ userId: id, ...input })).pipe(settle("ForkMergeStatus")),
+    PreviewForkMerge: (input) =>
+      Effect.flatMap(userId, (id) => reader.PreviewForkMerge({ userId: id, ...input })).pipe(
+        settle("PreviewForkMerge")
+      ),
+    LibraryGenealogy: (input) =>
+      Effect.flatMap(userId, (id) => reader.LibraryGenealogy({ userId: id, ...input })).pipe(
+        settle("LibraryGenealogy")
+      ),
+    CommitForkMerge: (input) =>
+      Effect.flatMap(userId, (id) => writer.CommitForkMerge({ userId: id, ...input }).pipe(changed(id))).pipe(
+        Effect.map(saved),
+        settle("CommitForkMerge")
+      ),
+    UndoForkMerge: (input) =>
+      Effect.flatMap(userId, (id) => writer.UndoForkMerge({ userId: id, ...input }).pipe(changed(id))).pipe(
+        Effect.map(saved),
+        settle("UndoForkMerge")
+      )
+  } satisfies Parameters<typeof ForkMergeApi.of>[0]
 })

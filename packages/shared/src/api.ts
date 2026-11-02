@@ -17,7 +17,7 @@ import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
-import { EditorApi } from "./editorApi.ts"
+import { EditorApi, ForkMergeApi } from "./editorApi.ts"
 import {
   AccountRejected,
   Forbidden,
@@ -116,7 +116,12 @@ export class InvalidNetworkSettings extends Schema.TaggedError<InvalidNetworkSet
 
 const StorageErrors = [NotFound, ServerError] as const
 
-export class AppApi extends RpcGroup.make(
+/**
+ * Every RPC but the fork merges. The server implements it with one handler layer and
+ * ForkMergeApi with another: a single layer over all of AppApi exceeds TypeScript's
+ * instantiation depth (TS2589) in `toLayer`'s handler inference.
+ */
+export class AppCoreApi extends RpcGroup.make(
   Rpc.make("Health", { success: Health }),
   Rpc.make("Whoami", { success: User }),
   /** The caller's user and how they're signed in, so the client knows whether login applies. */
@@ -384,6 +389,12 @@ export class AppApi extends RpcGroup.make(
   // --- Inserting messages anywhere in the history (messagesApi.ts).
   .merge(MessagesApi)
   .middleware(Authentication) {}
+
+/** The fork merge RPCs (editorApi.ts), authenticated like the rest. */
+export const AuthenticatedForkMergeApi = ForkMergeApi.middleware(Authentication)
+
+/** The whole API: what the client calls and the server serves. */
+export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

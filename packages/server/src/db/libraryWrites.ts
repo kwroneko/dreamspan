@@ -1,3 +1,6 @@
+import { makeForkMergeQueries } from "./forkMerge.ts"
+import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
+import { makeForkMergeWriteHandlers } from "./forkMergeWrites.ts"
 import { withMain } from "@rp/shared/presetOrder.ts"
 import { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { getAt, parseField } from "@rp/shared/editing.ts"
@@ -32,7 +35,7 @@ import { makeEditorWriteHandlers } from "./editorWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaPath } from "./media.ts"
 import { sharedNote } from "./sharedNotes.ts"
-import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
+import { type FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
 import { recordCardArrival } from "./stArrival.ts"
 import { transaction } from "./tx.ts"
 
@@ -69,7 +72,9 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const lib = makeLibraryQueries(sql)
+    yield* libraryMergePolicies.register(defaultLibraryMergePolicy)
     const { drafts } = bin
+    const forkMerge = makeForkMergeQueries(sql)
 
     /** The user's live chat, or NotFound. */
     const liveChat = (userId: UserId, chatId: string) =>
@@ -94,6 +99,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           head_revision_id: head,
           follows_ref_id: ref.id,
           merge_base_revision_id: head,
+          forked_from_revision_id: head,
           label: ref.label,
           subtitle: "",
           chat_id: chatId,
@@ -216,77 +222,60 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const mergeMessage = (ref: RefRow) =>
       ref.followed_label === null ? "Merged a new import" : `Merged changes from ${ref.followed_label}`
 
-    /** Merges `ref` with what it follows, if that needs no help from the user. */
+    const recordMerge = (
+      ref: RefRow,
+      revisionId: string,
+      theirs: string,
+      sourceRefId = ref.follows_ref_id ?? ref.parent_ref_id
+    ) =>
+      sql`INSERT INTO library_merges ${sql.insert({
+        revision_id: revisionId,
+        ref_id: ref.id,
+        ours_revision_id: ref.head_revision_id,
+        base_revision_id: ref.merge_base_revision_id,
+        theirs_revision_id: theirs,
+        source_ref_id: sourceRefId,
+        selection_json: JSON.stringify({ excluded: [], resolutions: [] }),
+        created_at: Date.now()
+      })}`
+
+    /** Importing a file or applying an update is explicit; it never changes children. */
     const applyMerge = (ref: RefRow) =>
       Effect.gen(function* () {
         const plan = yield* lib.planMerge(ref)
-        switch (plan.outcome) {
-          case "up_to_date":
-            // What it follows moved on but brought nothing new, so only the merge base moves.
-            if (ref.followed_head !== null && plan.theirsHead !== ref.merge_base_revision_id) {
-              yield* moveHead(ref.id, ref.head_revision_id, plan.theirsHead, ref.updated_at)
-            }
-            break
-          case "fast_forward": {
-            // Moving to exactly what it follows would bring along a permission the user gave
-            // there and not here: then it's a merge revision with the permission kept off.
-            const doc = yield* withoutGrants(ref, plan.merged)
-            if (docHash(doc) === docHash(plan.merged)) {
-              yield* moveHead(ref.id, plan.theirsHead, plan.theirsHead, (yield* revision(plan.theirsHead)).created_at)
-              break
-            }
-            const merge = yield* insertRevision({
-              entityId: ref.entity_id,
-              schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
-              doc: encode(doc),
-              parents: [ref.head_revision_id, plan.theirsHead],
-              origin: "merge",
-              originRef: ref.follows_ref_id,
-              message: mergeMessage(ref)
-            })
-            yield* moveHead(ref.id, merge, plan.theirsHead)
-            return "merged" as MergeOutcome
-          }
-          case "merged": {
-            const merge = yield* insertRevision({
-              entityId: ref.entity_id,
-              schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
-              doc: encode(yield* withoutGrants(ref, plan.merged)),
-              parents: [ref.head_revision_id, plan.theirsHead],
-              origin: "merge",
-              originRef: ref.follows_ref_id,
-              message: mergeMessage(ref)
-            })
-            yield* moveHead(ref.id, merge, plan.theirsHead)
-            break
-          }
-        }
+        if (ref.followed_head === null || plan.theirsHead === ref.merge_base_revision_id) return plan.outcome
+        yield* forkMerge.noDrafts(
+          (yield* sql<{ owner_user_id: UserId }>`SELECT owner_user_id FROM entities WHERE id = ${ref.entity_id}`)[0]!
+            .owner_user_id,
+          ref
+        )
+        if (plan.outcome === "conflicts") return plan.outcome
+        // A clean imported update retains its source time. Actual merges with local
+        // edits use now; accepting identical content keeps its previous Modified date.
+        const modifiedAt =
+          plan.outcome === "fast_forward"
+            ? (yield* revision(plan.theirsHead)).created_at
+            : plan.outcome === "up_to_date"
+              ? ref.updated_at
+              : undefined
+        const merge = yield* insertRevision({
+          entityId: ref.entity_id,
+          schemaVersion: (yield* revision(ref.head_revision_id)).schema_version,
+          doc: encode(yield* withoutGrants(ref, plan.merged)),
+          parents: [ref.head_revision_id, plan.theirsHead],
+          origin: "merge",
+          originRef: ref.follows_ref_id,
+          message: mergeMessage(ref),
+          ...(modifiedAt === undefined ? {} : { modifiedAt })
+        })
+        yield* recordMerge(ref, merge, plan.theirsHead)
+        yield* moveHead(ref.id, merge, plan.theirsHead, modifiedAt ?? Date.now())
         return plan.outcome
       })
 
-    /** Non-card followers merge transitively. Cards only merge their own import line. */
-    const flowToFollowers = (refId: string) =>
-      Effect.gen(function* () {
-        const outcomes: Array<FollowerMerge> = []
-        if ((yield* reload(refId)).kind === "card") return outcomes
-        const queue = [refId]
-        while (queue.length > 0) {
-          const followers = yield* lib.refsWhere("r.follows_ref_id = ?", [queue.shift()!])
-          for (const follower of followers) {
-            const outcome: MergeOutcome = yield* applyMerge(follower)
-            outcomes.push(new FollowerMerge({ refId: follower.id as RefId, outcome }))
-            // A follower that changed passes the change on to its own followers.
-            if (outcome === "fast_forward" || outcome === "merged") queue.push(follower.id)
-          }
-        }
-        return outcomes
-      })
-
+    /** Forks keep their own head until an explicit merge, including chat overrides. */
     const changed = (refId: string) =>
-      Effect.gen(function* () {
-        const followers = yield* flowToFollowers(refId)
-        return new RefChange({ ref: toLibraryRef(yield* reload(refId)), followers })
-      })
+      Effect.map(reload(refId), (ref) => new RefChange({ ref: toLibraryRef(ref), followers: [] }))
 
     /** Merges `ref` with what it follows, and passes any change on to its followers. */
     const mergeAndFlow = (ref: RefRow) =>
@@ -362,6 +351,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         readonly sourcePath: string | null
         readonly sourceHash: string | null
         readonly modifiedAt?: number
+        readonly stageMerge?: boolean
       }
     ) =>
       Effect.gen(function* () {
@@ -381,13 +371,13 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         // a variant merges its upstream, so the user's edits to the upstream survive.
         // Importing what was last imported adds nothing to that line.
         const { doc } = options
-        const last = ref.followed_head === null ? null : yield* revision(ref.followed_head)
+        const last = ref.import_head === null ? null : yield* revision(ref.import_head)
         if (last === null || last.doc_hash !== doc.hash) {
           yield* insertRevision({
             entityId: ref.entity_id,
             schemaVersion: options.schemaVersion,
             doc,
-            parents: ref.followed_head === null ? [] : [ref.followed_head],
+            parents: ref.import_head === null ? [] : [ref.import_head],
             origin: "import",
             originRef: options.originRef,
             ...(options.modifiedAt === undefined ? {} : { modifiedAt: options.modifiedAt }),
@@ -396,6 +386,11 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         }
         yield* sql`UPDATE entity_refs SET source_path = coalesce(${options.sourcePath}, source_path),
                    source_hash = coalesce(${options.sourceHash}, source_hash) WHERE id = ${ref.id}`
+        if (options.stageMerge) {
+          // New file on the import line, visible to the explicit merge preview. No content or notes change.
+          yield* sql`UPDATE entity_refs SET row_version = row_version + 1 WHERE id = ${ref.id}`
+          return { outcome: "conflicts" as const, change: yield* changed(ref.id) }
+        }
         return yield* mergeAndFlow(yield* reload(ref.id))
       })
 
@@ -433,15 +428,15 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             reason: `This is schema version ${schemaVersion}, but the library holds version ${head.schema_version}, and documents can't be migrated yet.`
           })
         }
-        const last = ref.followed_head === null ? null : yield* revision(ref.followed_head)
+        const last = ref.import_head === null ? null : yield* revision(ref.import_head)
         const imported =
           last !== null && last.doc_hash === file.hash
-            ? ref.followed_head!
+            ? ref.import_head!
             : yield* insertRevision({
                 entityId: ref.entity_id,
                 schemaVersion,
                 doc: file,
-                parents: ref.followed_head === null ? [] : [ref.followed_head],
+                parents: ref.import_head === null ? [] : [ref.import_head],
                 origin: "import",
                 originRef: source.originRef,
                 message: null
@@ -462,6 +457,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             originRef: source.originRef,
             message: `Replaced with a new version from ${source.sourcePath}`
           })
+          yield* recordMerge(ref, headId, imported, null)
           yield* moveHead(ref.id, headId, imported)
           outcome = "merged"
         } else if (imported !== ref.merge_base_revision_id) {
@@ -718,6 +714,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             head_revision_id: ref.head_revision_id,
             follows_ref_id: ref.id,
             merge_base_revision_id: ref.head_revision_id,
+            forked_from_revision_id: ref.head_revision_id,
             label,
             subtitle,
             created_at: at,
@@ -767,6 +764,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             })
           }
           yield* checkRowVersion(ref, expectedRowVersion)
+          yield* forkMerge.noDrafts(userId, ref)
           if (ref.followed_head !== theirsRevisionId) {
             return yield* new RefOperationRefused({
               refId,
@@ -800,6 +798,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             originRef: ref.follows_ref_id,
             message: `${mergeMessage(ref)}, resolved by hand`
           })
+          yield* recordMerge(ref, merge, theirsRevisionId)
           yield* moveHead(ref.id, merge, theirsRevisionId)
           return yield* changed(ref.id)
         }).pipe(transaction(sql, "ResolveMerge")),
@@ -911,7 +910,12 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               ...source
             })
           } else {
-            const merged = yield* importInto(into, { doc, schemaVersion: input.schemaVersion, ...source })
+            const merged = yield* importInto(into, {
+              doc,
+              schemaVersion: input.schemaVersion,
+              ...source,
+              ...(input.stageMerge ? { stageMerge: true } : {})
+            })
             upstream = yield* reload(into.id)
             outcome = merged.outcome
             followers = merged.change.followers
@@ -927,6 +931,17 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             if (flag?.fav !== null && flag?.fav !== undefined)
               yield* importFavourite(sql, userId, upstream.entity_id, isFav(flag.fav))
           }
+          if (input.stageMerge)
+            return new LibraryImport({
+              created: false,
+              ref: toLibraryRef(upstream),
+              outcome: null,
+              stagedRevisionId: upstream.import_head! as import("@rp/shared/library.ts").RevisionId,
+              followers: [],
+              note: null,
+              keptAvatar,
+              keptAssets
+            })
           const noteDocJson =
             input.noteDocJson !== null && input.characterNoteScan
               ? JSON.stringify({ ...(JSON.parse(input.noteDocJson) as Doc), scan_lore: true })
@@ -960,7 +975,13 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       revision,
       recordMedia,
       createUpstream,
-      checkReferences
+      checkReferences,
+      withoutGrants
     }
-    return { ...handlers, ...makeEditorWriteHandlers(steps), ...makeCardForkWriteHandlers(steps) }
+    return {
+      ...handlers,
+      ...makeEditorWriteHandlers(steps),
+      ...makeCardForkWriteHandlers(steps),
+      ...makeForkMergeWriteHandlers(steps)
+    }
   })

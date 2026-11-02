@@ -38,6 +38,8 @@ export interface RefRow {
   readonly label: string
   readonly subtitle: string
   readonly head_revision_id: string
+  readonly import_head: string | null
+  readonly parent_ref_id: string | null
   readonly follows_ref_id: string | null
   readonly merge_base_revision_id: string | null
   readonly chat_id: string | null
@@ -72,8 +74,11 @@ export const toLibraryRef = (row: RefRow) =>
     headRevisionId: row.head_revision_id as RevisionId,
     followsRefId: row.follows_ref_id as RefId | null,
     chatId: row.chat_id as ChatId | null,
-    hasImport: row.ref_kind === "upstream" && row.followed_head !== null,
-    updateAvailable: row.followed_head !== null && row.followed_head !== row.merge_base_revision_id,
+    hasImport: row.ref_kind === "upstream" && row.import_head !== null,
+    // A card fork's parent versions are offered only by the explicit merge (ForkMergeStatus):
+    // the editor's update alert speaks of imported files, and the merge UI isn't built yet.
+    updateAvailable:
+      row.parent_ref_id === null && row.followed_head !== null && row.followed_head !== row.merge_base_revision_id,
     rowVersion: row.row_version,
     updatedAt: row.updated_at,
     ...(row.created_at === undefined ? {} : { addedAt: row.created_at }),
@@ -86,14 +91,16 @@ export const toLibraryRef = (row: RefRow) =>
 // to the upstream the same way a variant merges with its upstream.
 const refSelect = `
   SELECT r.id, r.entity_id, e.kind, r.ref_kind, r.label, r.subtitle, r.head_revision_id, r.follows_ref_id,
-    r.merge_base_revision_id, r.chat_id, r.row_version, r.created_at, r.updated_at, e.archived_at, r.last_used_at,
+    coalesce(r.merge_base_revision_id, CASE WHEN e.kind = 'card' THEN e.forked_from_revision_id END) AS merge_base_revision_id, r.chat_id, r.row_version, r.created_at, r.updated_at, e.archived_at, r.last_used_at,
     f.label AS followed_label,
+    (SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import' ORDER BY i.seq DESC LIMIT 1) AS import_head,
+    CASE WHEN e.kind = 'card' AND NOT EXISTS (SELECT 1 FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import') THEN (SELECT p.id FROM entity_refs p WHERE p.entity_id = e.forked_from_entity_id AND p.ref_kind = 'upstream') ELSE NULL END AS parent_ref_id,
     CASE WHEN e.kind = 'card' THEN
       (SELECT json_extract(h.doc_json, '$.nickname') FROM entity_revisions h WHERE h.id = r.head_revision_id)
       ELSE NULL END AS card_nickname,
     CASE WHEN r.ref_kind = 'upstream'
-      THEN (SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import'
-            ORDER BY i.seq DESC LIMIT 1)
+      THEN coalesce((SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import'
+            ORDER BY i.seq DESC LIMIT 1), (SELECT p.head_revision_id FROM entity_refs p WHERE p.entity_id = e.forked_from_entity_id AND p.ref_kind = 'upstream'))
       ELSE f.head_revision_id END AS followed_head
   FROM entity_refs r
   JOIN entities e ON e.id = r.entity_id

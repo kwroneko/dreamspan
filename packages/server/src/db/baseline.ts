@@ -244,6 +244,7 @@ export const baseline: ReadonlyArray<string> = [
     head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id),
     follows_ref_id TEXT REFERENCES entity_refs(id),
     merge_base_revision_id TEXT REFERENCES entity_revisions(id),
+    forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
     label TEXT NOT NULL,
     subtitle TEXT NOT NULL DEFAULT '',
     chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
@@ -257,6 +258,24 @@ export const baseline: ReadonlyArray<string> = [
     CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)),
     CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL)
   ) STRICT`,
+  `CREATE TABLE library_merges (
+    revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE,
+    ours_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
+    theirs_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    source_ref_id TEXT REFERENCES entity_refs(id) ON DELETE SET NULL,
+    selection_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL
+  ) STRICT`,
+  `CREATE INDEX library_merges_ref ON library_merges(ref_id, created_at)`,
+  `CREATE INDEX library_merges_ours ON library_merges(ours_revision_id)`,
+  `CREATE INDEX library_merges_base ON library_merges(base_revision_id) WHERE base_revision_id IS NOT NULL`,
+  `CREATE INDEX library_merges_theirs ON library_merges(theirs_revision_id)`,
+  `CREATE INDEX library_merges_source ON library_merges(source_ref_id) WHERE source_ref_id IS NOT NULL`,
+  `CREATE INDEX library_merges_undo ON library_merges(undone_by_revision_id) WHERE undone_by_revision_id IS NOT NULL`,
+  `CREATE INDEX entity_refs_fork_revision ON entity_refs(forked_from_revision_id) WHERE forked_from_revision_id IS NOT NULL`,
   `CREATE TRIGGER card_ref_insert BEFORE INSERT ON entity_refs
     WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
       AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL

@@ -1,3 +1,4 @@
+import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "./forkMerge.ts"
 // The editor RPCs (ARCHITECTURE.md "Editing the library"; DESIGN §4, §6.2), merged into
 // AppApi. Every text field edits through a draft on the server, with its own undo history;
 // saving commits the drafts as one revision. Writes carry the row version the client saw.
@@ -391,7 +392,7 @@ export class EditorApi extends RpcGroup.make(
   Rpc.make("ApplyUpdate", {
     payload: { refId: RefId },
     success: Schema.Struct({ outcome: MergeOutcome, saved: SavedRef }),
-    error: Schema.Union([...Errors])
+    error: Schema.Union([...Writes])
   }),
   /** Commits an update the user resolved by hand, against the preview's `theirsRevisionId`. */
   Rpc.make("ResolveUpdate", {
@@ -456,4 +457,44 @@ export class EditorApi extends RpcGroup.make(
   }),
   /** A card's note or a chat's, to the bin like any delete. */
   Rpc.make("DeleteNote", { payload: { noteRefId: RefId }, success: BinItem, error: Schema.Union([...Errors]) })
+) {}
+
+/**
+ * Explicit merges into a fork or chat override from its parent or import line, and the
+ * family tree (DESIGN §4). A group of its own, merged into AppApi with its own handler
+ * layer: one handler layer for every RPC exceeds TypeScript's instantiation depth (TS2589).
+ */
+export class ForkMergeApi extends RpcGroup.make(
+  Rpc.make("ForkMergeStatus", {
+    payload: { refId: RefId },
+    success: MergeStatus,
+    error: Schema.Union([...Writes])
+  }),
+  Rpc.make("PreviewForkMerge", {
+    payload: { refId: RefId, theirsRevisionId: Schema.optionalKey(RevisionId) },
+    success: ForkMergePreview,
+    error: Schema.Union([...Writes])
+  }),
+  Rpc.make("LibraryGenealogy", {
+    payload: { refId: RefId },
+    success: LibraryGenealogy,
+    error: Schema.Union([...Writes])
+  }),
+  Rpc.make("CommitForkMerge", {
+    payload: {
+      refId: RefId,
+      theirsRevisionId: RevisionId,
+      baseRevisionId: Schema.NullOr(RevisionId),
+      expectedRowVersion: Schema.Int,
+      selection: MergeSelection,
+      message: Schema.NullOr(Schema.String)
+    },
+    success: SavedRef,
+    error: Schema.Union([...Writes, InvalidDocument])
+  }),
+  Rpc.make("UndoForkMerge", {
+    payload: { refId: RefId, mergeRevisionId: RevisionId, expectedRowVersion: Schema.Int },
+    success: SavedRef,
+    error: Schema.Union([...Writes])
+  })
 ) {}
