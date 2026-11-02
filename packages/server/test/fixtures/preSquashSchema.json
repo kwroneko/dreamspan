@@ -818,6 +818,12 @@
     },
     {
       "type": "table",
+      "name": "card_summaries",
+      "tbl_name": "card_summaries",
+      "sql": "CREATE TABLE card_summaries ( revision_id TEXT PRIMARY KEY, fields TEXT NOT NULL, book INTEGER NOT NULL, book_entries INTEGER NOT NULL ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
       "name": "changeset_groups",
       "tbl_name": "changeset_groups",
       "sql": "CREATE TABLE changeset_groups ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, origin TEXT NOT NULL CHECK (origin IN ('user', 'agent')), created_at INTEGER NOT NULL ) STRICT"
@@ -1289,6 +1295,18 @@
       "name": "card_ref_update",
       "tbl_name": "entity_refs",
       "sql": "CREATE TRIGGER card_ref_update BEFORE UPDATE ON entity_refs WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card' AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id)) BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "card_summaries_delete",
+      "tbl_name": "entity_revisions",
+      "sql": "CREATE TRIGGER card_summaries_delete AFTER DELETE ON entity_revisions BEGIN DELETE FROM card_summaries WHERE revision_id = OLD.id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "card_summaries_insert",
+      "tbl_name": "entity_revisions",
+      "sql": "CREATE TRIGGER card_summaries_insert AFTER INSERT ON entity_revisions WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card' BEGIN INSERT INTO card_summaries (revision_id, fields, book, book_entries) VALUES (NEW.id, json_extract(NEW.doc_json, '$.name', '$.nickname', '$.character_version', '$.avatar_media_id', '$.character_book.name', '$.avatar_crop', '$.extensions.talkativeness'), coalesce(json_type(NEW.doc_json, '$.character_book') = 'object', 0), CASE WHEN json_type(NEW.doc_json, '$.character_book.entries') = 'array' THEN json_array_length(NEW.doc_json, '$.character_book.entries') ELSE 0 END); END"
     },
     {
       "type": "trigger",

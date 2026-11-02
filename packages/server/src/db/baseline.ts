@@ -212,6 +212,29 @@ export const baseline: ReadonlyArray<string> = [
     search_text TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL
   ) STRICT`,
+  // A card revision's summary, what the card lists read (`cardSummary` in cards.ts): written
+  // with the revision, in its insert's transaction, so no list parses a document, which can be
+  // megabytes with a lorebook. A table of its own, not columns of entity_revisions: a column
+  // after doc_json is reached only through its overflow pages, which is the read it saves.
+  // `fields` is name, nickname, character_version, avatar_media_id, character_book.name,
+  // avatar_crop and extensions.talkativeness as the document has them (a JSON array); `book`
+  // whether it embeds a lorebook, `book_entries` how many entries that has.
+  `CREATE TABLE card_summaries (
+    revision_id TEXT PRIMARY KEY,
+    fields TEXT NOT NULL,
+    book INTEGER NOT NULL,
+    book_entries INTEGER NOT NULL
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TRIGGER card_summaries_insert AFTER INSERT ON entity_revisions
+    WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
+    BEGIN INSERT INTO card_summaries (revision_id, fields, book, book_entries) VALUES (NEW.id,
+      json_extract(NEW.doc_json, '$.name', '$.nickname', '$.character_version', '$.avatar_media_id',
+        '$.character_book.name', '$.avatar_crop', '$.extensions.talkativeness'),
+      coalesce(json_type(NEW.doc_json, '$.character_book') = 'object', 0),
+      CASE WHEN json_type(NEW.doc_json, '$.character_book.entries') = 'array'
+        THEN json_array_length(NEW.doc_json, '$.character_book.entries') ELSE 0 END); END`,
+  `CREATE TRIGGER card_summaries_delete AFTER DELETE ON entity_revisions
+    BEGIN DELETE FROM card_summaries WHERE revision_id = OLD.id; END`,
   `CREATE INDEX entity_revisions_entity ON entity_revisions(entity_id, seq)`,
   `CREATE INDEX entity_revisions_hash ON entity_revisions(entity_id, doc_hash)`,
   `CREATE TABLE entity_refs (

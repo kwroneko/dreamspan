@@ -727,18 +727,18 @@ export const makeReadHandlers = Effect.gen(function* () {
                 AND json_extract(s.value_json, '$.entity') IN (
                   SELECT r.entity_id FROM entity_refs r
                   JOIN entities e ON e.id = r.entity_id
-                  JOIN entity_revisions rev ON rev.id = r.head_revision_id
+                  LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
                   WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
                     AND (r.label LIKE ${pattern} ESCAPE '\\'
                       OR r.subtitle LIKE ${pattern} ESCAPE '\\'
-                      OR json_extract(rev.doc_json, '$.nickname') LIKE ${pattern} ESCAPE '\\'))
+                      OR json_extract(cs.fields, '$[1]') LIKE ${pattern} ESCAPE '\\'))
             ) OR id IN (
               SELECT s.chat_id FROM state_events s
-              JOIN entity_revisions rev ON rev.id = json_extract(s.value_json, '$.revision')
+              JOIN card_summaries cs ON cs.revision_id = json_extract(s.value_json, '$.revision')
               WHERE s.key = 'card.binding'
-                AND (json_extract(rev.doc_json, '$.name') LIKE ${pattern} ESCAPE '\\'
-                  OR json_extract(rev.doc_json, '$.character_version') LIKE ${pattern} ESCAPE '\\'
-                  OR json_extract(rev.doc_json, '$.nickname') LIKE ${pattern} ESCAPE '\\')))
+                AND (json_extract(cs.fields, '$[0]') LIKE ${pattern} ESCAPE '\\'
+                  OR json_extract(cs.fields, '$[2]') LIKE ${pattern} ESCAPE '\\'
+                  OR json_extract(cs.fields, '$[1]') LIKE ${pattern} ESCAPE '\\')))
           ORDER BY ${ranked} * (last_message_at IS NOT NULL) DESC, coalesce(last_message_at, created_at) DESC, id DESC
           LIMIT ${needle === null ? limit : -1}`
         if (needle === null) return rows.map(toChat)
