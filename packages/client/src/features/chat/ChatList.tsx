@@ -76,7 +76,7 @@ function Row({
   const search = useSearch({ strict: false }) as { panel?: string }
   const { title, unfinished } = importState(chat.title)
   const characters = (summary?.cast ?? []).filter((card) => !card.persona)
-  const name = chatName(title, characters)
+  const name = chatName(title, characters, chat.createdAt)
   const speaker = summary?.last?.speaker
     ? summary.cast.find((card) => card.entityId === summary.last!.speaker)?.name
     : null

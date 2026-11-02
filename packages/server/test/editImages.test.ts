@@ -283,10 +283,13 @@ describe("editing a message's images", () => {
         "the stale commit must not end the newer image draft"
       )
       const history = yield* api.MessageDraftHistory({ target, limit: 10 })
+      // The oldest state is the version as it was, with its own images (owner, 2026-11-02:
+      // an edit's first state is the text it was typed on); the one after it is the first save.
+      assert.strictEqual(history.at(-1)!.kind, "initial")
       const restored = yield* api.RestoreMessageDraft({
         target,
         draftId: changed.id,
-        seq: history.at(-1)!.seq,
+        seq: history.at(-2)!.seq,
         expectedRowVersion: changed.rowVersion
       })
       assert.deepStrictEqual(

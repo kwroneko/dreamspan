@@ -272,6 +272,7 @@ Events made "now" are attached to the **current leaf** of the view where they we
 | `roles.projection` | `by_writer` · `alternate` · `perspective` |
 | `macro.binding` | `{name: "user" \| "char" \| …, value}`: pinned bindings (DESIGN §5.3) |
 | `orchestration.mode` | Mode id plus its configuration |
+| `reply.order` | Who replies when nobody is picked: a reply policy id (`natural`, `list`, `pooled`, `manual`, ST's group strategies); built, ARCHITECTURE §12 |
 | `output.contract` | `final_text` · `send_message` · `both` |
 | `rollout.continuity` | `fork` · `resume_previous` |
 | `lorebook.attach` / `lorebook.detach` | `{ref}` |

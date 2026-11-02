@@ -45,6 +45,17 @@ export const budgets = {
   serverRoundTripP99Ms: 100,
   /** Deltas that arrived past the text a client had: none, ever. */
   gaps: 0,
+  /**
+   * Switching the chat panel's tabs (night/tabperf): message rows re-rendered by a switch (none:
+   * the tab is the panel's business), tabs that showed "Loading the …" while their code came
+   * (none: it's loaded once the panel opens), and from the click to the tab's content shown with
+   * its data, the slowest tab's first visit. That one waits on the server's reads, so it follows
+   * the host's load: 337 ms at a load of 40 (master 803 ms), 2.7 to 2.9 s at 110 (Notes; master
+   * 1.5 s at 100). The first two are the guards; this one only catches a tab that hangs.
+   */
+  rowRendersPerTabSwitch: 0,
+  tabCodeWaits: 0,
+  tabShownMs: 6000,
   /** From navigation to an editor ready, for a 50 KB card or a 100-prompt preset. */
   editorOpenMs: 8000
 }

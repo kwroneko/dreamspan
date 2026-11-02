@@ -37,9 +37,10 @@ export interface PanelDescriptor {
    */
   readonly placement?: "tools" | "cast"
   /**
-   * How wide its body goes in a wide panel: "readable" (the default), at most 52rem from the
-   * left, so forms and prose keep a readable line however far the panel is dragged; "full",
-   * the panel's whole width, for a body that lays itself out in columns as it widens.
+   * How wide its body goes in a wide panel (owner, 2026-11-02: "Tabs should be able to fully
+   * utilize horizontal space"): "full" (the default), the panel's whole width, its paragraphs
+   * at a readable measure and its controls each at their own width; "readable", at most 52rem
+   * from the left, for a body of controls that would only stretch.
    */
   readonly width?: "readable" | "full"
   /** Dynamic tab families, such as the cast's cards. Exact registered IDs take precedence. */
@@ -134,10 +135,38 @@ export function PanelContent({ descriptor, ...props }: PanelProps & { descriptor
   return <descriptor.component {...props} />
 }
 
-/** Each lazy contribution owns its retry boundary, including plugins. Failure stays in its tab. */
+/** Starts loading a lazy panel's code (`lazyPanel`), if it is one: the panel does this for every tab once it's open. */
+export const preloadPanel = (component: ComponentType<PanelProps>) =>
+  (component as { readonly preload?: () => void }).preload?.()
+
+/**
+ * Each lazy contribution owns its retry boundary, including plugins. Failure stays in its tab.
+ * Once its code is loaded (`preload`, which the panel calls for every tab when it opens), a tab
+ * mounts its content at once: through `lazy` it would show the fallback first, and React holds a
+ * fallback on screen for at least 300 ms, so every first visit of a tab took half a second
+ * however fast the code and its data came (night/tabperf).
+ */
 export const lazyPanel = (load: () => Promise<{ default: ComponentType<PanelProps> }>, label: string) => {
+  let loaded: ComponentType<PanelProps> | null = null
+  let pending: Promise<{ default: ComponentType<PanelProps> }> | null = null
+  const start = () =>
+    (pending ??= load().then(
+      (module) => {
+        loaded = module.default
+        return module
+      },
+      (error: unknown) => {
+        // Asked again on Try again, or by the next preload.
+        pending = null
+        throw error
+      }
+    ))
   return class LazyPanel extends Component<PanelProps> {
-    override state = { failed: false, Content: lazy(load) }
+    static preload() {
+      void start().catch(() => undefined)
+    }
+    // Fixed for the mount, so the tree under it never changes shape (and its state stays).
+    override state = { failed: false, Content: loaded ?? lazy(start) }
     static getDerivedStateFromError() {
       return { failed: true }
     }
@@ -148,11 +177,18 @@ export const lazyPanel = (load: () => Promise<{ default: ComponentType<PanelProp
             <p role="alert" className="text-sm text-danger">
               The {label} couldn't be loaded: the server can't be reached.
             </p>
-            <Button onClick={() => this.setState({ failed: false, Content: lazy(load) })}>Try again</Button>
+            <Button onClick={() => this.setState({ failed: false, Content: loaded ?? lazy(start) })}>Try again</Button>
           </div>
         )
       return (
-        <Suspense fallback={<Loading label={`Loading the ${label}…`} />}>
+        // Marked, so the performance harness can tell a tab that waited for its code.
+        <Suspense
+          fallback={
+            <div data-panel-code-loading>
+              <Loading label={`Loading the ${label}…`} />
+            </div>
+          }
+        >
           <this.state.Content {...this.props} />
         </Suspense>
       )

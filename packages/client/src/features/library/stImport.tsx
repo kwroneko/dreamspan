@@ -34,6 +34,7 @@ import { Select } from "../../ui/Select.tsx"
 import { ProgressBar, Spinner } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { readableChatTitle } from "../chat/chatTitle.ts"
+import { NeedsAttention } from "./stImportIssues.tsx"
 import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
 import { FolderBrowser } from "./FolderBrowser.tsx"
@@ -104,8 +105,6 @@ const lastFolder = (jobs: ReadonlyArray<StImportJob>) => {
   }
   return jobs.find((job) => job.mode === "path")?.source ?? null
 }
-
-const TONES = { info: "neutral", warning: "warning", error: "danger" } as const
 
 /** Changes to these after an import's report is acted on. */
 const AFTER_ACTION = [ST_IMPORTS, "library", "chats"]
@@ -254,7 +253,14 @@ function NextSteps({ latestChat }: { latestChat: StImportedChat | null }) {
         >
           <span className="min-w-0 [overflow-wrap:anywhere]">
             {/* As the chat list names it, never ST's file name (DESIGN §2.1). */}
-            Continue your latest chat{latestChat.title ? `: ${readableChatTitle(latestChat.title)}` : ""}
+            Continue your latest chat
+            {latestChat.title
+              ? `: ${readableChatTitle(
+                  latestChat.title,
+                  latestChat.createdAt ?? null,
+                  (latestChat.names ?? []).map((name) => ({ name }))
+                )}`
+              : ""}
           </span>
         </Link>
       )}
@@ -413,24 +419,7 @@ function ReportActions({
           </ul>
         </Card>
       )}
-      {report.issues.length > 0 && (
-        <Card>
-          <CardHeader title="Needs your attention" />
-          <ul
-            aria-label="Needs your attention"
-            className="flex max-h-96 flex-col gap-1.5 overflow-y-auto rounded-md border border-border bg-canvas p-2 text-sm"
-          >
-            {report.issues.map((issue, index) => (
-              <li key={index} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                <Badge tone={TONES[issue.level]}>{issue.level}</Badge>
-                <span className="min-w-0 font-mono text-xs text-muted [overflow-wrap:anywhere]">{issue.path}</span>
-                <span className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{issue.message}</span>
-              </li>
-            ))}
-          </ul>
-          {report.dropped > 0 && <p className="mt-2 text-sm text-muted">{report.dropped} more aren't listed.</p>}
-        </Card>
-      )}
+      <NeedsAttention report={report} />
     </>
   )
 }

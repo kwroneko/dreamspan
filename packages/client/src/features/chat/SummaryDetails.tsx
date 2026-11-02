@@ -12,11 +12,22 @@ import { rangeText } from "./lcm.ts"
 import { summaryPreviews } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 import { moneyText } from "./lcm.ts"
+import { requestPurposeText, requestStatusText } from "./requestWords.ts"
 
 const count = (value: number | null) => (value === null ? "Unknown" : value.toLocaleString())
 const time = (value: number | null) => (value === null ? "Unknown" : new Date(value).toLocaleString())
 
-function Provenance({ details }: { details: Details }) {
+/** The request's purpose and how it ended, in words: "Condensing 5 summaries, finished". */
+function requestLine(request: Details["requests"][number], details: Details, summary: LcmSummary | undefined) {
+  const about =
+    summary === undefined
+      ? { summaries: details.parts }
+      : { from: summary.from, to: summary.to, summaries: details.parts }
+  return `${requestPurposeText(request.purpose, about)}, ${requestStatusText(request.status)}`
+}
+
+/** `raw`: the inspector page also shows the stored purpose and status, for debugging. */
+function Provenance({ details, summary, raw = false }: { details: Details; summary?: LcmSummary; raw?: boolean }) {
   return (
     <div className="flex flex-col gap-2 text-sm" aria-label="Summary generation details">
       <p className="text-muted">The request that first wrote this summary. Later edits don't change it.</p>
@@ -43,7 +54,16 @@ function Provenance({ details }: { details: Details }) {
           {details.requests.map((request, index) => (
             <li key={request.id} className="flex flex-col gap-1 rounded-md border border-border p-2">
               <p className="font-medium">
-                Request {index + 1}: {request.responseModel ?? request.modelKey} ({request.purpose}, {request.status})
+                Request {index + 1}: {request.responseModel ?? request.modelKey}
+              </p>
+              <p>
+                {requestLine(request, details, summary)}
+                {raw && (
+                  <span className="text-muted">
+                    {" "}
+                    (stored as <code>{request.purpose}</code>, <code>{request.status}</code>)
+                  </span>
+                )}
               </p>
               <p>
                 Input: {count(request.counts.inputUncached)} · Cache read: {count(request.counts.cacheRead)} · Cache
@@ -106,7 +126,7 @@ function SummaryProvenance({ session, summary }: { session: ChatSession; summary
           </Alert>
         ) : details ? (
           <>
-            <Provenance details={details} />
+            <Provenance details={details} summary={summary} />
             {details.request ? (
               <Link
                 to="/chats/$chatId/summaries/$summaryId/request"
@@ -161,7 +181,7 @@ function SummaryRequestPage() {
           >
             Back to the summary
           </Link>
-          <Provenance details={details} />
+          <Provenance details={details} raw />
           {details.request ? (
             <>
               <p className="text-sm text-muted">

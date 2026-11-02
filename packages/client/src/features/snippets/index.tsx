@@ -221,7 +221,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
         model by itself; a note can show one (Add note, then Pick a shared note). Copy one to paste it anywhere, and add
         to the one open last from any editor with Send text to snippet.
       </p>
-      <div className="flex items-end gap-2">
+      <div className="flex max-w-controls items-end gap-2">
         <Field label="Search snippets" className="min-w-0 flex-1">
           <Input value={query} onChange={(e) => setQuery(e.currentTarget.value)} placeholder="Name or text" />
         </Field>

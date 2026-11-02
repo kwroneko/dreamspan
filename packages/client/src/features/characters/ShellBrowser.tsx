@@ -1,7 +1,7 @@
 import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
+import { useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useState } from "react"
@@ -73,7 +73,8 @@ export function PinButton({ fork }: { fork: ShellFork }) {
  */
 function useOpenFork(fork: ShellFork, scopeChat: boolean) {
   const navigate = useNavigate()
-  const search = useSearch({ strict: false }) as { panel?: string }
+  // Read at the click: subscribing would re-render every row with each switch of the chat panel's tab.
+  const router = useRouter()
   const navigation = useShellNavigation()
   const userId = useSession().user.id
   const wide = useWide()
@@ -81,7 +82,8 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
     navigation.picked()
     // A list changes only the middle. Keep a character tab while that character is in the
     // chat, played by the model or by the user; else This chat.
-    const previous = search.panel ?? (wide ? rememberedPanel(userId) : null)
+    const inUrl = (router.state.location.search as { panel?: unknown }).panel
+    const previous = (typeof inUrl === "string" ? inUrl : undefined) ?? (wide ? rememberedPanel(userId) : null)
     const id = previous?.startsWith("card:") ? (previous.slice(5) as EntityId) : null
     const panel = id !== null && (!fork.joined.includes(id) || fork.departed.includes(id)) ? "chat" : previous
     void navigate({
@@ -247,7 +249,10 @@ export function ForkRow({
             {details && (
               <span data-chat-meta className="text-xs text-muted [overflow-wrap:anywhere]">
                 started{" "}
-                {formatDay(chatName(importState(fork.chat.title).title, fork.cast).started ?? new Date(fork.createdAt))}{" "}
+                {formatDay(
+                  chatName(importState(fork.chat.title).title, fork.cast, fork.chat.createdAt ?? null).started ??
+                    new Date(fork.createdAt)
+                )}{" "}
                 · {fork.messages} messages
               </span>
             )}
@@ -276,7 +281,7 @@ const OPEN_BRANCHES_KEY = (userId: string) => `rp.openChatBranches.${userId}`
  */
 export function OpenChatBranches() {
   const params = useParams({ strict: false }) as { chatId?: string }
-  const shown = (useSearch({ strict: false }) as { fork?: string }).fork
+  const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const { scope, setScope, grid } = useShellNavigation()
   const userId = useSession().user.id
   const [expanded, setExpanded] = useState(() => {
@@ -455,7 +460,7 @@ function Browser({ data }: { data: ShellLibrary }) {
   // The characters grid's own filter and sort, apart from the home page's (cardBrowse.tsx).
   const [browse, setBrowse] = useCardBrowse("sidebar")
   const params = useParams({ strict: false }) as { chatId?: string }
-  const shown = (useSearch({ strict: false }) as { fork?: string }).fork
+  const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const card = data.cards.find((c) => c.card.entityId === scope.entity)
   const cardLabel = card
     ? `${card.card.label}${card.card.subtitle ? ` · ${card.card.subtitle}` : ""}`
@@ -569,6 +574,7 @@ function Browser({ data }: { data: ShellLibrary }) {
       <Input
         aria-label={grid ? "Find a character" : "Find a chat"}
         placeholder="Find by name"
+        className="max-w-controls"
         value={search}
         onChange={(e) => setSearch(e.currentTarget.value)}
       />
@@ -592,7 +598,8 @@ function Browser({ data }: { data: ShellLibrary }) {
             />
           )
         ) : (
-          <>
+          // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
+          <div className="max-w-controls">
             {/* A chat's own pins are among its named and pinned branches. */}
             {kind !== "chat" && <PinnedChats pinsCollapsed={data.pinsCollapsed} entity={scope.entity} />}
             {sections.map(([id, title]) =>
@@ -601,7 +608,7 @@ function Browser({ data }: { data: ShellLibrary }) {
             {forks.loading && !forks.failure && <Loading label="Still loading your chats…" />}
             <ListFailure forks={forks} />
             {none && <p className="p-2 text-sm text-muted">No chats here yet.</p>}
-          </>
+          </div>
         )}
       </div>
       <SlotOutlet slot={sidebarFoot} props={{}} />

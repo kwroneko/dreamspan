@@ -618,10 +618,23 @@ export const makeChatHandlers = Effect.gen(function* () {
         return version
       }).pipe(internal("RestoreVersionAmendment")),
 
-    MessageDraftHistory: ({ target, limit }) =>
-      Effect.flatMap(userId, (id) => reader.DraftHistory({ userId: id, key: messageDraftKey(target), limit })).pipe(
-        internal("MessageDraftHistory")
-      ),
+    MessageDraftHistory: ({ target, limit, before }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.DraftHistory({
+          userId: id,
+          key: messageDraftKey(target),
+          limit,
+          ...(before === undefined ? {} : { before })
+        })
+      ).pipe(internal("MessageDraftHistory")),
+
+    GetMessageDraft: ({ target }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const draft = yield* reader.GetDraft({ userId: id, key: messageDraftKey(target) })
+        if (draft === null) return yield* new NotFound({ entity: "draft", id: messageDraftKey(target).targetId })
+        return draft
+      }).pipe(internal("GetMessageDraft")),
 
     RestoreMessageDraft: ({ target, ...restore }) =>
       Effect.flatMap(userId, (id) =>

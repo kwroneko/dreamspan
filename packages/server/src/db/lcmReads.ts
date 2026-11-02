@@ -185,8 +185,10 @@ export const makeLcmReadHandlers = Effect.gen(function* () {
           started_at: number | null
           completed_at: number | null
           sent: string | null
+          parts: number
         }>`SELECT s.chat_id,r.fork_id,s.rollout_id,j.id AS job_id,j.attempts,m.model_key AS model,
-          r.started_at,r.completed_at,p.sent_context_json AS sent
+          r.started_at,r.completed_at,p.sent_context_json AS sent,
+          (SELECT count(*) FROM summary_parents sp WHERE sp.summary_id=s.id) AS parts
           FROM summaries s JOIN chats c ON c.id=s.chat_id
           LEFT JOIN rollouts r ON r.id=s.rollout_id
           LEFT JOIN rollout_payloads p ON p.rollout_id=r.id
@@ -224,6 +226,7 @@ export const makeLcmReadHandlers = Effect.gen(function* () {
           forkId: row.fork_id as ForkId | null,
           jobId: row.job_id,
           attempts: row.attempts,
+          parts: row.parts,
           model:
             requests.findLast((request) => request.purpose === "summarize" || request.purpose === "condense")
               ?.model_key ??

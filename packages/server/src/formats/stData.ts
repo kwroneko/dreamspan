@@ -10,6 +10,7 @@ import { Predicate } from "effect"
 import type { LoreRole } from "@rp/shared/docs/lorebook.ts"
 import { authorNoteFrom, bounded as boundedTo, type StAuthorNote } from "./stChat.ts"
 import { defaultLimits, fail, parseJson } from "./safety.ts"
+import { ST_REPLY_ORDERS } from "@rp/shared/naturalOrder.ts"
 
 const MiB = 1024 * 1024
 
@@ -233,6 +234,8 @@ export interface StGroup {
   readonly chats: ReadonlyArray<string>
   /** The chat ST opens the group on (`chat_id`): the one last opened. */
   readonly chatId: string | null
+  /** Who replies when nobody is picked (`activation_strategy`), as a reply policy id: `natural` (ST's default), `list`, `manual`, `pooled`. */
+  readonly replyOrder: string
 }
 
 export const parseStGroup = (bytes: Uint8Array, fileName: string, issues: ReportBuilder): StGroup => {
@@ -247,7 +250,9 @@ export const parseStGroup = (bytes: Uint8Array, fileName: string, issues: Report
     members: strings(group.members, stDataLimits.maxGroupMembers),
     disabledMembers: strings(group.disabled_members, stDataLimits.maxGroupMembers),
     chats,
-    chatId: typeof group.chat_id === "string" && group.chat_id !== "" ? bounded(group.chat_id) : null
+    chatId: typeof group.chat_id === "string" && group.chat_id !== "" ? bounded(group.chat_id) : null,
+    // ST reads it with `Number(group.activation_strategy ?? NATURAL)`: a numeric string counts too.
+    replyOrder: ST_REPLY_ORDERS[Number(group.activation_strategy ?? 0)] ?? "natural"
   }
 }
 

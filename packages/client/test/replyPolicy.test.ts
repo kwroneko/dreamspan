@@ -140,3 +140,52 @@ it("the pick follows the tip: the same for the same tip, varying as the chat mov
   }
   assert.isAbove(picks.size, 1)
 })
+
+it("follows the chat's reply order: list, pooled and manual, as ST's group strategies", () => {
+  const [mira, tobin, wren, ana] = ["synthetic-mira", "synthetic-tobin", "synthetic-wren", "synthetic-ana"] as [
+    EntityId,
+    EntityId,
+    EntityId,
+    EntityId
+  ]
+  const cards = [card(mira, "Mira", 1), card(tobin, "Tobin", 1), card(wren, "Wren", 1), card(ana, "Ana", 1)]
+  const order = (replyOrder: string, more: Partial<Cast> = {}) =>
+    castOf([mira, tobin, wren, ana], cards, { playedByMe: [ana], replyOrder, ...more })
+  const user = [turn("v1", ana, "Hello.")]
+  // List order: the first in the cast's order after your message, then the next each time.
+  const list = order("list")
+  assert.strictEqual(planReply(list, user, ana, null, null).replier, mira)
+  assert.strictEqual(planReply(list, [...user, turn("v2", mira)], ana, null, null).replier, tobin)
+  assert.strictEqual(planReply(list, [...user, turn("v2", mira), turn("v3", tobin)], ana, null, null).replier, wren)
+  assert.strictEqual(
+    planReply(list, [...user, turn("v2", mira), turn("v3", tobin), turn("v4", wren)], ana, null, null).replier,
+    mira
+  )
+  // Sending a message starts the list again, whoever spoke last; a muted card is skipped.
+  assert.strictEqual(planReply(list, [...user, turn("v2", mira)], ana, null, "And you?").replier, mira)
+  assert.strictEqual(
+    planReply(order("list", { absent: [tobin] }), [...user, turn("v2", mira)], ana, null, null).replier,
+    wren
+  )
+  // Pooled: someone who hasn't spoken since your message; once all have, not the last.
+  const pooled = order("pooled")
+  assert.strictEqual(planReply(pooled, [...user, turn("v2", mira), turn("v3", tobin)], ana, null, null).replier, wren)
+  for (let i = 0; i < 20; i++) {
+    const all = [...user, turn("v2", mira), turn("v3", tobin), turn(`v4-${i}`, wren)]
+    assert.notStrictEqual(planReply(pooled, all, ana, null, null).replier, wren)
+  }
+  // Manual: nobody replies to what you send unless picked; Reply now picks one of them.
+  const manual = order("manual")
+  assert.deepStrictEqual(planReply(manual, user, ana, null, "Hello?"), { next: null, replier: null, reply: false })
+  assert.strictEqual(planReply(manual, user, ana, tobin, "Hello?").replier, tobin)
+  assert.include([mira, tobin, wren], planReply(manual, user, ana, null, null).replier)
+  // An order no policy has is the default, natural order.
+  assert.strictEqual(planReply(order("synthetic-unknown"), user, ana, null, "Wren?").replier, wren)
+  // Each of ST's four is offered with its name and what it means.
+  for (const id of ["natural", "list", "pooled", "manual"]) {
+    const policy = replyPolicies.get(id)!
+    assert.isString(policy.label)
+    assert.isString(policy.description)
+    assert.isString(policy.autoDetail)
+  }
+})

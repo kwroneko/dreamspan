@@ -4,7 +4,7 @@ import type { MessageImages } from "@rp/shared/chat.ts"
 // keyed by the version edited or the slot written to, so it outlives the row (the message
 // list unmounts rows scrolled away) and a reload, which opens the editor again with it.
 // Saving names the draft, which the server commits with the version only if it holds
-// exactly the text and images saved; cancelling discards its text to the bin's recovered texts.
+// exactly the text and images saved; cancelling an edit puts the saved text back as a state of its history, which outlives saves.
 //
 // As for summaries, text typed is copied into this browser (`editor/backup.ts`) until the
 // server has it: a save that fails, a closed tab or a reload leaves the copy, filed under
@@ -339,12 +339,19 @@ export class MessageDraft {
     return true
   }
 
-  async history() {
+  /** A page of the edit's states, newest first; `before` pages on past a seq. */
+  async history(before?: number, limit = DraftHistoryPolicy.maxEntries + 1) {
     await this.save()
     if (this.local !== null) return { ok: false as const, error: this.view.error ?? notSaved }
-    if (this.draft === null) return { ok: true as const, value: [] }
+    if (this.draft === null) {
+      // A reopened edit has a resting draft from its earlier saves: its states are listed too.
+      const read = await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
+      if (!read.ok) return read.error.tag === "NotFound" ? { ok: true as const, value: [] } : read
+      this.draft ??= read.value
+      if (this.draft === null) return { ok: true as const, value: [] }
+    }
     return this.session.call((client) =>
-      client("MessageDraftHistory", { target: this.target, limit: DraftHistoryPolicy.maxEntries + 1 })
+      client("MessageDraftHistory", { target: this.target, limit, ...(before === undefined ? {} : { before }) })
     )
   }
 
@@ -397,7 +404,7 @@ export class MessageDraft {
   }
 
   /**
-   * Ends the edit unsaved; its text goes to the bin's recovered texts. Text the server
+   * Ends the edit unsaved: an edit goes back to the saved text, the text cancelled one step back in its history (owner, 2026-11-02); a written version's text goes to the bin. Text the server
    * doesn't have yet has nowhere to go: the edit stays open, with its copy.
    */
   async discard(): Promise<Outcome<unknown>> {

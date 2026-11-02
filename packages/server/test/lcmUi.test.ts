@@ -187,7 +187,8 @@ it.live("the layer, coverage, revisions, reruns, the switch and the edit draft",
       baseRevisionId: top.revisionId
     })
     assert.strictEqual((yield* api.GetSummaryDraft(draftKey))?.content, "my version")
-    assert.strictEqual((yield* api.SummaryDraftHistory({ ...draftKey, limit: 10 })).length, 1)
+    // The edit's first state is the revision's text it was typed on (owner, 2026-11-02).
+    assert.strictEqual((yield* api.SummaryDraftHistory({ ...draftKey, limit: 10 })).length, 2)
     const edited = yield* api.EditSummary({
       summaryId: top.id,
       content: "my version",
@@ -212,7 +213,7 @@ it.live("the layer, coverage, revisions, reruns, the switch and the edit draft",
     })
     assert.strictEqual((yield* state()).layer[0]!.revisionNumber, 1)
 
-    // A discarded edit keeps no text in the field.
+    // A discarded edit goes back to the revision's text; its history outlives the save before it.
     const second = yield* api.SaveSummaryDraft({
       ...draftKey,
       draftId: null,
@@ -227,13 +228,16 @@ it.live("the layer, coverage, revisions, reruns, the switch and the edit draft",
       seq: 0,
       expectedRowVersion: second.rowVersion
     })
-    assert.strictEqual(restored.content, "")
+    // The first state of all, from before the save: the generated revision's text.
+    assert.strictEqual(restored.content, top.content)
     const discarded = yield* api.DiscardSummaryDraft({
       ...draftKey,
       draftId: second.id,
       expectedRowVersion: restored.rowVersion
     })
     assert.strictEqual(discarded.status, "discarded")
+    assert.strictEqual(discarded.content, top.content)
+    assert.strictEqual(discarded.recovered, 0)
 
     // A rerun is a request, and withdrawing it removes it. Nothing was queued or run.
     const jobsBefore = yield* fixtureSql(config.dataDir, [{ sql: "SELECT count(*) AS n FROM summarization_jobs" }])
