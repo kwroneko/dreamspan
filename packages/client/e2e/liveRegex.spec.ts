@@ -213,10 +213,13 @@ for (const width of [1440, 390])
         expect(frame.thinking, `thinking frame "${frame.thinking}"`).not.toContain("PRIVATE")
         expect(frame.reasoning, `reasoning frame "${frame.reasoning}"`).not.toContain("PRIVATE")
       }
-      // No jump at the end: the body only ever grew towards the stored text.
+      // Scripts get no tag hold-back (DESIGN §1.2 [D]): a partial `<co` can show before
+      // `<cot>` completes and its script removes it. The thinking parser must pass it on.
       const bodies = streamed.map((frame) => frame.body).filter((text) => text !== "")
-      for (const text of bodies)
-        expect(finalText.startsWith(text.replace(/\*/g, "").trimEnd()) || text === finalText).toBe(true)
+      for (const text of bodies) {
+        const plain = text.replace(/\*/g, "").trimEnd()
+        expect(finalText.startsWith(plain) || "<cot>".startsWith(plain) || text === finalText).toBe(true)
+      }
 
       await notes.click()
       await expect(region).toContainText("Plan: take the [hidden] road")
