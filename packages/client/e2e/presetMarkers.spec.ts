@@ -86,7 +86,7 @@ const setUp = async (page: Page, name: string) => {
         if (sent._tag !== "Posted") throw new Error("not posted")
         leaf = sent.entry.slotId
       }
-      return chat.id
+      return { chatId: chat.id, refId: ref.id }
     })
   )
 }
@@ -154,7 +154,7 @@ for (const width of [1440, 1024, 390])
   for (const scheme of ["light", "dark"] as const)
     test(`the markers between prompts (${width}px ${scheme})`, async ({ page }) => {
       await theme(page, width, scheme)
-      const chatId = await setUp(page, `Markers ${width} ${scheme}`)
+      const { chatId } = await setUp(page, `Markers ${width} ${scheme}`)
       await page.goto(`${server().url}/chats/${chatId}`)
       await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
       const panel = await openPanel(page, "Prompt preset")
@@ -165,3 +165,70 @@ for (const width of [1440, 1024, 390])
       await expect(overlay).toBeVisible()
       await check(page, overlay, `large-${width}-${scheme}`)
     })
+
+/**
+ * Adding (owner, 2026-11-02): no "+" between the prompts, but New prompt and Definitions block
+ * in the list's toolbar, once, in the tab as in the large editor. A new prompt goes at the end,
+ * open and ready to type, waiting behind the unsaved bar; the definitions block can exist once.
+ * Wide rows keep the chips, count and actions by the name, and a closed prompt shows its first
+ * line there.
+ */
+for (const [width, scheme] of [
+  [2560, "dark"],
+  [1440, "light"],
+  [390, "dark"]
+] as const)
+  test(`adding from the toolbar, and the large editor's rows (${width}px ${scheme})`, async ({ page }) => {
+    await theme(page, width, scheme)
+    const { chatId, refId } = await setUp(page, `Adding ${width} ${scheme}`)
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
+    const panel = await openPanel(page, "Prompt preset")
+    const list = panel.getByRole("list", { name: "Preset blocks" })
+    await expect(list).toBeVisible({ timeout: 60_000 })
+    await expect(panel.getByRole("button", { name: /^Insert prompt|^Add a prompt/ })).toHaveCount(0)
+    await panel.getByRole("button", { name: "New prompt", exact: true }).click()
+    await expect(list.locator("[data-prompt]").last()).toContainText("New prompt")
+    const text = panel.getByRole("textbox", { name: "Prompt: New prompt", exact: true })
+    await expect(text).toBeFocused({ timeout: 30_000 })
+    await page.keyboard.type("Typed straight away.")
+    const bar = page.getByRole("region", { name: "Unsaved changes" })
+    await expect(bar).toContainText("1 prompt added")
+    await page.screenshot({ path: join(shots, `tab-added-${width}-${scheme}.png`) })
+
+    // The definitions block goes where the separate definitions start (Persona Description), once.
+    const definitions = panel.getByRole("button", { name: "Definitions block", exact: true })
+    await definitions.click()
+    await expect(list.locator('[data-prompt="charDefinitions"]')).toHaveCount(1)
+    const ids = await list
+      .locator("[data-prompt]")
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-prompt")))
+    expect(ids.indexOf("charDefinitions")).toBe(ids.indexOf("personaDescription") - 1)
+    await expect(definitions).toBeDisabled()
+    await definitions.locator("xpath=..").hover()
+    await expect(page.getByText("The preset already has its definitions block; drag it to move it")).toBeVisible()
+    await bar.getByRole("button", { name: "Revert", exact: true }).click()
+    await expect(bar).toHaveCount(0)
+
+    // The large editor as a page: the same toolbar, and rows whose details sit by their names.
+    await page.goto(`${server().url}/library/${refId}`)
+    const order = page.getByRole("list", { name: "Prompt order" })
+    await expect(order).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByRole("button", { name: "New prompt", exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: /^Insert prompt/ })).toHaveCount(0)
+    await page.getByRole("button", { name: "Collapse all", exact: true }).click()
+    const main = order.locator('[data-prompt="main"]')
+    await expect(main.locator("header")).toContainText("You narrate a story")
+    if (width >= 1024) {
+      // The count sits near the name, whatever the row's width.
+      const gap = await main.evaluate((row) => {
+        const name = row.querySelector("header button[aria-expanded]")!.getBoundingClientRect()
+        const count = [...row.querySelectorAll("header span")].find((e) =>
+          /^~?[\d,.…]+ tokens$/.test(e.textContent ?? "")
+        )!
+        return count.getBoundingClientRect().left - name.right
+      })
+      expect(gap).toBeLessThan(240)
+    }
+    await page.screenshot({ path: join(shots, `large-rows-${width}-${scheme}.png`) })
+  })

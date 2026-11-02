@@ -19,6 +19,7 @@ export function CardTextEditor({
   mono,
   readOnly,
   source,
+  autoFocus,
   onChange,
   onBlur
 }: {
@@ -34,6 +35,8 @@ export function CardTextEditor({
   readOnly?: boolean | undefined
   /** A snippet's own text: it offers no sending to a snippet. */
   source?: "snippet" | undefined
+  /** Focused as it mounts: a prompt just added, ready to type. */
+  autoFocus?: boolean | undefined
   onChange: (value: string) => void
   onBlur?: (() => void) | undefined
 }) {
@@ -65,6 +68,7 @@ export function CardTextEditor({
     <>
       <CodeEditor
         value={value}
+        autoFocus={autoFocus}
         selection={searchMatch}
         onRevealSelection={scrollToSearchField}
         base={comparison?.revision === revision ? comparison.value : value}
