@@ -210,7 +210,14 @@ function OpenLink({
   children: ReactNode
 }) {
   const { entry } = item
-  const props = picture ? { tabIndex: -1, "aria-hidden": true, className } : { title: itemName(entry), className }
+  const props = picture
+    ? {
+        tabIndex: -1,
+        "aria-hidden": true,
+        "data-layout-audit-ignore": "inset: portrait is a whole-surface hit target",
+        className
+      }
+    : { title: itemName(entry), className }
   return entry.kind === "card" && !persona(item) ? (
     <Link to="/cards/$entityId" params={{ entityId: entry.entityId }} {...props}>
       {children}
@@ -305,7 +312,7 @@ function Tile({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForm
         <span className="flex min-h-5 min-w-0 flex-wrap items-center gap-1 text-xs">
           <Badges item={item} seen={seen} />
         </span>
-        <div className="mt-auto flex items-center justify-end gap-0.5 pt-1">
+        <div className="mt-auto flex flex-wrap items-center justify-end gap-0.5 pt-2">
           {item.shell && <FavouriteStar card={item.shell} className="tile-toggle" />}
           <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
         </div>

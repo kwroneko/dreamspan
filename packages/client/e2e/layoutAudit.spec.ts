@@ -434,6 +434,23 @@ test.describe("synthetic library and every app surface", () => {
           await go("home-all", "/")
           return
         }
+        if (process.env.LAYOUT_AUDIT_GRIDS_ONLY === "1") {
+          await go("home-all", "/")
+          await showAppNavigation(page)
+          await page
+            .getByRole("group", { name: "Left panel", exact: true })
+            .getByRole("button", { name: "Characters", exact: true })
+            .click()
+          await audit("sidebar-Characters")
+          await hideAppNavigation(page)
+          await go("library-list", "/library")
+          await page
+            .getByRole("group", { name: "View", exact: true })
+            .getByRole("button", { name: "Grid", exact: true })
+            .click()
+          await audit("library-grid")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_FIXES_ONLY === "1") {
           await go("home-all", "/")
           await go("library", "/library")

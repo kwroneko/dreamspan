@@ -69,7 +69,7 @@ export function LibraryItemActions({ context }: { context: LibraryItemContext })
   if (open !== null && !libraryDialog?.dialog && !cardDialog?.dialog) setOpen(null)
   const label = `More actions for ${itemName(context.entry)}`
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div className="flex min-w-0 flex-wrap items-center gap-1">
       {actions.map((action) =>
         action.direct ? (
           <action.direct key={action.id} {...context} {...props({ from: "library", id: action.id })} />
