@@ -482,7 +482,8 @@ function EntrySettings({
             <details className={group}>
               <summary className={`cursor-pointer ${groupTitle}`}>Timing, filters and automation</summary>
               <p className="text-sm text-muted">
-                Kept for export. Chats here don't use sticky, cooldown, character filters or automation yet; the context inspector lists an entry that has them.
+                Kept for export. Chats here don't use sticky, cooldown, character filters or automation yet; the context
+                inspector lists an entry that has them.
               </p>
               <div className="grid gap-4 sm:grid-cols-3">
                 <NumberField
@@ -531,12 +532,14 @@ function EntrySettings({
                   <TextField
                     store={store}
                     path={[...path, "name"]}
-                    label="Name in exports" description="The entry's name in an exported card."
+                    label="Name in exports"
+                    description="The entry's name in an exported card."
                   />
                   <NumberField
                     store={store}
                     path={[...path, "priority"]}
-                    label="Priority in exports" description="The entry's priority in an exported card. Order decides here."
+                    label="Priority in exports"
+                    description="The entry's priority in an exported card. Order decides here."
                     optional
                   />
                   <SwitchField
