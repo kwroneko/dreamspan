@@ -13,7 +13,7 @@ import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Field, Fieldset, Input } from "../../ui/Field.tsx"
+import { Field, Fieldset } from "../../ui/Field.tsx"
 import { Slider } from "../../ui/Slider.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
@@ -173,35 +173,39 @@ function Tags({ store }: { store: EditorStore }) {
   return (
     <Fieldset legend="Tags">
       <p className="text-sm text-muted">{HINTS.tags}</p>
-      {tags.length > 0 && (
-        <ul aria-label="Tags" className="flex flex-wrap gap-2">
-          {tags.map((name) => (
-            <li
-              key={name}
-              className="flex items-center gap-0.5 rounded-full border border-border py-0.5 pr-0.5 pl-3 text-sm"
-            >
-              {name}
-              <IconButton
-                label={`Remove the tag ${name}`}
-                hint={`Removes the tag “${name}” from this card.`}
-                icon="close"
-                className="size-6! rounded-full"
-                onClick={() =>
-                  store.setValue(
-                    path,
-                    tags.filter((other) => other !== name)
-                  )
-                }
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="flex max-w-controls gap-2">
-        <Field label={<span className="sr-only">New tag</span>} className="flex-1">
-          <Input
+      {/* The chips, then a short field the width of what's typed with a + at their end (owner,
+          2026-11-02): Enter or + adds. */}
+      <ul aria-label="Tags" className="flex flex-wrap items-center gap-2">
+        {tags.map((name) => (
+          <li
+            key={name}
+            className="flex items-center gap-0.5 rounded-full border border-border py-0.5 pr-0.5 pl-3 text-sm"
+          >
+            {name}
+            <IconButton
+              label={`Remove the tag ${name}`}
+              hint={`Removes the tag “${name}” from this card.`}
+              icon="close"
+              className="size-6! rounded-full"
+              onClick={() =>
+                store.setValue(
+                  path,
+                  tags.filter((other) => other !== name)
+                )
+              }
+            />
+          </li>
+        ))}
+        <li
+          data-new-tag
+          className="flex items-center gap-0.5 rounded-full border border-dashed border-border py-0.5 pr-0.5 pl-3 text-sm focus-within:border-focus"
+        >
+          <input
+            aria-label="New tag"
             value={tag}
-            placeholder="A tag"
+            placeholder="New tag"
+            size={Math.max(7, [...tag].length + 1)}
+            className="max-w-48 min-w-0 bg-transparent outline-none placeholder:text-muted"
             onChange={(event) => setTag(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -210,11 +214,15 @@ function Tags({ store }: { store: EditorStore }) {
               }
             }}
           />
-        </Field>
-        <Button hint="Adds what's typed as a tag of this card." onClick={add}>
-          Add the tag
-        </Button>
-      </div>
+          <IconButton
+            label="Add the tag"
+            hint="Add what's typed as a tag of this card (or press Enter)."
+            icon="plus"
+            className="size-6! rounded-full"
+            onClick={add}
+          />
+        </li>
+      </ul>
       <FieldTools store={store} field={valueField(path)} label="Tags" />
     </Fieldset>
   )
@@ -419,21 +427,31 @@ function GreetingsTab({ store, layout }: CardTabProps) {
 
 function MetadataTab({ store, call, layout }: CardTabProps) {
   const doc = useWorkingDoc(store)
-  return (
-    <div className="flex min-w-0 flex-col gap-6">
-      {layout === "page" && (
-        <section aria-labelledby="card-picture" className="flex flex-col gap-2">
-          <h3 id="card-picture" className="text-sm font-medium">
-            Picture
-          </h3>
-          <EditorPortrait store={store} call={call} />
-        </section>
-      )}
+  const about = (
+    <>
       <CardField store={store} field="creator_notes" label="Creator's notes" rows={4} layout={layout} />
       <Tags store={store} />
       <div className={columns(layout)}>
         <TextField store={store} path={["creator"]} label="Creator" hint={HINTS.creator} />
       </div>
+    </>
+  )
+  return (
+    <div className="flex min-w-0 flex-col gap-6">
+      {layout === "page" ? (
+        // On a wide page the picture stands beside the notes, tags and creator, tops aligned.
+        <div className="flex flex-col gap-6 md:flex-row md:items-start">
+          <section aria-labelledby="card-picture" className="flex shrink-0 flex-col gap-2">
+            <h3 id="card-picture" className="text-sm font-medium">
+              Picture
+            </h3>
+            <EditorPortrait store={store} call={call} />
+          </section>
+          <div className="flex min-w-0 flex-1 flex-col gap-6">{about}</div>
+        </div>
+      ) : (
+        about
+      )}
       <CardDates store={store} />
       <section aria-labelledby="card-group-settings" className="flex flex-col gap-2">
         <h3 id="card-group-settings" className="text-sm font-medium">

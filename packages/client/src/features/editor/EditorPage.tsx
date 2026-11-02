@@ -33,7 +33,7 @@ import { shellAtom } from "../characters/shellData.tsx"
 import { useCaller } from "./caller.ts"
 import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
 import { CardEditor } from "./CardEditor.tsx"
-import { CardNameHeader, CardTokens } from "./CardNameHeader.tsx"
+import { CardHeader, CardNameHeader, CardTokens } from "./CardNameHeader.tsx"
 import { CARD_TAB_LOREBOOK } from "./cardTabs.ts"
 import { StorePortrait } from "./PortraitControls.tsx"
 import { NoteFields } from "./notes.tsx"
@@ -254,19 +254,16 @@ export function Editor({
           {/* Over a chat, a preset's name is in the sticky bar, once. A card's names are renamed
               in place, each with its own question (CardNameHeader). */}
           {ref.kind === "card" && !bookOnly ? (
-            <div className="flex items-start gap-3">
-              <StorePortrait store={store} call={call} id={ref.entityId} />
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <CardNameHeader
-                  store={store}
-                  call={call}
-                  current={current}
-                  heading="h1"
-                  after={<CardFavourite entityId={ref.entityId} />}
-                />
-                <CardTokens store={store} />
-              </div>
-            </div>
+            <CardHeader portrait={<StorePortrait store={store} call={call} id={ref.entityId} />}>
+              <CardNameHeader
+                store={store}
+                call={call}
+                current={current}
+                heading="h1"
+                after={<CardFavourite entityId={ref.entityId} />}
+              />
+              <CardTokens store={store} />
+            </CardHeader>
           ) : (
             !overPreset && title("text-2xl")
           )}

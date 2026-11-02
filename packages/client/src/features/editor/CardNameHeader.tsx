@@ -1,6 +1,7 @@
-// A card's names at the top of its editor, the same in the chat's character tab and the full
-// editor (owner, 2026-11-01): the display name as the title, the version as a small badge
-// beside it, and the nickname under it as what it does ("In chat: Mio", or a faint "Add a chat
+// A card's header at the top of its editor, the same in the chat's character tab and the full
+// editor (owner, 2026-11-01, 2026-11-02; `CardHeader`): the portrait beside the names and token
+// counts, as tall as they are. The display name is the title, the version a small badge on the
+// row under it, then the nickname as what it does ("In chat: Mio", or a faint "Add a chat
 // name"). Each is renamed in place with the pencil (`ui/InlineRename`), and none has an
 // on-screen label: each one's tooltip says what it is. A change of the name chats use asks
 // about past messages right there, on confirm (`renameQuestion`, the registered `cardSaved`
@@ -123,8 +124,9 @@ export function CardTokens({ store }: { store: EditorStore }) {
       <span
         tabIndex={0}
         data-card-tokens
+        data-card-header-row
         aria-busy={pending || undefined}
-        className="w-fit rounded text-xs text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className="col-span-full w-fit max-w-full truncate rounded text-xs leading-4 text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         {shown(sums.total)} tokens · {shown(sums.permanent)} permanent
       </span>
@@ -215,51 +217,63 @@ export function CardNameHeader({
   }
 
   const Title = heading
+  // Grid cells of `CardHeader`: each name in the first column, its pencil in the second, so
+  // every pencil is on one line; the title takes at most two lines and the others one, so the
+  // names never outgrow the portrait beside them.
   return (
-    <div className="flex min-w-0 flex-col gap-0.5">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+    <>
+      <InlineRename
+        value={name}
+        label="the display name"
+        hint={DISPLAY_HINT}
+        fieldLabel="Display name"
+        goTo={nameMatch}
+        cells
+        className="peer/title"
+        onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
+      >
         {/* The pencil beside the heading, not in it: the heading's name is the card's name. */}
-        <InlineRename
-          value={name}
-          label="the display name"
-          hint={DISPLAY_HINT}
-          fieldLabel="Display name"
-          goTo={nameMatch}
-          onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
-        >
-          <Tooltip label={DISPLAY_HINT}>
-            <Title
-              className={`min-w-0 font-semibold [overflow-wrap:anywhere] ${heading === "h1" ? "text-2xl" : "text-lg leading-snug"}`}
+        <Tooltip label={DISPLAY_HINT}>
+          <Title
+            data-card-header-row
+            className={`col-start-1 line-clamp-2 max-w-96 min-w-0 font-semibold [overflow-wrap:anywhere] ${heading === "h1" ? "text-2xl leading-8" : "text-lg leading-7"}`}
+          >
+            {name || "Unnamed card"}
+          </Title>
+        </Tooltip>
+      </InlineRename>
+      {after && (
+        <span className="col-start-3 row-start-1 flex items-center pl-1 peer-data-renaming/title:hidden">{after}</span>
+      )}
+      <InlineRename
+        value={version}
+        label="the version"
+        hint={VERSION_HINT}
+        fieldLabel="Version"
+        goTo={versionMatch}
+        allowEmpty
+        cells
+        className="text-sm"
+        onRename={async (next) => {
+          if (await clashes(name, next)) return false
+          write({ version: next })
+        }}
+      >
+        <Tooltip label={VERSION_HINT}>
+          {version ? (
+            <span
+              data-card-header-row
+              className="col-start-1 max-w-96 min-w-0 truncate rounded-full border border-border px-2 py-0.5 text-xs text-muted"
             >
-              {name || "Unnamed card"}
-            </Title>
-          </Tooltip>
-        </InlineRename>
-        <InlineRename
-          value={version}
-          label="the version"
-          hint={VERSION_HINT}
-          fieldLabel="Version"
-          goTo={versionMatch}
-          allowEmpty
-          className="text-sm"
-          onRename={async (next) => {
-            if (await clashes(name, next)) return false
-            write({ version: next })
-          }}
-        >
-          <Tooltip label={VERSION_HINT}>
-            {version ? (
-              <span className="max-w-full rounded-full border border-border px-2 py-0.5 text-xs text-muted [overflow-wrap:anywhere]">
-                {version}
-              </span>
-            ) : (
-              <span className="text-xs text-muted/70">Add a version</span>
-            )}
-          </Tooltip>
-        </InlineRename>
-        {after}
-      </div>
+              {version}
+            </span>
+          ) : (
+            <span data-card-header-row className="col-start-1 max-w-96 truncate text-xs text-muted/70">
+              Add a version
+            </span>
+          )}
+        </Tooltip>
+      </InlineRename>
       <InlineRename
         value={nickname}
         label="the chat name"
@@ -267,22 +281,45 @@ export function CardNameHeader({
         fieldLabel="Chat name (nickname)"
         goTo={nicknameMatch}
         allowEmpty
+        cells
         className="text-sm"
         onRename={(next) => rename({ name, nickname: next })}
       >
         <Tooltip label={NICKNAME_HINT}>
           {nickname ? (
-            <span className="min-w-0 text-muted [overflow-wrap:anywhere]">In chat: {nickname}</span>
+            <span data-card-header-row className="col-start-1 max-w-96 min-w-0 truncate text-muted">
+              In chat: {nickname}
+            </span>
           ) : (
-            <span className="text-muted/70">Add a chat name</span>
+            <span data-card-header-row className="col-start-1 max-w-96 truncate text-muted/70">
+              Add a chat name
+            </span>
           )}
         </Tooltip>
       </InlineRename>
       {problem && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="col-span-full text-sm text-danger">
           {problem}
         </p>
       )}
+    </>
+  )
+}
+
+/**
+ * A card's header, the same in the chat's character tab and the full editor (owner,
+ * 2026-11-02): the portrait (`CardHeaderPortrait`) beside its names and token counts
+ * (`CardNameHeader`, `CardTokens` as `children`), the portrait exactly as tall as they are,
+ * their first row at its top and the last at its bottom, the rows spread evenly between.
+ * Its width sets the portrait's size (a container query), so it holds at any panel width.
+ */
+export function CardHeader({ portrait, children }: { portrait: ReactNode; children: ReactNode }) {
+  return (
+    <div data-card-header className="@container flex items-stretch gap-3">
+      {portrait}
+      <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,max-content)_auto_1fr] content-between items-center justify-items-start gap-x-1">
+        {children}
+      </div>
     </div>
   )
 }

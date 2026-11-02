@@ -1,5 +1,7 @@
 // A name with a pencil beside it: the pencil turns the name into a field with Save and Cancel
-// beside it; Enter saves, Escape cancels. The usual way to rename one thing in place.
+// beside it; Enter saves, Escape cancels. The usual way to rename one thing in place. With
+// `cells`, the name and its pencil are a grid's cells (`display: contents`), so a column of
+// names keeps every pencil on one line; the field then spans the grid's whole row.
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Input } from "./Field.tsx"
 import { IconButton } from "./Tooltip.tsx"
@@ -14,7 +16,8 @@ export function InlineRename({
   inputClassName = "",
   hint = "Rename",
   fieldLabel,
-  goTo
+  goTo,
+  cells = false
 }: {
   /** The name as it is, what the field starts with. */
   value: string
@@ -34,6 +37,8 @@ export function InlineRename({
   fieldLabel?: string
   /** A search match in the name: opens the field with that part selected. */
   goTo?: { readonly at: number; readonly length: number } | undefined
+  /** The name and pencil as two cells of the grid it's in; the field spans the row. */
+  cells?: boolean
 }) {
   const [typed, setTyped] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null)
@@ -62,7 +67,7 @@ export function InlineRename({
   }
   if (typed === null)
     return (
-      <span className={`flex min-w-0 items-center gap-0.5 ${className}`}>
+      <span className={`${cells ? "contents" : "flex min-w-0 items-center gap-0.5"} ${className}`}>
         {children ?? <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>}
         <IconButton
           label={`Rename ${label}`}
@@ -74,7 +79,10 @@ export function InlineRename({
       </span>
     )
   return (
-    <span className={`flex min-w-0 flex-1 items-center gap-1 ${className}`}>
+    <span
+      data-renaming=""
+      className={`flex min-w-0 flex-1 items-center gap-1 ${cells ? "col-span-full" : ""} ${className}`}
+    >
       <Input
         aria-label={fieldLabel ?? `New name for ${label}`}
         ref={input}

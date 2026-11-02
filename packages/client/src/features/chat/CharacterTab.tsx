@@ -1,7 +1,8 @@
 // A character's tab in the chat's panel, as ST's character panel: every field the full editor
 // has, in the same tabs (`CardEditor`, `layout: "panel"`), edited right here with the editor's
 // store and field histories (ARCHITECTURE §14.6), each long field openable large over the
-// chat. At the top, the names renamed in place and the token counts (`CardNameHeader`), then
+// chat. At the top, the portrait beside the names renamed in place and the token counts
+// (`CardHeader`; "You play" is a badge on the persona's portrait), then
 // the card's actions as buttons: New chat with them, Full editor, Fork for this chat, Export…
 // and what else is registered (`chatCardActions`). The persona's tab is the same card editor
 // (DESIGN §2.2: a persona is a card), with Switch persona. Card data and actions stay in their
@@ -22,10 +23,10 @@ import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { CardEditor } from "../editor/CardEditor.tsx"
-import { CardNameHeader, CardTokens } from "../editor/CardNameHeader.tsx"
+import { CardHeader, CardNameHeader, CardTokens } from "../editor/CardNameHeader.tsx"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { RecoveredNotice } from "../editor/controls.tsx"
-import { TabPortrait } from "../editor/PortraitControls.tsx"
+import { CardHeaderPortrait, TabPortrait } from "../editor/PortraitControls.tsx"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { SaveRevision } from "../editor/SaveRevision.tsx"
 import { EditorStore, useEditorState, useLeaveGuard } from "../editor/store.ts"
@@ -69,14 +70,33 @@ function ChatCharacterPanel({ session, view, entityId }: { session: ChatSession;
     return <CardPanel key={info.refId} session={session} view={view} card={card} info={info} persona={persona} />
   return (
     <div className="flex flex-col gap-4">
-      <header className="flex items-start gap-3">
-        <Avatar id={entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="lg" preview />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {persona && <p className="text-xs text-muted">You play</p>}
-          <h2 className="text-lg leading-snug font-semibold [overflow-wrap:anywhere]">{card.label}</h2>
-          {card.subtitle && <p className="text-sm text-muted [overflow-wrap:anywhere]">{card.subtitle}</p>}
-        </div>
-      </header>
+      <CardHeader
+        portrait={
+          <CardHeaderPortrait badge={persona ? "You play" : undefined}>
+            <Avatar
+              id={entityId}
+              name={card.name}
+              mediaId={card.avatarMediaId}
+              crop={card.avatarCrop}
+              size="fill"
+              className="size-full"
+              preview
+            />
+          </CardHeaderPortrait>
+        }
+      >
+        <h2
+          data-card-header-row
+          className="col-span-full line-clamp-2 text-lg leading-7 font-semibold [overflow-wrap:anywhere]"
+        >
+          {card.label}
+        </h2>
+        {card.subtitle && (
+          <p data-card-header-row className="col-span-full truncate text-sm text-muted">
+            {card.subtitle}
+          </p>
+        )}
+      </CardHeader>
       {card.inBin && <p className="text-sm text-muted">This card is in the bin: restore it to edit it.</p>}
       {AsyncResult.isFailure(result) && (
         <p role="alert" className="text-sm text-danger">
@@ -139,27 +159,33 @@ function CardPanel({
   const portrait = { id: card.entityId, name: card.name, mediaId: card.avatarMediaId }
   return (
     <div className="flex flex-col gap-4">
-      <header className="flex items-start gap-3">
-        <TabPortrait
-          store={store}
-          call={call}
-          id={card.entityId}
-          shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
-          onViewFull={viewer && card.avatarMediaId !== null ? () => viewer.show(portrait) : undefined}
-          onChanged={() => void session.rereadCast()}
-        />
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          {persona && <p className="text-xs text-muted">You play</p>}
-          {state.snapshot ? (
-            <>
-              <CardNameHeader store={store} call={call} current={{ chatId: session.id, forkId: view.forkId }} />
-              <CardTokens store={store} />
-            </>
-          ) : (
-            <h2 className="text-lg leading-snug font-semibold [overflow-wrap:anywhere]">{card.label}</h2>
-          )}
-        </div>
-      </header>
+      <CardHeader
+        portrait={
+          <TabPortrait
+            store={store}
+            call={call}
+            id={card.entityId}
+            shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
+            onViewFull={viewer && card.avatarMediaId !== null ? () => viewer.show(portrait) : undefined}
+            onChanged={() => void session.rereadCast()}
+            badge={persona ? "You play" : undefined}
+          />
+        }
+      >
+        {state.snapshot ? (
+          <>
+            <CardNameHeader store={store} call={call} current={{ chatId: session.id, forkId: view.forkId }} />
+            <CardTokens store={store} />
+          </>
+        ) : (
+          <h2
+            data-card-header-row
+            className="col-span-full line-clamp-2 text-lg leading-7 font-semibold [overflow-wrap:anywhere]"
+          >
+            {card.label}
+          </h2>
+        )}
+      </CardHeader>
       <div className="-mx-2 flex flex-wrap items-center gap-x-1">
         {!persona && <NewChat card={card} />}
         <ChatCardActions session={session} card={card} info={info} persona={persona} />
