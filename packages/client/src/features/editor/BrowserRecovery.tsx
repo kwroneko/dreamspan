@@ -8,11 +8,11 @@ import { copiesOfUser, type Copy, dropCopy, flushCopies, pendingOf } from "./bac
 export function RecoveryNotice() {
   return (
     <p role="status">
-      Some text could not return to its original draft and was moved to{" "}
+      Text that could not return to its original draft is kept in{" "}
       <a href="/bin?section=recovered" className="underline">
-        recovered texts in the bin
+        the bin, under Recovered text
       </a>
-      . After logging out, log in to the same account to find it.
+      . After logging out, log in to the same account to find this text.
     </p>
   )
 }

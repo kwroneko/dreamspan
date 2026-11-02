@@ -14,8 +14,6 @@ const viewedFork = (session: ChatSession) => {
   return fork === null ? {} : { fork }
 }
 
-const versions = (count: number) => (count === 1 ? "its one version" : `all ${count} of its versions`)
-
 /** Ways in besides the button, said in Edit's explanation. */
 const EDIT_KEYS = "Or double-click the message; ↑ in the empty composer edits the latest message, Ctrl+↑ your own."
 
@@ -160,16 +158,14 @@ export const registerMessageActions = () => [
             label: "Delete version",
             icon: "trash",
             tone: "danger",
-            hint: `Delete the version shown; the message keeps its ${entry.versionCount - 1} other${
-              entry.versionCount > 2 ? "s" : ""
-            }. It goes to the bin, with Undo.`,
+            hint: "Moves this message version to the bin, from which it can be restored later.",
             onSelect: async () => toast(await session.deleteVersion(entry.version.id))
           }
         : {
             label: "Delete message",
             icon: "trash-all",
             tone: "danger",
-            hint: "Delete this message. It goes to the bin, with Undo.",
+            hint: "Moves this message to the bin, from which it can be restored later.",
             onSelect: async () => toast(await session.deleteMessage(entry.slotId))
           }
     )
@@ -183,7 +179,7 @@ export const registerMessageActions = () => [
       label: "Delete message",
       icon: "trash-all",
       tone: "danger",
-      hint: `Delete this message with ${versions(entry.versionCount)}. It goes to the bin, with Undo.`,
+      hint: "Moves this message and all its versions to the bin, from which it can be restored later.",
       onSelect: async () => toast(await session.deleteMessage(entry.slotId))
     }))
   })

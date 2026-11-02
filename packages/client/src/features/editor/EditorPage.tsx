@@ -84,7 +84,7 @@ const savedNotice = (saved: SavedRef) => {
       : "",
     conflicts > 0 ? `${plural(conflicts, "variant has", "variants have")} conflicts to resolve in its own editor.` : "",
     setAside > 0
-      ? `${plural(setAside, "change was", "changes were")} in something deleted since, so ${setAside === 1 ? "it's" : "they're"} in the bin's recovered texts instead.`
+      ? `Text from ${plural(setAside, "change", "changes")} to deleted entries is kept in the bin, under Recovered text.`
       : ""
   ].filter((part) => part !== "")
   return parts.length === 0 ? null : ["Saved.", ...parts].join(" ")

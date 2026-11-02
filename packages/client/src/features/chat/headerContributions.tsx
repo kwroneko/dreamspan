@@ -88,7 +88,7 @@ export const registerChatHeader = () => [
   chatCommands.register({
     id: "chat.delete",
     label: "Delete chat",
-    description: "Moves the chat, with all its branches, to the bin, with Undo.",
+    description: "Moves this chat and all its branches to the bin, from which it can be restored later.",
     order: 90,
     icon: "trash",
     tone: "danger",

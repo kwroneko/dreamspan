@@ -65,7 +65,7 @@ for (const width of [1440, 390]) {
     await expect(list.getByRole("button", { name: "Delete Old road", exact: true })).toBeVisible()
     await shot(page, "fork-menu", width)
     await list.getByRole("button", { name: "Delete Old road", exact: true }).click()
-    await expect(page.getByText(`Deleted: Branch “Old road” in “${title}”`)).toBeVisible()
+    await expect(page.getByText(`Branch “Old road” in “${title}” moved to the bin.`)).toBeVisible()
     await shot(page, "fork-deleted-toast", width)
 
     // The fork went, and the other forks and their messages are as they were.

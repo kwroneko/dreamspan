@@ -129,7 +129,9 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
         <Alert tone="warning">Another tab had typed here too; its text is one step back in the undo history.</Alert>
       )}
       {view.restored > 0 && <Alert>Text typed here earlier and kept in this browser is back in the box.</Alert>}
-      {view.recovered > 0 && <Alert>Earlier text from this edit is in the bin's recovered texts.</Alert>}
+      {view.recovered > 0 && (
+        <Alert>Earlier text from this summary edit is kept in the bin, under Recovered text.</Alert>
+      )}
       {base !== null && <SlotOutlet slot={summaryEditorTools} props={{ draft: store, base }} />}
       {base === null && comparisonError && (
         <>
@@ -156,8 +158,12 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
             Undo
           </Button>
         </Tooltip>
-        <Tooltip label="Keep the summary as it was. What you typed goes to the bin's recovered texts.">
-          <Button onClick={() => void finish(() => store.discard())} pending={pending} aria-label="Discard the edit">
+        <Tooltip label="Closes this without saving. What you typed is kept in the bin, under Recovered text.">
+          <Button
+            onClick={() => void finish(() => store.discard())}
+            pending={pending}
+            aria-label="Discard the summary edit"
+          >
             Discard
           </Button>
         </Tooltip>

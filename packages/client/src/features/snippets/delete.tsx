@@ -25,7 +25,7 @@ export function DeleteSnippet({ store, item }: { store: SnippetWorkspace; item: 
         variant="ghost"
         className="h-8 px-2"
         aria-label={`Delete ${name}`}
-        hint="Moves it to the bin, with Undo there and in the message that follows."
+        hint="Moves this snippet to the bin, from which it can be restored later."
         disabled={pending}
         onClick={async () => {
           const used = await store.usedBy(item.ref.id)
@@ -39,7 +39,7 @@ export function DeleteSnippet({ store, item }: { store: SnippetWorkspace; item: 
         open={usedBy > 0}
         onOpenChange={(open) => !open && setUsedBy(0)}
         title={`Delete ${name}?`}
-        description={`It's a shared note: ${usedBy} ${usedBy === 1 ? "note in a card or chat shows" : "notes in cards and chats show"} it. They send nothing until you restore it from the bin, or unlink them into copies.`}
+        description="Moves this snippet to the bin, from which it can be restored later."
         confirmLabel="Delete snippet"
         pending={pending}
         onConfirm={() => void remove()}

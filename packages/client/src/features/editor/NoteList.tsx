@@ -287,7 +287,7 @@ function NoteBlock({
                 <MenuItem
                   icon="trash"
                   tone="danger"
-                  description="Moves it to the bin, where it can be restored"
+                  description="Moves this note to the bin, from which it can be restored later."
                   onClick={() => void remove()}
                 >
                   Delete the note

@@ -303,7 +303,14 @@ function Editor({
             {saveLabel}
           </Button>
         </Tooltip>
-        <Button onClick={onCancel}>
+        <Button
+          onClick={onCancel}
+          hint={
+            draft.target._tag === "Write"
+              ? "Closes this without adding a version. What you typed is kept in the bin, under Recovered text."
+              : "Closes this without saving. Your text stays in the message’s edit history."
+          }
+        >
           <Icon name="close" />
           Cancel
         </Button>

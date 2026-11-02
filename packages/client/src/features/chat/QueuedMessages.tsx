@@ -91,7 +91,12 @@ function QueueEditor({
             Copy to composer
           </Button>
         )}
-        <Button onClick={() => void cancel()}>Cancel</Button>
+        <Button
+          onClick={() => void cancel()}
+          hint="Closes this without updating the queue. What you typed is kept in the bin, under Recovered text."
+        >
+          Cancel
+        </Button>
         <Button
           variant="ghost"
           onClick={async () => {

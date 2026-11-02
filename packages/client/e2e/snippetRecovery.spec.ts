@@ -74,9 +74,7 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
-  test(`a snippet is deleted to the bin with Undo, and a shared one says what shows it at ${width}`, async ({
-    page
-  }) => {
+  test(`a snippet is deleted to the bin with Undo, and a shared one asks first at ${width}`, async ({ page }) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width, height: 1000 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -96,7 +94,7 @@ for (const width of [1440, 390]) {
     // An unused snippet goes straight to the bin; the toast's Undo brings it back.
     await openSnippet(panel, `Empty ${width}`)
     await panel.getByRole("button", { name: `Delete Empty ${width}`, exact: true }).click()
-    await expect(page.getByText(`Deleted: Empty ${width}`)).toBeVisible()
+    await expect(page.getByText(`Empty ${width} moved to the bin.`)).toBeVisible()
     await expect(block(`Empty ${width}`)).toHaveCount(0)
     await expect.poll(titles).toEqual([`Shown ${width}`])
     await shoot(page, `snippet-deleted-${width}`)
@@ -104,17 +102,17 @@ for (const width of [1440, 390]) {
     await expect(block(`Empty ${width}`)).toBeVisible()
     await expect.poll(titles).toEqual([`Empty ${width}`, `Shown ${width}`])
 
-    // A snippet a chat note shows asks first, and says so.
+    // A snippet a chat note shows asks first; its explanation says where the snippet goes.
     await openSnippet(panel, `Shown ${width}`)
     await panel.getByRole("button", { name: `Delete Shown ${width}`, exact: true }).click()
     const confirm = page.getByRole("alertdialog", { name: `Delete Shown ${width}?` })
-    await expect(confirm).toContainText("1 note in a card or chat shows it")
+    await expect(confirm).toContainText("Moves this snippet to the bin, from which it can be restored later.")
     await shoot(page, `snippet-delete-shared-${width}`)
     await confirm.getByRole("button", { name: "Cancel" }).click()
     await expect.poll(titles).toEqual([`Empty ${width}`, `Shown ${width}`])
     await panel.getByRole("button", { name: `Delete Shown ${width}`, exact: true }).click()
     await confirm.getByRole("button", { name: "Delete snippet" }).click()
-    await expect(page.getByText(`Deleted: Shown ${width}`)).toBeVisible()
+    await expect(page.getByText(`Shown ${width} moved to the bin.`)).toBeVisible()
     await expect.poll(titles).toEqual([`Empty ${width}`])
     const bin = await admin((api) => api.ListBin({ limit: 50, before: null }))
     expect(bin.some((item) => item.kind === "entity" && item.title === `Shown ${width}`)).toBe(true)
