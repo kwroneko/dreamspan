@@ -1,6 +1,6 @@
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { createContext, lazy, type ReactNode, Suspense, useContext, useState } from "react"
+import { createContext, lazy, type ReactNode, Suspense, useContext, useEffect, useEffectEvent, useState } from "react"
 import { useSession } from "../../session.ts"
 import { ColumnOverlay } from "../../ui/ColumnOverlay.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -33,17 +33,26 @@ export function PresetWorkspace({
   children,
   context,
   chat,
+  compact = false,
   onOpen
 }: {
   children: ReactNode
   context?: PresetContext | null | undefined
   chat?: WorkspaceChat | undefined
+  /** On a phone the full editor takes the side panel's place. */
+  compact?: boolean
   onOpen?: () => void
 }) {
   const call = useCaller()
   const userId = useSession().user.id
   const [stores] = useState(() => new Map<RefId, EditorStore>())
   const [selection, setSelection] = useState<Workspace["selection"]>(null)
+  const notifyOpen = useEffectEvent(() => onOpen?.())
+  // Also reconcile when an already open editor crosses into the phone layout: otherwise
+  // the side panel becomes a modal sheet over it and makes the editor inert.
+  useEffect(() => {
+    if (selection !== null) notifyOpen()
+  }, [selection, compact])
   const store = (ref: RefId) => {
     let value = stores.get(ref)
     if (!value) {
@@ -62,7 +71,6 @@ export function PresetWorkspace({
         close: () => setSelection(null),
         open: (ref, focus) => {
           setSelection({ ref, focus })
-          onOpen?.()
         }
       }}
     >
