@@ -26,14 +26,13 @@ const provider = (connection: Connection, kinds: ReadonlyArray<ProviderKindInfo>
   return origin ? `${kind} (${origin})` : kind
 }
 
-const LOCAL_TEXT =
-  "Counted on this server; nothing is sent. Text is exact for OpenAI's models and approximate (o200k_base, marked ~) for the others. Images use the provider's published formula, or what earlier replies reported; where neither is known the count says unknown."
+const LOCAL_TEXT = "Counted on this server; nothing is sent. Some models' counts are close estimates, marked ~."
 
 /** What choosing a way of counting sends, and to whom. */
 const sends = (via: Connection, own: Connection, kinds: ReadonlyArray<ProviderKindInfo>) =>
   via.id === own.id
-    ? `The text and images being counted are sent to ${provider(via, kinds)}, this connection's provider, under its retention policy. Only Anthropic, Google Gemini and OpenAI's own API have a counting endpoint; others count on this server.`
-    : `The text and images being counted are sent to ${provider(via, kinds)} through “${via.name}”, under that provider's retention policy. It's used only for counting: replies still go to this connection.`
+    ? `The text and images being counted are sent to ${provider(via, kinds)}, this connection's provider, under its retention policy.`
+    : `The text and images being counted are sent to ${provider(via, kinds)} through “${via.name}”, under that provider's retention policy. Replies still go to this connection.`
 
 export function TokenCountingSection({ connection, kinds }: ConnectionSectionProps) {
   const counting = useAtomValue(countingAtom)
@@ -61,7 +60,7 @@ export function TokenCountingSection({ connection, kinds }: ConnectionSectionPro
     <Card>
       <CardHeader
         title="Token counts"
-        description="How the editors' token counts and the next request's image tokens are counted when this connection's model is the one chats use."
+        description="How token counts are made while this connection's model is the one chats use."
       />
       <Field label="Count with" description={chosen ? sends(chosen, connection, kinds) : LOCAL_TEXT}>
         <Select

@@ -441,7 +441,7 @@ for (const width of [1440, 390])
       await another.click()
       await expect(picker).toHaveText(`Another: Counter ${width} ${theme}`)
       await expect(picker).toHaveAccessibleDescription(
-        `The text and images being counted are sent to Anthropic (http://127.0.0.1:9) through “Counter ${width} ${theme}”, under that provider's retention policy. It's used only for counting: replies still go to this connection.`
+        `The text and images being counted are sent to Anthropic (http://127.0.0.1:9) through “Counter ${width} ${theme}”, under that provider's retention policy. Replies still go to this connection.`
       )
       expect(await admin((api) => api.GetTokenCounting())).toContainEqual({
         connectionId: connection.id,
