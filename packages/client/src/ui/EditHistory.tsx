@@ -89,7 +89,8 @@ function EditHistoryDialog({
   // then swaps it in place: no "Loading" in between, which collapsed the pane and grew it back
   // on every pick (the flash, owner 2026-11-02). Texts read once are kept for this dialog.
   const [shown, setRead] = useState<{ readonly seq: number; readonly text: string } | null>(null)
-  const [texts] = useState(() => new Map<number, string>())
+  // A new map on each read, so what renders from it renders again.
+  const [texts, setTexts] = useState<ReadonlyMap<number, string>>(() => new Map())
   // The picked state's text, once read; what the pane shows meanwhile.
   const text = (selected === null ? undefined : texts.get(selected.seq)) ?? null
   const displayed = text ?? shown?.text ?? null
@@ -113,7 +114,7 @@ function EditHistoryDialog({
     let live = true
     void read(selected.seq).then((result) => {
       if (!result.ok) return live && setError(result.error.message)
-      texts.set(selected.seq, result.value)
+      setTexts((known) => new Map(known).set(selected.seq, result.value))
       if (live) setRead({ seq: selected.seq, text: result.value })
     })
     return () => {
