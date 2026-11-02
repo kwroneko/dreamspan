@@ -15,6 +15,7 @@ import {
   memo,
   type ReactNode,
   useContext,
+  useId,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -89,10 +90,11 @@ function TitleCell({
   entry,
   title,
   uid,
+  idPrefix,
   open,
   onKeys,
   badges
-}: LorebookEntryContext & { uid: number; open: boolean; onKeys: () => void; badges?: ReactNode }) {
+}: LorebookEntryContext & { uid: number; idPrefix: string; open: boolean; onKeys: () => void; badges?: ReactNode }) {
   const titlePath = [...path, "comment"]
   const text = useText(store, titlePath)
   const match = useSearchMatch(titlePath)
@@ -115,7 +117,7 @@ function TitleCell({
     <div className="flex min-w-0 flex-col">
       <Input
         ref={input}
-        id={`lore-title-${uid}`}
+        id={`${idPrefix}-title-${uid}`}
         aria-label={`Title of ${title}`}
         placeholder="Untitled entry"
         className="h-8! px-2! font-medium"
@@ -124,7 +126,13 @@ function TitleCell({
         onBlur={() => void store.save(JSON.stringify(titlePath))}
       />
       {open ? (
-        <KeysLine store={store} path={[...path, "keys"]} id={`lore-keys-${uid}`} empty={noKeys} badges={badges} />
+        <KeysLine
+          store={store}
+          path={[...path, "keys"]}
+          id={`${idPrefix}-keys-${uid}`}
+          empty={noKeys}
+          badges={badges}
+        />
       ) : (
         <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
           <Tooltip label="Its primary keys: one appearing in the chat sends it. Click to open the entry at them.">
@@ -250,6 +258,7 @@ interface RowProps {
   store: EditorStore
   root: FieldPath
   uid: number
+  idPrefix: string
   open: boolean
   /** Its settings are open. */
   settings: boolean
@@ -289,6 +298,7 @@ const EntryRow = memo(function EntryRow({
   store,
   root,
   uid,
+  idPrefix,
   open,
   settings,
   wide,
@@ -354,6 +364,7 @@ const EntryRow = memo(function EntryRow({
     <TitleCell
       {...context}
       uid={uid}
+      idPrefix={idPrefix}
       open={open}
       onKeys={() => onToggle(uid, true, "keys")}
       badges={compact ? <EntryBadges entry={entry} /> : undefined}
@@ -473,12 +484,12 @@ function Rows({
   useEffect(() => {
     if (!focus) return
     const index = uids.indexOf(focus.uid)
-    const titleId = `lore-title-${focus.uid}`
+    const titleId = `${row.idPrefix}-title-${focus.uid}`
     if (index >= 0 && document.getElementById(titleId) === null) virtualizer.scrollToIndex(index, { align: "start" })
     let frame = 0
     let tries = 0
     const settle = () => {
-      const field = document.getElementById(focus.at === "keys" ? `lore-keys-${focus.uid}` : titleId)
+      const field = document.getElementById(focus.at === "keys" ? `${row.idPrefix}-keys-${focus.uid}` : titleId)
       const header = document.getElementById(titleId)?.closest<HTMLElement>("[data-entry-header]")
       // Rendered a frame or two after the virtualizer scrolled.
       if (!header && ++tries < 4) return void (frame = requestAnimationFrame(settle))
@@ -488,7 +499,7 @@ function Rows({
     }
     frame = requestAnimationFrame(settle)
     return () => cancelAnimationFrame(frame)
-  }, [focus, uids, virtualizer, searching, onFocused])
+  }, [focus, uids, virtualizer, searching, onFocused, row.idPrefix])
   return (
     <div
       role="list"
@@ -581,6 +592,8 @@ export function LorebookTable({
   /** The save cluster, leading the entries' toolbar row (DESIGN §10.1). */
   saveControls?: ReactNode
 }) {
+  // Both editors can render the same entry UID at once; focus must stay in this table.
+  const idPrefix = useId()
   const columns = useRegistry(lorebookColumns)
   const sorts = useRegistry(lorebookSorts)
   const actions = useRegistry(lorebookEntryActions)
@@ -596,13 +609,15 @@ export function LorebookTable({
     sorts.map((s) => s.id)
   )
   const setSortId = (next: string) => changeSort(next, true)
-  const [entryKey, setEntryKey] = usePlaceParam(`${scope}:entry`, "")
+  // A URL target belongs to its view: restoring it must not open or focus the other editor.
+  const entryScope = panel ? `${scope}:panel` : scope
+  const [entryKey, setEntryKey] = usePlaceParam(`${entryScope}:entry`, "")
   const entry = entryKey === "" ? null : Number(entryKey)
   const enteredHere = useRef<number | null>(null)
   usePlaceNotice(
     entry !== null && !book.entries.some((e) => e.uid === entry) ? "This entry is no longer in the lorebook." : null
   )
-  const [opened, setOpened] = useOpenEntries(store.refId, root, added)
+  const [opened, setOpened] = useOpenEntries(store.refId, root, added, panel)
   // Opened entries whose settings are open too: closed again with the page.
   const [settings, setSettings] = useState<ReadonlySet<number>>(EMPTY)
   const showSettings = (uid: number, open: boolean) =>
@@ -859,7 +874,11 @@ export function LorebookTable({
             className={small}
             disabled={opened.size === 0}
             hint="Closes every entry to its one-line header."
-            onClick={() => setOpened(new Set())}
+            onClick={() => {
+              enteredHere.current = null
+              setEntryKey("", true)
+              setOpened(new Set())
+            }}
           >
             Collapse all
           </Button>
@@ -983,6 +1002,7 @@ export function LorebookTable({
             onFocused={() => setFocus(null)}
             searching={match !== null}
             row={{
+              idPrefix,
               store,
               root,
               wide,
