@@ -55,6 +55,7 @@ export function StripRow({ scroll, children }: { scroll: boolean; children: Reac
       ref={row}
       role="group"
       aria-label="Next reply"
+      data-layout-audit-ignore="inset: Borderless chip strip shares the outer composer inset and hides its horizontal scrollbar"
       data-more-before={(scroll && more.before) || undefined}
       data-more-after={(scroll && more.after) || undefined}
       className={`flex min-w-0 items-center gap-1.5 border border-transparent px-1 ${scroll ? "overflow-x-auto [scrollbar-width:none]" : "flex-wrap"}`}

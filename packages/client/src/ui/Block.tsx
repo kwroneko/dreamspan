@@ -166,6 +166,7 @@ export function BlockSection({
       <Tooltip label={hint}>
         <button
           type="button"
+          data-layout-audit-ignore="inset: Disclosure is the full-width section header"
           aria-expanded={open}
           aria-label={`${title} of ${label}`}
           onClick={onToggle}

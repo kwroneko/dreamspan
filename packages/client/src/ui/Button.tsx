@@ -60,7 +60,13 @@ export function Button({
       <BaseTooltip.Root>
         <BaseTooltip.Trigger render={button} />
         <BaseTooltip.Portal>
-          <BaseTooltip.Positioner side="top" sideOffset={6} collisionPadding={8} className="pointer-events-none z-50">
+          <BaseTooltip.Positioner
+            data-layout-overlay="Tooltip floats above the page"
+            side="top"
+            sideOffset={6}
+            collisionPadding={8}
+            className="pointer-events-none z-50"
+          >
             <BaseTooltip.Popup className={tooltipPopupClass}>{hint}</BaseTooltip.Popup>
           </BaseTooltip.Positioner>
         </BaseTooltip.Portal>

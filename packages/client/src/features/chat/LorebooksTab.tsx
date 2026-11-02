@@ -127,15 +127,15 @@ function Book({
   const hintId = useId()
   return (
     <li
-      className={`flex items-start gap-1 rounded-md py-1.5 ps-1 ${rowActionInsetClass} ${selected ? "bg-surface-raised ring-1 ring-accent/50" : ""}`}
+      className={`flex items-start gap-1 rounded-md py-2 ps-2 ${rowActionInsetClass} ${selected ? "bg-surface-raised ring-1 ring-accent/50" : ""}`}
       data-selected={selected || undefined}
       // Switched here, not confirmed yet: the row says so without changing its name.
       aria-busy={row.pending || undefined}
     >
       {/* Its explanation on hover and focus; on a phone it's under the book's name. */}
       <Tooltip label={shown.switchHint}>
-        <span className="shrink-0 pt-1.5 pl-1">
-          <Switch checked={row.on} onCheckedChange={onSwitch} describedBy={hintId}>
+        <span className="shrink-0 pt-1.5">
+          <Switch labelHidden checked={row.on} onCheckedChange={onSwitch} describedBy={hintId}>
             <span className="sr-only">{shown.name}</span>
           </Switch>
         </span>
@@ -379,7 +379,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
             onClose={() => setAdding(false)}
           />
         ) : (
-          <div className="pt-1">
+          <div className="pt-2">
             <Button
               onClick={() => setAdding(true)}
               disabled={library === null}

@@ -438,7 +438,7 @@ export function ScriptItem({
     <li className="flex flex-col gap-2 py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-1">
-          <Switch checked={!script.disabled} onCheckedChange={setOn}>
+          <Switch labelHidden checked={!script.disabled} onCheckedChange={setOn}>
             <span className="sr-only">Run {name}</span>
           </Switch>
           <span

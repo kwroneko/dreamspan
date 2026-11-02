@@ -297,7 +297,7 @@ function CharacterTile({
   return (
     <div className="tile-toggle-surface relative flex min-w-0 flex-col">
       {pick ? <Tooltip label={pick.hint(card, status)}>{button}</Tooltip> : button}
-      <span className="absolute top-1 left-1">
+      <span data-layout-overlay="Favourite action sits over the portrait" className="absolute top-1 left-1">
         <FavouriteStar card={card} className="tile-toggle bg-surface/85" />
       </span>
       {state.mark && (

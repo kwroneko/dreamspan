@@ -37,6 +37,7 @@ export function Dialog({
       <BaseDialog.Portal>
         <BaseDialog.Backdrop className={backdrop} />
         <BaseDialog.Popup
+          data-layout-overlay="Modal dialog covers the page"
           finalFocus={finalFocus}
           {...(initialFocus ? { initialFocus: () => initialFocus() ?? true } : {})}
           className={wide ? `${popup} sm:max-w-5xl` : popup}
@@ -86,7 +87,7 @@ export function ConfirmDialog({
     <BaseAlertDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <BaseAlertDialog.Portal>
         <BaseAlertDialog.Backdrop className={backdrop} />
-        <BaseAlertDialog.Popup className={popup}>
+        <BaseAlertDialog.Popup data-layout-overlay="Confirmation dialog covers the page" className={popup}>
           <div className="flex flex-col gap-1">
             <BaseAlertDialog.Title className="text-base font-semibold">{title}</BaseAlertDialog.Title>
             <BaseAlertDialog.Description className="text-sm text-muted">{description}</BaseAlertDialog.Description>

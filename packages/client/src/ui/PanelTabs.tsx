@@ -124,6 +124,7 @@ export function ToolTabs({
               {visible.map((tab) => {
                 const button = (
                   <BaseTabs.Tab
+                    data-layout-audit-ignore="inset: Tabs form the panel navigation strip"
                     key={tab.value}
                     value={tab.value}
                     className={`group ${toolClass} data-active:border-accent data-active:text-text`}
@@ -146,7 +147,12 @@ export function ToolTabs({
             <Menu
               label={`More of the ${label.toLowerCase()}`}
               trigger={
-                <button type="button" aria-label={moreLabel} className={toolClass}>
+                <button
+                  data-layout-audit-ignore="inset: More tools continues the tab strip"
+                  type="button"
+                  aria-label={moreLabel}
+                  className={toolClass}
+                >
                   <Icon name="more" />
                   {MORE}
                 </button>
@@ -286,6 +292,7 @@ export function SubjectTabs({
             const short = compact && tab.avatar !== undefined && index !== named
             return (
               <BaseTabs.Tab
+                data-layout-audit-ignore="inset: Tabs form the panel navigation strip"
                 key={tab.value}
                 value={tab.value}
                 title={tab.note ? `${tab.label} (${tab.note})` : tab.label}

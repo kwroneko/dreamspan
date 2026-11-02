@@ -25,6 +25,7 @@ export function Sheet({
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal>
         <BaseDialog.Popup
+          data-layout-overlay="Modal sheet covers the page"
           initialFocus={closeRef}
           className="fixed inset-0 z-40 flex h-dvh flex-col bg-surface text-text outline-none transition-[translate,opacity] duration-150 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0 motion-reduce:transition-none"
         >

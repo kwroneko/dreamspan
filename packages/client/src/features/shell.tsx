@@ -137,7 +137,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const onChats = useLocation({ select: (location) => location.pathname === "/chats" })
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3">
-      <div className="flex items-center gap-1 px-1">
+      <div className="flex items-center gap-1 p-2">
         <Link to="/" className="mr-auto truncate font-semibold" onClick={onNavigate}>
           rp-harness
         </Link>
@@ -218,7 +218,10 @@ function PhoneBar() {
         </nav>
       </div>
       {open && (
-        <div className="fixed inset-0 z-40 flex lg:hidden">
+        <div
+          data-layout-overlay="Mobile navigation drawer covers the page"
+          className="fixed inset-0 z-40 flex lg:hidden"
+        >
           <div className="flex w-[min(22rem,88vw)] flex-col border-r border-border bg-surface shadow-xl">
             <Sidebar onNavigate={() => setOpen(false)} />
           </div>

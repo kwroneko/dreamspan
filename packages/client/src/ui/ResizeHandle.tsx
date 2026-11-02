@@ -142,6 +142,7 @@ export function ResizeHandle({
     <Tooltip label={hint} side={vertical ? "bottom" : direction === 1 ? "right" : "left"}>
       <div
         role="separator"
+        data-layout-overlay="Resize hit target straddles the column boundary"
         aria-label={label}
         aria-orientation={vertical ? "horizontal" : "vertical"}
         aria-valuemin={Math.round(min)}

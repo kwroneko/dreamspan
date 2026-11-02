@@ -76,7 +76,11 @@ export default function CodeEditorView(props: CodeEditorProps) {
           </>
         }
       >
-        <div ref={host} className="min-w-0 overflow-hidden rounded-md" />
+        <div
+          data-layout-audit-ignore="inset: Editor surface fills its own bordered field"
+          ref={host}
+          className="min-w-0 overflow-hidden rounded-md"
+        />
       </FieldFrame>
       {large && (
         <Dialog
