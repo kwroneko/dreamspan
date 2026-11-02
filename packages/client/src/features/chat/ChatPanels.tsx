@@ -323,6 +323,7 @@ export function ChatSidePanel({
 export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const navigate = useNavigate()
   const router = useRouter()
+  const [pathname] = useState(() => router.state.location.pathname)
   const wide = useWide()
   const userId = useSession().user.id
   // Each user's own, read again when another signs in.
@@ -338,6 +339,16 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   )
   // The URL names the tab shown, so a refresh or a copied link keeps it.
   useEffect(() => {
+    // Location state can update before the route's search props, and this component can
+    // still be mounted while another route opens. Never normalize either newer place
+    // from this render's old panel, or resolve a character tab before its cast loads.
+    const latestPanel = router.latestLocation.search.panel
+    if (
+      view.loading ||
+      router.latestLocation.pathname !== pathname ||
+      (isPanelTab(latestPanel) ? latestPanel : null) !== urlPanel
+    )
+      return
     if (!explicit || panel !== urlPanel)
       void navigate({
         to: ".",
@@ -346,7 +357,7 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
         replace: true,
         resetScroll: false
       })
-  }, [navigate, urlPanel, panel, explicit])
+  }, [navigate, router, pathname, urlPanel, panel, explicit, view.loading])
   // What a call reads when it's made, so `show` stays the same function from tab to tab and as
   // the chat updates: the message rows, the composer and the header take it, and a new one
   // re-rendered every row on each tab switch (night/tabperf).

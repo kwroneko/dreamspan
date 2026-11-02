@@ -112,6 +112,13 @@ test("the Cast tab: mute, speak now, write as, the card, add and remove", async 
     page.getByRole("textbox", { name: "Description", exact: true }),
     "A harbor pilot who reads the tides."
   )
+  await page.goBack()
+  await expect(members(page)).toBeVisible()
+  await page.goForward()
+  await expectTextBox(
+    page.getByRole("textbox", { name: "Description", exact: true }),
+    "A harbor pilot who reads the tides."
+  )
 
   // Speak now: the model writes Mira's turn.
   await openCast(page)
