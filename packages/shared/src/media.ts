@@ -120,24 +120,8 @@ export const avatarCropOf = (avatarMediaId: unknown, stored: unknown): AvatarCro
   return Schema.is(AvatarCrop)(crop) ? crop : null
 }
 
-/** The same from the JSON text a SQL read extracts (`json_extract(doc_json, '$.avatar_crop')`). */
-const avatarCropFromJson = (avatarMediaId: unknown, json: unknown): AvatarCrop | null => {
-  if (typeof json !== "string") return null
-  try {
-    return avatarCropOf(avatarMediaId, JSON.parse(json))
-  } catch {
-    return null
-  }
-}
-
 /** A read model's `avatarCrop`, present only when the card has chosen one for its avatar. */
 export const avatarCropField = (avatarMediaId: unknown, stored: unknown): { avatarCrop?: AvatarCrop } => {
   const crop = avatarCropOf(avatarMediaId, stored)
-  return crop === null ? {} : { avatarCrop: crop }
-}
-
-/** The same from extracted JSON text. */
-export const avatarCropFieldFromJson = (avatarMediaId: unknown, json: unknown): { avatarCrop?: AvatarCrop } => {
-  const crop = avatarCropFromJson(avatarMediaId, json)
   return crop === null ? {} : { avatarCrop: crop }
 }
