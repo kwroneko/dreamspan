@@ -95,7 +95,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
         const forkAfter = yield* api.OpenEditor({ refId: fork.id })
         assert.deepStrictEqual(forkAfter.doc, forkBefore.doc)
         assert.strictEqual(forkAfter.ref.headRevisionId, forkBefore.ref.headRevisionId)
-        assert.isTrue(forkAfter.ref.updateAvailable)
+        assert.isFalse(forkAfter.ref.updateAvailable)
         const matched = (yield* reader.StImportSources({ userId })).library.filter((r) => r.sourcePath === cardPath)
         assert.deepStrictEqual(
           matched.map((r) => r.refId),

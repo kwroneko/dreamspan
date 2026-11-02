@@ -12,7 +12,7 @@ import { createServer } from "node:http"
 import type { Socket } from "node:net"
 import type { Duplex } from "node:stream"
 import { NodeHttpServer } from "@effect/platform-node"
-import { AppApi, CurrentUser, Health } from "@rp/shared/api.ts"
+import { AppApi, AppCoreApi, AuthenticatedForkMergeApi, CurrentUser, Health } from "@rp/shared/api.ts"
 import { ByteSize, Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import {
   Headers,
@@ -27,7 +27,7 @@ import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
-import { makeEditorHandlers } from "./api/editor.ts"
+import { makeEditorHandlers, makeForkMergeHandlers } from "./api/editor.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeBinHandlers } from "./api/bin.ts"
 import { makeComposerHandlers } from "./api/composer.ts"
@@ -68,7 +68,7 @@ import * as Secrets from "./secrets.ts"
 const VERSION = "0.0.0"
 const startedAt = Date.now()
 
-const Handlers = AppApi.toLayer(
+const CoreHandlers = AppCoreApi.toLayer(
   Effect.gen(function* () {
     const config = yield* AppConfig
     const eventLoop = yield* EventLoopMonitor
@@ -86,7 +86,7 @@ const Handlers = AppApi.toLayer(
     const composer = yield* makeComposerHandlers
     const notices = yield* makeNoticeHandlers
     const inspector = yield* makeInspectorHandlers
-    return AppApi.of({
+    return AppCoreApi.of({
       ...providers,
       ...accounts,
       ...library,
@@ -119,6 +119,8 @@ const Handlers = AppApi.toLayer(
     })
   })
 )
+
+const Handlers = Layer.mergeAll(CoreHandlers, AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers))
 
 /**
  * RPC requests received and not yet answered, so a stop can let their replies go out

@@ -75,7 +75,10 @@ export const toLibraryRef = (row: RefRow) =>
     followsRefId: row.follows_ref_id as RefId | null,
     chatId: row.chat_id as ChatId | null,
     hasImport: row.ref_kind === "upstream" && row.import_head !== null,
-    updateAvailable: row.followed_head !== null && row.followed_head !== row.merge_base_revision_id,
+    // A card fork's parent versions are offered only by the explicit merge (ForkMergeStatus):
+    // the editor's update alert speaks of imported files, and the merge UI isn't built yet.
+    updateAvailable:
+      row.parent_ref_id === null && row.followed_head !== null && row.followed_head !== row.merge_base_revision_id,
     rowVersion: row.row_version,
     updatedAt: row.updated_at,
     ...(row.created_at === undefined ? {} : { addedAt: row.created_at }),

@@ -372,7 +372,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.deepStrictEqual(yield* cast, [parent.entityId, parent.ref.id, "A sailor."])
       assert.deepStrictEqual(yield* chats(parent.entityId), [chatId])
 
-      // Editing the parent: the fork keeps its content and offers an explicit update.
+      // Editing the parent: the fork keeps its content; only the explicit merge offers the change.
       const forkBefore = yield* api.OpenEditor({ refId: forked.id })
       yield* draft(api, parent.ref.id, textField(["description"]), "An old sailor.")
       const saved = yield* commit(api, parent.ref.id)
@@ -380,7 +380,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const forkAfter = yield* api.OpenEditor({ refId: forked.id })
       assert.deepStrictEqual(
         [forkAfter.ref.headRevisionId, forkAfter.doc.description, forkAfter.ref.updateAvailable, forkAfter.usedByChats],
-        [forkBefore.ref.headRevisionId, "A retired sailor.", true, 0]
+        [forkBefore.ref.headRevisionId, "A retired sailor.", false, 0]
       )
       assert.deepStrictEqual(yield* chats(forked.entityId), [])
       const family = yield* api.CardFamily({ entityId: parent.entityId })
