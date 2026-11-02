@@ -43,6 +43,18 @@ const setup = () => {
 }
 
 describe("the Snippets workspace", () => {
+  it("reads only the final scope when chat providers unmount and remount together", async () => {
+    const { workspace, calls } = setup()
+    workspace.setChat("chat-1" as ChatId)
+    workspace.setChat(null)
+    workspace.setChat("chat-2" as ChatId)
+    await workspace.refresh()
+    expect(calls).toEqual([{ tag: "ListSnippets", args: { chatId: "chat-2" } }])
+    // A change after that read still asks the server again.
+    await workspace.refresh()
+    expect(calls).toHaveLength(2)
+  })
+
   it("lists the chat's snippets, and makes new ones there", async () => {
     const { workspace, calls } = setup()
     workspace.setChat("chat-1" as ChatId)

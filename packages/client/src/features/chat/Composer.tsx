@@ -231,7 +231,7 @@ export function Composer({
   // The text is a server draft per branch tip (composerDraft.ts). Text typed on the card's
   // page while this chat was being made comes along (composerCarry.ts).
   const [workspace] = useState(() => composerWorkspace(session, userId))
-  const { draft, setBusy, setError } = workspace
+  const { draft, setBusy, setError, syncFork } = workspace
   const { busy, error } = useSyncExternalStore(workspace.subscribe, workspace.snapshot)
   const {
     text: draftText,
@@ -320,12 +320,7 @@ export function Composer({
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
 
   /** The composer belongs to the fork shown (DESIGN §6.2). */
-  const syncFork = useCallback(() => {
-    const { loading, forkId } = session.snapshot()
-    if (loading) return
-    draft.setFork(forkId, session.takeBranchStart(forkId))
-  }, [draft, session])
-  useEffect(syncFork, [syncFork, view.forkId, view.leafSlotId, view.loading])
+  useEffect(syncFork, [syncFork, view.forkId, view.leafSlotId, view.loading, view.opened])
 
   // The bar closes when its reply is deleted, or the chat view goes to another fork.
   useEffect(() => {

@@ -9,8 +9,20 @@ class ComposerWorkspace {
   readonly draft: ComposerDraft
   private state: { busy: boolean; error: AppError | null } = { busy: false, error: null }
   private readonly listeners = new Set<() => void>()
+  private readonly session: ChatSession
+  private location: string | null = null
   constructor(session: ChatSession, userId: string) {
+    this.session = session
     this.draft = new ComposerDraft(session, userId)
+  }
+  /** A surface remount is still the same tip. A moved tip or new open generation reads again. */
+  readonly syncFork = () => {
+    const { loading, forkId, leafSlotId, opened } = this.session.snapshot()
+    if (loading) return
+    const location = JSON.stringify([forkId, leafSlotId, opened])
+    if (this.location === location) return
+    this.location = location
+    this.draft.setFork(forkId, this.session.takeBranchStart(forkId))
   }
   readonly snapshot = () => this.state
   readonly subscribe = (listener: () => void) => {

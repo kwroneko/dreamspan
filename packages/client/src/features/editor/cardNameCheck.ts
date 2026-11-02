@@ -1,15 +1,15 @@
+import { libraryListAtom } from "../library/queries.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { cardNameClash } from "@rp/shared/cardNames.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { useEffect } from "react"
 import { onLibraryChange } from "../../libraryChanges.ts"
 import { AsyncResult } from "effect/reactivity"
-import { AppClient } from "../../rpc.ts"
 import { allOf } from "../../actions.tsx"
 
 const cards = allOf({
-  live: AppClient.query("ListLibrary", { kind: "card" }, { reactivityKeys: ["library"] }),
-  archived: AppClient.query("ListLibrary", { kind: "card", archived: true }, { reactivityKeys: ["library"] })
+  live: libraryListAtom("card"),
+  archived: libraryListAtom("card", true)
 })
 
 export function useCardNameCheck(name: string, version: string, current?: LibraryRef) {

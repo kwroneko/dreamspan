@@ -1,9 +1,10 @@
-// What the library screens read. An import makes the `library` key stale.
 import type { EntityKind } from "@rp/shared/library.ts"
+import { libraryListAtom } from "./queries.ts"
+// What the library screens read. An import makes the `library` key stale.
 import { allOf } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 
-const listAtom = (kind: EntityKind) => AppClient.query("ListLibrary", { kind }, { reactivityKeys: ["library"] })
+const listAtom = libraryListAtom
 
 /** The kinds the library screen lists, in order. */
 export const LISTED = [
@@ -20,7 +21,7 @@ export const libraryAtom = allOf({
   lorebook: listAtom("lorebook"),
   preset: listAtom("preset"),
   /** Archived presets, for the presets' Archived view (the other kinds have none yet). */
-  archivedPresets: AppClient.query("ListLibrary", { kind: "preset", archived: true }, { reactivityKeys: ["library"] }),
+  archivedPresets: libraryListAtom("preset", true),
   castCards: castCardsAtom,
   exportFormats: AppClient.query("ListExportFormats", undefined, { reactivityKeys: ["library"] })
 })

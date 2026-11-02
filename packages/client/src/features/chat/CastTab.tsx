@@ -1,3 +1,4 @@
+import { useChatCards } from "./chatCards.ts"
 // The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who you play (the persona, who
 // `{{user}}` is), then everyone in the chat, one quiet row each: portrait, name (which opens
 // their tab, where the card is edited), Mute (never picked to reply; the card stays in the
@@ -6,13 +7,11 @@
 // persona, remove them. Under them, Add characters (CastAdd.tsx, a `castSections` entry).
 // Changes to who's here are state events at the leaf shown, so they apply from the latest
 // message on, on this branch.
-import { useAtomValue } from "@effect/atom-react"
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
+import type { CastCard } from "@rp/shared/chat.ts"
 import type { CastChange, ChatCard } from "@rp/shared/chatSetupApi.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
-import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -218,29 +217,7 @@ export function CastTab({ session }: { session: ChatSession }) {
     return last?.version.status === "generating" ? last.version.speakerEntityId : null
   })
   const participants = useMemo(() => cast?.participants ?? [], [cast])
-  const chatId = session.id
-  // The leaf shown: what the next request reads depends on the state there.
-  const leafSlotId = useSyncExternalStore(session.subscribe, () => session.snapshot().leafSlotId)
-  const forkId = useSyncExternalStore(session.subscribe, () => session.snapshot().forkId)
-  // Cards in the bin, or purged, have no definition to read.
-  const key = participants.filter((id) => view.cards.get(id)?.inBin === false).join(" ")
-  // The library entry each card's actions need (the ref to edit or fork); read again at a new
-  // leaf, after any library change (an editor save), or a card fork made here.
-  const infoAtom = useMemo(
-    () =>
-      AppClient.query(
-        "ListChatCards",
-        {
-          chatId,
-          forkId,
-          slotId: leafSlotId,
-          entityIds: key === "" ? [] : (key.split(" ") as Array<EntityId>)
-        },
-        { reactivityKeys: ["library", `chat-cards:${chatId}`] }
-      ),
-    [chatId, leafSlotId, forkId, key]
-  )
-  const infoResult = useAtomValue(infoAtom)
+  const infoResult = useChatCards(session)
   const info = useMemo(
     () =>
       new Map(AsyncResult.isSuccess(infoResult) ? infoResult.value.map((card) => [card.entityId as string, card]) : []),
