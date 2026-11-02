@@ -1,3 +1,4 @@
+import { TokenizerInfo } from "./generation.ts"
 import { Placement } from "./docs/note.ts"
 // The request inspector and the cache-warmth estimate (DESIGN §5.5, §7.4), merged into AppApi.
 import { SelectiveLogic } from "./docs/lorebook.ts"
@@ -166,6 +167,7 @@ const RequestTimes = {
 /** Only the usage fields the inspector displays; provider metadata never crosses this boundary. */
 export const InspectorUsage = Schema.Struct({
   id: LlmRequestId,
+  estimatedInput: Schema.optionalKey(Schema.NullOr(Schema.Int)),
   status: RequestStatus,
   ...RequestTimes,
   counts: Schema.Struct({
@@ -273,6 +275,7 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   type: Schema.Literals(["normal", "swipe", "impersonate", "continue", "quiet"]),
   mode: Schema.Literals(["st", "layouts"]),
   capture: Schema.Literals(["captured", "unavailable"]),
+  tokenizer: Schema.optionalKey(TokenizerInfo),
   ...ContextDisplay.fields,
   /** Every attempt, retries included, oldest first. */
   requests: Schema.Array(InspectorUsage)
@@ -299,6 +302,8 @@ export type CacheWarmth = typeof CacheWarmth.Type
 
 /** Estimated budget for the next context, with raw history excluded from its fixed cost. */
 export const ContextBudget = Schema.Struct({
+  countedInput: Schema.optionalKey(Schema.Int),
+  tokenizer: Schema.optionalKey(TokenizerInfo),
   /** Effective context window and stepped target, both including the response reserve. */
   maximum: Schema.Int,
   target: Schema.Int,

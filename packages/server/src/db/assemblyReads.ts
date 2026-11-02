@@ -1,3 +1,5 @@
+import { tokensOf } from "../assembler/st.ts"
+import { textDisplay } from "./textDisplay.ts"
 import { fitSummaryOutput } from "../lcm/requestBudget.ts"
 import { presetContext } from "./presetContext.ts"
 import { cacheExpiry } from "./cacheExpiry.ts"
@@ -182,6 +184,16 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           ? { slotId: recorded.slot_id, depth: recorded.depth }
           : (sources.pins().historyStart ?? null)
         const start = next instanceof AssemblyFailed ? fallback : (next.historyStart ?? fallback)
+        const displayTokens =
+          next instanceof AssemblyFailed
+            ? null
+            : yield* textDisplay(
+                sql,
+                userId,
+                next.inputs.model,
+                assembler,
+                next.request.messages.map((m) => m.content + (m.name ?? ""))
+              )
         const budget = next.contextBudget
         const preset = next instanceof AssemblyFailed ? next.preset : next.inputs.preset
         const [presetRef] = preset?.ref
@@ -281,6 +293,17 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             budget && preset
               ? {
                   ...budget,
+                  ...(displayTokens && !(next instanceof AssemblyFailed)
+                    ? {
+                        countedInput:
+                          displayTokens.counts.reduce(
+                            (n, c) => n + c,
+                            next.request.messages.filter((m) => m.content).length * 3
+                          ) +
+                          next.request.messages.reduce((n, m) => n + tokensOf({ content: "", images: m.images }), 0),
+                        tokenizer: displayTokens.tokenizer
+                      }
+                    : {}),
                   presetName,
                   builtinPreset: preset.scope === "builtin",
                   origins: budgetOrigins(resolved ?? null)

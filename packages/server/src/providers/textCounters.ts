@@ -3,18 +3,19 @@
 // the selected model"). The same registry shape as the image counters beside it, and the same
 // endpoints: tried newest registration first, the first that applies counts.
 // - OpenAI's models (any host: api.openai.com, OpenRouter's `openai/…`): their own BPE
-//   encodings, counted locally (js-tiktoken in the format worker's interactive lane).
+//   encodings, counted locally (tiktoken in the format worker's interactive lane).
 // - Only for a connection the user opted in (owner, 2026-11-02: "this isn't a good idea to do
 //   behind the user's back, especially given varying retention policies"; `remote` counters):
 //   Anthropic POST /v1/messages/count_tokens, Gemini POST models/{model}:countTokens, OpenAI
 //   POST /v1/responses/input_tokens for an OpenAI model the encodings don't know: the model's
 //   own count, one request per text. A one-message count includes the message's framing, so a
 //   text's tokens are its count less a one-token text's count, plus one.
-// Where none applies (DeepSeek, OpenRouter's other models, a plugin's kind without a counter),
+// Where none applies (an unsupported model or a plugin's kind without a counter),
 // a provider's counter isn't opted in, or a count fails, the caller falls back to o200k_base and
 // says so (TextTokens.ts). Anthropic's old public Claude tokenizer isn't used: it undercounts
 // current models by 30–50% (owner, 2026-11-02).
 import { Effect } from "effect"
+import { localTextEncoding } from "./localTextModels.ts"
 import type { LocalEncoding } from "../importer/tokenizer.ts"
 import { countField, joinUrl, postJson, TokenCountError } from "./imageCounters.ts"
 import type { ListRequest } from "./modelLists.ts"
@@ -42,33 +43,37 @@ export interface TextTokenCounter {
   readonly count: (request: TextCountRequest) => Effect.Effect<ReadonlyArray<number>, TokenCountError>
 }
 
-/** The model's name without a router's prefix: `openai/gpt-4o` → `gpt-4o`. */
-const bare = (model: string) =>
-  model
-    .toLowerCase()
-    .replace(/^models\//, "")
-    .replace(/^openai\//, "")
-
-/** OpenAI's encoding for a model, as tiktoken maps them; null for a model that isn't OpenAI's. */
-const openAiEncoding = (model: string): LocalEncoding | null => {
-  const name = bare(model)
-  if (/^(gpt-4o|gpt-4\.1|gpt-4\.5|gpt-5|o1|o3|o4|chatgpt-4o|gpt-oss)/.test(name)) return "o200k_base"
-  if (/^(gpt-4|gpt-3\.5|gpt-35)/.test(name)) return "cl100k_base"
-  return null
-}
-
 const ENCODING_NAMES: Record<LocalEncoding, string> = {
   o200k_base: "o200k_base, the tokenizer of GPT-4o and later",
-  cl100k_base: "cl100k_base, the tokenizer of GPT-4 and GPT-3.5"
+  cl100k_base: "cl100k_base, the tokenizer of GPT-4 and GPT-3.5",
+  llama3: "Llama 3's published tokenizer",
+  "mistral-v3": "Mistral 7B v0.3's published tokenizer",
+  qwen3: "Qwen3's published tokenizer",
+  "deepseek-api": "DeepSeek's published API tokenizer",
+  "deepseek-v4": "DeepSeek V4's published tokenizer",
+  qwen2: "Qwen2.5's published tokenizer",
+  "deepseek-v3": "DeepSeek V3's published tokenizer",
+  gemma2: "Gemma 2's published tokenizer"
 }
 export const encodingLabel = (encoding: LocalEncoding) => ENCODING_NAMES[encoding]
 
 const tiktoken: TextTokenCounter = {
   id: "openai-encodings",
-  label: (model) => `${model}'s own tokenizer (${ENCODING_NAMES[openAiEncoding(model) ?? "o200k_base"]})`,
+  label: (model) => `${model}'s own tokenizer (${ENCODING_NAMES[localTextEncoding(model) ?? "o200k_base"]})`,
   remote: false,
-  appliesTo: (target) => openAiEncoding(target.model) !== null,
-  count: (request) => request.encode(openAiEncoding(request.model) ?? "o200k_base", request.texts)
+  appliesTo: (target) => ["o200k_base", "cl100k_base"].includes(localTextEncoding(target.model) ?? ""),
+  count: (request) => request.encode(localTextEncoding(request.model) ?? "o200k_base", request.texts)
+}
+
+const openModels: TextTokenCounter = {
+  id: "open-model-encodings",
+  label: (model) => `${model}'s own tokenizer (${encodingLabel(localTextEncoding(model)!)})`,
+  remote: false,
+  appliesTo: (target) => {
+    const encoding = localTextEncoding(target.model)
+    return encoding !== null && encoding !== "o200k_base" && encoding !== "cl100k_base"
+  },
+  count: (request) => request.encode(localTextEncoding(request.model)!, request.texts)
 }
 
 /** Each text's count less a one-token text's, plus one; an empty text is none, uncounted. */
@@ -139,6 +144,6 @@ const openai: TextTokenCounter = {
 }
 
 /** In registration order; the last registered is asked first, so the local encodings win. */
-export const builtinTextCounters: ReadonlyArray<TextTokenCounter> = [anthropic, google, openai, tiktoken]
+export const builtinTextCounters: ReadonlyArray<TextTokenCounter> = [anthropic, google, openai, tiktoken, openModels]
 
 export { TokenCountError }

@@ -143,6 +143,8 @@ export const toModel = (row: ModelRow) =>
   })
 
 export interface LlmRequestRow {
+  readonly estimated_input: number | null
+  readonly input_tokenizer: string | null
   readonly id: string
   readonly connection_id: string
   readonly model_id: string | null

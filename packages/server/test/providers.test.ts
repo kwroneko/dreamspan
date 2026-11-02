@@ -65,6 +65,15 @@ describe("connections", () => {
       )
       assert.deepStrictEqual(yield* reader.ListConnections({ userId: bo }), [])
       // Every operation on someone else's connection is NotFound, so it isn't even confirmed to exist.
+      yield* fails(
+        reader.GetTextCalibration({
+          userId: bo,
+          connectionId: conn.id,
+          modelKey: "synthetic",
+          tokenizer: "o200k_base"
+        }),
+        "NotFound"
+      )
       yield* fails(reader.GetConnection({ userId: bo, connectionId: conn.id }), "NotFound")
       yield* fails(reader.ResolveConnection({ userId: bo, connectionId: conn.id }), "NotFound")
       yield* fails(reader.ListModels({ userId: bo, connectionId: conn.id, includeHidden: true }), "NotFound")
@@ -432,6 +441,65 @@ describe("models", () => {
 })
 
 describe("usage ledger", () => {
+  it.effect(
+    "calibration uses reported totals including cache reads/writes and only the last 32 matching requests",
+    () =>
+      Effect.gen(function* () {
+        const { writer, reader, ana, create } = yield* setup
+        const conn = yield* create(ana)
+        for (let i = 0; i < 35; i++) {
+          const id = `calibration-${i}` as LlmRequestId
+          yield* writer.OpenLlmRequest({
+            userId: ana,
+            request: {
+              id,
+              connectionId: conn.id,
+              modelId: null,
+              chatId: null,
+              rolloutId: null,
+              versionId: null,
+              purpose: "generation",
+              api: "openai-completions",
+              provider: "openai",
+              modelKey: "synthetic",
+              startedAt: i
+            }
+          })
+          yield* writer.CloseLlmRequest({
+            userId: ana,
+            request: {
+              id,
+              status: i === 34 ? "failed" : "complete",
+              endedAt: i + 1,
+              firstTokenAt: null,
+              responseModel: null,
+              upstream: null,
+              textEstimate: { tokens: 100, tokenizer: "o200k_base" },
+              counts: {
+                ...unknownCounts,
+                inputUncached: i === 0 ? 99999 : 50,
+                cacheRead: 100,
+                cacheWrite: 50,
+                output: 1
+              },
+              usageSource: i === 33 ? "estimated" : "reported",
+              rawUsage: null,
+              reportedCost: null,
+              cost: null,
+              error: null
+            }
+          })
+        }
+        const calibration = yield* reader.GetTextCalibration({
+          userId: ana,
+          connectionId: conn.id,
+          modelKey: "synthetic",
+          tokenizer: "o200k_base"
+        })
+        assert.deepStrictEqual(calibration, { ratio: 2, samples: 32 })
+      }).pipe(Effect.provide(database()))
+  )
+
   it.effect("records a request from open to close, and a crash leaves it interrupted, never missing", () =>
     Effect.gen(function* () {
       const { writer, reader, ana, bo, create } = yield* setup

@@ -296,6 +296,7 @@ const OpenLlmRequest = Schema.Struct({
 
 /** Closes a ledger row with what the request produced. */
 const CloseLlmRequest = Schema.Struct({
+  textEstimate: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, tokenizer: Schema.String })),
   cacheIdentity: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
@@ -3178,6 +3179,11 @@ export class ReadOps extends RpcGroup.make(
     error: StorageError
   }),
   /** The user's live connections that count through a provider, and whose (`tokenCounting.ts`). */
+  Rpc.make("GetTextCalibration", {
+    payload: { userId: UserId, connectionId: ConnectionId, modelKey: Schema.String, tokenizer: Schema.String },
+    success: Schema.NullOr(Schema.Struct({ ratio: Schema.Number, samples: Schema.Int })),
+    error: Schema.Union([StorageError, NotFound])
+  }),
   Rpc.make("GetTokenCounting", {
     payload: { userId: UserId },
     success: Schema.Array(TokenCountingChoice),

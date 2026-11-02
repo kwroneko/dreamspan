@@ -1,3 +1,5 @@
+import { WorkerAssembler } from "../assembler/assembler.ts"
+import { textDisplay } from "./textDisplay.ts"
 import { eventApplies, inFork, viewAt } from "./forkState.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { tokensOf } from "../assembler/st.ts"
@@ -141,6 +143,7 @@ export const rolloutUsage = (sql: SqlClient.SqlClient, userId: UserId, rolloutId
       | "started_at"
       | "first_token_at"
       | "ended_at"
+      | "estimated_input"
       | "input_uncached"
       | "cache_read"
       | "cache_write"
@@ -150,7 +153,7 @@ export const rolloutUsage = (sql: SqlClient.SqlClient, userId: UserId, rolloutId
       | "cost_currency"
     >
   >`
-    SELECT id, status, started_at, first_token_at, ended_at, input_uncached, cache_read, cache_write, output,
+    SELECT id, status, started_at, first_token_at, ended_at, estimated_input, input_uncached, cache_read, cache_write, output,
       usage_source, cost, cost_currency
     FROM llm_requests INDEXED BY llm_requests_rollout WHERE rollout_id = ${rolloutId} AND owner_user_id = ${userId}
     ORDER BY started_at, id`
@@ -275,6 +278,7 @@ export const inspectionInputs = (
   })
 
 export const makeInspectorReadHandlers = Effect.gen(function* () {
+  const assembler = yield* WorkerAssembler
   const sql = yield* SqlClient.SqlClient
   const handlers = {
     RunContext: ({ userId, versionId }) =>
@@ -301,6 +305,14 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         const display = wire?.display
         // Captured wire messages are text; their images are the snapshot's, with its estimates.
         const images = wire ? wireImages(wire.messages, snapshot.request) : []
+        const textCounts = yield* textDisplay(
+          sql,
+          userId,
+          snapshot.inputs.model,
+          assembler,
+          (wire?.messages ?? []).map((m) => m.content + (m.name ?? "")),
+          snapshot.inputs.now
+        )
         const current = new Map<string, { readonly revisionId: string; readonly fresh: boolean }>()
         yield* Effect.gen(function* () {
           if (snapshot.lcm?.selected.length) {
@@ -323,13 +335,17 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           type: snapshot.inputs.type,
           mode: snapshot.inputs.mode,
           capture: display ? "captured" : "unavailable",
+          tokenizer: textCounts.tokenizer,
           messages: display
             ? wire!.messages.map((message, at) => ({
                 role: message.role,
                 ...(message.prefill ? { prefill: message.prefill } : {}),
                 name: message.name ?? null,
                 content: message.content,
-                tokens: tokensOf({ ...message, images: images[at] }),
+                tokens:
+                  (textCounts.counts[at] ?? 0) +
+                  tokensOf({ content: "", images: images[at] }) +
+                  (message.content ? 3 : 0),
                 ...(images[at]?.length ? { images: images[at].map(contextImage) } : {}),
                 sources: (message.sources ?? []).map((source) => {
                   if (!source.summary) return source
@@ -356,6 +372,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           }),
           requests: requests.map((r): InspectorUsage => ({
             id: r.id as InspectorUsage["id"],
+            estimatedInput: r.estimated_input,
             status: r.status,
             startedAt: r.started_at,
             firstTokenAt: r.first_token_at,

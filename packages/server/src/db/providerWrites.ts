@@ -413,6 +413,8 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           first_token_at: request.firstTokenAt,
           response_model: request.responseModel,
           upstream: request.upstream,
+          estimated_input: request.textEstimate?.tokens ?? null,
+          input_tokenizer: request.textEstimate?.tokenizer ?? null,
           input_uncached: counts.inputUncached,
           cache_read: counts.cacheRead,
           cache_write: counts.cacheWrite,

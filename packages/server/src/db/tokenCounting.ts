@@ -1,3 +1,4 @@
+import { readTextCalibration } from "./textCalibration.ts"
 // How each of a user's connections counts tokens (owner, 2026-11-02: "NEVER send anything to
 // providers users didn't actually choose to… It should also be possible to specify a separate
 // token counting endpoint for a connection"; DESIGN §11). On this server unless the user chose a
@@ -49,6 +50,12 @@ const live = (sql: SqlClient.SqlClient, userId: UserId) =>
 export const makeTokenCountingReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
+    GetTextCalibration: ({ userId, connectionId, modelKey, tokenizer }) =>
+      Effect.gen(function* () {
+        if (!(yield* owned(sql, userId, [connectionId])).has(connectionId))
+          return yield* new NotFound({ entity: "connection", id: connectionId })
+        return yield* readTextCalibration(sql, userId, connectionId, modelKey, tokenizer)
+      }).pipe(query("GetTextCalibration")),
     GetTokenCounting: ({ userId }) => live(sql, userId).pipe(query("GetTokenCounting"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

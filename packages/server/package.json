@@ -6,9 +6,11 @@
     "@earendil-works/pi-ai": "1.0.3",
     "@effect/platform-node": "4.0.1",
     "@effect/sql-sqlite-node": "4.0.1",
+    "@huggingface/tokenizers": "0.2.0",
     "effect": "4.0.1",
-    "js-tiktoken": "1.0.21",
+    "llama3-tokenizer-js": "1.2.0",
     "sharp": "0.35.5",
+    "tiktoken": "1.0.22",
     "undici": "8.11.2"
   },
   "devDependencies": {

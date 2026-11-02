@@ -1794,7 +1794,17 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         for (const request of own.requests) {
           assert.deepStrictEqual(
             Object.keys(request).sort(),
-            ["id", "status", "startedAt", "firstTokenAt", "endedAt", "counts", "usageSource", "cost"].sort()
+            [
+              "id",
+              "estimatedInput",
+              "status",
+              "startedAt",
+              "firstTokenAt",
+              "endedAt",
+              "counts",
+              "usageSource",
+              "cost"
+            ].sort()
           )
         }
       })
