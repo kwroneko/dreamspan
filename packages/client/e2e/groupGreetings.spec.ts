@@ -148,7 +148,7 @@ for (const width of [1440, 390]) {
       })
       await page.getByLabel("Message", { exact: true }).fill("Hello crew.")
       await page.getByRole("button", { name: "Send", exact: true }).click()
-      await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+      await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
       await expect(
         page.getByRole("article", { name: "Reply", exact: true }).filter({ hasText: "Mira welcomes the crew." })
       ).toBeVisible()

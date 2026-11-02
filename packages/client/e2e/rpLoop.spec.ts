@@ -407,7 +407,7 @@ test("the pending chat's Playing as is the persona control, and guidance generat
   await guidance.fill("Open on the docks at dawn.")
   const sent = provider.completions.length
   await guidance.press("Enter")
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   await expect.poll(() => provider.completions.length).toBe(sent + 1)
   expect(provider.completions.at(-1)!.messages.at(-1)!.content).toContain("Open on the docks at dawn.")
   // Submitted guidance leaves the box; the chat's composer starts empty.

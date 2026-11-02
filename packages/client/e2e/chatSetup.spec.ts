@@ -89,7 +89,7 @@ const chatWithMira = async (page: Page) => {
   await pickPendingPersona(page, "Bo")
   await composer(page).fill("Hello there.")
   await page.getByRole("button", { name: "Send as Bo" }).click()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   await expect(replies(page)).toHaveCount(2)
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 }
@@ -114,7 +114,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
 
   await composer(page).fill("Hello there.")
   await page.getByRole("button", { name: "Send as Bo" }).click()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   // Named by its character and day, the persona left out.
   await expect(page.getByRole("heading", { level: 1, name: /^Mira, [A-Z][a-z]{2} \d{1,2}$/ })).toBeVisible()
   // The greeting picked, as a version of the first message, with its macros resolved for Bo.
@@ -332,7 +332,7 @@ test("a saved greeting keeps its card's fields and the date it showed", async ({
   await expect(greeting).toContainText("A lighthouse keeper. The log says Wren, 2026-03-01.")
   await composer(page).fill("Hello, keeper.")
   await page.getByRole("button", { name: /^Send/ }).click()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   const first = replies(page).first()
   await expect(first).toContainText("A lighthouse keeper. The log says Wren, 2026-03-01.")
   // A day later, it still says what it said.
@@ -362,7 +362,7 @@ test("text typed while the first send makes the chat goes along to the chat's co
   await expect(composer(page)).toHaveValue("")
   await composer(page).fill("And bring the lantern.")
   release!()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   await expect(page.getByRole("article", { name: "Your message" })).toContainText("Take me across.")
   await expect(composer(page)).toHaveValue("And bring the lantern.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
@@ -375,7 +375,7 @@ test("a card with 1,001 greetings and a huge random draw starts like any other",
   await expect(page.getByRole("article", { name: /^Greeting from / })).toContainText("1/1001")
   await composer(page).fill("Hello, everyone.")
   await page.getByRole("button", { name: /^Send/ }).click()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   await expect(page.getByRole("article", { name: "Your message" })).toContainText("Hello, everyone.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 })
@@ -439,7 +439,7 @@ test("a new chat of a group: each character greets in turn, and the first send m
   await greetings.nth(0).getByRole("button", { name: "Next greeting from Mira" }).click()
   await expect(greetings.nth(0)).toContainText("Mira waves at Ana from the pier.")
   await page.getByRole("button", { name: "Send as Ana" }).click()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   await expect(page.getByRole("heading", { level: 1, name: "The Pier" })).toBeVisible()
   // Both greetings, the alternate picked shown, then the message and Tobin's reply.
   await expect(replies(page).first()).toContainText("Mira waves at Ana from the pier.")

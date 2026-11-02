@@ -376,7 +376,7 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
 
   // The account's choice: after a reload, still one at a time.
   await page.reload()
-  await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
+  // The viewer is itself restored, as well as the one-at-a-time preference.
   await expect(column("Tall").getByRole("button", { name: SINGLE, exact: true })).toHaveAttribute(
     "aria-pressed",
     "true"
@@ -388,8 +388,8 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   // Off again: back to stacking, after a reload too.
   await setSingle(column("Standard"), false)
   await page.reload()
+  await expect(column("Standard")).toBeVisible()
   await openPanel(page, "Cast")
-  await cast.getByRole("button", { name: "View Standard's portrait" }).click()
   await cast.getByRole("button", { name: "View Tall's portrait" }).click()
   await expect(viewers).toHaveCount(2)
   await expect(column("Tall").getByRole("button", { name: SINGLE, exact: true })).toHaveAttribute(

@@ -70,7 +70,7 @@ test("switching between branches opens the fork through each, with its own compo
   await expect(message(page, "Take the right road.")).toBeVisible()
   await expect(box(page)).toHaveValue("On the right, a toll.")
   // ...while switching never moved where the chat opens: the fork last chatted in.
-  await expect(page).not.toHaveURL(/fork=/)
+  await expect(page).toHaveURL(/fork=/)
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(message(page, "Take the right road.")).toBeVisible()
   await expect(box(page)).toHaveValue("On the right, a toll.")

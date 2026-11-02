@@ -1,3 +1,5 @@
+import { usePlaceParam } from "../../usePlaceParam.ts"
+import { showToast } from "../../ui/Toast.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { summaryEditorTools, summaryTextEditor } from "./editorHistory.tsx"
 // The summaries in use on the path shown (DESIGN §8.1, ARCHITECTURE §16): by level and
@@ -297,7 +299,12 @@ function SummaryRow({
   blockedByManual?: boolean
   onJump: (slot: SlotId) => void
 }) {
-  const [mode, setMode] = useState<Mode>("view")
+  const [mode, setMode] = usePlaceParam<Mode>(`summaryMode:${summary.id}`, "view", [
+    "view",
+    "edit",
+    "revisions",
+    "children"
+  ])
   const [error, setError] = useState<AppError | null>(null)
   const [loaded, setLoaded] = useState<string | null>(null)
   const ref = useRef<HTMLLIElement>(null)
@@ -724,7 +731,11 @@ export function SummaryPanel({
         client("GetSummary", { forkId: session.snapshot().forkId, summaryId: wanted as LcmSummary["id"] })
       )
       .then(async (result) => {
-        if (!live || !result.ok) return
+        if (!live) return
+        if (!result.ok) {
+          showToast({ title: "This summary is no longer available on this branch." })
+          return
+        }
         const s = result.value
         const coverage = await session.coverage(s.from - 1, s.to - 1, true)
         if (!live) return

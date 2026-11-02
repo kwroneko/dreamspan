@@ -127,7 +127,10 @@ export function useShellNavigation() {
   }
   const navigate = useNavigate()
   const { selection, picked } = useContext(Picks)!
-  const scope: Scope = { entity: (search.character as EntityId | undefined) ?? null, chat: search.forks ?? null }
+  const scope: Scope = {
+    entity: typeof search.character === "string" && search.character ? (search.character as EntityId) : null,
+    chat: typeof search.forks === "string" && search.forks ? search.forks : null
+  }
   return {
     scope,
     grid: search.side === "characters",
@@ -145,7 +148,7 @@ export function useShellNavigation() {
           ...scopeSearch(scope),
           ...(grid ? { side: "characters" } : {})
         }),
-        replace: true
+        resetScroll: false
       }),
     selection,
     picked
@@ -176,7 +179,6 @@ export function useOpenCharacter() {
           character: entity,
           fork: latest.forkId,
           panel,
-          ...(latest.leaf ? { leaf: latest.leaf } : {}),
           ...(latest.slot ? { slot: latest.slot } : {})
         }
       })

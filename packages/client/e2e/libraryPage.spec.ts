@@ -158,5 +158,5 @@ test("every item opens at its own address, and a stale address says so", async (
   await page.goto(`${server().url}/library/0190a5c0-0000-7000-8000-000000000000`)
   await expect(page.getByText("This item was deleted or never existed ·")).toBeVisible()
   await page.getByRole("main").getByRole("link", { name: "Library", exact: true }).click()
-  await expect(page).toHaveURL(`${server().url}/library`)
+  await expect(page).toHaveURL(`${server().url}/library?kind=preset`)
 })

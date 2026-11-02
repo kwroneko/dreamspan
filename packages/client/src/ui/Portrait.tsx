@@ -53,13 +53,23 @@ const Context = createContext<PortraitViewer | null>(null)
 export function PortraitProvider({
   inline,
   current,
+  stack: suppliedStack,
+  onStackChange,
   children
 }: {
   inline: boolean
   current?: (portrait: Portrait) => Portrait | null
+  stack?: Stack<Portrait>
+  onStackChange?: (next: Stack<Portrait>) => void
   children: ReactNode
 }) {
-  const [stack, setStack] = useState<Stack<Portrait>>([])
+  const [localStack, setLocalStack] = useState<Stack<Portrait>>([])
+  const stack = suppliedStack ?? localStack
+  const setStack = (change: (stack: Stack<Portrait>) => Stack<Portrait>) => {
+    const next = change(stack)
+    if (onStackChange) onStackChange(next)
+    else setLocalStack(next)
+  }
   const prefs = useViewPrefs()
   const single = prefs.prefs.singlePortrait
   // A phone has room for one: a click there always replaces it.

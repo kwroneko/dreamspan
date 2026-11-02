@@ -8,7 +8,7 @@
 
 **Built 2026-11-02 (addbuttons):** The direct-add-actions requirement in §10.1 is implemented and obsolete as a plan; see ARCHITECTURE.md §14.6.
 
-**Built 2026-11-02 (homeurl):** Home's URL state requirement in §10.1 is implemented and obsolete as an implementation plan; see ARCHITECTURE.md §12. The broader refresh rule still applies to other surfaces.
+**Built 2026-11-02 (homeurl):** Home's URL state requirement in §10.1 is implemented and obsolete as an implementation plan; see ARCHITECTURE.md §12. Most broader refresh state is implemented by urlstate (2026-11-02); saved-amendment/original-text dialog destinations remain deferred after two failed phone attempts. See ARCHITECTURE.md §5.
 
 **Built 2026-10-30:** CCv3 `group_only_greetings` selection in §4 is implemented and obsolete as a proposal; see ARCHITECTURE.md §12. Other §4 fields retain their statuses.
 
@@ -814,6 +814,8 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 **Built (fieldwidth, 2026-11-02):** the short-field width requirement below is implemented and obsolete as a plan; see ARCHITECTURE §12.
 - **[D]** Accessible from a browser and usable remotely (the owner runs it in Docker behind Authelia on their own domain). It must work well on phones for a real release, though not perfectly from day one.
 - **[D]** Every view has a URL. Refresh and the back button work.
+- **[D]** Refresh restoration (owner, 2026-11-01): "refreshing should generally result in reopening to the same item you were looking at before." (2026-11-02 urlstate brief): "Sort and filter changes replace the history entry; switching places pushes one."
+- **[P]** (urlstate, 2026-11-02, implementation choice) Keep chat/item/settings identities in existing paths; put the viewed fork, panel/editor/book/message destinations and browsing choices in queries, following home's default omission and device-seeding convention. Keep reading offsets in browser history, portrait weights and existing note/lore-entry expansions per device, and action confirmations transient. **Built except saved-amendment/original-text dialog destinations, deferred after two failed phone attempts; obsolete as an implementation proposal for the built portions** (ARCHITECTURE §5, §12).
 - **[D]** Home state (owner, 2026-11-02): "the homepage's tabs/sorting are not driven by url or query parameters." The tabs, sort and direction, filters and search must restore from the URL. The owner's earlier rule (2026-11-01): "refreshing should generally result in reopening to the same item you were looking at before."
 - **[P]** (homeurl, 2026-11-02, implementation choice) Home's existing Show tabs push history; sorts, direction and search replace it. Query defaults are omitted, unknown values fall back, and the existing browser sort memory seeds an unqualified visit only. **Built; obsolete as an implementation proposal** (ARCHITECTURE §12).
 - **[D]** **Multiple tabs work from day one**, e.g. comparing an old branch in another tab. In-app side-by-side panels come later.

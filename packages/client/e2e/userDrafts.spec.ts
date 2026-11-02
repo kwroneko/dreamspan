@@ -144,7 +144,7 @@ for (const width of [1440, 390])
         .poll(async () => JSON.parse((await draftText(`model:${model.id}`, "Custom settings")) ?? "{}").name)
         .toBe("Uncommitted model name")
       await page.reload()
-      await page.getByRole("button", { name: "Edit synthetic", exact: true }).click()
+      await expect(page.getByRole("dialog", { name: "Edit synthetic", exact: true })).toBeVisible()
       await expect(page.getByLabel("Display name", { exact: true })).toHaveValue("Uncommitted model name")
       await expect(page.getByLabel("Advanced model settings (JSON)", { exact: true })).toHaveValue(
         '{"stop":["STILL WRITING"'

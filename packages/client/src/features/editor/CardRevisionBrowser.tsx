@@ -1,3 +1,4 @@
+import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { cardNames } from "@rp/shared/cardNames.ts"
 import { Effect } from "effect"
 import { useCardNameCheck } from "./cardNameCheck.ts"
@@ -261,17 +262,45 @@ export function CardRevisionBrowser({
   // A chat's own note: its line as the branch shown has it, and where each change took effect.
   const chatNote = store.chatNote ? { chatNote: store.chatNote } : {}
   const [revisions, setRevisions] = useState<ReadonlyArray<Revision>>([])
-  const [selected, setSelected] = useState<Revision | null>(null)
+  const [selectedId, setSelectedId] = usePlaceParam(`revision:${store.refId}`, "")
+  const selected = revisions.find((r) => r.id === selectedId) ?? null
+  const setSelected = (revision: Revision | null) => setSelectedId(revision?.id ?? "")
   const [error, setError] = useState<AppError | null>(null)
   const [pending, setPending] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  usePlaceNotice(selectedId && loaded && !selected && !hasMore ? "This revision is no longer available." : null)
+  useEffect(() => {
+    if (!selectedId || selected || !loaded || !hasMore) return
+    let live = true
+    const at = store.chatNote ? { chatNote: store.chatNote } : {}
+    void call((client) =>
+      client("ListRevisions", { refId: store.refId, limit: 50, before: revisions.at(-1)!.id, ...at })
+    ).then((result) => {
+      if (!live) return
+      if (result.ok) {
+        setRevisions((previous) => [...previous, ...result.value])
+        setHasMore(result.value.length === 50)
+      } else {
+        setError(result.error)
+        setHasMore(false)
+      }
+    })
+    return () => {
+      live = false
+    }
+  }, [selectedId, selected, loaded, hasMore, revisions, store, call])
   const head = useEditorState(store).snapshot!.ref.headRevisionId
   useEffect(() => {
     let live = true
     const at = store.chatNote ? { chatNote: store.chatNote } : {}
     void call((client) => client("ListRevisions", { refId: store.refId, limit: 50, ...at })).then((result) => {
       if (!live) return
-      if (result.ok) setRevisions(result.value)
-      else setError(result.error)
+      if (result.ok) {
+        setRevisions(result.value)
+        setLoaded(true)
+        setHasMore(result.value.length === 50)
+      } else setError(result.error)
     })
     return () => {
       live = false

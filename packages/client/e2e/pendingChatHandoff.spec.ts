@@ -54,11 +54,11 @@ test("a group's pending chat accepts the group's full existing title", async ({ 
   await page.screenshot({ path: test.info().outputPath("desktop-long-group-pending.png") })
   await page.getByLabel("Message", { exact: true }).fill("Please start this group chat.")
   await page.getByRole("button", { name: "Send", exact: true }).click()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/, { timeout: 5000 })
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/, { timeout: 5000 })
   const groups = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListChatGroups())
   const group = groups.find((group) => group.name === title)!
   expect(group.chats).toBe(2)
-  expect(group.latestChatId).toBe(page.url().split("/").at(-1))
+  expect(group.latestChatId).toBe(new URL(page.url()).pathname.split("/").at(-1))
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
   await page.screenshot({ path: test.info().outputPath("phone-long-group-saved.png") })
@@ -96,9 +96,9 @@ for (const target of ["group", "card"] as const) {
     await expect.poll(() => releaseStart !== null).toBe(true)
     await composer.fill("Irreplaceable text typed while the first send was pending.")
     releaseStart!()
-    await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+    await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
     await expect.poll(() => composerHeld).toBe(true)
-    const chatId = page.url().split("/").at(-1)!
+    const chatId = new URL(page.url()).pathname.split("/").at(-1)!
     await expect
       .poll(async () =>
         (await copies(page)).some(
@@ -143,7 +143,7 @@ test("a phone shows the full streaming speaker name and Stop", async ({ page }) 
   await page.goto(`${server().url}/cards/${cards.find((c) => c.name === "Tobias Wren")!.entityId}/chat`)
   await page.getByLabel("Message", { exact: true }).fill("Tell a story.")
   await page.getByRole("button", { name: "Send", exact: true }).click()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   const reply = page.getByRole("article", { name: "Reply", exact: true }).last()
   await expect(reply.getByText("generating", { exact: true })).toBeVisible()
   await expect(reply.getByRole("button", { name: "Stop", exact: true })).toBeInViewport()
@@ -201,7 +201,7 @@ for (const target of ["card", "group"] as const) {
       // The tooltip shows how to add a line (Base UI gives its popup no tooltip role).
       await expect(page.getByText(/Shift\+Enter for a new line/)).toBeVisible()
       await composer.press("Enter")
-      await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+      await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
       await expect(page.getByRole("article", { name: "Your message", exact: true })).toContainText("First line")
       await expect(page.getByRole("article", { name: "Your message", exact: true }).locator(".markdown")).toContainText(
         "Second line"
@@ -222,7 +222,7 @@ test("a touch keyboard keeps Enter for a newline; Ctrl+Enter creates the chat", 
     await expect(composer).toHaveValue("Touch keyboard\n")
     expect(page.url()).toBe(pendingUrl)
     await composer.press("Control+Enter")
-    await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+    await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
     await expect(page.getByRole("article", { name: "Your message", exact: true })).toContainText("Touch keyboard")
   } finally {
     await context.close()

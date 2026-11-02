@@ -1,3 +1,5 @@
+import { usePlaceParam } from "../../usePlaceParam.ts"
+import { editorKey } from "./messageDraft.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import type { MessageImages } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
@@ -36,7 +38,10 @@ function CurrentChanges({ draft, base }: { draft: MessageDraft | SummaryDraft; b
 }
 
 function DraftHistory({ draft }: { draft: MessageDraft | SummaryDraft }) {
-  const [open, setOpen] = useState(false)
+  const key = "target" in draft ? editorKey(draft.target) : draft.historyKey
+  const [place, setPlace] = usePlaceParam("draftHistory", "")
+  const open = place === key
+  const setOpen = (on: boolean) => setPlace(on ? key : "")
   return (
     <>
       <Button hint={EARLIER_DRAFTS} onClick={() => setOpen(true)}>
@@ -137,7 +142,9 @@ function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryD
  * earlier text, and the text as it is against the saved text, once it differs.
  */
 function EditHistoryMenu({ draft, base }: { draft: MessageDraft; base: string }) {
-  const [open, setOpen] = useState<"drafts" | "changes" | null>(null)
+  const [place, setPlace] = usePlaceParam(`editHistory:${editorKey(draft.target)}`, "", ["", "drafts", "changes"])
+  const open = place || null
+  const setOpen = (next: "drafts" | "changes" | null) => setPlace(next ?? "")
   const text = useSyncExternalStore(draft.subscribe, () => draft.snapshot().text)
   return (
     <>

@@ -3,7 +3,8 @@
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
 import { RegistryContext } from "@effect/atom-react"
 import type { BinBranch, BinItem, RecoveredText } from "@rp/shared/bin.ts"
-import { Link, useSearch } from "@tanstack/react-router"
+import { Link } from "@tanstack/react-router"
+import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useContext, useEffect, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { type AppError, describeCause } from "../../errors.ts"
@@ -429,8 +430,7 @@ function RecoveredTexts({ first }: { first: ReadonlyArray<RecoveredText> }) {
 export function BinPage() {
   useTitle("Bin")
   // `?section=recovered`: where a composer or editor that put text there links to.
-  const search = useSearch({ strict: false }) as { section?: unknown }
-  const [tab, setTab] = useState<"deleted" | "recovered">(search.section === "recovered" ? "recovered" : "deleted")
+  const [tab, setTab] = usePlaceParam("section", "deleted", ["deleted", "recovered"])
   return (
     <Card>
       <CardHeader title="Bin" />

@@ -201,6 +201,7 @@ export class ChatSession {
   /** The fork the URL asks for; null opens the chat's current fork. */
   private requestedFork: ForkId | null
   private readonly registry: AtomRegistry.AtomRegistry
+  private readonly notice: (title: string) => void
 
   /** The chat this session shows. */
   get id(): ChatId {
@@ -215,12 +216,14 @@ export class ChatSession {
     requestedFork: ForkId | null,
     registry: AtomRegistry.AtomRegistry,
     /** The user signed in: whose browser copies of the message editors' text to replay. */
-    userId: string
+    userId: string,
+    notice: (title: string) => void = () => {}
   ) {
     this.chatId = chatId
     this.userId = userId
     this.requestedFork = requestedFork
     this.registry = registry
+    this.notice = notice
     // A chat just saved from its pending page opens on what that page had, and reads it again.
     const seed = requestedFork === null ? seeds.get(chatId) : undefined
     if (seed !== undefined)
@@ -635,6 +638,40 @@ export class ChatSession {
       client("ReadPath", { chatId: this.chatId, forkId, leafSlotId: null, range, limit })
     )
     if (result.ok) return result.value
+    if (result.error.tag === "NotFound" && (forkId !== null || range._tag === "Around")) {
+      const sameFork =
+        range._tag === "Around"
+          ? await this.call((client) =>
+              client("ReadPath", {
+                chatId: this.chatId,
+                forkId,
+                leafSlotId: null,
+                range: { _tag: "Bottom" },
+                limit
+              })
+            )
+          : null
+      const fallback = sameFork?.ok
+        ? sameFork
+        : await this.call((client) =>
+            client("ReadPath", {
+              chatId: this.chatId,
+              forkId: null,
+              leafSlotId: null,
+              range: { _tag: "Bottom" },
+              limit
+            })
+          )
+      if (fallback.ok && !this.disposed) {
+        this.requestedFork = fallback.value.forkId
+        this.notice(
+          sameFork?.ok
+            ? "This message is no longer on this branch. Showing its latest messages."
+            : "This branch is no longer available. Showing the current branch."
+        )
+        return fallback.value
+      }
+    }
     if (!this.disposed) this.update({ error: result.error.message, loading: false })
     return null
   }

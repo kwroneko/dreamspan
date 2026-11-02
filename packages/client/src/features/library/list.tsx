@@ -1,10 +1,11 @@
+import { usePlaceParam } from "../../usePlaceParam.ts"
 // The library: every card, lorebook and preset, found by name and opened from here. Each
 // item shows what identifies it, a direct action or two, and the rest in its menu.
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard } from "@rp/shared/chat.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
-import { Link } from "@tanstack/react-router"
+import { Link, useLocation, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { AsyncView } from "../../actions.tsx"
@@ -43,24 +44,71 @@ interface Prefs {
 }
 const DEFAULTS: Prefs = { kind: "card", show: "all", sort: "used", reversed: false, view: "list" }
 
-/** The page's choices, remembered per account in this browser. */
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    libraryBrowse?: boolean
+  }
+}
+const keys = ["kind", "show", "sort", "reverse", "view", "q", "presets"]
+const readPrefs = (s: Record<string, unknown>): Prefs => ({
+  kind: LISTED.find((k) => k.kind === s.kind)?.kind ?? "card",
+  show: (["all", "characters", "personas"] as const).find((v) => v === s.show) ?? "all",
+  sort: (["used", "name", "chats", "changed", "added"] as const).find((v) => v === s.sort) ?? "used",
+  reversed: s.reverse === true,
+  view: s.view === "grid" ? "grid" : "list"
+})
+const writePrefs = (s: Prefs) => ({
+  kind: s.kind === "card" ? undefined : s.kind,
+  show: s.show === "all" ? undefined : s.show,
+  sort: s.sort === "used" ? undefined : s.sort,
+  reverse: s.reversed || undefined,
+  view: s.view === "list" ? undefined : s.view
+})
 function usePrefs() {
   const key = `rp.library.${useSession().user.id}`
-  const [prefs, setPrefs] = useState<Prefs>(() => {
+  const presetSort = useViewPrefs().prefs.presetSort
+  const [remembered] = useState(() => {
     try {
-      return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(key) ?? "{}") as Partial<Prefs>) }
+      const stored = JSON.parse(localStorage.getItem(key) ?? "{}") as Prefs
+      return readPrefs({ ...stored, reverse: stored.reversed })
     } catch {
       return DEFAULTS
     }
   })
+  const search = useSearch({ strict: false }) as Record<string, unknown>
+  const marked = useLocation({ select: (l) => l.state.libraryBrowse === true })
+  const pathname = useLocation({ select: (l) => l.pathname })
+  const router = useRouter()
+  const navigate = useNavigate()
+  const prefs = !marked && !keys.some((k) => search[k] !== undefined) ? remembered : readPrefs(search)
+  useEffect(() => {
+    if (!marked && pathname === "/library" && router.latestLocation.pathname === "/library")
+      void navigate({
+        to: ".",
+        search: (prev: Record<string, unknown>) => ({
+          ...prev,
+          ...writePrefs(prefs),
+          ...(!keys.some((k) => prev[k] !== undefined) && presetSort !== "name" ? { presets: presetSort } : {})
+        }),
+        state: (prev) => ({ ...prev, libraryBrowse: true }),
+        replace: true,
+        resetScroll: false
+      })
+  }, [marked, pathname, router, navigate, prefs, presetSort])
   const update = (change: Partial<Prefs>) => {
     const next = { ...prefs, ...change }
-    setPrefs(next)
     try {
       localStorage.setItem(key, JSON.stringify(next))
     } catch {
-      /* Not remembered, still applied. */
+      /* URL still carries it. */
     }
+    void navigate({
+      to: ".",
+      search: (prev: Record<string, unknown>) => ({ ...prev, ...writePrefs({ ...readPrefs(prev), ...change }) }),
+      state: (prev) => ({ ...prev, libraryBrowse: true }),
+      replace: change.kind === undefined,
+      resetScroll: false
+    })
   }
   return [prefs, update] as const
 }
@@ -312,14 +360,18 @@ function Section({
   setPrefs: (change: Partial<Prefs>) => void
   formats: ReadonlyArray<ExportFormatInfo>
 }) {
-  const [search, setSearch] = useState("")
+  const [search, changeSearch] = usePlaceParam("q", "")
+  const setSearch = (next: string) => changeSearch(next, true)
   const needle = search.trim().toLowerCase()
   const cards = kind === "card"
   // Presets list as the preset pickers do: Name, Modified, Used or Archived (pickers/presetList.ts).
   const presets = kind === "preset"
   const views = useViewPrefs()
-  const [archivedView, setArchivedView] = useState(false)
-  const presetView: PresetView = archivedView ? "archived" : views.prefs.presetSort
+  const [presetView, setPresetView] = usePlaceParam<PresetView>(
+    "presets",
+    "name",
+    PRESET_VIEWS.map((v) => v.value)
+  )
   const shown = cards
     ? all.filter((item) => prefs.show === "all" || (prefs.show === "personas") === persona(item))
     : all
@@ -366,7 +418,7 @@ function Section({
             label="Show presets"
             value={presetView}
             onValueChange={(next) => {
-              setArchivedView(next === "archived")
+              setPresetView(next, true)
               if (next !== "archived" && next !== views.prefs.presetSort) void views.change({ presetSort: next })
             }}
             options={PRESET_VIEWS.map((option) => ({

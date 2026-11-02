@@ -1,3 +1,4 @@
+import { usePlaceParam } from "../../usePlaceParam.ts"
 // A list of notes as blocks (owner, 2026-11-01), the shape a preset's prompts have (ui/Block):
 // each note's header is always shown, its switch, its name renamed in place, and under it where
 // it goes and when; opening it shows its text, with its settings folded away under it. Several
@@ -118,7 +119,9 @@ function NoteBlock({
   const { ref, chatNote } = entry
   const [store] = useState(() => new EditorStore(ref.id, userId, call, browserEnv, chatNote))
   const [error, setError] = useState<AppError | null>(null)
-  const [history, setHistory] = useState(false)
+  const [historyRef, setHistoryRef] = usePlaceParam("noteHistory", "")
+  const history = historyRef === ref.id
+  const setHistory = (open: boolean) => setHistoryRef(open ? ref.id : "")
   const state = useEditorState(store)
   useEffect(() => {
     void store.load()

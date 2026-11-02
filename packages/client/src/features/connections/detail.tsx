@@ -1,3 +1,4 @@
+import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { selectablePresets } from "../pickers/presetList.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
@@ -558,7 +559,9 @@ function HeadersDialog({
 }
 
 export function HeadersSection({ connection, kinds }: ConnectionSectionProps) {
-  const [open, setOpen] = useState(false)
+  const [place, setPlace] = usePlaceParam("connectionDialog", "", ["", "headers"])
+  const open = place === "headers"
+  const setOpen = (on: boolean) => setPlace(on ? "headers" : "")
   return (
     <Card>
       <CardHeader
