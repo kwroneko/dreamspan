@@ -79,7 +79,9 @@ export function Avatar({
 }) {
   const open = useOpenPortrait()
   const { ref, width } = useMediaWidth()
-  const box = `relative inline-flex shrink-0 overflow-hidden rounded-sm ${SIZES[size]} ${className}`
+  // A filling portrait must not leave an inline baseline below it in collage cells.
+  // That extra line-box space otherwise makes row gaps larger than column gaps.
+  const box = `relative ${size === "fill" ? "flex" : "inline-flex"} shrink-0 overflow-hidden rounded-sm ${SIZES[size]} ${className}`
   const content = (
     <>
       {mediaId !== null && width !== undefined && (

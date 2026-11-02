@@ -140,6 +140,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[O]** **Overtaken**: New chat creates a new peer chat through the pending flow (ARCHITECTURE §12), consistent with §10.3’s independent-chat model; it does not create another root in an existing chat. Earlier wording: “Does "start over" with a card create a new peer chat (proposed), or a new root inside the same chat?”
 - **[D] Rejected:** per-participant roles (character vs. narrator) in each chat. They force a separation, and muting plus the card's own text already cover it. Per-card preset overlays replace them (§6.3).
 
+- **[D]** (owner, 2026-11-02, groupgrid) "make the gaps between portraits equal horizontally and vertically, at every panel width, with any number of members." Portrait/card grids use one CSS `gap` for both axes. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a).
+
 ### 2.2 Personas, speakers and writers
 - **[D]** Personas aren't a special entity. **A persona is a card in the "persona folder"**, and any card can be added to that folder. Cards in it get special UI treatment.
 - **[D]** You can switch to writing as any card, on any turn.
