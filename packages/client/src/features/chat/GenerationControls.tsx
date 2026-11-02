@@ -2,7 +2,7 @@
 import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@rp/shared/generation.ts"
 import type { Model } from "@rp/shared/providers.ts"
 import { Link } from "@tanstack/react-router"
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
+import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"
