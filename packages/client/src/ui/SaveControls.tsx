@@ -14,13 +14,13 @@ import { OneLineField } from "./OneLineField.tsx"
 import { Spinner } from "./Spinner.tsx"
 
 /** Where the cluster is; `data-save-state` on its group says it to tests and styles. */
-export type SaveState = "clean" | "unsaved" | "blocked" | "saving" | "saved" | "failed"
+type SaveState = "clean" | "unsaved" | "blocked" | "saving" | "saved" | "failed"
 
 /** How long the saved tick shows before the cluster settles back to quiet. */
-export const SAVED_FOR_MS = 1800
+const SAVED_FOR_MS = 1800
 
 /** The explanations, kept together so they read as one voice. */
-export const saveHints = {
+const saveHints = {
   save: "Keeps this version in History so you can return to it. Your edits are already in use; you don't need to save them.",
   clean: "Nothing to save: no edits since the last save.",
   saving: "Saving…",
