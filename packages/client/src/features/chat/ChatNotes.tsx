@@ -20,7 +20,11 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { useCaller } from "../editor/caller.ts"
-import { NoteList, type NoteListEntry, NoteListControls, useNoteBlocks } from "../editor/NoteList.tsx"
+import { NoteBlock, NoteList, type NoteListEntry, NoteListControls, useNoteBlocks } from "../editor/NoteList.tsx"
+import type { WorkspaceViewProps } from "../editor/workspaceViews.ts"
+import type { RefId } from "@rp/shared/library.ts"
+import { Alert } from "../../ui/Surface.tsx"
+import { Button } from "../../ui/Button.tsx"
 import { AddNoteButtons, type NoteCard, SharedNotePicker } from "../editor/notes.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useCast } from "./cast.ts"
@@ -63,19 +67,10 @@ const cardRefs = libraryListAtom("card")
 type Group = { readonly card: null } | { readonly card: EntityId; readonly name: string }
 
 /**
- * The side panel's Notes tab: the chat's notes at the latest message of the branch shown,
- * grouped by owner, to turn on and off, add (new or a shared note), edit and delete.
- * `focusCard` scrolls to a card's group.
+ * A chat's notes at the latest message of the branch shown, and what each list of them needs:
+ * the Notes tab's and the large editor's (owner, 2026-11-02), so both show the same note alike.
  */
-export function NotesTab({
-  session,
-  leafSlotId,
-  focusCard = null
-}: {
-  session: ChatSession
-  leafSlotId: SlotId | null
-  focusCard?: EntityId | null
-}) {
+function useChatNotes(session: ChatSession, leafSlotId: SlotId | null) {
   const chatId = session.id
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   // Library changes (a save, a delete, an undo from the bin) read the list again.
@@ -90,16 +85,91 @@ export function NotesTab({
   )
   const refresh = useAtomRefresh(atom)
   const listed = useAtomValue(atom)
-  const refs = useAtomValue(cardRefs)
-  const call = useCaller()
   const deleted = useDeletedToast()
   const cast = useCast()
-  const [picking, setPicking] = useState<Group | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   // A relink changes what a note is: its editor starts again from the saved note.
   const [generations, setGenerations] = useState<ReadonlyMap<string, number>>(new Map())
   const summaryFill = view.history?.presetContext?.summary
   const summarizing = view.lcm?.enabled === true
+  const position = { chatId, forkId: view.forkId, slotId: leafSlotId }
+  const toggle = async (note: ChatNote, active: boolean) => {
+    const outcome = await session.changeCast({ _tag: "Note", entityId: note.ref.entityId, active })
+    setError(outcome.ok ? null : outcome.error)
+    refresh()
+  }
+  const onDeleted = (item: BinItem) => {
+    deleted(item)
+    refresh()
+  }
+  const relinked = (refId: string) => {
+    setGenerations(new Map(generations).set(refId, (generations.get(refId) ?? 0) + 1))
+    refresh()
+  }
+  /** Every cast card, with notes or not, then any other card a note belongs to. */
+  const cardsOf = (notes: ReadonlyArray<ChatNote>): ReadonlyArray<NoteCard> =>
+    (
+      [
+        ...new Set([
+          ...(cast.cast?.participants ?? []),
+          ...(cast.cast?.playedByMe ?? []),
+          ...notes.flatMap((n) => (n.card === null ? [] : [n.card]))
+        ])
+      ] as Array<EntityId>
+    ).map((entity) => ({ entity, name: cast.cards.get(entity)?.name ?? "A card" }))
+  const entries = (list: ReadonlyArray<ChatNote>, own: boolean): ReadonlyArray<NoteListEntry> =>
+    list.map((note) => ({
+      ref: note.ref,
+      doc: note.doc,
+      sharedBinned: note.linked?.binned === true,
+      generation: generations.get(note.ref.id) ?? 0,
+      // Its explanation is a tooltip, never inline under it: the header has no room for that.
+      control: (
+        <Tooltip
+          label={
+            note.active ? "On: sent with the chat. Switch it off to stop." : "Off: not sent. Switch it on to send it."
+          }
+        >
+          <span className="inline-flex">
+            <Switch labelHidden checked={note.active} onCheckedChange={(active) => void toggle(note, active)}>
+              <span className="sr-only">{titleOf(note)}: on in this chat</span>
+            </Switch>
+          </span>
+        </Tooltip>
+      ),
+      detail:
+        note.doc["kind"] === "imported_summary" && (summaryFill || summarizing) ? (
+          <SummaryMacroLine note={note} summary={summaryFill} summarizing={summarizing} />
+        ) : null,
+      extra: <SlotOutlet slot={chatNoteActions} props={{ note, session, onChanged: refresh }} />,
+      // A chat's own note is edited on its branch; a card's note is the card's, deleted from the card.
+      ...(own ? { chatNote: position, onDeleted } : {})
+    }))
+  return { view, atom, listed, refresh, error, setError, position, cardsOf, entries, relinked }
+}
+
+/**
+ * The side panel's Notes tab: the chat's notes at the latest message of the branch shown,
+ * grouped by owner, to turn on and off, add (new or a shared note), edit and delete.
+ * `focusCard` scrolls to a card's group.
+ */
+export function NotesTab({
+  session,
+  leafSlotId,
+  focusCard = null
+}: {
+  session: ChatSession
+  leafSlotId: SlotId | null
+  focusCard?: EntityId | null
+}) {
+  const chatId = session.id
+  const { view, atom, listed, refresh, error, setError, position, cardsOf, entries, relinked } = useChatNotes(
+    session,
+    leafSlotId
+  )
+  const refs = useAtomValue(cardRefs)
+  const call = useCaller()
+  const [picking, setPicking] = useState<Group | null>(null)
   const sections = useRef(new Map<string, HTMLElement>())
   const count = AsyncResult.isSuccess(listed) ? listed.value.length : 0
   const { blocks, settings } = useNoteBlocks(count)
@@ -107,12 +177,6 @@ export function NotesTab({
     if (focusCard !== null) sections.current.get(focusCard)?.scrollIntoView({ block: "start", behavior: "smooth" })
   }, [focusCard])
 
-  const position = { chatId, forkId: view.forkId, slotId: leafSlotId }
-  const toggle = async (note: ChatNote, active: boolean) => {
-    const outcome = await session.changeCast({ _tag: "Note", entityId: note.ref.entityId, active })
-    setError(outcome.ok ? null : outcome.error)
-    refresh()
-  }
   const cardRef = (card: EntityId) =>
     AsyncResult.isSuccess(refs)
       ? refs.value.find((ref) => ref.entityId === card && ref.refKind === "upstream")?.id
@@ -143,60 +207,12 @@ export function NotesTab({
     blocks.setOpen(made.value.id, true)
     refresh()
   }
-  const onDeleted = (item: BinItem) => {
-    deleted(item)
-    refresh()
-  }
-  const relinked = (refId: string) => {
-    setGenerations(new Map(generations).set(refId, (generations.get(refId) ?? 0) + 1))
-    refresh()
-  }
   return (
     <div className="flex flex-col gap-3">
       <AsyncView atom={atom} loading="Loading the notes…">
         {(notes) => {
           // Every cast card has a group, with notes or not, then any other card a note belongs to.
-          const owners = [
-            ...new Set([
-              ...(cast.cast?.participants ?? []),
-              ...(cast.cast?.playedByMe ?? []),
-              ...notes.flatMap((n) => (n.card === null ? [] : [n.card]))
-            ])
-          ] as Array<EntityId>
-          const named: ReadonlyArray<NoteCard> = owners.map((entity) => ({
-            entity,
-            name: cast.cards.get(entity)?.name ?? "A card"
-          }))
-          const entries = (list: ReadonlyArray<ChatNote>, own: boolean): ReadonlyArray<NoteListEntry> =>
-            list.map((note) => ({
-              ref: note.ref,
-              doc: note.doc,
-              sharedBinned: note.linked?.binned === true,
-              generation: generations.get(note.ref.id) ?? 0,
-              // Its explanation is a tooltip, never inline under it: the header has no room for that.
-              control: (
-                <Tooltip
-                  label={
-                    note.active
-                      ? "On: sent with the chat. Switch it off to stop."
-                      : "Off: not sent. Switch it on to send it."
-                  }
-                >
-                  <span className="inline-flex">
-                    <Switch labelHidden checked={note.active} onCheckedChange={(active) => void toggle(note, active)}>
-                      <span className="sr-only">{titleOf(note)}: on in this chat</span>
-                    </Switch>
-                  </span>
-                </Tooltip>
-              ),
-              detail:
-                note.doc["kind"] === "imported_summary" && (summaryFill || summarizing) ? (
-                  <SummaryMacroLine note={note} summary={summaryFill} summarizing={summarizing} />
-                ) : null,
-              extra: <SlotOutlet slot={chatNoteActions} props={{ note, session, onChanged: refresh }} />,
-              // A chat's own note is edited on its branch; a card's note is the card's, deleted from the card.
-              ...(own ? { chatNote: position, onDeleted } : {})
-            }))
+          const named = cardsOf(notes)
           const own = notes.filter((n) => n.card === null)
           return (
             <>
@@ -279,6 +295,78 @@ export function NotesTab({
           if (group) void add(group, note)
         }}
       />
+    </div>
+  )
+}
+
+/**
+ * A note in the large editor over the chat (owner, 2026-11-02): the Notes tab's block, always
+ * open, filling the column, on the same store, so both show the same text, marker and Save. It
+ * stays while the side panel changes tab or character; the chat's notes are read as the tab reads them.
+ */
+export function ChatNoteLarge({ refId, onClose, session, view }: WorkspaceViewProps) {
+  if (!session || !view) return null
+  return <ChatNoteLargeIn refId={refId} onClose={onClose} session={session} leafSlotId={view.leafSlotId} />
+}
+
+function ChatNoteLargeIn({
+  refId,
+  onClose,
+  session,
+  leafSlotId
+}: {
+  refId: RefId
+  onClose: (() => void) | undefined
+  session: ChatSession
+  leafSlotId: SlotId | null
+}) {
+  const { atom, error, cardsOf, entries, relinked } = useChatNotes(session, leafSlotId)
+  const call = useCaller()
+  const { settings } = useNoteBlocks(1)
+  const close = () => onClose?.()
+  return (
+    <div className="flex flex-col gap-3">
+      <AsyncView atom={atom} loading="Loading the note…">
+        {(notes) => {
+          const note = notes.find((n) => n.ref.id === refId)
+          if (!note)
+            return (
+              <Alert tone="warning" actions={<Button onClick={close}>Back to the chat</Button>}>
+                <p>This note isn't in this chat any more.</p>
+              </Alert>
+            )
+          const entry = entries([note], note.card === null)[0]!
+          const removed = entry.onDeleted
+          return (
+            <ul aria-label="Note" className="flex flex-col">
+              <NoteBlock
+                key={`${refId}:${entry.chatNote?.forkId ?? ""}:${entry.chatNote?.slotId ?? ""}:${entry.generation ?? 0}`}
+                entry={{
+                  ...entry,
+                  // Deleted here, it goes back to the chat.
+                  ...(removed
+                    ? {
+                        onDeleted: (item: BinItem) => {
+                          removed(item)
+                          close()
+                        }
+                      }
+                    : {})
+                }}
+                cards={cardsOf(notes)}
+                call={call}
+                open
+                onOpenChange={() => {}}
+                settingsOpen={settings.isOpen(refId)}
+                onSettingsOpenChange={(open) => settings.setOpen(refId, open)}
+                onRelinked={() => relinked(refId)}
+                large={{ onClose: close }}
+              />
+            </ul>
+          )
+        }}
+      </AsyncView>
+      <ErrorAlert error={error} />
     </div>
   )
 }

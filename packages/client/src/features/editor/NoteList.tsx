@@ -29,6 +29,7 @@ import { type OpenBlocks, useOpenBlocks } from "../../ui/openBlocks.ts"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
+import { WindowClose } from "../../ui/WindowClose.tsx"
 import { browserEnv } from "./backup.ts"
 import type { Caller } from "./caller.ts"
 import { RecoveredNotice, RestoredNotice, TextField } from "./controls.tsx"
@@ -41,9 +42,11 @@ import {
   SharedBanner,
   settingsSummary
 } from "./notes.tsx"
+import { usePresetWorkspace } from "./PresetWorkspace.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { SaveRevision } from "./SaveRevision.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText, useValue } from "./store.ts"
+import { NOTE_FOCUS } from "./workspaceViews.ts"
 
 /** A note as a list shows it. */
 export interface NoteListEntry {
@@ -94,16 +97,20 @@ function BranchLine({ store }: { store: EditorStore }) {
   )
 }
 
-/** One note as a block, editing through its own store. */
-function NoteBlock({
+/**
+ * One note as a block, editing through its store: over a chat, the workspace's, which the
+ * large editor shares (`large`: the same block filling the chat's column, always open).
+ */
+export function NoteBlock({
   entry,
   cards,
   call,
-  open,
+  open: shownOpen,
   onOpenChange,
   settingsOpen,
   onSettingsOpenChange,
-  onRelinked
+  onRelinked,
+  large
 }: {
   entry: NoteListEntry
   cards: ReadonlyArray<NoteCard>
@@ -114,17 +121,24 @@ function NoteBlock({
   onSettingsOpenChange: (open: boolean) => void
   /** Told after it was saved as a shared note, unlinked from one, or its shared note restored. */
   onRelinked?: (() => void) | undefined
+  /** Shown in the large editor over the chat, with a way back. */
+  large?: { readonly onClose: () => void } | undefined
 }) {
   const userId = useSession().user.id
   const { ref, chatNote } = entry
-  const [store] = useState(() => new EditorStore(ref.id, userId, call, browserEnv, chatNote))
+  const workspace = usePresetWorkspace()
+  const [store] = useState(
+    () => workspace?.store(ref.id, chatNote) ?? new EditorStore(ref.id, userId, call, browserEnv, chatNote)
+  )
+  const open = large !== undefined || shownOpen
   const [error, setError] = useState<AppError | null>(null)
   const [historyRef, setHistoryRef] = usePlaceParam("noteHistory", "")
   const history = historyRef === ref.id
   const setHistory = (open: boolean) => setHistoryRef(open ? ref.id : "")
   const state = useEditorState(store)
   useEffect(() => {
-    void store.load()
+    // A store the large editor shares is read once; it reads again after a reply (useLeaveGuard).
+    if (store.snapshot === null) void store.load()
   }, [store])
   // Mounted closed too: its unsaved text is guarded on leaving, and a copy kept in this browser
   // comes back as the list opens.
@@ -182,6 +196,7 @@ function NoteBlock({
     )
     if (!result.ok) return setError(result.error)
     setError(null)
+    await store.refresh()
     onRelinked?.()
   }
   const restoreShared = async () => {
@@ -198,6 +213,7 @@ function NoteBlock({
     const restored = await call((client) => client("RestoreBinItem", { itemId: item.id }), ["library"])
     if (!restored.ok) return setError(restored.error)
     setError(null)
+    await store.refresh()
     onRelinked?.()
   }
 
@@ -224,7 +240,12 @@ function NoteBlock({
       <span className="min-w-0 [overflow-wrap:anywhere]">{title}</span>
     </span>
   )
-  const toggle = (
+  const toggle = large ? (
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5 px-1 py-1">
+      <h2 className="text-base font-semibold">{name}</h2>
+      {status}
+    </span>
+  ) : (
     <BlockToggle
       open={open}
       onToggle={() => onOpenChange(!open)}
@@ -260,9 +281,22 @@ function NoteBlock({
           {open && loaded && <SaveRevision store={store} />}
           <Menu
             label={`Actions for ${title}`}
-            hint="More: its History, Save as shared note, Delete"
+            hint={
+              workspace && !large
+                ? "More: Large editor, its History, Save as shared note, Delete"
+                : "More: its History, Save as shared note, Delete"
+            }
             trigger={<BlockMenuButton label={`Actions for ${title}`} />}
           >
+            {workspace && !large && (
+              <MenuItem
+                icon="expand"
+                description="Opens the note over the chat, where it stays while the side panel changes"
+                onClick={() => workspace.open(ref.id, NOTE_FOCUS)}
+              >
+                Large editor
+              </MenuItem>
+            )}
             <MenuItem
               icon="history"
               disabled={!loaded}
@@ -295,6 +329,7 @@ function NoteBlock({
               </>
             )}
           </Menu>
+          {large && <WindowClose onClick={large.onClose} />}
         </BlockHeader>
         <BranchLine store={store} />
         {entry.detail}
@@ -320,7 +355,11 @@ function NoteBlock({
                     path={["content"]}
                     label={`Text of ${title}`}
                     labelHidden
-                    rows={Math.min(8, Math.max(3, String(doc["content"] ?? "").split("\n").length))}
+                    rows={
+                      large
+                        ? Math.max(12, String(doc["content"] ?? "").split("\n").length)
+                        : Math.min(8, Math.max(3, String(doc["content"] ?? "").split("\n").length))
+                    }
                   />
                 )}
               </div>
