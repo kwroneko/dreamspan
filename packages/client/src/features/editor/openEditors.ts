@@ -14,14 +14,28 @@ interface OpenEditor {
 }
 
 const open = new Map<OpenEditor, number>()
+const listeners = new Set<() => void>()
+const changed = () => {
+  for (const listener of listeners) listener()
+}
+
+/** Told when an editor opens or closes; the returned function stops it. */
+export const subscribeOpenEditors = (listener: () => void) => {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
 
 /** Counts one more place guarding `editor`; the returned function undoes it. */
 export const trackOpenEditor = (editor: OpenEditor) => {
   open.set(editor, (open.get(editor) ?? 0) + 1)
+  changed()
   return () => {
     const count = (open.get(editor) ?? 1) - 1
     if (count > 0) open.set(editor, count)
     else open.delete(editor)
+    changed()
   }
 }
 

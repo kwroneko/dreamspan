@@ -2,12 +2,14 @@
 // public/scripts/RossAscends-mods.js `RA_CountCharTokens`, and the `data-token-counter` /
 // `data-token-permanent` counters in public/index.html): each counted field on its own, summed.
 // "Permanent" (`data-token-permanent`) is the name, description, personality, scenario and the
-// Character's Note (ST's depth prompt; here a card's notes on in every chat by default); "total"
-// adds the first message, the example messages, and the card's system prompt and post-history
-// instructions. Alternate greetings and creator's notes aren't counted, as in ST. The counts
-// come from the chat model's tokenizer (the client's tokenCounts.ts, ARCHITECTURE §6 "Text
-// tokens"), so any counter can sum them. ST substitutes macros in an existing card's fields
-// before it counts; these count the text as typed.
+// Character's Note (ST's depth prompt; here a card's notes on in every chat by default, a linked
+// one with its shared note's text); "total" adds the first message, the example messages, and
+// the card's system prompt and post-history instructions. Alternate greetings and creator's
+// notes aren't counted, as in ST. Each text is counted as chats send it (owner, 2026-11-02:
+// the counts include exactly what's sent): trimmed, as the assembler trims every card field and
+// note, and with macros substituted (the editor's `countMacros.ts`). The counts come from the
+// chat model's tokenizer (the client's tokenCounts.ts, ARCHITECTURE §6 "Text tokens"), so any
+// counter can sum them.
 import { modelName } from "./cardNames.ts"
 import type { Doc } from "./library.ts"
 
@@ -22,7 +24,7 @@ const CARD_TOKEN_FIELDS: ReadonlyArray<{ readonly field: string; readonly perman
   { field: "mes_example", permanent: false }
 ]
 
-const text = (value: unknown) => (typeof value === "string" ? value : "")
+const text = (value: unknown) => (typeof value === "string" ? value.trim() : "")
 
 export interface CardTokenText {
   readonly text: string
@@ -33,7 +35,7 @@ export interface CardTokenText {
 export const cardTokenTexts = (doc: Doc, notes: ReadonlyArray<string> = []): ReadonlyArray<CardTokenText> => [
   { text: modelName({ name: text(doc.name), nickname: text(doc.nickname) }), permanent: true },
   ...CARD_TOKEN_FIELDS.map(({ field, permanent }) => ({ text: text(doc[field]), permanent })),
-  ...notes.map((note) => ({ text: note, permanent: true }))
+  ...notes.map((note) => ({ text: note.trim(), permanent: true }))
 ]
 
 export interface CardTokenCounts {
