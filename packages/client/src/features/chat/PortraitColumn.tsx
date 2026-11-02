@@ -18,7 +18,7 @@ import { IconButton } from "../../ui/Tooltip.tsx"
 
 const MIN = 200
 /** The least a viewer is high, its header included; below it, the column scrolls. */
-export const MIN_VIEWER_HEIGHT = 180
+const MIN_VIEWER_HEIGHT = 180
 /** Room around the image: its box's padding and the column's border. */
 const GUTTER = 17
 
