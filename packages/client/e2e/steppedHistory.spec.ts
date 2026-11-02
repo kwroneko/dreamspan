@@ -151,7 +151,8 @@ test("two tabs and an inactive-path deep link keep their own context boundary", 
   if (branch._tag !== "Posted") throw new Error("expected posted branch")
   const other = await context.newPage()
   await other.goto(`${server().url}/chats/${chatId}?fork=${branch.chat.currentForkId}`)
-  await expect(other.getByText("Short branch.", { exact: true })).toBeVisible()
+  // The message itself: the sidebar previews the chat and the branch by the same text.
+  await expect(other.getByRole("main").locator("article").getByText("Short branch.", { exact: true })).toBeVisible()
   await expect(other.locator('[data-out-of-context="true"]')).toHaveCount(0)
   await page.reload()
   await expect(dropped).toHaveAttribute("data-out-of-context", "true")

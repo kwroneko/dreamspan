@@ -33,6 +33,9 @@ test.beforeAll(async () => {
     configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
     root: fileURLToPath(new URL("..", import.meta.url)),
     server: { host: "127.0.0.1", port: 0 },
+    // Pre-bundle only what the probe imports: scanning the whole app first held every request
+    // past the test's minute.
+    optimizeDeps: { entries: ["src/ui/CodeEditorView.tsx"] },
     plugins: [
       {
         name: "composition-test-harness",
