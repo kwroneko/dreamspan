@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { textField } from "@rp/shared/editing.ts"
+import { HELD_FIELD, textField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
@@ -255,6 +255,86 @@ const upload = async (page: Page, name: string, data: unknown) => {
   expect(response.status()).toBe(200)
   return ((await response.json()) as { library: { ref: { id: RefId } } }).library.ref.id
 }
+
+test("export asks about a preset's held changes even with no ordinary dirty fields", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const name = "Held export preset"
+  const refId = await upload(page, `${name}.json`, {
+    prompts: [
+      { identifier: "main", name: "Main Prompt", role: "system", content: "Write the scene." },
+      { identifier: "extra", name: "Extra", role: "system", content: "HELD-EXPORT-EXTRA" }
+    ],
+    prompt_order: [
+      {
+        character_id: 100001,
+        order: [
+          { identifier: "main", enabled: true },
+          { identifier: "extra", enabled: true }
+        ]
+      }
+    ]
+  })
+  await admin((api) =>
+    Effect.gen(function* () {
+      const opened = yield* api.OpenEditor({ refId })
+      yield* api.SaveEditorDraft({
+        refId,
+        field: HELD_FIELD,
+        draftId: null,
+        content: JSON.stringify({ deleted: ["extra"] }),
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+    })
+  )
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("tab", { name: /^Presets/ }).click()
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await page.getByRole("menuitem", { name: "Preset JSON", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: `${name} has unsaved changes` })
+  await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toHaveText(
+    "Prompts or lorebooks added, deleted or moved"
+  )
+  const exported = await downloaded(page, () =>
+    dialog.getByRole("button", { name: "Save and export", exact: true }).click()
+  )
+  expect(JSON.stringify(exported)).not.toContain("HELD-EXPORT-EXTRA")
+  const saved = await admin((api) => api.OpenEditor({ refId }))
+  expect(saved.doc.prompts).not.toEqual(expect.arrayContaining([expect.objectContaining({ identifier: "extra" })]))
+})
+
+test("export asks about a linked note slot's own unsaved fields", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const name = "Linked note export"
+  const ref = await importCard(page, name)
+  await admin((api) =>
+    Effect.gen(function* () {
+      const shared = yield* api.CreateSharedNote({ title: "Shared", content: "Shared note text." })
+      const slot = yield* api.CreateCardNote({ cardRefId: ref.id, title: "Linked slot", link: shared.entityId })
+      const opened = yield* api.OpenEditor({ refId: slot.id })
+      yield* api.SaveEditorDraft({
+        refId: slot.id,
+        field: textField(["title"]),
+        draftId: null,
+        content: "Changed linked slot title",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+    })
+  )
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await page.getByRole("menuitem", { name: "V2 JSON", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: `${name} has unsaved changes` })
+  await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toContainText("Title")
+  const saved = await downloaded(page, () =>
+    dialog.getByRole("button", { name: "Save and export", exact: true }).click()
+  )
+  expect(JSON.stringify(saved)).toContain("Changed linked slot title")
+  expect(JSON.stringify(saved)).toContain("Shared note text.")
+})
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)

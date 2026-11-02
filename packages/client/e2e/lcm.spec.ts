@@ -477,14 +477,15 @@ test("rail child rerun exposes cancel action", async ({ page }) => {
       commitDraft: null
     })
   )
+  // The row moves to "Not in use" once the edit arrives; a menu opened before that closes with it.
+  await expect(
+    row.getByText("Your own summary over these messages is used instead, so this one isn't sent.")
+  ).toBeVisible()
   await actions.click()
   await expect(page.getByRole("menuitem", { name: /Re-summarize messages 1–4 with the next reply/ })).toHaveAttribute(
     "data-disabled"
   )
   await page.keyboard.press("Escape")
-  await expect(
-    row.getByText("Your own summary over these messages is used instead, so this one isn't sent.")
-  ).toBeVisible()
 })
 
 // A summary's edit keeps its text through the same races as every other field (ARCHITECTURE §3.10).

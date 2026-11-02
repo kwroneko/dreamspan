@@ -101,13 +101,20 @@ export const makeDraftCarry = (sql: SqlClient.SqlClient, drafts: ReturnType<type
         if (fork !== from.id) continue
         const owned = yield* lib.ownedRef(userId, refId).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
         if (owned === null || keep.has(owned.entity_id)) continue
-        const at = (end: ForkEnd) =>
-          noteAt(sql, lib, userId, owned, {
-            chatId,
-            forkId: end.id as never,
-            slotId: end.tip_slot_id as never
-          }).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
-        const here = yield* at(from)
+        const at = (end: ForkEnd, latest = false) =>
+          noteAt(
+            sql,
+            lib,
+            userId,
+            owned,
+            {
+              chatId,
+              forkId: end.id as never,
+              slotId: end.tip_slot_id as never
+            },
+            latest
+          ).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
+        const here = yield* at(from, true)
         const there = here === null ? null : yield* at(to)
         if (here === null || there === null || here.ref.head_revision_id !== there.ref.head_revision_id) continue
         moved += yield* carryFieldDrafts(

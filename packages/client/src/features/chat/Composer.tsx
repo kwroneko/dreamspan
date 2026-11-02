@@ -294,9 +294,10 @@ export function Composer({
   // counts, as Send passes it: naming a character there makes them the one to reply.
   const faces = useMemo(() => replyFaces(cast, speaker), [cast, speaker])
   const pickedReply = choice.replyFrom !== null && faces.includes(choice.replyFrom) ? choice.replyFrom : null
+  const hasImages = (attachmentInput?.count ?? 0) > 0
   const replyPlan = useMemo(
-    () => planReply(cast, turnEntries, speaker, pickedReply, draftText),
-    [cast, turnEntries, speaker, pickedReply, draftText]
+    () => planReply(cast, turnEntries, speaker, pickedReply, draftText, hasImages),
+    [cast, turnEntries, speaker, pickedReply, draftText, hasImages]
   )
   const { next, replier } = replyPlan
   const replierName = nameOf(castView, replier)
@@ -415,7 +416,7 @@ export function Composer({
       await captured?.begin(from)
       let accepted = false
       // The text submitted decides, should it differ from the box the preview read.
-      const plan = planReply(cast, turnEntries, speaker, pickedReply, from.text)
+      const plan = planReply(cast, turnEntries, speaker, pickedReply, from.text, (captured?.images.length ?? 0) > 0)
       try {
         const { sent, outcome, draft, recovered } = await session.send(
           from.text,

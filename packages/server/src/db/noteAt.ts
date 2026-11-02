@@ -11,7 +11,7 @@ import { entityDraftTarget } from "@rp/shared/drafts.ts"
 import { SUMMARY_HISTORY, summaryOnPath } from "../assembler/summary.ts"
 import { noteHistory } from "./noteHistory.ts"
 import { NotFound } from "./ops.ts"
-import { displayEvents, displayThrough } from "./displayPath.ts"
+import { displayEndOf, displayEvents, displayThrough } from "./displayPath.ts"
 
 /**
  * A chat's own note as its branch has it at `position`: the revision bound there. `latest`
@@ -36,7 +36,8 @@ export const noteAt = Effect.fnUntraced(function* (
   if (slotId !== null) {
     const [slot] = yield* sql<{
       id: string
-    }>`SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`
+    }>`SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}
+      AND (${latest ? 1 : 0} OR deleted_at IS NULL)`
     if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
   }
   const head = yield* lib.loadDoc(ref.head_revision_id)
@@ -47,7 +48,10 @@ export const noteAt = Effect.fnUntraced(function* (
     return yield* new NotFound({ entity: "note", id: ref.id })
   }
   const [tip] = yield* sql<{ tip: SlotId | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${fork}`
-  if (latest) slotId = tip?.tip ?? null
+  const end = latest
+    ? ((yield* displayEndOf(sql, chatId, { id: fork, tip_slot_id: tip?.tip ?? null })) as SlotId | null)
+    : (tip?.tip ?? null)
+  if (latest) slotId = end
   // In a fork with insertions, the binding nearest before the slot in display order.
   const shown = yield* displayThrough(sql, chatId, fork, slotId)
   const [binding] = shown
@@ -90,7 +94,7 @@ export const noteAt = Effect.fnUntraced(function* (
     selected = found?.revision ?? revision.id
   }
   // Its unsaved text is its branch's (the drafts' scope).
-  return { ref: { ...ref, head_revision_id: selected }, doc, fork, tip: tip?.tip ?? null, scope: fork }
+  return { ref: { ...ref, head_revision_id: selected }, doc, fork, tip: end, scope: fork }
 })
 
 /** A chat's own note where it's edited: at its branch's latest message (`noteAt`). */
@@ -126,7 +130,7 @@ export const otherBranches = Effect.fnUntraced(function* (
     const [typed] = yield* sql<{ one: number }>`SELECT 1 AS one FROM drafts WHERE user_id = ${userId}
       AND target_kind = 'entity_field' AND target_id = ${entityDraftTarget(ref.id, fork.id)} AND status = 'active' LIMIT 1`
     if (typed) return true
-    const there = yield* noteAt(sql, lib, userId, ref, { chatId, forkId: fork.id, slotId: fork.tip }).pipe(
+    const there = yield* noteHere(sql, lib, userId, ref, { chatId, forkId: fork.id, slotId: fork.tip }).pipe(
       Effect.catchTag("NotFound", () => Effect.succeed(null))
     )
     // A branch that never changed it (its library head, as made) has no version of its own.

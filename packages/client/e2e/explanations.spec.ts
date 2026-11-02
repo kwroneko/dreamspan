@@ -207,7 +207,9 @@ for (const theme of ["light", "dark"] as const) {
     await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chatId}`)
     const lore = await openPanel(page, "Lorebooks")
-    // A panel tab says what it holds.
+    // A panel tab says what it holds. openPanel clicked it, and a click closes a tooltip until the
+    // pointer leaves, so come to it afresh.
+    await page.mouse.move(0, 0)
     await page.getByRole("tablist", { name: "Chat panel" }).getByRole("tab", { name: "Lorebooks" }).hover()
     await expect(
       page.getByText("The lorebooks this chat reads, each with its switch, and where their entries go.")

@@ -65,6 +65,7 @@ export function HistoryPanel({
   const [current, setCurrent] = useState(0)
   const group = useRef<string | undefined>(undefined)
   const revision = useRef(0)
+  const searched = useRef<typeof search | null>(null)
   const forkId = view.forkId ?? view.chat?.currentForkId
   const target = forkId ? { chatId: session.id, forkId } : null
   const idle = search.pairs.some((p) => !p.find)
@@ -92,7 +93,10 @@ export function HistoryPanel({
       }
       setError("")
       setScanning(true)
-      setSkipped(new Set())
+      // A new search starts with nothing skipped; the summaries or the history start reading
+      // again (opening the Summaries tab, say) keeps what was skipped.
+      if (searched.current !== search) setSkipped(new Set())
+      searched.current = search
       let cursor: typeof HistoryCursor.Type | undefined
       const all: HistoryHit[] = []
       do {

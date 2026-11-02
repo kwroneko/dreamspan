@@ -245,14 +245,18 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
 
   /**
    * A revision a ref's drafts can start from: of the ref's own entity, or, for a draft moved
-   * along with a fork (ForkCard), of the card it was forked from. Null when it's neither, or gone.
+   * along with forks (ForkCard), of a card in its parent chain. Null when it's neither, or gone.
    */
   const draftBase = (entityId: string, revisionId: string) =>
     sql<{ doc_json: string }>`
+      WITH RECURSIVE ancestors(id) AS (
+        SELECT ${entityId}
+        UNION
+        SELECT e.forked_from_entity_id FROM entities e JOIN ancestors a ON e.id = a.id
+          WHERE e.forked_from_entity_id IS NOT NULL
+      )
       SELECT doc_json FROM entity_revisions WHERE id = ${revisionId}
-        AND entity_id IN (${entityId}, (SELECT forked_from_entity_id FROM entities WHERE id = ${entityId}))`.pipe(
-      Effect.map(([row]) => row ?? null)
-    )
+        AND entity_id IN (SELECT id FROM ancestors)`.pipe(Effect.map(([row]) => row ?? null))
 
   /**
    * A card's family (spec/CARD-FORKS-DELTA.md §2): up its parents to the root, the member with

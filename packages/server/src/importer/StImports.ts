@@ -600,7 +600,7 @@ export class StImports extends Context.Service<
             session.settings?.textSwitches,
             kind === "lorebook" ? authorNotePlace(session.settings?.defaultAuthorNote ?? null).lore : undefined
           )
-          const anEntries = parsed.parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_entries")
+          const anEntries = parsed.parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_riders")
           // ST applies its global books to every chat: here they go with the preset ST had
           // selected, the books already imported (lorebooks come before presets, §13).
           const selected = kind === "preset" && session.settings?.selectedPreset === name

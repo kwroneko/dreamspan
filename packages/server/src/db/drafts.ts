@@ -24,6 +24,7 @@ import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { DraftTooLarge, NotFound, StaleWrite } from "./ops.ts"
+import { makeLibraryQueries } from "./library.ts"
 
 interface DraftRow {
   readonly id: string
@@ -241,6 +242,7 @@ export const makeDraftStore = (
   ) => Effect.Effect<void, SqlError.SqlError> = () => Effect.void,
   now: () => number = Date.now
 ) => {
+  const lib = makeLibraryQueries(sql)
   const find = (userId: UserId, key: DraftKey) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
@@ -282,6 +284,15 @@ export const makeDraftStore = (
         return Effect.succeed(null)
     }
   }
+
+  /** Inherited images must become a snapshot: the version can be amended after this edit. */
+  const startImages = (key: { readonly targetKind: DraftKey["targetKind"]; readonly targetId: string }) =>
+    key.targetKind === "version_edit"
+      ? sql<{ media_id: string; alt_text: string | null }>`
+          SELECT media_id, alt_text FROM version_attachments WHERE version_id = ${key.targetId} ORDER BY ordinal`.pipe(
+          Effect.map((rows) => imageJson(rows.map((row) => ({ mediaId: row.media_id, altText: row.alt_text ?? "" }))))
+        )
+      : Effect.succeed(null)
 
   const byId = (id: string) =>
     sql<DraftRow>`
@@ -598,7 +609,7 @@ export const makeDraftStore = (
         options.images === undefined
           ? draft.status === "active"
             ? draft.images_json
-            : null
+            : yield* startImages(toDraft(draft).key)
           : imageJson(options.images)
       const displaced =
         changed && (draft.content !== content || draft.images_json !== imagesJson)
@@ -645,11 +656,11 @@ export const makeDraftStore = (
       yield* tooLarge(options.content)
       yield* checkIdentity(options.userId, options.draftId)
       if (options.baseRevision !== null && options.key.targetKind === "entity_field") {
-        const [revision] = yield* sql<{
-          id: string
-        }>`SELECT r.id FROM entity_refs f JOIN entities e ON e.id = f.entity_id
-             JOIN entity_revisions r ON r.id = ${options.baseRevision} AND r.entity_id IN (e.id, e.forked_from_entity_id)
+        const [target] = yield* sql<{
+          entity_id: string
+        }>`SELECT e.id AS entity_id FROM entity_refs f JOIN entities e ON e.id = f.entity_id
            WHERE f.id = ${parseDraftTarget(options.key.targetId).refId} AND e.owner_user_id = ${options.userId}`
+        const revision = target ? yield* lib.draftBase(target.entity_id, options.baseRevision) : null
         if (!revision) return yield* new NotFound({ entity: "revision", id: options.baseRevision })
       }
       const keeps = keepsHistory({ target_kind: options.key.targetKind })
@@ -669,10 +680,18 @@ export const makeDraftStore = (
           : options.base === null || options.base.session === existing.session)
       ) {
         const shownText = yield* startText(options.key, options.baseRevision)
-        if (shownText !== null && (shownText !== existing.content || existing.images_json !== null)) {
-          if (existing.history_length > 0)
-            yield* record(existing, shownText, diffPatch(existing.content, shownText), "revision", now(), false, null)
-          yield* sql`UPDATE drafts SET content = ${shownText}, images_json = NULL WHERE id = ${existing.id}`
+        const shownImages = yield* startImages(options.key)
+        if (shownText !== null && (shownText !== existing.content || existing.images_json !== shownImages)) {
+          yield* record(
+            existing,
+            shownText,
+            diffPatch(existing.content, shownText),
+            "revision",
+            now(),
+            false,
+            shownImages
+          )
+          yield* sql`UPDATE drafts SET content = ${shownText}, images_json = ${shownImages} WHERE id = ${existing.id}`
           existing = (yield* byId(existing.id))!
         }
       }
@@ -689,8 +708,9 @@ export const makeDraftStore = (
       // An edit that keeps its history starts with the text it was typed on as its first
       // state: a library field's revision, a summary's revision, a message's version.
       const firstState = keeps ? yield* startText(options.key, options.baseRevision) : null
+      const firstImages = yield* startImages(options.key)
       if (firstState !== null && (firstState !== options.content || options.images !== undefined)) {
-        yield* insert(options.userId, options.key, firstState, options.baseRevision)
+        yield* insert(options.userId, options.key, firstState, options.baseRevision, firstImages)
         const seeded = (yield* find(options.userId, options.key))!
         yield* update(
           seeded,
@@ -698,7 +718,7 @@ export const makeDraftStore = (
           "edit",
           options.baseRevision,
           false,
-          options.images === undefined ? null : imageJson(options.images)
+          options.images === undefined ? firstImages : imageJson(options.images)
         )
         return toDraft((yield* find(options.userId, options.key))!)
       }
@@ -707,7 +727,7 @@ export const makeDraftStore = (
         options.key,
         options.content,
         options.baseRevision,
-        options.images === undefined ? null : imageJson(options.images)
+        options.images === undefined ? firstImages : imageJson(options.images)
       )
       return toDraft((yield* find(options.userId, options.key))!)
     })
@@ -781,12 +801,13 @@ export const makeDraftStore = (
       if (outcome === "discarded" && keepsHistory(draft) && draft.target_kind !== "entity_field") {
         const back = yield* startText(toDraft(draft).key, draft.base_revision)
         let recovered = 0
-        const moves = back !== null && (back !== draft.content || draft.images_json !== null)
+        const backImages = yield* startImages(toDraft(draft).key)
+        const moves = back !== null && (back !== draft.content || draft.images_json !== backImages)
         if (moves)
-          recovered = yield* record(draft, back, diffPatch(draft.content, back), "revision", now(), false, null)
+          recovered = yield* record(draft, back, diffPatch(draft.content, back), "revision", now(), false, backImages)
         const updatedAt = now()
         yield* sql`UPDATE drafts SET status = 'discarded', content = ${moves ? back : draft.content},
-                     images_json = ${moves ? null : draft.images_json}, row_version = row_version + 1,
+                     images_json = ${moves ? backImages : draft.images_json}, row_version = row_version + 1,
                      text_version = CASE WHEN ${moves ? 1 : 0} THEN row_version + 1 ELSE text_version END,
                      session = session + 1, updated_at = ${updatedAt}
                    WHERE id = ${draft.id}`

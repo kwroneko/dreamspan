@@ -109,24 +109,32 @@ it.live("a slot linked in two chats shows one shared note; unlinking copies it, 
       assert.include(yield* assembled(userId, chat.chat.id, chat.entry.slotId), "Snow on the roofs.")
     }
 
-    // Unlinked in A from its first message on: A keeps a copy, B stays linked.
-    yield* api.UnlinkNote({ noteRefId: slots[0]!.id, chatNote: { chatId: a.chat.id, slotId: a.entry.slotId } })
+    // The assembly helper appended replies. Even a caller naming the first message edits
+    // at the branch's latest state (owner, 2026-11-02): A keeps a copy from there on.
+    const currentA = yield* api.GetChat({ chatId: a.chat.id })
+    const position = { chatId: a.chat.id, forkId: currentA.currentForkId!, slotId: a.entry.slotId }
+    const latest = { ...position, slotId: currentA.activeLeafSlotId! }
+    yield* api.UnlinkNote({ noteRefId: slots[0]!.id, chatNote: position })
     yield* edit(api, userId, shared.id, { content: "Fog on the roofs." })
-    const copied = yield* listed(a)
+    const copied = (yield* api.ListChatNotes(latest)).find((n) => n.card === null)!
     assert.isNull(copied.linked)
     assert.strictEqual(copied.doc["content"], "Snow on the roofs.")
-    assert.include(yield* assembled(userId, a.chat.id, a.entry.slotId), "Snow on the roofs.")
+    assert.include(yield* assembled(userId, a.chat.id, latest.slotId), "Snow on the roofs.")
     assert.strictEqual((yield* listed(b)).doc["content"], "Fog on the roofs.")
     assert.include(yield* assembled(userId, b.chat.id, b.entry.slotId), "Fog on the roofs.")
-    // Before that message, A's slot still shows the shared note: the unlink is branch-local.
+    // Before the current message, A still shows the shared text, including at the stale
+    // caller's first message. Earlier forks also keep the link.
+    assert.isNotNull((yield* listed(a)).linked)
+    assert.strictEqual((yield* listed(a)).doc["content"], "Fog on the roofs.")
     assert.isNotNull((yield* listed(a, null)).linked)
+    const original = yield* api.ListChatNotes({
+      chatId: a.chat.id,
+      forkId: a.chat.currentForkId!,
+      slotId: a.entry.slotId
+    })
+    assert.isNotNull(original.find((n) => n.card === null)!.linked)
     // Its link changes only by its own actions, never through a draft.
-    assert.strictEqual(
-      yield* outcome(
-        api.UnlinkNote({ noteRefId: slots[0]!.id, chatNote: { chatId: a.chat.id, slotId: a.entry.slotId } })
-      ),
-      "EditRefused"
-    )
+    assert.strictEqual(yield* outcome(api.UnlinkNote({ noteRefId: slots[0]!.id, chatNote: position })), "EditRefused")
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 

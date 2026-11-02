@@ -13,6 +13,11 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
 
 let older: ChatId
 let latest: ChatId
+let latestCreatedAt: number
+
+/** How the app writes the day a chat started: its `createdAt`, not its ST file name's stamp (importreport). */
+const startedDay = (createdAt: number) =>
+  new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric" }).format(new Date(createdAt))
 
 /** A chat as ST's import titles a group's: the group's name and the day it started. */
 const groupChat = (title: string, cards: ReadonlyArray<EntityId>, content: string) =>
@@ -37,7 +42,11 @@ test.beforeAll(async () => {
   older = (await groupChat("The Lantern Inn: 2026-4-3@18h00m00s000ms", [ana, mira, tobin], "Evening at the inn.")).chat
     .id
   await new Promise((done) => setTimeout(done, 20))
-  latest = (await groupChat("The Lantern Inn: 2026-5-1@20h00m00s000ms", [ana, mira, tobin], "Back at the inn.")).chat.id
+  const latestChat = (
+    await groupChat("The Lantern Inn: 2026-5-1@20h00m00s000ms", [ana, mira, tobin], "Back at the inn.")
+  ).chat
+  latest = latestChat.id
+  latestCreatedAt = latestChat.createdAt
 })
 
 const grid = (page: Page) => page.getByRole("main").getByLabel("Groups", { exact: true })
@@ -77,7 +86,10 @@ test("a group's chats are listed on its page, and deleting one names it readably
 
   // Deleting the chat the page is named by keeps the page, on the group's other chat.
   await chats.first().hover()
-  await main.getByRole("button", { name: /^Delete The Lantern Inn, started May 1, 2026/ }).click()
+  await main
+    .getByRole("button", { name: new RegExp(`^Delete The Lantern Inn, started ${startedDay(latestCreatedAt)}`) })
+    .click()
+  // A bin item has only the title, so its name keeps the file stamp's day (importreport).
   await expect(page.getByText("Deleted: The Lantern Inn, started May 1, 2026")).toBeVisible()
   await expect(page).toHaveURL(`${server().url}/groups/${older}`)
   await expect(chats).toHaveCount(1)

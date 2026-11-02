@@ -116,6 +116,7 @@ it("Auto picks by ST's natural order: named first, then by talkativeness, never 
   assert.strictEqual(planReply(cast, [...user, turn("v3", mira, "Tobin, the door.")], ana, null, null).replier, tobin)
   // Typed text is user input: the last speaker isn't banned.
   assert.strictEqual(planReply(cast, afterMira, ana, null, "And then?").replier, mira)
+  assert.strictEqual(planReply(cast, afterMira, ana, null, "", true).replier, mira)
   // Muted (absent) cards and the composer's own speaker are never Auto's pick.
   const muted = castOf([mira, tobin, wren, ana], cards, { playedByMe: [ana], absent: [mira] })
   assert.notStrictEqual(planReply(muted, user, ana, null, "Mira?").replier, mira)
@@ -177,6 +178,18 @@ it("follows the chat's reply order: list, pooled and manual, as ST's group strat
   // Manual: nobody replies to what you send unless picked; Reply now picks one of them.
   const manual = order("manual")
   assert.deepStrictEqual(planReply(manual, user, ana, null, "Hello?"), { next: null, replier: null, reply: false })
+  assert.deepStrictEqual(planReply(manual, user, ana, null, "", true), { next: null, replier: null, reply: false })
+  assert.strictEqual(planReply(manual, user, ana, tobin, "", true).replier, tobin)
+  // An image-only user turn starts a new list/pooled round, too.
+  const afterMira = [...user, turn("v2", mira)]
+  assert.strictEqual(planReply(list, afterMira, ana, null, "", true).replier, mira)
+  const imagePicks = new Set(
+    Array.from(
+      { length: 30 },
+      (_, i) => planReply(pooled, [...user, turn(`v-${i}`, mira)], ana, null, "", true).replier
+    )
+  )
+  assert.include([...imagePicks], mira)
   assert.strictEqual(planReply(manual, user, ana, tobin, "Hello?").replier, tobin)
   assert.include([mira, tobin, wren], planReply(manual, user, ana, null, null).replier)
   // An order no policy has is the default, natural order.
