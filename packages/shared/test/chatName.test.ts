@@ -18,6 +18,17 @@ describe("chat names", () => {
     expect(chatName("Party: 2024-9-10 @13h 44m 41s 16ms", cast).name).toBe("Party")
   })
 
+  it("names a chat whose file name is only ST's stamp by its characters (owner, 2026-11-02)", () => {
+    const two = [{ name: "Cleo" }, { name: "Dax" }]
+    // ST's own "<card> - <stamp>" is only a stamp too, in either stamp form and as a branch.
+    expect(chatName("Cleo - 2026-05-11@07h51m55s691ms", two).name).toBe("Cleo, Dax")
+    expect(chatName("cleo - 2024-9-10 @13h 44m 41s 16ms - Branch #2", two).name).toBe("Cleo, Dax")
+    expect(chatName("2026-05-11@07h51m55s691ms", two).name).toBe("Cleo, Dax")
+    // A name the user gave stays: in ST (no stamp), or a rename here (which keeps the stamp).
+    expect(chatName("Moonlit road", two)).toEqual({ name: "Moonlit road", started: null })
+    expect(chatName("Moonlit road - 2026-05-11@07h51m55s691ms", two).name).toBe("Moonlit road")
+  })
+
   it("dates an imported chat by when it started, given that, never by a stale file name", () => {
     const started = Date.UTC(2026, 3, 20, 6, 36)
     expect(chatName("2024-9-10 @13h 44m 41s 16ms", cast, started)).toEqual({ name: "Cleo", started: new Date(started) })
