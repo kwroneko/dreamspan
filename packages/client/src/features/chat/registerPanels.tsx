@@ -110,10 +110,7 @@ export const registerPanels = () => [
     icon: "note",
     // Its sections go side by side as the panel widens.
     width: "full",
-    component: lazyPanel(loadNotes, "notes"),
-    preload: () => {
-      void loadNotes().catch(() => undefined)
-    }
+    component: lazyPanel(loadNotes, "notes")
   }),
   chatPanels.register({
     id: "summaries",
