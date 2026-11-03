@@ -815,7 +815,7 @@ export function LorebookTable({
   // shown, none, or indeterminate while some are selected.
   const selectAll = (
     <Tooltip label={allShown ? "Clears the selection of the entries shown." : "Selects every entry shown."}>
-      <span className="inline-flex size-6 shrink-0 items-center justify-center pt-1">
+      <span className="inline-flex size-6 shrink-0 items-center justify-center">
         <Checkbox
           labelHidden
           checked={allShown}
@@ -981,6 +981,7 @@ export function LorebookTable({
             {count && (
               <span
                 role="status"
+                data-layout-overlay="The entry count sits inside the filter field's end"
                 className="pointer-events-none absolute inset-y-0 right-8 flex items-center text-xs text-muted"
               >
                 {count}
@@ -996,7 +997,7 @@ export function LorebookTable({
             and its Edit, and the list's own actions at the end. One row whatever the width. */}
         {!compact ? (
           <div
-            className="grid items-center gap-2 border-b border-border py-1 ps-2 pe-4 text-xs font-medium text-muted"
+            className="grid items-center gap-2 border-b border-border py-2 ps-2 pe-4 text-xs font-medium text-muted"
             style={{ gridTemplateColumns: template }}
           >
             <span className="flex items-center gap-1">
@@ -1016,7 +1017,7 @@ export function LorebookTable({
             {listActions}
           </div>
         ) : (
-          <div className="flex min-h-9 items-center gap-1 border-b border-border py-1 ps-2 pe-4">
+          <div className="flex items-center gap-1 border-b border-border py-2 ps-2 pe-4">
             {selectAll}
             <span className="flex min-w-0 flex-1 items-center pl-1">{selection}</span>
             {listActions}
