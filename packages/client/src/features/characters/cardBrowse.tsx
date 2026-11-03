@@ -9,7 +9,6 @@ import { useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Checkbox } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
@@ -144,7 +143,7 @@ export function CardFilterControl({
   onChange: (filter: CardFilter) => void
   cards: ReadonlyArray<ShellCard>
   groups?: number | null
-  /** Include personas is ticked: the characters' counts count them too. */
+  /** Personas are included: the characters' counts count them too. */
   withPersonas?: boolean
   compact?: boolean
 }) {
@@ -156,7 +155,7 @@ export function CardFilterControl({
     return (
       <Select<CardFilter>
         ariaLabel="Show"
-        className="h-8!"
+        className="h-8! gap-1! px-2!"
         value={shown}
         onValueChange={onChange}
         items={options.map((f) => ({
@@ -200,13 +199,14 @@ export function IncludePersonas({
 }) {
   if (browse.filter === "personas" || browse.filter === "groups") return null
   return (
-    <Checkbox
-      checked={browse.withPersonas}
-      onCheckedChange={(withPersonas) => onChange({ withPersonas })}
-      hint="Shows the cards you play as among these characters"
-    >
-      Include personas
-    </Checkbox>
+    <IconButton
+      label="Include personas"
+      hint={browse.withPersonas ? "Personas included" : "Include personas"}
+      icon="people"
+      aria-pressed={browse.withPersonas}
+      className="aria-pressed:bg-surface-raised aria-pressed:text-accent"
+      onClick={() => onChange({ withPersonas: !browse.withPersonas })}
+    />
   )
 }
 

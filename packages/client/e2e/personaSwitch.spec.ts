@@ -152,20 +152,18 @@ test("Add characters: Include personas, off at first, marked when on, remembered
       .getByLabel("Characters", { exact: true })
       .getByRole("button")
       .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")).sort())
-  const include = section.getByRole("checkbox", { name: "Include personas" })
+  const include = section.getByRole("button", { name: "Include personas", exact: true })
 
   // Off by default: the personas aren't among All's characters.
-  await expect(include).not.toBeChecked()
+  await expect(include).toHaveAttribute("aria-pressed", "false")
   await expect.poll(tiles).toContain("Add Corin to this chat")
   await expect.poll(tiles).not.toContain("Add Nell to this chat")
   await expect(section.locator("[data-persona-badge]")).toHaveCount(0)
   await include.hover()
-  await expect(
-    page.getByText("Shows the cards you play as among these characters", { exact: true }).filter({ visible: true })
-  ).toBeVisible()
+  await expect(page.getByText("Include personas", { exact: true }).filter({ visible: true })).toBeVisible()
 
   // On: mixed in and marked, Pia (played here) and Nell.
-  await include.check()
+  await include.click()
   await expect.poll(tiles).toContain("Add Nell to this chat")
   await expect.poll(tiles).toContain("Pia: you play them here")
   await expect(section.locator("[data-persona-badge]")).toHaveCount(2)
@@ -176,16 +174,19 @@ test("Add characters: Include personas, off at first, marked when on, remembered
   await page.reload()
   const again = await openPanel(page, "Cast")
   const section2 = again.getByRole("region", { name: "Add characters", exact: true })
-  await expect(section2.getByRole("checkbox", { name: "Include personas" })).toBeChecked()
+  await expect(section2.getByRole("button", { name: "Include personas", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  )
   await expect(section2.locator("[data-persona-badge]")).toHaveCount(2)
 
-  // Under Personas there's no checkbox, and nothing is marked: every card there is one.
+  // Under Personas there's no toggle, and nothing is marked: every card there is one.
   await section2.getByRole("combobox", { name: "Show" }).click()
   await page.getByRole("option", { name: /^Personas/ }).click()
-  await expect(section2.getByRole("checkbox", { name: "Include personas" })).toHaveCount(0)
+  await expect(section2.getByRole("button", { name: "Include personas", exact: true })).toHaveCount(0)
   await expect(section2.locator("[data-persona-badge]")).toHaveCount(0)
   await section2.getByRole("combobox", { name: "Show" }).click()
   await page.getByRole("option", { name: /^All/ }).click()
-  await section2.getByRole("checkbox", { name: "Include personas" }).uncheck()
+  await section2.getByRole("button", { name: "Include personas", exact: true }).click()
   await expect(section2.locator("[data-persona-badge]")).toHaveCount(0)
 })
