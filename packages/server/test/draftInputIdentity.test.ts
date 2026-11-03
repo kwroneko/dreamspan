@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
+import { editingOrigin } from "@rp/shared/draftDeletions.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 it.live("a cleared array input stays deleted when an offline snapshot reordered its items", () =>
@@ -245,5 +246,35 @@ it.live("retrying an actual clear cannot create a new barrier while updating ano
       name: "Fresh after the actual deletion",
       baseUrl: "https://last.invalid"
     })
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("an offline anonymous clear remains protected when its text is reused before acknowledgement", () =>
+  Effect.gen(function* () {
+    const api = yield* client(),
+      ownerId = (yield* api.Whoami()).id
+    const address = { ownerId, targetId: "anonymous-reused-clear", field: "Inputs" }
+    const original = JSON.stringify({ items: [{ name: "Deleted name", note: "", other: "" }] })
+    const clear = JSON.stringify({ items: [{ name: "", note: "", other: "" }] })
+    const moved = JSON.stringify({ items: [{ name: "", note: "Deleted name", other: "" }] })
+    const origin = editingOrigin(editingOrigin(original, original, clear), clear, moved)
+    const first = yield* api.SaveUserDraft({
+      ...address,
+      draftId: null,
+      expectedRowVersion: null,
+      expectedSession: null,
+      content: original
+    })
+    const base = { ...address, draftId: first.id, expectedRowVersion: first.rowVersion, expectedSession: first.session }
+    const saved = yield* api.SaveUserDraft({ ...base, content: moved, editingFrom: origin })
+    assert.isNotEmpty(Object.keys(saved.deletions!))
+    const replay = yield* api.SaveUserDraft({
+      ...base,
+      editingFrom: original,
+      content: JSON.stringify({ items: [{ name: "Deleted name", note: "", other: "unrelated fresh key" }] })
+    })
+    assert.strictEqual(JSON.parse(replay.content).items[0].name, "")
+    assert.strictEqual(JSON.parse(replay.content).items[0].note, "Deleted name")
+    assert.isAbove(replay.recovered, 0)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )

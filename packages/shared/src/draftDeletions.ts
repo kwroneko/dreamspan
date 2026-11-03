@@ -1,5 +1,5 @@
 // Deletion belongs to the logical input, even when its edit history moves elsewhere.
-import type { Draft, ObservedDeletion, FieldDeletion } from "./drafts.ts"
+import type { Draft, ObservedDeletion, FieldDeletion, EditingOrigin } from "./drafts.ts"
 
 export interface DeletionBase {
   readonly draftId: string | null
@@ -25,6 +25,12 @@ export const beforeDeletion = (currentId: string, deletion: ObservedDeletion, ba
 }
 
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+const originContent = (origin: EditingOrigin | null | undefined): string | null =>
+  typeof origin === "object" && origin !== null ? origin.content : (origin ?? null)
+
+export const mapEditingOrigin = (origin: EditingOrigin, change: (content: string) => string): EditingOrigin =>
+  typeof origin === "string" ? change(origin) : { ...origin, content: change(origin.content) }
+
 const form = (content: string | null): Record<string, unknown> | null => {
   try {
     const parsed: unknown = JSON.parse(content ?? "null")
@@ -130,6 +136,11 @@ const clearsFrom = (
   } else if (typeof before === "string" && before !== "" && empty(after)) clears.push({ path, array: false })
   return clears
 }
+// A clear is an authored event. Later insertion of the same string cannot cancel it.
+const intendedClears = (origin: EditingOrigin | null | undefined, before: unknown, after: unknown): Clear[] => {
+  const recorded = typeof origin === "object" && origin !== null ? origin.clearedArrays : []
+  return [...clearsFrom(before, after), ...recorded.map((path) => ({ path, array: true }))]
+}
 const prefix = (parent: ReadonlyArray<string>, child: ReadonlyArray<string>) =>
   parent.every((part, index) => child[index] === part)
 
@@ -138,16 +149,16 @@ export const reconcileForm = (
   draft: DeletionState & Pick<Draft, "rowVersion">,
   base: DeletionBase | null,
   content: string,
-  editingFrom?: string,
+  editingFrom?: EditingOrigin,
   deliberate = true
 ) => {
   const exact = base?.draftId === draft.id && base.expectedRowVersion === draft.rowVersion
   const before = deliberate ? (editingFrom ?? (exact ? draft.content : null)) : null
-  const initial = form(before),
+  const initial = form(originContent(before)),
     incoming = form(content),
     current = form(draft.content)
   if (incoming === null || current === null) return { content, changed: false, intent: before }
-  const clears = initial === null ? [] : clearsFrom(initial, incoming)
+  const clears = intendedClears(before, initial, incoming)
   const merge = (left: unknown, right: unknown, path: ReadonlyArray<string>): unknown => {
     if (equal(left, right)) return right
     const cleared = clears.some((clear) => equal(clear.path, path))
@@ -193,7 +204,7 @@ export const trackDeletions = (
   content: string,
   compound: boolean,
   deliberate: boolean,
-  edit?: { readonly before: string | null; readonly content: string }
+  edit?: { readonly before: EditingOrigin | null; readonly content: string }
 ): Deletions => {
   const markers: Record<string, FieldDeletion> = { ...deletionMap(draft) }
   const token = { draftId: draft.id, rowVersion: draft.rowVersion + 1 }
@@ -204,10 +215,10 @@ export const trackDeletions = (
     markers[""] = token
   if (!compound) return markers
   const after = form(content),
-    before = form(edit ? edit.before : draft.content),
+    before = form(edit ? originContent(edit.before) : draft.content),
     intended = form(edit ? edit.content : content)
   if (deliberate && before !== null && intended !== null && after !== null) {
-    for (const clear of clearsFrom(before, intended)) {
+    for (const clear of intendedClears(edit?.before, before, intended)) {
       const final = at(after, clear.path)
       if (
         final.unsafe ||
@@ -266,13 +277,16 @@ const assign = (incoming: Record<string, unknown>, current: unknown, path: Reado
 }
 
 /** Preserve actual local clears across failed saves, even when typing returned to its original blank. */
-export const editingOrigin = (origin: string | null, before: string, content: string): string => {
+export const editingOrigin = (origin: EditingOrigin | null, before: string, content: string): EditingOrigin => {
   if (before !== "" && content === "") return before
   const left = form(before),
     right = form(content)
   if (left === null || right === null) return origin ?? before
-  let basis = form(origin) ?? form(before)!
-  for (const clear of clearsFrom(left, right)) {
+  let basis = form(originContent(origin)) ?? form(before)!
+  const clears = clearsFrom(left, right)
+  const arrays = typeof origin === "object" && origin !== null ? [...origin.clearedArrays] : []
+  for (const clear of clears) {
+    if (clear.array && !arrays.some((path) => equal(path, clear.path))) arrays.push(clear.path)
     if (clear.path.length === 0) {
       basis = left
       continue
@@ -284,7 +298,8 @@ export const editingOrigin = (origin: string | null, before: string, content: st
     }
     assign(basis, left, clear.path, at(left, clear.path))
   }
-  return JSON.stringify(basis)
+  const result = JSON.stringify(basis)
+  return arrays.length === 0 ? result : { content: result, clearedArrays: arrays }
 }
 
 /** Overlay protected inputs by identity. Anonymous-array conflicts retain the entire snapshot. */

@@ -447,3 +447,60 @@ it("a fresh editor can be closed while its opening read is pending", async () =>
   }
   expect(copies.size).toBe(0)
 })
+
+it("an exact replay compares image values while preserving the later attachment copy", async () => {
+  const active = new Draft({ ...tombstone, status: "active", clearedVersion: 0 })
+  const image = { altText: "Synthetic caption", mediaId: "synthetic-media" }
+  const copy = makeCopy(
+    "user",
+    "messages:chat",
+    "edit:version",
+    {
+      kind: "message",
+      payload: {
+        target,
+        draftId: active.id,
+        content: "",
+        images: [image],
+        expectedRowVersion: active.rowVersion,
+        expectedSession: active.session
+      }
+    },
+    1
+  )
+  copies.set(copy.key, copy)
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const acknowledged = new Draft({
+    ...active,
+    content: "",
+    rowVersion: 6,
+    clearedVersion: 6,
+    images: [{ mediaId: image.mediaId, altText: image.altText }]
+  })
+  const store = new MessageDraft(
+    session(active, () =>
+      Effect.promise(async () => {
+        await held
+        return acknowledged
+      })
+    ),
+    "user",
+    target,
+    "",
+    active
+  )
+  const restoring = store.restore([copy])
+  try {
+    await vi.waitFor(() => expect(store.snapshot().text).toBe(""))
+    store.setText("new text on the recovered empty field")
+  } finally {
+    release()
+    await restoring
+  }
+  const fresh = [...copies.values()].find((kept) => kept.content !== "")
+  expect(fresh?.save).toMatchObject({ kind: "message", payload: { expectedRowVersion: 6, images: [image] } })
+  store.committed({ text: store.snapshot().text, images: store.snapshot().images, draft: null })
+})

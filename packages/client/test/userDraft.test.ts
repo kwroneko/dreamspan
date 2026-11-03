@@ -723,3 +723,25 @@ it("acknowledging a clear removes its old intent from a later unrelated input ch
   await until(() => saves.length === 2)
   expect(saves[1]).toMatchObject({ content: url, editingFrom: cleared })
 })
+
+it("anonymous clear evidence stays in durable copies and RPCs when the same text is reused offline", async () => {
+  const original = JSON.stringify({ items: [{ name: "Deleted name", note: "" }] })
+  const cleared = JSON.stringify({ items: [{ name: "", note: "" }] })
+  const reused = JSON.stringify({ items: [{ name: "", note: "Deleted name" }] })
+  const { store, handlers, saves } = harness(draft(original))
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async (input) => {
+    saves.push(input)
+    throw new Error("offline")
+  }
+  store.type(cleared, original)
+  store.type(reused, original)
+  const copy = [...memory.values()].find((copy) => copy.content === reused)
+  expect(copy?.save).toMatchObject({
+    kind: "userDraft",
+    payload: { editingFrom: { content: original, clearedArrays: [["items"]] } }
+  })
+  await until(() => saves.length === 2)
+  expect(saves[1]?.editingFrom).toEqual({ content: original, clearedArrays: [["items"]] })
+})

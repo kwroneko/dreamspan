@@ -11,7 +11,7 @@ import type { MessageImages } from "@rp/shared/chat.ts"
 // server has it: a save that fails, a closed tab or a reload leaves the copy, filed under
 // the chat, which opening the chat again replays, with the draft it was typed on.
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { MessageDraftTarget } from "@rp/shared/chatApi.ts"
+import type { MessageDraftSave, MessageDraftTarget } from "@rp/shared/chatApi.ts"
 import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, dropCopy, keepCopy, makeCopy, pendingOf, type ReplayConflict } from "../editor/backup.ts"
@@ -238,6 +238,7 @@ export class MessageDraft {
         if (replayed.ok) {
           this.draft = replayed.value
           this.opened = true
+          await this.acknowledgeBase(copy, save.payload, replayed.value)
           if (this.pending === copy && this.local === copy.content) {
             this.local = null
             this.pending = null
@@ -297,6 +298,32 @@ export class MessageDraft {
     }
   }
 
+  /** Only an exact save can advance copies actually typed from its displayed text. */
+  private async acknowledgeBase(copy: Copy | null, sent: typeof MessageDraftSave.Type, draft: Draft) {
+    const images = draft.images ?? []
+    const exact =
+      draft.status === "active" &&
+      draft.content === sent.content &&
+      (sent.images === undefined ||
+        (images.length === sent.images.length &&
+          sent.images.every(
+            (image, index) => image.mediaId === images[index]?.mediaId && image.altText === images[index]?.altText
+          )))
+    const descended =
+      copy !== null &&
+      this.pending !== null &&
+      (this.pending === copy || this.pending.ancestors.includes(copy.key)) &&
+      this.base.draftId === sent.draftId &&
+      this.base.rowVersion === sent.expectedRowVersion &&
+      this.base.session === sent.expectedSession
+    if (exact && descended) {
+      this.base = baseOf(draft)
+      this.observedDeletion = null
+      if (this.pending !== copy && this.local !== null) await this.keep(this.local)
+    }
+    return exact
+  }
+
   /** Copies `content` into this browser, in place of the last copy unless that one is being sent. */
   private keep(content: string) {
     const previous = this.pending
@@ -310,7 +337,7 @@ export class MessageDraft {
       previous === null ? [] : [previous]
     )
     this.pending = copy
-    void keepCopy(copy, replaces ? previous : null)
+    return keepCopy(copy, replaces ? previous : null)
   }
 
   /** The copy, once the text it holds is on the server or thrown away on purpose. */
@@ -376,8 +403,8 @@ export class MessageDraft {
       }
       // The server has exactly the text sent: what's typed from it is on the draft as it is now.
       this.draft = result.value
-      const exact = result.value.status === "active" && result.value.content === sent
-      if (exact || (this.local === sent && this.view.images === sentImages)) {
+      const exact = await this.acknowledgeBase(copy, payload, result.value)
+      if (this.local === sent && this.view.images === sentImages) {
         this.base = baseOf(result.value)
         this.observedDeletion = null
       }
@@ -386,9 +413,6 @@ export class MessageDraft {
         this.local = null
         if (this.pending === copy) this.pending = null
         if (!exact) this.set({ text: result.value.content, images: result.value.images })
-      } else if (exact && this.local !== null && this.pending !== null && !this.sending.has(this.pending)) {
-        // More typed since: its copy now names the draft as the server has it.
-        this.keep(this.local)
       }
       // The first save of text replayed from this browser can go over text saved elsewhere too.
       const conflict =

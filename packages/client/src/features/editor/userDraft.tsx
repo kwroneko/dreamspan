@@ -1,8 +1,9 @@
-import { editingOrigin, reconcileDeletedFields, reconcileForm } from "@rp/shared/draftDeletions.ts"
+import { mapEditingOrigin, editingOrigin, reconcileDeletedFields, reconcileForm } from "@rp/shared/draftDeletions.ts"
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { UserId } from "@rp/shared/domain.ts"
 import {
+  type EditingOrigin,
   observeDeletion,
   type ObservedDeletion,
   deletedSince,
@@ -54,11 +55,16 @@ export class UserDraftStore {
   // The base of the displayed text, independent of reads/restores the user hasn't seen.
   private observedDeletion: ObservedDeletion | null = null
   private base = baseOf(null)
-  private editingFrom: string | null = null
+  private editingFrom: EditingOrigin | null = null
   private lastPersistAcknowledged = false
   private edits = 0
   private acknowledgedEdit = -1
-  private pendingTypes = new Set<{ initial: string; content: string; editingFrom: string | null; edit: number }>()
+  private pendingTypes = new Set<{
+    initial: string
+    content: string
+    editingFrom: EditingOrigin | null
+    edit: number
+  }>()
   private copy: Copy | null = null
   private queue: Promise<unknown> = Promise.resolve()
   private listeners = new Set<() => void>()
@@ -316,7 +322,10 @@ export class UserDraftStore {
             this.copy = copiedFormChanged ? null : copy
             this.editingFrom = save.payload.editingFrom ?? formCopy?.intent ?? safeCopy.content
             if (safeCopy.changed && this.draft !== null) {
-              this.editingFrom = reconcileDeletedFields(this.draft, save.payload, this.editingFrom).content
+              this.editingFrom = mapEditingOrigin(
+                this.editingFrom,
+                (content) => reconcileDeletedFields(this.draft!, save.payload, content).content
+              )
               this.observedDeletion = observeDeletion(this.draft)
             }
             this.update({ text: safeCopy.content })
@@ -470,9 +479,9 @@ export class UserDraftStore {
         for (const pending of this.pendingTypes) {
           pending.initial = rebase(pending.initial)
           pending.content = rebase(pending.content)
-          if (pending.editingFrom !== null) pending.editingFrom = rebase(pending.editingFrom)
+          if (pending.editingFrom !== null) pending.editingFrom = mapEditingOrigin(pending.editingFrom, rebase)
         }
-        if (this.editingFrom !== null) this.editingFrom = rebase(this.editingFrom)
+        if (this.editingFrom !== null) this.editingFrom = mapEditingOrigin(this.editingFrom, rebase)
         if (this.state.text !== null && this.state.text !== content) {
           this.update({ text: rebase(this.state.text) })
           await this.remember(this.state.text!, true).kept

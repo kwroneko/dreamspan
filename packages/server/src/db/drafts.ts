@@ -1,3 +1,4 @@
+import type { EditingOrigin } from "@rp/shared/drafts.ts"
 // Draft storage shared by the writer and the readers (DESIGN §6.2). See
 // @rp/shared/drafts.ts for the patch model.
 import {
@@ -519,7 +520,7 @@ export const makeDraftStore = (
     displaced = false,
     imagesJson: string | null = draft.images_json,
     deliberate = true,
-    formEdit?: { readonly before: string | null; readonly content: string }
+    formEdit?: { readonly before: EditingOrigin | null; readonly content: string }
   ) =>
     Effect.gen(function* () {
       const at = now()
@@ -608,7 +609,7 @@ export const makeDraftStore = (
       readonly baseRevision: string | null
       readonly ended: "recover" | "reopen"
       readonly observedDeletion?: ObservedDeletion | undefined
-      readonly editingFrom?: string | undefined
+      readonly editingFrom?: EditingOrigin | undefined
       readonly deliberate?: boolean
       readonly deletionBase?: DeletionBase
       readonly next?: boolean
@@ -714,7 +715,7 @@ export const makeDraftStore = (
     readonly images?: MessageImages | undefined
     readonly base: Base | null
     readonly baseRevision: string | null
-    readonly editingFrom?: string | undefined
+    readonly editingFrom?: EditingOrigin | undefined
     readonly seed?: boolean | undefined
     readonly checkTarget: Effect.Effect<void, NotFound, never>
     readonly observedDeletion?: ObservedDeletion | undefined

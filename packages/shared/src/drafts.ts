@@ -6,6 +6,13 @@ import { Schema } from "effect"
 import { beforeDeletion, deletionMap } from "./draftDeletions.ts"
 import { MessageImages } from "./chat.ts"
 
+/** Legacy strings remain valid; anonymous input clears need evidence independent of final text counts. */
+export const EditingOrigin = Schema.Union([
+  Schema.String,
+  Schema.Struct({ content: Schema.String, clearedArrays: Schema.Array(Schema.Array(Schema.String)) })
+])
+export type EditingOrigin = typeof EditingOrigin.Type
+
 export const DraftTargetKind = Schema.Literals([
   "composer",
   "version_edit",
