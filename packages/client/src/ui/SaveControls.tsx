@@ -196,7 +196,16 @@ export function SaveControls({
               disabled={!revertable}
               focusableWhenDisabled
               className={`${square} ${revertable || reverting ? "" : inert}`}
-              hint={explain(revertLabel, revertHint)}
+              hint={explain(
+                revertLabel,
+                reverting
+                  ? "Reverting these edits…"
+                  : state === "saving"
+                    ? "Wait for this revision to finish saving."
+                    : !changed
+                      ? "No edits to revert."
+                      : revertHint
+              )}
               onClick={() => {
                 if (!revertable) return
                 setReverting(true)

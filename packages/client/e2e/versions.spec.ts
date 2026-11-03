@@ -41,7 +41,8 @@ const manyVersions = async (page: Page, count = 4) => {
 test("a message the user wrote gets a version from the model, then its › and arrows", async ({ page }) => {
   await newChat(page, "Harbor")
   const mine = page.getByRole("article", { name: "Your message", exact: true })
-  await expect(versions(mine)).toHaveCount(0)
+  await expect(versions(mine)).toContainText("1/1")
+  await expect(versions(mine).getByRole("button", { name: "Previous version", exact: true })).toBeDisabled()
   await messageMenu(mine, /^Generate a version$/)
   await expect(versions(mine)).toContainText("2/2")
   await settled(page)

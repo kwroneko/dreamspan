@@ -10,6 +10,7 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { nextChip } from "./support/strip.ts"
 
@@ -207,6 +208,34 @@ test("ending a held round with a new message removes its controls in both tabs",
   await expect(round(page)).toHaveCount(0)
   await expect(round(other)).toHaveCount(0)
 })
+
+for (const width of [1440, 390])
+  test(`Continue round keeps its box while the round runs or stops at ${width}`, async ({ page }) => {
+    if (process.env.STABLE_BUTTONS_AUDIT) test.setTimeout(180_000)
+    await page.setViewportSize({ width, height: 900 })
+    const chatId = await groupChat(`Stable round ${width}`)
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await plannedRound(page)
+    await composer(page).fill("Synthetic round.")
+    await page.keyboard.press("Enter")
+    const resume = round(page).getByRole("button", { name: "Continue round", exact: true })
+    await expect(resume).toBeDisabled()
+    const actions = resume.locator("..")
+    const boxes = () =>
+      actions.evaluate((row) =>
+        [...row.querySelectorAll("button")].map((button) => {
+          const r = button.getBoundingClientRect(),
+            p = row.getBoundingClientRect()
+          return [r.x - p.x, r.y - p.y, r.width, r.height]
+        })
+      )
+    const before = await boxes()
+    await page.getByRole("button", { name: "Stop", exact: true }).click()
+    await expect(resume).toBeEnabled()
+    expect(await boxes()).toEqual(before)
+    if (process.env.STABLE_BUTTONS_AUDIT) await expectLayout(page, test.info(), `round-${width}`)
+    await round(page).getByRole("button", { name: "End round", exact: true }).click()
+  })
 
 for (const width of [1440, 1024, 390]) {
   for (const theme of ["light", "dark"] as const) {

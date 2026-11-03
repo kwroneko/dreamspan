@@ -9,6 +9,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { IMPORTED_SUMMARY, writeStFolder } from "./support/stFiles.ts"
@@ -84,7 +85,7 @@ const noSideways = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 
 for (const [name, viewport, chat] of [
-  ["desktop", { width: 1280, height: 800 }, "Bob - desktop"],
+  ["desktop", { width: 1440, height: 900 }, "Bob - desktop"],
   ["phone", { width: 390, height: 844 }, "Bob - phone"]
 ] as const) {
   test.describe(name, () => {
@@ -93,6 +94,7 @@ for (const [name, viewport, chat] of [
     test("keeping the imported summary shows the estimate first, spends nothing, and Summarize now backfills", async ({
       page
     }) => {
+      if (process.env.STABLE_BUTTONS_AUDIT) test.setTimeout(180_000)
       const before = provider.completions.length
       await openChat(page, chat)
       // Summaries are off for an imported chat, and turning them on is one click away, on one line.
@@ -144,8 +146,30 @@ for (const [name, viewport, chat] of [
       await expect(backfill.getByTestId("backfill-spent")).toContainText("Spent 0 of")
       await noSideways(page)
 
-      // Summarize now: the work runs without a reply, and the section goes when it is done.
-      await backfill.getByRole("button", { name: "Summarize now" }).click()
+      // All three controls keep their boxes through waiting, running and paused states.
+      const controls = backfill.getByRole("button", { name: "Summarize now", exact: true }).locator("..")
+      const boxes = () =>
+        controls.evaluate((row) =>
+          [...row.querySelectorAll("button")].map((button) => {
+            const r = button.getBoundingClientRect(),
+              p = row.getBoundingClientRect()
+            return [r.x - p.x, r.y - p.y, r.width, r.height]
+          })
+        )
+      const beforeBoxes = await boxes()
+      await expect(backfill.getByRole("button", { name: "Continue", exact: true })).toBeDisabled()
+      await expect(backfill.getByRole("button", { name: "Pause", exact: true })).toBeDisabled()
+      provider.hold()
+      await backfill.getByRole("button", { name: "Summarize now", exact: true }).click()
+      await expect(backfill).toHaveAttribute("data-state", "running")
+      expect(await boxes()).toEqual(beforeBoxes)
+      await backfill.getByRole("button", { name: "Pause", exact: true }).click()
+      await expect(backfill).toHaveAttribute("data-state", "paused")
+      await expect(backfill.getByRole("button", { name: "Continue", exact: true })).toBeEnabled()
+      expect(await boxes()).toEqual(beforeBoxes)
+      if (process.env.STABLE_BUTTONS_AUDIT) await expectLayout(page, test.info(), `backfill-${viewport.width}`)
+      await backfill.getByRole("button", { name: "Continue", exact: true }).click()
+      provider.release()
       await expect(summaries.getByTestId("backfill")).toHaveCount(0, { timeout: 45_000 })
       expect(provider.completions.length).toBeGreaterThan(before)
       await expect(summaries.getByRole("list", { name: "Summaries in use" })).toBeVisible()

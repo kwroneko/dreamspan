@@ -271,7 +271,9 @@ export const registerEditorHistory = () => [
     id: "message.amendments",
     order: 15,
     group: "change",
-    available: ({ entry, generating }) => !generating && entry.version.writer === "human",
+    available: ({ entry }) => entry.version.writer === "human",
+    disabled: ({ generating }) =>
+      generating ? "Wait for this message to finish before reading its amendments." : null,
     describe: viewOf(({ openDialog }) => ({
       label: "Saved amendment history",
       icon: "history",

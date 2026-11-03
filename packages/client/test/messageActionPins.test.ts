@@ -120,14 +120,21 @@ describe("pinned message actions", () => {
     messageActionPins.choose("message.edit", false)
     messageActionPins.choose("plugin.not-installed", true)
     expect(buttons(reply)).toEqual(["Continue", "Branch from here", "Copy text", "Delete version"])
-    // Delete message (every version) is offered only on a message with more than one.
+    // Delete all versions retains its pin and becomes disabled with only one version.
     messageActionPins.choose("message.delete-all", true)
-    expect(buttons(reply)).toEqual(["Continue", "Branch from here", "Copy text", "Delete version", "Delete message"])
+    expect(buttons(reply)).toEqual([
+      "Continue",
+      "Branch from here",
+      "Copy text",
+      "Delete version",
+      "Delete all versions"
+    ])
     expect(buttons(contextOf(entryOf("model", 1)))).toEqual([
       "Continue",
       "Branch from here",
       "Copy text",
-      "Delete message"
+      "Delete message",
+      "Delete all versions"
     ])
     messageActionPins.choose("message.edit", true)
     expect(buttons(reply)[0]).toBe("Edit")
@@ -170,7 +177,7 @@ describe("pinned message actions", () => {
     }
     const reply = views(contextOf(entryOf("model", 12)))
     expect(reply.get("message.add-guidance")).toMatchObject({ label: "New version with guidance…", icon: "guidance" })
-    expect(reply.get("message.delete-all")).toMatchObject({ label: "Delete message", icon: "trash-all" })
+    expect(reply.get("message.delete-all")).toMatchObject({ label: "Delete all versions", icon: "trash-all" })
     expect(reply.get("message.delete-all")!.hint).toBe(
       "Moves this message and all its versions to the bin, from which it can be restored later."
     )

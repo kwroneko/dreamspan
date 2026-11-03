@@ -352,23 +352,31 @@ export function KeySection(props: ConnectionSectionProps) {
             <Button hint="Gives it a key you type, sent only to its address." onClick={() => setDialog("set")}>
               Enter a new key
             </Button>
-            {credentials.length > 0 && (
-              <Button
-                hint="Uses a key saved in Settings → Keys, which other connections can share."
-                onClick={() => setDialog("saved")}
-              >
-                Use a saved key
-              </Button>
-            )}
-            {connection.hasKey && (
-              <Button
-                variant="ghost"
-                hint="Send requests without a key. You’ll confirm first."
-                onClick={() => setDialog("remove")}
-              >
-                Remove key
-              </Button>
-            )}
+            <Button
+              disabled={credentials.length === 0}
+              focusableWhenDisabled
+              hint={
+                credentials.length === 0
+                  ? "No saved keys yet."
+                  : "Uses a key saved in Settings → Keys, which other connections can share."
+              }
+              onClick={() => setDialog("saved")}
+            >
+              Use a saved key
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={!connection.hasKey}
+              focusableWhenDisabled
+              hint={
+                connection.hasKey
+                  ? "Send requests without a key. You’ll confirm first."
+                  : "This connection has no key to remove."
+              }
+              onClick={() => setDialog("remove")}
+            >
+              Remove key
+            </Button>
           </>
         }
       />

@@ -1,5 +1,6 @@
 // A panel anchored to its trigger. Base UI moves focus into it, closes it on Escape or an
 // outside click and returns focus to the trigger.
+import { Button as BaseButton } from "@base-ui/react/button"
 import { Popover as BasePopover } from "@base-ui/react/popover"
 import { useRef, type ReactNode, type RefObject } from "react"
 import { buttonClass } from "./Button.tsx"
@@ -11,6 +12,7 @@ export function Popover({
   onOpenChange,
   trigger,
   triggerLabel,
+  triggerDisabled = false,
   title,
   children,
   triggerClassName = `${buttonClass("secondary")} max-w-full`,
@@ -27,6 +29,8 @@ export function Popover({
   /** What the trigger button shows. */
   trigger: ReactNode
   triggerLabel: string
+  /** Unavailable triggers stay in place and keep their explanation on hover and focus. */
+  triggerDisabled?: boolean
   title: string
   children: ReactNode
   /** The trigger's look; a secondary button by default. */
@@ -55,7 +59,12 @@ export function Popover({
         element.getClientRects().length > 0
     ) ?? true
   const button = (
-    <BasePopover.Trigger aria-label={triggerLabel} className={triggerClassName}>
+    <BasePopover.Trigger
+      aria-label={triggerLabel}
+      disabled={triggerDisabled}
+      render={<BaseButton focusableWhenDisabled />}
+      className={`${triggerClassName} data-disabled:pointer-events-auto! data-disabled:opacity-40`}
+    >
       {trigger}
     </BasePopover.Trigger>
   )
