@@ -12,7 +12,8 @@ import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { LibraryRef, RefId } from "@rp/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
-import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Button } from "../../ui/Button.tsx"
+import { aboutHintClass } from "../../ui/AboutHint.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ActionMenu, type ActionMenuItem } from "../../ui/Menu.tsx"
@@ -50,37 +51,37 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
   const [open, setOpen] = useState(false)
   return (
     <section aria-label="Where entries go" className="flex flex-col gap-1">
-      <div className="flex items-start gap-1">
-        <Switch
-          checked={on}
-          onCheckedChange={onChange}
-          hint="On, every matching entry goes in one block just after the history. Off, each entry goes where its own position says."
-        >
-          Force all lorebook entries below the history
-        </Switch>
-        <Popover
-          open={open}
-          onOpenChange={setOpen}
-          trigger="?"
-          triggerLabel="Why below the history"
-          hint="Why?"
-          triggerClassName={`${buttonClass("ghost")} -mt-1 h-7 w-7 shrink-0 px-0`}
-          title="Below the history"
-          side="bottom"
-          align="end"
-        >
-          <p className="text-sm">
-            The model's provider keeps what it has already read (its cache) only up to the first thing that changed. An
-            entry that comes and goes above the history changes everything after it, so the whole history is read again,
-            slowly and at full price.
-          </p>
-          <p className="text-sm">
-            On, every entry that matches goes in one block just after the history, and is looked at again every turn.
-            Off, each entry goes where its own position says; entries above the history stay until the history's start
-            next moves.
-          </p>
-        </Popover>
-      </div>
+      <Switch
+        checked={on}
+        onCheckedChange={onChange}
+        hint="On, every matching entry goes in one block just after the history. Off, each entry goes where its own position says."
+        labelHelp={
+          <Popover
+            open={open}
+            onOpenChange={setOpen}
+            trigger={<Icon name="help" size={14} />}
+            triggerLabel="Why below the history"
+            hint="Why?"
+            triggerClassName={aboutHintClass}
+            title="Below the history"
+            side="bottom"
+            align="end"
+          >
+            <p className="text-sm">
+              The model's provider keeps what it has already read (its cache) only up to the first thing that changed.
+              An entry that comes and goes above the history changes everything after it, so the whole history is read
+              again, slowly and at full price.
+            </p>
+            <p className="text-sm">
+              On, every entry that matches goes in one block just after the history, and is looked at again every turn.
+              Off, each entry goes where its own position says; entries above the history stay until the history's start
+              next moves.
+            </p>
+          </Popover>
+        }
+      >
+        Force all lorebook entries below the history
+      </Switch>
       <p className="ps-12 text-sm text-muted">Applies to this chat, for all lorebooks.</p>
     </section>
   )

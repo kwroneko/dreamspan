@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { emptyEntry } from "../src/features/editor/lorebookDefaults.ts"
 import { applyMassChange, patchEdits, touched } from "../src/features/editor/lorebookMass.ts"
 import {
+  changed,
   commonValue,
   lorebookEntrySettings,
   manyPatch,
@@ -140,5 +141,12 @@ describe("the entry settings form for many entries (owner, 2026-11-02)", () => {
     const timing = lorebookEntrySettings.list().filter((s) => s.section === "timing")
     expect(sectionSummary(timing, entry(1))).toBe("Default settings")
     expect(sectionSummary(timing, entries[1]!)).toBe("Sticky 3")
+  })
+  it("marks an explicit choice even when it matches the inherited default", () => {
+    const matching = lorebookEntrySettings.list().filter((s) => s.section === "matching")
+    const explicitOff = entry(1, { case_sensitive: false })
+    expect(changed(setting("case_sensitive"), entry(1))).toBe(false)
+    expect(changed(setting("case_sensitive"), explicitOff)).toBe(true)
+    expect(sectionSummary(matching, explicitOff)).toBe("Case sensitive Off")
   })
 })

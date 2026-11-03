@@ -45,6 +45,7 @@ for (const width of [1440, 390]) {
                   keys: ["harbour"],
                   content: "The tide is low.",
                   comment: "Tides",
+                  use_regex: true,
                   enabled: true,
                   insertion_order: 23,
                   extensions: { synthetic: "retained", sticky: 3 },
@@ -71,6 +72,37 @@ for (const width of [1440, 390]) {
     const open = (title: string) => openEntry(page, title)
     await open("Tides")
     await expectTextBox(entry.getByRole("textbox", { name: "Entry content" }), "The tide is low.")
+    await entry.getByRole("button", { name: "Settings of Tides", exact: true }).click()
+    const exportToggle = entry.getByRole("button", { name: "Card export only of Tides", exact: true })
+    if (width === 390) {
+      await expect(exportToggle).toHaveAttribute("aria-expanded", "false")
+      await expect(exportToggle).toHaveText("Card export only")
+      await expect(exportToggle.locator("[data-changed]")).toHaveCount(0)
+      await exportToggle.click()
+    } else {
+      const exportSection = entry.getByRole("region", { name: "Card export only", exact: true })
+      await expect(exportSection.locator("h4")).toHaveText("Card export only")
+      await expect(exportSection.locator("h4 [data-changed]")).toHaveCount(0)
+    }
+    await expect(entry.getByRole("switch", { name: "Add the title as a memo", exact: true })).toBeChecked()
+    await expect(entry.getByRole("switch", { name: "Keys are regular expressions", exact: true })).toBeChecked()
+    if (width === 390) {
+      await exportToggle.click()
+      await expect(exportToggle).toHaveText("Card export only")
+      await expect(exportToggle.locator("[data-changed]")).toHaveCount(0)
+      // Active settings keep their existing marker and value summary.
+      const timing = entry.getByRole("button", { name: "Timing and filters of Tides, changed from the defaults" })
+      await expect(timing.locator("[data-changed]")).toHaveCount(1)
+      await expect(timing).toContainText("Sticky 3")
+    }
+    const headerShots = process.env.SCREENSHOT_DIR
+    if (headerShots) {
+      await mkdir(headerShots, { recursive: true })
+      const header =
+        width === 390 ? exportToggle : entry.getByRole("region", { name: "Card export only" }).locator("h4")
+      await header.screenshot({ path: join(headerShots, `export-only-header-${width}.png`) })
+    }
+    await entry.getByRole("button", { name: "Settings of Tides", exact: true }).click()
     await open("Lamp")
     await expectTextBox(
       page
@@ -127,6 +159,8 @@ for (const width of [1440, 390]) {
       keys: ["harbour", "/tide,a/iu"],
       content: "The tide turns at dawn.",
       sticky: 3,
+      add_memo: true,
+      use_regex: true,
       extensions: { synthetic: "retained" },
       unknown_fields: { future_entry: "preserved" }
     })
@@ -145,7 +179,8 @@ for (const width of [1440, 390]) {
     await added.getByRole("textbox", { name: "Entry content" }).fill("Gulls gather on the quay.")
     // On a phone the row is a compact header: its columns are in the entry's Settings.
     if (width === 390) await openSettings(added)
-    await page.getByRole("combobox", { name: "Strategy of Gulls", exact: true }).selectOption("constant")
+    await page.getByRole("combobox", { name: "Strategy of Gulls", exact: true }).click()
+    await page.getByRole("option", { name: "Constant", exact: true }).click()
     await page.getByRole("spinbutton", { name: "Order of Gulls", exact: true }).fill("37")
     await page.getByRole("spinbutton", { name: "Order of Gulls", exact: true }).blur()
     await save(page)

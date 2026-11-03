@@ -164,7 +164,8 @@ export const registerGuidanceEdit = () => [
     id: "message.add-guidance",
     order: 40,
     group: "change",
-    available: ({ entry, generating }) => !generating && entry.version.writer === "model" && !entry.version.direction,
+    available: ({ entry }) => entry.version.writer === "model" && !entry.version.direction,
+    disabled: ({ generating }) => (generating ? "Wait for this reply to finish before adding guidance." : null),
     describe: viewOf(({ session, entry }) => ({
       label: "New version with guidance…",
       icon: "guidance",

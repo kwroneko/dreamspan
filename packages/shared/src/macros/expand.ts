@@ -341,6 +341,7 @@ export type FrozenValues = Readonly<Record<string, string>>
 /** State shared by every evaluation in one expansion, nested ones included. */
 interface Run {
   readonly registry: MacroLookup
+  readonly onVolatileRead?: () => void
   readonly random: () => number
   readonly frozen: FrozenValues
   /** Every frozen value used, reused or new. */
@@ -529,6 +530,7 @@ class Expansion {
       lookup: (name) => this.entry(name.trim()),
       macrosIn: (t) => parseCharged(this.run, t).flatMap((n) => macroInfo(t, n) ?? []),
       random: this.run.random,
+      markVolatile: () => this.run.onVolatileRead?.(),
       once: (key) => {
         if (this.run.seen.has(key)) return false
         this.run.seen.add(key)
@@ -537,6 +539,7 @@ class Expansion {
       variables: this.run.variables,
       charge: (size) => charge(this.run, size)
     }
+    if (entry.volatile && entry.changesPerReply !== false) this.run.onVolatileRead?.()
     const key = entry.volatile ? this.drawKey(entry, offset, text.slice(node.start, node.end)) : undefined
     const frozen = key !== undefined && Object.hasOwn(this.run.frozen, key) ? this.run.frozen[key] : undefined
     let value: string
@@ -696,6 +699,8 @@ export interface ExpandRequest {
   readonly sharedWork?: { remaining: number }
   /** Observes variable reads, including nested templates and shorthand operations. */
   readonly onVariableRead?: () => void
+  /** Observes evaluated random/clock macros, including nested card templates. */
+  readonly onVolatileRead?: () => void
 }
 
 export interface Expanded {
@@ -763,6 +768,7 @@ const evaluate = (
     new VariableScope(initial, scope, effects, refusedWrites, (size) => charge(run, size), options.onVariableRead)
   const run: Run = {
     registry: options.registry,
+    ...(options.onVolatileRead ? { onVolatileRead: options.onVolatileRead } : {}),
     random: options.random,
     frozen: options.frozen ?? {},
     drawn: new Map(),

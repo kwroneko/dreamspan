@@ -160,7 +160,19 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     const timer = setTimeout(() => setNow(Date.now()), expiresAt - Date.now())
     return () => clearTimeout(timer)
   }, [warm, countdown, expiresAt])
-  if (view.loading || (shown === null && notes.length === 0)) return null
+  if (view.loading || (shown === null && notes.length === 0))
+    return (
+      <Button
+        variant="ghost"
+        aria-label="Cache unavailable"
+        className={chipClass()}
+        disabled
+        focusableWhenDisabled
+        hint={view.loading ? "Loading the next reply’s cache estimate…" : "No cache estimate is available yet."}
+      >
+        Cache
+      </Button>
+    )
   if (waiting)
     return (
       <Popover

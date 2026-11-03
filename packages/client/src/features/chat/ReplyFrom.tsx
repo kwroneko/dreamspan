@@ -1,6 +1,6 @@
 // Who replies next, in a group (ST-GRIPES E4): the strip's "Next: Aria ▾" chip, Auto (the chat's
 // reply order, ST's natural order unless the Cast tab says otherwise: replyPolicy.ts) or one of the cast for one reply, after which Auto picks again. Beside it,
-// ▶ makes them reply at once, as ST's force talk does. Shown only when there's a choice to make.
+// ▶ makes them reply at once, as ST's force talk does. Both stay disabled without a choice.
 import type { EntityId } from "@rp/shared/chat.ts"
 import { listNames, nameOf, type NextInTurn, useCast } from "./cast.ts"
 import { ChipText, ChoiceChip } from "./nextReplyStrip.tsx"
@@ -27,7 +27,7 @@ export const hasReplyChoice = (reply: ReplyChoice) => reply.candidates.length >=
 
 export function NextReplyChip({ candidates, muted, next, round = [], picked, onPick, loading = false }: ReplyChoice) {
   const view = useCast()
-  if (candidates.length < 2) return null
+  const disabled = candidates.length < 2
   const name = (id: EntityId) => nameOf(view, id) ?? "?"
   const replier = picked ?? next?.id ?? null
   const who = replier === null ? (loading ? "…" : "no one") : name(replier)
@@ -38,15 +38,18 @@ export function NextReplyChip({ candidates, muted, next, round = [], picked, onP
   const auto = next === null ? [] : [next.id, ...(picked === null ? round : (next.then ?? []))].map(name)
   return (
     <ChoiceChip<EntityId | typeof AUTO>
+      disabled={disabled}
       label={`Next: ${chipWho}. Choose who replies next`}
       hint={
-        picked !== null
-          ? `${who} replies next: your pick, for one reply`
-          : replier === null
-            ? "No one is picked to reply"
-            : all.length > 1
-              ? `${listNames(all)} reply next, in turn. ${detail}`
-              : `${who} replies next. ${detail}`
+        disabled
+          ? "Choose who replies next when at least two characters can reply."
+          : picked !== null
+            ? `${who} replies next: your pick, for one reply`
+            : replier === null
+              ? "No one is picked to reply"
+              : all.length > 1
+                ? `${listNames(all)} reply next, in turn. ${detail}`
+                : `${who} replies next. ${detail}`
       }
       title="Who replies next"
       chip={<ChipText>Next: {chipWho}</ChipText>}

@@ -43,7 +43,7 @@ export function Button({
   const id = useId()
   const button = (
     <BaseButton
-      className={`${buttonClass(variant)} ${className}`}
+      className={`${buttonClass(variant)} ${pending || props.focusableWhenDisabled ? "data-disabled:pointer-events-auto!" : ""} ${className}`}
       disabled={disabled || pending}
       aria-busy={pending || undefined}
       focusableWhenDisabled={pending}

@@ -3,20 +3,21 @@
 // selected…"), so SillyTavern's jargon reads the same everywhere.
 export const EXPLAIN = {
   enabled: "Off, the entry is never sent, whatever matches. The book itself stays on.",
-  strategy: "Choose when to include the entry: on a key match, always, or by similarity (not yet available).",
-  constant: "Constant: always sent while it's enabled, with no key needed.",
-  normal: "Normal: sent when one of its primary keys appears in the messages it scans.",
+  strategy:
+    "Choose whether the entry needs a key match or is always included. Similarity matching is not available yet.",
+  constant: "Include the entry without requiring a key match while the entry is enabled.",
+  normal: "Include the entry when a primary key appears in the messages it checks.",
   vectorized: "Match by similarity to the chat. Not available yet: this option matches keys instead.",
   position:
-    "Where its text goes when the chat lets entries go where they say; by default chats put every entry just after the history.",
-  depth: "At a depth: how many messages back from the newest its text is placed.",
+    "Choose where the entry's text is inserted. The chat's “Force all lorebook entries below the history” setting overrides this position when enabled.",
+  depth: "Place the entry this many messages back from the newest message when Position is @D.",
   role: "At a depth: whose message its text is sent as.",
-  order: "Order: higher goes first, and is kept first when the budget runs out.",
-  probability: "Trigger %: the chance it's sent when it matches, while “Use the trigger %” is on.",
+  order:
+    "Give higher numbers priority when entries compete for the token budget. Order also controls the entries' placement within each position.",
+  probability:
+    "Set the entry's chance of being included after a match, from 0 to 100%. Applies while “Use the trigger %” is on.",
   use_probability: "Off, a match always sends it, whatever its trigger %.",
   keys: "Include the entry when any key appears in the messages it checks. One key per line; /pattern/flags is a regular expression.",
-  keys_line:
-    "Its primary keys: any one appearing in the chat sends it. Click to edit them, one per line; /pattern/flags is a regular expression.",
   settings: "Change when the entry is included and where its text goes.",
   selective: "Secondary keys: a primary key match also has to pass this filter.",
   selective_logic:

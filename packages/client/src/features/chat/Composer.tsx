@@ -126,7 +126,7 @@ const BRANCH_CHANGED: AppError = {
 }
 
 /** Undo from the server's history of the composer's text (DESIGN §6.2): any earlier state, back. */
-function History({ draft }: { draft: ComposerDraft }) {
+function History({ draft, disabled = false }: { draft: ComposerDraft; disabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const [states, setStates] = useState<ReadonlyArray<DraftState> | null>(null)
   const [error, setError] = useState<AppError | null>(null)
@@ -148,9 +148,14 @@ function History({ draft }: { draft: ComposerDraft }) {
   return (
     <Popover
       open={open}
+      triggerDisabled={disabled}
       onOpenChange={openChange}
       triggerLabel="Earlier text of this message"
-      hint="Earlier text of this message"
+      hint={
+        disabled
+          ? "Finish editing this reply’s guidance to browse composer history."
+          : "Shows earlier text of this message."
+      }
       triggerClassName={`${buttonClass("ghost")} w-9 px-0!`}
       side="top"
       align="end"
@@ -579,7 +584,7 @@ export function Composer({
     generate,
     send,
     replyNow,
-    history: editing === null ? <History draft={draft} /> : null,
+    history: <History draft={draft} disabled={editing !== null} />,
     report
   }
   const onKeyDown = composerKeyDown(

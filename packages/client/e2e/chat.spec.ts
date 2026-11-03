@@ -118,7 +118,7 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
     await mine.getByRole("button", { name: "Save" }).click()
     await expect(mine.locator(".markdown")).toHaveText("Knock three times.")
     // Amended in place: still its only version.
-    await expect(mine.getByRole("group", { name: "Versions" })).toHaveCount(0)
+    await expect(mine.getByRole("group", { name: "Versions" })).toContainText("1/1")
 
     // A copied link opens the chat at that message.
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"])

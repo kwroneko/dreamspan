@@ -69,7 +69,10 @@ export interface MessageAction {
   readonly order: number
   /** Actions of one group sit together in the menu; a separator falls between groups. */
   readonly group?: string
+  /** Whether this action applies to this kind of message. */
   readonly available?: (context: MessageActionContext) => boolean
+  /** Temporary unavailability keeps the button in place and explains why. */
+  readonly disabled?: (context: MessageActionContext) => string | null
   /** Shown on the message as a button until the user unticks it. */
   readonly pinned?: boolean
   /** The keyboard's (and a double-click's) way in, where it has one. */
@@ -95,7 +98,7 @@ export const availableMessageActions = (context: MessageActionContext, snapshot 
 /** Resolve the effective action, including plugin disablement and availability. */
 export const invokeMessageAction = (id: string, context: MessageActionContext, source: "button" | "keyboard") => {
   const action = messageActions.get(id)
-  if (action?.available?.(context) === false) return
+  if (action?.available?.(context) === false || action?.disabled?.(context)) return
   return action?.run?.(context, source)
 }
 
@@ -149,7 +152,7 @@ export const messageActionPins = new PinStore()
 /** A pinned action as a button on the message. */
 function PinnedButton({ view }: { view: MessageActionView }) {
   const faded = view.dimmed ? "opacity-50" : ""
-  if (view.link)
+  if (view.link && view.disabled === undefined)
     return (
       <Tooltip label={view.hint}>
         {cloneElement(view.link as ReactElement<Record<string, unknown>>, {
@@ -233,6 +236,10 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
   const [dialog, setDialog] = useState<MessageAction | null>(null)
   const activeDialog = dialog !== null && actions.includes(dialog) ? dialog : null
   if (dialog !== null && activeDialog === null) setDialog(null)
+  const explain = (action: MessageAction, view: MessageActionView): MessageActionView => {
+    const reason = action.disabled?.(context)
+    return reason ? { ...view, disabled: reason } : view
+  }
   const props: MessageActionProps = {
     ...context,
     openDialog: (id: string) => setDialog(messageActions.get(id) ?? null),
@@ -246,7 +253,7 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
           data-pin={index < fit ? "shown" : "hidden"}
           className={index < fit ? "inline-flex shrink-0" : "hidden"}
         >
-          <action.describe {...props} show={(view) => <PinnedButton view={view} />} />
+          <action.describe {...props} show={(view) => <PinnedButton view={explain(action, view)} />} />
         </span>
       ))}
       {actions.length > 0 && (
@@ -270,23 +277,26 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
                   {index > 0 && action.group !== actions[index - 1]!.group && <MenuSeparator />}
                   <action.describe
                     {...props}
-                    show={(view) => (
-                      <MenuItemWithCheckbox
-                        icon={view.icon}
-                        tone={view.tone ?? "default"}
-                        label={view.label}
-                        description={view.disabled ?? view.hint}
-                        {...(view.disabled !== undefined ? { disabled: true, note: view.disabled } : {})}
-                        {...(view.link ? { link: view.link } : {})}
-                        {...(view.onSelect ? { onSelect: () => void view.onSelect?.() } : {})}
-                        checkbox={{
-                          checked: on,
-                          onCheckedChange: (checked) => messageActionPins.choose(action.id, checked),
-                          label: `Show ${view.label} on the message`,
-                          description: pinHint(view.label, on, shown)
-                        }}
-                      />
-                    )}
+                    show={(described) => {
+                      const view = explain(action, described)
+                      return (
+                        <MenuItemWithCheckbox
+                          icon={view.icon}
+                          tone={view.tone ?? "default"}
+                          label={view.label}
+                          description={view.disabled ?? view.hint}
+                          {...(view.disabled !== undefined ? { disabled: true, note: view.disabled } : {})}
+                          {...(view.link ? { link: view.link } : {})}
+                          {...(view.onSelect ? { onSelect: () => void view.onSelect?.() } : {})}
+                          checkbox={{
+                            checked: on,
+                            onCheckedChange: (checked) => messageActionPins.choose(action.id, checked),
+                            label: `Show ${view.label} on the message`,
+                            description: pinHint(view.label, on, shown)
+                          }}
+                        />
+                      )
+                    }}
                   />
                 </Fragment>
               )

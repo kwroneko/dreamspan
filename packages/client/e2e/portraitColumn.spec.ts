@@ -5,7 +5,7 @@
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import { openPanel } from "./support/panel.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
@@ -119,9 +119,9 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
   await openChat(page)
   const column = (name: string) => page.getByRole("complementary", { name: `${name}'s portrait`, exact: true })
 
-  // A message's portrait, with the panel closed (this browser reopens it where it was left).
-  const hide = page.getByRole("button", { name: "Hide panel" })
-  if (await hide.isVisible()) await hide.click()
+  // Establish the layout after restored panel state has loaded, before measuring the image.
+  await openPanel(page, "Cast")
+  await closePanel(page)
   await page.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()
   await expect(column("Tall")).toBeVisible()
   await expect(page.getByRole("dialog")).toHaveCount(0)
@@ -181,12 +181,13 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
       await page.getByRole("button", { name: "Hide panel" }).click()
     } else {
       await openPanel(page, shape.name)
-      // The tab's own portrait shows the whole image (owner, 2026-11-02), staying open when
-      // it's the one shown.
-      await page
+      // The tab's own portrait toggles the image already shown by the character chip.
+      const portrait = page
         .getByRole("tabpanel", { name: shape.name })
         .getByRole("button", { name: `View ${shape.name}'s picture`, exact: true })
-        .click()
+      await portrait.click()
+      await expect(column(shape.name)).toHaveCount(0)
+      await portrait.click()
       await expect(column(shape.name)).toBeVisible()
       await page.getByRole("button", { name: "Hide panel" }).click()
     }
@@ -407,6 +408,7 @@ test("a portrait opens full-screen at 390: fit and 100% differ, it pans and pinc
   await openChat(page)
   const screen = (name: string) => page.getByRole("dialog", { name, exact: true })
 
+  // The phone can restore a reading position with the user's message first.
   await page.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()
   await expect(screen("Tall")).toBeVisible()
   const fitted = await expectFitted(page, "Tall")

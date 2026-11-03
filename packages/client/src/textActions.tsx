@@ -37,6 +37,9 @@ export interface TextAction {
   readonly editor?: "text" | "selection"
   /** With Ctrl/Command+Shift, inside an editor that shows this action's control. */
   readonly shortcut?: string
+  /** Constant applicability, independent of the text being edited. */
+  readonly applies?: (context: TextActionContext) => boolean
+  readonly unavailable?: (context: TextActionContext) => string
   readonly available: (context: TextActionContext) => boolean
   /** "choose": open `choices` at its button instead (there's no one obvious place for the text). */
   readonly run: (context: TextActionContext) => void | "choose"
@@ -59,20 +62,22 @@ export const editorTextActions = (
   entries: ReadonlyArray<TextAction>,
   text: string,
   selection: string,
-  source?: "snippet"
+  source?: "snippet",
+  keepUnavailable = false
 ) =>
   [...entries.filter((a) => a.editor === "selection"), ...entries.filter((a) => a.editor !== "selection")].flatMap(
     (action) => {
       const context = { text: action.editor === "selection" ? selection : text, ...(source ? { source } : {}) }
       if (action.editor === "selection" ? selection.length === 0 : action.editor !== "text") return []
-      return action.available(context) ? [{ action, context }] : []
+      if (action.applies?.(context) === false) return []
+      return action.available(context) || (keepUnavailable && action.editor === "text") ? [{ action, context }] : []
     }
   )
 
 /**
- * The editor's own text actions, in the strip inside its box (ui/FieldFrame.tsx), only while the
- * editor has focus (`shown`) or a selection. The strip keeps its room whether they're there or
- * not, so nothing moves when they come and go (owner, 2026-11-02). An action with an icon shows
+ * The editor's own text actions, in the strip inside its box (ui/FieldFrame.tsx). Whole-text
+ * actions keep their places, disabled when unavailable; the frame hides its idle strip by
+ * opacity (owner, 2026-11-02). An action with an icon shows
  * only its icon, its name in its explanation. Only prose editors have them
  * (the message editor, card text, prompts, notes, summaries; owner, 2026-11-01): a box of
  * settings, keys, tags, names, patterns, numbers or addresses doesn't. The selection's actions
@@ -93,11 +98,12 @@ export function EditorTextActions({
   className?: string
 }) {
   const snapshot = useSyncExternalStore(textActions.subscribe, textActions.snapshot, textActions.snapshot)
-  const offered = editorTextActions(snapshot.entries, text, selection, source)
-  if (offered.length === 0 || !(shown || selection)) return null
+  const offered = editorTextActions(snapshot.entries, text, selection, source, true)
+  if (offered.length === 0) return null
   return (
     <div
       data-text-tool
+      data-editor-active={shown || undefined}
       role="toolbar"
       aria-label="Text actions"
       className={`flex min-w-0 items-center justify-end gap-0.5 ${className}`}
@@ -152,28 +158,34 @@ function ActionButton({ action, context }: { action: TextAction; context: TextAc
     node.addEventListener(CHOOSE, listener)
     return () => node.removeEventListener(CHOOSE, listener)
   })
+  const disabled = !action.available(context)
   const trigger = (
     <button
       ref={button}
       type="button"
       data-text-action={action.id}
+      aria-disabled={disabled || undefined}
       aria-label={action.label}
-      aria-description={describe(action, context)}
+      aria-description={
+        disabled
+          ? (action.unavailable?.(context) ?? "This action is unavailable for this text.")
+          : describe(action, context)
+      }
       // The editor keeps its focus and selection.
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => {
-        if (action.run(context) === "choose" && Choices) choose()
+        if (!disabled && action.run(context) === "choose" && Choices) choose()
       }}
       // A context menu on a button, not over text: the browser's own stays over text.
       onContextMenu={
-        Choices
+        Choices && !disabled
           ? (e) => {
               e.preventDefault()
               choose()
             }
           : undefined
       }
-      className={`inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-md text-xs text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus max-sm:h-8 ${
+      className={`aria-disabled:opacity-40 inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-md text-xs text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus max-sm:h-8 ${
         action.icon ? "w-6 max-sm:w-8" : "px-2"
       }`}
     >
@@ -187,8 +199,12 @@ function ActionButton({ action, context }: { action: TextAction; context: TextAc
       )}
     </button>
   )
-  const hint = <Explained action={action} context={context} />
-  if (!Choices) return <Tooltip label={hint}>{trigger}</Tooltip>
+  const hint = disabled ? (
+    (action.unavailable?.(context) ?? "This action is unavailable for this text.")
+  ) : (
+    <Explained action={action} context={context} />
+  )
+  if (!Choices || disabled) return <Tooltip label={hint}>{trigger}</Tooltip>
   return (
     <Menu
       trigger={trigger}

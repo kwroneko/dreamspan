@@ -11,14 +11,11 @@ export const stepFrom = (versions: ReadonlyArray<Version>, index: number, step: 
 
 /**
  * `‹ 3/7 ›`: the versions of a message, with the version picker on the counter. A message
- * with one version has no counter; on the latest reply › still generates another, and on an
- * earlier one the › that would generate shows on hover or keyboard focus (and always on a
- * touch screen), so old messages don't each carry a control nobody needs while reading.
+ * with one version keeps disabled navigation in place; › can generate another model version.
  */
 export function Versions({
   entry,
   generated,
-  latest = true,
   versions,
   position,
   onStep,
@@ -29,7 +26,7 @@ export function Versions({
   entry: PathEntry
   /** A model writes this message's versions, so › past the last one generates another. */
   generated: boolean
-  /** The latest message of the chat: its › to generate shows without a hover. */
+  /** Whether this is the latest message, also exposed to replacement contributions. */
   latest?: boolean
   versions: ReadonlyArray<Version> | null
   position: number
@@ -40,50 +37,45 @@ export function Versions({
 }) {
   // Until the list is read, the arrows go by the count; then they skip hidden versions.
   const listed = versions !== null && position >= 0
-  const before = listed ? stepFrom(versions, position, -1) !== undefined : position !== 0
-  const after = listed ? stepFrom(versions, position, 1) !== undefined : position < entry.versionCount - 1
-  const several = entry.versionCount > 1
+  const before = listed ? stepFrom(versions, position, -1) !== undefined : entry.versionCount > 1 && position !== 0
+  const after = listed
+    ? stepFrom(versions, position, 1) !== undefined
+    : position >= 0 && position < entry.versionCount - 1
   const generates = generated && (position === -1 || !after)
   return (
     <div className="flex shrink-0 items-center" role="group" aria-label="Versions">
-      {several && (
-        <IconButton
-          label="Previous version"
-          hint="Previous version (ArrowLeft outside inputs, on the last reply)"
-          icon="left"
-          className="max-sm:size-7"
-          disabled={!before}
-          onClick={() => onStep(-1)}
-        />
-      )}
-      {several && (
-        <VersionPicker
-          entry={entry}
-          versions={versions}
-          position={position}
-          onOpen={onOpen}
-          onPick={onPick}
-          onFlag={onFlag}
-        />
-      )}
-      {(several || generated) && (
-        <IconButton
-          label={generates ? "Generate another version" : "Next version"}
-          hint={
-            generates
+      <IconButton
+        label="Previous version"
+        hint={before ? "Shows the previous version." : "No previous version."}
+        icon="left"
+        className="max-sm:size-7"
+        disabled={!before}
+        focusableWhenDisabled
+        onClick={() => onStep(-1)}
+      />
+      <VersionPicker
+        entry={entry}
+        versions={versions}
+        position={position}
+        onOpen={onOpen}
+        onPick={onPick}
+        onFlag={onFlag}
+      />
+      <IconButton
+        label={generates ? "Generate another version" : "Next version"}
+        hint={
+          !generated && !after
+            ? "No next version."
+            : generates
               ? "Generate another version (ArrowRight outside inputs, on the last reply)"
               : "Next version (ArrowRight outside inputs, on the last reply; generates past last)"
-          }
-          icon="right"
-          className={`max-sm:size-7 ${
-            generates && !latest
-              ? "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-              : ""
-          }`}
-          disabled={!generated && !after}
-          onClick={() => onStep(1)}
-        />
-      )}
+        }
+        icon="right"
+        className="max-sm:size-7"
+        disabled={!generated && !after}
+        focusableWhenDisabled
+        onClick={() => onStep(1)}
+      />
     </div>
   )
 }

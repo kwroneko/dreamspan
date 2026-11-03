@@ -1,4 +1,5 @@
 import { Draft } from "./drafts.ts"
+import { ChatBrowse, ChatFilterCounts } from "./chatBrowse.ts"
 // Starting chats from cards, who's in them, their settings, and the send queue (DESIGN
 // §2.1, §2.2, §3.5; DATA-MODEL §5.3), merged into AppApi. Every id is the caller's own;
 // anything else is NotFound.
@@ -228,6 +229,8 @@ export const ShellForksView = Schema.Struct({
   /** Matched against each fork's name and its cast's names, ignoring case. */
   search: Schema.String,
   sort: ShellForkSort,
+  /** Chats tab choices; other surfaces retain their existing ordering. */
+  browse: Schema.optionalKey(ChatBrowse),
   /** The sort the other way round from its own: oldest first, or Z to A. */
   reversed: Schema.optionalKey(Schema.Boolean),
   sections: Schema.Array(
@@ -236,6 +239,8 @@ export const ShellForksView = Schema.Struct({
 })
 export type ShellForksView = typeof ShellForksView.Type
 export class ShellForks extends Schema.Class<ShellForks>("ShellForks")({
+  /** Counts in scope, before the name search and selected filter. */
+  filterCounts: ChatFilterCounts,
   /** In the view's order: each section's first `limit` rows, and how many it has. */
   sections: Schema.Array(Schema.Struct({ id: ShellSection, rows: Schema.Array(ShellFork), total: Schema.Int })),
   /** Every card the rows' casts name, once. */

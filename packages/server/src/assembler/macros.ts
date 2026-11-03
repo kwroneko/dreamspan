@@ -50,6 +50,8 @@ export interface MacroEnvironment {
   /** Later variable readers may depend on an intermittent note, including when it is skipped. */
   readonly potentialVariableWrite: () => void
   readonly isVolatile: (piece: number) => boolean
+  /** Dynamic prefix diagnostics do not suppress otherwise useful cache checkpoints. */
+  readonly isChanging: (piece: number) => boolean
   /** A piece that comes and goes from turn to turn, such as a conditioned note's, whatever its text. */
   readonly markVolatile: (piece: number) => void
   readonly text: (piece: number) => string
@@ -122,8 +124,12 @@ export const makeMacroEnvironment = (
   let global: Readonly<Record<string, unknown>> = {}
   let variableBarrier = false
   const volatilePieces = new Set<number>()
+  const changingPieces = new Set<number>()
   const isVolatile = (piece: number): boolean =>
     volatilePieces.has(piece) || (assembly.pieces[piece]!.parts?.some(isVolatile) ?? false)
+
+  const isChanging = (piece: number): boolean =>
+    volatilePieces.has(piece) || changingPieces.has(piece) || (assembly.pieces[piece]!.parts?.some(isChanging) ?? false)
 
   const record = (id: string, source: Source, text: string, parts?: ReadonlyArray<number>) => {
     assembly.pieces.push({ id, source, text, messages: [], ...(parts && parts.length > 0 ? { parts } : {}) })
@@ -158,8 +164,9 @@ export const makeMacroEnvironment = (
     frozen?: Readonly<Record<string, string>>,
     sharedWork?: { remaining: number }
   ) => {
-    if (sharedWork?.remaining === 0) return { text: "", readsVariables: false }
+    if (sharedWork?.remaining === 0) return { text: "", readsVariables: false, readsVolatile: false }
     let readsVariables = false
+    let readsVolatile = false
     const result = expand({
       text,
       ...(sharedWork ? { sharedWork } : {}),
@@ -169,6 +176,9 @@ export const makeMacroEnvironment = (
       context,
       frozen: { ...frozen, ...request.frozen[id] },
       random: request.random,
+      onVolatileRead: () => {
+        readsVolatile = true
+      },
       onVariableRead: () => {
         readsVariables = true
       }
@@ -179,7 +189,7 @@ export const makeMacroEnvironment = (
         kind: "macro_limit",
         message: `${id} was left out: its macros reached the ${result.limit} limit${where}, at offset ${result.offset}.`
       })
-      return { text: "", readsVariables }
+      return { text: "", readsVariables, readsVolatile }
     }
     if (Object.keys(result.frozen).length > 0) assembly.frozen[id] = result.frozen
     if (effects === "context") {
@@ -189,7 +199,7 @@ export const makeMacroEnvironment = (
     } else {
       effects(result.effects)
     }
-    return { text: result.text, readsVariables }
+    return { text: result.text, readsVariables, readsVolatile }
   }
 
   return {
@@ -223,6 +233,7 @@ export const makeMacroEnvironment = (
       const origin: TextOrigin = { kind: source.kind === "preset" ? "preset" : "card" }
       const expanded = run(id, text, origin, context, "context")
       const piece = record(id, source, expanded.text)
+      if (expanded.readsVolatile) changingPieces.add(piece)
       if (variableBarrier && expanded.readsVariables) volatilePieces.add(piece)
       // Who writes and the direction change from turn to turn: never inside the cached prefix.
       if (PER_TURN.test(text) || (setup.summaryVolatile && SUMMARY.test(text))) volatilePieces.add(piece)
@@ -265,6 +276,7 @@ export const makeMacroEnvironment = (
       variableBarrier = true
     },
     isVolatile,
+    isChanging,
     markVolatile: (piece) => {
       volatilePieces.add(piece)
     },

@@ -2,7 +2,14 @@ import { createPortal } from "react-dom"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { presetScopes } from "./searchScopes.ts"
 import { SaveRevision } from "./SaveRevision.tsx"
-import { PromptKindTag, promptKind, SummariesPlaceholder, VolatileBadge, volatileMacros } from "./promptKinds.tsx"
+import {
+  PlaceholderSource,
+  PromptKindTag,
+  promptKind,
+  SummariesPlaceholder,
+  VolatileBadge,
+  volatileMacros
+} from "./promptKinds.tsx"
 import { usePlaceExpansion, usePlaceNotice, usePlaceParam } from "../../usePlaceParam.ts"
 // The preset's prompt order as one document (DESIGN §6.2a). Each prompt is a bounded block: a
 // header (handle, switch, name renamed in place, how it's sent, tokens, its options and actions)
@@ -182,32 +189,6 @@ function OverrideNote({
         </>
       ) : null}
     </p>
-  )
-}
-
-/** What fills a marker in the open chat. */
-function MarkerNote({
-  entry,
-  context,
-  byDefinitions
-}: {
-  entry: PromptOrderEntry
-  context: PresetContext | null | undefined
-  byDefinitions: boolean
-}) {
-  const filled = context?.blocks.find((b) => b.identifier === entry.identifier)
-  return (
-    <span className="text-xs text-muted">
-      {byDefinitions
-        ? "Filled from Definitions"
-        : filled?.labels.length
-          ? `Filled from ${filled.labels.join(", ")}`
-          : entry.identifier === "chatHistory"
-            ? "Filled from the chat’s messages, oldest first."
-            : entry.identifier === "newestMessage"
-              ? "Filled from the newest chat message."
-              : "Filled from the current chat"}
-    </span>
   )
 }
 
@@ -434,7 +415,11 @@ function PromptBlock({
         )}
         {!landmark && <PromptKindTag prompt={prompt} />}
       </span>
-      <MarkerNote entry={entry} context={context} byDefinitions={byDefinitions} />
+      <PlaceholderSource
+        identifier={prompt.identifier}
+        heading={kind?.label ?? prompt.name}
+        byDefinitions={byDefinitions}
+      />
     </span>
   ) : (
     <BlockToggle
@@ -546,7 +531,7 @@ function PromptBlock({
         <div className="min-w-0 flex-1">
           <div data-prompt-title-row className="flex min-w-0 items-center gap-1">
             {named}
-            {!prompt.marker && <PromptKindTag prompt={prompt} />}
+            {!column && !prompt.marker && <PromptKindTag prompt={prompt} />}
             {!column && optionsToggle}
             {!column && menu}
           </div>
@@ -567,13 +552,19 @@ function PromptBlock({
             <TokenCount prompt={prompt} content={content} context={context} />
           </div>
         )}
-        {column && (prompt.marker || !open) && (
-          <span className="ml-auto flex h-8 shrink-0 items-center pl-1">
-            <TokenCount prompt={prompt} content={content} context={context} />
+        {column && (
+          // One cluster on the title's line: kind, tokens, options and ⋯, centred together with
+          // even gaps. A marker has no options button; its slot stays empty so the tokens and ⋯
+          // line up with the other rows' (owner, 2026-11-03: "both alignment and spacing are off").
+          <span data-prompt-end className="ml-auto flex h-8 shrink-0 items-center gap-2 self-start">
+            {!prompt.marker && <PromptKindTag prompt={prompt} />}
+            {(prompt.marker || !open) && <TokenCount prompt={prompt} content={content} context={context} />}
+            <span className="flex items-center gap-1">
+              {optionsToggle || <span aria-hidden className="size-8 shrink-0" />}
+              {menu}
+            </span>
           </span>
         )}
-        {column && optionsToggle}
-        {column && menu}
       </BlockHeader>
       {column && !prompt.marker && (open || summary || (aboveBreakpoint && volatileMacros(content).length > 0)) && (
         <div data-prompt-info className="flex flex-wrap items-center gap-2 px-3 pb-2">
@@ -871,12 +862,17 @@ export function PromptDocument({
           <Icon name="note" />
         </span>
         <span className="flex min-w-0 flex-1 flex-col items-start gap-1 break-words">
-          <Tooltip label="Filled from active notes at this placement.">
+          <Tooltip label="Active notes at this placement.">
             <span tabIndex={0} className="prompt-kind-tag rounded px-1.5 py-0.5 font-medium">
               {label}
             </span>
           </Tooltip>
-          <span className="text-xs text-muted">Filled from {notes}</span>
+          <PlaceholderSource
+            identifier="notes"
+            heading={label}
+            source={notes}
+            about="Each request inserts the active notes at this placement; this text isn't from the preset and can't be edited here. Edit the notes in the chat's Notes tab or the card's Notes tab. Their placement and conditions decide where and when they are sent."
+          />
         </span>
       </Block>
     )

@@ -122,7 +122,8 @@ for (const width of [1440, 390]) {
     await harbour.getByRole("textbox", { name: "Primary keys" }).blur()
     // On a phone the row is a compact header: its columns are in the entry's Settings.
     if (width === 390) await openSettings(harbour)
-    await page.getByRole("combobox", { name: "Position of Harbour" }).selectOption("at_depth:user")
+    await page.getByRole("combobox", { name: "Position of Harbour" }).click()
+    await page.getByRole("option", { name: "@D · Depth, user", exact: true }).click()
     await page.getByRole("spinbutton", { name: "Depth of Harbour" }).fill("2")
     await page.getByRole("spinbutton", { name: "Trigger % of Harbour" }).fill("55")
     await page.getByRole("spinbutton", { name: "Trigger % of Harbour" }).blur()
@@ -136,9 +137,9 @@ for (const width of [1440, 390]) {
     // The entry is still open: this browser remembers which are.
     await expect(page.getByRole("button", { name: "Close Harbour", exact: true })).toBeVisible()
     await expectTextBox(harbour.getByRole("textbox", { name: "Entry content" }), "Boats rock at the old quay.")
-    // The opened entry's text has its edit history; settings like Trigger % have no controls of their own.
+    // The opened entry's text has its edit history; settings like Trigger % have no edit history controls of their own.
     await expect(harbour.getByRole("button", { name: "Edit history of Entry content", exact: true })).toBeVisible()
-    await expect(harbour.getByRole("button", { name: /Trigger %$/ })).toHaveCount(0)
+    await expect(harbour.getByRole("button", { name: "Edit history of Trigger %", exact: true })).toHaveCount(0)
     await save(page)
     // History's comparison names the entry by its title.
     const history = await latestChanges(page)
@@ -342,8 +343,10 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   // Find an entry, then change its strategy, position, depth, order and trigger % in its row.
   await page.getByRole("searchbox", { name: "Filter by titles, keys and content" }).fill("key123")
   await expect(page.getByText("1 of 400 entries")).toBeVisible()
-  await page.getByRole("combobox", { name: "Strategy of Place 123" }).selectOption("constant")
-  await page.getByRole("combobox", { name: "Position of Place 123" }).selectOption("at_depth:assistant")
+  await page.getByRole("combobox", { name: "Strategy of Place 123" }).click()
+  await page.getByRole("option", { name: "Constant", exact: true }).click()
+  await page.getByRole("combobox", { name: "Position of Place 123" }).click()
+  await page.getByRole("option", { name: "@D · Depth, assistant", exact: true }).click()
   await page.getByRole("spinbutton", { name: "Depth of Place 123" }).fill("6")
   await page.getByRole("spinbutton", { name: "Order of Place 123" }).fill("900")
   await page.getByRole("spinbutton", { name: "Trigger % of Place 123" }).fill("40")

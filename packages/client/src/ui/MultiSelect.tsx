@@ -71,6 +71,7 @@ export function MultiSelect<Value extends string>({
       <Combobox.Chips
         ref={chips}
         aria-label={chosenLabel}
+        data-layout-audit-ignore="inset: Chips and Add share this field's border and compact internal padding"
         className="flex min-h-9 w-full min-w-0 flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface px-1.5 py-1 shadow-xs focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40"
       >
         <Combobox.Value>

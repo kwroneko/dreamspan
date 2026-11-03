@@ -1,7 +1,7 @@
 // Layout and status pieces with no behavior of their own: cards, badges, callouts and
 // empty states, and sections opened on demand.
 import { type ReactNode, useState } from "react"
-import { AboutHint } from "./AboutHint.tsx"
+import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -34,10 +34,11 @@ export function CardHeader({
     >
       <div className="flex min-w-0 flex-col gap-1">
         {about ? (
-          <div className="flex items-center gap-1">
-            <h2 className="text-base font-semibold">{title}</h2>
-            <AboutHint heading={typeof title === "string" ? title : "this section"}>{about}</AboutHint>
-          </div>
+          <LabelWithHelp
+            help={<AboutHint heading={typeof title === "string" ? title : "this section"}>{about}</AboutHint>}
+          >
+            <h2 className="inline text-base font-semibold">{title}</h2>
+          </LabelWithHelp>
         ) : (
           <h2 className="text-base font-semibold">{title}</h2>
         )}

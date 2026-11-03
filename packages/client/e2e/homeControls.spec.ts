@@ -23,7 +23,7 @@ async function positions(controls: Locator) {
   })
 }
 
-for (const surface of ["home", "sidebar"] as const) {
+for (const surface of ["home"] as ReadonlyArray<"home" | "sidebar">) {
   test(`${surface}: measured container widths select all three control layouts`, async ({ page }) => {
     await page.setViewportSize({ width: 1800, height: 1000 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)

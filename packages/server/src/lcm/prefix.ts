@@ -40,6 +40,24 @@ export const applySummaryPrefix = (snapshot: ContextSnapshot, prefix?: SummaryPr
     return snapshot
   const end = boundary(snapshot),
     shift = prefix.request.messages.length - end
+  const breakpoints = snapshot.request.breakpoints
+    .filter((b) => b.message >= end)
+    .map((b) => ({ ...b, message: b.message + shift }))
+  // A random/clock prefix is volatile during ordinary assembly. Freezing that prefix
+  // makes the continuity layer reusable again; do not include condensation material.
+  const summaries = snapshot.pieces.filter((p) => p.source.kind === "summary" && p.text !== "")
+  const parts = snapshot.summaryJob?.children?.length ?? 0
+  const continuity = summaries.slice(0, summaries.length - parts)
+  const material = parts ? summaries.slice(-parts) : []
+  const summaryEnd = Math.max(-1, ...continuity.flatMap((p) => p.messages))
+  const materialStart = Math.min(
+    Infinity,
+    ...material.flatMap((p) => p.messages),
+    ...snapshot.pieces.filter((p) => p.source.kind === "message").flatMap((p) => p.messages)
+  )
+  if (summaryEnd >= end && summaryEnd < materialStart && !breakpoints.some((b) => b.reason === "summary"))
+    breakpoints.push({ message: summaryEnd + shift, reason: "summary" })
+  const { pinnedStart: _pinnedStart, ...request } = snapshot.request
   return {
     ...snapshot,
     pieces: [
@@ -54,17 +72,13 @@ export const applySummaryPrefix = (snapshot: ContextSnapshot, prefix?: SummaryPr
         }))
     ],
     request: {
-      ...snapshot.request,
+      ...request,
       names: prefix.request.names,
       useSystemPrompt: prefix.request.useSystemPrompt,
+      ...(prefix.request.pinnedStart === undefined ? {} : { pinnedStart: prefix.request.pinnedStart }),
       ...(snapshot.request.summaryStart === undefined ? {} : { summaryStart: snapshot.request.summaryStart + shift }),
       messages: [...prefix.request.messages, ...snapshot.request.messages.slice(end)],
-      breakpoints: [
-        ...prefix.request.breakpoints,
-        ...snapshot.request.breakpoints
-          .filter((b) => b.message >= end)
-          .map((b) => ({ ...b, message: b.message + shift }))
-      ]
+      breakpoints: [...prefix.request.breakpoints, ...breakpoints]
     }
   }
 }

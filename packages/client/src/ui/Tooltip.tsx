@@ -54,7 +54,7 @@ export function Tooltip({
 }
 
 export const iconButtonClass = (tone: "muted" | "danger" = "muted") =>
-  `inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors select-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40 data-popup-open:bg-hover data-popup-open:text-text ${
+  `inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors select-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40 data-disabled:opacity-40 data-popup-open:bg-hover data-popup-open:text-text ${
     tone === "danger" ? "text-muted hover:text-danger" : "text-muted hover:text-text"
   }`
 

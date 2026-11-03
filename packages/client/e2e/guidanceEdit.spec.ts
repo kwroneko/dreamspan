@@ -108,7 +108,26 @@ for (const width of [1440, 390]) {
       const draft = "Sam waves at the lighthouse keeper."
       await box(page).fill(draft)
       const reply = page.getByRole("article").filter({ hasText: "Guidance: Aria looks out to sea." })
+      const history = page.getByRole("button", { name: "Earlier text of this message", exact: true })
+      const controls = page.getByTestId("composer-controls")
+      const historyBox = () =>
+        history.evaluate((button) => {
+          const r = button.getBoundingClientRect(),
+            p = button.closest('[data-testid="composer-controls"]')!.getBoundingClientRect()
+          return [r.x - p.x, r.y - p.y, r.width, r.height]
+        })
+      await expect(controls).toBeVisible()
+      const historyBefore = await historyBox()
       await reply.getByRole("button", { name: "New version with this guidance" }).click()
+
+      await expect(history).toBeDisabled()
+      expect(await historyBox()).toEqual(historyBefore)
+      await history.hover()
+      await expect(
+        page
+          .getByText("Finish editing this reply’s guidance to browse composer history.", { exact: true })
+          .filter({ visible: true })
+      ).toBeVisible()
 
       // The bar names the reply; the box holds its guidance, as guidance, toggle on meanwhile.
       await expect(bar(page)).toContainText("Guidance for a new version of Aria's reply")
@@ -241,7 +260,7 @@ for (const width of [1440, 390]) {
     await messageMenu(unguided, "New version with guidance…")
     await expect(box(page)).toHaveValue("")
     await expect(bar(page)).toBeVisible()
-    await messageMenu(unguided, "Delete message")
+    await messageMenu(unguided, "Delete all versions")
     await expect(bar(page)).toHaveCount(0)
     await expect(box(page)).toHaveValue(draft)
     await page.getByRole("button", { name: "New version with this guidance" }).click()

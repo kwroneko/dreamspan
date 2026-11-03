@@ -51,7 +51,7 @@ export const ReplySectionSettings = Schema.Struct({
 export type ReplySectionSettings = typeof ReplySectionSettings.Type
 
 /** Both spellings models use, each closed by its own: literal text, in any case. */
-export const DEFAULT_SECTION_PAIRS: ReadonlyArray<SectionPair> = [
+const DEFAULT_SECTION_PAIRS: ReadonlyArray<SectionPair> = [
   { open: "<think>", close: "</think>" },
   { open: "<thinking>", close: "</thinking>" }
 ]

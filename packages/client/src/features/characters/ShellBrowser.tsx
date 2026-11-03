@@ -1,3 +1,6 @@
+import type { ChatBrowse } from "@rp/shared/chatBrowse.ts"
+import { useChatBrowse } from "./useChatBrowse.ts"
+import { sidebarChatBrowse } from "./ChatBrowseBar.tsx"
 import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
@@ -20,7 +23,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { browseCards, mixesPersonas } from "./cardBrowse.tsx"
 import { useSidebarBrowse } from "./useSidebarBrowse.ts"
-import { CardGridControls } from "./CardGridControls.tsx"
+import { CardBrowseBar } from "./CardBrowseBar.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
 import { sidebarFoot } from "./homeSlots.ts"
@@ -437,12 +440,14 @@ export function PinnedChats({
   chat = null,
   home = false,
   sortBy,
+  browse,
   onSortChange
 }: {
   pinsCollapsed: boolean
   entity?: EntityId | null
   chat?: ChatId | null
   home?: boolean
+  browse?: ChatBrowse | undefined
   sortBy?: ShellSort
   onSortChange?: (sort: ShellSort) => void
 }) {
@@ -453,7 +458,14 @@ export function PinnedChats({
   const [limit, setLimit] = useState(PAGE_ROWS)
   const action = useAction()
   const open = !home || !pinsCollapsed
-  const forks = useShellForks({ entity, chat, search: "", sort, sections: [{ id: "pinned", limit }] })
+  const forks = useShellForks({
+    entity,
+    chat,
+    search: "",
+    sort,
+    ...(browse ? { browse } : {}),
+    sections: [{ id: "pinned", limit }]
+  })
   const pins = forks.section("pinned")
   if (!pins.total) return null
   return (
@@ -507,6 +519,7 @@ const SECTIONS = {
 function Browser({ data }: { data: ShellLibrary }) {
   const { scope, setScope, grid, setGrid } = useShellNavigation()
   const [browse, setBrowse] = useSidebarBrowse()
+  const [chatBrowse, setChatBrowse] = useChatBrowse()
   const search = browse.search
   const setSearch = (search: string) => setBrowse({ search })
   const params = useParams({ strict: false }) as { chatId?: string }
@@ -519,7 +532,7 @@ function Browser({ data }: { data: ShellLibrary }) {
   const kind = scope.chat ? "chat" : scope.entity ? "character" : "all"
   const sections = SECTIONS[kind]
   // Each list's length, by scope and search: another scope or search starts from its first page.
-  const listKey = `${scope.entity}/${scope.chat}/${needle}`
+  const listKey = `${scope.entity}/${scope.chat}/${needle}/${JSON.stringify(chatBrowse)}`
   const [limits, setLimits] = useState<{ key: string; limits: Partial<Record<ShellSection, number>> }>({
     key: listKey,
     limits: {}
@@ -535,6 +548,7 @@ function Browser({ data }: { data: ShellLibrary }) {
     chat: scope.chat as ChatId | null,
     search: needle,
     sort: "recent",
+    ...(!grid && kind !== "chat" ? { browse: chatBrowse } : {}),
     sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
   })
   // The chat by its name, which all its branches share.
@@ -621,24 +635,20 @@ function Browser({ data }: { data: ShellLibrary }) {
           )}
         </nav>
       )}
-      {grid ? (
-        <CardGridControls
-          data={data}
-          browse={browse}
-          onChange={setBrowse}
-          search={search}
-          onSearch={setSearch}
-          searchLabel="Find a character"
-        />
-      ) : (
-        <Input
-          aria-label="Find a chat"
-          placeholder="Find by name"
-          className="max-w-controls"
-          value={search}
-          onChange={(e) => setSearch(e.currentTarget.value)}
+      <Input
+        aria-label={grid ? "Find a character" : "Find a chat"}
+        placeholder="Find by name"
+        className="max-w-controls"
+        value={search}
+        onChange={(e) => setSearch(e.currentTarget.value)}
+      />
+      {!grid && kind !== "chat" && (
+        <SlotOutlet
+          slot={sidebarChatBrowse}
+          props={{ browse: chatBrowse, counts: forks.filterCounts, onChange: setChatBrowse }}
         />
       )}
+      {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups includePersonas />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
       <div data-shell-list className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
         {grid ? (
@@ -665,6 +675,7 @@ function Browser({ data }: { data: ShellLibrary }) {
             {kind !== "chat" && (
               <PinnedChats
                 pinsCollapsed={data.pinsCollapsed}
+                browse={chatBrowse}
                 entity={scope.entity}
                 sortBy={browse.pinsSort}
                 onSortChange={(pinsSort) => setBrowse({ pinsSort })}

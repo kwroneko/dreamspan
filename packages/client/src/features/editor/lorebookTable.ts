@@ -26,6 +26,7 @@ export interface LorebookColumn {
   readonly id: string
   readonly order: number
   readonly header: string
+  readonly description?: string
   /** A CSS grid track, e.g. "5rem". On a narrow screen cells wrap under the title instead. */
   readonly width: string
   readonly cell: ComponentType<LorebookEntryContext>
@@ -159,14 +160,14 @@ export const POSITIONS: ReadonlyArray<{
     position: "before_char",
     short: "↑Char",
     label: "↑Char · Before the character",
-    description: "At the preset's World Info (before) marker, ahead of the character's definitions."
+    description: "Inserted at the preset's World Info (before) marker, normally before the character definitions."
   },
   {
     value: "after_char",
     position: "after_char",
     short: "↓Char",
     label: "↓Char · After the character",
-    description: "At the preset's World Info (after) marker, after the character's definitions."
+    description: "Inserted at the preset's World Info (after) marker, normally right after the character definitions."
   },
   {
     value: "em_top",
@@ -188,7 +189,7 @@ export const POSITIONS: ReadonlyArray<{
     role: "system",
     short: "@D system",
     label: "@D · Depth, system",
-    description: "Among the chat's messages, its depth back from the newest, as a system message."
+    description: "Inserted at the chosen depth with the system role."
   },
   {
     value: "at_depth:user",
@@ -196,7 +197,7 @@ export const POSITIONS: ReadonlyArray<{
     role: "user",
     short: "@D user",
     label: "@D · Depth, user",
-    description: "Among the chat's messages, its depth back from the newest, as if you had written it."
+    description: "Inserted at the chosen depth with the user role."
   },
   {
     value: "at_depth:assistant",
@@ -204,7 +205,7 @@ export const POSITIONS: ReadonlyArray<{
     role: "assistant",
     short: "@D assistant",
     label: "@D · Depth, assistant",
-    description: "Among the chat's messages, its depth back from the newest, as if the model had written it."
+    description: "Inserted at the chosen depth with the assistant role."
   },
   {
     value: "outlet",
