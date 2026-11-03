@@ -72,7 +72,8 @@ export const makeDraftCarry = (sql: SqlClient.SqlClient, drafts: ReturnType<type
           })
           // Its text was taken by a draft already: it fits.
           .pipe(Effect.catchTag("DraftTooLarge", (error) => Effect.die(error)))
-        yield* drafts.settleOn(row, back, from.revision)
+        // Moving text to the fork is not a deletion: late saves still belong to the original.
+        yield* drafts.settleOn(row, back, from.revision, false)
         moved++
       }
       return moved

@@ -189,7 +189,7 @@ function Editor({
   onSave: () => void
   onCancel: () => void
 }) {
-  const { text, error, conflict, imagesBusy } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  const { text, loading, error, conflict, imagesBusy } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   // The editor may mount after the saved text loads: it still opens at the first caret.
   const [initialCaret] = useState(caret)
   useEffect(() => {
@@ -259,8 +259,15 @@ function Editor({
           onCancel()
       }}
     >
-      {base === undefined ? (
-        <p role="status">Loading saved text…</p>
+      {loading || base === undefined ? (
+        <p role="status">
+          Loading saved text…{" "}
+          {loading && error && (
+            <Button type="button" onClick={() => void draft.open()} hint="Loads the saved edit before you type.">
+              Retry
+            </Button>
+          )}
+        </p>
       ) : (
         <SlotOutlet
           slot={messageTextEditor}

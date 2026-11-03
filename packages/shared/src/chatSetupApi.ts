@@ -1,3 +1,4 @@
+import { Draft } from "./drafts.ts"
 // Starting chats from cards, who's in them, their settings, and the send queue (DESIGN
 // §2.1, §2.2, §3.5; DATA-MODEL §5.3), merged into AppApi. Every id is the caller's own;
 // anything else is NotFound.
@@ -517,7 +518,7 @@ export class ChatSetupApi extends RpcGroup.make(
        */
       title: Schema.optionalKey(Schema.String)
     },
-    success: Schema.Struct({ entry: PathEntry, chat: Chat }),
+    success: Schema.Struct({ entry: PathEntry, chat: Chat, composer: Draft }),
     error: Schema.Union([...Errors, GenerationUnavailable])
   }),
   /** Who's in the chat, and its settings, after `slotId` (null: at the start). */

@@ -168,6 +168,7 @@ it("persists image-only editor changes with browser recovery and preserves image
   const calls: Array<{ tag: string; payload: Record<string, unknown> }> = []
   let answer: ((value: Draft) => void) | undefined
   const rpc = (tag: string, payload: Record<string, unknown>) => {
+    if (tag === "GetMessageDraft") return Effect.succeed(null)
     calls.push({ tag, payload })
     return Effect.promise(
       () =>
@@ -220,8 +221,10 @@ it("persists image-only editor changes with browser recovery and preserves image
 })
 
 it("waits for an editor image upload before taking the image set to save", async () => {
-  const rpc = (_tag: string, payload: Record<string, unknown>) =>
-    Effect.succeed(new Draft({ ...draft(String(payload.content)), images: payload.images as [] }))
+  const rpc = (tag: string, payload: Record<string, unknown>) =>
+    tag === "GetMessageDraft"
+      ? Effect.succeed(null)
+      : Effect.succeed(new Draft({ ...draft(String(payload.content)), images: payload.images as [] }))
   const session = {
     id: "upload-draft-chat",
     call: async (request: (client: typeof rpc) => Effect.Effect<unknown>) => ({
@@ -244,4 +247,120 @@ it("waits for an editor image upload before taking the image set to save", async
   await uploading
   expect((await ready).images).toEqual([{ mediaId: "uploaded" }])
   expect(store.snapshot().imagesBusy).toBe(false)
+})
+
+for (const kind of ["message", "summary"] as const)
+  it(`${kind}: text typed during our Cancel is saved on its acknowledged deletion`, async () => {
+    let release: ((value: Draft) => void) | undefined
+    const calls: Array<{ tag: string; payload: Record<string, unknown> }> = []
+    const rpc = (tag: string, payload: Record<string, unknown>) => {
+      calls.push({ tag, payload })
+      if (tag.startsWith("Get")) return Effect.succeed(draft("before cancel"))
+      if (tag.startsWith("Discard"))
+        return Effect.promise(
+          () =>
+            new Promise<Draft>((resolve) => {
+              release = resolve
+            })
+        )
+      return Effect.succeed(draft(String(payload.content), 6))
+    }
+    const session = {
+      id: "chat",
+      snapshot: () => ({ forkId: "fork" }),
+      call: async (request: (client: typeof rpc) => Effect.Effect<unknown>) => ({
+        ok: true,
+        value: await Effect.runPromise(request(rpc))
+      })
+    } as unknown as ChatSession
+    const store =
+      kind === "summary"
+        ? new SummaryDraft(session, "user", {
+            id: "summary",
+            revisionId: "revision",
+            content: "saved",
+            rowVersion: 1
+          } as LcmSummary)
+        : new MessageDraft(session, "user", targetFor("write"), "before cancel", draft("before cancel"))
+    if (store instanceof SummaryDraft) await store.open()
+    const cancelled = store.discard()
+    await vi.waitFor(() => expect(release).toBeDefined())
+    store.setText("typed after clicking Cancel")
+    release!(new Draft({ ...draft("saved", 5), status: "discarded", session: 2, clearedVersion: 5 }))
+    expect((await cancelled).ok).toBe(false)
+    await store.save()
+    expect(calls.at(-1)?.payload).toMatchObject({
+      content: "typed after clicking Cancel",
+      expectedRowVersion: 1,
+      expectedSession: 1,
+      observedDeletion: { draftId: "draft", rowVersion: 5 }
+    })
+    expect(store.snapshot().text).toBe("typed after clicking Cancel")
+    if (store instanceof SummaryDraft) store.dispose()
+  })
+
+it("a newly opened blank editor saves new typing on its resting empty draft", async () => {
+  let release: ((draft: Draft) => void) | undefined
+  const calls: Array<{ tag: string; payload: Record<string, unknown> }> = []
+  const resting = new Draft({ ...draft("", 5), status: "discarded", session: 2, clearedVersion: 5 })
+  const rpc = (tag: string, payload: Record<string, unknown>) => {
+    calls.push({ tag, payload })
+    if (tag === "GetMessageDraft")
+      return Effect.promise(
+        () =>
+          new Promise<Draft>((resolve) => {
+            release = resolve
+          })
+      )
+    return Effect.succeed(draft(String(payload.content), 6))
+  }
+  const session = {
+    id: "chat",
+    snapshot: () => ({ forkId: "fork" }),
+    call: async (request: (client: typeof rpc) => Effect.Effect<unknown>) => ({
+      ok: true,
+      value: await Effect.runPromise(request(rpc))
+    })
+  } as unknown as ChatSession
+  const store = new MessageDraft(session, "user", targetFor("write"), "", null)
+  store.setText("fresh typing after reopening")
+  const saving = store.save()
+  await vi.waitFor(() => expect(release).toBeDefined())
+  store.setText("fresh typing after reopening, final keystroke")
+  release!(resting)
+  await saving
+  expect(calls.at(-1)?.payload).toMatchObject({
+    content: "fresh typing after reopening, final keystroke",
+    draftId: null,
+    expectedRowVersion: null,
+    expectedSession: null,
+    observedDeletion: { draftId: "draft", rowVersion: 5 }
+  })
+  expect(store.snapshot().text).toBe("fresh typing after reopening, final keystroke")
+  await store.save()
+})
+
+it("a first editor save creates its draft when the metadata read returns NotFound", async () => {
+  const calls: Array<{ tag: string; payload: Record<string, unknown> }> = []
+  const rpc = (tag: string, payload: Record<string, unknown>) => {
+    calls.push({ tag, payload })
+    return tag === "GetMessageDraft"
+      ? Effect.fail(new Error("no draft yet"))
+      : Effect.succeed(draft(String(payload.content)))
+  }
+  const session = {
+    id: "chat",
+    call: async (request: (client: typeof rpc) => Effect.Effect<unknown, unknown>) => {
+      const result = await Effect.runPromiseExit(request(rpc))
+      return result._tag === "Success"
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { tag: "NotFound", message: "No draft yet", problems: [], reason: null } }
+    }
+  } as unknown as ChatSession
+  const store = new MessageDraft(session, "user", targetFor("write"), "", null)
+  store.setText("first text")
+  await store.save()
+  expect(calls.map((call) => call.tag)).toEqual(["GetMessageDraft", "SaveMessageDraft"])
+  expect(store.snapshot().unsaved).toBe(false)
+  expect(store.snapshot().text).toBe("first text")
 })

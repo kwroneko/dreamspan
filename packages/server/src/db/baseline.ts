@@ -112,6 +112,8 @@ export const baseline: ReadonlyArray<string> = [
     -- A library field's session a save or checkpoint ended: the revision now holding its text.
     committed_revision TEXT,
     row_version INTEGER NOT NULL DEFAULT 1,
+    cleared_version INTEGER NOT NULL DEFAULT 0,
+    deletions_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(deletions_json)),
     updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
     UNIQUE (user_id, target_kind, target_id, field)
   ) STRICT`,

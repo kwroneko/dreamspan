@@ -3,7 +3,15 @@
 // can step back to any earlier state, and a destructive change (Ctrl-A plus a stray key)
 // always leaves the state before it restorable.
 import { Schema } from "effect"
+import { beforeDeletion, deletionMap } from "./draftDeletions.ts"
 import { MessageImages } from "./chat.ts"
+
+/** Legacy strings remain valid; anonymous input clears need evidence independent of final text counts. */
+export const EditingOrigin = Schema.Union([
+  Schema.String,
+  Schema.Struct({ content: Schema.String, clearedArrays: Schema.Array(Schema.Array(Schema.String)) })
+])
+export type EditingOrigin = typeof EditingOrigin.Type
 
 export const DraftTargetKind = Schema.Literals([
   "composer",
@@ -68,6 +76,17 @@ export class DraftDisplacement extends Schema.Class<DraftDisplacement>("DraftDis
   images: Schema.optionalKey(MessageImages)
 }) {}
 
+/** A deletion the editor observed; this never replaces the base its text was typed on. */
+export const ObservedDeletion = Schema.Struct({ draftId: Schema.String, rowVersion: Schema.Int })
+export type ObservedDeletion = typeof ObservedDeletion.Type
+
+export const FieldDeletion = Schema.Struct({
+  ...ObservedDeletion.fields,
+  value: Schema.optionalKey(Schema.Unknown),
+  missing: Schema.optionalKey(Schema.Boolean)
+})
+export type FieldDeletion = typeof FieldDeletion.Type
+
 export class Draft extends Schema.Class<Draft>("Draft")({
   id: Schema.String,
   key: DraftKey,
@@ -78,6 +97,10 @@ export class Draft extends Schema.Class<Draft>("Draft")({
   /** What the draft was started from, for conflict detection on commit. */
   baseRevision: Schema.NullOr(Schema.String),
   rowVersion: Schema.Int,
+  /** Last deliberate emptying/discard, retained across later text. Recovery compares server versions, never clocks. */
+  clearedVersion: Schema.optionalKey(Schema.Int),
+  /** Per-input barriers, including a moved history's original logical target. Empty key means the whole field. */
+  deletions: Schema.optionalKey(Schema.Record(Schema.String, FieldDeletion)),
   /**
    * The drafting session, counted up each time one ends (committed or discarded). Text
    * typed in a session that has ended is never taken as the start of the next one.
@@ -203,3 +226,22 @@ export const DraftRestore = {
   content: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(DraftHistoryPolicy.maxContentChars))),
   images: Schema.optionalKey(MessageImages)
 }
+
+/** A browser copy typed before the latest deletion must never reopen the field. */
+export const deletedSince = (
+  draft: Draft | null,
+  base: {
+    readonly draftId: string | null
+    readonly expectedRowVersion: number | null
+    readonly observedDeletion?: ObservedDeletion
+  } | null
+): boolean => {
+  if (draft === null) return false
+  const deletion = deletionMap(draft)[""]
+  return deletion !== undefined && beforeDeletion(draft.id, deletion, base)
+}
+
+export const observeDeletion = (draft: Draft | null): ObservedDeletion | null =>
+  draft !== null && Object.keys(deletionMap(draft)).length > 0
+    ? { draftId: draft.id, rowVersion: draft.rowVersion }
+    : null

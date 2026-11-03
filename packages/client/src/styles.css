@@ -451,23 +451,24 @@ main:has(> [data-fill]) {
 
 /*
  * A text box's own controls, in its strip inside its border (ui/FieldFrame.tsx; owner,
- * 2026-11-02): hidden until the pointer is over the box or focus is in it, then quiet, and fully
+ * 2026-11-02): counts and controls hide until the pointer is over the box or focus is in it, then quiet, and fully
  * opaque while the pointer or focus is on the strip itself. Only opacity changes and the strip
  * always takes its room, so nothing moves. A pointer over the hidden strip is over the box, which
- * shows it; on a touch screen it takes a tap only once the box has focus.
+ * shows it; on a touch screen it takes a tap only once the box has focus. The edited marker
+ * has no reveal wrapper and stays visible in the same reserved strip.
  */
-[data-field-frame] > [data-field-chrome] {
+[data-field-frame] > [data-field-chrome] [data-field-reveal] {
   opacity: 0;
   transition: opacity 120ms ease-out;
 }
-[data-field-frame]:is(:hover, :focus-within) > [data-field-chrome] {
+[data-field-frame]:is(:hover, :focus-within) > [data-field-chrome] [data-field-reveal] {
   opacity: 0.6;
 }
-[data-field-frame] > [data-field-chrome]:is(:hover, :focus-within) {
+[data-field-frame] > [data-field-chrome]:is(:hover, :focus-within) [data-field-reveal] {
   opacity: 1;
 }
 @media (hover: none) {
-  [data-field-frame]:not(:focus-within) > [data-field-chrome] {
+  [data-field-frame]:not(:focus-within) > [data-field-chrome] [data-field-reveal] {
     opacity: 0;
     pointer-events: none;
   }

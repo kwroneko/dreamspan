@@ -33,7 +33,11 @@ function FieldLabel({ store, field, label }: { store?: EditorStore; field?: stri
 }
 
 function DirtyBadge({ store, field }: { store: EditorStore; field: string }) {
-  return useDirty(store, field) ? <Badge tone="accent">edited</Badge> : null
+  return useDirty(store, field) ? (
+    <span data-field-edited>
+      <Badge tone="accent">edited</Badge>
+    </span>
+  ) : null
 }
 
 /**
@@ -44,7 +48,7 @@ function FieldStatus({ store, field, aside }: { store: EditorStore; field: strin
   return (
     <>
       <DirtyBadge store={store} field={field} />
-      {aside}
+      <span data-field-reveal>{aside}</span>
     </>
   )
 }

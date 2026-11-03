@@ -3,8 +3,8 @@
 // one of the box's borders, inside it: under a multi-line box's text, at a one-line box's end.
 // The strip always takes its room, shown or not and full or empty, so focusing, typing, a change
 // or leaving the box never moves anything around the box, and the text never runs under a
-// control. It shows only while the pointer is over the box or focus is in it (styles.css), and
-// comes after the box in the focus order.
+// control. The edited marker stays visible; counts and controls show on hover/focus
+// (styles.css). Controls come after the box in the focus order.
 import type { ReactNode } from "react"
 
 /** The box's border and focus ring, which the frame takes over from the control inside it. */
@@ -56,7 +56,9 @@ export function FieldFrame({
           }
         >
           {status && <span className="mr-auto flex min-w-0 items-center gap-2 pl-1 text-xs text-muted">{status}</span>}
-          {tools}
+          <span data-field-reveal className="flex shrink-0 items-center gap-0.5">
+            {tools}
+          </span>
         </div>
       )}
     </div>

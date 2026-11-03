@@ -1,4 +1,4 @@
-// The baseline against its frozen schema dump (the 56-step chain it replaced, plus the fork deletion triggers and `history_changes` of unit 5 and the token-estimate ledger fields/index, edited in as the baseline allows), and the migrator's refusal of a database
+// The baseline against its frozen schema dump (the 56-step chain it replaced, plus the fork deletion triggers and `history_changes` of unit 5, the token-estimate ledger fields/index and draft deletion watermark, edited in as the baseline allows), and the migrator's refusal of a database
 // made before it.
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -31,7 +31,7 @@ const chain = (
 const layer = () => writerConnection(join(tempDir("mig"), "db.sqlite"))
 
 describe("0001_baseline", () => {
-  it.effect("makes the schema the old chain made, and seeds nothing", () =>
+  it.effect("matches the recorded baseline schema and seeds nothing", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
