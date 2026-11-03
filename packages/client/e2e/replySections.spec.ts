@@ -128,7 +128,9 @@ for (const width of [1440, 390])
       await expect(opening.first()).toHaveAccessibleDescription("Where a section starts, exactly as written.")
       await expect(section).not.toContainText("Each tag is a regular expression")
       await shot("reply-sections-editor")
-      await expect(section.getByRole("button", { name: /^Add the default pair/ })).toHaveCount(0)
+      await section.getByRole("button", { name: "Tag pair actions" }).click()
+      await expect(page.getByRole("menuitem", { name: "Add the default pair", exact: true })).toBeDisabled()
+      await page.keyboard.press("Escape")
       // Opting a pair into regex: its tags are patterns, checked as such.
       await asRegex.first().click()
       await expect(asRegex.first()).toBeChecked()
@@ -137,7 +139,9 @@ for (const width of [1440, 390])
       await expect(section).toContainText(/Invalid regular expression|Unterminated group/)
       await asRegex.first().click()
       await expect(section).not.toContainText(/Invalid regular expression|Unterminated group/)
-      await expect(section.getByRole("button", { name: "Add the default pair" })).toBeVisible()
+      await section.getByRole("button", { name: "Tag pair actions" }).click()
+      await expect(page.getByRole("menuitem", { name: "Add the default pair", exact: true })).toBeEnabled()
+      await page.keyboard.press("Escape")
       const sendBack = section.getByRole("spinbutton", { name: "Send thinking back for the last replies" })
       await sendBack.fill("")
       await sendBack.fill("2")
@@ -184,8 +188,38 @@ for (const width of [390, 1024, 1440])
         })
       }
       await expectLayout(page, info, "thinking-settings", { scope: '[data-preset-section="reply-sections"]' })
-      await section.getByRole("button", { name: "Remove pair" }).first().click()
-      await section.getByRole("button", { name: "Add the default pair", exact: true }).scrollIntoViewIfNeeded()
+      const pairs = section.locator("[data-section-pair]")
+      await expect(section.getByRole("button", { name: "Add a pair", exact: true })).toHaveCount(0)
+      await section.getByRole("button", { name: "Add another tag pair", exact: true }).click()
+      await expect(pairs).toHaveCount(3)
+      const added = pairs.last()
+      await expect(added).toHaveAttribute("data-flashing", "")
+      await expect(added).toBeInViewport({ ratio: 1 })
+      await expectLayout(page, info, "thinking-settings-added", { scope: '[data-preset-section="reply-sections"]' })
+      // Empty is valid: even the last pair retains its corner remove control.
+      for (let count = 3; count > 0; count--) {
+        await pairs.last().getByRole("button", { name: "Remove this pair", exact: true }).click()
+        await expect(pairs).toHaveCount(count - 1)
+      }
+      await section.getByRole("button", { name: "Tag pair actions" }).click()
+      const restore = page.getByRole("menuitem", { name: "Add the default pair", exact: true })
+      await expect(restore).toHaveAccessibleDescription("Adds <think> and </think>")
+      await expectLayout(page, info, "thinking-settings-menu", { scope: '[role="menu"]' })
+      await restore.click()
+      await expect(pairs).toHaveCount(2)
+      await expect(pairs.first()).toHaveAttribute("data-flashing", "")
+      await expect(pairs.first()).toBeInViewport({ ratio: 1 })
+      await expectThinkingFields(section)
+      await expect(section.getByRole("textbox", { name: "Opening tag" }).first()).toHaveValue("<think>")
+      await expect(section.getByRole("textbox", { name: "Opening tag" }).last()).toHaveValue("<thinking>")
+      // Restore only a missing pair, retaining edits on the other pair.
+      await pairs.first().getByRole("button", { name: "Remove this pair", exact: true }).click()
+      await pairs.first().getByRole("checkbox", { name: "Match case", exact: true }).click()
+      await section.getByRole("button", { name: "Tag pair actions" }).click()
+      await restore.click()
+      await expect(pairs).toHaveCount(2)
+      await expect(pairs.first().getByRole("checkbox", { name: "Match case", exact: true })).toBeChecked()
+      await expect(pairs.last().getByRole("textbox", { name: "Opening tag" })).toHaveValue("<think>")
       await expectThinkingFields(section)
       await expectLayout(page, info, "thinking-settings-default-pair", {
         scope: '[data-preset-section="reply-sections"]'
@@ -194,6 +228,27 @@ for (const width of [390, 1024, 1440])
   }
 
 async function expectThinkingFields(section: Locator) {
+  const heading = section.getByRole("heading", { name: "Thinking at the start of a reply", exact: true })
+  const add = section.getByRole("button", { name: "Add another tag pair", exact: true })
+  const menu = section.getByRole("button", { name: "Tag pair actions", exact: true })
+  const headBox = (await heading.boundingBox())!
+  const addBox = (await add.boundingBox())!
+  const menuBox = (await menu.boundingBox())!
+  expect(addBox.x).toBeGreaterThanOrEqual(headBox.x + headBox.width)
+  expect(menuBox.x).toBeGreaterThan(addBox.x)
+  expect(addBox.y).toBeLessThan(headBox.y + headBox.height)
+  for (const pair of await section.locator("[data-section-pair]").all()) {
+    // Measure the box and X in one frame; the editor can restore its scroll position
+    // between separate Playwright geometry reads while the page settles.
+    const corner = await pair.evaluate((box) => {
+      const outer = box.getBoundingClientRect()
+      const remove = box.querySelector('button[aria-label="Remove this pair"]')!.getBoundingClientRect()
+      return { right: outer.right - remove.right, top: remove.top - outer.top }
+    })
+    expect(corner.right).toBeLessThanOrEqual(16)
+    expect(corner.top).toBeLessThanOrEqual(16)
+    await expect(pair.getByRole("checkbox")).toHaveCount(2)
+  }
   const tags = section.getByRole("textbox")
   for (const tag of await tags.all()) {
     await expect(tag).toHaveJSProperty("tagName", "INPUT")
@@ -219,8 +274,6 @@ async function expectThinkingFields(section: Locator) {
     )
   const toggle = order.indexOf("switch")
   expect(toggle).toBeGreaterThan(order.lastIndexOf("tag"))
-  expect(toggle).toBeGreaterThan(order.indexOf("Add a pair"))
-  if (order.includes("Add the default pair")) expect(toggle).toBeGreaterThan(order.indexOf("Add the default pair"))
   expect(order[toggle + 1]).toBe("send-back")
   const first = (await tags.nth(0).boundingBox())!
   const second = (await tags.nth(1).boundingBox())!
