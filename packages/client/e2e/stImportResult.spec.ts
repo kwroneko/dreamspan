@@ -137,6 +137,8 @@ test("a running import shows live progress and can be cancelled", async ({ page 
   await page.goto(`${server().url}/import/st`)
   const result = page.getByRole("heading", { name: "Result", exact: true }).locator("xpath=ancestor::section[1]")
   await expect(result).toContainText("0 of 2 files · 0%")
+  // Observe the running clock before a later upload: startup progress updates are coalesced.
+  await expect(result.getByRole("status")).toContainText(/· (?:(?:[2-9]|\d{2,}) s|\d+ min)/)
   const sent = await page.request.post(
     `${server().url}/st-import/file?${new URLSearchParams({ import: job.importId, path: "settings.json" })}`,
     {
