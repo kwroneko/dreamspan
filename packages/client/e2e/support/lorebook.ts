@@ -18,7 +18,9 @@ export const openSettings = async (entry: Locator) => {
   if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
   await expect(toggle).toHaveAttribute("aria-expanded", "true")
   // In the side panel and on a narrow screen its sections are accordions, closed: open them all.
-  const closed = entry.getByRole("region", { name: "Entry settings" }).locator("[data-section-toggle][aria-expanded=false]")
+  const closed = entry
+    .getByRole("region", { name: "Entry settings" })
+    .locator("[data-section-toggle][aria-expanded=false]")
   while ((await closed.count()) > 0) await closed.first().click()
 }
 
