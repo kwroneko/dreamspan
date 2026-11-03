@@ -153,7 +153,6 @@ export function MenuSubmenu({
         {...explanation.describedBy}
         data-explain={open ? undefined : description}
       >
-        <span className="w-4" />
         <ItemText parts={explanation.parts}>{label}</ItemText>
         <Icon name="right" className="shrink-0 text-muted" />
       </BaseMenu.SubmenuTrigger>
@@ -294,7 +293,7 @@ export function MenuItem({
   const explanation = useItemExplanation(description)
   return (
     <BaseMenu.Item className={itemClass(tone)} {...explanation.describedBy} {...props}>
-      {icon ? <Icon name={icon} className="text-muted" /> : <span className="w-4" />}
+      {icon && <Icon name={icon} className="text-muted" />}
       <ItemText parts={explanation.parts}>{children}</ItemText>
     </BaseMenu.Item>
   )
@@ -315,7 +314,7 @@ export function MenuLinkItem({
   const explanation = useItemExplanation(description)
   return (
     <BaseMenu.LinkItem className={itemClass("default")} render={render} closeOnClick {...explanation.describedBy}>
-      {icon ? <Icon name={icon} className="text-muted" /> : <span className="w-4" />}
+      {icon && <Icon name={icon} className="text-muted" />}
       <ItemText parts={explanation.parts}>{children}</ItemText>
     </BaseMenu.LinkItem>
   )
