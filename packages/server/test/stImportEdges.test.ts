@@ -621,13 +621,19 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
 
       // A new import run says it's unfinished, and finishes it.
       const second = yield* begin
-      assert.isTrue(
+      assert.isFalse(
         (yield* second.api.GetStImportReport({ importId: second.importId })).issues.some(
           (i) => i.code === "st.unfinished"
         )
       )
       const rest = jsonl({ chat_metadata: {} }, ...head, message("kept-r2", 4))
       assert.strictEqual((yield* sendStFile(second.importId, path, rest, { card: "none" })).outcome, "added")
+      yield* second.api.FinishStImport({ importId: second.importId, notSent: [] })
+      assert.isTrue(
+        (yield* second.api.GetStImportReport({ importId: second.importId })).issues.some(
+          (i) => i.code === "st.unfinished"
+        )
+      )
       assert.strictEqual((yield* second.api.GetChat({ chatId })).title, "kept")
       assert.strictEqual(present("kept-u amended"), 1)
       assert.lengthOf(query("SELECT id FROM version_history WHERE version_id = ?", versionOf("kept-u amended")), 1)

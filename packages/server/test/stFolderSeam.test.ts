@@ -97,13 +97,17 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "60 secon
           const { importId } = yield* api.StartStImport({ unsupported: [] })
           assert.strictEqual((yield* sendStFile(importId, "settings.json", settings)).outcome, "added")
           const report = yield* api.GetStImportReport({ importId })
-          assert.isTrue(
-            report.issues.some((i) => i.code === "st.preset_missing" && i.message.includes("Plugin preset"))
-          )
+          assert.isFalse(report.issues.some((i) => i.code === "st.preset_missing"))
           yield* parsers.disable("settings")
           assert.strictEqual((yield* sendStFile(importId, "settings.json", settings)).outcome, "failed")
           assert.isTrue(
             (yield* api.GetStImportReport({ importId })).issues.some((i) => i.code === "st.parser_disabled")
+          )
+          yield* api.FinishStImport({ importId, notSent: [] })
+          assert.isTrue(
+            (yield* api.GetStImportReport({ importId })).issues.some(
+              (i) => i.code === "st.preset_missing" && i.message.includes("Plugin preset")
+            )
           )
         })
       )

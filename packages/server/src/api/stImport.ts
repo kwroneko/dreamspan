@@ -11,6 +11,7 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { StImportJobs } from "../importer/StImportJobs.ts"
 import { StImports } from "../importer/StImports.ts"
+import { visibleReport } from "../importer/stReport.ts"
 import { listFolder, previewStFiles, scanStFolder } from "../importer/stFolderDisk.ts"
 
 /** Reading a folder by its path is for admins: anyone else could read any user's files. */
@@ -83,7 +84,10 @@ export const makeStImportHandlers = Effect.gen(function* () {
           )
         )
       ),
-    GetStImportReport: ({ importId }) => Effect.flatMap(CurrentUser, (user) => imports.report(user, importId)),
+    GetStImportReport: ({ importId }) =>
+      Effect.flatMap(CurrentUser, (user) =>
+        Effect.map(imports.report(user, importId), (report) => visibleReport(report, jobs.running(user, importId)))
+      ),
     UnhideImportedRun: ({ chatId, throughSlotId, importId }) =>
       Effect.gen(function* () {
         const user = yield* CurrentUser
