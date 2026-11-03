@@ -10,6 +10,8 @@ import {
   type LcmWhen,
   chunkSize,
   loweredTarget,
+  summaryPreset,
+  type SummaryPreset,
   summaryWords
 } from "@rp/shared/lcmSettings.ts"
 import type { LcmSettingsView } from "@rp/shared/lcm.ts"
@@ -17,6 +19,12 @@ import { type ReactNode, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, Input } from "../../ui/Field.tsx"
+import type { RefId } from "@rp/shared/library.ts"
+import { usePresetSelection } from "../pickers/presetSelection.ts"
+import { PresetPickerPopover } from "../pickers/PresetPicker.tsx"
+import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 
 type Resolved = LcmSettingsView["resolved"]
@@ -302,11 +310,25 @@ export function LcmFields({
   instruction?: ReactNode
 }) {
   const { resolved, fit, now, fitted } = view
+  const presets = usePresetSelection(null)
+  const workspace = usePresetWorkspace()
+  const specific = resolved.withPreset === "specific"
+  const chosen = resolved.preset
+  const current = [...presets.live, ...presets.archived].find((ref) => ref.id === chosen) ?? null
+  const unavailable = specific && presets.loaded && chosen !== null && (!current || current.archivedAt !== null)
+  const fallbackPreset = summaryPreset((fallback.withPreset ?? LCM_BUILTIN.withPreset) as SummaryPreset | boolean)
+  const presetLabel = (value: SummaryPreset) =>
+    value === "specific"
+      ? ([...presets.live, ...presets.archived].find((ref) => ref.id === fallback.preset)?.label ?? "a specific preset")
+      : value === "current"
+        ? "the current preset"
+        : "instruction and messages only"
   const [problem, setProblem] = useState<{ field: LcmField; message: string } | null>(null)
   const choose = async (change: LcmSettingsChange) => {
     const field = Object.keys(change)[0] as LcmField
     const message = await write(change)
     setProblem(message === null ? null : { field, message })
+    return message
   }
   const errorFor = (field: LcmField) => (problem?.field === field ? problem.message : null)
   const chunk =
@@ -317,13 +339,19 @@ export function LcmFields({
         <Segmented
           label="Send with"
           wrap
-          value={resolved.withPreset ? "preset" : "raw"}
-          onValueChange={(value) => void choose({ withPreset: value === "preset" })}
+          value={resolved.withPreset}
+          onValueChange={(value) => void choose({ withPreset: value })}
           options={[
             {
-              value: "preset",
-              label: "The full preset",
-              description: "The chat as the model sees it, then the instruction: cheaper, as it reads the chat's cache."
+              value: "current",
+              label: "The current preset",
+              description: "Summary requests use your current preset, so they can reuse the chat's cached prompt."
+            },
+            {
+              value: "specific",
+              label: "A specific preset",
+              description:
+                "Summary requests use this preset. Its prompt differs from the chat's, so the chat's cached prompt can't be reused."
             },
             {
               value: "raw",
@@ -332,15 +360,55 @@ export function LcmFields({
             }
           ]}
         />
+        {specific && (
+          <div className="flex min-w-0 items-center gap-2">
+            <PresetPickerPopover
+              selection={{
+                ...presets,
+                usage: "summary",
+                value: chosen ?? "",
+                current,
+                label: current?.label ?? "Choose a preset",
+                choose: async (value) => (await choose({ withPreset: "specific", preset: value as RefId })) === null
+              }}
+              side="bottom"
+              triggerLabel="Preset for summaries"
+              hint="Choose the preset summary requests use."
+              triggerClassName="flex h-9 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-left text-sm text-text hover:bg-surface-raised"
+              trigger={
+                <>
+                  <span className="min-w-0 truncate">{current?.label ?? "Choose a preset"}</span>
+                  <Icon name="down" size={14} />
+                </>
+              }
+            />
+            <IconButton
+              label="Open this preset in the large editor"
+              hint={
+                chosen && !unavailable
+                  ? "Open this preset in the large editor"
+                  : "Choose an available preset to open in the large editor"
+              }
+              icon="expand"
+              disabled={disabled || !chosen || unavailable}
+              onClick={() => {
+                if (chosen) workspace?.open(chosen)
+              }}
+            />
+          </div>
+        )}
+        {unavailable && (
+          <p role="status" className="text-sm text-warning">
+            The chosen preset is no longer available; summaries use your current preset.
+          </p>
+        )}
         <Origin
           scope={scope}
           from={resolved.from.withPreset ?? "builtin"}
-          same={resolved.withPreset === (fallback.withPreset ?? LCM_BUILTIN.withPreset)}
-          fallback={
-            (fallback.withPreset ?? LCM_BUILTIN.withPreset) ? "the full preset" : "instruction and messages only"
-          }
+          same={resolved.withPreset === fallbackPreset && (!specific || resolved.preset === (fallback.preset ?? null))}
+          fallback={presetLabel(fallbackPreset)}
           disabled={disabled}
-          onReset={() => void choose({ withPreset: null })}
+          onReset={() => void choose({ withPreset: null, preset: null })}
         />
         {errorFor("withPreset") && <p className="text-sm text-danger">{errorFor("withPreset")}</p>}
         <Switch

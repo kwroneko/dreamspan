@@ -7,7 +7,8 @@ import { TextTooLong } from "./composerApi.ts"
 import { ObservedDeletion, Draft, DraftHistoryPolicy, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { idSchema } from "./id.ts"
-import { LcmDefaults, LcmSettings, LcmSettingsChange, LcmWhen, ModelChoice } from "./lcmSettings.ts"
+import { LcmDefaults, LcmSettings, LcmSettingsChange, LcmWhen, ModelChoice, SummaryPreset } from "./lcmSettings.ts"
+import { RefId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 
 export const SummaryId = idSchema("SummaryId", "summaries")
@@ -188,7 +189,8 @@ export const LcmSettingsView = Schema.Struct({
   /** What applies, each field from the chat, the account default or the built-in. */
   resolved: Schema.Struct({
     enabled: Schema.Boolean,
-    withPreset: Schema.Boolean,
+    withPreset: SummaryPreset,
+    preset: Schema.NullOr(RefId),
     withNotes: Schema.Boolean,
     tail: Schema.NullOr(Schema.String),
     recentTarget: Schema.Int,

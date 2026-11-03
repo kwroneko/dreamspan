@@ -827,6 +827,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ## 8. LCM (hierarchical summarization)
 
+- **[D], 2026-11-03:** “summarization should be able to set its own preset, in addition to being able to set its own model.” (owner). **Built (summarypreset; obsolete as an implementation requirement):** account defaults and per-chat overrides select the current preset, a specific preset, or instruction and messages only; unavailable specific presets fall back to the current one with a warning. ARCHITECTURE §16 records the implementation.
+
 - **[D]** This is the main feature: chats of unlimited length with a fixed, predictable, cache-friendly context budget, keeping all original messages and every intermediate summary. The agent can drill down and search.
 - **[D] Baseline:** reference-harness ARCHITECTURE.md §9b:
   - summarization sessions reuse the agent factory, model, persona and rendered prefix

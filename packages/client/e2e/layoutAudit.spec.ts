@@ -387,11 +387,17 @@ test.describe("synthetic library and every app surface", () => {
               surface + suffix,
               process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
                 ? { scope: "[data-history-panel]" }
-                : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
-                  ? { scope: 'section[aria-label="Who replies"]' }
-                  : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
-                    ? { scope: '[role="menu"]' }
-                    : {}
+                : process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1"
+                  ? {
+                      scope: surface.startsWith("panel-")
+                        ? 'section[aria-label="Summary settings"]'
+                        : 'section[aria-label="Models for summaries"], section[aria-label="Summary defaults for new chats"]'
+                    }
+                  : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
+                    ? { scope: 'section[aria-label="Who replies"]' }
+                    : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
+                      ? { scope: '[role="menu"]' }
+                      : {}
             )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
@@ -424,6 +430,18 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.locator("main")).toBeVisible()
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
+        }
+        if (process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1") {
+          await admin((api) => api.ChangeLcmSettings({ chatId, change: { withPreset: "specific", preset: presetRef } }))
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const section = await openSummarySettings(page)
+          await expect(section.getByRole("button", { name: "Preset for summaries", exact: true })).toBeVisible()
+          await audit("panel-summary-settings")
+          await admin((api) =>
+            api.ChangeGenerationDefaults({ change: { lcm: { withPreset: "specific", preset: presetRef } } })
+          )
+          await go("settings-chats", "/settings/chats")
+          return
         }
         if (process.env.LAYOUT_AUDIT_SETTINGS_ONLY === "1") {
           for (const section of [

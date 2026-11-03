@@ -295,7 +295,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
                 : {}),
               tail: settings.tail ?? BUILTIN_SUMMARY_INSTRUCTION,
               style,
-              ...(settings.withPreset ? {} : { withPreset: false }),
+              ...(settings.withPreset === "raw" ? { withPreset: false } : {}),
               ...(prefix ? { prefix } : {})
             }
           })

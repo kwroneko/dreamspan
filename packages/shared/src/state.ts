@@ -100,7 +100,7 @@ type ValueOf<K extends StateEventData["key"]> = Extract<StateEventData, { readon
 
 /** Every core key's id fields; a new key doesn't compile until it's listed. */
 export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<ValueOf<K>> } = {
-  "lcm.settings": { ids: {} },
+  "lcm.settings": { ids: { preset: { table: "ref", kind: "preset" } }, removes: true },
   "participant.join": { ids: { entity: { table: "entity", kind: "card" } } },
   "participant.leave": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
   "presence.set": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },

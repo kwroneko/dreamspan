@@ -1,4 +1,5 @@
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
+import { PresetWorkspace, PresetOverlayHost } from "../editor/PresetWorkspace.tsx"
 import { selectablePresets } from "../pickers/presetList.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { accountSettingSections, summarySettingFields } from "./presentation.tsx"
@@ -31,6 +32,17 @@ const NONE = "none"
 const savedTail = (defaults: GenerationDefaults | null) => defaults?.lcm?.tail ?? ""
 
 export function ChatDefaultsPage() {
+  return (
+    <PresetWorkspace>
+      <div className="relative min-h-0 flex-1">
+        <ChatDefaultsContent />
+        <PresetOverlayHost page />
+      </div>
+    </PresetWorkspace>
+  )
+}
+
+function ChatDefaultsContent() {
   useTitle("Chats")
   const action = useAction()
   const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
@@ -240,6 +252,7 @@ export function SummaryDefaults({
         >
           <Textarea
             textActions
+            tools={<UserDraftUndo draft={instructionDraft} />}
             value={tail}
             onChange={(event) => type(event.target.value)}
             rows={5}
@@ -251,7 +264,6 @@ export function SummaryDefaults({
           <Button disabled={!defaults || pending || !unsaved} onClick={() => void saveTail()}>
             Save summarization instruction
           </Button>
-          <UserDraftUndo draft={instructionDraft} />
           {saved && !unsaved ? (
             <span role="status" className="text-sm text-muted">
               Saved.

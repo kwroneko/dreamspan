@@ -38,6 +38,7 @@ interface Expected {
 }
 
 const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
+  "lcm.settings": { value: (t) => ({ enabled: true, withPreset: "specific", preset: t.preset.ref }), removes: true },
   "participant.join": { value: (t) => ({ entity: t.card.entity }) },
   "participant.leave": { value: (t) => ({ entity: t.card.entity }), removes: true },
   "presence.set": { value: (t) => ({ entity: t.card.entity, present: false }), removes: true },

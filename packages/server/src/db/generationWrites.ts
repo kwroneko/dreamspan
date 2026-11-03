@@ -265,6 +265,8 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         if (preset !== null && !(yield* ownedPreset(sql, userId, preset))) {
           return yield* new NotFound({ entity: "ref", id: preset })
         }
+        if (defaults.lcm?.preset && !(yield* ownedPreset(sql, userId, defaults.lcm.preset)))
+          return yield* new NotFound({ entity: "ref", id: defaults.lcm.preset })
         const fallback = defaults.lcm?.fallback
         for (const choice of [defaults.judge, fallback])
           if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
@@ -310,6 +312,8 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           return yield* new NotFound({ entity: "model", id: change.model.model })
         if (change.preset && !(yield* ownedPreset(sql, userId, change.preset)))
           return yield* new NotFound({ entity: "ref", id: change.preset })
+        if (change.lcm?.preset && !(yield* ownedPreset(sql, userId, change.lcm.preset)))
+          return yield* new NotFound({ entity: "ref", id: change.lcm.preset })
         for (const choice of [change.judge, change.fallback])
           if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
             return yield* new NotFound({ entity: "model", id: choice.model })
