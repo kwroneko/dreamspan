@@ -4,18 +4,12 @@
 // prefix and suffix are; a pair is a regular expression only when "Treat as a regex" is on
 // (owner, 2026-11-02). The whole setting is one field of the preset; absent, the defaults show
 // and the first change writes them out.
-import {
-  DEFAULT_REPLY_SECTIONS,
-  DEFAULT_SECTION_PAIRS,
-  type ReplySectionSettings,
-  type SectionPair
-} from "@rp/shared/replySections.ts"
+import { DEFAULT_REPLY_SECTIONS, type ReplySectionSettings, type SectionPair } from "@rp/shared/replySections.ts"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { useEffect, useRef, useState } from "react"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Card } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
-import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { revealAdded } from "../../ui/reveal.ts"
 import { type EditorStore, useValue } from "./store.ts"
 
@@ -123,11 +117,6 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
     const box = list.current?.children[index]
     if (box instanceof HTMLElement) revealAdded(box)
   }, [settings.pairs])
-  // The default pairs this preset doesn't have, as literal tags.
-  const missingDefaults = DEFAULT_SECTION_PAIRS.filter(
-    (initial) =>
-      !settings.pairs.some((pair) => pair.regex !== true && pair.open === initial.open && pair.close === initial.close)
-  )
   const change = (next: Partial<ReplySectionSettings>) => store.setValue(PATH, { ...settings, ...next })
   const setPair = (index: number, pair: SectionPair) =>
     change({ pairs: settings.pairs.map((other, i) => (i === index ? pair : other)) })
@@ -147,19 +136,6 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
               hint="Add another tag pair"
               onClick={() => addPairs([{ open: "", close: "" }])}
             />
-            <Menu trigger={<IconButton icon="more" label="Tag pair actions" />} hint="Restore default tag pairs">
-              <MenuItem
-                disabled={missingDefaults.length === 0}
-                description={
-                  missingDefaults.length === 0
-                    ? "The default tag pairs are already present."
-                    : "Adds <think> and </think>"
-                }
-                onClick={() => addPairs(missingDefaults)}
-              >
-                Add the default pair
-              </MenuItem>
-            </Menu>
           </div>
         </div>
         <div className="flex flex-col gap-4">

@@ -128,9 +128,6 @@ for (const width of [1440, 390])
       await expect(opening.first()).toHaveAccessibleDescription("Where a section starts, exactly as written.")
       await expect(section).not.toContainText("Each tag is a regular expression")
       await shot("reply-sections-editor")
-      await section.getByRole("button", { name: "Tag pair actions" }).click()
-      await expect(page.getByRole("menuitem", { name: "Add the default pair", exact: true })).toBeDisabled()
-      await page.keyboard.press("Escape")
       // Opting a pair into regex: its tags are patterns, checked as such.
       await asRegex.first().click()
       await expect(asRegex.first()).toBeChecked()
@@ -139,9 +136,6 @@ for (const width of [1440, 390])
       await expect(section).toContainText(/Invalid regular expression|Unterminated group/)
       await asRegex.first().click()
       await expect(section).not.toContainText(/Invalid regular expression|Unterminated group/)
-      await section.getByRole("button", { name: "Tag pair actions" }).click()
-      await expect(page.getByRole("menuitem", { name: "Add the default pair", exact: true })).toBeEnabled()
-      await page.keyboard.press("Escape")
       const sendBack = section.getByRole("spinbutton", { name: "Send thinking back for the last replies" })
       await sendBack.fill("")
       await sendBack.fill("2")
@@ -201,27 +195,7 @@ for (const width of [390, 1024, 1440])
         await pairs.last().getByRole("button", { name: "Remove this pair", exact: true }).click()
         await expect(pairs).toHaveCount(count - 1)
       }
-      await section.getByRole("button", { name: "Tag pair actions" }).click()
-      const restore = page.getByRole("menuitem", { name: "Add the default pair", exact: true })
-      await expect(restore).toHaveAccessibleDescription("Adds <think> and </think>")
-      await expectLayout(page, info, "thinking-settings-menu", { scope: '[role="menu"]' })
-      await restore.click()
-      await expect(pairs).toHaveCount(2)
-      await expect(pairs.first()).toHaveAttribute("data-flashing", "")
-      await expect(pairs.first()).toBeInViewport({ ratio: 1 })
-      await expectThinkingFields(section)
-      await expect(section.getByRole("textbox", { name: "Opening tag" }).first()).toHaveValue("<think>")
-      await expect(section.getByRole("textbox", { name: "Opening tag" }).last()).toHaveValue("<thinking>")
-      // Restore only a missing pair, retaining edits on the other pair.
-      await pairs.first().getByRole("button", { name: "Remove this pair", exact: true }).click()
-      await pairs.first().getByRole("checkbox", { name: "Match case", exact: true }).click()
-      await section.getByRole("button", { name: "Tag pair actions" }).click()
-      await restore.click()
-      await expect(pairs).toHaveCount(2)
-      await expect(pairs.first().getByRole("checkbox", { name: "Match case", exact: true })).toBeChecked()
-      await expect(pairs.last().getByRole("textbox", { name: "Opening tag" })).toHaveValue("<think>")
-      await expectThinkingFields(section)
-      await expectLayout(page, info, "thinking-settings-default-pair", {
+      await expectLayout(page, info, "thinking-settings-empty", {
         scope: '[data-preset-section="reply-sections"]'
       })
     })
@@ -230,12 +204,9 @@ for (const width of [390, 1024, 1440])
 async function expectThinkingFields(section: Locator) {
   const heading = section.getByRole("heading", { name: "Thinking at the start of a reply", exact: true })
   const add = section.getByRole("button", { name: "Add another tag pair", exact: true })
-  const menu = section.getByRole("button", { name: "Tag pair actions", exact: true })
   const headBox = (await heading.boundingBox())!
   const addBox = (await add.boundingBox())!
-  const menuBox = (await menu.boundingBox())!
   expect(addBox.x).toBeGreaterThanOrEqual(headBox.x + headBox.width)
-  expect(menuBox.x).toBeGreaterThan(addBox.x)
   expect(addBox.y).toBeLessThan(headBox.y + headBox.height)
   for (const pair of await section.locator("[data-section-pair]").all()) {
     // Measure the box and X in one frame; the editor can restore its scroll position
