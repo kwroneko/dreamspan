@@ -21,7 +21,7 @@ import { buttonClass } from "../../ui/Button.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { CardEditor } from "../editor/CardEditor.tsx"
-import { CardHeader, CardNameHeader, CardTokens } from "../editor/CardNameHeader.tsx"
+import { CardHeader, CardNameHeader, CardTokensRow } from "../editor/CardNameHeader.tsx"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { RecoveredNotice } from "../editor/controls.tsx"
 import { CardHeaderPortrait, TabPortrait } from "../editor/PortraitControls.tsx"
@@ -200,7 +200,7 @@ function CardPanel({
               call={call}
               current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
             />
-            <CardTokens store={store} />
+            <CardTokensRow store={store} entityId={card.entityId} label={card.label} />
           </>
         ) : (
           <h2

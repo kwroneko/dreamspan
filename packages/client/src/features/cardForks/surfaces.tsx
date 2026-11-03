@@ -17,7 +17,8 @@ export interface CardMenuProps extends CardSurfaceContext {
   readonly openDialog: () => void
   readonly closeDialog: () => void
 }
-export type CardPlacement = "actions" | "provenance" | "badge" | "family"
+/** `header`: a row under a card's names in its header (the chat panel's tab, the full editor) and on its page. */
+export type CardPlacement = "actions" | "provenance" | "badge" | "family" | "header"
 interface CardContribution {
   readonly id: string
   readonly placement: CardPlacement

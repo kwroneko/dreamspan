@@ -19,12 +19,15 @@ function ChoiceLabel({
   children,
   description,
   hint,
-  hidden = false
+  hidden = false,
+  hintInline = true
 }: {
   children: ReactNode
   hidden?: boolean
   description?: ReactNode
   hint?: { readonly id: string; readonly text: string } | undefined
+  /** False: the hint is only the tooltip and the description, never a line under the label. */
+  hintInline?: boolean
 }) {
   return (
     <span className={hidden ? "sr-only" : "flex min-w-0 flex-col"}>
@@ -32,7 +35,11 @@ function ChoiceLabel({
       {description && <span className="text-sm text-muted">{description}</span>}
       {hint && (
         // Hidden from the name, and still the description: a reference reads hidden text.
-        <span id={hint.id} aria-hidden="true" className={`hidden pt-0.5 text-xs text-muted ${inlineExplanationClass}`}>
+        <span
+          id={hint.id}
+          aria-hidden="true"
+          className={`hidden pt-0.5 text-xs text-muted ${hintInline ? inlineExplanationClass : ""}`}
+        >
           {hint.text}
         </span>
       )}
@@ -112,7 +119,8 @@ export function Switch({
   hint,
   describedBy,
   labelHidden = false,
-  disabled = false
+  disabled = false,
+  compact = false
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
@@ -122,6 +130,8 @@ export function Switch({
   aboutLabel?: string
   /** What switching it on or off does, when the label doesn't say. */
   hint?: string | undefined
+  /** One line in a dense place (a card's header): the hint is its tooltip only, never a line under it. */
+  compact?: boolean
   /** An explanation shown elsewhere (a row's own line), read as its description. */
   describedBy?: string | undefined
   /** A switch beside its own visible title: keep its label out of the flex layout. */
@@ -131,7 +141,7 @@ export function Switch({
   const id = useId()
   const aboutId = useId()
   const row = (
-    <label className="flex items-start gap-3">
+    <label className={`flex items-start ${compact ? "gap-2" : "gap-3"}`}>
       <BaseSwitch.Root
         disabled={disabled}
         checked={checked}
@@ -143,7 +153,12 @@ export function Switch({
       >
         <BaseSwitch.Thumb className="size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none" />
       </BaseSwitch.Root>
-      <ChoiceLabel hidden={labelHidden} description={description} hint={hint ? { id, text: hint } : undefined}>
+      <ChoiceLabel
+        hidden={labelHidden}
+        description={description}
+        hint={hint ? { id, text: hint } : undefined}
+        hintInline={!compact}
+      >
         {children}
       </ChoiceLabel>
     </label>
