@@ -374,6 +374,51 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_PERSONA_BADGES_ONLY === "1") {
+          const persona = await admin((api) =>
+            Effect.gen(function* () {
+              const card = (yield* api.ListCards()).find((card) => card.persona)!
+              const ref = (yield* api.ListLibrary({ kind: "card" })).find((ref) => ref.entityId === card.entityId)!
+              yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "Persona", entityId: card.entityId } })
+              return { card, ref }
+            })
+          )
+          await go("persona-home-mixed", "/?personas=true&sidePersonas=true")
+          await showAppNavigation(page)
+          await page
+            .getByRole("group", { name: "Left panel", exact: true })
+            .getByRole("button", { name: "Characters", exact: true })
+            .click()
+          await audit("persona-sidebar-mixed")
+          await page.getByRole("button", { name: "Start a chat", exact: true }).click()
+          const start = page.getByRole("dialog", { name: "Start a chat with…" })
+          await start.getByRole("combobox", { name: "Show" }).click()
+          await page.getByRole("option", { name: /^Personas/ }).click()
+          await audit("persona-start-chat")
+          await page.keyboard.press("Escape")
+          await hideAppNavigation(page)
+          await go("persona-library-list", "/library?show=personas")
+          await go("persona-library-grid", "/library?show=personas&view=grid")
+          await go("persona-card-page", `/cards/${persona.card.entityId}`)
+          await go("persona-editor", `/library/${persona.ref.id}`)
+          await go("persona-chat", `/chats/${chatId}`)
+          await openPanel(page, "Cast")
+          await audit("persona-cast")
+          const add = page.getByRole("button", { name: "Add characters", exact: true })
+          if ((await add.getAttribute("aria-expanded")) !== "true") await add.click()
+          const section = page.getByRole("region", { name: "Add characters", exact: true })
+          await section.getByRole("combobox", { name: "Show" }).click()
+          await page.getByRole("option", { name: /^Personas/ }).click()
+          await audit("persona-add-characters")
+          await openPanel(page, persona.card.name)
+          await audit("persona-chat-card")
+          await go("persona-chat-editor", `/chats/${chatId}?editor=${persona.ref.id}`)
+          await go("persona-speaker", `/chats/${chatId}`)
+          if (await page.getByRole("tablist", { name: "Chat panel", exact: true }).isVisible()) await closePanel(page)
+          await page.getByRole("button", { name: /^Speaking as / }).click()
+          await audit("persona-speaker-switcher")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_CARD_HEADERS_ONLY === "1") {
           await go("card-editor-header", `/library/${cardRef}`)
           await go("group-chat", `/chats/${chatId}`)
@@ -479,7 +524,7 @@ test.describe("synthetic library and every app surface", () => {
             .click()
           await audit(`home-${name}`)
         }
-        // Personas mixed in, each marked "You" (personalists).
+        // Personas mixed in, each marked "Persona" (personalists).
         if (selected.test("home-include-personas")) {
           const include = page.getByRole("main").getByRole("checkbox", { name: "Include personas" })
           await include.check()

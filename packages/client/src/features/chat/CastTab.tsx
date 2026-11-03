@@ -1,3 +1,4 @@
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useChatCards } from "./chatCards.ts"
 // The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who you play (the persona, who
 // `{{user}}` is), then everyone in the chat, one quiet row each: portrait, name (which opens
@@ -186,7 +187,7 @@ function You({ card, children }: { card: CastCard | undefined; children: ReactNo
         />
       )}
       <div className="flex min-w-0 flex-1 flex-col items-start">
-        <span className="text-xs text-muted">You play</span>
+        {card ? <PersonaBadge played /> : <span className="text-xs text-muted">You play</span>}
         {card ? (
           <button
             type="button"

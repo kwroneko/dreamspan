@@ -282,12 +282,22 @@ export function EditorPortrait({ store, call }: { store: EditorStore; call: Call
  * the same as a character tab's (owner, 2026-11-02: "the big version's header has the same
  * annoyances as the side bar one").
  */
-export function StorePortrait({ store, call, id }: { store: EditorStore; call: Caller; id: string }) {
+export function StorePortrait({
+  store,
+  call,
+  id,
+  badge
+}: {
+  store: EditorStore
+  call: Caller
+  id: string
+  badge?: ReactNode
+}) {
   const stored = useValue<unknown>(store, ["avatar_media_id"])
   const crop = avatarCropOf(stored, useValue<unknown>(store, ["avatar_crop"]))
   const name = useText(store, ["name"]) ?? ""
   const mediaId = typeof stored === "string" ? stored : null
-  return <TabPortrait store={store} call={call} id={id} shown={{ name, mediaId, crop }} size="page" />
+  return <TabPortrait store={store} call={call} id={id} shown={{ name, mediaId, crop }} badge={badge} size="page" />
 }
 
 /**
@@ -303,8 +313,8 @@ const HEADER_PORTRAIT = {
 } as const
 
 /**
- * The portrait's place in a card's header: the picture (`children`), with `badge` on it ("You"
- * on the persona's, owner 2026-11-02, so its header has the same shape as any other) and
+ * The portrait's place in a card's header: the picture (`children`), with the shared persona `badge` on it ("You"
+ * for the selected chat persona, "Persona" for folder membership outside the chat) and
  * `controls` (the Picture button) over its lower-right corner, faint until the picture is
  * hovered or the button has focus, and always shown on a touch screen. Nothing takes room under it.
  */
@@ -330,11 +340,7 @@ export function CardHeaderPortrait({
       className={`group/portrait relative flex shrink-0 rounded-sm data-over:ring-2 data-over:ring-accent ${HEADER_PORTRAIT[size]}`}
     >
       {children}
-      {badge && (
-        <span className="pointer-events-none absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded-sm bg-accent px-1.5 text-[0.6875rem] leading-4 font-medium text-accent-contrast shadow-sm">
-          {badge}
-        </span>
-      )}
+      {badge}
       {controls && (
         <span
           data-portrait-controls
@@ -352,7 +358,7 @@ export function CardHeaderPortrait({
 /**
  * An editable portrait in a card's header (a character's or persona's tab, the full editor's
  * header): a click opens the whole image, the Picture button over its lower-right corner
- * changes it, and an image dropped on it replaces it; `badge` ("You") on it.
+ * changes it, and an image dropped on it replaces it; the shared persona `badge` on it.
  */
 export function TabPortrait({
   store,

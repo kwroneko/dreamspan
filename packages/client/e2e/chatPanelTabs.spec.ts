@@ -77,8 +77,8 @@ test("This chat leads with the chat's name, your persona and summaries; the rest
   // In this order, before anything about macros.
   const text = (await tab.innerText()).replace(/\s+/g, " ")
   const at = (part: string) => text.indexOf(part)
-  expect(at("You play")).toBeGreaterThan(-1)
-  expect(at("You play")).toBeLessThan(at("Summarize older messages"))
+  expect(at("You")).toBeGreaterThan(-1)
+  expect(at("You")).toBeLessThan(at("Summarize older messages"))
   expect(at("Summarize older messages")).toBeLessThan(at("Advanced: names in prompts"))
   // Collapsed: the names, the roles and the summary settings' fields aren't shown.
   await expect(tab.getByRole("region", { name: "Names in prompts" })).toBeHidden()

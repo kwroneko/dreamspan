@@ -92,7 +92,7 @@ const stateOf = (status: string | undefined): TileState =>
         )
       }
     : status === "you"
-      ? { done: true, mark: <Mark>You play</Mark> }
+      ? { done: true, mark: <Mark>In chat</Mark> }
       : status === "in"
         ? {
             done: true,
@@ -188,7 +188,10 @@ function AddGrid({
   return (
     <div className="flex flex-col gap-2">
       {/* Kept in view while the grid scrolls under it, with what the last add did. */}
-      <div className="sticky -top-4 z-10 -mx-1 flex flex-col gap-2 bg-surface px-1 pt-1 pb-2">
+      <div
+        data-layout-overlay="Add characters controls stay over the grid while it scrolls"
+        className="sticky -top-4 z-10 -mx-1 flex flex-col gap-2 bg-surface p-2"
+      >
         <Tooltip label="Shows the characters whose name or version has this in it">
           <Input
             ref={searchRef}

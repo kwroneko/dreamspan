@@ -1,3 +1,4 @@
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useChatCards } from "./chatCards.ts"
 // A character's tab in the chat's panel, as ST's character panel: every field the full editor
 // has, in the same tabs (`CardEditor`, `layout: "panel"`), edited right here with the editor's
@@ -89,7 +90,9 @@ function ChatCharacterPanel({ session, view, entityId }: { session: ChatSession;
     <div className="flex flex-col gap-4">
       <CardHeader
         portrait={
-          <CardHeaderPortrait badge={persona ? "You" : undefined}>
+          <CardHeaderPortrait
+            badge={persona ? <PersonaBadge played portrait /> : card.persona ? <PersonaBadge portrait /> : undefined}
+          >
             <Avatar
               id={entityId}
               name={card.name}
@@ -189,7 +192,7 @@ function CardPanel({
             id={card.entityId}
             shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
             {...(session === null ? {} : { onChanged: () => void session.rereadCast() })}
-            badge={persona ? "You" : undefined}
+            badge={persona ? <PersonaBadge played portrait /> : card.persona ? <PersonaBadge portrait /> : undefined}
           />
         }
       >

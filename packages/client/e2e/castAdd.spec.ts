@@ -100,12 +100,13 @@ for (const width of [1440, 390]) {
     await mira.click({ force: true })
     await expect(members(page).getByRole("listitem")).toHaveCount(1)
     // Ana and Bo are in the persona folder: not among All's characters, but under Personas,
-    // where Bo, played here, is marked.
+    // where both use Persona, including Bo who is played in this chat.
     await expect.poll(() => tileLabels(page)).not.toContain("Add Ana to this chat")
     const show = section(page).getByRole("combobox", { name: "Show" })
     await show.click()
     await page.getByRole("option", { name: /^Personas/ }).click()
     await expect.poll(() => tileLabels(page)).toEqual(["Add Ana to this chat", "Bo: you play them here"])
+    await expect(section(page).locator("[data-persona-badge]")).toHaveText(["Persona", "Persona"])
 
     // The filter: Never used leaves out Mira, who has this chat; no Groups.
     await show.click()
