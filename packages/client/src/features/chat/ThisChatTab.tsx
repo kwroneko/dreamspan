@@ -1,3 +1,4 @@
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { chatSettingSections, summarySettingFields } from "./presentation.tsx"
@@ -186,7 +187,7 @@ export function ChatIdentity({ session }: { session: ChatSession }) {
           />
         )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="text-xs text-muted">You play</span>
+          {persona ? <PersonaBadge played /> : <span className="text-xs text-muted">You play</span>}
           <span className="font-medium [overflow-wrap:anywhere]">{persona?.name ?? (cast ? "No persona" : "…")}</span>
         </div>
         <PersonaSwitch session={session} trigger="Switch persona" />

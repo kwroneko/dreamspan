@@ -1,3 +1,4 @@
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 // The library: every card, lorebook and preset, found by name and opened from here. Each
 // item shows what identifies it, a direct action or two, and the rest in its menu.
@@ -187,7 +188,7 @@ function Badges({ item, seen }: { item: Item; seen: boolean }) {
   const { entry } = item
   return (
     <>
-      {persona(item) && <Badge tone="accent">Persona</Badge>}
+      {persona(item) && <PersonaBadge />}
       {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
       {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
       {entry.kind === "card" && seen && <CardSurface placement="badge" entityId={entry.entityId} label={entry.label} />}

@@ -1,3 +1,5 @@
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
+import { useCast } from "../chat/cast.ts"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
@@ -126,6 +128,8 @@ export function Editor({
   current?: { readonly chatId: string; readonly forkId: string | null } | undefined
   onClose?: () => void
 }) {
+  const cast = useCast()
+  const shell = useAtomValue(shellAtom)
   const call = useCaller()
   const userId = useSession().user.id
   const [store] = useState(() => suppliedStore ?? new EditorStore(refId, userId, call))
@@ -265,7 +269,23 @@ export function Editor({
           {/* Over a chat, a preset's name is in the sticky bar, once. A card's names are renamed
               in place, each with its own question (CardNameHeader). */}
           {ref.kind === "card" && !bookOnly ? (
-            <CardHeader portrait={<StorePortrait store={store} call={call} id={ref.entityId} />}>
+            <CardHeader
+              portrait={
+                <StorePortrait
+                  store={store}
+                  call={call}
+                  id={ref.entityId}
+                  badge={
+                    cast.cast?.playedByMe.includes(ref.entityId) ? (
+                      <PersonaBadge played portrait />
+                    ) : AsyncResult.isSuccess(shell) &&
+                      shell.value.personas.some((p) => p.card.entityId === ref.entityId) ? (
+                      <PersonaBadge portrait />
+                    ) : undefined
+                  }
+                />
+              }
+            >
               <CardNameHeader
                 store={store}
                 call={call}
@@ -365,7 +385,12 @@ export function Editor({
             ) : (
               // A card's name is the heading just above: the bar keeps only the way back.
               <div>
-                <Button variant="ghost" className="-ml-2 h-8 gap-1.5 px-2" onClick={onClose}>
+                <Button
+                  variant="ghost"
+                  className="h-8 gap-1.5 px-2"
+                  hint="Closes the editor and returns to the chat."
+                  onClick={onClose}
+                >
                   <Icon name="back" />
                   Back to the chat
                 </Button>

@@ -6,6 +6,7 @@
 // folder with the current persona ticked; the same search filters both. The same switcher picks the persona (who `{{user}}` is) from
 // Members / Personas / All cards, opening on Personas: a library of hundreds of cards is
 // filtered in memory and only the first rows are drawn.
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { type KeyboardEvent, memo, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
@@ -62,6 +63,7 @@ function CardOptions({
   active,
   current,
   currentLabel,
+  played,
   members,
   empty,
   onActive,
@@ -72,6 +74,7 @@ function CardOptions({
   active: number
   current: EntityId | null
   currentLabel: string
+  played: EntityId | null
   /** The chat's members, when picking a card that isn't one makes it join; null when none can join. */
   members: ReadonlySet<EntityId> | null
   empty: string
@@ -98,7 +101,7 @@ function CardOptions({
   }, [active, cards, virtualizer])
   if (cards.length === 0) return <p className="px-1 py-2 text-sm text-muted">{empty}</p>
   return (
-    <div ref={list} id={id} role="listbox" aria-label="Cards" className="max-h-64 overflow-y-auto">
+    <div ref={list} id={id} role="listbox" aria-label="Cards" className="max-h-64 overflow-y-auto p-2">
       <div className="relative" style={{ height: cards.length * 44 }}>
         {virtualizer.getVirtualItems().map((item) => {
           const index = item.index
@@ -137,8 +140,8 @@ function CardOptions({
               {members !== null && !members.has(card.entityId) && !card.persona && (
                 <span className="shrink-0 text-xs text-muted">adds to this chat</span>
               )}
-              {card.entityId === current && <Badge>{currentLabel}</Badge>}
-              {card.persona && <Badge>persona</Badge>}
+              {card.entityId === current && card.entityId !== played && <Badge>{currentLabel}</Badge>}
+              {(card.entityId === played || card.persona) && <PersonaBadge played={card.entityId === played} />}
             </div>
           )
         })}
@@ -154,6 +157,7 @@ function SectionRow({
   index,
   active,
   current,
+  played,
   onActive,
   onPick
 }: {
@@ -162,6 +166,7 @@ function SectionRow({
   index: number
   active: boolean
   current: boolean
+  played: boolean
   onActive: (index: number) => void
   onPick: (card: CastCard) => void
 }) {
@@ -182,6 +187,7 @@ function SectionRow({
         <span className="[overflow-wrap:anywhere]">{card.name}</span>
         {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
       </span>
+      {(played || card.persona) && <PersonaBadge played={played} />}
       {current && <Icon name="check" size={16} className="text-accent" />}
     </div>
   )
@@ -361,7 +367,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         id={listId}
         role="listbox"
         aria-label="Speak as, or your persona"
-        className="flex min-h-0 flex-col overflow-y-auto"
+        className="flex min-h-0 flex-col overflow-y-auto p-2"
       >
         <div role="group" aria-label="Speak as" aria-describedby={`${listId}-speak-as`} className="flex flex-col">
           <p id={`${listId}-speak-as`} className="px-2 pb-1 text-xs text-muted">
@@ -382,6 +388,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
                 index={index}
                 active={index === active}
                 current={card.entityId === speaker}
+                played={card.entityId === personas.current}
                 onActive={setActive}
                 onPick={() => pickAt(index)}
               />
@@ -417,6 +424,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
                 index={shown.length + at}
                 active={shown.length + at === active}
                 current={card.entityId === personas.current}
+                played={card.entityId === personas.current}
                 onActive={setActive}
                 onPick={() => pickAt(shown.length + at)}
               />
@@ -431,6 +439,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         active={active}
         current={speaker}
         currentLabel={persona ? "your persona" : "speaking"}
+        played={persona ? speaker : (view.cast?.playedByMe[0] ?? null)}
         members={pending || !persona ? null : memberSet}
         empty={empty}
         onActive={setActive}

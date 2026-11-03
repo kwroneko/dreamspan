@@ -2,6 +2,7 @@
 // sort (no Groups: a group chat starts from its group), that opens a new chat with the one
 // picked (its greeting; nothing is saved until the first send, DESIGN §2.1). Registered in the
 // sidebar's actions slot, so a plugin can replace it.
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { Link, useNavigate } from "@tanstack/react-router"
@@ -90,6 +91,7 @@ function Choices({
                   {browse.sort !== "recent" && <SortDate card={c} sort={browse.sort} />}
                 </span>
               </span>
+              {c.persona && <PersonaBadge />}
             </Link>
             <FavouriteStar card={c} />
           </li>
