@@ -1,34 +1,17 @@
 import { HistoryDiff, HistoryPreviewContext } from "./historyPreview.tsx"
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, useId, type RefObject } from "react"
 import type { HistoryHit, HistoryRecord, HistorySearch, HistoryCursor } from "@rp/shared/historyApi.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Input } from "../../ui/Field.tsx"
+import { SearchReplace } from "../../ui/SearchReplace.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
+import { Segmented } from "../../ui/Segmented.tsx"
+import { revealAdded, revealIfHidden } from "../../ui/reveal.ts"
 import { showToast } from "../../ui/Toast.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 type Record = typeof HistoryRecord.Type
 const keyOf = (hit: HistoryHit) => `${hit.kind}:${hit.targetId}`
-/** The search's switches, each with what it does. */
-const OPTIONS = [
-  ["matchCase", "Aa · Match case", "Finds only text with the same capitals."],
-  ["wholeWord", "ab · Whole word", "Finds it only as a whole word, not inside a longer one."],
-  [
-    "regex",
-    ".* · Regular expression",
-    "Find is a regular expression, and Replace can use its groups: $1, $<name>, $& for the whole match."
-  ],
-  [
-    "preserveCase",
-    "Preserve case",
-    "Each replacement takes the capitals of the text it replaces: replacing cat with dog makes “Cat” “Dog”."
-  ],
-  ["messages", "Messages", "The version each message shows."],
-  ["swipes", "Swipes", "Each message's other versions, the ones it doesn't show."],
-  ["summaries", "Summaries", "This branch's summaries of older messages."]
-] as const
-
 const initial: HistorySearch = {
   pairs: [{ find: "", replace: "" }],
   matchCase: false,
@@ -54,22 +37,18 @@ export function HistoryPanel({
   active: boolean
 }) {
   const { publish } = useContext(HistoryPreviewContext)
-  const [search, setSearch] = useState(initial)
-  const [hits, setHits] = useState<ReadonlyArray<HistoryHit>>([])
+  const [pairs, setPairs] = useState([0])
+  const next = useRef(1)
+  const added = useRef<number | null>(null)
+  const boxes = useRef(new Map<number, HTMLElement>())
+  const [selected, setSelected] = useState(0)
   const [records, setRecords] = useState<ReadonlyArray<Record>>([])
-  const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set())
-  const [cost, setCost] = useState<{ messages: number; summaries: number; tokens: number } | null>(null)
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
-  const [scanning, setScanning] = useState(false)
-  const [completedSearch, setCompletedSearch] = useState("")
-  const [current, setCurrent] = useState(0)
+  const [refresh, setRefresh] = useState(0)
   const group = useRef<string | undefined>(undefined)
-  const revision = useRef(0)
-  const searched = useRef<typeof search | null>(null)
   const forkId = view.forkId ?? view.chat?.currentForkId
   const target = forkId ? { chatId: session.id, forkId } : null
-  const idle = search.pairs.some((p) => !p.find)
   const history = useCallback(async () => {
     if (!forkId) return
     const result = await session.call((c) => c("ListHistoryEdits", { chatId: session.id, forkId }))
@@ -82,13 +61,218 @@ export function HistoryPanel({
     }, 0)
     return () => clearTimeout(timer)
   }, [active, history])
+  const undo = async (record: Record, slotId?: string, itemIds?: ReadonlyArray<number>) => {
+    if (!target) return
+    setPending(true)
+    const result = await session.call((c) =>
+      c("UndoHistoryEdit", {
+        ...target,
+        changesetId: record.id,
+        ...(slotId ? { slotId } : {}),
+        ...(itemIds ? { itemIds } : {})
+      })
+    )
+    setPending(false)
+    if (!result.ok) setError(result.error.message)
+    else {
+      setError(result.value.conflicts.length ? `${result.value.conflicts.length} later edits were kept.` : "")
+      void history()
+      setRefresh((value) => value + 1)
+    }
+  }
+  useEffect(() => {
+    if (added.current === null) return
+    const box = boxes.current.get(added.current)
+    added.current = null
+    if (!box) return
+    revealAdded(box)
+    // A preview above the added box can finish after the first reveal and move the box
+    // without resizing it. Follow the list while it settles; only the latest addition.
+    const settling = new ResizeObserver(() => revealIfHidden(box))
+    if (box.parentElement) settling.observe(box.parentElement)
+    const timer = setTimeout(() => settling.disconnect(), 1000)
+    return () => {
+      clearTimeout(timer)
+      settling.disconnect()
+    }
+  }, [pairs])
+  useEffect(() => () => publish([]), [publish])
+  return (
+    <div className="flex min-w-0 flex-col gap-4 p-3 text-sm" data-history-panel>
+      <div className="flex items-center gap-2">
+        <h2 className="font-semibold">Searches</h2>
+        <IconButton
+          icon="plus"
+          label="Add search and replace"
+          hint={pairs.length >= 20 ? "At most 20 searches can be open." : "Add another search and replace"}
+          disabled={pairs.length >= 20}
+          onClick={() => {
+            const id = next.current++
+            added.current = id
+            setSelected(id)
+            setPairs((old) => [...old, id])
+          }}
+        />
+      </div>
+      {pairs.map((id, index) => (
+        <section
+          key={id}
+          aria-label={`Search and replace ${index + 1}`}
+          ref={(box) => {
+            if (box) boxes.current.set(id, box)
+            else boxes.current.delete(id)
+          }}
+          onFocusCapture={() => setSelected(id)}
+          className="flex min-w-0 flex-col gap-2 rounded-md border border-border p-2"
+        >
+          {pairs.length > 1 && (
+            <div className="flex justify-end">
+              <IconButton
+                icon="close"
+                label="Remove this search and replace"
+                hint="Remove this search and replace"
+                onClick={() => {
+                  setPairs((old) => old.filter((pair) => pair !== id))
+                  if (selected === id) setSelected(pairs.find((pair) => pair !== id)!)
+                }}
+              />
+            </div>
+          )}
+          <HistorySearchPair
+            session={session}
+            view={view}
+            onJump={onJump}
+            onSummaries={onSummaries}
+            active={active}
+            selected={selected === id}
+            refresh={refresh}
+            groupRef={group}
+            pending={pending}
+            setPending={setPending}
+            onApplied={async (changesetId) => {
+              setRefresh((value) => value + 1)
+              if (!target) return
+              const result = await session.call((c) => c("ListHistoryEdits", target))
+              if (result.ok) {
+                setRecords(result.value)
+                const record = result.value.find((item) => item.id === changesetId)
+                showToast({
+                  title: "History replaced",
+                  actions: record ? [{ label: "Undo", onClick: () => void undo(record) }] : []
+                })
+              }
+            }}
+          />
+        </section>
+      ))}
+      {error && (
+        <p role="alert" className="text-danger">
+          {error}
+        </p>
+      )}
+      <section className="flex flex-col gap-3 border-t border-border pt-4">
+        <h2 className="font-semibold">Applied edits</h2>
+        {!records.length && <p className="text-muted">No edits applied yet.</p>}
+        {records.map((record) => (
+          <article key={record.id} className="rounded-md border border-border p-2">
+            <div className="font-medium">{record.title}</div>
+            <p className="text-muted">
+              {record.inherited ? `Made in ${record.madeInName} · ` : ""}
+              {record.status}
+            </p>
+            <Button
+              disabled={pending || record.status === "undone"}
+              hint="Puts back everything this edit changed in this branch. Text changed again since is kept."
+              onClick={() => void undo(record)}
+            >
+              Undo all
+            </Button>
+            {record.items.map((item) => (
+              <details key={item.id} className="mt-2">
+                <summary>
+                  {item.kind === "summary_revision" ? "Summary" : "Message"} ·{" "}
+                  {item.applied ? "applied" : "undone or changed"}
+                </summary>
+                <div className="my-2 whitespace-pre-wrap break-words font-mono text-xs">
+                  <del>{item.before}</del> → <ins>{item.after}</ins>
+                </div>
+                <Button
+                  disabled={pending || !item.applied}
+                  hint={
+                    item.kind === "summary_revision"
+                      ? "Restores this summary's text before this edit."
+                      : item.kind === "state_event"
+                        ? "Restores the chat setting before this edit."
+                        : "Puts this message back, with the summaries of it that this edit changed."
+                  }
+                  onClick={() =>
+                    void (item.kind === "version_replace" && item.slotId
+                      ? undo(record, item.slotId)
+                      : undo(record, undefined, [item.id]))
+                  }
+                >
+                  {item.kind === "summary_revision"
+                    ? "Undo this summary"
+                    : item.kind === "state_event"
+                      ? "Undo this state change"
+                      : "Undo this message"}
+                </Button>
+              </details>
+            ))}
+          </article>
+        ))}
+      </section>
+    </div>
+  )
+}
+
+function HistorySearchPair({
+  session,
+  view,
+  onJump,
+  onSummaries,
+  active,
+  selected,
+  refresh,
+  groupRef,
+  pending,
+  setPending,
+  onApplied
+}: {
+  session: ChatSession
+  view: ChatView
+  onJump: (slot: SlotId) => void
+  onSummaries: (summary: string) => void
+  active: boolean
+  selected: boolean
+  refresh: number
+  groupRef: RefObject<string | undefined>
+  pending: boolean
+  setPending: (pending: boolean) => void
+  onApplied: (changesetId: string) => Promise<void>
+}) {
+  const { publish } = useContext(HistoryPreviewContext)
+  const id = useId()
+  const [search, setSearch] = useState(initial)
+  const [hits, setHits] = useState<ReadonlyArray<HistoryHit>>([])
+  const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set())
+  const [cost, setCost] = useState<{ messages: number; summaries: number; tokens: number } | null>(null)
+  const [error, setError] = useState("")
+  const [scanning, setScanning] = useState(false)
+  const [completedSearch, setCompletedSearch] = useState("")
+  const [current, setCurrent] = useState(0)
+  const revision = useRef(0)
+  const searched = useRef<typeof search | null>(null)
+  const forkId = view.forkId ?? view.chat?.currentForkId
+  const target = forkId ? { chatId: session.id, forkId } : null
+  const searchKey = JSON.stringify([search, refresh])
+  const idle = search.pairs.some((p) => !p.find)
   useEffect(() => {
     const request = ++revision.current
 
     const timer = setTimeout(async () => {
       if (!forkId || search.pairs.some((p) => !p.find)) {
         setHits([])
-        publish([])
         setScanning(false)
         return
       }
@@ -108,7 +292,6 @@ export function HistoryPanel({
         if (!result.ok) {
           setError(result.error.message)
           setHits([])
-          publish([])
           setScanning(false)
           return
         }
@@ -140,34 +323,14 @@ export function HistoryPanel({
       if (revision.current !== request) return
       setCost(estimate.ok ? estimate.value : null)
       setCurrent(0)
-      setCompletedSearch(JSON.stringify(search))
+      setCompletedSearch(searchKey)
       setScanning(false)
     }, 250)
     return () => {
       clearTimeout(timer)
       if (revision.current === request) revision.current = request + 1
     }
-  }, [search, session, forkId, publish, view.lcm, view.history])
-  useEffect(() => () => publish([]), [publish])
-  const undo = async (record: Record, slotId?: string, itemIds?: ReadonlyArray<number>) => {
-    if (!target) return
-    setPending(true)
-    const result = await session.call((c) =>
-      c("UndoHistoryEdit", {
-        ...target,
-        changesetId: record.id,
-        ...(slotId ? { slotId } : {}),
-        ...(itemIds ? { itemIds } : {})
-      })
-    )
-    setPending(false)
-    if (!result.ok) setError(result.error.message)
-    else {
-      setError(result.value.conflicts.length ? `${result.value.conflicts.length} later edits were kept.` : "")
-      void history()
-      setSearch((s) => ({ ...s }))
-    }
-  }
+  }, [search, session, forkId, view.lcm, view.history, refresh, searchKey])
   const included = useMemo(
     () =>
       hits
@@ -186,10 +349,10 @@ export function HistoryPanel({
     [hits, skipped]
   )
   useEffect(() => {
-    publish(completedSearch === JSON.stringify(search) ? included : [], active)
-  }, [active, completedSearch, search, included, publish])
+    if (selected) publish(completedSearch === searchKey ? included : [], active)
+  }, [active, selected, completedSearch, searchKey, included, publish])
   const apply = async (one: boolean) => {
-    if (!target || JSON.stringify(search) !== completedSearch) return
+    if (!target || searchKey !== completedSearch) return
     let edits = included
     if (one) {
       const matches = included.flatMap((hit) => hit.matches.map((match) => ({ hit, match })))
@@ -202,7 +365,7 @@ export function HistoryPanel({
     const result = await session.call((c) =>
       c("ApplyHistoryEdits", {
         title: "Search and replace",
-        ...(group.current ? { groupId: group.current } : {}),
+        ...(groupRef.current ? { groupId: groupRef.current } : {}),
         applications: [
           {
             ...target,
@@ -223,16 +386,8 @@ export function HistoryPanel({
       setError(result.error.message)
       return
     }
-    group.current = result.value.groupId
-    const recordsRead = await session.call((c) => c("ListHistoryEdits", target))
-    if (recordsRead.ok) {
-      setRecords(recordsRead.value)
-      const record = recordsRead.value.find((r) => r.id === result.value.changesetIds[0])
-      showToast({
-        title: "History replaced",
-        actions: record ? [{ label: "Undo", onClick: () => void undo(record) }] : []
-      })
-    }
+    groupRef.current = result.value.groupId
+    await onApplied(result.value.changesetIds[0]!)
     setSearch((s) => ({ ...s }))
   }
   const counts = (test: (h: HistoryHit) => boolean) => hits.filter(test).reduce((n, h) => n + h.matches.length, 0)
@@ -247,71 +402,118 @@ export function HistoryPanel({
     setCurrent(next)
     openHit(matches[next]!.hit)
   }
+  const navigationBlocked = idle
+    ? "Enter the text to find before visiting matches."
+    : scanning || searchKey !== completedSearch
+      ? "Wait for this search to finish."
+      : error
+        ? "Correct this search before visiting matches."
+        : !included.length
+          ? "No matches to visit in this search."
+          : null
+  const replacementBlocked = pending
+    ? "Wait for this replacement to finish."
+    : idle
+      ? "Enter the text to find before replacing."
+      : scanning || searchKey !== completedSearch
+        ? "Wait for this search to finish."
+        : error
+          ? "Correct this search before replacing text."
+          : !included.length
+            ? "No matches to replace in this search."
+            : null
   return (
-    <div className="flex flex-col gap-4 p-3 text-sm">
-      <h2 className="font-semibold">Search and replace</h2>
-
-      {search.pairs.map((pair, i) => (
-        <fieldset key={i} className="flex flex-col gap-2">
-          <label>
-            Find {i ? i + 1 : ""}
-            <Input
-              aria-label={i ? `Find ${i + 1}` : "Find"}
-              className="mt-1 font-mono"
-              value={pair.find}
-              onChange={(e) =>
+    <div className="flex min-w-0 flex-col gap-2">
+      <SearchReplace
+        find={search.pairs[0]!.find}
+        setFind={(find) => setSearch({ ...search, pairs: [{ ...search.pairs[0]!, find }] })}
+        replace={search.pairs[0]!.replace}
+        setReplace={(replace) => setSearch({ ...search, pairs: [{ ...search.pairs[0]!, replace }] })}
+        wholeWord={search.wholeWord}
+        setWholeWord={(wholeWord) => setSearch({ ...search, wholeWord })}
+        preserveCase={search.preserveCase}
+        setPreserveCase={(preserveCase) => setSearch({ ...search, preserveCase })}
+        regex={search.regex}
+        setRegex={(regex) => setSearch({ ...search, regex })}
+        caseSensitive={search.matchCase}
+        setCaseSensitive={(matchCase) => setSearch({ ...search, matchCase })}
+        idPrefix={id}
+        inline
+        alwaysShowOptions
+        onFindKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault()
+            step(event.shiftKey)
+          }
+        }}
+        findActions={
+          <>
+            <Button
+              className="px-2!"
+              onClick={() => step(true)}
+              disabled={!!navigationBlocked}
+              hint={navigationBlocked ?? "Shows the previous match in this search."}
+            >
+              Previous
+            </Button>
+            <Button
+              className="px-2!"
+              onClick={() => step(false)}
+              disabled={!!navigationBlocked}
+              hint={navigationBlocked ?? "Shows the next match in this search."}
+            >
+              Next
+            </Button>
+          </>
+        }
+        replaceActions={
+          <>
+            <Button
+              className="px-2!"
+              disabled={pending || scanning || searchKey !== completedSearch || !included.length || !!error}
+              hint={replacementBlocked ?? "Replaces the current match in this search."}
+              onClick={() => void apply(true)}
+            >
+              Replace
+            </Button>
+            <Button
+              className="px-2!"
+              disabled={pending || scanning || searchKey !== completedSearch || !included.length || !!error}
+              hint={replacementBlocked ?? "Replaces every match in this search that you haven't skipped."}
+              onClick={() => void apply(false)}
+            >
+              Replace all
+            </Button>
+          </>
+        }
+        scopeControl={
+          <div className="flex items-center gap-2 whitespace-nowrap">
+            <span className="text-xs text-muted">Look in:</span>
+            <Segmented
+              label="Look in"
+              multiple
+              value={(["messages", "swipes", "summaries"] as const).filter((key) => search[key])}
+              onValueChange={(value) =>
                 setSearch({
                   ...search,
-                  pairs: search.pairs.map((p, n) => (n === i ? { ...p, find: e.target.value } : p))
+                  messages: value.includes("messages"),
+                  swipes: value.includes("swipes"),
+                  summaries: value.includes("summaries")
                 })
               }
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  step(e.shiftKey)
+              options={[
+                { value: "messages", label: "Messages", description: "Searches the version each message shows." },
+                { value: "swipes", label: "Swipes", description: "Searches each message's other versions." },
+                {
+                  value: "summaries",
+                  label: "Summaries",
+                  description: "Searches this branch's summaries of older messages."
                 }
-              }}
+              ]}
             />
-          </label>
-          <label>
-            Replace with
-            <Input
-              aria-label={i ? `Replace with ${i + 1}` : "Replace with"}
-              className="mt-1 font-mono"
-              value={pair.replace}
-              onChange={(e) =>
-                setSearch({
-                  ...search,
-                  pairs: search.pairs.map((p, n) => (n === i ? { ...p, replace: e.target.value } : p))
-                })
-              }
-            />
-          </label>
-        </fieldset>
-      ))}
-      <Button
-        className="self-start"
-        hint="Adds another Find and Replace with pair, at most 20"
-        onClick={() => setSearch({ ...search, pairs: [...search.pairs, { find: "", replace: "" }] })}
-        disabled={search.pairs.length >= 20}
-      >
-        ＋ Add pair
-      </Button>
-      <div className="flex flex-wrap gap-3">
-        {OPTIONS.map(([key, label, description]) => (
-          <Tooltip key={key} label={description}>
-            <label className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                aria-description={description}
-                checked={search[key]}
-                onChange={(e) => setSearch({ ...search, [key]: e.target.checked })}
-              />
-              {label}
-            </label>
-          </Tooltip>
-        ))}
-      </div>
+          </div>
+        }
+      />
       {error && (
         <p role="alert" className="text-danger">
           {error}
@@ -332,28 +534,6 @@ export function HistoryPanel({
             : "The next reply reads the history as edited."}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          disabled={pending || scanning || JSON.stringify(search) !== completedSearch || !included.length || !!error}
-          hint="Replaces only the current match: the first, or the one Previous or Next went to."
-          onClick={() => void apply(true)}
-        >
-          Replace
-        </Button>
-        <Button
-          disabled={pending || scanning || JSON.stringify(search) !== completedSearch || !included.length || !!error}
-          hint="Replaces every match you haven't skipped, as one edit you can undo."
-          onClick={() => void apply(false)}
-        >
-          Replace all
-        </Button>
-        <Button onClick={() => step(true)} disabled={!included.length}>
-          Previous
-        </Button>
-        <Button onClick={() => step(false)} disabled={!included.length}>
-          Next
-        </Button>
-      </div>
       {(["Messages", "Swipes", "Summaries"] as const).map((kind) => {
         const found = hits.filter((h) =>
           kind === "Summaries"
@@ -420,54 +600,6 @@ export function HistoryPanel({
           </section>
         )
       })}
-      <section className="flex flex-col gap-3">
-        <h2 className="font-semibold">History edits</h2>
-        {!records.length && <p className="text-muted">No history edits yet.</p>}
-        {records.map((record) => (
-          <article key={record.id} className="rounded-md border border-border p-2">
-            <div className="font-medium">{record.title}</div>
-            <p className="text-muted">
-              {record.inherited ? `Made in ${record.madeInName} · ` : ""}
-              {record.status}
-            </p>
-            <Button
-              disabled={pending || record.status === "undone"}
-              hint="Puts back everything this edit changed in this branch. Text changed again since is kept."
-              onClick={() => void undo(record)}
-            >
-              Undo all
-            </Button>
-            {record.items.map((item) => (
-              <details key={item.id} className="mt-2">
-                <summary>
-                  {item.kind === "summary_revision" ? "Summary" : "Message"} ·{" "}
-                  {item.applied ? "applied" : "undone or changed"}
-                </summary>
-                <div className="my-2 whitespace-pre-wrap break-words font-mono text-xs">
-                  <del>{item.before}</del> → <ins>{item.after}</ins>
-                </div>
-                <Button
-                  disabled={pending || !item.applied}
-                  {...(item.kind === "version_replace" && item.slotId
-                    ? { hint: "Puts this message back, with the summaries of it that this edit changed." }
-                    : {})}
-                  onClick={() =>
-                    void (item.kind === "version_replace" && item.slotId
-                      ? undo(record, item.slotId)
-                      : undo(record, undefined, [item.id]))
-                  }
-                >
-                  {item.kind === "summary_revision"
-                    ? "Undo this summary"
-                    : item.kind === "state_event"
-                      ? "Undo this state change"
-                      : "Undo this message"}
-                </Button>
-              </details>
-            ))}
-          </article>
-        ))}
-      </section>
     </div>
   )
 }

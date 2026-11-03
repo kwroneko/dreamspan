@@ -1,6 +1,6 @@
 // The side panel's tabs leading with what a person touches (night/ftabs): This chat's name,
 // persona and summaries before the advanced, collapsed parts; the persona's tab as its
-// description edited in place, with Switch persona; History edits before a search (the Model
+// description edited in place, with Switch persona; Search and replace before a search (the Model
 // tab's form is models.spec.ts's). Every card here is made up.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -118,9 +118,9 @@ test("the persona's tab is a full card, edited in place, and Switch persona", as
   await expect(page.getByRole("tab", { name: "Wren" })).toBeAttached()
 })
 
-test("History edits doesn't ask for a model before a search", async ({ page }) => {
+test("Search and replace doesn't ask for a model before a search", async ({ page }) => {
   await open(page)
-  const tab = await openPanel(page, "History edits")
+  const tab = await openPanel(page, "Search and replace")
   await expect(tab.getByLabel("Find", { exact: true })).toBeVisible()
   await expect(tab).not.toContainText("Choose a model")
   await expect(tab).not.toContainText("0 in messages")
