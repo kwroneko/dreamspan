@@ -99,16 +99,14 @@ const checkFolder = Effect.fnUntraced(function* (tag: string, before: number) {
       api.ListLibrary({ kind: kind as "card" | "preset" | "lorebook" | "note" })
     )
   )).flat()
-  for (const [label, expected] of [
-    [tag, FILE],
-    [`${tag} v3`, INNER],
-    [`${tag} charx`, FILE],
-    [`${tag} persona`, SETTINGS],
-    [tag, SETTINGS]
+  for (const [kind, label, expected] of [
+    ["card", tag, FILE],
+    ["card", `${tag} v3`, INNER],
+    ["card", `${tag} charx`, FILE],
+    ["card", `${tag} persona`, SETTINGS],
+    ["preset", tag, FILE]
   ] as const) {
-    const ref = refs.find(
-      (r) => r.label === label && (label === tag ? r.kind === (expected === FILE ? "card" : "preset") : true)
-    )!
+    const ref = refs.find((r) => r.label === label && r.kind === kind)!
     assert.isDefined(ref, label)
     assert.strictEqual(ref.updatedAt, expected, `${label}: modified`)
     assert.strictEqual(
@@ -162,6 +160,78 @@ const checkFolder = Effect.fnUntraced(function* (tag: string, before: number) {
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })(
   "ST source modification times",
   (it) => {
+    it.effect("recent settings do not replace old preset or standalone lorebook file dates", () =>
+      Effect.gen(function* () {
+        const root = tempDir("st-preset-dates")
+        const recent = Date.UTC(2026, 9, 31, 12)
+        const files = new Map([
+          [
+            "settings.json",
+            encode({
+              power_user: { pin_examples: true },
+              oai_settings: { preset_settings_openai: "Dated selected" },
+              world_info_settings: { world_info: { globalSelect: ["Dated book"] } },
+              extension_settings: { note: { defaultDepth: 7, defaultRole: 1 } }
+            })
+          ],
+          ["OpenAI Settings/Dated selected.json", preset(0.61)],
+          ["OpenAI Settings/Dated other.json", preset(0.62)],
+          [
+            "worlds/Dated book.json",
+            encode({ entries: { "0": { uid: 0, key: ["synthetic"], content: "Old lore", position: 2 } } })
+          ]
+        ])
+        const times = new Map([
+          ["settings.json", recent],
+          ["OpenAI Settings/Dated selected.json", FILE],
+          ["OpenAI Settings/Dated other.json", INNER],
+          ["worlds/Dated book.json", CREATED]
+        ])
+        for (const [path, bytes] of files) {
+          const full = join(root, path)
+          mkdirSync(dirname(full), { recursive: true })
+          writeFileSync(full, bytes)
+          const at = new Date(times.get(path)!)
+          utimesSync(full, at, at)
+        }
+        const api = yield* client()
+        const before = Date.now()
+        const { job, report, notSent } = yield* importStPath(api, root)
+        assert.strictEqual(job.status, "complete")
+        assert.deepStrictEqual(notSent, [])
+        assert.strictEqual(report!.counts.preset?.added, 2)
+        assert.strictEqual(report!.counts.lorebook?.added, 1)
+        const presets = (yield* api.ListLibrary({ kind: "preset" })).filter((r) => r.label.startsWith("Dated "))
+        const book = (yield* api.ListLibrary({ kind: "lorebook" })).find((r) => r.label === "Dated book")!
+        const selected = presets.find((r) => r.label === "Dated selected")!
+        const doc = (yield* api.OpenEditor({ refId: selected.id })).doc
+        assert.strictEqual(doc.pin_examples, true)
+        assert.deepStrictEqual(doc.lorebooks, [{ id: book.id, enabled: true }])
+        const bookDoc = (yield* api.OpenEditor({ refId: book.id })).doc
+        assert.include(JSON.stringify(bookDoc), '"depth":7')
+        assert.deepStrictEqual(
+          [...presets, book].map((r) => [r.label, r.updatedAt]).sort(),
+          [
+            ["Dated selected", FILE],
+            ["Dated other", INNER],
+            ["Dated book", CREATED]
+          ].sort()
+        )
+        for (const ref of [...presets, book]) {
+          assert.strictEqual((yield* api.ListRevisions({ refId: ref.id, limit: 10 }))[0]!.createdAt, ref.updatedAt)
+          assert.isAtLeast(ref.addedAt!, before)
+          assert.isAtMost(ref.addedAt!, Date.now())
+        }
+        const [entities] = yield* fixtureSql(
+          config.dataDir,
+          [{ sql: "SELECT created_at FROM entities WHERE id IN (?, ?)", params: presets.map((r) => r.entityId) }],
+          { readOnly: true }
+        )
+        assert.lengthOf(entities!, 2)
+        for (const entity of entities!) assert.isAtLeast(entity.created_at as number, before)
+      })
+    )
+
     it.effect("browser folder uploads retain per-file dates, settings dates, message dates and creation dates", () =>
       Effect.gen(function* () {
         const files = folder("Upload times")

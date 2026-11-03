@@ -674,10 +674,8 @@ export class StImports extends Context.Service<
             parsed.parsed,
             undefined,
             globals.map((book) => book.ref),
-            // These mapped fields came from settings.json, not the preset/book file.
-            (kind === "preset" && (session.settings?.textSwitches !== undefined || globals.length > 0)) || anEntries
-              ? Math.max(modifiedAt, session.settingsModifiedAt ?? modifiedAt)
-              : modifiedAt
+            // ST rewrites settings.json during ordinary use; only this entity's file dates its edits.
+            modifiedAt
           )
           if (imported.entity !== null && kind === "lorebook") {
             session.worlds.set(name, imported.entity.refId)
