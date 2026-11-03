@@ -39,7 +39,8 @@ export function InlineRename({
   /** Position the pencil after the last visible line of [data-inline-rename-text]. */
   lastLine?: boolean
 }) {
-  const [typed, setTyped] = useState<string | null>(null)
+  // Mounted by a Go to (a prompt opened at a match in its name): already renaming.
+  const [typed, setTyped] = useState<string | null>(() => (goTo ? value : null))
   const input = useRef<HTMLInputElement>(null)
   const display = useRef<HTMLSpanElement>(null)
   useLayoutEffect(() => {
@@ -87,6 +88,7 @@ export function InlineRename({
     const frame = requestAnimationFrame(() => {
       input.current?.focus({ preventScroll: true })
       input.current?.setSelectionRange(goTo.at, goTo.at + goTo.length)
+      input.current?.scrollIntoView({ block: "center" })
     })
     return () => cancelAnimationFrame(frame)
   }, [goTo])

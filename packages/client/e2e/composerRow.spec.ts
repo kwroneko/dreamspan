@@ -147,6 +147,8 @@ for (const width of [1440, 1024, 390])
           await capture(`${on ? "guidance" : "message"}-${text ? "text" : "empty"}`)
         }
         await expect(generate).toHaveText(width === 390 ? "" : "Generate")
+        await guidance.hover()
+        await expect(page.getByText(`Click to turn guidance ${on ? "off" : "on"}`, { exact: false })).toBeVisible()
         await guidance.focus()
         await page.keyboard.press("Tab")
         await expect(generate).toBeFocused()

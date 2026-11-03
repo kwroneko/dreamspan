@@ -9,51 +9,6 @@ import type { CardForChat } from "@rp/shared/chatSetupApi.ts"
 import type { Caller } from "../editor/caller.ts"
 import type { ChatView, Outcome } from "./session.ts"
 
-const PERSONA_KEY = "rp.lastPersona"
-
-const savedPersona = () => {
-  try {
-    return localStorage.getItem(PERSONA_KEY)
-  } catch {
-    return null
-  }
-}
-const savePersona = (id: string | null) => {
-  try {
-    localStorage.setItem(PERSONA_KEY, id ?? "none")
-  } catch {
-    // Not remembered, then.
-  }
-}
-
-/**
- * The last text typed in a chat not made yet, written synchronously with each keystroke. The
- * browser copy (IndexedDB) and the server draft are written asynchronously, so a reload right
- * after a keystroke can lose it from both; this one is already written. Per user and pending
- * chat (`copyKey`); emptied when the box is, or once the first send has made the chat.
- */
-const typedKey = (userId: string, copyKey: string) => `rp.pendingTyped:${userId}:${copyKey}`
-
-export const writeLastTyped = (userId: string, copyKey: string, content: string) => {
-  try {
-    if (content === "") localStorage.removeItem(typedKey(userId, copyKey))
-    else localStorage.setItem(typedKey(userId, copyKey), JSON.stringify({ at: Date.now(), content }))
-  } catch {
-    // The asynchronous copies still keep it.
-  }
-}
-
-export const readLastTyped = (userId: string, copyKey: string): { at: number; content: string } | null => {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(typedKey(userId, copyKey)) ?? "null")
-    if (typeof value !== "object" || value === null) return null
-    const { at, content } = value as { at?: unknown; content?: unknown }
-    return typeof at === "number" && typeof content === "string" && content !== "" ? { at, content } : null
-  } catch {
-    return null
-  }
-}
-
 export interface PendingState {
   /** Each character's card, in the order they greet: the chat's characters. */
   readonly greeters: ReadonlyArray<CardForChat>
@@ -94,14 +49,15 @@ export class PendingChat {
     cards: ReadonlyArray<CastCard>,
     greeters: ReadonlyArray<CardForChat>,
     group: PendingGroup | null,
-    call: Caller
+    call: Caller,
+    defaultPersona: EntityId | null = null
   ) {
     this.cards = cards
     this.group = group
     this.call = call
-    const saved = savedPersona()
     const persona =
-      cards.find((card) => card.entityId === saved)?.entityId ?? cards.find((card) => card.persona)?.entityId ?? null
+      [...cards, ...greeters.map((item) => item.card)].find((card) => card.entityId === defaultPersona && card.persona)
+        ?.entityId ?? null
     const state = { greeters, persona }
     this.state = {
       ...state,
@@ -142,7 +98,6 @@ export class PendingChat {
   }
 
   setPersona(id: EntityId | null) {
-    savePersona(id)
     this.change((current) => ({ ...current, persona: id }))
   }
 

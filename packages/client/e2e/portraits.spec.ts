@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test"
-import { openPanel } from "./support/panel.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 import { pickPendingPersona } from "./support/cast.ts"
 import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
 import { closePortrait, portraitView, portraitPng } from "./support/portrait.ts"
@@ -51,20 +51,21 @@ const chat = async (page: Page) => {
   await expect(page.locator("article[data-slot]")).toHaveCount(3)
 }
 const select = async (page: Page, field: string, option: string) => {
-  // In a phone's chat the image settings are in the menu its header's ← opens.
-  await showAppNavigation(page)
-  await page.getByRole("button", { name: "Image settings", exact: true }).filter({ visible: true }).first().click()
-  const popover = page.getByRole("dialog", { name: "Images" })
-  await popover.getByLabel(field).click()
+  const display = await openPanel(page, "Display")
+  await display.getByLabel(field, { exact: true }).click()
   await page.getByRole("option", { name: option, exact: true }).click()
-  await page.keyboard.press("Escape")
-  await hideAppNavigation(page)
+  if (option === "Large (84 × 126)") {
+    await page.reload()
+    await expect(page.getByLabel(field, { exact: true })).toHaveText(option)
+  }
+  await closePanel(page)
 }
 
 for (const width of [1440, 390]) {
   test(`whole portraits from messages, personas, Cast and header at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await chat(page)
+    await expect(page.getByRole("button", { name: "Image settings", exact: true })).toHaveCount(0)
     if (width === 390) {
       // A phone's chat header takes the app bar's place (fheader): its ← opens the menu, the
       // chats first, then Characters and the rest.
@@ -127,7 +128,7 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("img", { name: `${name}'s full portrait` })).toHaveCount(0)
     }
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
-    else await page.getByRole("button", { name: "Close the panel" }).click()
+    else await page.getByRole("button", { name: "Hide panel" }).click()
     for (const [label, pixels] of [
       ["Smallest (48 × 72)", 48],
       ["Medium (72 × 108)", 72],
@@ -182,9 +183,19 @@ test("every image follows concealment, reload's first frame and another tab", as
   const other = await context.newPage()
   await other.goto(`${server().url}/`)
   await expect(other.locator("img").first()).toHaveCSS("filter", "blur(14px) saturate(0.6)")
-  await select(other, "Every image", "Hide")
+  const otherToggle = other.getByRole("button", { name: "Show all images", exact: true })
+  await otherToggle.click({ button: "right" })
+  await expect(other.getByRole("menuitemradio", { name: "Blur hidden images", exact: true })).toBeChecked()
+  await other.getByRole("menuitemradio", { name: "Remove hidden images", exact: true }).click()
   await expect(page.locator("img").first()).toHaveCSS("visibility", "hidden")
   await expect(page.locator("[data-image-fallback]").first()).toBeVisible()
+  await otherToggle.click({ button: "right" })
+  await expect(other.getByRole("menuitemradio", { name: "Remove hidden images", exact: true })).toBeChecked()
+  await other.getByRole("menuitemradio", { name: "Blur hidden images", exact: true }).click()
+  await expect(page.locator("img").first()).toHaveCSS("visibility", "visible")
+  await expect(page.locator("img").first()).toHaveCSS("filter", "blur(14px) saturate(0.6)")
+  await otherToggle.click({ button: "right" })
+  await other.getByRole("menuitemradio", { name: "Remove hidden images", exact: true }).click()
   await page.keyboard.press("Alt+Shift+B")
   await expect(other.locator("img").first()).toHaveCSS("visibility", "visible")
   await page.keyboard.press("Alt+Shift+B")
@@ -203,7 +214,14 @@ test("every image follows concealment, reload's first frame and another tab", as
   await page.keyboard.press("Alt+Shift+B")
   await expect(page.locator("article img").first()).toHaveCSS("visibility", "visible")
   // New surfaces inherit concealment even without a feature-specific preference hook.
-  await select(page, "Every image", "Blur")
+  const toggle = page.getByRole("button", { name: "Hide all images", exact: true }).filter({ visible: true }).first()
+  await showAppNavigation(page)
+  await toggle.click({ button: "right" })
+  await expect(page.getByRole("menuitemradio", { name: "Remove hidden images", exact: true })).toBeChecked()
+  await page.getByRole("menuitemradio", { name: "Blur hidden images", exact: true }).click()
+  await expect(page.locator("article img").first()).toHaveCSS("filter", "none")
+  await page.getByRole("button", { name: "Blur all images", exact: true }).filter({ visible: true }).first().click()
+  await hideAppNavigation(page)
   await page.evaluate(() => {
     const img = document.createElement("img")
     img.id = "future-image"
@@ -219,6 +237,37 @@ test("every image follows concealment, reload's first frame and another tab", as
   await page.getByRole("link", { name: "Edit Mira", exact: true }).click()
   await cardFieldsTab(page, "Metadata")
   await expect(page.getByRole("img", { name: "The card's avatar" })).toHaveCSS("filter", "blur(14px) saturate(0.6)")
+})
+
+test("a touch long-press chooses concealment without toggling shown images", async ({ browser, browserName }) => {
+  test.skip(browserName !== "chromium", "Real touch input uses Chromium CDP.")
+  const touch = await browser.newContext({ hasTouch: true, viewport: { width: 390, height: 844 } })
+  try {
+    const page = await touch.newPage()
+    await prepare(page)
+    await page.goto(server().url)
+    const toggle = page.getByRole("button", { name: "Blur all images", exact: true }).filter({ visible: true }).first()
+    const box = (await toggle.boundingBox())!
+    const cdp = await touch.newCDPSession(page)
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }]
+    })
+    const menu = page.getByRole("menu", { name: "Hidden images", exact: true })
+    await expect(menu).toBeVisible()
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
+    await expect(page.locator("html")).toHaveAttribute("data-images", "show")
+    await expect(menu.getByRole("menuitemradio", { name: "Blur hidden images", exact: true })).toBeChecked()
+    await menu.getByRole("menuitemradio", { name: "Remove hidden images", exact: true }).tap()
+    await expect(page.locator("html")).toHaveAttribute("data-images", "show")
+    await page.getByRole("button", { name: "Hide all images", exact: true }).filter({ visible: true }).first().tap()
+    await expect(page.locator("img").first()).toHaveCSS("visibility", "hidden")
+    await page.getByRole("button", { name: "Show all images", exact: true }).filter({ visible: true }).first().tap()
+    await expect(page.locator("img").first()).toHaveCSS("visibility", "visible")
+    await expect(page.getByRole("button", { name: "Image settings", exact: true })).toHaveCount(0)
+  } finally {
+    await touch.close()
+  }
 })
 
 test("both sidebars resize by pointer and keyboard, keep widths per user, and reset", async ({ page }) => {

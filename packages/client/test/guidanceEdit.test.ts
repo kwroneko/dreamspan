@@ -185,7 +185,7 @@ describe("guidance on swipes, as registered parts", () => {
     expect(offered(entry("s2", null))).toBe(true)
     expect(offered(entry("s2", "Rain."))).toBe(false)
     expect(offered(entry("s2", null, "human"))).toBe(false)
-    expect(offered(entry("s2", null), true)).toBe(false)
+    expect(offered(entry("s2", null), true)).toBe(true)
   })
 
   it("shows the bar naming the reply, with a visible ✕, only while editing (rules 3, 5 and 6)", () => {
@@ -225,8 +225,8 @@ describe("guidance on swipes, as registered parts", () => {
     expect(markup(createElement(ComposerControls, { placement: "actions", context }))).toContain(
       'aria-label="New version"'
     )
-    // With the box as guidance, Send isn't offered: no submit can post it as a message.
-    expect(availableComposerControls("actions", context).map((c) => c.id)).not.toContain("composer.send")
+    // Send keeps its place, disabled: no submit can post guidance as a message.
+    expect(availableComposerControls("actions", context).map((c) => c.id)).toContain("composer.send")
     void composerControls.get("composer.generate")!.run!(context, "keyboard")
     void composerControls.get("composer.generate")!.run!(context, "button")
     expect(generate).toHaveBeenCalledTimes(2)

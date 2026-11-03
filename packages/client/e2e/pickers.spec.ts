@@ -261,7 +261,7 @@ for (const width of [1440, 390]) {
     const panel = await openPanel(page, "Prompt preset")
     await panel.getByRole("button", { name: "New preset", exact: true }).click()
     const dialog = page.getByRole("dialog", { name: "New prompt preset" })
-    await expect(dialog.getByText(/Start with the built-in preset/)).toBeVisible()
+    await expect(dialog.getByText(/Start with the built-in preset/)).toHaveCount(0)
     const name = `Lantern hall ${width}`
     await dialog.getByLabel("Name").fill(name)
     await page.screenshot({ path: join(shots, `new-preset-${width}.png`) })
@@ -270,7 +270,11 @@ for (const width of [1440, 390]) {
     await expect
       .poll(async () => (await rpc((api) => api.GetGenerationDefaults())).preset)
       .toBe(byLabel(await presets(), name).id)
-    await page.getByRole("button", { name: "Close preset editor" }).click()
+    await page
+      .getByRole("dialog", { name: "Preset editor", exact: true })
+      .getByRole("button", { name: "Close", exact: true })
+      .first()
+      .click()
     await expect(presetChip(page)).toHaveAccessibleName(presetName(name))
     // The picker's list has it too, at its end.
     await presetChip(page).click()

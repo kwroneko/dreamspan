@@ -1,15 +1,15 @@
 import { useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
 import { AsyncView } from "../../actions.tsx"
-import { Input } from "../../ui/Field.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
 import { homeIntro } from "./homeSlots.ts"
-import { browseCards, CardFilterControl, CardSortControl, IncludePersonas, mixesPersonas } from "./cardBrowse.tsx"
+import { browseCards, mixesPersonas } from "./cardBrowse.tsx"
 import { useHomeBrowse } from "./useHomeBrowse.ts"
+import { CardGridControls } from "./CardGridControls.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
-import { browsable, CharacterGrid, shellAtom, useGroupCount, type ShellLibrary } from "./shellData.tsx"
+import { browsable, CharacterGrid, shellAtom, type ShellLibrary } from "./shellData.tsx"
 import { PinnedChats } from "./ShellBrowser.tsx"
 
 const COLUMNS = "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5"
@@ -17,7 +17,6 @@ const COLUMNS = "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-co
 function Home({ data }: { data: ShellLibrary }) {
   const [browse, setBrowse] = useHomeBrowse()
   const { search } = browse
-  const groups = useGroupCount()
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
   // Then the filters and search, having nothing to work on, stay out of the way too.
@@ -44,29 +43,14 @@ function Home({ data }: { data: ShellLibrary }) {
         sortBy={browse.pinsSort}
         onSortChange={(pinsSort) => setBrowse({ pinsSort })}
       />
-      <div>
-        <CardFilterControl
-          value={browse.filter}
-          onChange={(filter) => setBrowse({ filter })}
-          cards={browsable(data)}
-          groups={groups}
-          withPersonas={browse.withPersonas}
-        />
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Input
-          type="search"
-          aria-label="Search characters and groups"
-          placeholder="Search by name"
-          value={search}
-          onChange={(e) => setBrowse({ search: e.currentTarget.value })}
-          className="sm:max-w-xs"
-        />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <IncludePersonas browse={browse} onChange={setBrowse} />
-          <CardSortControl sort={browse.sort} reversed={browse.reversed} onChange={setBrowse} />
-        </div>
-      </div>
+      <CardGridControls
+        data={data}
+        browse={browse}
+        onChange={setBrowse}
+        search={search}
+        onSearch={(search) => setBrowse({ search })}
+        searchLabel="Search characters and groups"
+      />
       {browse.filter === "groups" ? (
         <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} />
       ) : (

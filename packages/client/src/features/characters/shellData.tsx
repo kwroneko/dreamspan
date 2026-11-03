@@ -1,3 +1,4 @@
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
@@ -220,7 +221,7 @@ export interface TileState {
  * Characters as tiles, in the order given (`browseCards`), each with the date `sort` orders
  * by. `pick`: what a tile does, else open the character's chat, and `status` each tile's
  * status for it, by entity id. `markPersonas`: the list mixes the persona folder's cards in,
- * so each is marked "You" (`mixesPersonas`). `children` follow the tiles
+ * so each is marked "Persona" (`mixesPersonas`). `children` follow the tiles
  * (an empty state). `className` sets the columns for where it's shown.
  */
 export function CharacterGrid({
@@ -257,21 +258,6 @@ export function CharacterGrid({
   )
 }
 
-/** The "You" badge (the card header's, PortraitControls.tsx) on a persona's picture in a mixed list. */
-function PersonaBadge() {
-  return (
-    <Tooltip label="A persona: a card you play as">
-      <span
-        data-persona-badge
-        data-layout-overlay="The persona badge sits over the portrait"
-        className="absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded-sm bg-accent px-1.5 text-[0.6875rem] leading-4 font-medium text-accent-contrast shadow-sm"
-      >
-        You
-      </span>
-    </Tooltip>
-  )
-}
-
 /**
  * A character's tile: its picture, names and use, with the favourite star over the picture.
  * `sort`: a date sort's date ends the last line. `pick`: what a click does, else open its chat.
@@ -287,7 +273,7 @@ function CharacterTile({
   sort?: CardSort
   pick?: TilePick
   status: string | undefined
-  /** A persona in a mixed list: the "You" badge on its picture. */
+  /** A persona in a mixed list: the "Persona" badge on its picture. */
   marked: boolean
 }) {
   const open = useOpenCharacter()
@@ -312,7 +298,7 @@ function CharacterTile({
     >
       <span className={`relative aspect-[2/3] w-full overflow-hidden ${state.done ? "opacity-50" : ""}`}>
         <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="fill" />
-        {marked && <PersonaBadge />}
+        {marked && <PersonaBadge portrait />}
       </span>
       <span className="flex w-full min-w-0 flex-1 flex-col gap-0.5 p-2">
         {/* A pick's tooltip names it already. */}
@@ -338,9 +324,23 @@ function CharacterTile({
         />
       </span>
       {state.mark && (
-        <span className="pointer-events-none absolute top-1.5 right-1.5 max-w-[calc(100%-3rem)]">{state.mark}</span>
+        <span
+          data-layout-overlay="Chat membership sits over the portrait"
+          className="pointer-events-none absolute top-1.5 right-1.5 max-w-[calc(100%-3rem)]"
+        >
+          {state.mark}
+        </span>
       )}
-      <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
+      {card.persona ? (
+        <div className="flex items-start gap-2 p-2">
+          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+            <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
+          </div>
+          <CardSurface placement="persona-menu" entityId={c.entityId} label={c.label} />
+        </div>
+      ) : (
+        <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
+      )}
     </div>
   )
 }

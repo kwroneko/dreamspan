@@ -240,7 +240,7 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
   const controlsBox = (await toolbar.locator("[data-zoom-controls]").boundingBox())!
   expect(controlsBox.x + controlsBox.width).toBeLessThanOrEqual(columnBox.x + columnBox.width + 0.5)
   await shoot(page, "column-narrow")
-  await page.getByRole("button", { name: "Close the panel" }).click()
+  await page.getByRole("button", { name: "Hide panel" }).click()
   await expect.poll(async () => (await column.boundingBox())!.width).toBeGreaterThan(400)
   // Wide: one aligned row: slider, percentage, Fit, 100%, then the column's own buttons.
   const slider = toolbar.getByRole("slider", { name: "Zoom" })
@@ -279,7 +279,7 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
     [fit, "Fit: show all of the picture"],
     [actual, "100%: one pixel of the picture to one pixel of the screen"],
     [percent, /^Shown at \d+% of its own size, 1024 × 1536 pixels$/],
-    [single, "Keep one image open: opening another replaces this one."],
+    [single, "Click to keep only one image open at a time."],
     [close, "Close the portrait"]
   ] as const) {
     await control.hover()
@@ -367,6 +367,9 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
   await single.click()
   await expect(single).toHaveAttribute("aria-pressed", "true")
   expect(await positions()).toEqual(initialPositions)
+  await page.mouse.move(0, 0)
+  await single.hover()
+  await expect(page.getByText("Click to allow multiple images open at a time.", { exact: true })).toBeVisible()
   await single.click()
   await expect(single).toHaveAttribute("aria-pressed", "false")
 

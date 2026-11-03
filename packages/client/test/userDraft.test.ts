@@ -1,5 +1,5 @@
 import type { UserId } from "@rp/shared/domain.ts"
-import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
+import { Draft, DraftKey, DraftState, deletedSince } from "@rp/shared/drafts.ts"
 import type { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { Effect } from "effect"
 import { beforeEach, expect, it, vi } from "vitest"
@@ -56,7 +56,7 @@ const deferred = <A>() => {
 const until = async (check: () => boolean) => {
   await vi.waitFor(() => expect(check()).toBe(true))
 }
-const harness = (initial = draft("original"), field = key.field) => {
+const harness = (initial = draft("original"), field = key.field, targetId = key.targetId) => {
   let current = initial
   const saves: Array<typeof UserDraftSave.Type> = []
   const handlers = {
@@ -88,7 +88,7 @@ const harness = (initial = draft("original"), field = key.field) => {
       return { ok: false, error: { tag: "ServerError", message: "Synthetic refusal", problems: [], reason: null } }
     }
   }
-  const store = new UserDraftStore(ownerId, key.targetId, field, run)
+  const store = new UserDraftStore(ownerId, targetId, field, run)
   return { store, handlers, saves }
 }
 beforeEach(() => memory.clear())
@@ -444,7 +444,9 @@ it("closing a conflicted editor sends the refused local copy with the base it wa
     const init = fetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(init[0]).toBe("/library/drafts")
     expect(init[1].keepalive).toBe(true)
-    expect(JSON.parse(init[1].body as string).userDrafts).toEqual([payload("Local text as the page closes")])
+    expect(JSON.parse(init[1].body as string).userDrafts).toEqual([
+      { ...payload("Local text as the page closes"), editingFrom: "original" }
+    ])
     expect(
       (await copiesOf(ownerId, key.targetId)).some((copy) => copy.content === "Local text as the page closes")
     ).toBe(true)
@@ -482,4 +484,302 @@ it.each([
   expect(store.snapshot().text).toBe(text)
   // The newer copy goes to the server; the older one isn't sent over the server's text.
   expect(saves.map((save) => save.content)).toEqual(at > 5 ? ["First line\n\n\n\nSecond line"] : [])
+})
+
+// Device A's clock may be years ahead; a deletion still wins by server version.
+it.each(["active", "discarded", "committed"] as const)(
+  "a newer %s deletion blocks an older browser copy",
+  async (status) => {
+    const pending = makeCopy(
+      ownerId,
+      key.targetId,
+      "First message",
+      { kind: "userDraft", payload: payload("deleted text", 3) },
+      9e15
+    )
+    await keepCopy(pending)
+    const tombstone = new Draft({ ...draft("", 5), status, clearedVersion: 5 })
+    const { store, saves } = harness(tombstone, "First message")
+    store.open()
+    await until(() => store.snapshot().ready)
+    expect(store.snapshot().text).toBe(status === "active" ? "" : null)
+    expect(store.snapshot().savedAt).toBe(5)
+    expect(saves).toEqual([])
+    // Explicit recovery stays possible; it never reappears in the composer automatically.
+    expect(await copiesOf(ownerId, key.targetId)).toHaveLength(1)
+  }
+)
+
+it("a keystroke based on an older tombstone survives reload, even with a slow browser clock", async () => {
+  const pending = makeCopy(
+    ownerId,
+    key.targetId,
+    "First message",
+    { kind: "userDraft", payload: payload("new keystroke", 5) },
+    -1000
+  )
+  await keepCopy(pending)
+  const { store, saves } = harness(new Draft({ ...draft("", 5), clearedVersion: 5 }), "First message")
+  store.open()
+  await until(() => store.snapshot().ready)
+  expect(store.snapshot().text).toBe("new keystroke")
+  expect(saves.map((save) => save.content)).toEqual(["new keystroke"])
+})
+
+it("a deletion barrier remains after subsequent text and rejects legacy copies without a base", () => {
+  const after = new Draft({ ...draft("replacement", 8), clearedVersion: 5 })
+  expect(deletedSince(after, payload("deleted", 3))).toBe(true)
+  expect(deletedSince(after, null)).toBe(true)
+  expect(deletedSince(after, payload("new", 5))).toBe(false)
+  expect(deletedSince(after, { ...payload("new", 3), observedDeletion: { draftId: "draft", rowVersion: 5 } })).toBe(
+    false
+  )
+  expect(deletedSince(after, { ...payload("new", 3), observedDeletion: { draftId: "draft", rowVersion: 4 } })).toBe(
+    true
+  )
+  expect(deletedSince(after, { ...payload("new", 3), observedDeletion: { draftId: "other", rowVersion: 100 } })).toBe(
+    true
+  )
+})
+
+it("the synchronous versioned backup alone keeps the final keystroke across an immediate reload", async () => {
+  const storage = new Map<string, string>()
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key)
+  })
+  try {
+    const tombstone = new Draft({ ...draft("", 5), clearedVersion: 5 })
+    const { store, handlers } = harness(tombstone, "First message", "pending-chat:synthetic")
+    store.open()
+    await until(() => store.snapshot().ready)
+    const held = deferred<Draft>()
+    handlers.SaveUserDraft = () => held.promise
+    store.type("Final keystroke", "")
+    // Simulate IndexedDB not finishing before the page is destroyed.
+    memory.clear()
+    const reopened = harness(tombstone, "First message", "pending-chat:synthetic")
+    reopened.store.open()
+    await until(() => reopened.store.snapshot().ready)
+    expect(reopened.store.snapshot().text).toBe("Final keystroke")
+    expect(storage.size).toBe(0)
+    held.resolve(draft("Final keystroke", 6))
+  } finally {
+    vi.unstubAllGlobals()
+    vi.stubGlobal("location", { protocol: "http:", host: "localhost" })
+  }
+})
+
+it("a deletion that wins during a save does not let a stale form commit its text", async () => {
+  const { store, handlers } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async () =>
+    new Draft({ ...draft("", 5), status: "discarded", clearedVersion: 5, recovered: 1 })
+  const save = vi.fn(async () => true)
+  expect(await store.commit("stale form text", save)).toBe(false)
+  expect(save).not.toHaveBeenCalled()
+  expect(store.snapshot().recovered).toBe(1)
+})
+
+it("typing into the empty field before its tombstone read finishes starts from that deletion", async () => {
+  const tombstone = new Draft({ ...draft("", 5), clearedVersion: 5 })
+  const { store, handlers, saves } = harness(tombstone, "First message")
+  const opening = deferred<Draft>()
+  handlers.GetUserDraft = () => opening.promise
+  const save = handlers.SaveUserDraft
+  handlers.SaveUserDraft = async (payload) =>
+    Math.max(payload.expectedRowVersion ?? 0, payload.observedDeletion?.rowVersion ?? 0) < 5 ? tombstone : save(payload)
+  store.open()
+  store.type("new text typed in the empty box", "")
+  opening.resolve(tombstone)
+  await until(() => saves.some((save) => save.content === "new text typed in the empty box"))
+  expect(store.snapshot().text).toBe("new text typed in the empty box")
+  expect(store.snapshot().error).toBeNull()
+})
+
+it("a refused compound replay protects cleared inputs while retaining other last keystrokes", async () => {
+  const raw = JSON.stringify({ name: "deleted name", baseUrl: "https://example.invalid/last-keystroke" })
+  const old = makeCopy(ownerId, key.targetId, key.field, { kind: "userDraft", payload: payload(raw) }, 1)
+  await keepCopy(old)
+  const cleared = new Draft({
+    ...draft(JSON.stringify({ name: "", baseUrl: "https://example.invalid" }), 5),
+    deletions: { '["name"]': { draftId: "draft", rowVersion: 5, value: "" } }
+  })
+  const { store, handlers, saves } = harness(cleared)
+  const save = handlers.SaveUserDraft
+  handlers.SaveUserDraft = async () => {
+    throw new Error("offline during replay")
+  }
+  store.open()
+  await until(() => store.snapshot().ready)
+  expect(JSON.parse(store.snapshot().text!)).toEqual({ name: "", baseUrl: "https://example.invalid/last-keystroke" })
+  expect(memory.has(old.key)).toBe(true)
+  handlers.SaveUserDraft = save
+  const fresh = JSON.stringify({ name: "new deliberate name", baseUrl: "https://example.invalid/last-keystroke" })
+  store.type(fresh, cleared.content)
+  await until(() => saves.length > 0)
+  expect(saves.at(-1)).toMatchObject({
+    content: fresh,
+    expectedRowVersion: 1,
+    observedDeletion: { draftId: "draft", rowVersion: 5 }
+  })
+  expect(memory.has(old.key)).toBe(true)
+})
+
+it("a refused form initialization copy remains distinguishable from deliberate typing", async () => {
+  const initial = JSON.stringify({ name: "", baseUrl: "" })
+  const { store, handlers } = harness(new Draft({ ...draft("", 4), status: "committed" }))
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async () => {
+    throw new Error("refused initialization")
+  }
+  store.type(JSON.stringify({ name: "last keystroke", baseUrl: "" }), initial)
+  await until(() => [...memory.values()].some((copy) => copy.content === initial))
+  expect([...memory.values()].find((copy) => copy.content === initial)?.save).toMatchObject({
+    kind: "userDraft",
+    payload: { seed: true }
+  })
+  expect([...memory.values()].some((copy) => copy.content.includes("last keystroke"))).toBe(true)
+})
+
+it("compound copies and closing saves retain the actual form edited, not a later server read", async () => {
+  const initial = JSON.stringify({ name: "", baseUrl: "" })
+  const { store, handlers, saves } = harness(draft(initial))
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async (save) => {
+    saves.push(save)
+    throw new Error("offline")
+  }
+  const typed = JSON.stringify({ name: "", baseUrl: "https://a.invalid" })
+  store.type(typed, initial)
+  await until(() => saves.length > 0)
+  expect(saves[0]).toMatchObject({ content: typed, editingFrom: initial, expectedRowVersion: 1 })
+  expect([...memory.values()].find((copy) => copy.content === typed)?.save).toMatchObject({
+    kind: "userDraft",
+    payload: { editingFrom: initial }
+  })
+})
+
+it("clearing locally typed but unacknowledged text retains deletion intent in the next copy", async () => {
+  const initial = JSON.stringify({ name: "", baseUrl: "" })
+  const typed = JSON.stringify({ name: "locally typed name", baseUrl: "" })
+  const cleared = JSON.stringify({ name: "", baseUrl: "" })
+  const { store, handlers } = harness(draft(initial))
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async () => {
+    throw new Error("lost acknowledgement")
+  }
+  store.type(typed, initial)
+  store.type(cleared, initial)
+  store.type(JSON.stringify({ name: "", baseUrl: "https://last.invalid" }), initial)
+  const copy = [...memory.values()].find((copy) => copy.content.includes("https://last.invalid"))
+  expect(copy?.save).toMatchObject({ kind: "userDraft", payload: { editingFrom: typed } })
+})
+
+it("an earlier acknowledgement cannot erase a later local clear before a failed intermediate save", async () => {
+  const initial = JSON.stringify({ name: "", baseUrl: "" })
+  const url = JSON.stringify({ name: "", baseUrl: "https://a.invalid" })
+  const typed = JSON.stringify({ name: "Typed then removed", baseUrl: "https://a.invalid" })
+  const { store, handlers, saves } = harness(draft(initial))
+  store.open()
+  await until(() => store.snapshot().ready)
+  const first = deferred<Draft>()
+  handlers.SaveUserDraft = async (input) => {
+    saves.push(input)
+    if (saves.length === 1) return first.promise
+    if (input.content === typed) throw new Error("lost intermediate acknowledgement")
+    return draft(input.content, 4)
+  }
+  store.type(url, initial)
+  await until(() => saves.length === 1)
+  store.type(typed, initial)
+  store.type(url, initial)
+  first.resolve(draft(url, 2))
+  await until(() => saves.length === 3)
+  expect(saves[2]).toMatchObject({ content: url, editingFrom: typed })
+})
+
+it("acknowledging a clear removes its old intent from a later unrelated input change", async () => {
+  const original = JSON.stringify({ name: "Name actually cleared", baseUrl: "" })
+  const cleared = JSON.stringify({ name: "", baseUrl: "" })
+  const url = JSON.stringify({ name: "", baseUrl: "https://a.invalid" })
+  const { store, handlers, saves } = harness(draft(original))
+  store.open()
+  await until(() => store.snapshot().ready)
+  const first = deferred<Draft>()
+  handlers.SaveUserDraft = async (input) => {
+    saves.push(input)
+    return saves.length === 1 ? first.promise : draft(input.content, 3)
+  }
+  store.type(cleared, original)
+  await until(() => saves.length === 1)
+  store.type(url, original)
+  first.resolve(draft(cleared, 2))
+  await until(() => saves.length === 2)
+  expect(saves[1]).toMatchObject({ content: url, editingFrom: cleared })
+})
+
+it("anonymous clear evidence stays in durable copies and RPCs when the same text is reused offline", async () => {
+  const original = JSON.stringify({ items: [{ name: "Deleted name", note: "" }] })
+  const cleared = JSON.stringify({ items: [{ name: "", note: "" }] })
+  const reused = JSON.stringify({ items: [{ name: "", note: "Deleted name" }] })
+  const { store, handlers, saves } = harness(draft(original))
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async (input) => {
+    saves.push(input)
+    throw new Error("offline")
+  }
+  store.type(cleared, original)
+  store.type(reused, original)
+  const copy = [...memory.values()].find((copy) => copy.content === reused)
+  expect(copy?.save).toMatchObject({
+    kind: "userDraft",
+    payload: { editingFrom: { content: original, clearedArrays: [["items"]] } }
+  })
+  await until(() => saves.length === 2)
+  expect(saves[1]?.editingFrom).toEqual({ content: original, clearedArrays: [["items"]] })
+})
+
+it("a whole-field clear keeps its identity through closing saves and an earlier unrelated acknowledgement", async () => {
+  const { store, handlers, saves } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  const first = deferred<Draft>()
+  handlers.SaveUserDraft = async (input) => {
+    saves.push(input)
+    if (saves.length === 1) return first.promise
+    throw new Error("closed before later acknowledgements")
+  }
+  store.type("Intermediate text", "original")
+  await until(() => saves.length === 1)
+  store.type("", "original")
+  store.type("Fresh after the clear", "original")
+  const copy = [...memory.values()].find((copy) => copy.content === "Fresh after the clear")!
+  expect(copy.save.kind).toBe("userDraft")
+  if (copy.save.kind !== "userDraft") return
+  const intent = copy.save.payload.editingFrom
+  expect(intent).toMatchObject({ content: "", clearedArrays: [], clearId: expect.any(String) })
+  const send = vi.fn(async () => new Response(null, { status: 204 }))
+  vi.stubGlobal("fetch", send)
+  try {
+    store.leave()
+    const init = send.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init[1].keepalive).toBe(true)
+    expect(JSON.parse(init[1].body as string).userDrafts[0].editingFrom).toEqual(intent)
+    first.resolve(draft("Intermediate text", 2))
+    await until(() => saves.length === 3)
+    expect(saves[1]?.editingFrom).toEqual(intent)
+    expect(saves[2]?.editingFrom).toEqual(intent)
+    expect(saves[2]?.expectedRowVersion).toBe(2)
+  } finally {
+    first.resolve(draft("Intermediate text", 2))
+    vi.unstubAllGlobals()
+    vi.stubGlobal("location", { protocol: "http:", host: "localhost" })
+  }
 })

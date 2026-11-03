@@ -23,7 +23,8 @@ const MIN_VIEWER_HEIGHT = 180
 const GUTTER = 17
 
 const SINGLE = "Only keep one image open at a time"
-const SINGLE_HINT = "Keep one image open: opening another replaces this one."
+const SINGLE_OFF = "Click to keep only one image open at a time."
+const SINGLE_ON = "Click to allow multiple images open at a time."
 
 interface Measured {
   /** The viewer's height, header included. */
@@ -190,7 +191,7 @@ function Viewer({
         toggle={
           <IconButton
             label={SINGLE}
-            hint={SINGLE_HINT}
+            hint={viewer.single ? SINGLE_ON : SINGLE_OFF}
             icon="one-image"
             aria-pressed={viewer.single}
             className="aria-pressed:bg-surface-raised aria-pressed:text-accent aria-pressed:ring-1 aria-pressed:ring-border"

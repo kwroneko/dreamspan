@@ -237,24 +237,21 @@ test("on a phone, a group chat's row shows when it started and its length in ful
   await context.close()
 })
 
-test("a long name shows in full, wrapped rather than clipped", async ({ page }) => {
+test("a long chat name is limited to two lines and shown in full on hover", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(`${server().url}/cards/${aria}`)
-  // Since the branch list (fe174be2) the name wraps with no line clamp, so nothing needs a tooltip.
-  const name = chatLinks(page)
-    .filter({ hasText: "The Lantern Inn" })
-    .getByText(/^The Lantern Inn/)
-  await expect(name).toHaveText("The Lantern Inn at the End of the Long Road")
-  const clipped = await name.evaluate((element) => {
-    const line = element.parentElement!
-    return (
-      getComputedStyle(line).webkitLineClamp !== "none" ||
-      line.scrollWidth > line.clientWidth ||
-      line.scrollHeight > line.clientHeight
-    )
-  })
-  expect(clipped).toBe(false)
+  const row = chatLinks(page).filter({ hasText: "The Lantern Inn" })
+  const name = row.locator("[data-chat-title]")
+  const title = "The Lantern Inn at the End of the Long Road"
+  await expect(name).toHaveText(title)
+  const geometry = await name.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    lineHeight: parseFloat(getComputedStyle(element).lineHeight)
+  }))
+  expect(geometry.height).toBeLessThanOrEqual(geometry.lineHeight * 2)
+  await row.hover()
+  await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(title)
 })
 
 test("a definition folded anew when the window narrows offers Show more, and stays open", async ({ page }) => {

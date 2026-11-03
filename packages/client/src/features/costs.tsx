@@ -7,7 +7,7 @@ import { AppClient } from "../rpc.ts"
 import { routes } from "../routes.tsx"
 import { Button } from "../ui/Button.tsx"
 import { Field, Input } from "../ui/Field.tsx"
-import { AboutHint } from "../ui/AboutHint.tsx"
+import { AboutHint, LabelWithHelp } from "../ui/AboutHint.tsx"
 import { Select } from "../ui/Select.tsx"
 import { Alert, Card, CardHeader } from "../ui/Surface.tsx"
 import { useUserDraft, UserDraftStatus } from "./editor/userDraft.tsx"
@@ -86,7 +86,7 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
         conditions take precedence, then upstream, then provider. The last rule breaks ties. Currency is a label;
         nothing is converted.
       </p>
-      <UserDraftStatus draft={durable} />
+      <UserDraftStatus draft={durable} history />
       {values.revision !== settings.revision && (
         <Alert>
           <p>
@@ -169,10 +169,11 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
                 />
               </Field>
             </div>
-            <div className="flex items-center gap-1 text-sm text-muted">
+            <LabelWithHelp
+              help={<AboutHint heading="Base rates">Prices per million tokens. Output includes reasoning.</AboutHint>}
+            >
               <span>Base rates</span>
-              <AboutHint heading="Base rates">Prices per million tokens. Output includes reasoning.</AboutHint>
-            </div>
+            </LabelWithHelp>
             <Rates rates={rule.rates} change={(rates) => update(index, { rates })} />
             {rule.tiers.map((tier, ti) => (
               <fieldset key={ti} className="flex min-w-0 flex-col gap-3 rounded-md border border-border p-3">

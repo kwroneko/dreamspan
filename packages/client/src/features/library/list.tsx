@@ -1,3 +1,4 @@
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 // The library: every card, lorebook and preset, found by name and opened from here. Each
 // item shows what identifies it, a direct action or two, and the rest in its menu.
@@ -141,6 +142,8 @@ interface Item {
   readonly detail?: string
   /** A character's shell card (not a persona's), for its favourite star. */
   readonly shell: ShellCard | undefined
+  /** Shown in a persona-only list (Personas), where a persona badge would mark every row. */
+  readonly personaOnly?: boolean
 }
 type ShellCard = ShellLibrary["cards"][number]
 const persona = (item: Item) => item.card?.persona === true
@@ -187,7 +190,7 @@ function Badges({ item, seen }: { item: Item; seen: boolean }) {
   const { entry } = item
   return (
     <>
-      {persona(item) && <Badge tone="accent">Persona</Badge>}
+      {persona(item) && !item.personaOnly && <PersonaBadge />}
       {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
       {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
       {entry.kind === "card" && seen && <CardSurface placement="badge" entityId={entry.entityId} label={entry.label} />}
@@ -276,7 +279,7 @@ function Row({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForma
         {entry.label}
       </OpenLink>
       {line && (
-        <span className="col-span-2 col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 self-start text-xs text-muted sm:col-span-1">
+        <span className="col-span-2 col-start-2 row-start-2 flex min-h-5 min-w-0 items-center gap-1.5 self-start text-xs text-muted sm:col-span-1">
           <Badges item={item} seen={seen} />
           <span className="min-w-0 truncate">
             <Meta item={item} />
@@ -379,7 +382,9 @@ function Section({
     PRESET_VIEWS.map((v) => v.value)
   )
   const shown = cards
-    ? all.filter((item) => prefs.show === "all" || (prefs.show === "personas") === persona(item))
+    ? all
+        .filter((item) => prefs.show === "all" || (prefs.show === "personas") === persona(item))
+        .map((item) => (prefs.show === "personas" ? { ...item, personaOnly: true } : item))
     : all
   const items: ReadonlyArray<Item> = presets
     ? presetsInView(

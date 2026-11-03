@@ -312,7 +312,11 @@ export class AppCoreApi extends RpcGroup.make(
   Rpc.make("ListExportFormats", { success: Schema.Array(ExportFormatInfo), error: ServerError }),
   /** The user's upstream refs and variants of one kind, by label. */
   Rpc.make("ListLibrary", {
-    payload: { kind: EntityKind, archived: Schema.optionalKey(Schema.Boolean) },
+    payload: {
+      kind: EntityKind,
+      archived: Schema.optionalKey(Schema.Boolean),
+      withFilterData: Schema.optionalKey(Schema.Boolean)
+    },
     success: Schema.Array(LibraryRef),
     error: ServerError
   }),

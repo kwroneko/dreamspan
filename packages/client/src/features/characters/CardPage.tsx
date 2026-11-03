@@ -1,3 +1,4 @@
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useAtomRefresh } from "@effect/atom-react"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 // A card's page (DESIGN §2.1, §4): the card without entering a chat. Continue (its latest
@@ -228,6 +229,7 @@ function Page({ card, persona = false }: { card: CardUsage; persona?: boolean })
         />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{card.label}</h1>
+          {persona && <PersonaBadge />}
           <CardSurface placement="provenance" entityId={card.entityId} />
           {card.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{card.subtitle}</p>}
           {card.modelName && card.modelName !== card.label && (
@@ -236,6 +238,7 @@ function Page({ card, persona = false }: { card: CardUsage; persona?: boolean })
             </p>
           )}
           <p className="text-sm text-muted">{usageLine(card)}</p>
+          <CardSurface placement="chats" entityId={card.entityId} label={card.label} />
           <CardSurface placement="header" entityId={card.entityId} label={card.label} />
           <div className="mt-2 flex flex-wrap gap-2">
             <CardSurface placement="actions" entityId={card.entityId} />

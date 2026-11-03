@@ -1,3 +1,4 @@
+import { loreEffectsAt, type LoreReceipt, type LoreTimeline } from "../assembler/loreTiming.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { originalReply, type ReplySections } from "@rp/shared/replySections.ts"
 import { eventApplies, eventOrder } from "./forkState.ts"
@@ -32,6 +33,7 @@ import type { Summary } from "@rp/shared/lcm.ts"
 import { resolveModel } from "@rp/shared/providers.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Schema } from "effect"
+import type { Fragment } from "effect/sql/Statement"
 import type { SqlClient, SqlError } from "effect/sql"
 import type { PathPiece } from "./displayPath.ts"
 import { AssemblySources, type PositionedEvent } from "../assembler/pipeline.ts"
@@ -362,6 +364,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     lorebooks: [] as Array<NonNullable<SourcePins["lorebooks"]>[number]>,
     globalRegex: [] as NonNullable<SourcePins["globalRegex"]>,
     notes: [] as Array<SourcePins["notes"][number]>,
+    loreStates: [] as Array<NonNullable<SourcePins["loreStates"]>[number]>,
     messageCount: [] as Array<NonNullable<SourcePins["messageCount"]>[number]>,
     lcmDefaults: undefined as SourcePins["lcmDefaults"],
     imageTokenFacts: undefined as SourcePins["imageTokenFacts"]
@@ -763,6 +766,73 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         ),
     onPath: history.onPath,
 
+    loreState: (leaf, identities, continuing) =>
+      Effect.gen(function* () {
+        const selected = yield* shown(leaf, "s")
+        const fork = yield* viewAt(sql, chatId, leaf)
+        const onDisplay = yield* display(leaf)
+        const path =
+          onDisplay === null
+            ? sql`WITH RECURSIVE path(id, position) AS (
+              SELECT id, depth FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}
+              UNION ALL
+              SELECT s.parent_slot_id, p.position - 1 FROM slots s JOIN path p ON s.id = p.id
+              WHERE s.parent_slot_id IS NOT NULL
+            )`
+            : sql`${displaySlots(sql, onDisplay.pieces, 0, onDisplay.end)}, path AS (SELECT id, position FROM display_slots)`
+        // Continue and edits retain the admissions of their source versions. Swipes have no source.
+        const receipts = (version: Fragment) => sql`(
+          WITH RECURSIVE lineage(id, source, n) AS (
+            SELECT id, source_version_id, 0 FROM versions WHERE id = ${version}
+            UNION ALL
+            SELECT v.id, v.source_version_id, l.n + 1 FROM versions v JOIN lineage l ON v.id = l.source
+          )
+          SELECT json_group_array(json_object('id', v.id, 'offset', a.message_offset, 'entries', json(a.entries_json)))
+          FROM (SELECT id FROM lineage ORDER BY n DESC) l JOIN versions v ON v.id = l.id
+          JOIN lore_activations a ON a.rollout_id = v.rollout_id
+        )`
+        // One path scan for every timed entry. Compact receipts avoid reading context payloads.
+        const rows = [
+          ...(yield* sql<{ eligible: number; receipts: string }>`
+          ${path}
+          SELECT CASE WHEN ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
+            AND (length(v.content) > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN 1 ELSE 0 END AS eligible, ${receipts(sql`v.id`)} AS receipts
+          FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = ${selected}
+          WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${owned} ORDER BY path.position`)
+        ]
+        if (continuing) {
+          const continued = yield* sql<{ eligible: number; receipts: string }>`
+            SELECT 1 AS eligible, ${receipts(sql`v.id`)} AS receipts FROM versions v JOIN slots s ON s.id = v.slot_id
+            WHERE v.id = ${continuing} AND s.chat_id = ${chatId} AND length(v.content) > 0 AND ${owned}`
+          rows.push(...continued)
+        }
+        const relevant = new Set(identities)
+        let count = 0
+        const activations: Array<LoreTimeline["activations"][number]> = []
+        for (const row of rows) {
+          if (row.eligible) {
+            const recorded = JSON.parse(row.receipts) as Array<{
+              id: string
+              offset: number
+              entries: Array<LoreReceipt>
+            }>
+            for (const receipt of recorded)
+              activations.push({
+                id: receipt.id,
+                at: count + receipt.offset,
+                entries: receipt.entries.filter((entry) => relevant.has(entry.key))
+              })
+            count++
+          }
+        }
+        const state = {
+          count,
+          effects: [...loreEffectsAt({ count, activations })].map(([key, effect]) => ({ key, ...effect }))
+        }
+        pins.loreStates.push({ key: keyOf(leaf, identities, continuing ?? null), state })
+        return state
+      }),
+
     messageCount: (leaf) =>
       Effect.gen(function* () {
         const selected = yield* shown(leaf, "s")
@@ -770,7 +840,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const onDisplay = yield* display(leaf)
         const counted = sql`count(*) AS n FROM path JOIN slots s ON s.id = path.id
         JOIN versions v ON v.id = ${selected}
-        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed' AND length(v.content) > 0`
+        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed' AND (length(v.content) > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id))`
         const [row] =
           onDisplay === null
             ? yield* sql<{ n: number }>`
@@ -1064,6 +1134,11 @@ const replaySources = (
 
     noteHistory: live.noteHistory,
     onPath: live.onPath,
+    loreState: (leaf, identities, continuing) =>
+      Effect.map(
+        pinned(pins.loreStates ?? [], keyOf(leaf, identities, continuing ?? null), "lorebook activation history"),
+        ({ state }) => state
+      ),
     messageCount: (leaf) =>
       Effect.map(pinned(pins.messageCount ?? [], keyOf(leaf), "the path message count"), ({ count }) => count),
 

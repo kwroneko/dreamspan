@@ -9,7 +9,6 @@ import { useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Checkbox } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
@@ -138,15 +137,18 @@ export function CardFilterControl({
   cards,
   groups,
   withPersonas = false,
-  compact = false
+  compact = false,
+  wrap = true
 }: {
   value: CardFilter
   onChange: (filter: CardFilter) => void
   cards: ReadonlyArray<ShellCard>
   groups?: number | null
-  /** Include personas is ticked: the characters' counts count them too. */
+  /** Personas are included: the characters' counts count them too. */
   withPersonas?: boolean
   compact?: boolean
+  /** Wraps onto more lines when narrow; off, the choices scroll sideways instead. */
+  wrap?: boolean
 }) {
   const counts = filterCounts(cards, withPersonas)
   const options = FILTERS.filter((f) => f !== "groups" || groups !== undefined)
@@ -156,7 +158,7 @@ export function CardFilterControl({
     return (
       <Select<CardFilter>
         ariaLabel="Show"
-        className="h-8!"
+        className="h-8! gap-1! px-2!"
         value={shown}
         onValueChange={onChange}
         items={options.map((f) => ({
@@ -167,7 +169,7 @@ export function CardFilterControl({
     )
   return (
     <Segmented
-      wrap
+      wrap={wrap}
       label="Show"
       value={shown}
       onValueChange={onChange}
@@ -189,7 +191,9 @@ export function CardFilterControl({
 
 /**
  * Include personas: the persona folder's cards among the characters, marked. Only where a
- * filter lists characters (not Personas, not Groups).
+ * filter lists characters (not Personas, not Groups). Under those two it stays in place but
+ * invisible (visibility: hidden also drops it from the tab order and the accessibility tree), so
+ * the controls around it don't shift.
  */
 export function IncludePersonas({
   browse,
@@ -198,15 +202,16 @@ export function IncludePersonas({
   browse: CardBrowse
   onChange: (change: Partial<CardBrowse>) => void
 }) {
-  if (browse.filter === "personas" || browse.filter === "groups") return null
+  const hidden = browse.filter === "personas" || browse.filter === "groups"
   return (
-    <Checkbox
-      checked={browse.withPersonas}
-      onCheckedChange={(withPersonas) => onChange({ withPersonas })}
-      hint="Shows the cards you play as among these characters"
-    >
-      Include personas
-    </Checkbox>
+    <IconButton
+      label="Include personas"
+      hint={browse.withPersonas ? "Click to hide personas" : "Click to show personas"}
+      icon={browse.withPersonas ? "user" : "user-x"}
+      aria-pressed={browse.withPersonas}
+      className={`${hidden ? "invisible" : ""} ${browse.withPersonas ? "" : "text-text!"} aria-pressed:bg-surface-raised aria-pressed:text-accent`}
+      onClick={() => onChange({ withPersonas: !browse.withPersonas })}
+    />
   )
 }
 
@@ -250,7 +255,7 @@ export function SortDirection({
   return (
     <IconButton
       label={`Order: ${order}`}
-      hint={`${order}. Click for ${orderName(kind, !reversed).toLowerCase()}`}
+      hint={`Click to sort ${orderName(kind, !reversed).toLowerCase()}`}
       icon={reversed ? "sortUp" : "sortDown"}
       onClick={onToggle}
     />
@@ -263,13 +268,15 @@ export function CardSortControl({
   reversed,
   onChange,
   compact = false,
-  label = "Sort by"
+  label = "Sort by",
+  className = ""
 }: {
   sort: CardSort
   reversed: boolean
   onChange: (change: Partial<CardBrowse>) => void
   compact?: boolean
   label?: string
+  className?: string
 }) {
   const direction = (
     <SortDirection
@@ -279,7 +286,7 @@ export function CardSortControl({
     />
   )
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div className={`flex shrink-0 items-center gap-1 ${className}`}>
       {compact ? (
         <Menu
           label={label}
@@ -347,7 +354,7 @@ export function FavouriteStar({ card, className = "" }: { card: ShellCard; class
   return (
     <IconButton
       label={on ? `Remove ${name} from favourites` : `Add ${name} to favourites`}
-      hint={on ? "A favourite: click to remove" : "Add to favourites"}
+      hint={on ? "Click to remove from favourites" : "Click to add to favourites"}
       icon="star"
       filled={on}
       aria-pressed={on}

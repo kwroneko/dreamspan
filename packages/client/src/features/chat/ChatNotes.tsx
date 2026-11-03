@@ -12,7 +12,7 @@ import type { SharedNote } from "@rp/shared/editorApi.ts"
 import type { SummaryFill } from "@rp/shared/inspectorApi.ts"
 import type { Placement } from "@rp/shared/docs/note.ts"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AsyncView, ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
@@ -25,7 +25,7 @@ import type { WorkspaceViewProps } from "../editor/workspaceViews.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Alert } from "../../ui/Surface.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { AddNoteButtons, type NoteCard, SharedNotePicker } from "../editor/notes.tsx"
+import { type NoteCard, NoteSectionHeader, SharedNotePicker } from "../editor/notes.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useCast } from "./cast.ts"
 import { chatNoteActions } from "./presentation.tsx"
@@ -170,6 +170,9 @@ export function NotesTab({
   const refs = useAtomValue(cardRefs)
   const call = useCaller()
   const [picking, setPicking] = useState<Group | null>(null)
+  // The note just added: it scrolls into view and flashes once it shows (owner, 2026-11-02).
+  const [added, setAdded] = useState<string | null>(null)
+  const revealed = useCallback(() => setAdded(null), [])
   const sections = useRef(new Map<string, HTMLElement>())
   const count = AsyncResult.isSuccess(listed) ? listed.value.length : 0
   const { blocks, settings } = useNoteBlocks(count)
@@ -205,6 +208,8 @@ export function NotesTab({
     const on = await session.changeCast({ _tag: "Note", entityId: made.value.entityId, active: true })
     setError(on.ok ? null : on.error)
     blocks.setOpen(made.value.id, true)
+    if (!shared) settings.setOpen(made.value.id, true)
+    setAdded(made.value.id)
     refresh()
   }
   return (
@@ -216,14 +221,17 @@ export function NotesTab({
           const own = notes.filter((n) => n.card === null)
           return (
             <>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <span className="min-w-0 flex-1 basis-60" />
-                <NoteListControls ids={notes.map((n) => n.ref.id)} blocks={blocks} />
-              </div>
+              {/* At the right at every width, with the page-level controls (owner, 2026-11-02). */}
+              <NoteListControls ids={notes.map((n) => n.ref.id)} blocks={blocks} />
               {/* The chat's and each card's notes side by side as the panel widens (26rem each at least). */}
               <div className="grid gap-5 @4xl:grid-cols-[repeat(auto-fill,minmax(26rem,1fr))] @4xl:gap-x-8">
                 <section aria-label="This chat's notes" className="flex min-w-0 flex-col gap-1.5">
-                  <h3 className="text-sm font-semibold">This chat</h3>
+                  <NoteSectionHeader
+                    title="This chat"
+                    addHint="Adds a new note to this chat."
+                    onNew={() => void add({ card: null })}
+                    onPick={() => setPicking({ card: null })}
+                  />
                   {own.length === 0 ? (
                     <p className="text-sm text-muted">
                       No notes yet. A note here is text the model is sent with this chat.
@@ -237,11 +245,10 @@ export function NotesTab({
                       blocks={blocks}
                       settings={settings}
                       onRelinked={(entry) => relinked(entry.ref.id)}
+                      added={added}
+                      onRevealed={revealed}
                     />
                   )}
-                  <div>
-                    <AddNoteButtons onNew={() => void add({ card: null })} onPick={() => setPicking({ card: null })} />
-                  </div>
                 </section>
                 {named.map(({ entity, name }) => {
                   const theirs = notes.filter((n) => n.card === entity)
@@ -256,25 +263,27 @@ export function NotesTab({
                       aria-label={`${name}'s notes`}
                       className="flex min-w-0 scroll-mt-2 flex-col gap-1.5"
                     >
-                      <h3 className="text-sm font-semibold">{name}</h3>
+                      <NoteSectionHeader
+                        title={name}
+                        addHint={`Adds a new note to ${name}.`}
+                        onNew={() => void add(group)}
+                        onPick={() => setPicking(group)}
+                      />
                       {theirs.length === 0 ? (
                         <p className="text-sm text-muted">No notes yet.</p>
                       ) : (
-                        <>
-                          <NoteList
-                            label="Notes"
-                            entries={entries(theirs, false)}
-                            cards={named}
-                            call={call}
-                            blocks={blocks}
-                            settings={settings}
-                            onRelinked={(entry) => relinked(entry.ref.id)}
-                          />
-                        </>
+                        <NoteList
+                          label="Notes"
+                          entries={entries(theirs, false)}
+                          cards={named}
+                          call={call}
+                          blocks={blocks}
+                          settings={settings}
+                          onRelinked={(entry) => relinked(entry.ref.id)}
+                          added={added}
+                          onRevealed={revealed}
+                        />
                       )}
-                      <div>
-                        <AddNoteButtons onNew={() => void add(group)} onPick={() => setPicking(group)} />
-                      </div>
                     </section>
                   )
                 })}

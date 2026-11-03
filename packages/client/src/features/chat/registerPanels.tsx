@@ -175,7 +175,7 @@ export const registerPanels = () => [
   }),
   chatPanels.register({
     id: "history",
-    label: "History edits",
+    label: "Search and replace",
     description: "Search and replace in this branch's messages, and undo past edits.",
     order: 90,
     icon: "history",
@@ -186,7 +186,7 @@ export const registerPanels = () => [
             <m.HistoryPanel session={session} view={view} active={active} onJump={onJump} onSummaries={onSummaries} />
           )
         })),
-      "history edits"
+      "search and replace"
     )
   })
 ]

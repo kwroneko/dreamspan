@@ -3,6 +3,7 @@
 // all of them; both buttons are reached by keyboard, their explanations shown on focus. Saving
 // is held, and a failure made, by catching the save on its way to the server. In the chat's
 // panel, it shares each surface's toolbar row and keeps its size. Everything here is made up.
+import { switchAll } from "./support/lorebook.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { openPanel, panelTab } from "./support/panel.ts"
@@ -79,9 +80,11 @@ for (const width of [1440, 390])
     await expect(cluster).toHaveAttribute("data-save-state", "clean")
     await expect(save).toBeDisabled()
     await expect(withMessage).toBeDisabled()
-    await expect(revert).toHaveCount(0)
+    await expect(revert).toBeVisible()
+    await expect(revert).toBeDisabled()
     await expect(cluster).not.toContainText(/revision/i)
     expect(await explanation(save)).toMatch(/^Nothing to save/)
+    expect(await explanation(revert)).toMatch(/No edits to revert/)
     await measure("clean")
 
     // Unsaved: Save is actionable, and so is Revert.
@@ -89,7 +92,7 @@ for (const width of [1440, 390])
     await expect(cluster).toHaveAttribute("data-save-state", "unsaved", { timeout: 30_000 })
     await expect(save).toBeEnabled()
     await expect(withMessage).toBeEnabled()
-    await expect(revert).toBeVisible()
+    await expect(revert).toBeEnabled()
     expect(await explanation(save)).toMatch(/History.*already in use/)
     expect(await explanation(withMessage)).toMatch(/note saying what changed/)
     await measure("unsaved")
@@ -180,8 +183,19 @@ for (const width of [1440, 390])
     const check = async (surface: string, scope: Locator, beside: Locator, edit: () => Promise<void>) => {
       const cluster = saveCluster(scope).first()
       await expect(cluster).toHaveAttribute("data-save-state", "clean", { timeout: 30_000 })
-      const before = (await cluster.boundingBox())!
-      const other = (await beside.boundingBox())!
+      await expect(beside).toBeVisible()
+      // Panel loading and sheet layout can move the whole row between protocol calls.
+      // Compare both controls in the same frame, preserving the actual overlap assertion.
+      const { before, other } = await cluster.evaluate(
+        (element, beside) => {
+          const box = (node: Element) => {
+            const { y, width, height } = node.getBoundingClientRect()
+            return { y, width, height }
+          }
+          return { before: box(element), other: box(beside!) }
+        },
+        await beside.elementHandle()
+      )
       expect(before.y < other.y + other.height && other.y < before.y + before.height, `${surface}: one row`).toBe(true)
       await edit()
       await expect(cluster).toHaveAttribute("data-save-state", "unsaved", { timeout: 30_000 })
@@ -203,10 +217,10 @@ for (const width of [1440, 390])
     await check("card", card, card.getByRole("tab", { name: "Definition", exact: true }), () =>
       typeInto(card.getByRole("textbox", { name: "Description", exact: true }), " Counts the gulls.")
     )
-    // The Prompt preset tab: Save on the left of Expand all's row.
+    // The Prompt preset tab: Save shares the editing row with Add prompt.
     await panelTab(page, "Prompt preset")
     const preset = page.getByRole("tabpanel", { name: "Prompt preset", exact: true })
-    await check("preset", preset, preset.getByRole("button", { name: "Expand all", exact: true }), async () => {
+    await check("preset", preset, preset.getByRole("button", { name: "Add prompt", exact: true }), async () => {
       await preset.getByRole("button", { name: "Expand Main Prompt", exact: true }).click()
       await typeInto(preset.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }), " Slowly.")
     })
@@ -214,15 +228,15 @@ for (const width of [1440, 390])
     const lore = await openPanel(page, "Lorebooks")
     await lore.getByRole("button", { name: new RegExp(`^Tides ${width}`) }).click()
     const editor = lore.getByRole("region", { name: `Lorebook Tides ${width}` })
-    await check("lorebook", editor, editor.getByRole("button", { name: "Expand all", exact: true }), () =>
-      editor.getByRole("button", { name: "Disable all", exact: true }).click()
+    await check("lorebook", editor, editor.getByRole("button", { name: "Add entry" }), () =>
+      switchAll(editor, "Disable all")
     )
     // A note: Save in its header, beside its menu.
     const notes = await openPanel(page, "Notes")
-    // New note is a button of its own since addbuttons, not an Add note menu's item.
+    // Add note is a button of its own in the section header since notesheader.
     await notes
       .getByRole("region", { name: "This chat's notes" })
-      .getByRole("button", { name: "New note", exact: true })
+      .getByRole("button", { name: "Add note", exact: true })
       .click()
     const note = notes.getByRole("region", { name: "Note Note" })
     await note.getByRole("textbox", { name: /^Text of/ }).fill("A first line.")

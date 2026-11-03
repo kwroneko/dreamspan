@@ -6,6 +6,9 @@
 // folder with the current persona ticked; the same search filters both. The same switcher picks the persona (who `{{user}}` is) from
 // Members / Personas / All cards, opening on Personas: a library of hundreds of cards is
 // filtered in memory and only the first rows are drawn.
+import { CardSurface } from "../cardForks/surfaces.tsx"
+import { useDefaultPersona } from "../characters/defaultPersona.tsx"
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { type KeyboardEvent, memo, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
@@ -21,6 +24,9 @@ import { ChevronIcon } from "./icons.tsx"
 import type { Outcome } from "./session.ts"
 
 type SwitcherTab = "members" | "personas" | "all"
+
+// A 48 px portrait plus the row's 6 px top and bottom padding.
+const CARD_ROW_HEIGHT = 60
 
 const fold = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()
 
@@ -62,16 +68,20 @@ function CardOptions({
   active,
   current,
   currentLabel,
+  played,
   members,
   empty,
   onActive,
-  onPick
+  onPick,
+  personaOnly
 }: {
+  personaOnly: boolean
   id: string
   cards: ReadonlyArray<CastCard>
   active: number
   current: EntityId | null
   currentLabel: string
+  played: EntityId | null
   /** The chat's members, when picking a card that isn't one makes it join; null when none can join. */
   members: ReadonlySet<EntityId> | null
   empty: string
@@ -84,7 +94,7 @@ function CardOptions({
   const virtualizer = useVirtualizer({
     count: cards.length,
     getScrollElement: () => list.current,
-    estimateSize: () => 44,
+    estimateSize: () => CARD_ROW_HEIGHT,
     overscan: 4,
     rangeExtractor: (range) => {
       const visible = defaultRangeExtractor(range)
@@ -98,8 +108,8 @@ function CardOptions({
   }, [active, cards, virtualizer])
   if (cards.length === 0) return <p className="px-1 py-2 text-sm text-muted">{empty}</p>
   return (
-    <div ref={list} id={id} role="listbox" aria-label="Cards" className="max-h-64 overflow-y-auto">
-      <div className="relative" style={{ height: cards.length * 44 }}>
+    <div ref={list} id={id} role="listbox" aria-label="Cards" className="max-h-64 overflow-y-auto p-2">
+      <div className="relative" style={{ height: cards.length * CARD_ROW_HEIGHT }}>
         {virtualizer.getVirtualItems().map((item) => {
           const index = item.index
           const card = cards[index]!
@@ -118,8 +128,8 @@ function CardOptions({
               onPointerDown={(event) => event.preventDefault()}
               onPointerMove={() => index !== active && onActive(index)}
               onClick={() => onPick(card)}
-              className="absolute top-0 left-0 flex h-11 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm aria-[current]:font-medium aria-selected:bg-surface-raised aria-selected:ring-1 aria-selected:ring-border"
-              style={{ transform: `translateY(${item.start}px)` }}
+              className="absolute top-0 left-0 flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm aria-[current]:font-medium aria-selected:bg-surface-raised aria-selected:ring-1 aria-selected:ring-border"
+              style={{ height: CARD_ROW_HEIGHT, transform: `translateY(${item.start}px)` }}
             >
               <Avatar
                 id={card.entityId}
@@ -137,8 +147,16 @@ function CardOptions({
               {members !== null && !members.has(card.entityId) && !card.persona && (
                 <span className="shrink-0 text-xs text-muted">adds to this chat</span>
               )}
-              {card.entityId === current && <Badge>{currentLabel}</Badge>}
-              {card.persona && <Badge>persona</Badge>}
+              {card.entityId === current && card.entityId !== played && <Badge>{currentLabel}</Badge>}
+              {(card.entityId === played || (card.persona && !personaOnly)) && (
+                <PersonaBadge played={card.entityId === played} />
+              )}
+              <CardSurface placement="persona-badge" entityId={card.entityId} />
+              {card.persona && (
+                <span onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                  <CardSurface placement="persona-menu" entityId={card.entityId} label={card.name} />
+                </span>
+              )}
             </div>
           )
         })}
@@ -154,6 +172,7 @@ function SectionRow({
   index,
   active,
   current,
+  played,
   onActive,
   onPick
 }: {
@@ -162,6 +181,7 @@ function SectionRow({
   index: number
   active: boolean
   current: boolean
+  played: boolean
   onActive: (index: number) => void
   onPick: (card: CastCard) => void
 }) {
@@ -182,6 +202,13 @@ function SectionRow({
         <span className="[overflow-wrap:anywhere]">{card.name}</span>
         {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
       </span>
+      {(played || card.persona) && <PersonaBadge played={played} />}
+      <CardSurface placement="persona-badge" entityId={card.entityId} />
+      {card.persona && (
+        <span onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+          <CardSurface placement="persona-menu" entityId={card.entityId} label={card.name} />
+        </span>
+      )}
       {current && <Icon name="check" size={16} className="text-accent" />}
     </div>
   )
@@ -233,6 +260,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   compact?: boolean
 }) {
   const view = useCast()
+  const defaultPersona = useDefaultPersona()
+  const defaultLabel = pending && persona && speaker !== null && speaker === defaultPersona ? " (default)" : ""
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<SwitcherTab>("personas")
   const [all, setAll] = useState<ReadonlyArray<CastCard> | null>(null)
@@ -361,7 +390,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         id={listId}
         role="listbox"
         aria-label="Speak as, or your persona"
-        className="flex min-h-0 flex-col overflow-y-auto"
+        className="flex min-h-0 flex-col overflow-y-auto p-2"
       >
         <div role="group" aria-label="Speak as" aria-describedby={`${listId}-speak-as`} className="flex flex-col">
           <p id={`${listId}-speak-as`} className="px-2 pb-1 text-xs text-muted">
@@ -382,6 +411,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
                 index={index}
                 active={index === active}
                 current={card.entityId === speaker}
+                played={card.entityId === personas.current}
                 onActive={setActive}
                 onPick={() => pickAt(index)}
               />
@@ -417,6 +447,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
                 index={shown.length + at}
                 active={shown.length + at === active}
                 current={card.entityId === personas.current}
+                played={card.entityId === personas.current}
                 onActive={setActive}
                 onPick={() => pickAt(shown.length + at)}
               />
@@ -426,11 +457,13 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       </div>
     ) : (
       <CardOptions
+        personaOnly={persona && tab === "personas"}
         id={listId}
         cards={loading ? [] : shown}
         active={active}
         current={speaker}
         currentLabel={persona ? "your persona" : "speaking"}
+        played={persona ? speaker : (view.cast?.playedByMe[0] ?? null)}
         members={pending || !persona ? null : memberSet}
         empty={empty}
         onActive={setActive}
@@ -444,7 +477,9 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       initialFocus={search}
       // Two sections at the composer: room for the cast and the personas under it.
       wide={personas !== undefined}
-      triggerLabel={persona ? `Playing as ${name}. Change your persona` : `Speaking as ${name}. Change the speaker`}
+      triggerLabel={
+        persona ? `Playing as ${name}${defaultLabel}. Change your persona` : `Speaking as ${name}. Change the speaker`
+      }
       hint={persona ? `You play ${name} ({{user}}). Change who you play` : `Speaking as ${name}. Change who's speaking`}
       triggerClassName={
         trigger
@@ -466,7 +501,12 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
             ) : (
               <span aria-hidden="true" className="size-1" />
             )}
-            {!compact && <span className="min-w-0 truncate">{name}</span>}
+            {!compact && (
+              <span className="min-w-0 truncate">
+                {name}
+                {defaultLabel}
+              </span>
+            )}
             <ChevronIcon up />
           </>
         )

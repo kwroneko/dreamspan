@@ -139,9 +139,7 @@ for (const kind of ["lorebook", "preset", "card"] as const) {
       }
     })
     // Closing the editor returns to a usable chat, with no invisible modal trapping focus.
-    await editor
-      .getByRole("button", { name: kind === "preset" ? "Close preset editor" : "Back to the chat", exact: true })
-      .click()
+    await editor.getByRole("button", { name: kind === "preset" ? "Close" : "Back to the chat", exact: true }).click()
     await expect(editor).toHaveCount(0)
     await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeEditable()
     await page.getByRole("textbox", { name: "Message", exact: true }).fill("The chat still works.")

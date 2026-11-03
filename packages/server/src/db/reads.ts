@@ -1,3 +1,4 @@
+import { LibraryRef } from "@rp/shared/library.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
 import { revisionNumber, revisionUse } from "./revisionNumbers.ts"
 import { previewForkNotes } from "./forkNotes.ts"
@@ -582,7 +583,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         query("GetDraftState")
       ),
 
-    ListLibrary: ({ userId, kind, tag, archived }) =>
+    ListLibrary: ({ userId, kind, tag, archived, withFilterData }) =>
       lib
         .refsWhere(
           `e.owner_user_id = ? AND e.kind = ? AND r.ref_kind <> 'chat_override' AND e.deleted_at IS NULL
@@ -591,7 +592,32 @@ export const makeReadHandlers = Effect.gen(function* () {
           [userId, kind, archived ? 1 : 0, tag, tag]
         )
         .pipe(
-          Effect.map((rows) => rows.map(toLibraryRef)),
+          Effect.flatMap((rows) =>
+            Effect.gen(function* () {
+              if (!withFilterData || kind !== "card" || !rows.length) return rows.map(toLibraryRef)
+              const data = yield* sql<{ id: string; source_path: string | null; tags: string | null }>`
+              SELECT r.id, r.source_path, json_extract(h.doc_json, '$.tags') AS tags
+              FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+              JOIN entity_revisions h ON h.id = r.head_revision_id
+              WHERE e.owner_user_id = ${userId} AND r.id IN ${sql.in(rows.map((r) => r.id))}`
+              const byId = new Map(data.map((row) => [row.id, row]))
+              return rows.map((row) => {
+                const extra = byId.get(row.id)
+                const filename = extra?.source_path
+                  ?.replaceAll("\\", "/")
+                  .split("/")
+                  .at(-1)
+                  ?.replace(/\.[^.]*$/, "")
+                return new LibraryRef({
+                  ...toLibraryRef(row),
+                  filterData: {
+                    name: filename || row.label,
+                    tags: extra?.tags ? (JSON.parse(extra.tags) as Array<string>) : []
+                  }
+                })
+              })
+            })
+          ),
           query("ListLibrary")
         ),
 

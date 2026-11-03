@@ -1,4 +1,5 @@
 import * as costs from "./costs.tsx"
+import * as clientVersion from "./clientVersion.tsx"
 import * as snippets from "./snippets/index.tsx"
 // The core features, each registering its routes and slot entries the way a plugin will.
 import * as cardRename from "./cardRename/index.tsx"
@@ -33,6 +34,7 @@ export const registerFeatures = () => {
   cardExport.register()
   cardImport.register()
   shell.register()
+  clientVersion.register()
   settings.register()
   login.register()
   characters.register()

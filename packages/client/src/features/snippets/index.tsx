@@ -445,6 +445,8 @@ export const register = () => [
     description: sendHint(true),
     icon: "snippet",
     editor: "text",
+    applies: ({ source }) => source !== "snippet",
+    unavailable: ({ text }) => (text.trim() === "" ? "No text to send yet." : "The Snippets panel is unavailable."),
     available: ({ text, source }) => source !== "snippet" && text.trim().length > 0 && canSend(),
     run: sendOrChoose,
     choices: SnippetChoices

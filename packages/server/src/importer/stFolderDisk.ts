@@ -2,6 +2,7 @@
 // ARCHITECTURE.md §13): listing the files the import reads, and reading one of them, a chat
 // in parts cut at line ends as the browser upload sends it. Plain file reads on the main
 // thread; parsing stays in the format workers.
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { createHash } from "node:crypto"
 import { createReadStream } from "node:fs"
 import { open, opendir, readdir, readFile, realpath, stat } from "node:fs/promises"
@@ -188,7 +189,7 @@ export const readStFolderFile = (
         if (size !== seen.size || mtimeMs !== seen.modifiedMs)
           throw new Refused("It changed after the folder was read. Look in the folder again, then import it.")
         const max = chat ? ST_CHAT_PART_BYTES : defaultLimits.maxFileBytes
-        if (!chat && size > max) throw new Refused(`It's larger than ${Math.round(max / 1024 / 1024)} MB.`)
+        if (!chat && size > max) throw new Refused(`It's larger than ${formatByteSize(max)}.`)
         const buffer = Buffer.alloc(Math.max(0, Math.min(max, size - start)))
         const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, start)
         let bytes: Uint8Array = buffer.subarray(0, bytesRead)

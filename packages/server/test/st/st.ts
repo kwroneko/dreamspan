@@ -96,13 +96,19 @@ const WRITES = /\/api\/[^?]*(save|edit|merge-attributes|delete|rename|create|imp
  * A fresh browser context with ST loaded and initialized, in UTC. `now` fixes the page's
  * clock (timers still run).
  */
-const openPage = async (
+export const openPage = async (
   browser: Browser,
   url: string,
-  options: { readOnly: boolean; now?: number; previewOverlap?: "protected" | "unprotected" }
+  options: { readOnly: boolean; now?: number; previewOverlap?: "protected" | "unprotected"; worldInfoHook?: string }
 ) => {
   const context = await browser.newContext({ timezoneId: MACRO_TIME_ZONE, locale: "en-US" })
   if (options.now !== undefined) await context.clock.setFixedTime(options.now)
+  if (options.worldInfoHook) {
+    await context.route("**/scripts/world-info.js", async (route) => {
+      const response = await route.fetch()
+      await route.fulfill({ response, body: (await response.text()) + options.worldInfoHook })
+    })
+  }
   if (options.readOnly) {
     await context.route("**/scripts/PromptManager.js", async (route) => {
       const response = await route.fetch()

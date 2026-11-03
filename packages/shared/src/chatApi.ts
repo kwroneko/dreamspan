@@ -20,7 +20,15 @@ import {
 } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { ComposerImageIds, ComposerChoice, TextTooLong } from "./composerApi.ts"
-import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState, insertDraftKey } from "./drafts.ts"
+import {
+  ObservedDeletion,
+  Draft,
+  DraftHistoryPolicy,
+  DraftKey,
+  DraftRestore,
+  DraftState,
+  insertDraftKey
+} from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
 import { RefId } from "./library.ts"
@@ -338,6 +346,7 @@ export const messageDraftKey = (target: MessageDraftTarget) =>
  */
 export const MessageDraftSave = Schema.Struct({
   target: MessageDraftTarget,
+  observedDeletion: Schema.optionalKey(ObservedDeletion),
   draftId: Schema.NullOr(Schema.String),
   content: Schema.String,
   images: Schema.optionalKey(MessageImages),

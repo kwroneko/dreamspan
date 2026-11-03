@@ -15,7 +15,7 @@ test("another tab creating the same pair must disable Create in the waiting tab"
     await tab.getByRole("button", { name: "New card", exact: true }).click()
     const dialog = tab.getByRole("dialog", { name: "New card" })
     await dialog.getByRole("textbox", { name: "Display name", exact: true }).fill("Review cross-tab")
-    await dialog.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("1")
+    await dialog.getByRole("textbox", { name: "Version", exact: true }).fill("1")
     await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeEnabled()
   }
   await page.getByRole("dialog").getByRole("button", { name: "Create", exact: true }).click()

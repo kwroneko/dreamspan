@@ -118,7 +118,7 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   await expect(page.getByText("Plugin summary fields", { exact: true })).toBeVisible()
   await plugin(page, "close")
   await expect(page.getByText("Plugin summary fields", { exact: true })).toHaveCount(0)
-  await page.getByRole("button", { name: "Close the panel", exact: true }).click()
+  await page.getByRole("button", { name: "Hide panel", exact: true }).click()
   await plugin(page, "hide")
   await expect(page.getByText("Original 1", { exact: true })).toBeVisible()
   await expect(page.getByRole("group", { name: "Versions", exact: true })).toHaveCount(0)

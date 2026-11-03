@@ -5,6 +5,7 @@ import { join, resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { textField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser, type Client } from "./support/rpc.ts"
 import { messageMenu } from "./support/message.ts"
 import { noteBlock, noteText } from "./support/notes.ts"
@@ -185,6 +186,8 @@ for (const width of [1440, 390])
       await expect(treaty.getByRole("button", { name: "As it was then" })).toHaveAttribute("aria-pressed", "true")
       // Unsaved text is the latest state: each row says so, and its comparison shows it.
       await expect(dialog.getByText("This chat · Unsaved changes")).toHaveCount(2)
+      await expect(dialog).toHaveAccessibleDescription("")
+      if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "branch-from-here")
       if (width === 1440 && theme === "light") {
         await all.getByRole("button", { name: "As it is now" }).click()
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click()

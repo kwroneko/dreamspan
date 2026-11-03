@@ -1,9 +1,20 @@
 // Regression for comparing a streaming swipe: the dialog stays open across completion
 // and retains the final saved content and metadata at both widths.
 import { expect, test } from "@playwright/test"
+import { syntheticMarkdown, tokenize } from "../../server/src/dev/syntheticText.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
-const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "5", FAKE_GENERATOR_TOKENS: "120" })
+const seed = 1312
+const tokens = 120
+const tps = 5
+// The requested size is approximate; derive the wait from the actual fixture body.
+const completionMs = Math.ceil(tokenize(syntheticMarkdown(seed, tokens)).length / tps) * 1000 + 10_000
+const server = serverPerFile({
+  ...withAdmin,
+  FAKE_GENERATOR_TPS: String(tps),
+  FAKE_GENERATOR_TOKENS: String(tokens),
+  FAKE_GENERATOR_SEED: String(seed)
+})
 
 for (const viewport of [
   { width: 1440, height: 900 },
@@ -20,7 +31,7 @@ for (const viewport of [
     await page.getByRole("button", { name: "Send", exact: true }).click()
     const reply = page.getByRole("article", { name: "Reply", exact: true, includeHidden: true }).last()
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(1)
-    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 30_000 })
+    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: completionMs })
     const versions = reply.getByRole("group", { name: "Versions", exact: true })
     await versions.getByRole("button", { name: "Generate another version", exact: true }).click()
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(1)
@@ -33,7 +44,7 @@ for (const viewport of [
     const current = compare.getByRole("region", { name: "Version 2", exact: true })
     await expect(current.getByText("generating", { exact: true })).toHaveCount(1)
     await compare.getByRole("button", { name: "What changed", exact: true }).click()
-    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 30_000 })
+    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: completionMs })
     // Switching back must show the final text, even though Compare opened on a live version.
     await compare.getByRole("button", { name: "Both texts", exact: true }).click()
     const finalText = (await reply.locator(".markdown").textContent()) ?? ""

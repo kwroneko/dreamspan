@@ -6,17 +6,16 @@
 // (`stImportSections`), so a plugin can replace or remove one. Report text quotes files, so
 // it's rendered as text.
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { StRoot } from "@rp/shared/stFolder.ts"
 import type {
   StFolderEntry,
   StHiddenRun,
-  StImportedChat,
   StImportJob,
   StImportJobDetail,
   StImportReport,
-  StLinkChoice,
-  StNotSent
+  StLinkChoice
 } from "@rp/shared/stImportApi.ts"
 import { type StSentKind, stPlan, stPlanKinds } from "@rp/shared/stPlan.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
@@ -31,16 +30,18 @@ import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { ProgressBar, Spinner } from "../../ui/Spinner.tsx"
+import { ProgressBar } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { readableChatTitle } from "../chat/chatTitle.ts"
-import { NeedsAttention } from "./stImportIssues.tsx"
+import { ImportLog, reportIssues } from "./stImportIssues.tsx"
+import { Menu, MenuItem } from "../../ui/Menu.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
 import { FolderBrowser } from "./FolderBrowser.tsx"
 import { type StImportSectionProps, stImportSections } from "./slots.ts"
 import {
-  megabytes,
   percentOf,
   ST_IMPORTS,
   ST_PREVIEW,
@@ -61,17 +62,14 @@ import {
   stRoots
 } from "./stUpload.ts"
 
-/** The report's kinds, as `StImportReport.counts` names them. */
-const KINDS: ReadonlyArray<readonly [string, string]> = [
+/** Compact result stats, including kinds with nothing imported. */
+const KINDS = [
   ["card", "Cards"],
-  ["persona", "Personas"],
   ["chat", "Chats"],
-  ["group_chat", "Group chats"],
-  ["group", "Groups"],
-  ["character_note", "Character author's notes"],
+  ["preset", "Presets"],
   ["lorebook", "Lorebooks"],
-  ["preset", "Presets"]
-]
+  ["persona", "Personas"]
+] as const
 
 /** The preview's kinds, as the folder's files are found (`stPlan`). */
 const FOLDER_KINDS: ReadonlyArray<readonly [StSentKind, string]> = [
@@ -86,12 +84,6 @@ const FOLDER_KINDS: ReadonlyArray<readonly [StSentKind, string]> = [
 ]
 
 const OUTCOMES = ["added", "updated", "failed"] as const
-
-/** How the report words each outcome; `unchanged` for a group is a group read for its chats. */
-const OUTCOME_WORDS = { added: "added", updated: "updated", unchanged: "already here", failed: "failed" }
-// Not `skipped`: the report holds only what the user must act on (DESIGN §1.4), and skipped
-// chats hold only a greeting.
-const SHOWN_OUTCOMES = ["added", "updated", "unchanged", "failed"] as const
 
 /** Where the folder browser starts: the folder last looked in on this device, else the newest path import's. */
 const LAST_FOLDER = "rp.st-import.folder"
@@ -215,64 +207,37 @@ const linkUploaded = async (importId: string, path: string, card: EntityId | "no
 
 // --- The report
 
-/** What the import did, in one line per kind: what changed, what was already here, what failed. Details aren't listed. */
-function Counts({ report }: { report: StImportReport }) {
-  const rows = KINDS.flatMap(([kind, label]) => {
-    const count = report.counts[kind]
-    const shown = count ? SHOWN_OUTCOMES.filter((outcome) => count[outcome] > 0) : []
-    const words = (outcome: (typeof SHOWN_OUTCOMES)[number]) =>
-      kind === "group" && outcome === "unchanged" ? "read for their chats" : OUTCOME_WORDS[outcome]
-    return count && shown.length ? [{ kind, label, text: shown.map((o) => `${count[o]} ${words(o)}`).join(", ") }] : []
-  })
-  return rows.length ? (
-    <ul aria-label="Imported" className="flex flex-col gap-1.5 text-sm">
-      {rows.map(({ kind, label, text }) => (
-        <li key={kind}>
-          <span className="font-medium">{label}:</span> <span className="text-muted">{text}</span>
+function Counts({ job, issues }: { job: StImportJob; issues: ReturnType<typeof reportIssues> }) {
+  const imported = (kind: string) => {
+    const count = job.counts[kind]
+    return count ? count.added + count.updated : 0
+  }
+  const stats = [
+    ...KINDS.map(([kind, label]) => [label, imported(kind) + (kind === "chat" ? imported("group_chat") : 0)] as const),
+    ["Warnings", issues.filter((issue) => issue.level === "warning").length] as const,
+    ["Errors", issues.filter((issue) => issue.level === "error").length] as const
+  ]
+  return (
+    <ul
+      aria-label={job.status === "running" ? "Import progress" : "Imported"}
+      className="flex flex-wrap gap-x-5 gap-y-2 text-sm"
+    >
+      {stats.map(([label, count]) => (
+        <li key={label}>
+          <span className="text-muted">{label}:</span> <span className="font-semibold tabular-nums">{count}</span>
         </li>
       ))}
     </ul>
-  ) : (
-    <p className="text-sm text-muted">Nothing new or changed to import.</p>
-  )
-}
-
-/** Where to go once an import is in: the characters, and the newest imported chat. */
-function NextSteps({ latestChat }: { latestChat: StImportedChat | null }) {
-  return (
-    <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
-      <Link to="/" className={buttonClass(latestChat ? "secondary" : "primary")}>
-        Open your characters
-      </Link>
-      {latestChat && (
-        <Link
-          to="/chats/$chatId"
-          params={{ chatId: latestChat.chatId }}
-          // The chat's name wraps on a phone rather than being cut off.
-          className={`${buttonClass("primary")} h-auto! min-h-9 max-w-full py-2 text-left whitespace-normal!`}
-        >
-          <span className="min-w-0 [overflow-wrap:anywhere]">
-            {/* As the chat list names it, never ST's file name (DESIGN §2.1). */}
-            Continue your latest chat
-            {latestChat.title
-              ? `: ${readableChatTitle(
-                  latestChat.title,
-                  latestChat.createdAt ?? null,
-                  (latestChat.names ?? []).map((name) => ({ name }))
-                )}`
-              : ""}
-          </span>
-        </Link>
-      )}
-    </div>
   )
 }
 
 function LinkChoiceRow({
   choice,
-  onChoose
+  onChoose,
+  blocked
 }: {
   choice: StLinkChoice
+  blocked: boolean
   onChoose: (card: EntityId | "none") => Promise<string | null>
 }) {
   const library = useAtomValue(libraryAtom)
@@ -290,17 +255,32 @@ function LinkChoiceRow({
     { value: "none", label: "No card", description: "Imports it without linking it to any of your cards." }
   ]
   return (
-    <li className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0">
-      <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{choice.title}</span>
-      <span className="text-sm text-muted [overflow-wrap:anywhere]">{choice.reason}</span>
-      <div className="flex flex-wrap items-end gap-2">
-        <Field label={`Card for ${choice.title}`} className="w-full sm:w-64">
-          <Select items={items} value={card} onValueChange={setCard} placeholder="Choose a card" />
-        </Field>
+    <li className="flex min-w-0 flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
+      <p className="min-w-0 flex-1 basis-64 text-sm [overflow-wrap:anywhere]">
+        {choice.path.startsWith("chats/undefined/")
+          ? `Chat “${choice.title}” was saved without a character.`
+          : `Chat “${choice.title}”: ${choice.reason.replace(" ST's card for this chat may have been deleted or renamed.", "")}`}
+      </p>
+      <div className="flex max-w-full flex-wrap items-center gap-2">
+        <Tooltip label="Choose the card to link to this chat.">
+          <span className="w-44 max-w-full">
+            <Select
+              ariaLabel={`Card for ${choice.title}`}
+              items={items}
+              value={card}
+              onValueChange={setCard}
+              placeholder="Choose a card"
+            />
+          </span>
+        </Tooltip>
         <Button
-          disabled={card === null}
+          disabled={card === null || blocked}
           pending={pending}
-          hint="Imports this chat now, linked to the card you chose."
+          hint={
+            blocked
+              ? "Wait for the import to finish before linking this chat."
+              : "Imports this chat with the selected card."
+          }
           onClick={async () => {
             setPending(true)
             // The report's candidates are the user's cards, or "none".
@@ -317,21 +297,6 @@ function LinkChoiceRow({
         </p>
       )}
     </li>
-  )
-}
-
-function NotSentList({ notSent }: { notSent: ReadonlyArray<StNotSent> }) {
-  if (notSent.length === 0) return null
-  return (
-    <Alert tone="danger" title="Not sent">
-      <ul className="list-disc pl-5">
-        {notSent.map((failure) => (
-          <li key={failure.path} className="[overflow-wrap:anywhere]">
-            {failure.path}: {failure.message}
-          </li>
-        ))}
-      </ul>
-    </Alert>
   )
 }
 
@@ -360,28 +325,31 @@ function ReportActions({
     if (!linked.ok) return linked.error.message
     return linked.value.outcome === "failed" ? linked.value.message || "The chat couldn't be imported." : null
   }
+  const count = report.links.length + report.hiddenRuns.length
+  if (count === 0) return null
   const unhide = ({ chatId, throughSlotId }: StHiddenRun) =>
     void action.run((client) => client("UnhideImportedRun", { chatId, throughSlotId, importId: job.id }), AFTER_ACTION)
   return (
-    <>
+    <Card>
+      <CardHeader title={`Needs your action (${count})`} />
       <ErrorAlert error={action.error} />
       {report.links.length > 0 && (
-        <Card>
-          <CardHeader title="Chats to link" about="Choose a card for chats the import couldn’t match." />
+        <div>
           {linkNote && <p className="mb-3 text-sm text-muted">{linkNote}</p>}
           <ul aria-label="Chats to link" className="flex flex-col divide-y divide-border">
             {report.links.map((choice) => (
-              <LinkChoiceRow key={choice.path} choice={choice} onChoose={(card) => choose(choice.path, card)} />
+              <LinkChoiceRow
+                key={choice.path}
+                choice={choice}
+                blocked={job.status === "running"}
+                onChoose={(card) => choose(choice.path, card)}
+              />
             ))}
           </ul>
-        </Card>
+        </div>
       )}
       {report.hiddenRuns.length > 0 && (
-        <Card>
-          <CardHeader
-            title="Hidden from the start"
-            about="These chats start with hidden messages, often from manual summarizing in ST. Un-hide them to include them in the context again."
-          />
+        <div className={report.links.length ? "mt-3 border-t border-border pt-3" : ""}>
           <ul aria-label="Hidden runs" className="flex flex-col divide-y divide-border">
             {report.hiddenRuns.map((run) => (
               <li
@@ -389,24 +357,29 @@ function ReportActions({
                 className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex min-w-0 flex-col gap-1">
-                  <Link
-                    to="/chats/$chatId"
-                    params={{ chatId: run.chatId }}
-                    className="font-medium text-accent underline-offset-4 [overflow-wrap:anywhere] hover:underline"
-                  >
-                    {readableChatTitle(run.title)}
-                  </Link>
-                  <span className="text-sm text-muted">
-                    {run.hidden} messages hidden.{" "}
-                    {run.summaryCovers === true
-                      ? "Its summary covers them, so un-hiding sends them twice."
-                      : run.summaryCovers === false
-                        ? "Its summary doesn't cover all of them."
-                        : "It has no summary."}
-                  </span>
+                  <p className="text-sm">
+                    <Tooltip label="Opens the chat with these hidden messages.">
+                      <Link
+                        to="/chats/$chatId"
+                        params={{ chatId: run.chatId }}
+                        className="font-medium text-accent underline-offset-4 [overflow-wrap:anywhere] hover:underline"
+                      >
+                        {readableChatTitle(run.title)}
+                      </Link>
+                    </Tooltip>
+                    <span className="text-muted">
+                      {` has ${run.hidden} messages hidden from the start; `}
+                      {run.summaryCovers === true
+                        ? "its summary covers them, so un-hiding sends them twice."
+                        : run.summaryCovers === false
+                          ? "its summary doesn't cover all of them."
+                          : "the chat has no summary."}
+                    </span>
+                  </p>
                 </div>
                 <Button
-                  hint="Sends these messages to the model again, from the chat’s first message to the end of the run."
+                  disabled={job.status === "running"}
+                  hint="Includes the hidden messages in this chat’s context."
                   onClick={() => unhide(run)}
                 >
                   Un-hide
@@ -414,34 +387,13 @@ function ReportActions({
               </li>
             ))}
           </ul>
-        </Card>
+        </div>
       )}
-      <NeedsAttention report={report} />
-    </>
+    </Card>
   )
 }
 
 // --- One import
-
-/** Start, end, how long, how many files. */
-function JobFacts({ job, now }: { job: StImportJob; now: number }) {
-  const facts: ReadonlyArray<readonly [string, string]> = [
-    ["Started", when(job.startedAt)],
-    ...(job.finishedAt === null ? [] : ([["Ended", when(job.finishedAt)]] as const)),
-    [job.finishedAt === null ? "Running for" : "Took", took((job.finishedAt ?? now) - job.startedAt)],
-    ["Files", `${job.filesDone} of ${job.filesTotal}`]
-  ]
-  return (
-    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
-      {facts.map(([term, value]) => (
-        <div key={term} className="contents">
-          <dt className="text-muted">{term}</dt>
-          <dd>{value}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
 
 const useNow = (running: boolean) => {
   const [now, setNow] = useState(() => Date.now())
@@ -453,181 +405,105 @@ const useNow = (running: boolean) => {
   return now
 }
 
-function JobTitle({ job }: { job: StImportJob }) {
-  return (
-    <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
-      <h2 className="min-w-0 font-semibold [overflow-wrap:anywhere]">{job.source}</h2>
-      <Badge tone={STATUS_TONES[job.status]}>{STATUS_LABELS[job.status]}</Badge>
-    </div>
-  )
-}
-
-function RunningJob({ job }: { job: StImportJob }) {
+function Result({ detail }: { detail: StImportJobDetail }) {
+  const { job } = detail
   const action = useAction()
-  const now = useNow(true)
-  const sending = uploads.has(job.id)
-  return (
-    <Card>
-      <JobTitle job={job} />
-      <div role="status" className="flex flex-col gap-2 text-sm">
-        <span className="flex items-center gap-2 font-medium">
-          <Spinner />
-          Importing, {job.filesDone} of {job.filesTotal} files · {percentOf(job)}%
-        </span>
-        {job.currentFile && <span className="text-muted [overflow-wrap:anywhere]">{job.currentFile}</span>}
-        <ProgressBar
-          className="h-2 w-full"
-          max={Math.max(1, job.bytesTotal)}
-          value={job.bytesDone}
-          label="Imported so far"
-        />
-        <span className="text-muted">
-          {megabytes(job.bytesDone)} of {megabytes(job.bytesTotal)}
-        </span>
-      </div>
-      <p className="mt-3 text-sm">
-        {job.mode === "path"
-          ? "You can close this tab. The import keeps going; follow its progress here from any device."
-          : sending
-            ? "Keep this tab open until the import finishes. You can use other pages of the app."
-            : "Its files are sent from the tab that started it. If that tab was closed, the import ends as stopped 10 minutes after its last file arrived."}
-      </p>
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <JobFacts job={job} now={now} />
-      </div>
-      <div className="mt-4">
-        <Button
-          pending={action.pending}
-          onClick={() => {
-            stoppedUploads.add(job.id)
-            void action.run((client) => client("CancelStImport", { importId: job.id }), [ST_IMPORTS])
-          }}
-        >
-          Cancel the import
-        </Button>
-        <p className="mt-1 text-xs text-muted">Stop after the current file. What’s already imported stays.</p>
-      </div>
-      <ErrorAlert error={action.error} />
-    </Card>
-  )
-}
-
-function FinishedJob({ job, open }: { job: StImportJob; open: StImportSectionProps["open"] }) {
-  const action = useAction()
-  const admin = useSession().user.role === "admin"
-  const atom = useMemo(
-    () => AppClient.query("GetStImport", { importId: job.id }, { reactivityKeys: [ST_IMPORTS] }),
-    [job.id]
-  )
-  // Opened: the app shell stops saying it finished.
-  const seen = job.seen
+  const running = job.status === "running"
+  const now = useNow(running)
+  const issues = reportIssues(detail)
   useEffect(() => {
-    if (!seen) void action.run((client) => client("SeenStImport", { importId: job.id }), [ST_IMPORTS])
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening, whatever the action's identity
-  }, [job.id, seen])
-  const again = async () => {
-    // The job's folder is the ST user's own folder, so it's its one user.
-    const started = await action.run(
-      (client) => client("StartStPathImport", { path: job.source, prefix: "" }),
-      [ST_IMPORTS]
-    )
-    if (started.ok) open(started.value.importId)
-  }
-  const ended = job.status !== "complete"
+    if (!running && !job.seen) void action.run((client) => client("SeenStImport", { importId: job.id }), [ST_IMPORTS])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mark each finished import once when opened
+  }, [job.id, job.seen, running])
   return (
-    <AsyncView atom={atom} loading="Loading the report…">
-      {(detail: StImportJobDetail) => (
-        <>
-          <Card>
-            <JobTitle job={detail.job} />
-            <JobFacts job={detail.job} now={detail.job.finishedAt ?? detail.job.updatedAt} />
-            {detail.job.error && <p className="mt-3 text-sm text-danger">{detail.job.error}</p>}
-            {ended && (
-              <p className="mt-3 text-sm text-muted">
-                Importing the same folder again goes on from where this one was: what's in stays, and only what's new or
-                changed is imported.
-              </p>
-            )}
-            <div className="mt-4 flex flex-wrap gap-2">
-              {ended && job.mode === "path" && admin && (
-                <Button
-                  variant="primary"
-                  pending={action.pending}
-                  hint="Starts a new import of the same folder, which takes in only what’s new or changed."
-                  onClick={() => void again()}
-                >
-                  Import again
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                hint="Forgets this import and its report. Nothing it imported changes."
-                onClick={async () => {
-                  const cleared = await action.run(
-                    (client) => client("ClearStImports", { importId: job.id }),
-                    [ST_IMPORTS]
-                  )
-                  if (cleared.ok) open(null)
-                }}
-              >
-                Remove from the list
-              </Button>
-            </div>
-            {ended && job.mode === "upload" && (
-              <p className="mt-3 text-sm text-muted">To import it again, choose the folder again below.</p>
-            )}
-            <ErrorAlert error={action.error} />
-          </Card>
-          {detail.report && (
-            <Card>
-              <CardHeader title="Report" />
-              <Counts report={detail.report} />
-              <NextSteps latestChat={detail.latestChat} />
-            </Card>
+    <>
+      <Card>
+        <CardHeader title="Result" />
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-sm" role={running ? "status" : undefined}>
+          <Badge tone={STATUS_TONES[job.status]}>{STATUS_LABELS[job.status]}</Badge>
+          <span className="text-muted">
+            {when(job.startedAt)} · {took((job.finishedAt ?? now) - job.startedAt)}
+          </span>
+          {running && (
+            <span>
+              {job.filesDone} of {job.filesTotal} files · {percentOf(job)}%
+            </span>
           )}
-          <NotSentList notSent={detail.notSent} />
-          {detail.report && (
-            <ReportActions
-              job={detail.job}
-              report={detail.report}
-              linkNote={
-                detail.job.mode === "upload" && !uploads.has(detail.job.id)
-                  ? "This import's files were sent from a browser: linking a chat needs them again, from the tab that sent them, or by importing the folder again."
-                  : null
-              }
+        </p>
+        <Counts job={job} issues={issues} />
+        {running && (
+          <div className="mt-3 flex flex-col gap-2 text-sm">
+            <ProgressBar
+              className="h-2 w-full"
+              max={Math.max(1, job.bytesTotal)}
+              value={job.bytesDone}
+              label="Imported so far"
             />
-          )}
-        </>
+            {job.currentFile && <span className="text-muted [overflow-wrap:anywhere]">{job.currentFile}</span>}
+            <p className="text-muted">
+              {job.mode === "path"
+                ? "You can close this tab while the import runs."
+                : "Keep the tab that started this import open until it finishes."}
+            </p>
+            <Button
+              className="self-start"
+              pending={action.pending}
+              hint="Stops the import after the current file."
+              onClick={() => {
+                stoppedUploads.add(job.id)
+                void action.run((client) => client("CancelStImport", { importId: job.id }), [ST_IMPORTS])
+              }}
+            >
+              Cancel import
+            </Button>
+          </div>
+        )}
+        <ErrorAlert error={action.error} />
+      </Card>
+      {detail.report && (
+        <ReportActions
+          job={job}
+          report={detail.report}
+          linkNote={
+            job.mode === "upload" && !uploads.has(job.id)
+              ? "Linking this chat needs the files again; import the folder from this browser."
+              : null
+          }
+        />
       )}
-    </AsyncView>
+      <ImportLog detail={detail} />
+    </>
   )
 }
 
-/** The import opened (`?job=`), else the one running. */
-function JobSection({ opened, open }: StImportSectionProps) {
+/** An explicit history selection, otherwise the newest import, including a finished one. */
+function JobSection({ opened }: StImportSectionProps) {
   const result = useAtomValue(stImportsAtom)
   const top = useRef<HTMLDivElement>(null)
-  // An import opened from the list below shows up here, at the top: on a phone the list is
-  // screens further down, so the page goes to it.
+  const job = AsyncResult.isSuccess(result)
+    ? opened === null
+      ? result.value[0]
+      : result.value.find((job) => job.id === opened)
+    : undefined
+  const jobId = job?.id
+  const atom = useMemo(
+    () => (jobId ? AppClient.query("GetStImport", { importId: jobId }, { reactivityKeys: [ST_IMPORTS] }) : null),
+    [jobId]
+  )
   useEffect(() => {
     if (opened !== null) top.current?.scrollIntoView({ block: "start" })
   }, [opened])
-  if (!AsyncResult.isSuccess(result)) return <div ref={top} />
-  const job =
-    opened === null ? result.value.find((j) => j.status === "running") : result.value.find((j) => j.id === opened)
   return (
     <div ref={top} className="flex scroll-mt-4 flex-col gap-6 empty:hidden">
-      {job === undefined ? (
-        opened !== null && (
-          <Alert tone="warning" title="That import isn't in the list">
-            <p>It was removed from the list. What it imported is still in your library and chats.</p>
-          </Alert>
-        )
-      ) : job.status === "running" ? (
-        <RunningJob job={job} />
-      ) : (
-        <FinishedJob key={job.id} job={job} open={open} />
-      )}
+      {atom ? (
+        <AsyncView atom={atom} loading="Loading the report…">
+          {(detail) => <Result key={detail.job.id} detail={detail} />}
+        </AsyncView>
+      ) : opened !== null && AsyncResult.isSuccess(result) ? (
+        <Alert tone="warning" title="That import isn't in the list">
+          It was removed from history.
+        </Alert>
+      ) : null}
     </div>
   )
 }
@@ -733,7 +609,7 @@ function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; p
         </tbody>
       </table>
       <p className="text-sm text-muted">
-        {plan.send.length} files ({megabytes(bytes)})
+        {plan.send.length} files ({formatByteSize(bytes)})
         {plan.unsupported.length > 0 &&
           `, and ${plan.unsupported.length} that only text completion uses, which aren't read`}
         .{" "}
@@ -759,7 +635,7 @@ type Chosen =
   | { readonly _tag: "Path"; readonly root: string; readonly files: ReadonlyArray<StFolderEntry> }
   | { readonly _tag: "Picked"; readonly files: ReadonlyArray<StFound> }
 
-function StartSection({ open }: StImportSectionProps) {
+function StartForm({ open, close }: StImportSectionProps & { close: (() => void) | null }) {
   const registry = useContext(RegistryContext)
   const action = useAction()
   const admin = useSession().user.role === "admin"
@@ -850,7 +726,21 @@ function StartSection({ open }: StImportSectionProps) {
       <Card>
         <CardHeader
           title="SillyTavern data folder"
-          about="Import characters, personas, lorebooks, chat-completion presets, groups and chats from a SillyTavern folder. Choose the installation, data folder or one user’s folder. Re-import to add new and changed content."
+          about="Choose an ST installation, data folder or user folder."
+          inline
+          actions={
+            close ? (
+              <Button
+                variant="ghost"
+                className="h-8! w-8 px-0!"
+                aria-label="Close import form"
+                hint="Closes the import form."
+                onClick={close}
+              >
+                <Icon name="close" />
+              </Button>
+            ) : undefined
+          }
         />
         {admin && (
           <>
@@ -877,7 +767,7 @@ function StartSection({ open }: StImportSectionProps) {
                 className="justify-self-start"
                 disabled={folderPath.trim() === "" || action.pending}
                 pending={scanning}
-                hint="Lists what’s in it and how much is new. Nothing is imported yet."
+                hint="Lists the files in this folder and how many are new."
               >
                 {scanning ? "Looking through the folder…" : "Look in this folder"}
               </Button>
@@ -897,15 +787,12 @@ function StartSection({ open }: StImportSectionProps) {
                 />
               )}
             </div>
-            <p className="mt-4 mb-2 text-sm text-muted">
-              Using a browser on another computer, where the folder is? Choose it here instead, and it's sent from this
-              browser.
-            </p>
+            <p className="mt-4 mb-2 text-sm text-muted">For a folder on this device, choose it below.</p>
           </>
         )}
         <FileDrop
           label="Choose the folder"
-          description="Your browser asks before it shares the folder. Its files are sent from this tab, which stays open until they're all in."
+          description="Sends the selected folder from this tab, which must stay open until the import finishes."
           directory
           onFiles={(picked) => choose({ _tag: "Picked", files: pickedFiles(picked) })}
         />
@@ -972,66 +859,118 @@ function StartSection({ open }: StImportSectionProps) {
   )
 }
 
-// --- The list
+/** The trigger stays above the form, so opening it only moves content below. */
+function StartSection(props: StImportSectionProps) {
+  const jobs = useAtomValue(stImportsAtom)
+  const hasJobs = AsyncResult.isSuccess(jobs) && jobs.value.length > 0
+  const [expanded, setExpanded] = useState(false)
+  const open = !hasJobs || expanded
+  if (!AsyncResult.isSuccess(jobs)) return null
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-base font-semibold">Start another import</h2>
+      {hasJobs && (
+        <Button
+          aria-expanded={open}
+          aria-pressed={open}
+          className="self-start"
+          hint="Opens the ST folder import form."
+          onClick={() => setExpanded(!expanded)}
+        >
+          Import ST data again
+        </Button>
+      )}
+      {open && (
+        <div className="flex flex-col gap-4">
+          <StartForm
+            {...props}
+            close={hasJobs ? () => setExpanded(false) : null}
+            open={(id) => {
+              setExpanded(false)
+              props.open(id)
+            }}
+          />
+        </div>
+      )}
+    </section>
+  )
+}
 
-function JobsSection({ opened }: StImportSectionProps) {
+// --- The single history list and its removal controls.
+function JobsSection({ opened, open }: StImportSectionProps) {
   const action = useAction()
-  const navigate = useNavigate()
   return (
     <AsyncView atom={stImportsAtom} loading="Loading your imports…">
       {(jobs) => (
         <Card>
-          <CardHeader title="Imports" about="Removing an import from the list changes nothing it imported." />
-          {jobs.length === 0 ? (
-            <p className="text-sm text-muted">No imports yet.</p>
-          ) : (
-            <ul aria-label="Imports" className="-mx-2 flex flex-col">
-              {jobs.map((job) => (
-                <li key={job.id}>
-                  <Link
-                    to="/import/st"
-                    search={{ job: job.id }}
-                    aria-current={job.id === opened ? "page" : undefined}
-                    className="flex min-w-0 flex-col gap-1 rounded-md px-2 py-2 text-sm hover:bg-surface-raised aria-[current=page]:bg-surface-raised"
-                  >
-                    <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{job.source}</span>
-                      <Badge tone={STATUS_TONES[job.status]}>
-                        {job.status === "running"
-                          ? `${STATUS_LABELS.running} · ${percentOf(job)}%`
-                          : STATUS_LABELS[job.status]}
-                      </Badge>
-                      {job.attention > 0 && <Badge tone="warning">{job.attention} to look at</Badge>}
-                    </span>
-                    <span className="text-muted">
-                      {when(job.startedAt)}
-                      {job.finishedAt !== null && ` · took ${took(job.finishedAt - job.startedAt)}`} · {job.filesDone}{" "}
-                      of {job.filesTotal} files · {countsLine(job)}
-                    </span>
-                    {/* Why it stopped, without opening it; opened, it offers to import again. */}
-                    {job.error && <span className="text-danger [overflow-wrap:anywhere]">{job.error}</span>}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-          {jobs.some((job) => job.status !== "running") && (
-            <div className="mt-3">
+          <CardHeader
+            title="History"
+            actions={
               <Button
                 variant="ghost"
                 pending={action.pending}
-                hint="Forgets every finished import and its report. Nothing they imported changes."
+                disabled={!jobs.some((job) => job.status !== "running")}
+                hint="Removes finished imports and their reports from history."
                 onClick={async () => {
                   const cleared = await action.run(
                     (client) => client("ClearStImports", { importId: null }),
                     [ST_IMPORTS]
                   )
-                  if (cleared.ok && opened !== null) void navigate({ to: "/import/st", search: {} })
+                  if (cleared.ok) open(null)
                 }}
               >
                 Clear finished imports
               </Button>
-            </div>
+            }
+          />
+          {jobs.length === 0 ? (
+            <p className="text-sm text-muted">No imports yet.</p>
+          ) : (
+            <ul aria-label="History" className="flex flex-col divide-y divide-border">
+              {jobs.map((job) => (
+                <li key={job.id} className="flex min-w-0 items-center gap-3 py-3 first:pt-0 last:pb-0">
+                  <Tooltip label="Opens this import’s result and report.">
+                    <Link
+                      to="/import/st"
+                      search={{ job: job.id }}
+                      aria-current={job.id === (opened ?? jobs[0]?.id) ? "page" : undefined}
+                      className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 rounded-md text-sm outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-focus"
+                    >
+                      <span>{when(job.startedAt)}</span>
+                      <Badge tone={STATUS_TONES[job.status]}>{STATUS_LABELS[job.status]}</Badge>
+                      <span className="text-muted">{countsLine(job)}</span>
+                    </Link>
+                  </Tooltip>
+                  <Menu
+                    trigger={
+                      <Button
+                        variant="ghost"
+                        className="h-8! w-8 px-0!"
+                        aria-label={`Import actions: ${when(job.startedAt)}`}
+                      >
+                        ⋯
+                      </Button>
+                    }
+                    hint="Opens this import’s history actions."
+                    align="end"
+                  >
+                    <MenuItem
+                      disabled={job.status === "running" || action.pending}
+                      description="Removes this import and its report from history."
+                      onClick={async () => {
+                        const cleared = await action.run(
+                          (client) => client("ClearStImports", { importId: job.id }),
+                          [ST_IMPORTS]
+                        )
+                        if (cleared.ok && job.id === opened) open(null)
+                      }}
+                    >
+                      Remove from history
+                    </MenuItem>
+                  </Menu>
+                </li>
+              ))}
+            </ul>
           )}
           <ErrorAlert error={action.error} />
         </Card>
@@ -1042,8 +981,8 @@ function JobsSection({ opened }: StImportSectionProps) {
 
 export const stImportSectionEntries = [
   { id: "st-import.job", order: 10, component: JobSection },
-  { id: "st-import.start", order: 20, component: StartSection },
-  { id: "st-import.jobs", order: 30, component: JobsSection }
+  { id: "st-import.start", order: 30, component: StartSection },
+  { id: "st-import.jobs", order: 20, component: JobsSection }
 ] as const
 
 export function StImportPage() {
@@ -1057,9 +996,11 @@ export function StImportPage() {
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Import ST data</h1>
-        <Link to="/import" className={buttonClass("ghost")}>
-          Back to Import
-        </Link>
+        <Tooltip label="Opens the other import options.">
+          <Link to="/import" className={buttonClass("ghost")}>
+            Back to Import
+          </Link>
+        </Tooltip>
       </header>
       <SlotOutlet slot={stImportSections} props={{ opened, open }} />
     </div>

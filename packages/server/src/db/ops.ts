@@ -66,7 +66,15 @@ import {
 } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinBranch, BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
-import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
+import {
+  EditingOrigin,
+  ObservedDeletion,
+  Draft,
+  DraftHistoryPolicy,
+  DraftKey,
+  DraftRestore,
+  DraftState
+} from "@rp/shared/drafts.ts"
 import {
   ComposerImage,
   ComposerImageIds,
@@ -740,6 +748,9 @@ export class WriteOps extends RpcGroup.make(
       /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
       draftId: Schema.NullOr(Schema.String),
       content: Schema.String,
+      seed: Schema.optionalKey(Schema.Boolean),
+      editingFrom: Schema.optionalKey(EditingOrigin),
+      observedDeletion: Schema.optionalKey(ObservedDeletion),
       images: Schema.optionalKey(MessageImages),
       /** The draft as last seen: null if none was. */
       expectedRowVersion: Schema.NullOr(Schema.Int),
@@ -1635,7 +1646,7 @@ export class WriteOps extends RpcGroup.make(
       /** The chat's title; null or blank: its cast's names. */
       title: Schema.NullOr(Schema.String)
     },
-    success: AppendResult,
+    success: Schema.Struct({ ...AppendResult.fields, composer: Draft }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
@@ -1927,6 +1938,8 @@ export class WriteOps extends RpcGroup.make(
       matching: Schema.Boolean,
       /** A JSON array of the format worker's messages (formats/stChat.ts), passed on unread. */
       messagesJson: Schema.String,
+      /** Exact normalized message hashes from the format worker; optional for plugins. */
+      hashes: Schema.optionalKey(Schema.Array(Schema.String)),
       /** Each speaker key of the messages, as a card of the user's, or null. */
       speakers: Schema.Record(Schema.String, Schema.NullOr(EntityId)),
       /** Full-folder cards/personas by speaker; a manual link alone never dates their arrival. */
@@ -2231,7 +2244,7 @@ export class WriteOps extends RpcGroup.make(
   // --- Generation (ARCHITECTURE.md §15).
   /**
    * Opens a generation's rollout before its request is sent (DATA-MODEL §7.1): the row, its
-   * frozen context snapshot (JSON text, stored as given), the version's link to it and to
+   * frozen context snapshot (JSON text, stored as given), compact lore activation receipts, the version's link to it and to
    * the model, the chat variables the preset's and cards' macros wrote, as `var.set`
    * events of the version, and the values its template messages drew. The version must be the user's and still generating, and the
    * model one of the user's live connections'.
@@ -2294,7 +2307,7 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** At startup: rollouts a previous process left running are interrupted. */
   Rpc.make("InterruptRollouts", { success: Schema.Struct({ interrupted: Schema.Int }), error: StorageError }),
-  /** The user's default model and preset; NotFound when either isn't the user's and live. */
+  /** The account defaults, including its new-chat persona; choices must be owned and live. */
   Rpc.make("SetGenerationDefaults", {
     payload: { userId: UserId, defaults: GenerationDefaults },
     success: GenerationDefaults,
@@ -2668,6 +2681,7 @@ export class ReadOps extends RpcGroup.make(
       kind: EntityKind,
       /** Only entities with this tag, e.g. "persona" for the persona folder. */
       tag: Schema.NullOr(Schema.String),
+      withFilterData: Schema.optionalKey(Schema.Boolean),
       archived: Schema.Boolean
     },
     success: Schema.Array(LibraryRef),

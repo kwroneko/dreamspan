@@ -61,17 +61,14 @@ test("import an ST folder by browsing to it or typing its path", async ({ page }
   await page.getByRole("button", { name: "Import", exact: true }).click()
 
   const imported = page.getByRole("list", { name: "Imported" })
-  await expect(imported).toContainText("Cards: 1 added")
-  await expect(imported).toContainText("Chats: 2 added")
+  await expect(imported).toContainText("Cards: 1")
+  await expect(imported).toContainText("Chats: 2")
   await expect(page.getByRole("list", { name: "Hidden runs" })).toContainText("12 messages hidden")
-
-  // The report ends with where to go next.
-  await expect(page.getByRole("link", { name: "Open your characters" })).toBeVisible()
-  await expect(page.getByRole("link", { name: /^Continue your latest chat/ })).toBeVisible()
 
   // Coming back starts at the folder last looked in, and a re-scan says it's all here.
   await page.goto(`${server().url}/`)
   await page.goto(`${server().url}/import/st`)
+  await page.getByRole("button", { name: "Import ST data again" }).click()
   await expect(page.getByLabel("Folder path")).toHaveValue(join(st, "data"))
   await expect(
     page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: "default-user SillyTavern" })
@@ -103,6 +100,7 @@ test("chats holding only a greeting get their own column, so each row adds up", 
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/import/st`)
+  await page.getByRole("button", { name: "Import ST data again" }).click()
   await page.getByLabel("Folder path").fill(join(st, "data"))
   await page.getByRole("button", { name: "Look in this folder" }).click()
   const preview = page.getByRole("table", { name: "What's in the folder" })

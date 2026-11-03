@@ -110,10 +110,13 @@ export function PanelToggles({
       <IconButton
         label={open === null ? "Chat panel" : "Hide panel"}
         hint={
-          open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
+          open === null
+            ? "Click to open the chat panel: cast, settings, lorebooks, notes and summaries"
+            : "Click to hide the chat panel"
         }
         icon="panel"
         aria-expanded={open !== null}
+        aria-pressed={open !== null}
         className={open === null ? "" : "bg-surface-raised text-text"}
         onClick={toggle}
       />
@@ -124,7 +127,9 @@ export function PanelToggles({
         variant="ghost"
         aria-expanded={open !== null}
         title={
-          open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
+          open === null
+            ? "Click to open the chat panel: cast, settings, lorebooks, notes and summaries"
+            : "Click to hide the chat panel"
         }
         className="h-8 px-2.5"
         onClick={toggle}
@@ -139,7 +144,7 @@ export function PanelToggles({
         <IconButton
           key={tab.value}
           label={tab.label}
-          hint={tab.descriptor.description ? `${tab.label}: ${tab.descriptor.description}` : tab.label}
+          hint={`Click to open ${tab.label}${tab.descriptor.description ? `: ${tab.descriptor.description}` : ""}`}
           icon={tab.descriptor.icon}
           onClick={() => onToggle(tab.value)}
         />
@@ -217,37 +222,40 @@ export function ChatSidePanel({
     onTab(value)
   }
   const nav = (
-    <div className="flex flex-col gap-1 border-b border-border px-2 pt-1.5">
-      <ToolTabs
-        tabs={tools.map((t) => ({
-          value: t.value,
-          label: t.label,
-          icon: t.descriptor.icon,
-          // A tab with nothing to show before the first send says so where it's described.
-          description:
-            "pending" in content && !t.descriptor.pending
-              ? `${t.descriptor.description ?? t.label} Available once the chat is saved.`
-              : t.descriptor.description
-        }))}
-        value={tab}
-        onValueChange={onTab}
-        label="Chat panel"
-        moreLabel="More tools"
-        end={wide && <IconButton label="Close the panel" icon="close" className="shrink-0" onClick={onClose} />}
-      />
-      <SubjectTabs
-        tabs={cast.map((t) => ({
-          value: t.value,
-          label: t.label,
-          avatar: t.avatar,
-          icon: t.descriptor.icon,
-          note: t.note
-        }))}
-        value={tab}
-        onValueChange={pick}
-        label="Characters"
-      />
-      {cast.length === 0 && <div className="h-0.5" />}
+    <div className="flex shrink-0 flex-col">
+      <div className="flex h-shell-header shrink-0 items-center border-b border-border px-2 py-2 *:min-w-0 *:flex-1">
+        <ToolTabs
+          tabs={tools.map((t) => ({
+            value: t.value,
+            label: t.label,
+            icon: t.descriptor.icon,
+            // A tab with nothing to show before the first send says so where it's described.
+            description:
+              "pending" in content && !t.descriptor.pending
+                ? `${t.descriptor.description ?? t.label} Available once the chat is saved.`
+                : t.descriptor.description
+          }))}
+          value={tab}
+          onValueChange={onTab}
+          label="Chat panel"
+          moreLabel="More tools"
+        />
+      </div>
+      <div className="border-b border-border px-2 pt-4">
+        <SubjectTabs
+          tabs={cast.map((t) => ({
+            value: t.value,
+            label: t.label,
+            avatar: t.avatar,
+            icon: t.descriptor.icon,
+            note: t.note
+          }))}
+          value={tab}
+          onValueChange={pick}
+          label="Characters"
+        />
+        {cast.length === 0 && <div className="h-0.5" />}
+      </div>
     </div>
   )
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open.

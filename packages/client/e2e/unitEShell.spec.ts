@@ -234,7 +234,7 @@ for (const width of [1440, 390]) {
         await shoot(`panel-${tab.toLowerCase().replaceAll(" ", "-")}`)
       }
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
-      else await page.getByRole("button", { name: "Close the panel", exact: true }).click()
+      else await page.getByRole("button", { name: "Hide panel", exact: true }).click()
       await shoot("chat")
       await page
         .locator("article")
@@ -244,10 +244,14 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("img", { name: /full portrait$/ })).toBeVisible()
       await shoot("portrait")
       await closePortrait(page)
-      // A phone's chat header replaces the app's bar: its ← opens the menu, which has the image settings.
+      // A phone's chat header replaces the app's bar: its ← opens the menu, which has the image toggle.
       if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
-      await page.getByRole("button", { name: "Image settings", exact: true }).first().click()
-      await shoot("image-settings")
+      await page
+        .getByRole("button", { name: /^(Blur|Hide|Show) all images$/ })
+        .filter({ visible: true })
+        .first()
+        .click({ button: "right" })
+      await shoot("image-concealment")
       await page.keyboard.press("Escape")
       await shoot("left-chats")
       await page
@@ -274,7 +278,7 @@ for (const width of [1440, 390]) {
       await expect(fullEditor).toBeVisible()
       await shoot("new-chat-card")
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
-      else await page.getByRole("button", { name: "Close the panel", exact: true }).click()
+      else await page.getByRole("button", { name: "Hide panel", exact: true }).click()
       await shoot("new-chat")
       // The header's faces open the card's tab; a phone's header leaves them out, as in any chat.
       if (width === 390) await openPanel(page, unused.card.label)

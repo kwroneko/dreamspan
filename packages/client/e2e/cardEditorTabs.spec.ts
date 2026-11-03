@@ -182,7 +182,7 @@ for (const width of [1440, 390])
 
       const notes = await subTab(tab, "Notes")
       await expect(notes.getByText("No notes", { exact: true })).toBeVisible()
-      await notes.getByRole("button", { name: "New note", exact: true }).click()
+      await notes.getByRole("button", { name: "Add note", exact: true }).click()
       await expect(notes.getByRole("list", { name: "The card's notes" })).toBeVisible()
       await shoot(page, `panel-notes-${width}-${theme}`)
 
@@ -196,7 +196,7 @@ for (const width of [1440, 390])
       // Save and Revert as the pair: what changed goes back to the revision.
       await expect(tab.getByRole("button", { name: "Revert to the last save", exact: true })).toBeVisible()
       await saveButton(tab).click()
-      await expect(tab.getByRole("button", { name: "Revert to the last save", exact: true })).toHaveCount(0)
+      await expect(tab.getByRole("button", { name: "Revert to the last save", exact: true })).toBeDisabled()
       const revisions = await admin((api) => api.ListRevisions({ refId: ref.id, limit: 50 }))
       expect(revisions.length).toBeGreaterThan(1)
     })

@@ -403,7 +403,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             )
           const composer = yield* bin.drafts.openComposer(userId, composerKey(chatId, added.forkId), null)
           yield* bin.drafts.setComposerChoice(userId, chatId, composer.id, { speakerEntityId: first.speakerEntityId })
-          return added
+          return { ...added, composer }
         }).pipe(transaction("StartChat")),
 
       SendOrQueue: ({

@@ -102,8 +102,12 @@ for (const [width, height] of [
       const chatId = await setUp(page, `Plain ${width} ${theme}`, false)
       const overlay = await open(page, chatId)
       const scroll = overlay.getByTestId("preset-scroll")
-      // Under Main: a card's prompt can replace it, whether or not one does.
-      await expect(overlay.locator('[data-prompt="main"]')).toContainText("A card's own prompt can replace it")
+      // The slot explains overrides on hover, keeping the header quiet.
+      await overlay.locator('[data-prompt="main"] [data-prompt-kind-tag]').hover()
+      await expect(
+        page.getByText("The main instruction for the chat. A card's own prompt can replace it.", { exact: true })
+      ).toBeVisible()
+      await page.mouse.move(0, 0)
 
       // "Notes inside the chat" lists each note once, with its depth.
       await expect(overlay.getByText("Tide table", { exact: false })).toHaveCount(1)
@@ -142,7 +146,7 @@ test("with Chat History last the tail still starts after it", async ({ page }) =
   await page.setViewportSize({ width: 1440, height: 900 })
   const chatId = await setUp(page, "History last", true)
   const overlay = await open(page, chatId)
-  await expect(overlay.getByRole("button", { name: "Search", exact: true })).toBeVisible()
+  await expect(overlay.getByRole("button", { name: "Search and replace", exact: true })).toBeVisible()
   await expect(overlay.getByText("After the chat: sent last", { exact: true })).toHaveCount(1)
   await expect(overlay.getByText("Tail rule")).toHaveCount(1)
   // After Chat History's block, before the end of the document.
@@ -156,7 +160,7 @@ test("Find's matches go when the question or the text changes", async ({ page })
   const chatId = await setUp(page, "Find list", false)
   const overlay = await open(page, chatId)
   // The search is folded away until asked for.
-  await overlay.getByRole("button", { name: "Search", exact: true }).click()
+  await overlay.getByRole("button", { name: "Search and replace", exact: true }).click()
   const find = overlay.getByRole("textbox", { name: "Find", exact: true })
   const matches = overlay.getByRole("list", { name: "Matches", exact: true })
   await find.fill("narrate")
@@ -186,7 +190,7 @@ for (const width of [1440, 390])
       const chatId = await setUp(page, `Find navigation ${width} ${theme}`, false)
       const overlay = await open(page, chatId)
       // The search is folded away until asked for.
-      await overlay.getByRole("button", { name: "Search", exact: true }).click()
+      await overlay.getByRole("button", { name: "Search and replace", exact: true }).click()
       await overlay.getByRole("button", { name: "Collapse all", exact: true }).click()
       const find = overlay.getByRole("textbox", { name: "Find", exact: true })
       await find.fill("narrate")
@@ -244,7 +248,7 @@ for (const width of [1440, 390])
       await scroll.evaluate((e) => {
         e.scrollTop = e.scrollHeight
       })
-      const close = overlay.getByRole("button", { name: "Close preset editor", exact: true })
+      const close = overlay.getByRole("button", { name: "Close", exact: true })
       const bar = close.locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
       await expect(bar.getByText(name, { exact: true })).toBeVisible()
       await expectSaveState(bar, NOTHING_TO_SAVE)
@@ -274,7 +278,7 @@ for (const width of [1440, 390])
       const chatId = await setUp(page, `Marker navigation ${width} ${theme}`, false)
       const overlay = await open(page, chatId)
       // The search is folded away until asked for.
-      await overlay.getByRole("button", { name: "Search", exact: true }).click()
+      await overlay.getByRole("button", { name: "Search and replace", exact: true }).click()
       await overlay.getByRole("textbox", { name: "Find", exact: true }).fill("History")
       await overlay.getByRole("button", { name: "Find", exact: true }).click()
       const result = overlay
@@ -299,7 +303,7 @@ test("Find reveals closed utility prompts and regex script fields", async ({ pag
   const chatId = await setUp(page, "Utility navigation", false)
   const overlay = await open(page, chatId)
   // The search is folded away until asked for.
-  await overlay.getByRole("button", { name: "Search", exact: true }).click()
+  await overlay.getByRole("button", { name: "Search and replace", exact: true }).click()
   const find = overlay.getByRole("textbox", { name: "Find", exact: true })
   const submit = overlay.getByRole("button", { name: "Find", exact: true })
   await find.fill("new story")
@@ -340,7 +344,7 @@ test("Find reveals an offscreen range inside a long prompt", async ({ page }) =>
   const chatId = await setUp(page, "Long prompt navigation", false)
   const overlay = await open(page, chatId)
   // The search is folded away until asked for.
-  await overlay.getByRole("button", { name: "Search", exact: true }).click()
+  await overlay.getByRole("button", { name: "Search and replace", exact: true }).click()
   const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
   await main.fill(`${"A synthetic line of prompt text.\n".repeat(200)}select this distant range\nLast line.`)
   await overlay.getByRole("button", { name: "Collapse all", exact: true }).click()
@@ -364,4 +368,16 @@ test("Find reveals an offscreen range inside a long prompt", async ({ page }) =>
       )
     })
     .toBe(true)
+})
+
+test("panel search opens lazy utility fields", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  const chatId = await setUp(page, "Panel utility navigation", false)
+  await page.goto(`${server().url}/chats/${chatId}`)
+  const panel = await openPanel(page, "Prompt preset")
+  await panel.getByRole("button", { name: "Search and replace", exact: true }).click()
+  await panel.getByRole("textbox", { name: "Find", exact: true }).fill("new story")
+  await panel.getByRole("button", { name: "Find", exact: true }).click()
+  await panel.getByRole("button", { name: "Go to Utility prompts: New chat prompt", exact: true }).click()
+  await expect(panel.getByRole("textbox", { name: "New chat", exact: true })).toBeFocused()
 })

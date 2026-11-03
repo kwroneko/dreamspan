@@ -298,7 +298,7 @@ for (const theme of ["light", "dark"] as const)
     const show = page.locator("header").getByRole("button", { name: "Show the sidebar", exact: true })
     // Focus moves to the button that brings it back.
     await expect(show).toBeFocused()
-    await expect(page.getByText("Show the sidebar: your chats, characters and the menu")).toBeVisible()
+    await expect(page.getByText("Click to show the sidebar: your chats, characters and the menu")).toBeVisible()
     // Only the chat: the messages' column centred in the window at the chat width.
     const column = (await page.getByTestId("messages").locator("> div").boundingBox())!
     expect(Math.abs(column.x + column.width / 2 - 960)).toBeLessThanOrEqual(2)
@@ -480,7 +480,7 @@ test("a panel dragged to 1700 px uses its width: fields and grids widen, groups 
   expect(await firstRow(grid)).toBeGreaterThanOrEqual(4)
 })
 
-const SWEEP = [...TABS.slice(0, 3), "Prompt preset", ...TABS.slice(3), "History edits", "Juniper"]
+const SWEEP = [...TABS.slice(0, 3), "Prompt preset", ...TABS.slice(3), "Search and replace", "Juniper"]
 const CARD_TABS = ["Greetings", "Metadata", "Lorebook", "Notes", "Extra"]
 
 // Screens for review (RP_SCREENS): every tab at 400, 800, 1200, 1700 and 2400 px with its

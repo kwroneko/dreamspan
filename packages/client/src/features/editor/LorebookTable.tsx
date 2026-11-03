@@ -17,11 +17,14 @@ import {
   useContext,
   useId,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
-  type ComponentType
+  type ComponentType,
+  type MouseEvent
 } from "react"
 import type { Registry } from "../../registry.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -29,10 +32,10 @@ import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
-import { revealIfHidden } from "../../ui/reveal.ts"
+import { revealAdded, revealIfHidden } from "../../ui/reveal.ts"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { EntryDetails, KeysLine } from "./LorebookEntryDetails.tsx"
 import { BlockOptionsToggle } from "../../ui/Block.tsx"
 import { EXPLAIN } from "./lorebookExplain.ts"
@@ -58,6 +61,13 @@ import {
 import { SearchNavigation, useSearchMatch } from "./searchNavigation.ts"
 import { type EditorStore, useEditorKind, useText, useValue } from "./store.ts"
 
+/** Where an entry revealed gets the cursor; `added`: it was just added (or duplicated), so it's flashed. */
+interface Focus {
+  readonly uid: number
+  readonly at: "title" | "keys"
+  readonly added?: boolean
+}
+
 /** What an opened entry shows with its settings closed. */
 const SHOWN: ReadonlySet<string> = new Set(["comment", "keys", "content"])
 
@@ -77,6 +87,13 @@ const scrollParent = (element: HTMLElement | null) => {
   }
   return null
 }
+
+/** Whether a click in an entry's header belongs to one of its controls rather than the header. */
+const ownClick = (target: EventTarget, header: HTMLElement) =>
+  target instanceof Element &&
+  target.closest("button, input, textarea, select, label, a, [role=switch], [role=checkbox], [data-own-click]") !==
+    null &&
+  header.contains(target)
 
 const entriesLabel = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
 
@@ -269,8 +286,6 @@ interface RowProps {
   template: string
   columns: ReadonlyArray<LorebookColumn>
   actions: ReadonlyArray<LorebookEntryAction>
-  /** Selection mode: each row has its checkbox. */
-  selecting: boolean
   selected: boolean
   onSelect: (uid: number, selected: boolean) => void
   onToggle: (uid: number, open: boolean, focus?: "keys") => void
@@ -307,7 +322,6 @@ const EntryRow = memo(function EntryRow({
   template,
   columns,
   actions,
-  selecting,
   selected,
   onSelect,
   onSettings,
@@ -321,6 +335,14 @@ const EntryRow = memo(function EntryRow({
   const title = typed || "Untitled entry"
   const context: LorebookEntryContext = { store, root, entry, path, title }
   const toggleLabel = open ? `Close ${title}` : `Open ${title}`
+  // The whole header opens and closes the entry (owner, 2026-11-02), as a preset prompt's does;
+  // its controls (title, keys, switch, checkbox, buttons, cells) keep their own clicks. The
+  // arrow stays the keyboard's way to it.
+  const headerClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (ownClick(event.target, event.currentTarget)) return
+    if (window.getSelection()?.toString()) return
+    onToggle(uid, !open)
+  }
   const chevron = (
     <Tooltip label={open ? "Close the entry" : "Open the entry: its text, with its keys to edit"}>
       <button
@@ -351,11 +373,11 @@ const EntryRow = memo(function EntryRow({
       </span>
     </Tooltip>
   )
-  const select = selecting && (
-    <Tooltip label="Selected entries change together: Change for selected…">
-      <span className="inline-flex pt-1.5">
-        <Checkbox checked={selected} onCheckedChange={(next) => onSelect(uid, next)}>
-          <span className="sr-only">{`Select ${title}`}</span>
+  const select = (
+    <Tooltip label="Selects the entry, to edit several entries at once.">
+      <span className="inline-flex size-6 shrink-0 items-center justify-center pt-1">
+        <Checkbox labelHidden checked={selected} onCheckedChange={(next) => onSelect(uid, next)}>
+          {`Select ${title}`}
         </Checkbox>
       </span>
     </Tooltip>
@@ -377,7 +399,9 @@ const EntryRow = memo(function EntryRow({
       open={settings}
       onToggle={() => onSettings(uid, !settings)}
       label={`Settings of ${title}`}
-      hint={settings ? "Hide the entry's settings" : EXPLAIN.settings}
+      hint={
+        settings ? "Click to hide the entry's settings" : "Click to show the entry's settings: inclusion and placement"
+      }
     />
   )
   return (
@@ -388,7 +412,8 @@ const EntryRow = memo(function EntryRow({
       {!compact ? (
         <div
           data-entry-header
-          className={`grid items-start gap-2 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
+          onClick={headerClick}
+          className={`grid cursor-pointer items-start gap-2 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
           style={{ gridTemplateColumns: template }}
         >
           <div className="mt-0.5 flex items-center gap-1">
@@ -410,7 +435,8 @@ const EntryRow = memo(function EntryRow({
       ) : (
         <div
           data-entry-header
-          className={`flex items-start gap-1 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
+          onClick={headerClick}
+          className={`flex cursor-pointer items-start gap-1 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
         >
           {select}
           {chevron}
@@ -429,6 +455,7 @@ const EntryRow = memo(function EntryRow({
             root={root}
             uid={uid}
             wide={wide && !compact}
+            compact={compact}
             card={card}
             settings={settings}
             essentials={compact ? <Essentials columns={columns} context={context} /> : undefined}
@@ -458,7 +485,7 @@ function Rows({
   uids: ReadonlyArray<number>
   scroller: HTMLElement | null
   margin: number
-  focus: { uid: number; at: "title" | "keys" } | null
+  focus: Focus | null
   onFocused: () => void
   /** A search visit focuses its own field. */
   searching: boolean
@@ -469,6 +496,21 @@ function Rows({
   selected: ReadonlySet<number>
 }) {
   "use no memo"
+  // URL setters change with their target. Keep row actions stable while calling the latest
+  // table handlers, so a focus/expansion update renders only the rows it changes.
+  const handlers = useRef(row)
+  useLayoutEffect(() => {
+    handlers.current = row
+  })
+  const callbacks = useMemo<Pick<RowProps, "onSelect" | "onToggle" | "onSettings" | "onAction">>(
+    () => ({
+      onSelect: (uid, selected) => handlers.current.onSelect(uid, selected),
+      onToggle: (uid, open, at) => handlers.current.onToggle(uid, open, at),
+      onSettings: (uid, open) => handlers.current.onSettings(uid, open),
+      onAction: (uid, action) => handlers.current.onAction(uid, action)
+    }),
+    []
+  )
   // eslint-disable-next-line react-hooks/incompatible-library -- mutable instance; memoization is disabled above
   const virtualizer = useVirtualizer({
     count: uids.length,
@@ -493,7 +535,11 @@ function Rows({
       const header = document.getElementById(titleId)?.closest<HTMLElement>("[data-entry-header]")
       // Rendered a frame or two after the virtualizer scrolled.
       if (!header && ++tries < 4) return void (frame = requestAnimationFrame(settle))
-      if (header) revealIfHidden(header, [field])
+      // An added entry: wholly in view and flashed (revealAdded); otherwise only if hidden.
+      const item = header?.closest<HTMLElement>("[role=listitem]")
+      if (focus.added && item)
+        revealAdded(item.firstElementChild instanceof HTMLElement ? item.firstElementChild : item)
+      else if (header) revealIfHidden(header, [field])
       if (!searching) field?.focus({ preventScroll: true })
       onFocused()
     }
@@ -518,6 +564,7 @@ function Rows({
         >
           <EntryRow
             {...row}
+            {...callbacks}
             uid={uids[item.index]!}
             open={opened.has(uids[item.index]!)}
             settings={settings.has(uids[item.index]!)}
@@ -571,15 +618,7 @@ const changedUids = (store: EditorStore, root: FieldPath) =>
     })
   )
 
-export function LorebookTable({
-  store,
-  root,
-  book,
-  added = null,
-  panel = false,
-  tools,
-  saveControls
-}: {
+export function LorebookTable(props: {
   store: EditorStore
   root: FieldPath
   book: LorebookDoc
@@ -587,11 +626,20 @@ export function LorebookTable({
   added?: number | null
   /** The side panel's narrow column: compact headers, the toolbar folded tighter. */
   panel?: boolean
-  /** Extra toolbar controls (the panel's search and replace toggle). */
+  /** The editing row's controls after the save cluster (the panel's Search and replace). */
   tools?: ReactNode
-  /** The save cluster, leading the entries' toolbar row (DESIGN §10.1). */
+  /** What `tools` open, under the editing row (the Search and replace panel). */
+  toolPanel?: ReactNode
+  /** The save cluster, beside Add entry in the editing row (DESIGN §10.1). */
   saveControls?: ReactNode
 }) {
+  // Parameter defaults currently make React Compiler skip this table and its row callbacks.
+  const { store, book, tools, toolPanel, saveControls } = props
+  // Some callers recreate this path during URL navigation; equal paths must keep row props stable.
+  const rootKey = JSON.stringify(props.root)
+  const root = useMemo(() => JSON.parse(rootKey) as FieldPath, [rootKey])
+  const added = props.added ?? null
+  const panel = props.panel ?? false
   // Both editors can render the same entry UID at once; focus must stay in this table.
   const idPrefix = useId()
   const columns = useRegistry(lorebookColumns)
@@ -630,12 +678,9 @@ export function LorebookTable({
   // Entries just added or duplicated lead the table, newest first, until the search, filter
   // or sort changes: a second one doesn't push the first away to its sorted place.
   const [pinned, setPinned] = useState<ReadonlyArray<number>>(added === null ? [] : [added])
-  const [focus, setFocus] = useState<{ uid: number; at: "title" | "keys" } | null>(
-    added === null ? null : { uid: added, at: "title" }
-  )
+  const [focus, setFocus] = useState<Focus | null>(added === null ? null : { uid: added, at: "title", added: true })
   const [dialog, setDialog] = useState<{ uid: number; action: ComponentType<LorebookActionProps> } | null>(null)
-  // Selection mode, for "Change for selected…".
-  const [selecting, setSelecting] = useState(false)
+  // The selected entries, for editing several at once.
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set())
   const [massEdit, setMassEdit] = useState(false)
   const sort = sorts.find((s) => s.id === sortId) ?? sorts[0]
@@ -670,7 +715,9 @@ export function LorebookTable({
 
   // A search visit to an entry: everything shown again, the entry open and scrolled to.
   const match = useContext(SearchNavigation)
-  useEffect(() => {
+  // Read the current table without replaying a visit on edits or folds. Effect events also
+  // avoid dependency suppressions, which disable compilation for the entire table.
+  const restoreMatch = useEffectEvent(() => {
     if (!match) return
     const frame = requestAnimationFrame(() => {
       const at = JSON.stringify(match.path.slice(0, root.length + 1)) === JSON.stringify([...root, "entries"])
@@ -686,10 +733,10 @@ export function LorebookTable({
       }
     })
     return () => cancelAnimationFrame(frame)
-    // Only a new search visit restores the match; edits and folds must not replay it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [match])
-  useEffect(() => {
+  })
+  // Only a new search visit restores the match; edits and folds must not replay it.
+  useEffect(() => restoreMatch(), [match])
+  const restoreEntry = useEffectEvent(() => {
     const local = enteredHere.current
     enteredHere.current = null
     if (entry === local || entry === null || !book.entries.some((e) => e.uid === entry)) return
@@ -698,9 +745,9 @@ export function LorebookTable({
       setFocus({ uid: entry, at: "title" })
     })
     return () => cancelAnimationFrame(frame)
-    // Restore only a new URL target, not each edit or fold of that entry.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry])
+  })
+  // Restore only a new URL target, not each edit or fold of that entry.
+  useEffect(() => restoreEntry(), [entry])
 
   // Measured, so the chat's narrow editor overlay gets the narrow layout too.
   const list = useRef<HTMLDivElement>(null)
@@ -724,7 +771,7 @@ export function LorebookTable({
   }, [])
   const wide = width === 0 ? !panel : width >= WIDE
   const compact = panel || !wide
-  const template = `${selecting ? "6.25rem" : "4.5rem"} minmax(10rem,1fr) ${columns.map((column) => column.width).join(" ")} 4.25rem`
+  const template = `6.25rem minmax(10rem,1fr) ${columns.map((column) => column.width).join(" ")} 4.25rem`
 
   const toggle = (uid: number, open: boolean, at?: "keys") => {
     enteredHere.current = open ? uid : null
@@ -744,7 +791,7 @@ export function LorebookTable({
     setEnabled("all")
     setPinned((list) => [uid, ...list.filter((other) => other !== uid)])
     setOpened((set) => new Set(set).add(uid))
-    setFocus({ uid, at: "title" })
+    setFocus({ uid, at: "title", added: true })
   }
   const runAction = (uid: number, action: LorebookEntryAction) => {
     const path = entryPath(root, uid)
@@ -776,35 +823,170 @@ export function LorebookTable({
     (entry) => entry.uid
   )
   const removed = savedUids.filter((uid) => !book.entries.some((entry) => entry.uid === uid))
-  const dialogEntry = dialog ? (store.value(entryPath(root, dialog.uid)) as LorebookEntry | undefined) : undefined
+  const dialogEntry = dialog ? book.entries.find((entry) => entry.uid === dialog.uid) : undefined
   const filtered = query.trim() !== "" || enabled !== "all"
   const live = book.entries.filter((entry) => selected.has(entry.uid)).map((entry) => entry.uid)
   const small = panel ? "h-8! px-2!" : "h-8! px-2.5!"
 
+  const shownSelected = uids.filter((uid) => selected.has(uid)).length
+  const allShown = uids.length > 0 && shownSelected === uids.length
+  const anyOpen = uids.some((uid) => opened.has(uid))
+  // The standard checkbox over the rows' checkboxes (owner, 2026-11-02): all of the entries
+  // shown, none, or indeterminate while some are selected.
+  const selectAll = (
+    <Tooltip label={allShown ? "Clears the selection of the entries shown." : "Selects every entry shown."}>
+      <span className="inline-flex size-6 shrink-0 items-center justify-center">
+        <Checkbox
+          labelHidden
+          checked={allShown}
+          indeterminate={shownSelected > 0 && !allShown}
+          disabled={uids.length === 0}
+          onCheckedChange={() =>
+            setSelected((set) =>
+              allShown ? new Set([...set].filter((uid) => !uids.includes(uid))) : new Set([...set, ...uids])
+            )
+          }
+        >
+          Select all entries shown
+        </Checkbox>
+      </span>
+    </Tooltip>
+  )
+  const selection = live.length > 0 && (
+    <span className="flex min-w-0 items-center gap-2">
+      <span role="status" className="truncate text-xs font-medium text-text">
+        {live.length.toLocaleString()} selected
+      </span>
+      <Button
+        variant="primary"
+        className="h-6! px-2! text-xs"
+        hint="Edits the settings of every selected entry at once."
+        onClick={() => setMassEdit(true)}
+      >
+        Edit {entriesLabel(live.length)}
+      </Button>
+    </span>
+  )
+  // The list's own actions, at the end of its header row.
+  const listActions = (
+    <div className="flex shrink-0 items-center justify-end gap-0.5">
+      <IconButton
+        label={anyOpen ? "Collapse all" : "Expand all"}
+        hint={anyOpen ? "Click to collapse every entry to its one-line header." : "Click to expand every entry shown."}
+        icon={anyOpen ? "collapseAll" : "expandAll"}
+        disabled={uids.length === 0}
+        className="size-7!"
+        onClick={() => {
+          if (!anyOpen) return setOpened((set) => new Set([...set, ...uids]))
+          enteredHere.current = null
+          setEntryKey("", true)
+          setOpened(new Set())
+        }}
+      />
+      <Menu
+        label="All entries"
+        hint="Enable or disable every entry."
+        trigger={
+          <button type="button" aria-label="More for all entries" className={`${iconButtonClass()} size-7!`}>
+            <Icon name="more" />
+          </button>
+        }
+      >
+        <MenuItem
+          disabled={book.entries.length === 0 || book.entries.every((entry) => entry.enabled)}
+          description="Switches every entry on, the hidden ones too."
+          onClick={() => switchAll(true)}
+        >
+          Enable all
+        </MenuItem>
+        <MenuItem
+          disabled={book.entries.length === 0 || book.entries.every((entry) => !entry.enabled)}
+          description="Switches every entry off, the hidden ones too. The book stays on."
+          onClick={() => switchAll(false)}
+        >
+          Disable all
+        </MenuItem>
+      </Menu>
+    </div>
+  )
+  const count =
+    filtered || card || panel
+      ? filtered
+        ? `${uids.length.toLocaleString()} of ${entriesLabel(book.entries.length)}`
+        : entriesLabel(book.entries.length)
+      : null
+  const addButton = (
+    <Button
+      variant="primary"
+      className={small}
+      hint="Adds an empty entry at the top of the list, open, with its title ready to type."
+      onClick={() => {
+        const uid = addEntry(store, root, book)
+        reveal(uid)
+      }}
+    >
+      <Icon name="insert" />
+      Add entry
+    </Button>
+  )
+  // The editing row leads when it holds more than Add entry (the side panel's save cluster and
+  // Search and replace); otherwise Add entry leads the filter row.
+  const editingRow = saveControls !== undefined || tools !== undefined
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="primary"
-            className={panel ? small : ""}
-            hint="A new entry at the top, open, with its title ready to type."
-            onClick={() => {
-              const uid = addEntry(store, root, book)
-              reveal(uid)
-            }}
-          >
-            <Icon name="insert" />
-            Add entry
-          </Button>
-          {/* Wide enough for its placeholder: on a phone it takes its own line. */}
-          <div className={`${panel ? "min-w-[11rem]" : "min-w-[16rem]"} max-w-controls flex-1`}>
-            <Tooltip label="Shows only the entries whose title, keys or text have every word typed. Search and replace changes text.">
+      {/* Collapse order (DESIGN §1.3): the filter field takes its own line first, then Find and
+          replace drops its label for its icon. Nothing else wraps. */}
+      <div data-lorebook-toolbar className="@container flex min-w-0 flex-col gap-2">
+        {editingRow && (
+          <div role="toolbar" aria-label="Editing" className="flex min-w-0 items-center gap-1.5">
+            {addButton}
+            {saveControls && <div className="flex min-w-0 items-center">{saveControls}</div>}
+            {tools && <div className="ml-auto flex shrink-0 items-center">{tools}</div>}
+          </div>
+        )}
+        {toolPanel}
+        <div role="group" aria-label="Filter entries" className="flex min-w-0 flex-wrap items-center gap-2">
+          {!editingRow && addButton}
+          {/* Show and the sort stay together; the sort narrows before anything wraps. */}
+          <div className="flex min-w-0 items-center gap-2">
+            <Segmented
+              label="Show"
+              value={enabled}
+              onValueChange={(next) => {
+                setPinned([])
+                setEnabled(next)
+              }}
+              options={[
+                { value: "all", label: "All", description: "Every entry." },
+                { value: "on", label: "Enabled", description: "Only entries whose switch is on." },
+                { value: "off", label: "Disabled", description: "Only entries whose switch is off." }
+              ]}
+            />
+            <Tooltip label="The order the entries are listed in.">
+              <div className="w-40 min-w-24 shrink">
+                <Select
+                  ariaLabel="Sort entries by"
+                  items={sorts.map((s) => ({ value: s.id, label: s.label, description: s.description }))}
+                  value={sort?.id ?? null}
+                  onValueChange={(next) => {
+                    setPinned([])
+                    setSortId(next)
+                  }}
+                  {...(panel ? { className: "h-8!" } : {})}
+                />
+              </div>
+            </Tooltip>
+          </div>
+          {/* Fills the rest of the row up to a bounded width; with less room than its own
+              minimum it takes the next line, filling it up to the same bound. */}
+          <div className="relative max-w-sm min-w-44 flex-1">
+            <Tooltip label="Shows only the entries whose title, keys or text have every word typed.">
               <Input
                 type="search"
                 aria-label="Filter by titles, keys and content"
-                placeholder={panel ? "Filter entries" : "Filter by titles, keys and content"}
-                className={panel ? "h-8!" : ""}
+                placeholder="Filter entries"
+                className={`${panel ? "h-8!" : ""} ${count ? "pr-28!" : ""}`}
                 value={query}
                 onChange={(event) => {
                   setPinned([])
@@ -812,181 +994,49 @@ export function LorebookTable({
                 }}
               />
             </Tooltip>
-          </div>
-          {tools}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Segmented
-            label="Show"
-            value={enabled}
-            onValueChange={(next) => {
-              setPinned([])
-              setEnabled(next)
-            }}
-            options={[
-              { value: "all", label: "All", description: "Every entry." },
-              { value: "on", label: "Enabled", description: "Only entries whose switch is on." },
-              { value: "off", label: "Disabled", description: "Only entries whose switch is off." }
-            ]}
-          />
-          <div className="flex items-center gap-2">
-            <span className={panel ? "sr-only" : "text-sm text-muted"}>Sort by</span>
-            <div className={panel ? "w-36" : "w-44"}>
-              <Select
-                ariaLabel="Sort entries by"
-                items={sorts.map((s) => ({ value: s.id, label: s.label, description: s.description }))}
-                value={sort?.id ?? null}
-                onValueChange={(next) => {
-                  setPinned([])
-                  setSortId(next)
-                }}
-              />
-            </div>
-          </div>
-          <span className="flex-1" />
-          {/* A standalone book's header has its count; here it's how many the search leaves. */}
-          {(filtered || card || panel) && (
-            <p role="status" className="text-sm text-muted">
-              {filtered
-                ? `${uids.length.toLocaleString()} of ${entriesLabel(book.entries.length)}`
-                : entriesLabel(book.entries.length)}
-            </p>
-          )}
-        </div>
-        <div
-          role="toolbar"
-          aria-label="All entries"
-          className={`flex flex-wrap items-center ${panel ? "gap-0.5" : "gap-1.5"} ${saveControls ? "justify-end" : ""}`}
-        >
-          {/* The save cluster leads the row, the toolbar's buttons on the right (DESIGN §10.1). */}
-          {saveControls && <div className="mr-auto flex">{saveControls}</div>}
-          <Button
-            variant="ghost"
-            className={small}
-            disabled={uids.length === 0}
-            hint="Opens every entry shown, to read them one after another. Their settings stay folded."
-            onClick={() => setOpened((set) => new Set([...set, ...uids]))}
-          >
-            Expand all
-          </Button>
-          <Button
-            variant="ghost"
-            className={small}
-            disabled={opened.size === 0}
-            hint="Closes every entry to its one-line header."
-            onClick={() => {
-              enteredHere.current = null
-              setEntryKey("", true)
-              setOpened(new Set())
-            }}
-          >
-            Collapse all
-          </Button>
-          {!panel && <span aria-hidden="true" className="h-5 w-px bg-border" />}
-          <Button
-            variant="ghost"
-            className={small}
-            disabled={book.entries.length === 0 || book.entries.every((entry) => entry.enabled)}
-            hint="Switches every entry on, the hidden ones too. An unsaved change like any edit: Save keeps it, Revert undoes it."
-            onClick={() => switchAll(true)}
-          >
-            Enable all
-          </Button>
-          <Button
-            variant="ghost"
-            className={small}
-            disabled={book.entries.length === 0 || book.entries.every((entry) => !entry.enabled)}
-            hint="Switches every entry off, to turn a few back on. The book stays in the chat. An unsaved change like any edit: Save keeps it, Revert undoes it."
-            onClick={() => switchAll(false)}
-          >
-            Disable all
-          </Button>
-          {!panel && <span aria-hidden="true" className="h-5 w-px bg-border" />}
-          <Button
-            variant="ghost"
-            className={small}
-            aria-pressed={selecting}
-            disabled={book.entries.length === 0}
-            hint={
-              selecting
-                ? "Stop selecting entries."
-                : "Select several entries to change a setting on all of them at once."
-            }
-            onClick={() => {
-              setSelecting(!selecting)
-              setSelected(new Set())
-            }}
-          >
-            <Icon name="check" />
-            {selecting ? "Done selecting" : "Select"}
-          </Button>
-        </div>
-        {selecting && (
-          <div
-            role="region"
-            aria-label="Selected entries"
-            className="flex flex-wrap items-center gap-1.5 rounded-md border border-accent/40 bg-accent/5 px-2 py-1.5 text-sm"
-          >
-            <span role="status" className="px-1 font-medium">
-              {live.length.toLocaleString()} selected
-            </span>
-            <Button
-              variant="ghost"
-              className={small}
-              hint="Every entry in the book, those the filter hides too."
-              onClick={() => setSelected(new Set(book.entries.map((entry) => entry.uid)))}
-            >
-              All {book.entries.length.toLocaleString()}
-            </Button>
-            {filtered && (
-              <Button
-                variant="ghost"
-                className={small}
-                hint="The entries the filter and Show leave, adding them to the selection."
-                onClick={() => setSelected((set) => new Set([...set, ...uids]))}
+            {count && (
+              <span
+                role="status"
+                data-layout-overlay="The entry count sits inside the filter field's end"
+                className="pointer-events-none absolute inset-y-0 right-8 flex items-center text-xs text-muted"
               >
-                The {uids.length.toLocaleString()} shown
-              </Button>
+                {count}
+              </span>
             )}
-            <Button
-              variant="ghost"
-              className={small}
-              disabled={live.length === 0}
-              hint="Clears the selection."
-              onClick={() => setSelected(new Set())}
-            >
-              None
-            </Button>
-            <span className="flex-1" />
-            <Button
-              variant="primary"
-              className={small}
-              disabled={live.length === 0}
-              hint="Give every selected entry the same value for one setting; their other settings stay as they are."
-              onClick={() => setMassEdit(true)}
-            >
-              Change for selected…
-            </Button>
           </div>
-        )}
+        </div>
         <Removed store={store} root={root} uids={removed} />
       </div>
 
       <div ref={list} className="min-w-0 rounded-lg border border-border bg-canvas">
-        {!compact && uids.length > 0 && (
+        {/* The list's header: the select-all checkbox over the rows' checkboxes, the selection
+            and its Edit, and the list's own actions at the end. One row whatever the width. */}
+        {!compact ? (
           <div
-            aria-hidden="true"
-            className="grid gap-2 border-b border-border px-1 py-1.5 text-xs font-medium text-muted"
+            className="grid items-center gap-2 border-b border-border py-2 ps-2 pe-4 text-xs font-medium text-muted"
             style={{ gridTemplateColumns: template }}
           >
-            <span className="pl-1">On</span>
-            <span className="pl-2">Title · keys</span>
+            <span className="flex items-center gap-1">
+              {selectAll}
+              <span aria-hidden="true" className="pl-9">
+                On
+              </span>
+            </span>
+            <span className="flex min-w-0 items-center pl-2">
+              {selection || <span aria-hidden="true">Title · keys</span>}
+            </span>
             {columns.map((column) => (
-              <span key={column.id} className="pl-1">
+              <span key={column.id} aria-hidden="true" className="pl-1">
                 {column.header}
               </span>
             ))}
-            <span />
+            {listActions}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 border-b border-border py-2 ps-2 pe-4">
+            {selectAll}
+            <span className="flex min-w-0 flex-1 items-center pl-1">{selection}</span>
+            {listActions}
           </div>
         )}
         {uids.length === 0 ? (
@@ -1011,7 +1061,6 @@ export function LorebookTable({
               template,
               columns,
               actions,
-              selecting,
               onSelect: select,
               onToggle: toggle,
               onSettings: showSettings,
@@ -1019,7 +1068,7 @@ export function LorebookTable({
             }}
             opened={opened}
             settings={settings}
-            selected={selecting ? selected : EMPTY}
+            selected={selected}
           />
         )}
       </div>

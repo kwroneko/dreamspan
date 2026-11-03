@@ -7,6 +7,25 @@ import { useId, useState, type ReactNode } from "react"
 import { tooltipPopupClass } from "./Button.tsx"
 import { Icon } from "./Icon.tsx"
 
+/** Shared geometry for tooltip and popover help triggers. */
+export const aboutHintClass =
+  "inline-flex size-5 shrink-0 items-center justify-center rounded-full align-[-2px] text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+
+/** Inline text flow keeps help beside the final word, including when a label wraps. */
+export function LabelWithHelp({ children, help }: { children: ReactNode; help: ReactNode }) {
+  return (
+    <span className="text-sm leading-5">
+      {children}
+      {help && (
+        <>
+          {"\u00a0"}
+          {help}
+        </>
+      )}
+    </span>
+  )
+}
+
 export function AboutHint({ heading, children }: { heading: string; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const id = useId()
@@ -20,7 +39,7 @@ export function AboutHint({ heading, children }: { heading: string; children: Re
             aria-describedby={id}
             // A tap opens it too, where nothing hovers; a tap elsewhere closes it.
             onClick={() => setOpen(true)}
-            className="inline-flex size-5 shrink-0 items-center justify-center rounded-full align-middle text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+            className={aboutHintClass}
           >
             <Icon name="help" size={14} />
           </BaseButton>

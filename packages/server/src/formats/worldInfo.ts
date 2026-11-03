@@ -1,6 +1,7 @@
 // SillyTavern's standalone World Info files, to and from our lorebook document. Entry fields
 // and their defaults are ST's `newWorldInfoEntryDefinition` (public/scripts/world-info.js);
 // a file must have `entries`, as ST's import requires (src/endpoints/worldinfo.js).
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
 import { Context, type Effect, Predicate } from "effect"
@@ -173,7 +174,7 @@ export const importLorebook = (
 ): Effect.Effect<{ lorebook: LorebookDoc; report: ImportReport }, FormatError> =>
   attempt(() => {
     if (bytes.byteLength > limits.maxFileBytes) {
-      fail("file.too_large", `The file is larger than ${limits.maxFileBytes} bytes.`)
+      fail("file.too_large", `The file is larger than ${formatByteSize(limits.maxFileBytes)}.`)
     }
     const issues = new ReportBuilder()
     const root = parseJson(bytes, limits.maxLorebookJsonBytes, limits, issues)
@@ -259,8 +260,8 @@ export const exportLorebook = (book: LorebookDoc) => {
       ...present({
         characterFilter: entry.character_filter && {
           isExclude: entry.character_filter.is_exclude,
-          names: entry.character_filter.names,
-          tags: entry.character_filter.tags
+          names: [...entry.character_filter.names, ...(entry.character_filter.cards ?? []).map((card) => card.name)],
+          tags: entry.character_filter.tags.map((tag) => entry.character_filter?.tag_ids?.[tag] ?? tag)
         },
         displayIndex: entry.display_index
       }),

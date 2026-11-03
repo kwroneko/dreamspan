@@ -1,4 +1,5 @@
 import { replyHooks } from "../chat/replyHooks.ts"
+import { editorExtensions } from "../../ui/editorExtensions.ts"
 import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
 import { registerUserDraftNotices } from "./userDraft.tsx"
 import { libraryActions } from "../library/slots.ts"
@@ -18,7 +19,7 @@ import { registerCardTabs } from "./cardTabsRegister.tsx"
 import { lorebookFields, standaloneLorebookFields } from "./lorebookFields.ts"
 import { LorebookUse, StandaloneLorebook } from "./StandaloneLorebook.tsx"
 import { registerLorebookTable } from "./lorebookColumns.tsx"
-import { registerLorebookMassSettings } from "./lorebookMassDefaults.ts"
+import { registerLorebookEntrySettings } from "./lorebookSettingsDefaults.tsx"
 import { lazy, Suspense } from "react"
 import { routes } from "../../routes.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -48,6 +49,10 @@ function LazyEditorPage() {
 }
 
 export const register = () => {
+  editorExtensions.register({
+    id: "editor.macro-highlighting",
+    load: () => import("../../ui/macroHighlight.ts").then((module) => module.macroHighlight)
+  })
   // Live text is what's sent: open editors flush before a reply, and read again after one cut revisions.
   replyHooks.register({
     id: "editor.live-text",
@@ -64,7 +69,7 @@ export const register = () => {
   editorTextFields.register({ id: "card.regex", kind: "card", fields: (doc) => regexScriptFields("card", doc) })
   registerCardTabs()
   registerLorebookTable()
-  registerLorebookMassSettings()
+  registerLorebookEntrySettings()
   presetEditorSections.register({ id: "preset.end-of-request", order: 100, component: EndOfRequest })
   presetEditorSections.register({ id: "preset.reply-sections", order: 110, component: ReplySectionsSettings })
   registerPresetWarnings()

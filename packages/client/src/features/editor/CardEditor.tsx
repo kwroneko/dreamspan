@@ -9,7 +9,16 @@ import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { valueField, type FieldPath } from "@rp/shared/editing.ts"
 import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
-import { type ReactNode, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import {
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -29,7 +38,7 @@ import { LorebookForm } from "./LorebookForm.tsx"
 import { LorebookPanelEditor } from "./LorebookPanelEditor.tsx"
 import { addEntry } from "./lorebookTable.ts"
 import { NoteList, NoteListControls, useNoteBlocks } from "./NoteList.tsx"
-import { AddNoteButtons, SharedNotePicker } from "./notes.tsx"
+import { NoteSectionHeader, SharedNotePicker } from "./notes.tsx"
 import { EditorPortrait } from "./PortraitControls.tsx"
 import { PromptUseNote } from "./PromptUseNote.tsx"
 import { SearchNavigation } from "./searchNavigation.ts"
@@ -278,6 +287,9 @@ function CardNotes({ store, call }: { store: EditorStore; call: Caller }) {
   const [error, setError] = useState<AppError | null>(null)
   const [version, setVersion] = useState(0)
   const [picking, setPicking] = useState(false)
+  // The note just added: it scrolls into view and flashes once it shows (owner, 2026-11-02).
+  const [added, setAdded] = useState<string | null>(null)
+  const revealed = useCallback(() => setAdded(null), [])
   const { blocks, settings } = useNoteBlocks(notes?.length ?? 0)
   const name = useValue<string>(store, ["name"]) || "This card"
   const entity = useEditorState(store).snapshot?.ref.entityId
@@ -294,12 +306,24 @@ function CardNotes({ store, call }: { store: EditorStore; call: Caller }) {
     )
     if (!result.ok) return setError(result.error)
     blocks.setOpen(result.value.id, true)
+    if (!shared) settings.setOpen(result.value.id, true)
+    setAdded(result.value.id)
     setVersion(version + 1)
   }
   // A card's notes can only be conditioned on the card itself here; a chat offers its cast.
   const cards = entity ? [{ entity, name }] : []
   return (
     <div className="flex flex-col gap-3">
+      {notes && notes.length > 0 && (
+        // At the right at every width, with the page-level controls (owner, 2026-11-02).
+        <NoteListControls ids={notes.map((entry) => entry.ref.id)} blocks={blocks} />
+      )}
+      <NoteSectionHeader
+        title={name}
+        addHint={`Adds a new note to ${name}.`}
+        onNew={() => void add()}
+        onPick={() => setPicking(true)}
+      />
       <ErrorAlert error={error} />
       {notes === null && !error && <p role="status">Loading the notes…</p>}
       {notes?.length === 0 && (
@@ -311,27 +335,23 @@ function CardNotes({ store, call }: { store: EditorStore; call: Caller }) {
         </EmptyState>
       )}
       {notes && notes.length > 0 && (
-        <>
-          <NoteListControls ids={notes.map((entry) => entry.ref.id)} blocks={blocks} />
-          <NoteList
-            label="The card's notes"
-            entries={notes.map((entry) => ({
-              ref: entry.ref,
-              doc: entry.doc,
-              generation: version,
-              onDeleted: () => setVersion(version + 1)
-            }))}
-            cards={cards}
-            call={call}
-            blocks={blocks}
-            settings={settings}
-            onRelinked={() => setVersion(version + 1)}
-          />
-        </>
+        <NoteList
+          label="The card's notes"
+          entries={notes.map((entry) => ({
+            ref: entry.ref,
+            doc: entry.doc,
+            generation: version,
+            onDeleted: () => setVersion(version + 1)
+          }))}
+          cards={cards}
+          call={call}
+          blocks={blocks}
+          settings={settings}
+          onRelinked={() => setVersion(version + 1)}
+          added={added}
+          onRevealed={revealed}
+        />
       )}
-      <div>
-        <AddNoteButtons onNew={() => void add()} onPick={() => setPicking(true)} />
-      </div>
       <SharedNotePicker
         open={picking}
         onOpenChange={setPicking}

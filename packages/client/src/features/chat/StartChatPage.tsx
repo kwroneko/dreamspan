@@ -1,5 +1,6 @@
+import type { Draft } from "@rp/shared/drafts.ts"
 import { greetingPick } from "@rp/shared/greetings.ts"
-import { newerText, useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
 import {
   PendingComposerControls,
@@ -38,15 +39,7 @@ import { IconButton, TooltipProvider } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useSession } from "../../session.ts"
 import { useCaller } from "../editor/caller.ts"
-import {
-  copiesOf,
-  type Copy,
-  dropCopy,
-  keepCopy,
-  makeCopy,
-  pendingChatCopy,
-  pendingGroupChatCopy
-} from "../editor/backup.ts"
+import { type Copy, dropCopy, keepCopy, pendingChatCopy, pendingGroupChatCopy } from "../editor/backup.ts"
 import { useTitle } from "../shell.tsx"
 import { CastContext, type CastView, castView } from "./cast.ts"
 import { ChatPortraitProvider } from "./ChatPortraitProvider.tsx"
@@ -57,7 +50,7 @@ import { ComposerBox, useCompactComposer } from "./Composer.tsx"
 import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { expandForDisplay } from "./macros.ts"
 import { useIsPanelTab } from "./panels.tsx"
-import { PendingChat, pendingOptions, pendingTitle, readLastTyped, writeLastTyped } from "./pendingChat.ts"
+import { PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
 import { chatColumns } from "./presentation.tsx"
 import { seedChat } from "./session.ts"
 import { preloadChatPage } from "./chatPageLoader.ts"
@@ -178,81 +171,33 @@ function Pending({
   // The saved chat's page, ready before the first send opens it.
   useEffect(preloadChatPage, [])
   const sending = useRef<string | null>(null)
-  const destination = useRef<string | null>(null)
-  // The newest copy of the text in this browser as the page opened, once read: on opening, the
-  // newer of it and the server's draft wins, so a reload right after typing keeps the last
-  // keystrokes even when the server hasn't had them yet (newerText).
-  const [local, setLocal] = useState<{ readonly at: number; readonly content: string } | null | undefined>(undefined)
-  const settled = useRef(false)
+  const destination = useRef<{ chatId: string; composer: Draft } | null>(null)
+  // The draft store reconciles its synchronous and IndexedDB backups before opening.
   useEffect(() => {
     if (!durable.ready || sending.current !== null) return
-    if (!settled.current) {
-      if (local === undefined) return
-      settled.current = true
-      // The newer copy becomes the draft's text (and is saved); this effect then shows it.
-      if (local !== null && local.content !== durable.text && newerText(durable.savedAt, local.at) === "local") {
-        typed.current = local.content
-        durable.setText(local.content)
-        return
-      }
-    }
     typed.current = durable.text
     setTextState(durable.text)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- durable's setter is new each render
-  }, [durable.ready, durable.text, durable.savedAt, local])
+  }, [durable.ready, durable.text])
   const copy = useRef<Copy | null>(null)
   const keep = (content: string) => {
-    writeLastTyped(userId, copyKey, destination.current === null ? content : "")
-    if (destination.current === null) durable.setText(content)
+    if (destination.current === null) {
+      durable.setText(content)
+      return Promise.resolve()
+    }
     const previous = copy.current
     copy.current = null
-    if (content === "") {
-      return previous === null ? Promise.resolve() : dropCopy(previous)
-    }
-    copy.current =
-      destination.current !== null
-        ? composerCarryCopy(userId, destination.current, entityId, group?.name ?? card.card.name, content, previous)
-        : makeCopy(
-            userId,
-            copyKey,
-            "first message",
-            {
-              kind: "pendingChat",
-              payload:
-                group === null
-                  ? { entityId, name: card.card.name, content }
-                  : { entityId, name: group.name, content, groupChatId: group.chatId }
-            },
-
-            Date.now()
-          )
+    if (content === "") return previous === null ? Promise.resolve() : dropCopy(previous)
+    copy.current = composerCarryCopy(
+      userId,
+      destination.current.chatId,
+      entityId,
+      group?.name ?? card.card.name,
+      content,
+      previous,
+      destination.current.composer
+    )
     return keepCopy(copy.current, previous)
   }
-  // The text left here before, if nothing's been typed since; the newest of them, when
-  // several tabs left one (the others stay in the sidebar's Unsaved text).
-  useEffect(() => {
-    let current = true
-    void copiesOf(userId, copyKey).then((copies) => {
-      const newest = [...copies].sort((a, b) => b.at - a.at)[0]
-      if (!current) return
-      // The keystroke-synchronous copy may be newer than the asynchronous ones.
-      const typedLast = readLastTyped(userId, copyKey)
-      const found =
-        typedLast !== null && (newest === undefined || typedLast.at > newest.at)
-          ? typedLast
-          : newest === undefined
-            ? null
-            : { at: newest.at, content: newest.content }
-      setLocal(found)
-      if (found === null || copy.current !== null || typed.current !== "") return
-      copy.current = newest ?? null
-      typed.current = found.content
-      setTextState(found.content)
-    })
-    return () => {
-      current = false
-    }
-  }, [userId, copyKey])
   const playing = pending.playing(state)
   // The guidance toggle, as in the chat's composer (DESIGN §2.2).
   const viewPrefs = useViewPrefs()
@@ -385,7 +330,7 @@ function Pending({
     }
     // Only submitted text was acknowledged. Atomically replace the pending copy with
     // the extra text addressed to the saved chat, before navigating or opening its draft.
-    destination.current = result.value.chat.id
+    destination.current = { chatId: result.value.chat.id, composer: result.value.composer }
     await keep(typed.current)
     await durable.commit(durable.text, async () => true)
     // The saved chat opens in place: the same page, its panel at the same tab.
@@ -566,16 +511,18 @@ function PendingFor({
   card,
   cards,
   greeters,
-  group
+  group,
+  defaultPersona
 }: {
   card: CardForChat
+  defaultPersona: EntityId | null
   cards: ReadonlyArray<CastCard>
   greeters: ReadonlyArray<CardForChat>
   group: { name: string; chatId: ChatId; members: ReadonlyArray<string> } | null
 }) {
   const call = useCaller()
   const [pending] = useState(
-    () => new PendingChat(cards, greeters, group && { name: group.name, chatId: group.chatId }, call)
+    () => new PendingChat(cards, greeters, group && { name: group.name, chatId: group.chatId }, call, defaultPersona)
   )
   return <Pending pending={pending} card={card} groupMembers={group?.members ?? null} />
 }
@@ -586,6 +533,7 @@ export function StartChatPage() {
   const action = useAction()
   const [loaded, setLoaded] = useState<{
     card: CardForChat
+    defaultPersona: EntityId | null
     cards: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? loaded.card.card.name : "New chat")
@@ -600,19 +548,31 @@ export function StartChatPage() {
       .run((client) =>
         Effect.all({
           card: client("GetCardForChat", { entityId }),
-          cards: client("ListCards", undefined)
+          cards: client("ListCards", undefined),
+          defaults: client("GetGenerationDefaults", undefined)
         })
       )
       .then((result) => {
         if (result.ok)
-          setLoaded({ card: result.value.card, cards: result.value.cards.filter((c) => c.entityId !== entityId) })
+          setLoaded({
+            card: result.value.card,
+            cards: result.value.cards.filter((c) => c.entityId !== entityId),
+            defaultPersona: result.value.defaults.persona ?? null
+          })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card and attempt
   }, [entityId, attempt])
   return (
     <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
       {loaded ? (
-        <PendingFor key={entityId} card={loaded.card} cards={loaded.cards} greeters={[loaded.card]} group={null} />
+        <PendingFor
+          key={entityId}
+          card={loaded.card}
+          cards={loaded.cards}
+          greeters={[loaded.card]}
+          group={null}
+          defaultPersona={loaded.defaultPersona}
+        />
       ) : action.error ? (
         <div className="chat-column pt-4">
           <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
@@ -632,6 +592,7 @@ export function StartGroupChatPage() {
   const action = useAction()
   const [loaded, setLoaded] = useState<{
     group: ChatGroup
+    defaultPersona: EntityId | null
     cards: ReadonlyArray<CardForChat>
     all: ReadonlyArray<CastCard>
   } | null>(null)
@@ -647,25 +608,31 @@ export function StartGroupChatPage() {
         Effect.gen(function* () {
           const { group } = yield* client("ListGroupChats", { chatId })
           // Every member's greetings: each greets in turn.
-          const { greeters, cards } = yield* Effect.all(
+          const { greeters, cards, defaults } = yield* Effect.all(
             {
               greeters: Effect.forEach(
                 group.members,
                 (member) => client("GetCardForChat", { entityId: member.entityId }),
                 { concurrency: "unbounded" }
               ),
-              cards: client("ListCards", undefined)
+              cards: client("ListCards", undefined),
+              defaults: client("GetGenerationDefaults", undefined)
             },
             { concurrency: "unbounded" }
           )
-          return { group, greeters, cards }
+          return { group, greeters, cards, defaults }
         })
       )
       .then((result) => {
         if (!result.ok) return
-        const { group, greeters, cards } = result.value
+        const { group, greeters, cards, defaults } = result.value
         const inGroup = new Set<string>(group.members.map((member) => member.entityId))
-        setLoaded({ group, cards: greeters, all: cards.filter((c) => !inGroup.has(c.entityId)) })
+        setLoaded({
+          group,
+          cards: greeters,
+          all: cards.filter((c) => !inGroup.has(c.entityId)),
+          defaultPersona: defaults.persona ?? null
+        })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group and attempt
   }, [chatId, attempt])
@@ -676,6 +643,7 @@ export function StartGroupChatPage() {
           key={chatId}
           card={loaded.cards[0]!}
           cards={loaded.all}
+          defaultPersona={loaded.defaultPersona}
           greeters={loaded.cards}
           group={{
             name: loaded.group.name,

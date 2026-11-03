@@ -5,6 +5,8 @@ import { cardToJson } from "../../src/formats/cardExport.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { defaultLimits } from "../../src/formats/safety.ts"
 import { exportLorebook, importLorebook } from "../../src/formats/worldInfo.ts"
+import { mapLorebookFilters } from "../../src/formats/lorebookFilters.ts"
+import { characterFilterPasses } from "@rp/shared/lorebookFilters.ts"
 import { failure, json, run, stCardV2, worldInfo } from "./support.ts"
 
 /** Every key and value of `expected` is in `actual`. */
@@ -19,6 +21,39 @@ const expectSuperset = (actual: unknown, expected: unknown, path = "") => {
 }
 
 describe("World Info import", () => {
+  it("resolves filenames and local tag IDs, filters the speaker, and exports the original ST shape", () => {
+    const source = {
+      entries: {
+        0: { key: ["cat"], characterFilter: { names: ["alice", "missing"], tags: ["tag-1"], isExclude: false } }
+      }
+    }
+    const imported = run(importLorebook(json(source))).lorebook
+    const mapped = mapLorebookFilters(imported, { cards: { alice: "card-alice" }, tags: { "tag-1": "Mages" } })
+    const filter = mapped.entries[0]!.character_filter
+    expect(filter).toEqual({
+      names: ["missing"],
+      cards: [{ entity: "card-alice", name: "alice" }],
+      tags: ["Mages"],
+      tag_ids: { Mages: "tag-1" },
+      is_exclude: false
+    })
+    expect(characterFilterPasses(filter, { entity: "card-alice", tags: ["Mages"] })).toBe(true)
+    expect(characterFilterPasses(filter, { entity: "card-bob", tags: ["Mages"] })).toBe(false)
+    expect(characterFilterPasses(filter, { entity: "card-alice", tags: [] })).toBe(false)
+    const exported = JSON.parse(new TextDecoder().decode(exportLorebook(mapped)))
+    expect(exported.entries[0].characterFilter).toEqual({
+      names: ["missing", "alice"],
+      tags: ["tag-1"],
+      isExclude: false
+    })
+    expect(run(importLorebook(json(exported))).lorebook).toEqual(mapped)
+    const again = mapLorebookFilters(run(importLorebook(json(exported))).lorebook, {
+      cards: { alice: "card-alice" },
+      tags: { "tag-1": "Mages" }
+    })
+    expect(again).toEqual(mapped)
+  })
+
   it("maps ST's fields and keeps everything else", () => {
     const { lorebook, report } = run(importLorebook(json(worldInfo()), "Harbor"))
     expect(Schema.decodeUnknownSync(LorebookDoc)(lorebook)).toEqual(lorebook)

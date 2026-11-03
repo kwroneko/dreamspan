@@ -471,8 +471,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           updated_at: at
         })}`
         if (moveDrafts) {
-          yield* sql`UPDATE drafts SET target_id = ${id}, row_version = row_version + 1, updated_at = ${at}
-            WHERE user_id = ${userId} AND target_kind = 'entity_field' AND target_id = ${refId} AND status = 'active'`
+          yield* drafts.moveFields(userId, refId, id)
         }
         return toLibraryRef(yield* steps.reload(id))
       }).pipe(transaction(sql, "ForkWithDrafts")),

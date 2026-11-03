@@ -10,6 +10,7 @@ import { client, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 
 const database = () => Database.layer({ dataDir: tempDir("shell"), readers: 2, allowNetworkFs: false, ...testWorkers })
 
@@ -89,6 +90,68 @@ const setup = Effect.gen(function* () {
 })
 
 describe("shell fork summaries", () => {
+  it.live("recomputes persisted summaries from before retained-swipe invalidation", () => {
+    const dataDir = tempDir("shell-old-summary")
+    return Effect.gen(function* () {
+      const t = yield* setup
+      yield* t.append(t.harbor.id, null, "The current story.")
+      const expected = yield* t.check("stored", [t.harbor.id, t.other.id])
+      // Older builds could advance a stale summary's stamp after an unselected swipe.
+      // Its stamps still match on startup, so only the format can invalidate it.
+      yield* fixtureSql(dataDir, [
+        {
+          sql: "UPDATE fork_summaries SET format = 3, preview = 'Obsolete cached preview', joined_json = '[]' WHERE chat_id = ?",
+          params: [t.harbor.id]
+        }
+      ])
+      const read = yield* t.reader.ShellLibrary({ userId: t.userId })
+      assert.deepStrictEqual(
+        read.fresh.map((chat) => chat.chatId),
+        [t.harbor.id]
+      )
+      assert.deepStrictEqual(library(read), library(expected))
+      yield* t.check("repaired", [t.harbor.id])
+    }).pipe(Effect.provide(Database.layer({ dataDir, readers: 2, allowNetworkFs: false, ...testWorkers })))
+  })
+
+  it.live("an unselected model swipe refreshes participation on every fork displaying its slot", () =>
+    Effect.gen(function* () {
+      const t = yield* setup
+      const { writer, reader, userId, harbor, other, mira, tam } = t
+      const root = yield* t.append(harbor.id, null, "Mira opens the story.", mira.entityId)
+      yield* t.append(other.id, null, "Tam's other story.", tam.entityId)
+      const main = harbor.currentForkId as ForkId
+      const branch = (yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: root.slotId }))
+        .fork.id
+      const before = yield* t.check("cache both forks", [harbor.id, other.id])
+      assert.strictEqual(before.cards.find((card) => card.card.entityId === tam.entityId)!.card.chats, 1)
+      yield* writer.AddVersion({
+        userId,
+        slotId: root.slotId,
+        forkId: main,
+        version: t.version("Tam's unselected reply.", tam.entityId),
+        select: false,
+        commitDraft: null
+      })
+      const read = yield* reader.ShellLibrary({ userId })
+      assert.deepStrictEqual(
+        read.fresh.map((chat) => chat.chatId),
+        [harbor.id]
+      )
+      const refreshed = JSON.parse(read.fresh[0]!.forks) as Array<{ forkId: string }>
+      assert.deepStrictEqual(refreshed.map((fork) => fork.forkId).sort(), [main, branch].sort())
+      const after = yield* t.check("retained swipe", [harbor.id])
+      assert.strictEqual(after.cards.find((card) => card.card.entityId === tam.entityId)!.card.chats, 3)
+      for (const fork of after.forks.filter((fork) => fork.chat.id === harbor.id)) {
+        assert.include(fork.joined, tam.entityId)
+        assert.include(fork.departed, tam.entityId)
+        assert.notInclude(fork.cast, tam.entityId)
+      }
+      const shown = yield* reader.GetSlot({ userId, slotId: root.slotId, forkId: main })
+      assert.strictEqual(shown.entry.version.id, root.version.id)
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("every write the walk reads makes its chat stale, and the stored read equals a fresh one", () =>
     Effect.gen(function* () {
       const t = yield* setup

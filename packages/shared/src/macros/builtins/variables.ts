@@ -11,6 +11,7 @@ const scope = (call: MacroCall, which: VarScope) => call.variables[which]
 
 const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec> => [
   {
+    kind: "directive",
     name: `set${infix}var`,
     args: [name, value],
     handler: (call) => {
@@ -19,6 +20,7 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
     }
   },
   {
+    kind: "directive",
     name: `add${infix}var`,
     args: [name, value],
     handler: (call) => {
@@ -26,16 +28,33 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
       return ""
     }
   },
-  { name: `inc${infix}var`, args: [name], handler: (call) => scope(call, which).add(call.args[0]!, 1) },
-  { name: `dec${infix}var`, args: [name], handler: (call) => scope(call, which).add(call.args[0]!, -1) },
-  { name: `get${infix}var`, args: [name], handler: (call) => normalize(scope(call, which).get(call.args[0]!)) },
   {
+    kind: "directive",
+    name: `inc${infix}var`,
+    args: [name],
+    handler: (call) => scope(call, which).add(call.args[0]!, 1)
+  },
+  {
+    kind: "directive",
+    name: `dec${infix}var`,
+    args: [name],
+    handler: (call) => scope(call, which).add(call.args[0]!, -1)
+  },
+  {
+    kind: "value",
+    name: `get${infix}var`,
+    args: [name],
+    handler: (call) => normalize(scope(call, which).get(call.args[0]!))
+  },
+  {
+    kind: "value",
     name: `has${infix}var`,
     aliases: [`${infix}varexists`],
     args: [name],
     handler: (call) => String(scope(call, which).has(call.args[0]!))
   },
   {
+    kind: "directive",
     name: `delete${infix}var`,
     aliases: [`flush${infix}var`],
     args: [name],
@@ -45,6 +64,7 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
     }
   },
   {
+    kind: "directive",
     name: `set${infix}varkey`,
     aliases: [`set${infix}varindex`],
     args: [name, key, value],
@@ -54,6 +74,7 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
     }
   },
   {
+    kind: "value",
     name: `get${infix}varkey`,
     aliases: [`get${infix}varindex`],
     args: [name, key],

@@ -14,10 +14,12 @@ import { type ReactNode, useCallback, useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { AboutHint, LabelWithHelp } from "../../ui/AboutHint.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
-import { MenuItem } from "../../ui/Menu.tsx"
+import { MenuAction, MenuItem } from "../../ui/Menu.tsx"
 import { ReadableDiff } from "../../ui/ReadableDiff.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
@@ -132,7 +134,7 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
   const read = async (file: File) => {
     setProblem(null)
     if (file.size > MAX_IMPORT_BYTES) {
-      setProblem(`This file is larger than ${MAX_IMPORT_BYTES / 1024 / 1024} MB.`)
+      setProblem(`This file is larger than ${formatByteSize(MAX_IMPORT_BYTES)}.`)
       return
     }
     setStep({ _tag: "Reading", file })
@@ -176,13 +178,7 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
 
   const warnings = shown?.preview.report.issues.filter((issue) => issue.level === "warning") ?? []
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && onClose()}
-      wide
-      title={`Import a new version of ${label}`}
-      description="The file's version replaces the card's content wholesale, everywhere the card is used. Nothing changes until you press Replace."
-    >
+    <Dialog open onOpenChange={(open) => !open && onClose()} wide title={`Import a new version of ${label}`}>
       {problem && (
         <Alert tone="danger" title="Couldn't read this file">
           <p>{problem}</p>
@@ -195,12 +191,23 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
         </Alert>
       )}
       {step._tag === "Pick" && (
-        <FileDrop
-          label="Choose the new version's file"
-          description="A PNG, JSON or CHARX card, or drop it here. It's only read to compare; nothing is stored yet."
-          accept=".png,.json,.charx,image/png,application/json"
-          onFiles={(files) => files[0] && void read(files[0])}
-        />
+        <div className="flex flex-col gap-2">
+          <LabelWithHelp
+            help={
+              <AboutHint heading="Card file">
+                The file replaces the card’s content everywhere the card is used.
+              </AboutHint>
+            }
+          >
+            <span className="inline text-sm font-medium">Card file</span>
+          </LabelWithHelp>
+          <FileDrop
+            label="Choose the new version's file"
+            description="A PNG, JSON or CHARX card, or drop it here. It's only read to compare; nothing is stored yet."
+            accept=".png,.json,.charx,image/png,application/json"
+            onFiles={(files) => files[0] && void read(files[0])}
+          />
+        </div>
       )}
       {step._tag === "Reading" && (
         <p role="status" className="text-sm text-muted">
@@ -330,7 +337,7 @@ export function ImportNewVersion({
   // The Cast tab knows every card's ref: a family read per card there was an N+1 (night/tabperf).
   const action = (ref: RefId | undefined) => (
     <>
-      <Button
+      <MenuAction
         variant={compact ? "ghost" : "secondary"}
         className={compact ? "h-8! px-2!" : ""}
         hint={EXPLAIN.action}
@@ -338,7 +345,7 @@ export function ImportNewVersion({
         onClick={() => setOpen(true)}
       >
         Import a new version…
-      </Button>
+      </MenuAction>
       {open && ref && <NewVersionDialog refId={ref} label={label} onClose={() => setOpen(false)} />}
     </>
   )

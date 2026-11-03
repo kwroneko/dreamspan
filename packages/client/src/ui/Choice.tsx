@@ -8,7 +8,7 @@ import { Radio as BaseRadio } from "@base-ui/react/radio"
 import { RadioGroup as BaseRadioGroup } from "@base-ui/react/radio-group"
 import { Switch as BaseSwitch } from "@base-ui/react/switch"
 import { type ReactElement, type ReactNode, useId } from "react"
-import { AboutHint } from "./AboutHint.tsx"
+import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { inlineExplanationClass } from "./Explanation.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
@@ -20,7 +20,10 @@ function ChoiceLabel({
   description,
   hint,
   hidden = false,
-  hintInline = true
+  hintInline = true,
+  compact = false,
+  labelFor,
+  help
 }: {
   children: ReactNode
   hidden?: boolean
@@ -28,10 +31,21 @@ function ChoiceLabel({
   hint?: { readonly id: string; readonly text: string } | undefined
   /** False: the hint is only the tooltip and the description, never a line under the label. */
   hintInline?: boolean
+  compact?: boolean
+  labelFor?: string
+  help?: ReactNode
 }) {
   return (
     <span className={hidden ? "sr-only" : "flex min-w-0 flex-col"}>
-      <span className="text-sm text-text">{children}</span>
+      <span className={compact ? "text-xs leading-4 text-muted" : "text-sm text-text"}>
+        {help ? (
+          <LabelWithHelp help={help}>
+            <label htmlFor={labelFor}>{children}</label>
+          </LabelWithHelp>
+        ) : (
+          children
+        )}
+      </span>
       {description && <span className="text-sm text-muted">{description}</span>}
       {hint && (
         // Hidden from the name, and still the description: a reference reads hidden text.
@@ -57,7 +71,11 @@ export function Checkbox({
   description,
   about,
   aboutLabel,
-  hint
+  labelHelp,
+  hint,
+  indeterminate = false,
+  disabled = false,
+  labelHidden = false
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
@@ -65,48 +83,62 @@ export function Checkbox({
   description?: ReactNode
   about?: ReactNode
   aboutLabel?: string
+  /** Custom help popup, using the shared help trigger geometry. */
+  labelHelp?: ReactNode
   /** What ticking it does, when the label doesn't say. */
   hint?: string | undefined
+  /** Some but not all of what it stands for are ticked (a list's header checkbox), or mixed values. */
+  indeterminate?: boolean
+  disabled?: boolean
+  /** A checkbox whose visible label is elsewhere: its label stays out of the layout. */
+  labelHidden?: boolean
 }) {
   const id = useId()
   const aboutId = useId()
+  const help =
+    labelHelp ??
+    (about ? (
+      <AboutHint heading={aboutLabel ?? (typeof children === "string" ? children.trim() : "this setting")}>
+        {about}
+      </AboutHint>
+    ) : null)
+  const Row = help ? "div" : "label"
   const row = (
-    <label className="flex items-start gap-2.5">
+    <Row className={`flex min-w-0 items-start ${labelHidden ? "" : "gap-2.5"}`}>
       <BaseCheckbox.Root
+        id={id}
         checked={checked}
+        indeterminate={indeterminate}
+        disabled={disabled}
         onCheckedChange={(next) => onCheckedChange(next)}
         {...(hint || about
-          ? { "aria-describedby": [hint ? id : null, about ? aboutId : null].filter(Boolean).join(" ") }
+          ? { "aria-describedby": [hint ? `${id}-hint` : null, about ? aboutId : null].filter(Boolean).join(" ") }
           : {})}
-        className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
+        className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast data-checked:border-accent data-checked:bg-accent data-indeterminate:border-accent data-indeterminate:bg-accent data-disabled:opacity-50 ${focusRing}`}
       >
         <BaseCheckbox.Indicator className="flex data-unchecked:hidden">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
-            <path d="m2.5 8.5 4 4 7-9" strokeWidth="2" />
+            <path d={indeterminate ? "M3.5 8h9" : "m2.5 8.5 4 4 7-9"} strokeWidth="2" />
           </svg>
         </BaseCheckbox.Indicator>
       </BaseCheckbox.Root>
-      <ChoiceLabel description={description} hint={hint ? { id, text: hint } : undefined}>
+      <ChoiceLabel
+        labelFor={id}
+        help={help}
+        hidden={labelHidden}
+        description={description}
+        hint={hint ? { id: `${id}-hint`, text: hint } : undefined}
+      >
         {children}
       </ChoiceLabel>
-    </label>
-  )
-  return withHint(
-    hint,
-    about ? (
-      <div className="flex items-start gap-1">
-        {row}
-        <AboutHint heading={aboutLabel ?? (typeof children === "string" ? children.trim() : "this setting")}>
-          {about}
-        </AboutHint>
+      {about && (
         <span id={aboutId} hidden>
           {about}
         </span>
-      </div>
-    ) : (
-      row
-    )
+      )}
+    </Row>
   )
+  return withHint(hint, row)
 }
 
 export function Switch({
@@ -116,21 +148,27 @@ export function Switch({
   description,
   about,
   aboutLabel,
+  labelHelp,
   hint,
   describedBy,
   labelHidden = false,
   disabled = false,
-  compact = false
+  compact = false,
+  mixed = false
 }: {
+  /** The values it stands for differ (several entries at once): the thumb sits in the middle. */
+  mixed?: boolean
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   children: ReactNode
   description?: ReactNode
   about?: ReactNode
   aboutLabel?: string
+  /** Custom help popup, using the shared help trigger geometry. */
+  labelHelp?: ReactNode
   /** What switching it on or off does, when the label doesn't say. */
   hint?: string | undefined
-  /** One line in a dense place (a card's header): the hint is its tooltip only, never a line under it. */
+  /** A small, muted, centred row (a card's header), with its hint only in the tooltip. */
   compact?: boolean
   /** An explanation shown elsewhere (a row's own line), read as its description. */
   describedBy?: string | undefined
@@ -140,45 +178,54 @@ export function Switch({
 }) {
   const id = useId()
   const aboutId = useId()
+  const help =
+    labelHelp ??
+    (about ? (
+      <AboutHint heading={aboutLabel ?? (typeof children === "string" ? children.trim() : "this setting")}>
+        {about}
+      </AboutHint>
+    ) : null)
+  const Row = help ? "div" : "label"
   const row = (
-    <label className={`flex items-start ${compact ? "gap-2" : "gap-3"}`}>
+    <Row className={`flex min-w-0 ${compact ? "items-center gap-2" : "items-start gap-3"}`}>
       <BaseSwitch.Root
+        id={id}
         disabled={disabled}
-        checked={checked}
+        checked={mixed ? false : checked}
         onCheckedChange={(next) => onCheckedChange(next)}
+        {...(mixed ? { "data-mixed": "" } : {})}
         {...(hint || about || describedBy
-          ? { "aria-describedby": [hint ? id : null, about ? aboutId : null, describedBy].filter(Boolean).join(" ") }
+          ? {
+              "aria-describedby": [hint ? `${id}-hint` : null, about ? aboutId : null, describedBy]
+                .filter(Boolean)
+                .join(" ")
+            }
           : {})}
-        className={`mt-0.5 flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
+        className={`${compact ? "" : "mt-0.5"} flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 data-mixed:border-dashed ${focusRing}`}
       >
-        <BaseSwitch.Thumb className="size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none" />
+        <BaseSwitch.Thumb
+          className={`size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none ${mixed ? "translate-x-2 opacity-60" : ""}`}
+        />
       </BaseSwitch.Root>
       <ChoiceLabel
+        labelFor={id}
+        help={help}
         hidden={labelHidden}
         description={description}
-        hint={hint ? { id, text: hint } : undefined}
+        hint={hint ? { id: `${id}-hint`, text: hint } : undefined}
         hintInline={!compact}
+        compact={compact}
       >
         {children}
       </ChoiceLabel>
-    </label>
-  )
-  return withHint(
-    hint,
-    about ? (
-      <div className="flex items-start gap-1">
-        {row}
-        <AboutHint heading={aboutLabel ?? (typeof children === "string" ? children.trim() : "this setting")}>
-          {about}
-        </AboutHint>
+      {about && (
         <span id={aboutId} hidden>
           {about}
         </span>
-      </div>
-    ) : (
-      row
-    )
+      )}
+    </Row>
   )
+  return withHint(hint, row)
 }
 
 export function RadioGroup<Value extends string>({

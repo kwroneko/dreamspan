@@ -133,7 +133,7 @@ it.live("private draft saves, restores, endings and closing-page writes notify o
       expectedRowVersion: next.rowVersion,
       seq: history.at(-1)!.seq
     })
-    yield* api.EndUserDraft({
+    const ended = yield* api.EndUserDraft({
       ...address,
       draftId: initial.id,
       expectedRowVersion: restored.rowVersion,
@@ -156,6 +156,30 @@ it.live("private draft saves, restores, endings and closing-page writes notify o
       })
     )
     assert.strictEqual(response.status, 204)
+    // A closing-page copy from before deletion is recovered, never put back in the field.
+    assert.strictEqual(response.headers.get("x-drafts-recovered"), "1")
+    yield* eventually(() => notices.some((n) => n._tag === "UserDraftChanged" && n.draft.recovered > 0))
+    assert.strictEqual((yield* api.GetUserDraft(address))?.content, "")
+    // New typing after observing that deletion is a valid closing-page save and notifies too.
+    const fresh = yield* Effect.promise(() =>
+      fetch(`http://127.0.0.1:${port}/library/drafts`, {
+        method: "POST",
+        headers: { cookie: session.cookie, "content-type": "application/json" },
+        body: JSON.stringify({
+          drafts: [],
+          userDrafts: [
+            {
+              ...address,
+              content: "Closing page text",
+              draftId: ended.id,
+              expectedRowVersion: ended.rowVersion,
+              expectedSession: ended.session
+            }
+          ]
+        })
+      })
+    )
+    assert.strictEqual(fresh.status, 204)
     yield* eventually(() =>
       notices.some((n) => n._tag === "UserDraftChanged" && n.draft.content === "Closing page text")
     )

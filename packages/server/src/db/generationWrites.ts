@@ -10,11 +10,13 @@ import {
   DEFAULT_JUDGE,
   DEFAULT_LCM,
   DEFAULT_MODEL,
+  DEFAULT_PERSONA,
   DEFAULT_PRESET,
   GLOBAL_REGEX,
   readGlobalRegex,
   ownedModel,
   ownedPreset,
+  ownedPersona,
   readDefaults
 } from "./generationSettings.ts"
 import { makeDisplayPrefsWriteHandlers } from "./displayPrefs.ts"
@@ -148,6 +150,9 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           updated_at: now
         })}`
         yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
+        yield* sql`INSERT INTO lore_activations (rollout_id, entries_json, message_offset)
+          SELECT ${rolloutId}, coalesce(json_extract(${snapshot}, '$.loreTiming'), '[]'),
+            CASE WHEN json_extract(${snapshot}, '$.inputs.type') = 'continue' THEN 1 ELSE 0 END`
         // Pin the cast actually assembled, including an earlier-message swipe and a cast
         // change racing the placeholder's creation. Later undo cannot rewrite this evidence.
         yield* sql`UPDATE versions SET cast_json = (
@@ -248,6 +253,12 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
     SetGenerationDefaults: ({ userId, defaults }) =>
       Effect.gen(function* () {
         const { model, preset } = defaults
+        if (
+          defaults.persona !== undefined &&
+          defaults.persona !== null &&
+          !(yield* ownedPersona(sql, userId, defaults.persona))
+        )
+          return yield* new NotFound({ entity: "persona", id: defaults.persona })
         if (model !== null && !(yield* ownedModel(sql, userId, model.connection, model.model))) {
           return yield* new NotFound({ entity: "model", id: model.model })
         }
@@ -259,6 +270,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
             return yield* new NotFound({ entity: "model", id: choice.model })
         const locked = yield* connectionLock(userId, model)
+        if (defaults.persona !== undefined) yield* putSetting(userId, DEFAULT_PERSONA, defaults.persona)
         yield* putSetting(userId, DEFAULT_MODEL, model)
         yield* putSetting(userId, DEFAULT_PRESET, locked ?? preset)
         if (defaults.lcm !== undefined) yield* putSetting(userId, DEFAULT_LCM, defaults.lcm)
@@ -287,6 +299,13 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
     // tab's change to a setting not named here stays.
     ChangeGenerationDefaults: ({ userId, change }) =>
       Effect.gen(function* () {
+        if (
+          change.persona !== undefined &&
+          change.persona !== null &&
+          !(yield* ownedPersona(sql, userId, change.persona))
+        )
+          return yield* new NotFound({ entity: "persona", id: change.persona })
+        if (change.persona !== undefined) yield* putSetting(userId, DEFAULT_PERSONA, change.persona)
         if (change.model && !(yield* ownedModel(sql, userId, change.model.connection, change.model.model)))
           return yield* new NotFound({ entity: "model", id: change.model.model })
         if (change.preset && !(yield* ownedPreset(sql, userId, change.preset)))

@@ -20,3 +20,11 @@ export const crash: StParsers["chat-part"] = () => {
   if (isMainThread) throw new Error("plugin parser ran on the main thread")
   return Effect.sync(() => process.exit(1))
 }
+
+/** Reference path for database parity: plugins may omit the optional prefix hashes. */
+export const positionalChatPart: StParsers["chat-part"] = (input) =>
+  Effect.map(builtinParsers["chat-part"](input), (part) =>
+    Object.assign(part, {
+      batches: part.batches.map(({ messagesJson, speakers }) => ({ messagesJson, speakers }))
+    })
+  )

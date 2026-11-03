@@ -1,3 +1,4 @@
+import { deletedSince, observeDeletion, type ObservedDeletion } from "@rp/shared/drafts.ts"
 // The text of a summary being edited (ARCHITECTURE §3.10, §16): typed into a server draft
 // that keeps its undo history, and saved as a revision only when the user says so. The
 // rules are the other fields': the draft a save names is the one this tab last saw
@@ -71,9 +72,11 @@ export class SummaryDraft {
    * shown, or when the server answers with exactly the text sent: text restored from a copy
    * keeps the copy's base until the server has it, whatever the server holds now.
    */
+  private observedDeletion: ObservedDeletion | null = null
   private base: Base = baseOf(null)
   /** Typed here and not saved yet. */
   private local: string | null = null
+  private edits = 0
   /** The browser copy of `local`. */
   private pending: Copy | null = null
   /** Copies on their way to the server, which a newer one mustn't replace. */
@@ -154,6 +157,8 @@ export class SummaryDraft {
   }
 
   async open() {
+    const edits = this.edits
+    const hadLocal = this.local !== null
     const result = await this.session.call((client) =>
       client("GetSummaryDraft", { forkId: this.forkId, summaryId: this.summary.id })
     )
@@ -171,23 +176,29 @@ export class SummaryDraft {
       let displaced = this.view.displaced
       for (const copy of copies) {
         const save = pendingOf(copy)
-        if (save?.kind !== "summary") continue
+        if (save?.kind !== "summary" || deletedSince(this.draft, save.payload)) continue
         this.sending.add(copy)
         const replayed = await this.session.call((client) => client("SaveSummaryDraft", save.payload))
         this.sending.delete(copy)
         restored++
         if (replayed.ok) {
           this.draft = replayed.value
-          if (this.local === null) this.base = baseOf(replayed.value)
+          if (this.local === null) {
+            this.base = baseOf(replayed.value)
+            this.observedDeletion = null
+          }
           displaced = replayed.value.displaced?.content ?? displaced
           void dropCopy(copy)
         } else {
           // Still not on the server: the box shows it, on the base it was typed on, and the
           // copy stays until the server has it.
-          if (this.pending !== null && this.pending.at < copy.at) this.pending = null
-          if (this.pending === null) {
+          if (this.edits === edits && !hadLocal) {
+            if (this.pending !== null && this.pending.at < copy.at) this.pending = null
+          }
+          if (this.pending === null && this.edits === edits && !hadLocal) {
             this.local = copy.content
             this.pending = copy
+            this.observedDeletion = save.payload.observedDeletion ?? null
             this.base = {
               draftId: save.payload.draftId,
               rowVersion: save.payload.expectedRowVersion,
@@ -209,6 +220,7 @@ export class SummaryDraft {
     return {
       forkId: this.forkId,
       summaryId: this.summary.id,
+      ...(this.observedDeletion === null ? {} : { observedDeletion: this.observedDeletion }),
       draftId: base.draftId,
       content,
       expectedRowVersion: base.rowVersion,
@@ -240,6 +252,7 @@ export class SummaryDraft {
   }
 
   setText(text: string) {
+    this.edits++
     // The first keystroke fixes the revision, before autosave or another tab's update.
     if (this.base.revisionId === null) this.base = { ...this.base, revisionId: this.summary.revisionId }
     this.local = text
@@ -269,18 +282,22 @@ export class SummaryDraft {
       }
       // The server has exactly the text sent: what's typed from it is on the draft as it is now.
       this.draft = result.value
-      this.base = baseOf(result.value)
+      const exact = result.value.status === "active" && result.value.content === sent
+      if (exact || this.local === sent) {
+        this.base = baseOf(result.value)
+        this.observedDeletion = null
+      }
       if (copy !== null) void dropCopy(copy)
       if (this.local === sent) {
         this.local = null
         if (this.pending === copy) this.pending = null
-      } else if (this.local !== null && this.pending !== null && !this.sending.has(this.pending)) {
+      } else if (exact && this.local !== null && this.pending !== null && !this.sending.has(this.pending)) {
         // More typed since: its copy now names the draft as the server has it.
         this.keep(this.local)
       }
       if (this.disposed) return
       this.refresh({
-        error: null,
+        error: exact ? null : deletedElsewhere,
         recovered: this.view.recovered + result.value.recovered,
         displaced: result.value.displaced?.content ?? this.view.displaced
       })
@@ -416,14 +433,17 @@ export class SummaryDraft {
       })
     )
     if (result.ok) {
-      this.draft = null
-      this.base = baseOf(null)
-      // Typed while the discard was out: that text wasn't discarded, so the edit stays open
-      // with it and its copy, and it's saved anew.
+      this.draft = result.value
+      // Our own acknowledged Cancel precedes this later typing. Keep its comparison
+      // revision and refile its copy on the acknowledged deletion before saving anew.
       if (this.local !== null) {
+        this.observedDeletion = observeDeletion(result.value)
+        this.keep(this.local)
         this.refresh({ error: typedDuringCancel, recovered: this.view.recovered + result.value.recovered })
         return { ok: false, error: typedDuringCancel }
       }
+      this.base = baseOf(result.value)
+      this.observedDeletion = null
       this.forget()
       this.refresh({ error: null, recovered: this.view.recovered + result.value.recovered })
     } else this.refresh({ error: result.error })
@@ -448,6 +468,13 @@ const typedDuringCancel: AppError = {
 const notSaved: AppError = {
   tag: "NotSaved",
   message: "A change isn't on the server yet. Wait for it to be kept, then try again.",
+  problems: [],
+  reason: null
+}
+
+const deletedElsewhere: AppError = {
+  tag: "NotSaved",
+  message: "This text was deleted elsewhere. Find your copy in recovered texts.",
   problems: [],
   reason: null
 }

@@ -51,13 +51,33 @@ function QueueEditor({
       <Textarea
         textActions
         aria-label="Queued message"
+        disabled={view.loading}
         value={view.text}
         onChange={(event) => editor.setText(event.currentTarget.value)}
       />
+      {view.loading && (
+        <p role="status">
+          Loading saved text…{" "}
+          {view.error && (
+            <Button
+              onClick={() =>
+                void editor.open().then(() => {
+                  if (session.queueEditors().includes(editor) && !editor.snapshot().loading)
+                    editor.setText(editor.snapshot().text)
+                })
+              }
+              hint="Loads the saved edit before you type."
+            >
+              Retry
+            </Button>
+          )}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {queued ? (
           <Button
             variant="primary"
+            disabled={view.loading}
             onClick={async () => {
               const submitted = await editor.ready()
               if (submitted.draft === null) return
@@ -186,20 +206,28 @@ export function QueuedMessages({
             {/* Its actions at the end of one row, never stretched across a wide column. */}
             {queued && (
               <div className="flex flex-wrap items-center justify-end gap-1">
-                {!editor && (
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      const opened = session.openEditor(
-                        { _tag: "Queue", chatId: session.id, queuedId: queued.id, rowVersion: queued.rowVersion },
-                        queued.kind === "message" ? queued.content : (queued.direction ?? "")
-                      )
-                      opened.setText(opened.snapshot().text)
-                    }}
-                  >
-                    Edit
-                  </Button>
-                )}
+                <Button
+                  variant="ghost"
+                  disabled={editor !== undefined}
+                  focusableWhenDisabled
+                  hint={
+                    editor
+                      ? "This queued message is already open for editing."
+                      : "Edits this queued message before it is sent."
+                  }
+                  onClick={() => {
+                    const opened = session.openEditor(
+                      { _tag: "Queue", chatId: session.id, queuedId: queued.id, rowVersion: queued.rowVersion },
+                      queued.kind === "message" ? queued.content : (queued.direction ?? "")
+                    )
+                    void opened.open().then(() => {
+                      if (session.queueEditors().includes(opened) && !opened.snapshot().loading)
+                        opened.setText(opened.snapshot().text)
+                    })
+                  }}
+                >
+                  Edit
+                </Button>
                 <Withdraw queued={queued} session={session} onRecovered={onRecovered} />
               </div>
             )}

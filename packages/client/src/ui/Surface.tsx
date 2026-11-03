@@ -1,7 +1,8 @@
 // Layout and status pieces with no behavior of their own: cards, badges, callouts and
 // empty states, and sections opened on demand.
 import { type ReactNode, useState } from "react"
-import { AboutHint } from "./AboutHint.tsx"
+import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
+import { Tooltip } from "./Tooltip.tsx"
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <section className={`rounded-lg border border-border bg-surface p-4 sm:p-5 ${className}`}>{children}</section>
@@ -33,10 +34,11 @@ export function CardHeader({
     >
       <div className="flex min-w-0 flex-col gap-1">
         {about ? (
-          <div className="flex items-center gap-1">
-            <h2 className="text-base font-semibold">{title}</h2>
-            <AboutHint heading={typeof title === "string" ? title : "this section"}>{about}</AboutHint>
-          </div>
+          <LabelWithHelp
+            help={<AboutHint heading={typeof title === "string" ? title : "this section"}>{about}</AboutHint>}
+          >
+            <h2 className="inline text-base font-semibold">{title}</h2>
+          </LabelWithHelp>
         ) : (
           <h2 className="text-base font-semibold">{title}</h2>
         )}
@@ -128,39 +130,44 @@ export function Disclosure({
   children,
   defaultOpen = false,
   className = "",
-  lazy = false
+  lazy = false,
+  hint
 }: {
   title: ReactNode
   children: ReactNode
+  hint?: string
   defaultOpen?: boolean
   className?: string
   /** Mount the contents only once opened: for heavy contents (code editors) most visits never open. */
   lazy?: boolean
 }) {
   const [opened, setOpened] = useState(defaultOpen)
+  const summary = (
+    <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-sm font-medium text-muted outline-none select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
+      <svg
+        width={14}
+        height={14}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        className="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+      >
+        <path d="m9 18 6-6-6-6" />
+      </svg>
+      {title}
+    </summary>
+  )
   return (
     <details
       open={defaultOpen}
       className={`group ${className}`}
       onToggle={lazy ? (event) => event.currentTarget.open && setOpened(true) : undefined}
     >
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-sm font-medium text-muted outline-none select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
-        <svg
-          width={14}
-          height={14}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-          className="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
-        >
-          <path d="m9 18 6-6-6-6" />
-        </svg>
-        {title}
-      </summary>
+      {hint ? <Tooltip label={hint}>{summary}</Tooltip> : summary}
       <div className="flex flex-col gap-4 pt-3 pb-1 pl-5">{!lazy || opened ? children : null}</div>
     </details>
   )

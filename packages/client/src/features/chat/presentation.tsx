@@ -13,6 +13,10 @@ import type { LcmFields } from "./LcmFields.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export const chatCardActions = defineSlot<ChatCardActionProps>("chat.card-actions")
+/** Navigation immediately after Write as in a cast member's menu. */
+export const castMemberNavigation = defineSlot<{ session: ChatSession; card: import("@rp/shared/chat.ts").CastCard }>(
+  "chat.cast-member-navigation"
+)
 export function ChatCardActions(props: ChatCardActionProps) {
   return <SlotOutlet slot={chatCardActions} props={props} />
 }

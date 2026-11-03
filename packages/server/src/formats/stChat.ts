@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto"
 // SillyTavern chat files (JSONL, DATA-MODEL §14): a header line with `chat_metadata`, then one
 // message per line. Read from ST's public source (`public/global.d.ts` for the shapes,
 // `public/scripts/utils.js` for dates, `chats.js` for hiding, `extensions/memory` for the
 // summary). A chat file can be far larger than any card, so it arrives in parts cut at line
 // ends (ARCHITECTURE.md §13), and each part is read on its own: lines are separate JSON
 // documents, each under the shared JSON caps. Pure: no database, no files.
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { originalReply, type ReplySections, sectionsDisplay } from "@rp/shared/replySections.ts"
 import { ReportBuilder, shownText } from "@rp/shared/importReport.ts"
 import { Predicate } from "effect"
@@ -256,7 +258,11 @@ export interface StChatPart {
    * The part's messages as JSON arrays of `StMessage`, at most a transaction's worth each,
    * with the speaker keys each batch uses.
    */
-  readonly batches: ReadonlyArray<{ readonly messagesJson: string; readonly speakers: ReadonlyArray<string> }>
+  readonly batches: ReadonlyArray<{
+    readonly messagesJson: string
+    readonly speakers: ReadonlyArray<string>
+    readonly hashes?: ReadonlyArray<string>
+  }>
   readonly messages: number
   readonly userTurns: number
   /** The last user message’s speaker key; null for no user turn or an unnamed speaker. */
@@ -375,7 +381,7 @@ export const parseStChatPart = (
   issues: ReportBuilder
 ): StChatPart => {
   if (bytes.byteLength > stChatLimits.maxPartBytes) {
-    fail("st_chat.part_too_large", `A part of a chat file can be at most ${stChatLimits.maxPartBytes} bytes.`)
+    fail("st_chat.part_too_large", `A part of a chat file can be at most ${formatByteSize(stChatLimits.maxPartBytes)}.`)
   }
   let header: StChatHeader | null = null
   let lastAt = options.carryAt
@@ -390,14 +396,17 @@ export const parseStChatPart = (
   let unreadable = 0
   const speakers = new Map<string, StSpeaker>()
   const summaries: Array<{ index: number; text: string }> = []
-  const batches: Array<{ messagesJson: string; speakers: ReadonlyArray<string> }> = []
+  const batches: Array<{ messagesJson: string; speakers: ReadonlyArray<string>; hashes: ReadonlyArray<string> }> = []
   let batch: Array<string> = []
   let batchSpeakers = new Set<string>()
+  let batchHashes: Array<string> = []
   let batchBytes = 0
   let unspoken = 0
   const flush = () => {
-    if (batch.length > 0) batches.push({ messagesJson: `[${batch.join(",")}]`, speakers: [...batchSpeakers] })
+    if (batch.length > 0)
+      batches.push({ messagesJson: `[${batch.join(",")}]`, speakers: [...batchSpeakers], hashes: batchHashes })
     batch = []
+    batchHashes = []
     batchSpeakers = new Set()
     batchBytes = 0
   }
@@ -537,6 +546,7 @@ export const parseStChatPart = (
       flush()
     }
     batch.push(json)
+    batchHashes.push(createHash("sha256").update(json).digest("hex"))
     if (speaker !== null) batchSpeakers.add(speaker)
     batchBytes += json.length
     index++

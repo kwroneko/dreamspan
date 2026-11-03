@@ -1,3 +1,5 @@
+import { useDefaultPersona } from "../characters/defaultPersona.tsx"
+import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useChatCards } from "./chatCards.ts"
 // The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who you play (the persona, who
 // `{{user}}` is), then everyone in the chat, one quiet row each: portrait, name (which opens
@@ -13,11 +15,9 @@ import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { Button } from "../../ui/Button.tsx"
-import { Icon } from "../../ui/Icon.tsx"
-import { Popover } from "../../ui/Popover.tsx"
+import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { castView } from "./cast.ts"
 import { useShowPanel } from "./panels.tsx"
@@ -26,70 +26,58 @@ import type { ChatSession } from "./session.ts"
 import type { ChatCardInfo } from "./CardForkDialogs.tsx"
 import type { PendingChat } from "./pendingChat.ts"
 import { usePendingCardInfo } from "./pendingCardInfo.ts"
-import { castSections, ChatCardActions, pendingCastSections } from "./presentation.tsx"
+import { castSections, castMemberNavigation, ChatCardActions, pendingCastSections } from "./presentation.tsx"
 import { type ReactNode } from "react"
 import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
-/** The row's ⋯: what's used less, each a button in a panel that stays mounted for the dialogs they open. */
+/** The row's ⋯: registered menu actions, kept mounted for the dialogs they open. */
 function MemberMore({
   session,
   card,
   info,
   onChange,
-  onPersona
+  onPersona,
+  persona = false
 }: {
   session: ChatSession
   card: CastCard
   info: ChatCard | undefined
   onChange: (change: CastChange) => void
   onPersona: () => void
+  persona?: boolean
 }) {
-  const [open, setOpen] = useState(false)
   const showPanel = useShowPanel()
   const name = card.name
   return (
-    <Popover
-      open={open}
-      onOpenChange={setOpen}
-      trigger={<Icon name="more" />}
-      triggerLabel={`More for ${name}`}
-      hint={`More for ${name}`}
-      triggerClassName={iconButtonClass()}
-      title={name}
-      side="bottom"
-      align="end"
-      keepMounted
-    >
-      <div
-        className="flex flex-col items-stretch gap-0.5 [&_button]:h-auto! [&_button]:min-h-8 [&_button]:w-full [&_button]:justify-start [&_button]:px-2! [&_button]:py-1.5 [&_button]:text-left [&_button]:whitespace-normal"
-        onClickCapture={() => setOpen(false)}
+    <Menu trigger={<IconButton icon="more" label={`More for ${name}`} />} label={name} keepMounted>
+      <MenuItem
+        description={`The composer writes as ${name}: what you send is their message.`}
+        onClick={() => writeAs(session, card.entityId)}
       >
-        <Button
-          variant="ghost"
-          hint={`The composer writes as ${name}: what you send is their message.`}
-          onClick={() => writeAs(session, card.entityId)}
-        >
-          Write as {name}
-        </Button>
-        <Button variant="ghost" hint="Edit their card here." onClick={() => showPanel(`card:${card.entityId}`)}>
-          Edit the card here
-        </Button>
-        <ChatCardActions session={session} card={card} info={info} />
-        <Button variant="ghost" hint={`You play ${name} in this chat: {{user}} is them.`} onClick={onPersona}>
-          Use as my persona
-        </Button>
-        <Button
-          variant="ghost"
-          className="text-danger!"
-          hint="They leave the chat. Earlier messages stay."
-          onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
-        >
-          Remove from chat
-        </Button>
-      </div>
-    </Popover>
+        Write as {name}
+      </MenuItem>
+      <SlotOutlet slot={castMemberNavigation} props={{ session, card }} />
+      <MenuItem description="Edit their card here." onClick={() => showPanel(`card:${card.entityId}`)}>
+        Edit the card here
+      </MenuItem>
+      <ChatCardActions session={session} card={card} info={info} persona={persona} />
+      {!persona && (
+        <>
+          <MenuItem description={`You play ${name} in this chat: {{user}} is them.`} onClick={onPersona}>
+            Use as my persona
+          </MenuItem>
+          <MenuItem
+            tone="danger"
+            description="They leave the chat. Earlier messages stay."
+            onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
+          >
+            Remove from chat
+          </MenuItem>
+        </>
+      )}
+    </Menu>
   )
 }
 
@@ -154,7 +142,11 @@ function Member({
       <IconButton
         icon={muted ? "muted" : "volume"}
         label={muted ? `Unmute ${name}` : `Mute ${name}`}
-        hint={muted ? "Muted: never picked to reply. Unmute" : "Mute: never picked to reply"}
+        hint={
+          muted
+            ? "Click to allow this character to be picked to reply"
+            : "Click to mute this character: never picked to reply"
+        }
         className={muted ? "text-warning!" : ""}
         onClick={() => onChange({ _tag: "Presence", entityId: card.entityId, present: muted })}
       />
@@ -171,7 +163,15 @@ function Member({
 }
 
 /** Who you play: one row, apart from the characters, with no count of the chats it's in. */
-function You({ card, children }: { card: CastCard | undefined; children: ReactNode }) {
+function You({
+  card,
+  children,
+  isDefault = false
+}: {
+  card: CastCard | undefined
+  children: ReactNode
+  isDefault?: boolean
+}) {
   const showPanel = useShowPanel()
   return (
     <div role="group" aria-label="Your persona" className="flex max-w-controls items-center gap-3">
@@ -186,7 +186,7 @@ function You({ card, children }: { card: CastCard | undefined; children: ReactNo
         />
       )}
       <div className="flex min-w-0 flex-1 flex-col items-start">
-        <span className="text-xs text-muted">You play</span>
+        {card ? <PersonaBadge played /> : <span className="text-xs text-muted">You play</span>}
         {card ? (
           <button
             type="button"
@@ -196,6 +196,7 @@ function You({ card, children }: { card: CastCard | undefined; children: ReactNo
             className="line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
           >
             {card.name}
+            {isDefault ? " (default)" : ""}
           </button>
         ) : (
           <span className="font-medium">No persona</span>
@@ -249,6 +250,16 @@ export function CastTab({ session }: { session: ChatSession }) {
     <div className="flex flex-col gap-4">
       <You card={persona === null ? undefined : view.cards.get(persona)}>
         <PersonaSwitch session={session} trigger="Switch" />
+        {persona !== null && view.cards.has(persona) && (
+          <MemberMore
+            session={session}
+            card={view.cards.get(persona)!}
+            info={info.get(persona)}
+            onChange={change}
+            onPersona={() => void choosePersona(view.cards.get(persona)!)}
+            persona
+          />
+        )}
       </You>
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
@@ -286,7 +297,7 @@ export function CastTab({ session }: { session: ChatSession }) {
         )}
       </div>
       {/* Add characters, and what a plugin adds (castSections). */}
-      <SlotOutlet slot={castSections} props={{ session }} />
+      <SlotOutlet slot={castSections} except={["cast.one-reply"]} props={{ session }} />
       {AsyncResult.isFailure(infoResult) && (
         <p className="text-sm text-muted">The cards' details couldn't be read; editing them may not work.</p>
       )}
@@ -314,7 +325,6 @@ function PendingMember({
   removable: boolean
   onRemove: () => void
 }) {
-  const [open, setOpen] = useState(false)
   const showPanel = useShowPanel()
   const name = card.name
   return (
@@ -332,42 +342,24 @@ function PendingMember({
         </button>
         {version && <span className="max-w-full truncate text-xs text-muted">{version}</span>}
       </div>
-      <Popover
-        open={open}
-        onOpenChange={setOpen}
-        trigger={<Icon name="more" />}
-        triggerLabel={`More for ${name}`}
-        hint={`More for ${name}`}
-        triggerClassName={iconButtonClass()}
-        title={name}
-        side="bottom"
-        align="end"
-        keepMounted
-      >
-        <div
-          className="flex flex-col items-stretch gap-0.5 [&_button]:h-auto! [&_button]:min-h-8 [&_button]:w-full [&_button]:justify-start [&_button]:px-2! [&_button]:py-1.5 [&_button]:text-left [&_button]:whitespace-normal"
-          onClickCapture={() => setOpen(false)}
+      <Menu trigger={<IconButton icon="more" label={`More for ${name}`} />} label={name} keepMounted>
+        <MenuItem
+          description="Opens their card's fields in this panel."
+          onClick={() => showPanel(`card:${card.entityId}`)}
         >
-          <Button
-            variant="ghost"
-            hint="Opens their card's fields in this panel."
-            onClick={() => showPanel(`card:${card.entityId}`)}
+          Edit the card here
+        </MenuItem>
+        <ChatCardActions session={null} card={card} info={info} />
+        {removable && (
+          <MenuItem
+            tone="danger"
+            description="Leaves them out of the new chat, with their greeting."
+            onClick={onRemove}
           >
-            Edit the card here
-          </Button>
-          <ChatCardActions session={null} card={card} info={info} />
-          {removable && (
-            <Button
-              variant="ghost"
-              className="text-danger!"
-              hint="Leaves them out of the new chat, with their greeting."
-              onClick={onRemove}
-            >
-              Remove from chat
-            </Button>
-          )}
-        </div>
-      </Popover>
+            Remove from chat
+          </MenuItem>
+        )}
+      </Menu>
     </li>
   )
 }
@@ -381,12 +373,13 @@ export function PendingCastTab({ pending }: { pending: PendingChat }) {
   const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
   const infoOf = usePendingCardInfo()
   const playing = pending.playing(state)
+  const defaultPersona = useDefaultPersona()
   const characters = state.greeters.map((item) => item.card).filter((card) => card.entityId !== state.persona)
   const sameName = (card: CastCard) =>
     characters.some((other) => other.entityId !== card.entityId && other.name === card.name)
   return (
     <div className="flex flex-col gap-4">
-      <You card={playing ?? undefined}>
+      <You card={playing ?? undefined} isDefault={playing !== null && playing.entityId === defaultPersona}>
         <PendingPersonaSwitch pending={pending} trigger="Switch" />
       </You>
       <div className="flex flex-col gap-1">

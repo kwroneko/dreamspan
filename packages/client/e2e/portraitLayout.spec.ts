@@ -42,11 +42,21 @@ test("phone sheets close immediately and after changing image privacy", async ({
   for (const mode of ["Blur", "Hide"]) {
     await openPanel(page, "This chat")
     const sheet = page.getByRole("dialog").first()
-    await sheet.getByRole("button", { name: "Image settings", exact: true }).click()
-    await page.getByRole("dialog", { name: "Images" }).getByLabel("Every image").click()
-    await page.getByRole("option", { name: mode, exact: true }).click()
-    await page.keyboard.press("Escape")
-    const tooltip = page.getByText("Image settings", { exact: true })
+    const toggle = sheet.getByRole("button", { name: /^(Blur|Hide|Show) all images$/ })
+    await toggle.click({ button: "right" })
+    await page
+      .getByRole("menuitemradio", {
+        name: mode === "Blur" ? "Blur hidden images" : "Remove hidden images",
+        exact: true
+      })
+      .click()
+    if (mode === "Blur") await toggle.click()
+    await page.mouse.move(0, 0)
+    await toggle.hover()
+    const tooltip = page.getByText(
+      `Click to ${(await toggle.getAttribute("aria-label"))!.toLowerCase()}. Right-click to choose blur or hide.`,
+      { exact: true }
+    )
     await expect(tooltip).toBeVisible()
     await expect(tooltip).toHaveCSS("pointer-events", "none")
     const tip = (await tooltip.boundingBox())!

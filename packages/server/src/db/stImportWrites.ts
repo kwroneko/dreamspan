@@ -1,3 +1,4 @@
+import type { StImportPrefix } from "./stImportPrefix.ts"
 import { insertStMessageBatch, prepareStMessageBatch } from "./stMessageBatch.ts"
 import { recordCardArrival, recordChatArrival } from "./stArrival.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -125,7 +126,7 @@ interface RecordPayload {
   readonly parentRecordId?: string
 }
 
-export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
+export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: StImportPrefix) {
   const sql = yield* SqlClient.SqlClient
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
@@ -453,12 +454,29 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           updated_at: at
         })}`
         return { chatId: chatId as ChatId, recordId }
-      }).pipe(transaction(sql, "StImportStartChat")),
+      }).pipe(
+        transaction(sql, "StImportStartChat"),
+        Effect.tap((target) =>
+          Effect.sync(() => {
+            if (into === null) prefix.created(target.chatId)
+          })
+        )
+      ),
 
     StImportMessages: (input) =>
       // Decoded before the transaction, which holds only database work.
-      Effect.flatMap(Schema.decodeEffect(Messages)(input.messagesJson).pipe(Effect.orDie), (messages) => {
-        const batch = input.matching ? null : prepareStMessageBatch(messages, input.speakers)
+      Effect.gen(function* () {
+        const messages = yield* Schema.decodeEffect(Messages)(input.messagesJson).pipe(Effect.orDie)
+        const cached = input.matching
+          ? prefix.match(input.chatId, input.parentSlotId, messages, input.hashes, input.speakers)
+          : []
+        // Preparing a possible divergent suffix is outside the transaction. The common
+        // prefix needs neither version decoding from SQLite nor swipe comparisons.
+        const prepared =
+          !input.matching || (input.hashes !== undefined && prefix.fresh(input.chatId))
+            ? prepareStMessageBatch(messages.slice(cached.length), input.speakers)
+            : null
+        const batch = input.matching ? null : prepared
         const arrivals = new Map<string, number>()
         for (const message of messages) {
           if (message.arrivalAt == null) continue
@@ -469,7 +487,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           (first, message) => (message.arrivalAt == null ? first : Math.min(first ?? Infinity, message.arrivalAt)),
           null
         )
-        return Effect.gen(function* () {
+        let invalidatesPrefix = false
+        const result = yield* Effect.gen(function* () {
           const { userId, chatId, speakers } = input
           yield* ownedChat(userId, chatId)
           const payload = yield* leased(userId, input.recordId, chatId, input.lease)
@@ -567,7 +586,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           for (const [ref, at] of arrivals) yield* recordCardArrival(sql, userId, ref, { at, basis: 1 })
           if (firstAt !== null) yield* recordChatArrival(sql, userId, chatId, { at: firstAt, basis: 1 })
           let firstAdded: string | null = null
-          const slotIds: Array<SlotId> = []
+          const slotIds: Array<SlotId> = [...cached]
+          if (cached.length > 0) parent = yield* ownedSlot(chatId, cached.at(-1)!)
           if (batch !== null) {
             yield* insertStMessageBatch(sql, batch, {
               chatId,
@@ -580,7 +600,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
             slotIds.push(...batch.slotIds)
             added = batch.slotIds.length
           }
-          for (const message of batch === null ? messages : []) {
+          for (const [offset, message] of (batch === null ? messages.slice(cached.length) : []).entries()) {
             const writer = message.user ? "human" : "model"
             const speaker = message.speaker === null ? null : (speakers[message.speaker] ?? null)
             const chosen = message.selected < message.versions.length ? message.selected : 0
@@ -715,6 +735,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                 (input.strict ? undefined : candidates[0])
               const match = placeholder ?? own?.[0]
               if (match !== undefined) {
+                // A copy, changed swipe or fork selection discards the fast path. An
+                // unchanged subset of known swipes can safely populate another hash.
+                if (copied !== null || placeholder !== undefined || match.branch_deleted === 1) invalidatesPrefix = true
                 if (copied !== null) {
                   added++
                   firstAdded ??= copied
@@ -740,10 +763,15 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                     showsSelected = true
                     changed = true
                   }
-                  if (changed) updated++
+                  if (changed) {
+                    updated++
+                    invalidatesPrefix = true
+                  }
                 }
-                if (placeholder === undefined && (!showsSelected || match.hidden !== (message.hidden ? 1 : 0)))
+                if (placeholder === undefined && (!showsSelected || match.hidden !== (message.hidden ? 1 : 0))) {
                   differing++
+                  invalidatesPrefix = true
+                }
                 parent = { id: match.slot_id, depth: match.depth, lane_id: laneId }
                 slotIds.push(match.slot_id as SlotId)
                 continue
@@ -754,6 +782,19 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
               // in the record without moving the user off their work.
               keepTip ||= yield* changedSuffix(parent === null ? 0 : parent.depth + 1)
               matching = false
+            }
+            if (offset === 0 && prepared !== null) {
+              yield* insertStMessageBatch(sql, prepared, {
+                chatId,
+                laneId,
+                forkId: fileFork.id,
+                parentId: parent?.id ?? null,
+                depth: parent === null ? 0 : parent.depth + 1
+              })
+              firstAdded ??= prepared.slotIds[0] ?? null
+              slotIds.push(...prepared.slotIds)
+              added += prepared.slotIds.length
+              break
             }
             const slotId = uuidv7()
             let selected = ""
@@ -808,7 +849,18 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           yield* sql`UPDATE jobs SET updated_at = ${Date.now()}, payload_json = ${JSON.stringify(progress)}
             WHERE id = ${input.recordId}`
           return { slotIds, matching, added, updated, differing }
-        }).pipe(transaction(sql, "StImportMessages"))
+        }).pipe(
+          transaction(sql, "StImportMessages"),
+          // Keep cache work outside the transaction, including when the request is
+          // interrupted after committing or a later statement rolls the batch back.
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (invalidatesPrefix) prefix.forget(input.chatId)
+            })
+          )
+        )
+        prefix.remember(input.chatId, input.parentSlotId, messages, input.hashes, input.speakers, result.slotIds)
+        return result
       }),
 
     StImportFinishChat: (input) =>

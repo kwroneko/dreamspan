@@ -890,6 +890,10 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           (yield* actor.api.ListLibrary({ kind: "preset" })).map((r) => r.id),
           owner.refId
         )
+        assert.notInclude(
+          (yield* actor.api.ListLibrary({ kind: "card", withFilterData: true })).map((r) => r.entityId),
+          owner.cardId
+        )
       })
   },
   // --- Generation

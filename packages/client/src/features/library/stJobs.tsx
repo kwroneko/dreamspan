@@ -62,8 +62,6 @@ export function StImportWatcher() {
   return null
 }
 
-export const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
-
 /** How far a job is, by bytes (a chat can be most of a folder), as a whole percentage. */
 export const percentOf = (job: StImportJob) =>
   job.bytesTotal > 0

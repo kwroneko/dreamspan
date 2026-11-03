@@ -261,14 +261,9 @@ function SetKeyDialog({
     if (result.ok) onOpenChange(false)
   }
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Enter a new key"
-      description={origin ? `The key will be sent only to ${origin}. It's never shown again.` : undefined}
-    >
+    <Dialog open={open} onOpenChange={onOpenChange} title="Enter a new key">
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <Field label="Key">
+        <Field label="Key" about={origin ? `The key is sent only to ${origin}. It's never shown again.` : undefined}>
           {/* Keyed by the address, so a changed address empties the field. */}
           <SecretInput key={origin} name="apiKey" onEmptyChange={(empty) => setTypedFor(empty ? null : origin)} />
         </Field>
@@ -357,23 +352,31 @@ export function KeySection(props: ConnectionSectionProps) {
             <Button hint="Gives it a key you type, sent only to its address." onClick={() => setDialog("set")}>
               Enter a new key
             </Button>
-            {credentials.length > 0 && (
-              <Button
-                hint="Uses a key saved in Settings → Keys, which other connections can share."
-                onClick={() => setDialog("saved")}
-              >
-                Use a saved key
-              </Button>
-            )}
-            {connection.hasKey && (
-              <Button
-                variant="ghost"
-                hint="Send requests without a key. You’ll confirm first."
-                onClick={() => setDialog("remove")}
-              >
-                Remove key
-              </Button>
-            )}
+            <Button
+              disabled={credentials.length === 0}
+              focusableWhenDisabled
+              hint={
+                credentials.length === 0
+                  ? "No saved keys yet."
+                  : "Uses a key saved in Settings → Keys, which other connections can share."
+              }
+              onClick={() => setDialog("saved")}
+            >
+              Use a saved key
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={!connection.hasKey}
+              focusableWhenDisabled
+              hint={
+                connection.hasKey
+                  ? "Send requests without a key. You’ll confirm first."
+                  : "This connection has no key to remove."
+              }
+              onClick={() => setDialog("remove")}
+            >
+              Remove key
+            </Button>
           </>
         }
       />

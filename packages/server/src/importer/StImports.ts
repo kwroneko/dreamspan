@@ -138,6 +138,7 @@ interface Target {
 }
 
 interface Batch {
+  readonly hashes?: ReadonlyArray<string>
   readonly messagesJson: string
   readonly speakers: ReadonlyArray<string>
 }
@@ -607,7 +608,11 @@ export class StImports extends Context.Service<
         arrivalFile: StArrival
       ) =>
         Effect.gen(function* () {
-          const parsed = yield* formats.st.libraryFile(bytes, file, "card")
+          const parsed = yield* formats.st.libraryFile(bytes, file, "card", undefined, undefined, {
+            cards: Object.fromEntries([...session.cards].map(([name, card]) => [name, card.entityId])),
+            tags: session.settings?.tagNames ?? {},
+            cardTags: session.settings?.characterTags?.[stem(file)] ?? []
+          })
           const card = parsed.card
           const arrival: StArrival =
             parsed.parsed.stCreatedAt == null ? arrivalFile : { at: parsed.parsed.stCreatedAt, basis: 0 }
@@ -654,7 +659,13 @@ export class StImports extends Context.Service<
             file,
             kind,
             session.settings?.textSwitches,
-            kind === "lorebook" ? authorNotePlace(session.settings?.defaultAuthorNote ?? null).lore : undefined
+            kind === "lorebook" ? authorNotePlace(session.settings?.defaultAuthorNote ?? null).lore : undefined,
+            kind === "lorebook"
+              ? {
+                  cards: Object.fromEntries([...session.cards].map(([name, card]) => [name, card.entityId])),
+                  tags: session.settings?.tagNames ?? {}
+                }
+              : undefined
           )
           const anEntries = parsed.parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_riders")
           // ST applies its global books to every chat: here they go with the preset ST had
@@ -775,6 +786,7 @@ export class StImports extends Context.Service<
             parentSlotId: progress.cursor,
             matching: progress.matching,
             messagesJson: batch.messagesJson,
+            ...(batch.hashes === undefined ? {} : { hashes: batch.hashes }),
             ...(progress.link.group?.arrival === undefined
               ? {}
               : { groupArrival: progress.link.group.arrival, groupId: progress.link.group.id }),
@@ -1077,7 +1089,12 @@ export class StImports extends Context.Service<
           countAs: file.kind,
           modifiedAt: request.modifiedAt ?? session.importedAt,
           nextPart: 0,
-          title: stChatTitle(file.name, mainChat, file.kind === "group_chat" ? (link.group?.name ?? null) : null),
+          title: stChatTitle(
+            file.name,
+            mainChat,
+            file.kind === "group_chat" ? (link.group?.name ?? "") : null,
+            link.group?.members.map((member) => session.cards.get(stem(member))?.name ?? null)
+          ),
           header,
           link,
           target: own === undefined ? null : { chatId: own.chatId, recordId: own.recordId },

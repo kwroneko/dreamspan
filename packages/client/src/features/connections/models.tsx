@@ -221,16 +221,17 @@ function Limit({
             <span className="text-xs text-muted">{source}</span>
           </span>
         </div>
-        {!open && (
-          <IconButton
-            icon="edit"
-            label={`Set the ${label.toLowerCase()} yourself`}
-            onClick={() => {
-              focusing.current = true
-              setEditing(true)
-            }}
-          />
-        )}
+        <IconButton
+          icon="edit"
+          disabled={open}
+          focusableWhenDisabled
+          hint={open ? "This limit is already open for editing." : `Set the ${label.toLowerCase()} yourself.`}
+          label={`Set the ${label.toLowerCase()} yourself`}
+          onClick={() => {
+            focusing.current = true
+            setEditing(true)
+          }}
+        />
       </div>
       {open && (
         <div className="flex flex-col gap-2 border-l-2 border-border pl-3">
@@ -428,7 +429,7 @@ export function ModelSettingsEditor({
   const learned = savedModel.overrides.learned
   return (
     <form ref={form} onSubmit={submit} className="flex min-w-0 flex-col gap-4 [overflow-wrap:anywhere]" noValidate>
-      <UserDraftStatus draft={durable} />
+      <UserDraftStatus draft={durable} history />
       <Field label="Display name">
         <Input value={name} onValueChange={setName} placeholder={model.upstream.name ?? model.key} />
       </Field>
@@ -728,15 +729,10 @@ function AddModelDialog({
       })
   }
   return (
-    <Dialog
-      open
-      onOpenChange={onOpenChange}
-      title="Add a model"
-      description="For a model the provider doesn't list. Use the exact id the API expects."
-    >
+    <Dialog open onOpenChange={onOpenChange} title="Add a model">
       <form onSubmit={submit} className="flex flex-col gap-4">
         <UserDraftStatus draft={durable} />
-        <Field label="Model id">
+        <Field label="Model id" about="The exact id the provider's API expects.">
           <Input value={key} onValueChange={setKey} autoCapitalize="none" spellCheck={false} />
         </Field>
         <ErrorAlert error={action.error} title="Not added" />

@@ -51,12 +51,7 @@ export function NewPresetDialog({
     }
   }
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="New prompt preset"
-      description="Start with the built-in preset’s prompts and settings. Character cards can replace its prompts only if you allow it."
-    >
+    <Dialog open={open} onOpenChange={onOpenChange} title="New prompt preset">
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
         <Field label="Name">
           <Input value={label} onChange={(event) => setLabel(event.currentTarget.value)} maxLength={200} required />

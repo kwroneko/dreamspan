@@ -69,13 +69,26 @@ for (const width of [1440, 390])
       await expect(long.getByRole("button", { name: /^Forks of / })).toBeVisible()
       await shot(page, `search-${width}-${theme}`, width)
       await long.getByRole("button", { name: /^More actions for / }).click()
-      const menu = page.getByRole("menu")
-      for (const item of ["Fork…", "Forks", "Compare with parent", "Mark as a fork of…", "Unlink from parent", "PNG"])
+      const menu = page.getByRole("menu", { name: /^More actions for/ })
+      for (const item of [
+        "Fork…",
+        "Forks",
+        "Compare with parent",
+        "Mark as a fork of…",
+        "Unlink from parent",
+        "Export…"
+      ])
         await expect(menu.getByRole("menuitem", { name: item, exact: true })).toBeVisible()
       await expect(menu.getByRole("menuitemcheckbox", { name: "Persona" })).not.toBeChecked()
       // A fork has no import line to update from.
       await expect(menu.getByRole("menuitem", { name: /Update from file/ })).toHaveCount(0)
       await shot(page, `menu-${width}-${theme}`, width)
+      await menu.getByRole("menuitem", { name: "Export…", exact: true }).hover()
+      await expect(
+        page.getByRole("menu", { name: "Export…", exact: true }).getByRole("menuitem", { name: "PNG", exact: true })
+      ).toBeVisible()
+      await page.keyboard.press("Escape")
+      await expect(menu).toBeVisible()
       await page.keyboard.press("Escape")
       await search.fill("")
 
@@ -83,9 +96,9 @@ for (const width of [1440, 390])
         .getByRole("group", { name: "Show" })
         .getByRole("button", { name: /^Personas/ })
         .click()
-      await expect(rows.first()).toContainText("Persona")
-      expect(await rows.count()).toBeGreaterThan(0)
-      for (const text of await rows.allTextContents()) expect(text).toContain("Persona")
+      // Only personas are listed, so none is marked.
+      await expect(rows.first()).toBeVisible()
+      await expect(rows.locator("[data-persona-badge]")).toHaveCount(0)
       await shot(page, `personas-${width}-${theme}`, width)
       await page.getByRole("group", { name: "Show" }).getByRole("button", { name: "All", exact: true }).click()
 
@@ -141,12 +154,12 @@ test("every item opens at its own address, and a stale address says so", async (
   await expect(page).toHaveURL(/\/library\/[^/]+$/)
   const editor = page.getByRole("main")
   await expect(editor.getByRole("heading", { level: 1, name })).toBeVisible()
-  await expect(editor.getByRole("button", { name: "Close preset editor" })).toHaveCount(0)
+  await expect(editor.locator("[data-window-close]")).toHaveCount(0)
   await expect(editor.getByRole("textbox", { name: "Find", exact: true })).toHaveCount(0)
-  const search = editor.getByRole("button", { name: "Search", exact: true })
-  await expect(search).toHaveAttribute("aria-expanded", "false")
+  const search = editor.getByRole("button", { name: "Search and replace", exact: true })
+  await expect(search).toHaveAttribute("aria-pressed", "false")
   await search.click()
-  await expect(search).toHaveAttribute("aria-expanded", "true")
+  await expect(search).toHaveAttribute("aria-pressed", "true")
   await expect(editor.getByRole("textbox", { name: "Find", exact: true })).toBeVisible()
   const address = page.url()
   await page.reload()

@@ -3,10 +3,10 @@
 import { Link } from "@tanstack/react-router"
 import { useAction } from "../../actions.tsx"
 import { buttonClass } from "../../ui/Button.tsx"
-import { MenuCheckboxItem, MenuGroup, MenuItem, MenuLinkItem } from "../../ui/Menu.tsx"
+import { MenuCheckboxItem, MenuLinkItem } from "../../ui/Menu.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
-import { requestExport } from "../cardExport/exportRequests.ts"
+import { ExportMenu } from "../cardExport/CardExport.tsx"
 import { PERSONA_FOLDER_HINT, useSetPersona } from "../characters/personaFolder.tsx"
 import { libraryItemActions, type LibraryItemProps } from "./itemActions.tsx"
 
@@ -75,7 +75,7 @@ function ArchiveAction({ entry }: LibraryItemProps) {
   return (
     <IconButton
       label={`${archived ? "Unarchive" : "Archive"} ${entry.label}`}
-      hint={archived ? "Unarchive: show it in the lists again" : "Archive: hide it from the lists; nothing is deleted"}
+      hint={archived ? "Click to unarchive: show in the lists again" : "Click to archive: hide from the lists"}
       icon={archived ? "unarchive" : "archive"}
       disabled={action.pending}
       onClick={() =>
@@ -96,22 +96,7 @@ function ArchiveAction({ entry }: LibraryItemProps) {
 
 function ExportItems({ entry, exportFormats }: LibraryItemProps) {
   const formats = exportFormats.filter((format) => format.kind === entry.kind)
-  // The last saved revision; with unsaved changes it asks first (cardExport's check).
-  return (
-    <MenuGroup label="Export as">
-      {formats.map((format) => (
-        <MenuItem
-          key={format.id}
-          description={format.description}
-          onClick={() =>
-            requestExport({ refId: entry.id, format: format.id, formatLabel: format.label, label: entry.label })
-          }
-        >
-          {format.label}
-        </MenuItem>
-      ))}
-    </MenuGroup>
-  )
+  return <ExportMenu refId={entry.id} label={entry.label} kind={entry.kind} formats={formats} />
 }
 
 export const registerItemActions = () => [

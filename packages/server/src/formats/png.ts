@@ -1,5 +1,6 @@
 // PNG chunks: enough to find a card's text chunks and to write new ones. A card PNG carries
 // its card as base64 JSON in `tEXt` chunks: `chara` (V2) and `ccv3` (V3).
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { crc32 } from "node:zlib"
 import { fail, type Limits } from "./safety.ts"
 
@@ -28,7 +29,7 @@ export const readChunks = (bytes: Uint8Array, limits: Limits): Array<Chunk> => {
     if (offset + 12 > bytes.byteLength) fail("png.truncated", "The PNG ends before its IEND chunk.")
     const length = view.getUint32(offset)
     if (length > limits.maxPngChunkBytes) {
-      fail("png.chunk_too_large", `A PNG chunk is larger than ${limits.maxPngChunkBytes} bytes.`)
+      fail("png.chunk_too_large", `A PNG chunk is larger than ${formatByteSize(limits.maxPngChunkBytes)}.`)
     }
     const end = offset + 12 + length
     if (end > bytes.byteLength) fail("png.truncated", "A PNG chunk runs past the end of the file.")

@@ -36,7 +36,7 @@ export const panelTab = async (page: Page, tab: string) => {
 export const closePanel = async (page: Page) => {
   const sheet = page.getByRole("dialog").filter({ has: page.getByRole("tablist", { name: "Chat panel" }) })
   if (await sheet.isVisible()) await sheet.getByRole("button", { name: "Close", exact: true }).click()
-  else await page.getByRole("button", { name: "Close the panel" }).click()
+  else await page.getByRole("button", { name: "Hide panel" }).click()
   await expect(page.getByRole("tablist", { name: "Chat panel" })).toHaveCount(0)
 }
 

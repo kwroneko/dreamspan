@@ -24,7 +24,11 @@ export function GroupFaces({ members }: { members: ChatGroup["members"] }) {
           {more > 0 && i === shown.length - 1 && (
             <span
               data-layout-overlay="Remaining-member count covers the last group portrait"
-              className="absolute inset-0 flex items-center justify-center bg-canvas/70 text-lg font-semibold text-text"
+              title={members
+                .slice(shown.length)
+                .map((member) => member.name)
+                .join(", ")}
+              className="absolute inset-0 flex items-center justify-center rounded-sm bg-surface-raised/70 text-lg font-semibold text-muted"
             >
               +{more}
             </span>

@@ -91,8 +91,8 @@ for (const scheme of ["light", "dark"] as const)
         await branch.click()
         await list.getByRole("button", { name: "Delete Original", exact: true }).click()
         await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toBeVisible()
-        // One branch left: the header shows no control; ⋯ Branches… still lists it.
-        await expect(branch).toHaveCount(0)
+        // One branch left: the header keeps its disabled control; ⋯ Branches… still lists it.
+        await expect(branch).toBeDisabled()
         const branches = async () => {
           await page.getByRole("button", { name: "Chat actions", exact: true }).click()
           await page.getByRole("menuitem", { name: "Branches…" }).click()

@@ -154,7 +154,7 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: C
           {done.count > 0 && (
             <>
               <p className="text-sm text-muted">
-                Inspect the resulting history diff or undo all or individual messages in each chat’s History edits.
+                Inspect the resulting history diff or undo all or individual messages in each chat’s Applied edits.
               </p>
               <ul aria-label="History diffs and undo" className="flex flex-col gap-2">
                 {done.targets.map((t) => (

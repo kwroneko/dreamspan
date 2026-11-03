@@ -5,6 +5,14 @@ import { Schema } from "effect"
 
 export const LOREBOOK_SCHEMA_VERSION = 1
 
+export const CharacterFilter = Schema.Struct({
+  is_exclude: Schema.Boolean,
+  names: Schema.Array(Schema.String),
+  cards: Schema.optionalKey(Schema.Array(Schema.Struct({ entity: Schema.String, name: Schema.String }))),
+  tags: Schema.Array(Schema.String),
+  tag_ids: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
+})
+
 const Extensions = Schema.Record(Schema.String, Schema.Unknown)
 
 /**
@@ -72,14 +80,8 @@ export const LorebookEntry = Schema.Struct({
   match_creator_notes: Schema.Boolean,
   add_memo: Schema.Boolean,
   display_index: Schema.optionalKey(Schema.Int),
-  /** World Info only: card books have no equivalent. */
-  character_filter: Schema.optionalKey(
-    Schema.Struct({
-      is_exclude: Schema.Boolean,
-      names: Schema.Array(Schema.String),
-      tags: Schema.Array(Schema.String)
-    })
-  ),
+  /** Filenames not resolved on import stay in names; resolved cards retain their export filename. */
+  character_filter: Schema.optionalKey(CharacterFilter),
   /** Card book fields with no World Info equivalent. */
   name: Schema.optionalKey(Schema.String),
   priority: Schema.optionalKey(Schema.Finite),

@@ -4,7 +4,7 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, EntityId, ForkId, SlotId, VersionId } from "./chat.ts"
 import { TextTooLong } from "./composerApi.ts"
-import { Draft, DraftHistoryPolicy, DraftRestore, DraftState } from "./drafts.ts"
+import { ObservedDeletion, Draft, DraftHistoryPolicy, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { idSchema } from "./id.ts"
 import { LcmDefaults, LcmSettings, LcmSettingsChange, LcmWhen, ModelChoice } from "./lcmSettings.ts"
@@ -322,6 +322,7 @@ export const SummaryChange = Schema.Struct({ summary: Summary, recovered: Schema
 export const SummaryDraftSave = Schema.Struct({
   forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
   summaryId: SummaryId,
+  observedDeletion: Schema.optionalKey(ObservedDeletion),
   draftId: Schema.NullOr(Schema.String),
   content: Schema.String,
   expectedRowVersion: Schema.NullOr(Schema.Int),

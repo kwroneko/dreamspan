@@ -2,6 +2,7 @@
 // mapping follows ST's `convertCharacterBook` (public/scripts/world-info.js), which keeps
 // its World Info fields in each entry's `extensions`.
 import {
+  CharacterFilter,
   LOREBOOK_SCHEMA_VERSION,
   type LorebookDoc,
   type LorebookEntry,
@@ -104,6 +105,7 @@ export const ourEntryFields = (extensions: Record<string, unknown>, path: Path, 
   if (!Predicate.isObject(ours)) return {}
   const fields = new Fields(ours, [...path, "extensions", OUR_EXTENSION], issues)
   return {
+    ...fields.optional("character_filter", Schema.is(CharacterFilter), "a character filter"),
     ...fields.optional("decision_hint", Predicate.isString, "text"),
     ...fields.optional("placement_override", isPlacement, "a placement")
   }
@@ -117,6 +119,7 @@ export const remainingExtensions = (extensions: Record<string, unknown>, lifted:
   for (const key of lifted) delete extensions[key]
   const ours = extensions[OUR_EXTENSION]
   if (Predicate.isObject(ours)) {
+    delete ours.character_filter
     delete ours.decision_hint
     delete ours.placement_override
     if (!hasKeys(ours)) delete extensions[OUR_EXTENSION]
@@ -346,7 +349,11 @@ export const lorebookFromCharacterBook = (
 
 /** `extensions` with our own entry fields put back in our namespace. */
 export const withOurFields = (entry: LorebookEntry) => {
-  const ours = present({ decision_hint: entry.decision_hint, placement_override: entry.placement_override })
+  const ours = present({
+    decision_hint: entry.decision_hint,
+    placement_override: entry.placement_override,
+    character_filter: entry.character_filter
+  })
   if (Object.keys(ours).length === 0) return entry.extensions
   const existing = entry.extensions[OUR_EXTENSION]
   return { ...entry.extensions, [OUR_EXTENSION]: { ...(Predicate.isObject(existing) ? existing : {}), ...ours } }

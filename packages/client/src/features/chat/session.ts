@@ -277,6 +277,7 @@ export class ChatSession {
   }
 
   private contextReads = 0
+  private contextPending: Promise<void> | null = null
 
   private lcmReads = 0
   /** The newest read applied: a slow read is never dropped for a newer one still in flight. */
@@ -347,7 +348,21 @@ export class ChatSession {
       : null
   }
 
-  private async refreshContext() {
+  /** Waits for the context already being read, or reads it when none is in flight. */
+  async ensureNextContext() {
+    await (this.contextPending ?? this.refreshContext())
+    return !this.disposed
+  }
+
+  private refreshContext() {
+    const pending = this.readContext().finally(() => {
+      if (this.contextPending === pending) this.contextPending = null
+    })
+    this.contextPending = pending
+    return pending
+  }
+
+  private async readContext() {
     const read = ++this.contextReads
     const forkId = this.view.forkId
     const leafSlotId = this.view.leafSlotId
@@ -612,6 +627,8 @@ export class ChatSession {
     this.castBatch = null
     // Text typed in a message editor and not saved yet goes to the server on the way out.
     for (const editor of this.editors.values()) void editor.save()
+    for (const unsubscribe of this.editorSubscriptions.values()) unsubscribe()
+    this.editorSubscriptions.clear()
     if (typeof window !== "undefined") window.removeEventListener("pagehide", this.saveEditors)
     if (this.lcmTimer !== null) clearTimeout(this.lcmTimer)
     if (this.highlightTimer !== null) clearTimeout(this.highlightTimer)
@@ -738,6 +755,7 @@ export class ChatSession {
   // scrolled away; read from the server's drafts when the chat opens, so a reload opens them again.
 
   private readonly editors = new Map<MessageEditorKey, MessageDraft>()
+  private readonly editorSubscriptions = new Map<MessageEditorKey, () => void>()
   private readonly editSlots = new Map<VersionId, SlotId>()
   private readonly userId: string
   /** This browser's copies of the editors' text were sent (once, as the chat opens). */
@@ -759,6 +777,24 @@ export class ChatSession {
   private editorsChanged() {
     this.queueEditorSnapshot = [...this.editors.values()].filter((editor) => editor.target._tag === "Queue")
     for (const listener of this.editorListeners) listener()
+  }
+
+  private trackEditor(editor: MessageDraft) {
+    const key = editorKey(editor.target)
+    this.editorSubscriptions.get(key)?.()
+    this.editors.set(key, editor)
+    let hasText = editor.snapshot().text !== ""
+    this.editorSubscriptions.set(
+      key,
+      editor.subscribe(() => {
+        const next = editor.snapshot().text !== ""
+        if (next === hasText) return
+        hasText = next
+        // A restored insertion becomes visible before its replay finishes. Ordinary
+        // keystrokes still notify only their field, not every message in the chat.
+        this.editorsChanged()
+      })
+    )
   }
 
   /** The open editor of a version's edit or of a version being written of a slot, if any. */
@@ -792,7 +828,8 @@ export class ChatSession {
     const open = this.editors.get(key)
     if (open) return open
     const editor = new MessageDraft(this, this.userId, target, initial, null)
-    this.editors.set(key, editor)
+    this.trackEditor(editor)
+    void editor.open()
     this.editorsChanged()
     return editor
   }
@@ -816,7 +853,7 @@ export class ChatSession {
     for (const draft of result.value) {
       const target = targetOf(draft)
       if (target === null || this.editors.has(editorKey(target))) continue
-      this.editors.set(editorKey(target), new MessageDraft(this, this.userId, target, draft.content, draft))
+      this.trackEditor(new MessageDraft(this, this.userId, target, draft.content, draft))
       changed = true
     }
     // Once the chat's drafts are read: text typed here that never reached the server goes
@@ -838,7 +875,7 @@ export class ChatSession {
       let editor = this.editors.get(key)
       if (editor === undefined) {
         editor = new MessageDraft(this, this.userId, target, "", null)
-        this.editors.set(key, editor)
+        this.trackEditor(editor)
         changed = true
       }
       void editor.restore(theirs)

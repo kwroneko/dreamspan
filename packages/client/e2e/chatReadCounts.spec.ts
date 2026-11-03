@@ -205,7 +205,7 @@ test("chat navigation shares reads and still refreshes after writes", async ({ p
     })
     await page
       .getByRole("dialog", { name: "Preset editor", exact: true })
-      .getByRole("button", { name: "Close preset editor", exact: true })
+      .getByRole("button", { name: "Close", exact: true })
       .click()
     const lore = await openPanel(page, "Lorebooks")
     await lore.getByRole("button", { name: /^Read-count-book/ }).click()
@@ -230,7 +230,7 @@ test("chat navigation shares reads and still refreshes after writes", async ({ p
   await editor.getByRole("button", { name: "Rename Read-count-preset", exact: true }).click()
   await editor.getByRole("textbox", { name: "New name for Read-count-preset", exact: true }).fill("Read-count renamed")
   await page.keyboard.press("Enter")
-  await editor.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  await editor.getByRole("button", { name: "Close", exact: true }).click()
   await expect(page.getByRole("button", { name: /^Prompt preset: / })).toContainText("Read-count renamed")
   const snippets = await openPanel(page, "Snippets")
   await snippets.getByRole("button", { name: "New snippet", exact: true }).click()
