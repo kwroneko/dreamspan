@@ -13,7 +13,7 @@ let cookie: string
 test.beforeAll(async () => {
   cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
 })
-for (const width of [1440, 390])
+for (const width of [1440, 1024, 390])
   for (const theme of ["light", "dark"] as const)
     test(`history preview, replace and undo at ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
@@ -44,7 +44,7 @@ for (const width of [1440, 390])
       const panel = page.getByRole(width === 390 ? "dialog" : "complementary", {
         name: width === 390 ? "The lantern garden" : "Chat panel"
       })
-      await expect(page.getByRole("heading", { name: "Search and replace", exact: true })).toBeVisible()
+      await expect(page.getByRole("heading", { name: "Searches", exact: true })).toBeVisible()
       await page.getByRole("textbox", { name: "Find", exact: true }).fill("Aria")
       await page.getByRole("textbox", { name: "Replace with", exact: true }).fill("Ari")
       await page.getByLabel("Preserve case", { exact: true }).check()
@@ -52,9 +52,8 @@ for (const width of [1440, 390])
       await expect(page.getByRole("button", { name: "Replace all", exact: true })).toBeEnabled()
       if (process.env.REVIEW_SCREENSHOTS) {
         await mkdir(process.env.REVIEW_SCREENSHOTS, { recursive: true })
-        await page.screenshot({
-          path: join(process.env.REVIEW_SCREENSHOTS, `history-${width}-${theme}.png`),
-          fullPage: true
+        await panel.screenshot({
+          path: join(process.env.REVIEW_SCREENSHOTS, `history-${width}-${theme}.png`)
         })
       }
       if (width === 1440) {
@@ -77,17 +76,17 @@ for (const width of [1440, 390])
       await page.getByRole("button", { name: "Replace all", exact: true }).click()
       await expect(page.getByText("History replaced", { exact: true })).toBeVisible()
       await page.reload()
-      await expect(page.getByRole("heading", { name: "Search and replace", exact: true })).toBeVisible()
+      await expect(page.getByRole("heading", { name: "Searches", exact: true })).toBeVisible()
       await page.getByRole("button", { name: "Undo all", exact: true }).click()
       await expect(page.getByRole("button", { name: "Undo all", exact: true })).toBeDisabled()
       if (width === 1440) {
         await page.keyboard.press("Control+h")
-        await expect(page.getByRole("heading", { name: "Search and replace", exact: true })).toBeVisible()
+        await expect(page.getByRole("heading", { name: "Searches", exact: true })).toBeVisible()
       }
       await expect(panel).toBeVisible()
     })
 
-for (const width of [1440, 390])
+for (const width of [1440, 1024, 390])
   for (const theme of ["light", "dark"] as const)
     test(`a summary item can be undone without undoing its message at ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1000 })
@@ -120,10 +119,13 @@ for (const width of [1440, 390])
         await expect(page.getByText("History replaced", { exact: true })).toHaveCount(0)
         await mkdir(process.env.REVIEW_SCREENSHOTS, { recursive: true })
         await item.getByRole("button", { name: "Undo this summary", exact: true }).scrollIntoViewIfNeeded()
-        await page.screenshot({
-          path: join(process.env.REVIEW_SCREENSHOTS, `history-summary-${width}-${theme}.png`),
-          fullPage: true
-        })
+        await page
+          .getByRole(width === 390 ? "dialog" : "complementary", {
+            name: width === 390 ? "Summary undo" : "Chat panel"
+          })
+          .screenshot({
+            path: join(process.env.REVIEW_SCREENSHOTS, `history-summary-${width}-${theme}.png`)
+          })
       }
       await item.getByRole("button", { name: "Undo this summary", exact: true }).click()
       await expect(item.locator("summary")).toContainText("undone or changed")

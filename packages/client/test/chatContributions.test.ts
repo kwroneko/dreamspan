@@ -264,7 +264,7 @@ describe("chat contributions", () => {
       )
     )
     expect(chatCommands.get(original.id)).toBe(original)
-    expect(availableCommands(context).map((entry) => entry.label)).toEqual(["Search and replace", "History edits"])
+    expect(availableCommands(context).map((entry) => entry.label)).toEqual(["Search and replace", "Applied edits"])
     chatCommands.get(original.id)!.run!(context)
     expect(onHistory).toHaveBeenCalledTimes(2)
   })

@@ -381,16 +381,35 @@ test.describe("synthetic library and every app surface", () => {
               page,
               info,
               surface + suffix,
-              process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1" ? { scope: '[role="menu"]' } : {}
+              process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
+                ? { scope: "[data-history-panel]" }
+                : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
+                  ? { scope: '[role="menu"]' }
+                  : {}
             )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
             writeFileSync(join(work, `findings-${width}-${theme}.json`), JSON.stringify(findings, null, 2))
           }
-          if (shots?.test(surface))
+          if (shots?.test(surface)) {
+            const bounds =
+              process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
+                ? await page.locator("[data-history-panel]").boundingBox()
+                : null
+            const viewport = page.viewportSize()!
+            const clip = bounds
+              ? {
+                  x: Math.max(0, bounds.x),
+                  y: Math.max(0, bounds.y),
+                  width: Math.min(viewport.width, bounds.x + bounds.width) - Math.max(0, bounds.x),
+                  height: Math.min(viewport.height, bounds.y + bounds.height) - Math.max(0, bounds.y)
+                }
+              : null
             await page.screenshot({
-              path: join(work, "shots", `${width}-${theme}-${surface.replace(/\W+/g, "-")}.png`)
+              path: join(work, "shots", `${width}-${theme}-${surface.replace(/\W+/g, "-")}.png`),
+              ...(clip ? { clip } : {})
             })
+          }
           await inspect()
           await sampleScrollEnds(page, inspect)
         }
@@ -583,6 +602,45 @@ test.describe("synthetic library and every app surface", () => {
           await audit("panel-header")
           return
         }
+        if (process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1") {
+          const fixture = await admin((api) =>
+            Effect.gen(function* () {
+              const chat = yield* api.CreateChat({ title: "Search and replace layout" })
+              const sent = yield* api.SendMessage({
+                chatId: chat.id,
+                parentSlotId: null,
+                branch: false,
+                content: "Aria reads the garden ledger. Aria waves."
+              })
+              if (sent._tag !== "Posted") throw new Error("fixture queued")
+              return { chat, entry: sent.entry }
+            })
+          )
+          await level1(join(work, "data"), fixture.chat.id, [fixture.entry], "Aria reads the ledger.")
+          await page.goto(`${server.url}/chats/${fixture.chat.id}?panel=history`)
+          const panel = page.locator("[data-history-panel]")
+          await expect(panel.getByRole("heading", { name: "Searches", exact: true })).toBeVisible()
+          await audit("panel-search-replace-empty")
+          await panel.getByRole("button", { name: "Add search and replace", exact: true }).click()
+          await panel
+            .getByRole("region", { name: "Search and replace 2", exact: true })
+            .getByRole("textbox", { name: "Find", exact: true })
+            .fill("Aria")
+          await expect(
+            panel.getByRole("region", { name: "Search and replace 2", exact: true }).getByRole("status")
+          ).toContainText("2 in messages, 0 in swipes, 1 in summaries")
+          await audit("panel-search-replace-boxes")
+          await panel
+            .getByRole("region", { name: "Search and replace 2", exact: true })
+            .getByRole("button", { name: "Remove this search and replace", exact: true })
+            .click()
+          await panel.getByRole("textbox", { name: "Find", exact: true }).fill("Aria")
+          await panel.getByRole("textbox", { name: "Replace with", exact: true }).fill("Ari")
+          await panel.getByRole("button", { name: "Replace all", exact: true }).click()
+          await expect(panel.getByRole("button", { name: "Undo all", exact: true })).toBeVisible()
+          await audit("panel-search-replace-applied")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_NOTES_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, "Notes")
@@ -733,7 +791,7 @@ test.describe("synthetic library and every app surface", () => {
             "Summaries",
             "Display",
             "Snippets",
-            "History edits"
+            "Search and replace"
           ]) {
             const panel = await openPanel(page, name)
             await expect(panel.getByText(/^(Loading|Still loading)/)).toHaveCount(0, { timeout: 30000 })

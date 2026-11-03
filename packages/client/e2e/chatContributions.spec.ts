@@ -144,13 +144,13 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   // The menu stays for the chat's commands, without the history ones; keys are listed apart.
   await page.getByRole("button", { name: "Chat actions", exact: true }).click()
   await expect(page.getByRole("menuitem", { name: "Keyboard shortcuts", exact: true })).toBeVisible()
-  await expect(page.getByRole("menuitem", { name: /^(Search and replace|History edits)$/ })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: /^(Search and replace|Applied edits)$/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await page.keyboard.press("Control+h")
   await expect(page.getByRole("complementary", { name: "Chat panel", exact: true })).toHaveCount(0)
   await contribution(page, "close", "history")
   await page.keyboard.press("Control+h")
-  await expect(page.getByRole("heading", { name: "Search and replace", exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Searches", exact: true })).toBeVisible()
 })
 
 test("a dynamic family obeys individual disablement and never opens an unlisted URL", async ({ page }) => {
