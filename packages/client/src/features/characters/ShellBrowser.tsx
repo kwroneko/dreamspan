@@ -223,7 +223,7 @@ export function ForkRow({
           aria-current={here ? "page" : undefined}
           data-chat-id={fork.chat.id}
           data-fork-id={fork.forkId}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className="flex min-w-0 flex-1 items-center self-stretch gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           {!branchOnly && (
             <span className="flex shrink-0 gap-0.5">
@@ -239,7 +239,7 @@ export function ForkRow({
               ))}
             </span>
           )}
-          <span className="flex min-w-0 flex-col">
+          <span className="flex min-w-0 flex-1 flex-col self-stretch">
             {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
             <span data-chat-title className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]">
               <span className="font-medium">{title}</span>
@@ -276,15 +276,17 @@ export function ForkRow({
             {fork.preview && (
               <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">{fork.preview}</span>
             )}
-            <span data-row-when className="text-xs text-muted">
+            <span data-row-when className="mt-auto text-xs text-muted">
               {perFork ? "Last message " : ""}
               {perFork ? formatMoment(last) : formatWhen(last)}
             </span>
           </span>
         </button>
       </Tooltip>
-      {!perFork && <BranchesButton fork={fork} entity={entity} />}
-      <PinButton fork={fork} />
+      <div className="my-1 flex shrink-0 flex-col items-end justify-between self-stretch">
+        <PinButton fork={fork} />
+        {!perFork && <BranchesButton fork={fork} entity={entity} />}
+      </div>
     </div>
   )
 }

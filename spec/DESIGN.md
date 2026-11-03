@@ -893,6 +893,8 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+**Built 2026-11-03 (chatrowcorners):** **[D]** Owner, 2026-11-03: “Upper right: the pin button, top-aligned with the title’s first line”; “Lower right: the branch-count button, bottom-aligned with the date line”; “the column for the buttons is only as wide as the wider of the two buttons.” Shared chat rows retain the two-line title clamp, existing controls and empty lower corner without branches. This requirement is obsolete as an implementation plan; see ARCHITECTURE.md, Chat row corners.
 - **[D] Column header alignment** (owner, 2026-11-03): "the left column header has a lot of space around it and ends up looking misaligned with the centre column's header, which is less tall." The left header, centre chat header and right panel's top tab bar share one height token and continuous bottom borders wherever they sit side by side; left title/actions are vertically centred with the chat's controls, with matching vertical padding. Chats / Characters stays below that divider, spaced like the centre's content. **Built** (ARCHITECTURE §12, "Column header alignment").
   - **[P]** (headeralign, 2026-11-03) How: retain the centre header's portrait-bearing height, 65 px (48 px portrait + 8 px above/below + 1 px border), at every width through `--spacing-shell-header`. The sidebar's tabs and the panel's cast strip start 16 px below the common divider, matching the message list's leading inset.
 
