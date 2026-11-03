@@ -62,9 +62,9 @@ function Home({ data }: { data: ShellLibrary }) {
           onChange={(e) => setBrowse({ search: e.currentTarget.value })}
           className="sm:max-w-xs"
         />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <IncludePersonas browse={browse} onChange={setBrowse} />
+        <div className="flex min-w-0 items-center gap-1">
           <CardSortControl sort={browse.sort} reversed={browse.reversed} onChange={setBrowse} />
+          <IncludePersonas browse={browse} onChange={setBrowse} />
         </div>
       </div>
       {browse.filter === "groups" ? (

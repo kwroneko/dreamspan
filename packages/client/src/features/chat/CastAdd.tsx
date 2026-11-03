@@ -1,6 +1,6 @@
 // The Cast tab's Add characters section (owner, 2026-11-01; ST's group "Add Members" list):
 // under the cast, collapsed until opened (remembered per account in this browser), the same
-// character grid as the left panel's Characters, with its filter (Include personas under it),
+// character grid as the left panel's Characters, with its filter (with Include personas),
 // sort and direction and the search. A click on a tile adds that character to the chat from the leaf shown on, on this
 // branch (`ChangeCast` `Join`, as the cast's other changes); the grid stays open, so several
 // can be added in a row. Who's already in the chat is marked, and a click on them does nothing.

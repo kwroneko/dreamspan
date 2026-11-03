@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { ChatId, EntityId, VersionId } from "@rp/shared/chat.ts"
 import { findStRoots } from "@rp/shared/stFolder.ts"
@@ -431,6 +431,57 @@ test.describe("synthetic library and every app surface", () => {
           await audit("panel-Notes")
           return
         }
+        if (process.env.LAYOUT_AUDIT_PERSONA_TOGGLE_ONLY === "1") {
+          const toggle = (scope: Page | Locator) => scope.getByRole("button", { name: "Include personas", exact: true })
+          const checkRow = async (scope: Page | Locator) => {
+            const button = toggle(scope)
+            const direction = scope.getByRole("button", { name: /^Order:/ }).last()
+            const a = (await button.boundingBox())!
+            const b = (await direction.boundingBox())!
+            expect(a.y).toBe(b.y)
+            expect(a.width).toBe(b.width)
+            expect(a.height).toBe(b.height)
+            expect(a.x).toBeGreaterThan(b.x)
+          }
+          await go("home-all", "/")
+          const main = page.getByRole("main")
+          await checkRow(main)
+          await toggle(main).click()
+          await audit("home-include-personas")
+          await showAppNavigation(page)
+          await page
+            .getByRole("group", { name: "Left panel", exact: true })
+            .getByRole("button", { name: "Characters", exact: true })
+            .click()
+          const sideToggle = page.getByRole("button", { name: "Include personas", exact: true }).first()
+          // The sidebar's grid is the first browser in document order.
+          await expect(sideToggle).toBeVisible()
+          await checkRow(sideToggle.locator(".."))
+          await audit("sidebar-Characters")
+          await sideToggle.click()
+          await audit("sidebar-include-personas")
+          if (width === 1440) {
+            const handle = page.getByRole("separator", { name: "Resize sidebar", exact: true })
+            const box = (await handle.boundingBox())!
+            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+            await page.mouse.down()
+            await page.mouse.move(0, box.y + box.height / 2, { steps: 10 })
+            await page.mouse.up()
+            await checkRow(sideToggle.locator(".."))
+            await audit("sidebar-minimum-include-personas")
+          }
+          await hideAppNavigation(page)
+          await go("group-chat", `/chats/${chatId}`)
+          const cast = await openPanel(page, "Cast")
+          const add = cast.getByRole("button", { name: "Add characters", exact: true })
+          if ((await add.getAttribute("aria-expanded")) === "false") await add.click()
+          const section = cast.getByRole("region", { name: "Add characters", exact: true })
+          await checkRow(section)
+          await audit("cast-add-characters")
+          await toggle(section).click()
+          await audit("cast-add-personas")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_HOME_ONLY === "1") {
           await go("home-all", "/")
           return
@@ -482,10 +533,10 @@ test.describe("synthetic library and every app surface", () => {
         }
         // Personas mixed in, each marked "You" (personalists).
         if (selected.test("home-include-personas")) {
-          const include = page.getByRole("main").getByRole("checkbox", { name: "Include personas" })
-          await include.check()
+          const include = page.getByRole("main").getByRole("button", { name: "Include personas", exact: true })
+          await include.click()
           await audit("home-include-personas")
-          await include.uncheck()
+          await include.click()
         }
         await showAppNavigation(page)
         for (const name of ["Characters", "Chats"]) {

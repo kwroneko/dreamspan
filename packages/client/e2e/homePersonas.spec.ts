@@ -1,5 +1,5 @@
 // Personas on the home page (owner, 2026-11-02): the persona folder's cards are under their
-// own Personas tab and left out of the other tabs, unless Include personas is ticked, which
+// own Personas tab and left out of the other tabs, unless Include personas is on, which
 // mixes them in marked "You". The choice is remembered and in the URL. Every card is made up.
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
@@ -29,7 +29,7 @@ const tiles = (page: Page) =>
     .getByLabel("Characters", { exact: true })
     .getByRole("button", { name: /^Open / })
     .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")).sort())
-const include = (page: Page) => main(page).getByRole("checkbox", { name: "Include personas" })
+const include = (page: Page) => main(page).getByRole("button", { name: "Include personas", exact: true })
 
 for (const width of [1440, 390]) {
   test(`${width}: Personas tab, and Include personas off, on (marked) and remembered`, async ({ page }) => {
@@ -39,10 +39,12 @@ for (const width of [1440, 390]) {
     await expect(show(page, "All")).toHaveAttribute("aria-pressed", "true")
 
     // Off by default: the persona isn't among the characters.
-    await expect(include(page)).not.toBeChecked()
+    await expect(include(page)).toHaveAttribute("aria-pressed", "false")
+    await include(page).hover()
+    await expect(page.getByText("Include personas", { exact: true }).filter({ visible: true })).toBeVisible()
     await expect.poll(() => tiles(page)).toEqual(["Open Corin", "Open Delia"])
 
-    // The Personas tab: the persona folder alone, unmarked, without the checkbox.
+    // The Personas tab: the persona folder alone, unmarked, without the toggle.
     await show(page, "Personas").click()
     await expect.poll(() => tiles(page)).toEqual(["Open Pia"])
     await expect(include(page)).toHaveCount(0)
@@ -50,7 +52,11 @@ for (const width of [1440, 390]) {
 
     // On: mixed in, marked "You", with the badge's explanation.
     await show(page, "All").click()
-    await include(page).check()
+    await include(page).click()
+    await expect(include(page)).toHaveAttribute("aria-pressed", "true")
+    await main(page).getByRole("heading", { name: "Characters", exact: true }).hover()
+    await include(page).hover()
+    await expect(page.getByText("Personas included", { exact: true }).filter({ visible: true })).toBeVisible()
     await expect.poll(() => tiles(page)).toEqual(["Open Corin", "Open Delia", "Open Pia (persona)"])
     const badge = main(page).locator("[data-persona-badge]")
     await expect(badge).toHaveCount(1)
@@ -65,16 +71,16 @@ for (const width of [1440, 390]) {
     // In the URL, and remembered: a reload keeps it, and so does a fresh visit with no params.
     expect(new URL(page.url()).searchParams.get("personas")).toBe("true")
     await page.reload()
-    await expect(include(page)).toBeChecked()
+    await expect(include(page)).toHaveAttribute("aria-pressed", "true")
     await expect.poll(() => tiles(page)).toContain("Open Pia (persona)")
     await page.goto(`${server().url}/library`)
     await page.goto(server().url)
-    await expect(include(page)).toBeChecked()
+    await expect(include(page)).toHaveAttribute("aria-pressed", "true")
 
     // Off again hides it, and that's remembered as well.
-    await include(page).uncheck()
+    await include(page).click()
     await expect.poll(() => tiles(page)).toEqual(["Open Corin", "Open Delia"])
     await page.goto(server().url)
-    await expect(include(page)).not.toBeChecked()
+    await expect(include(page)).toHaveAttribute("aria-pressed", "false")
   })
 }
