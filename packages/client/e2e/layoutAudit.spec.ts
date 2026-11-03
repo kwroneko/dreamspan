@@ -413,23 +413,25 @@ test.describe("synthetic library and every app surface", () => {
               page,
               info,
               surface + suffix,
-              process.env.LAYOUT_AUDIT_SNIPPETS_ONLY === "1"
-                ? { scope: '[role="tabpanel"], [role="dialog"]' }
-                : process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
-                  ? { scope: "[data-history-panel]" }
-                  : process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1"
-                    ? {
-                        scope: surface.startsWith("panel-")
-                          ? 'section[aria-label="Summary settings"]'
-                          : 'section[aria-label="Models for summaries"], section[aria-label="Summary defaults for new chats"]'
-                      }
-                    : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
-                      ? { scope: 'section[aria-label="Who replies"]' }
-                      : process.env.LAYOUT_AUDIT_LOREBOOKS_ONLY === "1"
-                        ? { scope: "[data-lorebook-audit]" }
-                        : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
-                          ? { scope: '[role="menu"]' }
-                          : {}
+              process.env.LAYOUT_AUDIT_CHAT_ROWS_ONLY === "1"
+                ? { scope: '[data-fork-row], [aria-label="Chat filters and sorting"]' }
+                : process.env.LAYOUT_AUDIT_SNIPPETS_ONLY === "1"
+                  ? { scope: '[role="tabpanel"], [role="dialog"]' }
+                  : process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
+                    ? { scope: "[data-history-panel]" }
+                    : process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1"
+                      ? {
+                          scope: surface.startsWith("panel-")
+                            ? 'section[aria-label="Summary settings"]'
+                            : 'section[aria-label="Models for summaries"], section[aria-label="Summary defaults for new chats"]'
+                        }
+                      : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
+                        ? { scope: 'section[aria-label="Who replies"]' }
+                        : process.env.LAYOUT_AUDIT_LOREBOOKS_ONLY === "1"
+                          ? { scope: "[data-lorebook-audit]" }
+                          : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
+                            ? { scope: '[role="menu"]' }
+                            : {}
             )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })

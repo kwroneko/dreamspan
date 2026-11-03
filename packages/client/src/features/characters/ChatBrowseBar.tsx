@@ -30,13 +30,22 @@ interface Props {
 export const sidebarChatBrowse = defineSlot<Props>("sidebar.chat-browse")
 export function ChatBrowseBar({ browse, counts, onChange }: Props) {
   return (
-    <div aria-label="Chat filters and sorting" className="flex max-w-controls min-w-0 shrink-0 items-center gap-1">
-      <div className="min-w-0 flex-1">
+    <div
+      aria-label="Chat filters and sorting"
+      className="@container/chat-browse flex max-w-controls min-w-0 shrink-0 flex-wrap items-center gap-1"
+    >
+      <div className="min-w-max flex-1">
         <Tooltip label="Chooses which chats are shown">
           <span className="block">
             <Select
               ariaLabel="Show chats"
-              className="h-8!"
+              className="h-8! min-w-max!"
+              shown={(filter) => (
+                <>
+                  {FILTERS[filter].label}
+                  <span className="chat-filter-count"> · {counts?.[filter].toLocaleString() ?? "…"}</span>
+                </>
+              )}
               value={browse.filter}
               onValueChange={(filter) => onChange({ filter })}
               items={CHAT_FILTERS.map((filter) => ({
@@ -48,7 +57,7 @@ export function ChatBrowseBar({ browse, counts, onChange }: Props) {
           </span>
         </Tooltip>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div data-chat-sort className="ms-auto flex shrink-0 items-center gap-1">
         <Menu
           label="Sort chats"
           hint="Chooses how chats are ordered"

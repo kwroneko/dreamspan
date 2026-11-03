@@ -1,7 +1,7 @@
 // Pickers. An item's `description` explains it beside the highlighted option, or under its
 // label on touch screens and narrow windows (`Explanation.tsx`), so the label can stay short.
 import { Select as BaseSelect } from "@base-ui/react/select"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { HighlightExplanation, useItemExplanation } from "./Explanation.tsx"
 
 export interface SelectItem<Value> {
@@ -53,7 +53,7 @@ export function Select<Value>({
   /** Its name when no `Field` labels it: a table cell's, say. */
   ariaLabel?: string
   /** What the closed picker shows for a value, when its label is too long for the space. */
-  shown?: (value: Value) => string
+  shown?: (value: Value) => ReactNode
 }) {
   const [popup, setPopup] = useState<HTMLElement | null>(null)
   return (

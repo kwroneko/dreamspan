@@ -210,7 +210,8 @@ export function ForkRow({
   const opensHere = perFork && fork.current && fork.branches > 1
   return (
     <div
-      className={`flex w-full max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
+      data-fork-row
+      className={`fork-row @container/fork-row relative flex w-full max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <Tooltip
         label={`${title}. ${
@@ -226,10 +227,14 @@ export function ForkRow({
           aria-current={here ? "page" : undefined}
           data-chat-id={fork.chat.id}
           data-fork-id={fork.forkId}
-          className="flex min-w-0 flex-1 items-center self-stretch gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className="fork-row-open flex min-w-0 flex-1 items-center self-stretch gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           {!branchOnly && (
-            <span className="flex shrink-0 gap-0.5">
+            <span
+              data-row-portraits
+              data-layout-audit-ignore="overlap: Cast portraits intentionally overlap in compact chat rows"
+              className="flex shrink-0 gap-0.5"
+            >
               {fork.cast.slice(0, 2).map((c) => (
                 <Avatar
                   key={c.entityId}
@@ -242,7 +247,7 @@ export function ForkRow({
               ))}
             </span>
           )}
-          <span className="flex min-w-0 flex-1 flex-col self-stretch">
+          <span data-row-text className="flex min-w-0 flex-1 flex-col self-stretch">
             {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
             <span data-chat-title className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]">
               <span className="font-medium">{title}</span>
@@ -286,7 +291,11 @@ export function ForkRow({
           </span>
         </button>
       </Tooltip>
-      <div className="my-1 flex shrink-0 flex-col items-end justify-between self-stretch">
+      <div
+        data-row-actions
+        data-layout-overlay="Corner actions share the full-width open control in narrow chat rows"
+        className="my-1 flex shrink-0 flex-col items-end justify-between self-stretch"
+      >
         <PinButton fork={fork} />
         {!perFork && <BranchesButton fork={fork} entity={entity} />}
       </div>
