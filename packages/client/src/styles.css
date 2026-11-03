@@ -99,6 +99,8 @@
 }
 
 @theme {
+  /* The three column top bars: 48 px portraits, 8 px above/below, and the divider. */
+  --spacing-shell-header: 4.0625rem;
   /*
    * `max-w-controls`: a row whose controls belong together (a label and its button, a picker
    * and its New, a filter bar) stays within this in a column dragged wide, so its ends never
