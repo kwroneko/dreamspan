@@ -325,11 +325,20 @@ export function CardNameHeader({
  * (`CardNameHeader`, `CardTokens` as `children`), stacked from the top with consistent gaps.
  * Its width sets the portrait's size (a container query), so it holds at any panel width.
  */
-export function CardHeader({ portrait, children }: { portrait: ReactNode; children: ReactNode }) {
+export function CardHeader({
+  portrait,
+  children,
+  saveControls
+}: {
+  portrait: ReactNode
+  children: ReactNode
+  saveControls?: ReactNode
+}) {
   return (
-    <div data-card-header className="@container flex items-stretch gap-3">
+    <div data-card-header data-editor-header className="@container flex items-stretch gap-3">
       {portrait}
       <div className="relative flex min-w-0 flex-1 flex-col items-start gap-1 has-[>span.absolute]:pr-8 [&>[data-renaming]]:w-full [&>[data-renaming]]:flex-none">
+        {saveControls && <div className="mb-1 flex w-full justify-end">{saveControls}</div>}
         {children}
       </div>
     </div>

@@ -15,6 +15,7 @@ import {
   useSyncExternalStore
 } from "react"
 import { useSession } from "../../session.ts"
+import { UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
 import { ColumnOverlay } from "../../ui/ColumnOverlay.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { useCaller } from "./caller.ts"
@@ -36,6 +37,7 @@ interface WorkspaceChat {
 interface Workspace {
   /** A chat's own note is edited at its position, so its store is that position's. */
   store: (ref: RefId, chatNote?: ChatNotePosition) => EditorStore
+  edits: { tracker: UnsavedTracker; stores: ReadonlyMap<string, EditorStore> }
   open: (ref: RefId, focus?: string) => void
   close: () => void
   selection: { ref: RefId; focus?: string | undefined } | null
@@ -44,6 +46,16 @@ interface Workspace {
 }
 const Context = createContext<Workspace | null>(null)
 export const usePresetWorkspace = () => useContext(Context)
+const emptyEdits = new UnsavedTracker()
+/** Loaded workspace editors also mark their panel tab before that panel is first visited. */
+export function useWorkspaceChanges() {
+  const workspace = usePresetWorkspace()
+  const tracker = workspace?.edits.tracker ?? emptyEdits
+  const dirty = useSyncExternalStore(tracker.subscribe, tracker.snapshot)
+  return [...(workspace?.edits.stores ?? [])].flatMap(([key, store]) =>
+    dirty.has(key) && store.snapshot ? [store.snapshot.ref] : []
+  )
+}
 
 export function PresetWorkspace({
   children,
@@ -62,6 +74,8 @@ export function PresetWorkspace({
   const call = useCaller()
   const userId = useSession().user.id
   const [stores] = useState(() => new Map<string, EditorStore>())
+  const [edits] = useState(() => new UnsavedTracker())
+  useEffect(() => () => edits.dispose(), [edits])
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const navigate = useNavigate()
   const selection = useMemo<Workspace["selection"]>(
@@ -97,6 +111,7 @@ export function PresetWorkspace({
     if (!value) {
       value = new EditorStore(ref, userId, call, browserEnv, chatNote)
       stores.set(key, value)
+      edits.add(key, value.unsavedSource)
     }
     return value
   }
@@ -104,6 +119,7 @@ export function PresetWorkspace({
     <Context
       value={{
         store,
+        edits: { tracker: edits, stores },
         context,
         chat,
         selection,

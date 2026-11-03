@@ -1,7 +1,6 @@
 import { createPortal } from "react-dom"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { presetScopes } from "./searchScopes.ts"
-import { SaveRevision } from "./SaveRevision.tsx"
 import { PromptKindTag, promptKind, SummariesPlaceholder, VolatileBadge, volatileMacros } from "./promptKinds.tsx"
 import { usePlaceExpansion, usePlaceNotice, usePlaceParam } from "../../usePlaceParam.ts"
 // The preset's prompt order as one document (DESIGN §6.2a). Each prompt is a bounded block: a
@@ -420,9 +419,13 @@ function PromptBlock({
 
   const title = prompt.marker ? (
     <span className="flex min-w-0 flex-1 flex-col gap-1 px-1 py-1">
-      <span className="flex min-w-0 items-center gap-2">
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <Icon name={kind && "icon" in kind ? kind.icon! : "insert"} />
-        <span className={landmark ? "truncate text-base font-semibold" : "truncate text-sm font-medium"}>
+        <span
+          className={
+            landmark ? "min-w-0 flex-1 truncate text-base font-semibold" : "min-w-0 flex-1 truncate text-sm font-medium"
+          }
+        >
           {landmark && !nameMatch ? "Chat history" : markedName}
         </span>
         {!entry.enabled && (
@@ -463,7 +466,7 @@ function PromptBlock({
       // Search and replace's Go to a match in the name: its field opens with the match selected.
       goTo={nameMatch}
       allowEmpty
-      className="min-w-0 max-w-md"
+      className="min-w-14 max-w-md"
       onRename={(next) => {
         store.setText(namePath, next)
         void store.save(textField(namePath))
@@ -472,7 +475,7 @@ function PromptBlock({
       {title}
     </InlineRename>
   ) : (
-    <span className="flex min-w-0 flex-1">{title}</span>
+    <span className="flex min-w-7 flex-1">{title}</span>
   )
 
   const menu = (
@@ -654,7 +657,6 @@ export function PromptDocument({
   layout = "document",
   onOpenLarge,
   onOpenLorebook,
-  saveControls,
   toolbarTarget,
   toolbarEnd,
   onSearchReveal
@@ -664,7 +666,6 @@ export function PromptDocument({
   toolbarTarget?: HTMLElement | null | undefined
   toolbarEnd?: ReactNode
   onSearchReveal?: ((match: SearchMatch) => void) | undefined
-  saveControls?: ReactNode
   context?: PresetContext | null | undefined
   focus?: string | undefined
   /** A prompt to open and scroll to, asked for again by a new object (a warning's link). */
@@ -905,7 +906,6 @@ export function PromptDocument({
     <div data-preset-layout={layout} className="preset-toolbar @container flex min-w-0 flex-col gap-2">
       <div data-preset-edit-row className="preset-edit-row flex items-center gap-2">
         {addButtons}
-        <div className="flex shrink-0 items-center">{saveControls ?? <SaveRevision store={store} />}</div>
         <Button
           ref={searchButton}
           aria-controls={searchId}

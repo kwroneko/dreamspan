@@ -101,7 +101,7 @@ test.beforeAll(async ({ browser }) => {
 
 const box = async (locator: Locator) => (await locator.boundingBox())!
 
-/** The header's geometry: the portrait's box, and the first and last rows beside it. */
+/** The shared header: save cluster above the names beside the portrait. */
 const measure = async (panel: Locator) => {
   const header = panel.locator("[data-card-header]")
   await expect(header).toBeVisible()
@@ -109,7 +109,13 @@ const measure = async (panel: Locator) => {
   const rows = header.locator("[data-card-header-row]")
   const first = await box(rows.first())
   const last = await box(rows.last())
-  return { header: await box(header), portrait, first, last }
+  return {
+    header: await box(header),
+    portrait,
+    save: await box(header.getByRole("group", { name: "Save", exact: true })),
+    first,
+    last
+  }
 }
 
 /** Check visible text fragments, so a two-line heading cannot leave its pencil on line one. */
@@ -235,9 +241,12 @@ for (const scheme of ["light", "dark"] as const)
         const header = panel.locator("[data-card-header]")
         const slug = name.split(" ")[0]!.toLowerCase()
         await shoot(phone ? page : page.getByRole("complementary", { name: "Chat panel" }), `${mode}-${scheme}-${slug}`)
-        // The names start at the portrait's top, without stretching the stack to its bottom.
-        const { header: whole, portrait, first } = await measure(panel)
-        expect.soft(Math.abs(portrait.y - first.y), `${name}: top`).toBeLessThanOrEqual(1)
+        // The save cluster starts at the portrait's top; the names follow beneath it.
+        const { header: whole, portrait, save, first } = await measure(panel)
+        expect.soft(Math.abs(portrait.y - save.y), `${name}: save top`).toBeLessThanOrEqual(1)
+        expect.soft(first.y - save.y - save.height, `${name}: names below save`).toBeGreaterThanOrEqual(0)
+        expect.soft(first.y - save.y - save.height, `${name}: compact name stack`).toBeLessThanOrEqual(12)
+        expect.soft(whole.x + whole.width - save.x - save.width, `${name}: save right`).toBeLessThanOrEqual(48)
         await expectInlineNames(panel)
         heights.push(whole.height)
         // "You" is on the persona's portrait, and only there.
@@ -297,8 +306,11 @@ test("the full editor's header is the same", async ({ page }) => {
         await page.mouse.move(0, 0)
         await page.waitForTimeout(300)
         await shoot(page, `editor-${width}-${scheme}-${name.split(" ")[0]!.toLowerCase()}`)
-        const { portrait, first } = await measure(page.locator("main"))
-        expect.soft(Math.abs(portrait.y - first.y), `${name}: top`).toBeLessThanOrEqual(1)
+        const { header: whole, portrait, save, first } = await measure(page.locator("main"))
+        expect.soft(Math.abs(portrait.y - save.y), `${name}: save top`).toBeLessThanOrEqual(1)
+        expect.soft(first.y - save.y - save.height, `${name}: names below save`).toBeGreaterThanOrEqual(0)
+        expect.soft(first.y - save.y - save.height, `${name}: compact name stack`).toBeLessThanOrEqual(12)
+        expect.soft(whole.x + whole.width - save.x - save.width, `${name}: save right`).toBeLessThanOrEqual(48)
         await expectInlineNames(page.locator("main"))
         // The same Picture button over it as in a character tab, with or without a picture.
         const over = page.locator("[data-card-header-portrait]")

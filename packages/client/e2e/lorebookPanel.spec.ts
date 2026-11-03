@@ -207,7 +207,7 @@ for (const [width, scheme] of [
     await expectSaveState(editor, UNSAVED, {
       timeout: 30_000
     })
-    await editor.getByRole("button", { name: "Revert to the last save", exact: true }).click()
+    await editor.getByRole("button", { name: "Revert", exact: true }).click()
     for (const title of ["Harbour", "Lamp", "Fog"])
       await expect(editor.getByRole("switch", { name: `${title} enabled` })).toBeChecked({ timeout: 30_000 })
     await expectSaveState(editor, NOTHING_TO_SAVE, {
@@ -284,17 +284,17 @@ test("a preset sends a book: attached in the Prompt preset tab, listed from the 
   const bar = presetTab.getByRole("region", { name: "Unsaved changes" })
   await expect(bar).toContainText("1 lorebook attached")
   await page.screenshot({ path: join(shots, "preset-block-1440.png"), fullPage: false })
-  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  await presetTab.getByRole("button", { name: "Revert", exact: true }).click()
   await expect(attached).toHaveCount(0)
   await presetTab.getByRole("button", { name: "Attach a lorebook", exact: true }).click()
   await presetTab.getByRole("list", { name: "Lorebooks to add" }).getByText("Style preset", { exact: true }).click()
-  await bar.getByRole("button", { name: "Save", exact: true }).click()
+  await presetTab.getByRole("button", { name: "Save", exact: true }).click()
   await expect(bar).toHaveCount(0)
   await expect(attached.getByRole("switch", { name: "Style preset" })).toBeChecked()
   // Taking it off waits too: it's still sent until Save, and Revert puts it back.
   await attached.getByRole("button", { name: "Take Style preset off the preset", exact: true }).click()
   await expect(bar).toContainText("1 lorebook taken off")
-  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  await presetTab.getByRole("button", { name: "Revert", exact: true }).click()
   await expect(attached.getByRole("switch", { name: "Style preset" })).toBeChecked()
 
   const panel = await openPanel(page, "Lorebooks")
@@ -328,7 +328,7 @@ test("the large editor: Look in, the pencil rename, text and keys first, Revert"
   await expect(page.getByRole("textbox", { name: "Primary keys" })).toHaveValue("harbour\nquay")
   await expect(page.getByRole("combobox", { name: "Logic" })).toHaveCount(0)
   await page.getByRole("textbox", { name: "Entry content" }).fill("Boats knock at the quay.")
-  await page.getByRole("button", { name: "Revert to the last save", exact: true }).click()
+  await page.getByRole("button", { name: "Revert", exact: true }).click()
   await expect(page.getByRole("textbox", { name: "Entry content" })).toHaveValue("Boats rock at the quay.")
   await page.screenshot({ path: join(shots, "large-1440-dark.png"), fullPage: false })
 })

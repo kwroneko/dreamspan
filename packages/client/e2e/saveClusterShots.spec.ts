@@ -185,7 +185,7 @@ for (const width of [1440, 390])
         await shoot(bar(), "panel-held-2-unsaved")
         await page.screenshot({ path: join(dir, "panel-held-0-page.png") })
         mode = "hold"
-        await bar().getByRole("button", { name: "Save", exact: true }).click()
+        await preset().getByRole("button", { name: "Save", exact: true }).click()
         await expect.poll(() => held.length, { timeout: 30_000 }).toBe(1)
         await shoot(preset().getByRole("button", { name: "Save", exact: true }).first(), "panel-held-3-saving")
         mode = "pass"

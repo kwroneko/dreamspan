@@ -10,6 +10,8 @@ import {
   type ReplySectionSettings,
   type SectionPair
 } from "@rp/shared/replySections.ts"
+import { valueField } from "@rp/shared/editing.ts"
+import { FieldRevert } from "./FieldRevert.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { useState } from "react"
@@ -35,11 +37,13 @@ const tagError = (tag: string, regex: boolean) => {
 }
 
 function PairRow({
+  store,
   pair,
   index,
   onChange,
   onRemove
 }: {
+  store: EditorStore
   pair: SectionPair
   index: number
   onChange: (pair: SectionPair) => void
@@ -59,6 +63,16 @@ function PairRow({
           <Textarea
             rows={2}
             value={pair.open}
+            tools={
+              <FieldRevert
+                store={store}
+                field={valueField(PATH)}
+                path={[...PATH, "pairs", index, "open"]}
+                value={pair.open}
+                format={(value) => (typeof value === "string" ? value : (DEFAULT_SECTION_PAIRS[index]?.open ?? ""))}
+                onChange={(value) => onChange({ ...pair, open: value })}
+              />
+            }
             spellCheck={false}
             className="font-mono"
             onChange={(event) => onChange({ ...pair, open: event.currentTarget.value })}
@@ -72,6 +86,16 @@ function PairRow({
           <Textarea
             rows={2}
             value={pair.close}
+            tools={
+              <FieldRevert
+                store={store}
+                field={valueField(PATH)}
+                path={[...PATH, "pairs", index, "close"]}
+                value={pair.close}
+                format={(value) => (typeof value === "string" ? value : (DEFAULT_SECTION_PAIRS[index]?.close ?? ""))}
+                onChange={(value) => onChange({ ...pair, close: value })}
+              />
+            }
             spellCheck={false}
             className="font-mono"
             onChange={(event) => onChange({ ...pair, close: event.currentTarget.value })}
@@ -136,6 +160,7 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
         <ul className="flex flex-col gap-2">
           {settings.pairs.map((pair, index) => (
             <PairRow
+              store={store}
               key={index}
               pair={pair}
               index={index}

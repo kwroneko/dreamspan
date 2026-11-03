@@ -201,8 +201,7 @@ test("Save rechecks names and disables the action after an unannounced collision
   )
   // Save asks nothing, so the recheck happens on the click itself.
   await save.click()
-  // The clash shows in the editor's status line (and in Save's explanation), not as an alert;
-  // a hidden tooltip's copy of it isn't a status.
+  // The clash shows once in the editor's status line.
   await expect(
     page.getByRole("status").filter({ hasText: "Another card is already called Late target · 1" })
   ).toBeVisible()

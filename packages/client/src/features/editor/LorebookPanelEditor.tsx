@@ -73,13 +73,14 @@ export function LorebookPanelEditor({
   return (
     <SearchNavigation value={match}>
       <section aria-label={`Lorebook ${fallbackName}`} className="flex min-w-0 flex-col gap-3">
-        <div className="flex items-start gap-0.5">
+        <div data-editor-header className="flex items-start gap-0.5">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="font-medium">
               <BookName store={store} root={root} fallback={fallbackName} />
             </span>
             {note && <p className="text-xs text-muted">{note}</p>}
           </div>
+          {saveControls && <SaveRevision store={store} />}
           {onOpenLarge && (
             <IconButton
               label="Large editor"
@@ -109,7 +110,6 @@ export function LorebookPanelEditor({
             root={root}
             book={book}
             panel
-            saveControls={saveControls ? <SaveRevision store={store} /> : undefined}
             tools={
               <Button
                 ref={findButton}

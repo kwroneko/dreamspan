@@ -13,6 +13,7 @@ export const registerCharacterPanels = () =>
     icon: "people",
     header: false,
     placement: "cast",
+    holdsEditor: (ref, tab) => ref.kind === "card" && tab === `card:${ref.entityId}`,
     matches: (value) => /^card:[0-9a-f-]{36}$/.test(value),
     tabs: (view, selected) => {
       const cast = view.cast

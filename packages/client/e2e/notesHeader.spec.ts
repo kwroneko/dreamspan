@@ -154,7 +154,7 @@ for (const width of [1440, 390])
 
       // Revert: shown, greyed out, until something changed.
       const cluster = saveCluster(block)
-      const revert = cluster.getByRole("button", { name: "Revert to the last save", exact: true })
+      const revert = cluster.getByRole("button", { name: "Revert", exact: true })
       await expect(revert).toBeVisible()
       await expect(revert).toBeDisabled()
       const menu = (await block.getByRole("button", { name: "Actions for Tide" }).boundingBox())!

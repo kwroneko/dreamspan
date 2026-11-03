@@ -8,9 +8,11 @@ import type { AvatarCrop } from "@rp/shared/media.ts"
 import { Avatar } from "./Avatar.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 import { Menu, MenuItem } from "./Menu.tsx"
+import { UnsavedDot } from "./UnsavedChanges.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
 interface ToolTab {
+  readonly dirty?: boolean | undefined
   readonly value: string
   readonly label: string
   readonly icon: IconName
@@ -19,6 +21,7 @@ interface ToolTab {
 }
 
 interface SubjectTab {
+  readonly dirty?: boolean | undefined
   readonly value: string
   readonly label: string
   /** A portrait; without one the tab shows `icon` (the cast's own tab, say). */
@@ -37,7 +40,7 @@ interface SubjectTab {
 
 // The icon over its label, small, as a phone's tab bar: about six fit in the panel's default width.
 const toolClass =
-  "flex shrink-0 flex-col items-center gap-0.5 rounded-md border-b-2 border-transparent px-1.5 pt-1 pb-0.5 text-xs whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+  "relative flex shrink-0 flex-col items-center gap-0.5 rounded-md border-b-2 border-transparent px-1.5 pt-1 pb-0.5 text-xs whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
 const GAP = 2
 /** The subjects' strip's gap (gap-1). */
 const GAP_SUBJECT = 4
@@ -127,10 +130,13 @@ export function ToolTabs({
                     data-layout-audit-ignore="inset: Tabs form the panel navigation strip"
                     key={tab.value}
                     value={tab.value}
+                    data-unsaved={tab.dirty || undefined}
+                    aria-description={tab.dirty ? "Unsaved changes" : undefined}
                     className={`group ${toolClass} data-active:border-accent data-active:text-text`}
                   >
                     <Icon name={tab.icon} className="group-data-active:text-accent" />
                     {tab.label}
+                    {tab.dirty && <UnsavedDot />}
                   </BaseTabs.Tab>
                 )
                 return tab.description ? (
@@ -155,6 +161,7 @@ export function ToolTabs({
                 >
                   <Icon name="more" />
                   {MORE}
+                  {hidden.some((tab) => tab.dirty) && <UnsavedDot />}
                 </button>
               }
             >
@@ -165,7 +172,10 @@ export function ToolTabs({
                   description={tab.description}
                   onClick={() => onValueChange(tab.value)}
                 >
-                  {tab.label}
+                  <span className="relative pr-3">
+                    {tab.label}
+                    {tab.dirty && <UnsavedDot />}
+                  </span>
                 </MenuItem>
               ))}
             </Menu>
@@ -295,13 +305,17 @@ export function SubjectTabs({
                 data-layout-audit-ignore="inset: Tabs form the panel navigation strip"
                 key={tab.value}
                 value={tab.value}
+                data-unsaved={tab.dirty || undefined}
                 title={tab.note ? `${tab.label} (${tab.note})` : tab.label}
-                aria-description={tab.note}
+                aria-description={
+                  [tab.note, tab.dirty ? "Unsaved changes" : ""].filter(Boolean).join(". ") || undefined
+                }
                 className={`${chipClass(tab, short)} outline-none focus-visible:ring-2 focus-visible:ring-focus data-active:border-accent data-active:bg-surface-raised data-active:text-text ${
                   tab.avatar ? "hover:bg-surface-raised" : "hover:text-text"
                 }`}
               >
                 {chip(tab, short)}
+                {tab.dirty && <UnsavedDot />}
               </BaseTabs.Tab>
             )
           })}

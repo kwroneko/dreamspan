@@ -61,7 +61,6 @@ export function PresetEditor({
   focus,
   toolbarTarget,
   toolbarEnd,
-  saveControls,
   onSearchReveal
 }: {
   store: EditorStore
@@ -70,7 +69,6 @@ export function PresetEditor({
   focus?: string | undefined
   toolbarTarget?: HTMLElement | null | undefined
   toolbarEnd?: ReactNode
-  saveControls?: ReactNode
   onSearchReveal?: ((match: SearchMatch) => void) | undefined
 }) {
   const [goTo, setGoTo] = useState<{ readonly identifier: string } | null>(null)
@@ -87,7 +85,6 @@ export function PresetEditor({
           store={store}
           toolbarTarget={toolbarTarget}
           toolbarEnd={toolbarEnd}
-          saveControls={saveControls}
           onSearchReveal={onSearchReveal}
           context={context}
           focus={focus}

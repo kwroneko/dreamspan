@@ -1,5 +1,5 @@
 // Saving a revision from an editor (owner, 2026-11-01 and 2026-11-02; ARCHITECTURE §14.6):
-// `ui/SaveControls` bound to the store; a failed save shows on Save itself. Save asks nothing:
+// `ui/SaveControls` bound to the store; a failed save shows below the controls. Save asks nothing:
 // what's typed is used as it's typed, and a revision is a checkpoint. Only fields another tab
 // or an update changed meanwhile open a dialog, to pick per field. A card's nickname asks about past messages where it's renamed (`CardNameHeader`),
 // never after a save. Every editor uses it: the library page, the chat's tabs, a card's or
@@ -11,6 +11,7 @@ import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { useUnsavedSource } from "../../ui/UnsavedChanges.tsx"
 import { SaveControls } from "../../ui/SaveControls.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import { type Choice, type Conflict, ConflictPicker, chosen } from "./conflicts.tsx"
@@ -24,12 +25,13 @@ const contentOf = (field: string, value: unknown) =>
 export function SaveRevision({
   store,
   onSaved,
-  labelsInHints = false
+  shownNameClash = null
 }: {
   store: EditorStore
   onSaved?: (saved: SavedRef) => void
-  labelsInHints?: boolean
+  shownNameClash?: string | null
 }) {
+  useUnsavedSource(store.unsavedSource)
   const state = useEditorState(store)
   const held = useHeld(store)
   const ref = state.snapshot!.ref
@@ -38,7 +40,7 @@ export function SaveRevision({
   const nameCheck = useCardNameCheck(name, version, ref)
   const clash = ref.kind === "card" ? nameCheck : null
   const [pending, setPending] = useState(false)
-  /** Why the last save failed: shown on Save itself, in its explanation. */
+  /** Why the last save failed, shown below the revision controls. */
   const [failure, setFailure] = useState<string | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const [conflicts, setConflicts] = useState<{ list: ReadonlyArray<Conflict>; message: string | null } | null>(null)
@@ -105,11 +107,10 @@ export function SaveRevision({
   return (
     <>
       <SaveControls
-        labelsInHints={labelsInHints}
         changed={state.dirty > 0 || held !== ""}
         pending={pending}
         blocked={clash}
-        failed={failure}
+        failed={shownNameClash ? null : failure}
         onSave={save}
         onRevert={revert}
       />

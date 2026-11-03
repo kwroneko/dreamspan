@@ -1,3 +1,4 @@
+import { FieldRevert, linesText } from "./FieldRevert.tsx"
 // Everything a lorebook entry holds, as the table's opened row shows it (LorebookTable.tsx):
 // its text, then its settings form (lorebookSettings.ts). Every edit is a field draft.
 import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
@@ -86,6 +87,16 @@ export function Keys({
           rows={Math.min(4, Math.max(1, keys.length))}
           className="min-h-9!"
           value={keys.join("\n")}
+          tools={
+            <FieldRevert
+              store={store}
+              path={path}
+              value={keys.join("\n")}
+              field={field}
+              format={linesText}
+              onChange={(value) => store.setValue(path, splitKeys(value))}
+            />
+          }
           onChange={(event) => store.setValue(path, splitKeys(event.currentTarget.value))}
           onBlur={() => void store.save(field)}
         />
@@ -125,7 +136,7 @@ export function KeysLine({
   return (
     <div className="group/keys flex min-w-0 flex-col">
       <div
-        className={`mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 group-has-[textarea:focus]/keys:hidden ${focused ? "hidden" : ""}`}
+        className={`mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 group-focus-within/keys:hidden ${focused ? "hidden" : ""}`}
       >
         <Tooltip label={EXPLAIN.keys_line}>
           {/* The picture of the box below, which is what the keyboard and screen readers reach. */}
@@ -140,27 +151,40 @@ export function KeysLine({
         </Tooltip>
         {badges}
       </div>
-      <Tooltip label={EXPLAIN.keys}>
-        <textarea
+      <div onFocus={onFocus} onBlur={onBlur} className={focused ? "" : "not-focus-within:sr-only"}>
+        <Textarea
           ref={target}
           id={id}
           aria-label="Primary keys"
           placeholder="One key per line"
           rows={Math.max(1, keys.length)}
           spellCheck={false}
-          className={`mt-1 min-h-8 w-full resize-none rounded-md border border-border bg-canvas px-2 py-1 text-sm text-text outline-none field-sizing-content placeholder:text-muted focus-visible:ring-2 focus-visible:ring-focus ${focused ? "" : "not-focus:sr-only"}`}
+          className="min-h-8! resize-none field-sizing-content"
+          textActions={false}
           value={keys.join("\n")}
+          tools={
+            <FieldRevert
+              store={store}
+              path={path}
+              value={keys.join("\n")}
+              field={field}
+              format={linesText}
+              onChange={(value) => store.setValue(path, splitKeys(value))}
+            />
+          }
           onChange={(event) => store.setValue(path, splitKeys(event.currentTarget.value))}
-          onFocus={onFocus}
-          onBlur={(event) => {
-            onBlur(event)
+          onBlur={() => {
             void store.save(field)
           }}
           onKeyDown={(event) => {
-            if (event.key === "Escape") event.currentTarget.blur()
+            if (event.key === "Escape") {
+              event.preventDefault()
+              event.stopPropagation()
+              event.currentTarget.blur()
+            }
           }}
         />
-      </Tooltip>
+      </div>
       <FieldTools store={store} field={field} label="Primary keys" />
     </div>
   )

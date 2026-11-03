@@ -307,7 +307,7 @@ test("a preset's prompts reorder by dragging and by keyboard, and toggle", async
   await expect(page.getByRole("switch", { name: "Send Chat Examples" })).not.toBeChecked()
   await expect(state(page)).toHaveAttribute("data-save-state", UNSAVED)
   await shoot(page, "preset-editor")
-  await held.getByRole("button", { name: "Save", exact: true }).click()
+  await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(held).toHaveCount(0)
   await page.reload()
   await expect(state(page)).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
@@ -706,7 +706,7 @@ test("Main can be switched off and moved but a custom Main cannot be deleted", a
     page.getByRole("textbox", { name: "Prompt: New prompt", exact: true }),
     "Added in the large editor."
   )
-  await bar.getByRole("button", { name: "Save", exact: true }).click()
+  await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(bar).toHaveCount(0)
   const saved = await page.evaluate(() => document.querySelectorAll("[data-prompt]").length)
   await page.reload()

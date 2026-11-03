@@ -240,7 +240,9 @@ for (const width of [1440, 390])
     await page.waitForTimeout(1500)
     await page.keyboard.press("Control+A")
     await page.keyboard.type("Brisk.")
-    // Save stays in sight above a field further down the tab.
+    // Save has one fixed home in the card header, above the fields.
+    await expect(tab.locator("[data-card-header]").getByRole("group", { name: "Save", exact: true })).toHaveCount(1)
+    await saveButton(tab).scrollIntoViewIfNeeded()
     await expect(saveButton(tab)).toBeInViewport()
     await saveRevision(tab)
     await expect(tab.getByText(/in the bin/)).toHaveCount(0)

@@ -4,6 +4,10 @@ export interface CodeEditorProps {
   value: string
   /** Text at the revision this draft was typed against. */
   base: string
+  /** The last revision, for a field-only revert recorded as an ordinary editor edit. */
+  lastRevision?: string | undefined
+  /** Explicit field-history restore; false leaves the current text alone. */
+  onRevert?: (() => Promise<boolean>) | undefined
   /** Select and reveal a range; a fresh object requests another visit. */
   selection?: { readonly at: number; readonly length: number } | undefined
   onRevealSelection?: ((host: HTMLElement, top: number) => void) | undefined

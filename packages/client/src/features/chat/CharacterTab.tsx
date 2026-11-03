@@ -185,6 +185,7 @@ function CardPanel({
   return (
     <div className="flex flex-col gap-4">
       <CardHeader
+        saveControls={state.snapshot ? <SaveRevision store={store} /> : undefined}
         portrait={
           <TabPortrait
             store={store}
@@ -247,7 +248,6 @@ function CardPanel({
             store={store}
             call={call}
             layout="panel"
-            saveControls={<SaveRevision store={store} />}
             onOpenBook={workspace ? () => workspace.open(info.refId, CARD_LOREBOOK_FOCUS) : undefined}
           />
         </>

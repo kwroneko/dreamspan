@@ -8,6 +8,8 @@ import { useSession } from "../../session.ts"
 import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
+import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
+import { UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
 import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
@@ -178,6 +180,8 @@ export function ChatSidePanel({
 } & SidePanelContent) {
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
+  const { tracker, dirty } = useUnsavedTabs()
+  const editorChanges = useWorkspaceChanges()
   const userId = useSession().user.id
   const { width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, wide)
   const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
@@ -222,6 +226,7 @@ export function ChatSidePanel({
         <ToolTabs
           tabs={tools.map((t) => ({
             value: t.value,
+            dirty: dirty.has(t.value) || editorChanges.some((ref) => t.descriptor.holdsEditor?.(ref, t.value)),
             label: t.label,
             icon: t.descriptor.icon,
             // A tab with nothing to show before the first send says so where it's described.
@@ -241,6 +246,7 @@ export function ChatSidePanel({
         <SubjectTabs
           tabs={cast.map((t) => ({
             value: t.value,
+            dirty: dirty.has(t.value) || editorChanges.some((ref) => t.descriptor.holdsEditor?.(ref, t.value)),
             label: t.label,
             avatar: t.avatar,
             icon: t.descriptor.icon,
@@ -267,26 +273,28 @@ export function ChatSidePanel({
         >
           {/* The panel's whole width, its text at a readable measure (styles.css), unless the tab asks for less. */}
           <div data-measure className={t.descriptor.width === "readable" ? "max-w-[52rem]" : ""}>
-            {"pending" in content ? (
-              <PendingPanelContent
-                key={t.descriptor.id}
-                descriptor={t.descriptor}
-                tab={t.value}
-                active={t.value === tab}
-                pending={content.pending}
-                view={content.view}
-              />
-            ) : (
-              <PanelContent
-                key={t.descriptor.id}
-                descriptor={t.descriptor}
-                tab={t.value}
-                active={t.value === tab}
-                notesFocus={notesFocus}
-                onNotes={notes}
-                {...content}
-              />
-            )}
+            <UnsavedScope tracker={tracker} tab={t.value}>
+              {"pending" in content ? (
+                <PendingPanelContent
+                  key={t.descriptor.id}
+                  descriptor={t.descriptor}
+                  tab={t.value}
+                  active={t.value === tab}
+                  pending={content.pending}
+                  view={content.view}
+                />
+              ) : (
+                <PanelContent
+                  key={t.descriptor.id}
+                  descriptor={t.descriptor}
+                  tab={t.value}
+                  active={t.value === tab}
+                  notesFocus={notesFocus}
+                  onNotes={notes}
+                  {...content}
+                />
+              )}
+            </UnsavedScope>
           </div>
         </div>
       )

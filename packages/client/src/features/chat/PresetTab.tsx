@@ -45,7 +45,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
   return (
     <SearchNavigation value={searchMatch}>
       <div className="flex min-h-full flex-col gap-3">
-        <div className="flex items-start justify-between gap-2">
+        <div data-editor-header className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="min-w-0 font-medium">
               <RefName store={store}>
@@ -53,6 +53,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
               </RefName>
             </span>
           </div>
+          <SaveRevision store={store} />
           <IconButton
             label="Open the preset in the large editor"
             hint="Opens this preset in the large editor"
@@ -73,7 +74,6 @@ function PresetColumn({ store }: { store: EditorStore }) {
           context={workspace?.context}
           layout="column"
           onSearchReveal={setSearchMatch}
-          saveControls={<SaveRevision store={store} />}
           goTo={goTo}
           onOpenLarge={(identifier) => workspace?.open(store.refId, identifier)}
           onOpenLorebook={workspace ? (ref) => workspace.open(ref) : undefined}

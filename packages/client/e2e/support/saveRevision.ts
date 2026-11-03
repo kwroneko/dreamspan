@@ -1,5 +1,5 @@
 // Saving a revision from an editor's save cluster (ui/SaveControls, ARCHITECTURE §14.6): a plain
-// Save asks nothing; "Save with a message…" takes one line, Enter saving it. Either way Save
+// Save asks nothing; "Save with message…" takes one line, Enter saving it. Either way Save
 // goes back to not actionable once nothing changed since the new revision.
 import { expect, type Locator, type Page } from "@playwright/test"
 import type { RefId } from "@rp/shared/library.ts"
@@ -13,7 +13,7 @@ export const saveButton = (scope: Page | Locator) => scope.getByRole("button", {
 export const saveRevision = async (scope: Page | Locator, message?: string) => {
   if (message === undefined) await saveButton(scope).click()
   else {
-    await scope.getByRole("button", { name: "Save with a message…", exact: true }).click()
+    await scope.getByRole("button", { name: "Save with message…", exact: true }).click()
     await scope.getByRole("textbox", { name: "Revision message", exact: true }).fill(message)
     await scope.getByRole("textbox", { name: "Revision message", exact: true }).press("Enter")
     await expect(scope.getByRole("textbox", { name: "Revision message", exact: true })).toHaveCount(0)

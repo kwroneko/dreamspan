@@ -48,7 +48,7 @@ export function PromptKindTag({ prompt }: { prompt: PresetPrompt }) {
       <span
         tabIndex={0}
         data-prompt-kind-tag
-        className="prompt-kind-tag shrink-0 rounded px-1.5 py-0.5 text-xs whitespace-nowrap"
+        className="prompt-kind-tag min-w-0 max-w-full shrink truncate rounded px-1.5 py-0.5 text-xs"
       >
         {kind.label}
       </span>

@@ -14,6 +14,7 @@ import { Alert, Badge } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { ReplayNotice } from "./ReplayNotice.tsx"
+import { FieldRevert, linesText } from "./FieldRevert.tsx"
 import { CardTextEditor } from "./CardTextEditor.tsx"
 import type { CallResult } from "./caller.ts"
 import { draftLabel } from "./fields.ts"
@@ -260,7 +261,19 @@ export function TextField({
             {...props}
             // Prose has them; a pattern (mono) doesn't.
             textActions={!mono}
-            tools={tools}
+            tools={
+              <>
+                {tools}
+                {!readOnly && (
+                  <FieldRevert
+                    store={store}
+                    path={path}
+                    value={value}
+                    onChange={(value) => store.setText(path, value)}
+                  />
+                )}
+              </>
+            }
             status={status}
             rows={rows}
             className={`resize-y ${fit ? "max-h-[min(60vh,32rem)] min-h-0! field-sizing-content" : ""} ${props.className}`}
@@ -434,6 +447,19 @@ export function LinesField({ store, path, label }: { store: EditorStore; path: F
           spellCheck={false}
           className="resize-y font-mono"
           value={typed ?? lines.join("\n")}
+          tools={
+            <FieldRevert
+              store={store}
+              path={path}
+              value={typed ?? lines.join("\n")}
+              field={field}
+              format={linesText}
+              onChange={(value) => {
+                setTyped(null)
+                store.setValue(path, value === "" ? [] : value.split("\n"))
+              }}
+            />
+          }
           onChange={(event) => {
             const text = event.currentTarget.value
             setTyped(text)

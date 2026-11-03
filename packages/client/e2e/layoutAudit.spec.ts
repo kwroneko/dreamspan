@@ -300,7 +300,10 @@ test.describe("synthetic library and every app surface", () => {
         yield* api.SetGenerationDefaults({
           defaults: {
             model: { connection: connection.id, model: model.id },
-            preset: process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ? preset.id : null
+            preset:
+              process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" || process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1"
+                ? preset.id
+                : null
           }
         })
         const started = yield* api.StartChat({
@@ -371,7 +374,7 @@ test.describe("synthetic library and every app surface", () => {
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
         await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
         const findings: unknown[] = []
-        const audit = async (surface: string) => {
+        const audit = async (surface: string, scope?: string) => {
           if (!selected.test(surface)) return
           await expect(page.getByRole("status").filter({ hasText: /^(Loading|Still loading)/ })).toHaveCount(0, {
             timeout: 30000
@@ -381,7 +384,7 @@ test.describe("synthetic library and every app surface", () => {
               page,
               info,
               surface + suffix,
-              process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1" ? { scope: '[role="menu"]' } : {}
+              scope ? { scope } : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1" ? { scope: '[role="menu"]' } : {}
             )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
@@ -489,6 +492,50 @@ test.describe("synthetic library and every app surface", () => {
           await openPanel(page, "Cast")
           await page.getByRole("button", { name: `More for ${cardName}`, exact: true }).click()
           await formats("menu-pending-cast-export", true)
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1") {
+          const bookLabel = (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).find(
+            (ref) => ref.id === bookRef
+          )!.label
+          for (const kind of ["card", "preset", "lorebook"] as const) {
+            await page.goto(`${server.url}/chats/${chatId}`)
+            let editor = await openPanel(
+              page,
+              kind === "card" ? cardName : kind === "preset" ? "Prompt preset" : "Lorebooks"
+            )
+            if (kind === "lorebook") {
+              await editor.getByRole("button").filter({ hasText: bookLabel }).first().click()
+              editor = editor.getByRole("region", { name: `Lorebook ${bookLabel}`, exact: true })
+            }
+            await expect(editor.getByRole("group", { name: "Save", exact: true }).first()).toBeVisible()
+            if (kind === "preset")
+              await expect(editor.getByRole("list", { name: "Preset blocks", exact: true })).toBeVisible({
+                timeout: 60000
+              })
+            if (kind === "lorebook")
+              await editor
+                .getByRole("button", { name: /^Open / })
+                .first()
+                .click()
+            await editor.evaluate((element) => element.setAttribute("data-saveflow-layout", ""))
+            await audit(`saveflow-${kind}-panel`, "[data-saveflow-layout]")
+            const ref = kind === "card" ? cardRef : kind === "preset" ? presetRef : bookRef
+            await page.goto(`${server.url}/chats/${chatId}?editor=${ref}`)
+            const large = page.locator('[data-testid="preset-scroll"]')
+            await expect(large.getByRole("group", { name: "Save", exact: true }).first()).toBeVisible()
+            if (kind === "preset")
+              await expect(large.getByRole("list", { name: "Prompt order", exact: true })).toBeVisible({
+                timeout: 60000
+              })
+            if (kind === "lorebook")
+              await large
+                .getByRole("button", { name: /^Open / })
+                .first()
+                .click()
+            await large.evaluate((element) => element.setAttribute("data-saveflow-layout", ""))
+            await audit(`saveflow-${kind}-large`, "[data-saveflow-layout]")
+          }
           return
         }
         if (process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1") {

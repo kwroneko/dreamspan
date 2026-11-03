@@ -629,10 +629,9 @@ export function LorebookTable(props: {
   /** What `tools` open, under the editing row (the Search and replace panel). */
   toolPanel?: ReactNode
   /** The save cluster, beside Add entry in the editing row (DESIGN §10.1). */
-  saveControls?: ReactNode
 }) {
   // Parameter defaults currently make React Compiler skip this table and its row callbacks.
-  const { store, book, tools, toolPanel, saveControls } = props
+  const { store, book, tools, toolPanel } = props
   // Some callers recreate this path during URL navigation; equal paths must keep row props stable.
   const rootKey = JSON.stringify(props.root)
   const root = useMemo(() => JSON.parse(rootKey) as FieldPath, [rootKey])
@@ -933,7 +932,7 @@ export function LorebookTable(props: {
   )
   // The editing row leads when it holds more than Add entry (the side panel's save cluster and
   // Search and replace); otherwise Add entry leads the filter row.
-  const editingRow = saveControls !== undefined || tools !== undefined
+  const editingRow = tools !== undefined
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -943,7 +942,6 @@ export function LorebookTable(props: {
         {editingRow && (
           <div role="toolbar" aria-label="Editing" className="flex min-w-0 items-center gap-1.5">
             {addButton}
-            {saveControls && <div className="flex min-w-0 items-center">{saveControls}</div>}
             {tools && <div className="ml-auto flex shrink-0 items-center">{tools}</div>}
           </div>
         )}
