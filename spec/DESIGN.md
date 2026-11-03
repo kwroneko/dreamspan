@@ -834,6 +834,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 
 ### 10.1 Web app
 
+- **[D] Bin size units** (owner, 2026-11-02, on the raw byte limits): “This should NOT be in bytes.” **Built**: bin capacities use MB/GB, grouped item counts, adjacent Save buttons and the standard disclosure; other UI file and import sizes share the formatter. Implementation is recorded in ARCHITECTURE §3.11 and §5.
+- **[P]** (binunits, 2026-11-03, implemented): retain binary multiples under the existing MB/GB labels; prefer GB when one decimal converts back to the same whole-byte count, otherwise MB, retaining full precision for older arbitrary limits. Round edited fractional bytes to the nearest byte and reject nonpositive or unsafe values inline. Read-only sizes round to at most one decimal.
+
 - **[D] Decided (owner, 2026-11-02):** “Every modal that can be dismissed without a decision (closing it loses nothing, or simply cancels) must have a visible close button: an X in the top-right corner. Clicking outside still closes it too.” “Modals that demand a specific resolution (confirm/cancel choices such as ‘Discard changes?’, destructive confirmations, anything where outside-click is already disabled) don't get the X; their buttons are the way out.” **Built, obsolete as an implementation requirement:** shared dialog, sheet and popover behavior is documented in ARCHITECTURE §5; portrait/picture viewers are reserved for the separate portraitview work.
 
 - **[D] Small portrait shape and pending greeting clicks** (owner, 2026-11-02): "remove the stray element or style, so only the image (with its intended corner radius) shows"; clicking the pending greeting portrait and a saved message portrait "must behave the same." **Built; obsolete as an implementation requirement** (portraitfix; ARCHITECTURE §14.5a).

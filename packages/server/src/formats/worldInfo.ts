@@ -1,6 +1,7 @@
 // SillyTavern's standalone World Info files, to and from our lorebook document. Entry fields
 // and their defaults are ST's `newWorldInfoEntryDefinition` (public/scripts/world-info.js);
 // a file must have `entries`, as ST's import requires (src/endpoints/worldinfo.js).
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
 import { Context, type Effect, Predicate } from "effect"
@@ -173,7 +174,7 @@ export const importLorebook = (
 ): Effect.Effect<{ lorebook: LorebookDoc; report: ImportReport }, FormatError> =>
   attempt(() => {
     if (bytes.byteLength > limits.maxFileBytes) {
-      fail("file.too_large", `The file is larger than ${limits.maxFileBytes} bytes.`)
+      fail("file.too_large", `The file is larger than ${formatByteSize(limits.maxFileBytes)}.`)
     }
     const issues = new ReportBuilder()
     const root = parseJson(bytes, limits.maxLorebookJsonBytes, limits, issues)

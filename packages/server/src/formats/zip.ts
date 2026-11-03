@@ -1,6 +1,7 @@
 // A small zip reader for CHARX files: the central directory, and stored or deflated entries.
 // Every size is checked against a cap before anything is inflated, and inflating stops at
 // the size the archive declares, so a lying header can't make it allocate more.
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { crc32, deflateRawSync, inflateRawSync } from "node:zlib"
 import { shownText } from "@rp/shared/importReport.ts"
 import { fail, type Limits } from "./safety.ts"
@@ -123,10 +124,10 @@ interface Budget {
 export const extract = (bytes: Uint8Array, entry: ZipEntry, limits: Limits, budget: Budget): Uint8Array => {
   const quoted = JSON.stringify(shownText(entry.name))
   if (entry.size > limits.maxZipEntryBytes) {
-    fail("zip.entry_too_large", `${quoted} is larger than ${limits.maxZipEntryBytes} bytes uncompressed.`)
+    fail("zip.entry_too_large", `${quoted} is larger than ${formatByteSize(limits.maxZipEntryBytes)} uncompressed.`)
   }
   if (budget.used + entry.size > limits.maxZipTotalBytes) {
-    fail("zip.total_too_large", `The archive holds more than ${limits.maxZipTotalBytes} bytes uncompressed.`)
+    fail("zip.total_too_large", `The archive holds more than ${formatByteSize(limits.maxZipTotalBytes)} uncompressed.`)
   }
   if (entry.size > limits.ratioFloorBytes && entry.size > entry.compressedSize * limits.maxCompressionRatio) {
     fail("zip.ratio", `${quoted} compresses suspiciously well, as a zip bomb would.`)

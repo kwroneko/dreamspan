@@ -1,6 +1,7 @@
 // What every format parser shares: its error, the caps on untrusted input, and JSON parsing
 // that can't hand a prototype key, unbounded nesting or millions of objects to the code after
 // it. Imported files are data only: nothing in them is ever executed or rendered.
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
 import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
 import { Effect, Schema } from "effect"
@@ -125,7 +126,7 @@ const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"])
  * assign or merge can act on them; more than a few of them reject the file.
  */
 export const parseJson = (bytes: Uint8Array, maxBytes: number, limits: Limits, issues: ReportBuilder): unknown => {
-  if (bytes.byteLength > maxBytes) fail("json.too_large", `The JSON is larger than ${maxBytes} bytes.`)
+  if (bytes.byteLength > maxBytes) fail("json.too_large", `The JSON is larger than ${formatByteSize(maxBytes)}.`)
   scanJson(bytes, limits)
   let value: unknown
   try {

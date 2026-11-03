@@ -2,6 +2,7 @@
 // are JSON, so a file would cross as base64: a third larger, and decoded whole on the main
 // thread. Both routes act as the user the session names, behind the same cross-site guard
 // as every request (server.ts), and refuse content types a cross-site form can send.
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { createHash } from "node:crypto"
 import { CurrentUser } from "@rp/shared/api.ts"
 import { SavedRef } from "@rp/shared/editorApi.ts"
@@ -62,7 +63,7 @@ const MAX_EXPORT_FILE_BYTES = defaultLimits.maxZipTotalBytes
 const MEDIA_GRACE_MS = 60 * 60 * 1000
 
 const BODY_REFUSALS: Record<BodyRefused["reason"], readonly [status: number, message: string]> = {
-  too_large: [413, `files can be at most ${MAX_UPLOAD_BYTES} bytes`],
+  too_large: [413, `files can be at most ${formatByteSize(MAX_UPLOAD_BYTES)}`],
   stalled: [408, "the file stopped arriving"],
   trickling: [408, "the file arrived too slowly"],
   too_slow: [408, "the file took too long to arrive"],
@@ -378,7 +379,7 @@ export const layer = Layer.unwrap(
       if (total > MAX_EXPORT_FILE_BYTES) {
         return jsonError(
           422,
-          `This card's files add up to ${Math.ceil(total / 1024 / 1024)} MB, more than an export can hold (${MAX_EXPORT_FILE_BYTES / 1024 / 1024} MB).`
+          `This card's files add up to ${formatByteSize(total)}, more than an export can hold (${formatByteSize(MAX_EXPORT_FILE_BYTES)}).`
         )
       }
       const cache = new Map<string, Effect.Success<ReturnType<typeof readMedia>>>()
@@ -467,7 +468,8 @@ export const layer = Layer.unwrap(
       const modified = query.get("modifiedAt")
       const modifiedAt = modified === null || modified.trim() === "" ? undefined : Number(modified)
       const maxBytes = chat ? ST_CHAT_PART_BYTES : MAX_UPLOAD_BYTES
-      if (Number(request.headers["content-length"]) > maxBytes) return jsonError(413, `at most ${maxBytes} bytes`)
+      if (Number(request.headers["content-length"]) > maxBytes)
+        return jsonError(413, `at most ${formatByteSize(maxBytes)}`)
       // Before the body is read: another user's import, or none, reads nothing.
       if (!stImports.exists(user, importId)) return jsonError(404, "there's no such import")
 
@@ -535,7 +537,7 @@ export const layer = Layer.unwrap(
         return jsonError(415, "expected application/octet-stream")
       }
       if (Number(request.headers["content-length"]) > MAX_AVATAR_BYTES) {
-        return jsonError(413, `an avatar can be at most ${MAX_AVATAR_BYTES / 1024 / 1024} MB`)
+        return jsonError(413, `an avatar can be at most ${formatByteSize(MAX_AVATAR_BYTES)}`)
       }
       const query = new URL(request.url, "http://upload").searchParams
       const refId = query.get("ref")
@@ -622,7 +624,7 @@ export const layer = Layer.unwrap(
         return jsonError(415, "expected application/octet-stream")
       }
       if (Number(request.headers["content-length"]) > MAX_AVATAR_BYTES) {
-        return jsonError(413, `an image can be at most ${MAX_AVATAR_BYTES / 1024 / 1024} MB`)
+        return jsonError(413, `an image can be at most ${formatByteSize(MAX_AVATAR_BYTES)}`)
       }
       const message = NodeHttpServerRequest.toIncomingMessage(request)
       const limits = {

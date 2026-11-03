@@ -60,7 +60,7 @@ export function FolderBrowser({
     onSuccess: ({ value: listing, waiting }) => (
       <nav
         aria-label="Folders"
-        className="flex max-h-72 flex-col overflow-y-auto rounded-md border border-border bg-canvas p-1"
+        className="flex max-h-72 flex-col overflow-y-auto rounded-md border border-border bg-canvas p-2"
       >
         {listing.parent !== null && (
           <button

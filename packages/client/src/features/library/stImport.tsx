@@ -29,6 +29,7 @@ import { sessionAtom, useSession } from "../../session.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { ProgressBar, Spinner } from "../../ui/Spinner.tsx"
@@ -40,7 +41,6 @@ import { libraryAtom } from "./data.ts"
 import { FolderBrowser } from "./FolderBrowser.tsx"
 import { type StImportSectionProps, stImportSections } from "./slots.ts"
 import {
-  megabytes,
   percentOf,
   ST_IMPORTS,
   ST_PREVIEW,
@@ -482,7 +482,7 @@ function RunningJob({ job }: { job: StImportJob }) {
           label="Imported so far"
         />
         <span className="text-muted">
-          {megabytes(job.bytesDone)} of {megabytes(job.bytesTotal)}
+          {formatByteSize(job.bytesDone)} of {formatByteSize(job.bytesTotal)}
         </span>
       </div>
       <p className="mt-3 text-sm">
@@ -733,7 +733,7 @@ function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; p
         </tbody>
       </table>
       <p className="text-sm text-muted">
-        {plan.send.length} files ({megabytes(bytes)})
+        {plan.send.length} files ({formatByteSize(bytes)})
         {plan.unsupported.length > 0 &&
           `, and ${plan.unsupported.length} that only text completion uses, which aren't read`}
         .{" "}
