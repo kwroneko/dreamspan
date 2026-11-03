@@ -68,6 +68,7 @@ export function CardGridControls({
             cards={browsable(data)}
             groups={groups}
             withPersonas={browse.withPersonas}
+            wrap={false}
           />
         </div>
         <div

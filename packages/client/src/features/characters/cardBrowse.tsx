@@ -137,7 +137,8 @@ export function CardFilterControl({
   cards,
   groups,
   withPersonas = false,
-  compact = false
+  compact = false,
+  wrap = true
 }: {
   value: CardFilter
   onChange: (filter: CardFilter) => void
@@ -146,6 +147,8 @@ export function CardFilterControl({
   /** Personas are included: the characters' counts count them too. */
   withPersonas?: boolean
   compact?: boolean
+  /** Wraps onto more lines when narrow; off, the choices scroll sideways instead. */
+  wrap?: boolean
 }) {
   const counts = filterCounts(cards, withPersonas)
   const options = FILTERS.filter((f) => f !== "groups" || groups !== undefined)
@@ -166,6 +169,7 @@ export function CardFilterControl({
     )
   return (
     <Segmented
+      wrap={wrap}
       label="Show"
       value={shown}
       onValueChange={onChange}
