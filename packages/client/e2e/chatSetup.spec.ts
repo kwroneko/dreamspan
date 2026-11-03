@@ -152,7 +152,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await page.getByText("Advanced: message roles", { exact: true }).click()
   await expect(page.getByRole("radio", { name: /By perspective/ })).toBeChecked()
   // Closed, it stays closed.
-  await page.getByRole("button", { name: "Close the panel" }).click()
+  await page.getByRole("button", { name: "Hide panel" }).click()
   await expect(page).not.toHaveURL(/panel=/)
   await page.reload()
   await expect(page.getByRole("complementary", { name: "Chat panel" })).toHaveCount(0)

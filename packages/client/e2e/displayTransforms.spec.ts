@@ -159,7 +159,7 @@ for (const width of [1440, 390])
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `display-${width}-${colorScheme}.png`) })
       // The original is what the editor reads, and what the next real request sends.
-      await page.getByRole("button", { name: width < 640 ? "Close" : "Close the panel", exact: true }).click()
+      await page.getByRole("button", { name: width < 640 ? "Close" : "Hide panel", exact: true }).click()
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `display-chat-${width}-${colorScheme}.png`) })
       if (width === 1440 && colorScheme === "light") {

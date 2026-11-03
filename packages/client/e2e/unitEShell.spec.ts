@@ -234,7 +234,7 @@ for (const width of [1440, 390]) {
         await shoot(`panel-${tab.toLowerCase().replaceAll(" ", "-")}`)
       }
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
-      else await page.getByRole("button", { name: "Close the panel", exact: true }).click()
+      else await page.getByRole("button", { name: "Hide panel", exact: true }).click()
       await shoot("chat")
       await page
         .locator("article")
@@ -274,7 +274,7 @@ for (const width of [1440, 390]) {
       await expect(fullEditor).toBeVisible()
       await shoot("new-chat-card")
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
-      else await page.getByRole("button", { name: "Close the panel", exact: true }).click()
+      else await page.getByRole("button", { name: "Hide panel", exact: true }).click()
       await shoot("new-chat")
       // The header's faces open the card's tab; a phone's header leaves them out, as in any chat.
       if (width === 390) await openPanel(page, unused.card.label)

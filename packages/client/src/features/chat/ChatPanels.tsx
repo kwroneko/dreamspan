@@ -114,6 +114,7 @@ export function PanelToggles({
         }
         icon="panel"
         aria-expanded={open !== null}
+        aria-pressed={open !== null}
         className={open === null ? "" : "bg-surface-raised text-text"}
         onClick={toggle}
       />
@@ -233,7 +234,6 @@ export function ChatSidePanel({
         onValueChange={onTab}
         label="Chat panel"
         moreLabel="More tools"
-        end={wide && <IconButton label="Close the panel" icon="close" className="shrink-0" onClick={onClose} />}
       />
       <SubjectTabs
         tabs={cast.map((t) => ({

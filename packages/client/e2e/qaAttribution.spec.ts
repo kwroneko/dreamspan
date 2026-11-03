@@ -116,7 +116,7 @@ for (const width of [1440, 390])
         .click()
       await page.getByRole("option", { name: `Kim ${width} ${theme}`, exact: true }).click()
       await page.reload()
-      await page.getByRole("button", { name: width === 390 ? "Close" : "Close the panel", exact: true }).click()
+      await page.getByRole("button", { name: width === 390 ? "Close" : "Hide panel", exact: true }).click()
       for (const [slot, name] of [
         [fixture.sent.slotId, "Sam"],
         [fixture.generated.slotId, "Sam"],
@@ -210,7 +210,7 @@ for (const width of [1440, 390])
       await expect(row).toBeVisible()
       await expect(preview.locator("ins")).toHaveText("pier")
       // Closing the workspace discards previews; reopening Summaries must not resurrect them.
-      await page.getByRole("button", { name: width === 390 ? "Close" : "Close the panel", exact: true }).click()
+      await page.getByRole("button", { name: width === 390 ? "Close" : "Hide panel", exact: true }).click()
       await page.goto(`${server().url}/chats/${fixture.chat.id}?panel=summaries`)
       await expect(page.getByLabel("Replacement preview", { exact: true })).toHaveCount(0)
     })

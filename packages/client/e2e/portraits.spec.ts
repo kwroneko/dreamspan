@@ -127,7 +127,7 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("img", { name: `${name}'s full portrait` })).toHaveCount(0)
     }
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
-    else await page.getByRole("button", { name: "Close the panel" }).click()
+    else await page.getByRole("button", { name: "Hide panel" }).click()
     for (const [label, pixels] of [
       ["Smallest (48 × 72)", 48],
       ["Medium (72 × 108)", 72],

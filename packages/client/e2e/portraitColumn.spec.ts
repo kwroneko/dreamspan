@@ -120,7 +120,7 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
   const column = (name: string) => page.getByRole("complementary", { name: `${name}'s portrait`, exact: true })
 
   // A message's portrait, with the panel closed (this browser reopens it where it was left).
-  const hide = page.getByRole("button", { name: "Close the panel" })
+  const hide = page.getByRole("button", { name: "Hide panel" })
   if (await hide.isVisible()) await hide.click()
   await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
   await expect(column("Tall")).toBeVisible()
@@ -170,7 +170,7 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
     await expectFitted(page, shape.name)
     await shoot(page, `desktop-${shape.name.toLowerCase()}-with-panel`)
   }
-  await page.getByRole("button", { name: "Close the panel" }).click()
+  await page.getByRole("button", { name: "Hide panel" }).click()
   await expect(cast).toHaveCount(0)
   for (const shape of SHAPES) {
     if (shape.name !== "Huge") {
@@ -178,7 +178,7 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
       await openPanel(page, "Cast")
       await page.getByRole("tab", { name: shape.name }).click()
       await expect(column(shape.name)).toBeVisible()
-      await page.getByRole("button", { name: "Close the panel" }).click()
+      await page.getByRole("button", { name: "Hide panel" }).click()
     } else {
       await openPanel(page, shape.name)
       // The tab's own portrait shows the whole image (owner, 2026-11-02), staying open when
@@ -188,7 +188,7 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
         .getByRole("button", { name: `View ${shape.name}'s picture`, exact: true })
         .click()
       await expect(column(shape.name)).toBeVisible()
-      await page.getByRole("button", { name: "Close the panel" }).click()
+      await page.getByRole("button", { name: "Hide panel" }).click()
     }
     const fitted = await expectFitted(page, shape.name)
     // Never a thumbnail in the middle: the column takes the image's width at its height.
@@ -262,7 +262,7 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   const order = () => viewers.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")))
   const heights = () =>
     viewers.evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().height)))
-  const hide = page.getByRole("button", { name: "Close the panel" })
+  const hide = page.getByRole("button", { name: "Hide panel" })
   if (await hide.isVisible()) await hide.click()
 
   // Stacking is the default; the earlier test left one at a time on, so turn it off.
@@ -285,7 +285,7 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   await expect(viewers).toHaveCount(1)
   await cast.getByRole("button", { name: "View Wide's portrait" }).click()
   await expect(viewers).toHaveCount(2)
-  await page.getByRole("button", { name: "Close the panel" }).click()
+  await page.getByRole("button", { name: "Hide panel" }).click()
   await shoot(page, "stack-2")
   // A narrower window: the column gives way, the two still stacked.
   await page.setViewportSize({ width: 1024, height: 768 })
@@ -302,7 +302,7 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   await expect(viewers).toHaveCount(4)
   expect(await order()).toEqual(["Huge's portrait", "Standard's portrait", "Wide's portrait", "Tall's portrait"])
   for (const name of ["Huge", "Standard", "Wide", "Tall"]) await expectFitted(page, name)
-  await page.getByRole("button", { name: "Close the panel" }).click()
+  await page.getByRole("button", { name: "Hide panel" }).click()
   await shoot(page, "stack-4")
   await page.setViewportSize({ width: 1024, height: 768 })
   await shoot(page, "stack-4-1024")
@@ -348,7 +348,7 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   await cast.getByRole("button", { name: "View Phone's portrait" }).click()
   await cast.getByRole("button", { name: "View Small's portrait" }).click()
   await expect(viewers).toHaveCount(6)
-  await page.getByRole("button", { name: "Close the panel" }).click()
+  await page.getByRole("button", { name: "Hide panel" }).click()
   const list = page.locator("[data-portrait-column] > div.overflow-y-auto")
   expect(await list.evaluate((node) => node.scrollHeight > node.clientHeight + 1)).toBe(true)
   for (const height of await heights()) expect(height).toBeGreaterThanOrEqual(179)
