@@ -129,7 +129,7 @@ const paths = {
   ],
   sliders: ["M20 7h-9", "M14 17H5", "M14 17a3 3 0 1 0 6 0a3 3 0 1 0-6 0", "M4 7a3 3 0 1 0 6 0a3 3 0 1 0-6 0"],
   search: ["M21 21l-4.34-4.34", "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"],
-  /** Find and replace: a word, an arrow, its replacement. */
+  /** Search and replace: a word, an arrow, its replacement. */
   replace: [
     "M14 4a1 1 0 0 1 1-1",
     "M15 10a1 1 0 0 1-1-1",

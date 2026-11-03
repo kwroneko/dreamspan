@@ -1,5 +1,5 @@
 // The lorebook editors as reworked on the owner's feedback of 2026-11-02: the header's rows and
-// their collapse order at several widths, Find and replace as a pressed toggle with its panel
+// their collapse order at several widths, Search and replace as a pressed toggle with its panel
 // below it, the select-all checkbox, whole-header expansion, the settings' accordions with their
 // summaries, "Edit N entries" with Mixed values, and the chat's Lorebooks list and placement switch.
 // Made-up books and card only.
@@ -137,10 +137,10 @@ for (const width of [390, 1024, 1440, 1920])
     // Title row: the name, then the icon buttons.
     await expect(editor.getByRole("button", { name: "Large editor", exact: true })).toBeVisible()
     await expect(editor.getByRole("button", { name: "Close the lorebook", exact: true })).toBeVisible()
-    // Editing row: Add entry, the save cluster beside it, then Find and replace.
+    // Editing row: Add entry, the save cluster beside it, then Search and replace.
     const editing = editor.getByRole("toolbar", { name: "Editing", exact: true })
     await expect(editing.getByRole("button", { name: "Add entry" })).toBeVisible()
-    await expect(editing.getByRole("button", { name: "Find and replace", exact: true })).toBeVisible()
+    await expect(editing.getByRole("button", { name: "Search and replace", exact: true })).toBeVisible()
     await expect(editor.getByRole("status").filter({ hasText: "3 entries" })).toBeVisible()
     await page.screenshot({ path: join(shots, `panel-${width}-pre.png`) })
     await checkToolbar(editor, `side panel ${width}`)
@@ -158,15 +158,15 @@ for (const width of [390, 1024, 1440, 1920])
     }
   })
 
-test("Find and replace opens below its button, pressed, and closes by its X or Escape", async ({ page }) => {
+test("Search and replace opens below its button, pressed, and closes by its X or Escape", async ({ page }) => {
   const tag = "find"
   const { panel } = await setUp(page, tag, 1440)
   const editor = await openBook(page, panel, tag)
-  const button = editor.getByRole("button", { name: "Find and replace", exact: true })
+  const button = editor.getByRole("button", { name: "Search and replace", exact: true })
   await expect(button).toHaveAttribute("aria-pressed", "false")
   await button.click()
   await expect(button).toHaveAttribute("aria-pressed", "true")
-  const findPanel = editor.getByRole("region", { name: "Find and replace", exact: true })
+  const findPanel = editor.getByRole("region", { name: "Search and replace", exact: true })
   await expect(findPanel).toBeVisible()
   expect((await box(findPanel)).y).toBeGreaterThan((await box(button)).y + (await box(button)).height - 1)
   await findPanel.getByRole("button", { name: "Close", exact: true }).click()
@@ -314,10 +314,10 @@ test("Go to a match in a preset prompt's name opens its name with the match sele
   ) as unknown
   const ref = await upload(page, "Go to preset", preset)
   await page.goto(`${server().url}/library/${ref}`)
-  const button = page.getByRole("button", { name: "Find and replace", exact: true })
+  const button = page.getByRole("button", { name: "Search and replace", exact: true })
   await button.click()
   await expect(button).toHaveAttribute("aria-pressed", "true")
-  const findPanel = page.getByRole("region", { name: "Find and replace", exact: true })
+  const findPanel = page.getByRole("region", { name: "Search and replace", exact: true })
   await findPanel.getByRole("button", { name: "Prompt names", exact: true }).click()
   await findPanel.getByRole("textbox", { name: "Find" }).fill("Auxiliary")
   await findPanel.getByRole("button", { name: "Find", exact: true }).click()

@@ -115,15 +115,15 @@ export function LorebookPanelEditor({
                 ref={findButton}
                 variant="ghost"
                 className={`h-8! px-2! ${pressedButtonClass}`}
-                aria-label="Find and replace"
+                aria-label="Search and replace"
                 aria-pressed={searching}
                 aria-controls="panel-lore-search"
-                hint="Find and replace in the entries' text, their keys, or anywhere in the book."
+                hint="Search and replace in the entries' text, their keys, or anywhere in the book."
                 onClick={() => setSearching(!searching)}
               >
                 <Icon name="replace" />
                 {/* Its label goes first when the row is narrow (LorebookTable's collapse order). */}
-                <span className="hidden @[22rem]:inline">Find and replace</span>
+                <span className="hidden @[22rem]:inline">Search and replace</span>
               </Button>
             }
             toolPanel={

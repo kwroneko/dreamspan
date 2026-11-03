@@ -12,7 +12,10 @@ import type { EditorStore } from "./store.ts"
 
 export type MassValue = string | number | boolean | null
 
-/** How a setting's value is picked when no `single` renderer is given, and in the many-entries form. */
+/**
+ * How a setting's value is picked when no `single` renderer is given, and in the many-entries form.
+ * @public For plugins registering settings.
+ */
 export type SettingInput =
   | {
       readonly kind: "choice"
@@ -30,7 +33,10 @@ export type SettingInput =
   /** Unset (the default applies), on or off: "inherit", "true" or "false". */
   | { readonly kind: "inherit"; readonly fallback: "on" | "off" }
 
-/** One entry's setting, as a field of its own (`single`) renders it. */
+/**
+ * One entry's setting, as a field of its own (`single`) renders it.
+ * @public For plugins registering settings.
+ */
 export interface SingleSettingProps {
   readonly store: EditorStore
   /** The entry's path. */
@@ -97,14 +103,14 @@ export const lorebookEntrySections = makeRegistry<LorebookEntrySection>()
 const DEFAULT = emptyEntry(0)
 
 /** The setting's default value, as a new entry has it. */
-export const defaultOf = (setting: LorebookEntrySetting) => setting.current(DEFAULT)
+const defaultOf = (setting: LorebookEntrySetting) => setting.current(DEFAULT)
 
 /** Whether the entry's value differs from a new entry's. */
 export const changed = (setting: LorebookEntrySetting, entry: LorebookEntry) =>
   JSON.stringify(setting.current(entry)) !== JSON.stringify(defaultOf(setting))
 
 /** A value in words: "On", "AND ANY", "12", "empty". */
-export const valueText = (setting: LorebookEntrySetting, value: MassValue): string => {
+const valueText = (setting: LorebookEntrySetting, value: MassValue): string => {
   const input = setting.input
   if (input.kind === "choice") return input.options.find((option) => option.value === value)?.label ?? String(value)
   if (input.kind === "inherit")

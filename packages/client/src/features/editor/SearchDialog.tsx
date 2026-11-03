@@ -1,4 +1,4 @@
-// Find and replace across an editor's text fields, as plain text or a regular expression
+// Search and replace across an editor's text fields, as plain text or a regular expression
 // (DESIGN §6.2, §5.3). Replacing edits each field through its draft, like typing would.
 import { type FormEvent, type ReactNode, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
@@ -161,7 +161,7 @@ export function SearchDialog({
     inline ? (
       <InlinePanel
         id={idPrefix}
-        title="Find and replace"
+        title="Search and replace"
         titleHidden
         onClose={() => onClose?.()}
         className="@container max-w-5xl"
@@ -172,7 +172,7 @@ export function SearchDialog({
       <Dialog
         open
         onOpenChange={(open) => !open && onClose?.()}
-        title="Find and replace"
+        title="Search and replace"
         finalFocus={() => !navigating.current}
       >
         <div className="@container flex flex-col gap-2">{children}</div>

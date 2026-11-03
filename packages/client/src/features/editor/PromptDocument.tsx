@@ -419,7 +419,7 @@ function PromptBlock({
     <InlineRename
       value={typed}
       label={name}
-      // Find and replace's Go to a match in the name: its field opens with the match selected.
+      // Search and replace's Go to a match in the name: its field opens with the match selected.
       goTo={nameMatch}
       allowEmpty
       className={column ? "min-w-0 flex-1 basis-40" : "min-w-0 max-w-md"}

@@ -119,7 +119,7 @@ for (const width of [1440, 390])
       })
       // The search is folded away until asked for.
       await expect(overlay.getByRole("textbox", { name: "Find", exact: true })).toHaveCount(0)
-      await overlay.getByRole("button", { name: "Find and replace", exact: true }).click()
+      await overlay.getByRole("button", { name: "Search and replace", exact: true }).click()
       await expect(overlay.getByRole("textbox", { name: "Find", exact: true })).toBeInViewport()
       await shoot("document")
       await overlay.getByRole("button", { name: "Collapse all", exact: true }).click()
@@ -140,7 +140,7 @@ for (const width of [1440, 390])
       await expect(overlay.getByRole("list", { name: "Matches", exact: true })).toContainText("→")
       // The sticky bar, with its matches, leaves most of a phone's screen to the document.
       const sticky = await overlay
-        .getByRole("region", { name: "Find and replace", exact: true })
+        .getByRole("region", { name: "Search and replace", exact: true })
         .evaluate((element) => {
           let at: HTMLElement | null = element as HTMLElement
           while (at && getComputedStyle(at).position !== "sticky") at = at.parentElement
@@ -181,7 +181,7 @@ for (const width of [1440, 390])
       await editor
         .getByRole("textbox", { name: "Prompt: Post-History Instructions", exact: true })
         .fill(`Keep continuity ${width} ${theme}.`)
-      await editor.getByRole("button", { name: "Find and replace", exact: true }).click()
+      await editor.getByRole("button", { name: "Search and replace", exact: true }).click()
       await editor.getByRole("textbox", { name: "Find", exact: true }).fill("continuity")
       await editor.getByRole("textbox", { name: "Replace with", exact: true }).fill("coherence")
       await editor.getByRole("button", { name: "Find", exact: true }).click()

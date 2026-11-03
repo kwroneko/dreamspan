@@ -376,9 +376,9 @@ export function Editor({
           <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
             <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
             {!scopes && (
-              <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
+              <Button hint="Search and replace text in every field." onClick={() => setOpen("search")}>
                 <Icon name="replace" />
-                Find and replace
+                Search and replace
               </Button>
             )}
             <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
@@ -434,13 +434,13 @@ export function Editor({
                   aria-controls="preset-search"
                   hint={
                     ref.kind === "preset"
-                      ? "Find and replace in the prompts' text, their names, or anywhere in the preset."
-                      : "Find and replace in the entries' text, their keys, or anywhere in the book."
+                      ? "Search and replace in the prompts' text, their names, or anywhere in the preset."
+                      : "Search and replace in the entries' text, their keys, or anywhere in the book."
                   }
                   onClick={() => setSearching(!searching)}
                 >
                   <Icon name="replace" />
-                  Find and replace
+                  Search and replace
                 </Button>
               )}
             </div>

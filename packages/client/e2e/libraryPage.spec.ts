@@ -143,7 +143,7 @@ test("every item opens at its own address, and a stale address says so", async (
   await expect(editor.getByRole("heading", { level: 1, name })).toBeVisible()
   await expect(editor.getByRole("button", { name: "Close preset editor" })).toHaveCount(0)
   await expect(editor.getByRole("textbox", { name: "Find", exact: true })).toHaveCount(0)
-  const search = editor.getByRole("button", { name: "Find and replace", exact: true })
+  const search = editor.getByRole("button", { name: "Search and replace", exact: true })
   await expect(search).toHaveAttribute("aria-pressed", "false")
   await search.click()
   await expect(search).toHaveAttribute("aria-pressed", "true")

@@ -84,7 +84,7 @@ export function revealAdded(item: HTMLElement) {
 }
 
 /** The box flashing: an accent ring three times, or one fading highlight with reduced motion. */
-export function flash(element: HTMLElement) {
+function flash(element: HTMLElement) {
   if (typeof element.animate !== "function") return
   const ring = "inset 0 0 0 2px var(--color-accent)"
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches

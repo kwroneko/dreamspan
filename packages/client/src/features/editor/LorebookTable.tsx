@@ -615,9 +615,9 @@ export function LorebookTable({
   added?: number | null
   /** The side panel's narrow column: compact headers, the toolbar folded tighter. */
   panel?: boolean
-  /** The editing row's controls after the save cluster (the panel's Find and replace). */
+  /** The editing row's controls after the save cluster (the panel's Search and replace). */
   tools?: ReactNode
-  /** What `tools` open, under the editing row (the Find and replace panel). */
+  /** What `tools` open, under the editing row (the Search and replace panel). */
   toolPanel?: ReactNode
   /** The save cluster, beside Add entry in the editing row (DESIGN §10.1). */
   saveControls?: ReactNode
@@ -914,7 +914,7 @@ export function LorebookTable({
     </Button>
   )
   // The editing row leads when it holds more than Add entry (the side panel's save cluster and
-  // Find and replace); otherwise Add entry leads the filter row.
+  // Search and replace); otherwise Add entry leads the filter row.
   const editingRow = saveControls !== undefined || tools !== undefined
 
   return (

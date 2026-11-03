@@ -245,7 +245,7 @@ for (const [width, scheme] of [
     })
 
     // Search and replace in the keys only.
-    await editor.getByRole("button", { name: "Find and replace", exact: true }).click()
+    await editor.getByRole("button", { name: "Search and replace", exact: true }).click()
     // On a phone "Look in" folds behind Options with the other options.
     if (width < 640) await editor.getByRole("button", { name: /^Options/ }).click()
     await editor.getByRole("button", { name: "Keys", exact: true }).click()
@@ -319,8 +319,8 @@ test("the large editor: Look in, the pencil rename, text and keys first, Revert"
   await page.getByRole("textbox", { name: "New name for Tides page" }).fill("Tides renamed")
   await page.getByRole("textbox", { name: "New name for Tides page" }).press("Enter")
   await expect(page.getByRole("heading", { name: "Tides renamed" })).toBeVisible()
-  await page.getByRole("button", { name: "Find and replace", exact: true }).click()
-  const search = page.getByRole("region", { name: "Find and replace" })
+  await page.getByRole("button", { name: "Search and replace", exact: true }).click()
+  const search = page.getByRole("region", { name: "Search and replace" })
   for (const scope of ["Content", "Keys", "Both", "Everything"])
     await expect(search.getByRole("button", { name: scope, exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Open Harbour", exact: true }).click()
