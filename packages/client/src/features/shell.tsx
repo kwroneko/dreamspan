@@ -137,8 +137,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   // On the chats page the list is the page; the sidebar doesn't show it twice.
   const onChats = useLocation({ select: (location) => location.pathname === "/chats" })
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-3">
-      <div className="flex items-center gap-1 p-2">
+    <div className="flex h-full min-h-0 flex-col gap-3 px-3 pb-3">
+      <div className="-mx-3 mb-1 flex h-shell-header shrink-0 items-center gap-1 border-b border-border px-5 py-2">
         <Link to="/" className="mr-auto truncate font-semibold" onClick={onNavigate}>
           rp-harness
         </Link>

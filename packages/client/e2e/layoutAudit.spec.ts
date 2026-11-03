@@ -468,6 +468,8 @@ test.describe("synthetic library and every app surface", () => {
         if (process.env.LAYOUT_AUDIT_HEADER_ONLY === "1") {
           await go("pending-chat-header", `/cards/${cardId}/chat`)
           await go("saved-chat-header", `/chats/${chatId}`)
+          await openPanel(page, "This chat")
+          await audit("panel-header")
           return
         }
         if (process.env.LAYOUT_AUDIT_NOTES_ONLY === "1") {
