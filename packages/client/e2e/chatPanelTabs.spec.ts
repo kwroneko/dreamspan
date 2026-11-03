@@ -120,7 +120,7 @@ test("the persona's tab is a full card, edited in place, and Switch persona", as
 
 test("Search and replace doesn't ask for a model before a search", async ({ page }) => {
   await open(page)
-  const tab = await openPanel(page, "Search and replace")
+  const tab = await openPanel(page, "History edits")
   await expect(tab.getByLabel("Find", { exact: true })).toBeVisible()
   await expect(tab).not.toContainText("Choose a model")
   await expect(tab).not.toContainText("0 in messages")
