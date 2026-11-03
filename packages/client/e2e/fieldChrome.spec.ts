@@ -267,7 +267,7 @@ test("every multi-line versioned field opens large from its strip, editing the s
   await expectOpensLarge(page, description, (await description.getAttribute("aria-label"))!, "Description")
 
   await cardFieldsTab(page, "Notes")
-  await page.getByRole("button", { name: "New note", exact: true }).first().click()
+  await page.getByRole("button", { name: "Add note", exact: true }).first().click()
   const anyNote = page.getByRole("textbox", { name: /^Text of / }).first()
   await expect(anyNote).toBeVisible()
   const noteName = (await anyNote.getAttribute("aria-label"))!

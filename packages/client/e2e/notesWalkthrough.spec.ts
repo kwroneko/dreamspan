@@ -169,7 +169,7 @@ for (const width of [1440, 390])
       const tab = await notesAt(page, width, theme)
       const own = tab.getByRole("region", { name: "This chat's notes" })
       // Each header says where the note goes and when, open or closed; opening shows its text.
-      const row = noteToggle(own, "Aria's outfit")
+      const row = noteBlock(own, "Aria's outfit").locator("header")
       await expect(row).toContainText("End of tail")
       await expect(row).toContainText("Aria Vance's turn")
       const outfit = noteBlock(own, "Aria's outfit")
@@ -180,10 +180,10 @@ for (const width of [1440, 390])
       // An imported group chat has Aria's own author's note off, as ST ignores it there.
       const aria = tab.getByRole("region", { name: "Aria Vance's notes" })
       await expect(aria.getByRole("switch", { name: /Character author's note/ })).not.toBeChecked()
-      await expect(noteToggle(aria, "Character author's note")).toContainText("Private")
+      await expect(noteBlock(aria, "Character author's note").locator("header")).toContainText("Private")
 
       // Add a new note: it opens, on from here.
-      await own.getByRole("button", { name: "New note", exact: true }).click({ timeout: 10_000 })
+      await own.getByRole("button", { name: "Add note", exact: true }).click({ timeout: 10_000 })
       const fresh = noteBlock(own, "Note").last()
       await expect(fresh).toBeVisible()
       // It opens with its text; its settings are folded under it.
@@ -213,13 +213,13 @@ for (const width of [1440, 390])
       )
       await page.keyboard.press("Escape")
       await saveRevision(fresh)
-      await expect(noteToggle(own, "Note").last()).toContainText("Start of context")
+      await expect(noteBlock(own, "Note").last().locator("header")).toContainText("Start of context")
       // Its switch turns it off from here.
       await own.getByRole("switch", { name: "Note: on in this chat" }).last().click()
       await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).not.toBeChecked()
 
       // Pick a shared note into this chat: the slot shows it, with the banner.
-      await own.getByRole("button", { name: "Pick a shared note", exact: true }).click()
+      await own.getByRole("button", { name: "Link shared note", exact: true }).click()
       const picker = page.getByRole("dialog", { name: "Pick a shared note" })
       await picker.getByRole("textbox", { name: "Filter by name" }).fill("harb")
       await picker
@@ -240,7 +240,7 @@ for (const width of [1440, 390])
 
       // Save a card's note as a shared note, from its menu.
       const tobias = tab.getByRole("region", { name: "Tobias Wren's notes" })
-      const newNote = tobias.getByRole("button", { name: "New note", exact: true })
+      const newNote = tobias.getByRole("button", { name: "Add note", exact: true })
       await newNote.scrollIntoViewIfNeeded()
       await expect(newNote).toBeInViewport()
       await page.screenshot({ animations: "disabled", path: join(shots, `new-note-buttons-${width}-${theme}.png`) })
@@ -289,7 +289,7 @@ for (const width of [1440, 390])
       // The group's cards, Aria's imported author's note off here.
       await tab.getByRole("region", { name: "Aria Vance's notes" }).scrollIntoViewIfNeeded()
       await shoot("group-notes")
-      await own.getByRole("button", { name: "Pick a shared note", exact: true }).click()
+      await own.getByRole("button", { name: "Link shared note", exact: true }).click()
       const picker = page.getByRole("dialog", { name: "Pick a shared note" })
       await expect(picker.getByRole("button", { name: /Harbor weather/ }).first()).toBeVisible()
       await shoot("picker")

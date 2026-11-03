@@ -1,4 +1,4 @@
-import { closeNoteBlock, noteBlock, noteSettings, noteText, noteToggle } from "./support/notes.ts"
+import { closeNoteBlock, noteBlock, noteSettings, noteText } from "./support/notes.ts"
 import { expectTextBox } from "./support/textbox.ts"
 // The card and preset editors (ARCHITECTURE.md §14) in a real browser against the real
 // server: edits used as typed, saved as revisions, put back from a field's edit history,
@@ -471,9 +471,9 @@ test("a card's notes are blocks, and the card has no modules section (DESIGN §5
   await cardFieldsTab(page, "Notes")
   const list = page.getByRole("list", { name: "The card's notes" })
   // Its header says where it goes, open or closed; its settings are folded under its text.
-  await expect(noteToggle(list, "Scarf")).toContainText("End of tail")
+  await expect(noteBlock(list, "Scarf").locator("header")).toContainText("End of tail")
   await closeNoteBlock(noteBlock(list, "Scarf"), "Scarf")
-  await expect(noteToggle(list, "Scarf")).toContainText("End of tail")
+  await expect(noteBlock(list, "Scarf").locator("header")).toContainText("End of tail")
   await noteSettings(list, "Scarf")
   // In the card editor, a note's condition can name the card itself.
   await page.getByRole("region", { name: "Note Scarf" }).getByRole("combobox", { name: "When it applies" }).click()

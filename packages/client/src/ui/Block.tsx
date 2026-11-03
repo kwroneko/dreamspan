@@ -2,7 +2,7 @@
 // preset's prompts, a chat's notes and snippets. A header that's always shown (its name, a
 // button that opens or closes the block, renamed in place beside it, a line under it saying the
 // state of what matters, and its actions), then what it opens to: its text first, and its
-// settings folded away in a section of their own. A list of blocks has Expand all and Collapse all.
+// settings behind its header's settings button. A list of blocks has Expand all and Collapse all.
 import type { ComponentProps, ReactNode } from "react"
 import { Button } from "./Button.tsx"
 import { Icon } from "./Icon.tsx"
@@ -98,7 +98,7 @@ export function BlockMenuButton({
   ...props
 }: { label: string } & Omit<ComponentProps<typeof Button>, "children">) {
   return (
-    <Button variant="ghost" className="size-8 shrink-0 px-0!" aria-label={label} {...props}>
+    <Button variant="ghost" className="size-8! shrink-0 px-0!" aria-label={label} {...props}>
       <Icon name="more" />
     </Button>
   )
@@ -129,9 +129,27 @@ export function BlockOptionsToggle({
   )
 }
 
-/** The options' panel, under the header or in a section. */
-export function BlockOptions({ children }: { children: ReactNode }) {
-  return <div className="border-t border-border bg-surface-raised/50 px-3 py-3">{children}</div>
+/**
+ * The options' panel, under the header or in a section. With `onClose`, a corner X closes it,
+ * as for any panel a button opens (owner, 2026-11-02).
+ */
+export function BlockOptions({
+  children,
+  onClose,
+  closeLabel = "Close the options"
+}: {
+  children: ReactNode
+  onClose?: (() => void) | undefined
+  /** The X's accessible name and explanation. */
+  closeLabel?: string
+}) {
+  if (!onClose) return <div className="border-t border-border bg-surface-raised/50 px-3 py-3">{children}</div>
+  return (
+    <div className="flex items-start gap-2 border-t border-border bg-surface-raised/50 py-3 ps-3 pe-2">
+      <div className="min-w-0 flex-1">{children}</div>
+      <IconButton label={closeLabel} icon="close" className="-mt-1" onClick={onClose} />
+    </div>
+  )
 }
 
 /** What the block opens to, under its header: its text. */
@@ -140,8 +158,8 @@ export function BlockBody({ children, dim = false }: { children: ReactNode; dim?
 }
 
 /**
- * A section folded inside the opened block (a note's settings): a row with its name and a short
- * summary that opens it, then its options' panel.
+ * A section folded inside the opened block (a lorebook entry's settings): a row with its name
+ * and a short summary that opens it, then its options' panel.
  */
 export function BlockSection({
   open,

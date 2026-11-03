@@ -65,21 +65,29 @@ export function revealIfHidden(header: HTMLElement, parts: ReadonlyArray<HTMLEle
  * is. With reduced motion it doesn't flash: a steady highlight fades instead.
  */
 export function revealAdded(item: HTMLElement) {
-  if (!inView(item)) {
-    const scroller = scrollParentOf(item)
-    const view = viewOf(item, scroller)
-    const rect = item.getBoundingClientRect()
-    const top = view.top + Math.min(view.room, 16)
-    // Fits: scroll just enough for its bottom (or its top) to show; else its top at the top.
-    const delta =
-      rect.height <= view.bottom - top
-        ? rect.top < top
-          ? rect.top - top
-          : rect.bottom - view.bottom + 8
-        : rect.top - top
-    if (scroller) scroller.scrollTop += delta
-    else window.scrollBy(0, delta)
+  const reveal = () => {
+    if (!inView(item)) {
+      const scroller = scrollParentOf(item)
+      const view = viewOf(item, scroller)
+      const rect = item.getBoundingClientRect()
+      const top = view.top + Math.min(view.room, 16)
+      // Fits: scroll just enough for its bottom (or its top) to show; else its top at the top.
+      const delta =
+        rect.height <= view.bottom - top
+          ? rect.top < top
+            ? rect.top - top
+            : rect.bottom - view.bottom + 8
+          : rect.top - top
+      if (scroller) scroller.scrollTop += delta
+      else window.scrollBy(0, delta)
+    }
   }
+  reveal()
+  // A newly mounted text editor can grow after its first frame: keep the whole box in view
+  // while it settles, without restarting the flash.
+  const growing = new ResizeObserver(reveal)
+  growing.observe(item)
+  setTimeout(() => growing.disconnect(), 1000)
   flash(item)
 }
 

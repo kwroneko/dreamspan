@@ -76,7 +76,7 @@ test("a note made in the chat goes into the request once on, and out once off", 
   const dialog = page.getByRole("tabpanel", { name: "Notes" })
   await dialog
     .getByRole("region", { name: "This chat's notes" })
-    .getByRole("button", { name: "New note", exact: true })
+    .getByRole("button", { name: "Add note", exact: true })
     .click()
   const editor = dialog.getByRole("region", { name: "Note Note" })
   await editor.getByRole("textbox", { name: /^Text of/ }).fill("Lanterns burn along the levee.")

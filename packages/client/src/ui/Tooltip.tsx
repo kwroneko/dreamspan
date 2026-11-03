@@ -24,6 +24,7 @@ export function Tooltip({
   children,
   side = "top",
   followCursor = false,
+  enabled = true,
   ...props
 }: {
   label: ReactNode
@@ -31,9 +32,11 @@ export function Tooltip({
   side?: "top" | "bottom" | "left" | "right"
   /** Placed at the pointer's height: for a trigger taller than the screen, as a rail's bar can be. */
   followCursor?: boolean
+  /** False when the full text already fits in its trigger. */
+  enabled?: boolean
 } & Omit<ComponentProps<typeof BaseTooltip.Trigger>, "render" | "children">) {
   return (
-    <BaseTooltip.Root {...(followCursor ? { trackCursorAxis: "y" as const } : {})}>
+    <BaseTooltip.Root disabled={!enabled} {...(followCursor ? { trackCursorAxis: "y" as const } : {})}>
       <BaseTooltip.Trigger {...props} render={children} />
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner
