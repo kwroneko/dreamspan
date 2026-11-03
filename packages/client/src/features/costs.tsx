@@ -86,7 +86,7 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
         conditions take precedence, then upstream, then provider. The last rule breaks ties. Currency is a label;
         nothing is converted.
       </p>
-      <UserDraftStatus draft={durable} />
+      <UserDraftStatus draft={durable} history />
       {values.revision !== settings.revision && (
         <Alert>
           <p>

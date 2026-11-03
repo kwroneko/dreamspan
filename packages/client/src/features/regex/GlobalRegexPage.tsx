@@ -74,7 +74,7 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
         shown or only the prompt sent, a script rewrites messages as they're saved; you can still see and restore a
         message's original text.
       </p>
-      <UserDraftStatus draft={durable} />
+      <UserDraftStatus draft={durable} history />
       {values.revision !== saved.revision && (
         <Alert tone="warning" title="The global scripts changed in another tab or device">
           <p>

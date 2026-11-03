@@ -374,18 +374,15 @@ function ParentDialog({ entityId, onClose }: { entityId: EntityId; onClose: () =
   const [search, setSearch] = useState("")
   const action = useAction()
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && !action.pending && onClose()}
-      title="Mark as a fork of…"
-      description="Link this card to a parent without changing either card’s text. You can unlink them later."
-    >
-      <Input
-        aria-label="Find a parent card"
-        value={search}
-        onChange={(e) => setSearch(e.currentTarget.value)}
-        placeholder="Find a card"
-      />
+    <Dialog open onOpenChange={(open) => !open && !action.pending && onClose()} title="Mark as a fork of…">
+      <Field label="Parent card" about="Links this card to a parent without changing either card’s text.">
+        <Input
+          aria-label="Find a parent card"
+          value={search}
+          onChange={(e) => setSearch(e.currentTarget.value)}
+          placeholder="Find a card"
+        />
+      </Field>
       <AsyncView atom={atom} loading="Loading cards…">
         {(lists) => {
           const cards = [...lists.live, ...lists.archived]
@@ -404,7 +401,7 @@ function ParentDialog({ entityId, onClose }: { entityId: EntityId; onClose: () =
                 a.label.localeCompare(b.label)
             )
           return (
-            <ul aria-label="Parent cards" className="flex max-h-80 flex-col gap-2 overflow-auto">
+            <ul aria-label="Parent cards" className="flex max-h-80 flex-col gap-2 overflow-auto p-2">
               {candidates.map((card) => (
                 <li key={card.id}>
                   <Button

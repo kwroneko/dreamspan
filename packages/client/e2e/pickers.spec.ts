@@ -261,7 +261,7 @@ for (const width of [1440, 390]) {
     const panel = await openPanel(page, "Prompt preset")
     await panel.getByRole("button", { name: "New preset", exact: true }).click()
     const dialog = page.getByRole("dialog", { name: "New prompt preset" })
-    await expect(dialog.getByText(/Start with the built-in preset/)).toBeVisible()
+    await expect(dialog.getByText(/Start with the built-in preset/)).toHaveCount(0)
     const name = `Lantern hall ${width}`
     await dialog.getByLabel("Name").fill(name)
     await page.screenshot({ path: join(shots, `new-preset-${width}.png`) })

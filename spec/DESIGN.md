@@ -5,6 +5,9 @@
 **Built 2026-11-02 (personarow):** The dedicated Persona row above the token counts (§2.2) is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §12.
 **Built 2026-11-03 (chatswith):** The card-scoped chat entry points and sidebar selection in §2.1 and draggable list/branch divider in §10.1 are implemented and obsolete as implementation requirements; see ARCHITECTURE §12.
 **Built 2026-11-03 (preseteditor):** The owner’s 2026-11-02 P1–P7 preset editor decisions in §6.2a are implemented and obsolete as implementation requirements; ARCHITECTURE §14.6 records the implementation. They supersede the earlier promptmarkers toolbar, wide-row, two-line cache display and global options proposals.
+**Built 2026-11-02 (newcarddialog follow-up):** Standing title explanations are removed across creation and naming dialogs, with choice-relevant help beside fields; see §10.1 and ARCHITECTURE §3.10.
+
+**Built 2026-11-02 (newcarddialog):** Creation and naming forms omit detached history controls; New card omits its standing explanation and labels its subtitle field Version with a tooltip. These requirements in §10.1 are obsolete as implementation plans; see ARCHITECTURE.md §3.10.
 
 **Built 2026-11-02 (entryclicks):** The per-view lorebook expansion decision in §1.3 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §14.6.
 
@@ -881,6 +884,11 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 
 - **[D] Chat-list / branch-viewer divider** (owner, 2026-11-02): “The divider between the upper list and the lower branch viewer is draggable”: reuse the panel resizer's handle and behaviour; arrow-key resizing with `aria-valuenow`; double-click resets; remember the size per account; minimum/maximum heights keep both halves usable. On phones follow the column's existing behaviour. **Built; obsolete as an implementation requirement** (chatswith; ARCHITECTURE §12).
   - **[P]** (chatswith, 2026-11-03): Keep the preferred lower height per account in this browser, like column widths; clamp the rendered height to the available room without rewriting that preference. Default to 45% of the browser's height, keep 112 px for branches and reserve 224 px for the upper list and its controls where the window allows. Use the same split inside the phone's existing navigation drawer.
+- **[D]** (owner, 2026-11-02, newcarddialog follow-up): "Remove every standing explanatory sentence under the title of every create, new or rename dialog"; "Where a fact really matters for a choice in the form, it goes in a '?' beside that field, and only then." Applies to preset, card, variant, fork, user, model, key, note, snippet, persona and other creation/naming surfaces. **Built; obsolete as an implementation requirement** (ARCHITECTURE §3.10).
+
+
+- **[D]** (owner, 2026-11-02, New card): "What is going on here? Why is there a random undo?" Creation and rename forms have no detached history button. New card has no standing sentence below its title; its third label is **Version**, with a question-mark tooltip, "Shown as the card's subtitle." **Built; obsolete as an implementation requirement** (ARCHITECTURE §3.10).
+- **[P]** (newcarddialog, 2026-11-02) Shared form status shows history only when an existing settings editor explicitly requests it. Draft persistence and recovery notices continue on creation and naming forms.
 
 - **[D] Decided (owner, 2026-11-02):** “Every modal that can be dismissed without a decision (closing it loses nothing, or simply cancels) must have a visible close button: an X in the top-right corner. Clicking outside still closes it too.” “Modals that demand a specific resolution (confirm/cancel choices such as ‘Discard changes?’, destructive confirmations, anything where outside-click is already disabled) don't get the X; their buttons are the way out.” **Built, obsolete as an implementation requirement:** shared dialog, sheet and popover behavior is documented in ARCHITECTURE §5; portrait/picture viewers are reserved for the separate portraitview work.
 

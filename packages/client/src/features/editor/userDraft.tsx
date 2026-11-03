@@ -756,8 +756,9 @@ export function UserDraftNotices({ draft }: { draft: UserDraft }) {
   )
 }
 
-/** The undo button and the notices together, for a form without a header to put the button in. */
-export function UserDraftStatus({ draft }: { draft: UserDraft }) {
+/** Draft notices, with history explicitly enabled by editors that need it. */
+export function UserDraftStatus({ draft, history = false }: { draft: UserDraft; history?: boolean }) {
+  if (!history) return <UserDraftNotices draft={draft} />
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-end">
