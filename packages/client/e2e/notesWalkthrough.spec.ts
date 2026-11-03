@@ -183,7 +183,7 @@ for (const width of [1440, 390])
       await expect(noteToggle(aria, "Character author's note")).toContainText("Private")
 
       // Add a new note: it opens, on from here.
-      await own.getByRole("button", { name: "New note", exact: true }).click({ timeout: 10_000 })
+      await own.getByRole("button", { name: "Add note", exact: true }).click({ timeout: 10_000 })
       const fresh = noteBlock(own, "Note").last()
       await expect(fresh).toBeVisible()
       // It opens with its text; its settings are folded under it.
@@ -219,7 +219,7 @@ for (const width of [1440, 390])
       await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).not.toBeChecked()
 
       // Pick a shared note into this chat: the slot shows it, with the banner.
-      await own.getByRole("button", { name: "Pick a shared note", exact: true }).click()
+      await own.getByRole("button", { name: "Link shared note", exact: true }).click()
       const picker = page.getByRole("dialog", { name: "Pick a shared note" })
       await picker.getByRole("textbox", { name: "Filter by name" }).fill("harb")
       await picker
@@ -240,7 +240,7 @@ for (const width of [1440, 390])
 
       // Save a card's note as a shared note, from its menu.
       const tobias = tab.getByRole("region", { name: "Tobias Wren's notes" })
-      const newNote = tobias.getByRole("button", { name: "New note", exact: true })
+      const newNote = tobias.getByRole("button", { name: "Add note", exact: true })
       await newNote.scrollIntoViewIfNeeded()
       await expect(newNote).toBeInViewport()
       await page.screenshot({ animations: "disabled", path: join(shots, `new-note-buttons-${width}-${theme}.png`) })
@@ -284,7 +284,7 @@ for (const width of [1440, 390])
       // The group's cards, Aria's imported author's note off here.
       await tab.getByRole("region", { name: "Aria Vance's notes" }).scrollIntoViewIfNeeded()
       await shoot("group-notes")
-      await own.getByRole("button", { name: "Pick a shared note", exact: true }).click()
+      await own.getByRole("button", { name: "Link shared note", exact: true }).click()
       const picker = page.getByRole("dialog", { name: "Pick a shared note" })
       await expect(picker.getByRole("button", { name: /Harbor weather/ }).first()).toBeVisible()
       await shoot("picker")

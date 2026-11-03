@@ -130,16 +130,16 @@ for (const theme of ["light", "dark"] as const) {
     const menu = page.getByRole("menu", { name: "Actions for Outfit" })
     await expect(menu).toBeVisible()
     await page.keyboard.press("ArrowDown")
-    await expect(explanation(page)).toHaveText(/Opens the note over the chat/)
+    await expect(explanation(page)).toHaveText(/Opens this note in the main column/)
     await beside(menu, explanation(page))
     await page.keyboard.press("ArrowDown")
-    await expect(explanation(page)).toHaveText(/Its revisions, what changed in each/)
+    await expect(explanation(page)).toHaveText(/Shows this note.s saved revisions/)
     await page.keyboard.press("ArrowDown")
-    await expect(explanation(page)).toHaveText(/Makes its text a shared note/)
+    await expect(explanation(page)).toHaveText(/Turns this note.s text into a shared note/)
     await page.getByRole("menuitem", { name: "History", exact: true }).hover()
-    await expect(explanation(page)).toHaveText(/Its revisions, what changed in each/)
+    await expect(explanation(page)).toHaveText(/Shows this note.s saved revisions/)
     await expect(page.getByRole("menuitem", { name: "Save as shared note", exact: true })).toHaveAccessibleDescription(
-      /Makes its text a shared note/
+      /Turns this note.s text into a shared note/
     )
     await page.screenshot({ path: join(shots, `menu-1440-${theme}.png`) })
     // Leaving the list puts it away.
@@ -179,10 +179,12 @@ for (const theme of ["light", "dark"] as const) {
 
     await note.getByRole("button", { name: "Actions for Outfit" }).tap()
     await expect(
-      page.getByRole("menuitem", { name: "History", exact: true }).getByText(/Its revisions, what changed in each/)
+      page.getByRole("menuitem", { name: "History", exact: true }).getByText(/Shows this note.s saved revisions/)
     ).toBeVisible()
     await expect(
-      page.getByRole("menuitem", { name: "Save as shared note", exact: true }).getByText(/Makes its text a shared note/)
+      page
+        .getByRole("menuitem", { name: "Save as shared note", exact: true })
+        .getByText(/Turns this note.s text into a shared note/)
     ).toBeVisible()
     await page.screenshot({ path: join(shots, `menu-390-${theme}.png`) })
     await page.keyboard.press("Escape")

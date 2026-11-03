@@ -28,7 +28,7 @@ export const closeNoteBlock = async (block: Locator, title: string) => {
 /** Opens a note's block, then its Settings section, when they're closed. */
 export const openNoteSettings = async (block: Locator, title: string) => {
   await openNoteBlock(block, title)
-  const settings = block.getByRole("button", { name: `Settings of ${title}` })
+  const settings = block.getByRole("button", { name: `Settings of ${title}`, exact: true })
   if ((await settings.getAttribute("aria-expanded")) !== "true") await settings.click()
   await expect(settings).toHaveAttribute("aria-expanded", "true")
   return block

@@ -9,7 +9,7 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import { textField } from "@rp/shared/editing.ts"
 import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import type { Doc, LibraryRef } from "@rp/shared/library.ts"
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { useSession } from "../../session.ts"
@@ -18,7 +18,8 @@ import {
   BlockBody,
   BlockHeader,
   BlockMenuButton,
-  BlockSection,
+  BlockOptions,
+  BlockOptionsToggle,
   BlockToggle,
   ExpandCollapseAll
 } from "../../ui/Block.tsx"
@@ -33,16 +34,9 @@ import { WindowClose } from "../../ui/WindowClose.tsx"
 import { browserEnv } from "./backup.ts"
 import type { Caller } from "./caller.ts"
 import { RecoveredNotice, RestoredNotice, TextField } from "./controls.tsx"
-import {
-  type NoteCard,
-  NoteSettings,
-  noteSettingLines,
-  noteState,
-  noteTitle,
-  SharedBanner,
-  settingsSummary
-} from "./notes.tsx"
+import { type NoteCard, NoteSettings, noteSettingLines, noteState, noteTitle, SharedBanner } from "./notes.tsx"
 import { usePresetWorkspace } from "./PresetWorkspace.tsx"
+import { revealAdded } from "./revealAdded.ts"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { SaveRevision } from "./SaveRevision.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText, useValue } from "./store.ts"
@@ -97,6 +91,20 @@ function BranchLine({ store }: { store: EditorStore }) {
   )
 }
 
+/** Under a note's name: where it goes and when, and its role ("End of tail · always · as system"). */
+const headerState = (doc: Doc, cards: ReadonlyArray<NoteCard>) => {
+  const placement = doc["placement"] as { mode?: string; role?: string } | undefined
+  const role = placement?.mode === "none" ? null : `as ${placement?.role ?? "system"}`
+  return [
+    noteState(doc, cards),
+    role,
+    doc["scan_lore"] === true ? "lorebook scan" : null,
+    doc["agent_editable"] === true ? "agent may edit" : null
+  ]
+    .filter((part) => part !== null)
+    .join(" · ")
+}
+
 /**
  * One note as a block, editing through its store: over a chat, the workspace's, which the
  * large editor shares (`large`: the same block filling the chat's column, always open).
@@ -110,7 +118,9 @@ export function NoteBlock({
   settingsOpen,
   onSettingsOpenChange,
   onRelinked,
-  large
+  large,
+  reveal = false,
+  onRevealed
 }: {
   entry: NoteListEntry
   cards: ReadonlyArray<NoteCard>
@@ -123,6 +133,9 @@ export function NoteBlock({
   onRelinked?: (() => void) | undefined
   /** Shown in the large editor over the chat, with a way back. */
   large?: { readonly onClose: () => void } | undefined
+  /** Just added: once it has read its note, it scrolls into view and flashes. */
+  reveal?: boolean | undefined
+  onRevealed?: (() => void) | undefined
 }) {
   const userId = useSession().user.id
   const { ref, chatNote } = entry
@@ -144,6 +157,17 @@ export function NoteBlock({
   // comes back as the list opens.
   useLeaveGuard(store)
   const loaded = state.snapshot !== null
+  const box = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!reveal || !loaded || !box.current) return
+    const element = box.current
+    // After the text box has its height; told only then, so clearing `reveal` can't cancel it.
+    const frame = requestAnimationFrame(() => {
+      revealAdded(element, element.querySelector("header"))
+      onRevealed?.()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [reveal, loaded, onRevealed])
   const typedTitle = useText(store, ["title"])
   const typedContent = useText(store, ["content"])
   const placement = useValue<unknown>(store, ["placement"])
@@ -170,6 +194,14 @@ export function NoteBlock({
     : entry.doc
   const { title, derived } = noteTitle(doc["title"], doc["content"], ref.label)
   const linked = doc["link"] !== undefined
+  const settingsShown = settingsOpen
+  /** Closed, the note opens with its settings; open, its settings open or close. */
+  const toggleSettings = () => {
+    if (!open) {
+      onOpenChange(true)
+      onSettingsOpenChange(true)
+    } else onSettingsOpenChange(!settingsOpen)
+  }
   const card = typeof (doc["owner"] as { card?: unknown } | undefined)?.card === "string"
 
   const remove = async () => {
@@ -219,7 +251,7 @@ export function NoteBlock({
 
   const status = (
     <span className="flex flex-wrap items-center gap-1 text-xs text-muted">
-      <span>{noteState(doc, cards)}</span>
+      <span>{headerState(doc, cards)}</span>
       {/* Without a switch (a card's editor), whether a card's note is on in every chat. */}
       {!entry.control && doc["on_by_default"] === true && <Badge>On in every chat</Badge>}
       {entry.sharedBinned && <Badge tone="warning">linked note is in the bin</Badge>}
@@ -230,7 +262,7 @@ export function NoteBlock({
   const name = (
     <span className="flex min-w-0 items-center gap-1.5">
       {linked && (
-        <Tooltip label="Shows a shared note: its text is the shared note's">
+        <Tooltip label="Shows a shared note's text. Editing it changes it everywhere it's used.">
           <span className="shrink-0 text-muted">
             <Icon name="link" />
             <span className="sr-only">Shared note</span>
@@ -241,7 +273,7 @@ export function NoteBlock({
     </span>
   )
   const toggle = large ? (
-    <span className="flex min-w-0 flex-1 flex-col gap-0.5 px-1 py-1">
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5 px-1 pt-0.5 pb-1">
       <h2 className="text-base font-semibold">{name}</h2>
       {status}
     </span>
@@ -258,15 +290,17 @@ export function NoteBlock({
   )
   return (
     <li>
-      <Block aria-label={`Note ${title}`} className="bg-canvas">
+      <Block ref={box} aria-label={`Note ${title}`} className="bg-canvas">
         <BlockHeader>
           {entry.control && <span className="flex h-8 w-10 shrink-0 items-center justify-center">{entry.control}</span>}
           {loaded ? (
             <InlineRename
               value={typedTitle}
               label={title}
+              hint="Renames this note"
               allowEmpty
-              className="min-w-0 flex-1"
+              // The pencil on the title's line, centred with it and with the header's buttons.
+              className="mt-0.5 min-w-0 flex-1 items-start!"
               onRename={(next) => {
                 store.setText(["title"], next)
                 void store.save(textField(["title"]))
@@ -275,66 +309,87 @@ export function NoteBlock({
               {toggle}
             </InlineRename>
           ) : (
-            <span className="flex min-w-0 flex-1">{toggle}</span>
+            <span className="mt-0.5 flex min-w-0 flex-1">{toggle}</span>
           )}
-          {/* The open note's save cluster, in its header row (DESIGN §10.1). */}
-          {open && loaded && <SaveRevision store={store} />}
-          <Menu
-            label={`Actions for ${title}`}
-            hint={
-              workspace && !large
-                ? "More: Large editor, its History, Save as shared note, Delete"
-                : "More: its History, Save as shared note, Delete"
-            }
-            trigger={<BlockMenuButton label={`Actions for ${title}`} />}
-          >
-            {workspace && !large && (
-              <MenuItem
-                icon="expand"
-                description="Opens the note over the chat, where it stays while the side panel changes"
-                onClick={() => workspace.open(ref.id, NOTE_FOCUS)}
-              >
-                Large editor
-              </MenuItem>
-            )}
-            <MenuItem
-              icon="history"
-              disabled={!loaded}
-              description="Its revisions, what changed in each (settings in words), and where each took effect"
-              onClick={() => setHistory(true)}
+          {/* The open note's save cluster, its settings and ⋯, together at the end with even
+              gaps (DESIGN §10.1); the settings button stays put when opening the note adds Save. */}
+          <span className="flex shrink-0 items-center gap-1">
+            {open && loaded && <SaveRevision store={store} />}
+            <BlockOptionsToggle
+              open={open && settingsShown}
+              onToggle={toggleSettings}
+              label={`Settings of ${title}`}
+              hint={
+                open && settingsShown
+                  ? "Hides this note's settings."
+                  : open
+                    ? "Shows this note's settings: position, depth, role and when it applies."
+                    : "Opens this note with its settings: position, depth, role and when it applies."
+              }
+            />
+            <Menu
+              label={`Actions for ${title}`}
+              hint={
+                workspace && !large
+                  ? "More: Large editor, History, Save as shared note, Delete"
+                  : "More: History, Save as shared note, Delete"
+              }
+              trigger={<BlockMenuButton label={`Actions for ${title}`} />}
             >
-              History
-            </MenuItem>
-            {!linked && (
-              <MenuItem
-                icon="link"
-                disabled={!loaded}
-                description="Makes its text a shared note this one shows, so other cards and chats can use it too"
-                onClick={() => void relink("share")}
-              >
-                Save as shared note
-              </MenuItem>
-            )}
-            {entry.onDeleted && (
-              <>
-                <MenuSeparator />
+              {workspace && !large && (
                 <MenuItem
-                  icon="trash"
-                  tone="danger"
-                  description="Moves this note to the bin, from which it can be restored later."
-                  onClick={() => void remove()}
+                  icon="expand"
+                  description="Opens this note in the main column, where it stays open while the side panel changes."
+                  onClick={() => workspace.open(ref.id, NOTE_FOCUS)}
                 >
-                  Delete the note
+                  Large editor
                 </MenuItem>
-              </>
-            )}
-          </Menu>
-          {large && <WindowClose onClick={large.onClose} />}
+              )}
+              <MenuItem
+                icon="history"
+                disabled={!loaded}
+                description="Shows this note's saved revisions and what changed in each."
+                onClick={() => setHistory(true)}
+              >
+                History
+              </MenuItem>
+              {!linked && (
+                <MenuItem
+                  icon="link"
+                  disabled={!loaded}
+                  description="Turns this note's text into a shared note that other chats and cards can use too."
+                  onClick={() => void relink("share")}
+                >
+                  Save as shared note
+                </MenuItem>
+              )}
+              {entry.onDeleted && (
+                <>
+                  <MenuSeparator />
+                  <MenuItem
+                    icon="trash"
+                    tone="danger"
+                    description="Moves this note to the bin, from which it can be restored later."
+                    onClick={() => void remove()}
+                  >
+                    Delete the note
+                  </MenuItem>
+                </>
+              )}
+            </Menu>
+            {large && <WindowClose onClick={large.onClose} />}
+          </span>
         </BlockHeader>
         <BranchLine store={store} />
         {entry.detail}
         {open && (
           <>
+            {/* Opened by the header's settings button, in place under the header, as a prompt's options are. */}
+            {settingsShown && loaded && (
+              <BlockOptions onClose={() => onSettingsOpenChange(false)} closeLabel="Close these settings">
+                <NoteSettings store={store} cards={cards} />
+              </BlockOptions>
+            )}
             <BlockBody>
               <div className="flex flex-col gap-2">
                 {entry.extra}
@@ -364,18 +419,6 @@ export function NoteBlock({
                 )}
               </div>
             </BlockBody>
-            {loaded && (
-              <BlockSection
-                open={settingsOpen}
-                onToggle={() => onSettingsOpenChange(!settingsOpen)}
-                title="Settings"
-                label={title}
-                summary={settingsSummary(doc)}
-                hint={settingsOpen ? "Hide the note's settings" : "Its position, role, when it applies, and switches"}
-              >
-                <NoteSettings store={store} cards={cards} />
-              </BlockSection>
-            )}
           </>
         )}
         {error && (
@@ -431,7 +474,9 @@ export function NoteList({
   call,
   blocks,
   settings,
-  onRelinked
+  onRelinked,
+  added = null,
+  onRevealed
 }: {
   /** The list's accessible name. */
   label: string
@@ -444,6 +489,9 @@ export function NoteList({
   settings: OpenBlocks
   /** A note was saved as a shared note, unlinked from one, or had its shared note restored. */
   onRelinked?: ((entry: NoteListEntry) => void) | undefined
+  /** The note just added (its ref id), revealed once it shows. */
+  added?: string | null | undefined
+  onRevealed?: (() => void) | undefined
 }) {
   const shown = filter ? entries.filter(filter) : entries
   return (
@@ -459,6 +507,8 @@ export function NoteList({
           settingsOpen={settings.isOpen(entry.ref.id)}
           onSettingsOpenChange={(open) => settings.setOpen(entry.ref.id, open)}
           onRelinked={() => onRelinked?.(entry)}
+          reveal={added === entry.ref.id}
+          onRevealed={onRevealed}
         />
       ))}
     </ul>
