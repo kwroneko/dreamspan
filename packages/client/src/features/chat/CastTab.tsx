@@ -25,7 +25,7 @@ import type { ChatSession } from "./session.ts"
 import type { ChatCardInfo } from "./CardForkDialogs.tsx"
 import type { PendingChat } from "./pendingChat.ts"
 import { usePendingCardInfo } from "./pendingCardInfo.ts"
-import { castSections, ChatCardActions, pendingCastSections } from "./presentation.tsx"
+import { castSections, castMemberNavigation, ChatCardActions, pendingCastSections } from "./presentation.tsx"
 import { type ReactNode } from "react"
 import { writeAs } from "./speaker.ts"
 
@@ -37,13 +37,15 @@ function MemberMore({
   card,
   info,
   onChange,
-  onPersona
+  onPersona,
+  persona = false
 }: {
   session: ChatSession
   card: CastCard
   info: ChatCard | undefined
   onChange: (change: CastChange) => void
   onPersona: () => void
+  persona?: boolean
 }) {
   const showPanel = useShowPanel()
   const name = card.name
@@ -55,20 +57,25 @@ function MemberMore({
       >
         Write as {name}
       </MenuItem>
+      <SlotOutlet slot={castMemberNavigation} props={{ session, card }} />
       <MenuItem description="Edit their card here." onClick={() => showPanel(`card:${card.entityId}`)}>
         Edit the card here
       </MenuItem>
-      <ChatCardActions session={session} card={card} info={info} />
-      <MenuItem description={`You play ${name} in this chat: {{user}} is them.`} onClick={onPersona}>
-        Use as my persona
-      </MenuItem>
-      <MenuItem
-        tone="danger"
-        description="They leave the chat. Earlier messages stay."
-        onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
-      >
-        Remove from chat
-      </MenuItem>
+      <ChatCardActions session={session} card={card} info={info} persona={persona} />
+      {!persona && (
+        <>
+          <MenuItem description={`You play ${name} in this chat: {{user}} is them.`} onClick={onPersona}>
+            Use as my persona
+          </MenuItem>
+          <MenuItem
+            tone="danger"
+            description="They leave the chat. Earlier messages stay."
+            onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
+          >
+            Remove from chat
+          </MenuItem>
+        </>
+      )}
     </Menu>
   )
 }
@@ -229,6 +236,16 @@ export function CastTab({ session }: { session: ChatSession }) {
     <div className="flex flex-col gap-4">
       <You card={persona === null ? undefined : view.cards.get(persona)}>
         <PersonaSwitch session={session} trigger="Switch" />
+        {persona !== null && view.cards.has(persona) && (
+          <MemberMore
+            session={session}
+            card={view.cards.get(persona)!}
+            info={info.get(persona)}
+            onChange={change}
+            onPersona={() => void choosePersona(view.cards.get(persona)!)}
+            persona
+          />
+        )}
       </You>
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">

@@ -162,5 +162,8 @@ test("the chat open in the middle is marked in the left panel's list", async ({ 
   await row.click()
   await expect(page).toHaveURL(/\/chats\//)
   await expect(row).toHaveAttribute("aria-current", "page")
-  await expect(sidebar(page).locator('[aria-current="page"]')).toHaveCount(1)
+  await expect(sidebar(page).locator('[data-shell-list] [aria-current="page"]')).toHaveCount(1)
+  await expect(
+    sidebar(page).getByRole("region", { name: "Branches of the open chat" }).locator('[aria-current="page"]')
+  ).toHaveCount(1)
 })
