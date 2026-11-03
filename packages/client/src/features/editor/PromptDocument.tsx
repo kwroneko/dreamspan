@@ -34,7 +34,7 @@ import {
 } from "../../ui/Block.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle, useInnerPanelWidth } from "../../ui/ResizeHandle.tsx"
-import { revealAdded } from "../../ui/reveal.ts"
+import { revealAdded, revealIfHidden } from "../../ui/reveal.ts"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
@@ -739,7 +739,10 @@ export function PromptDocument({
       if (added) {
         // Let the sticky toolbar measure the newly shown unsaved bar first.
         requestAnimationFrame(() => {
-          if (target.isConnected) revealAdded(target)
+          if (!target.isConnected) return
+          // Keep the header at the top while the new text editor finishes opening.
+          revealIfHidden(target)
+          revealAdded(target)
         })
         return
       }

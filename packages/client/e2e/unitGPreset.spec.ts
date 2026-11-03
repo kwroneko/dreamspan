@@ -8,7 +8,7 @@ import type { LibraryRef } from "@rp/shared/library.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
-import { NOTHING_TO_SAVE, UNSAVED, expectSaveState, saveButton, saveRevision } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, UNSAVED, expectSaveState, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel, openPresetAt } from "./support/panel.ts"
 import { openNoteSettings } from "./support/notes.ts"
@@ -226,10 +226,13 @@ test("a panel switch is shared with the overlay as flipped, with no unsaved bar"
   await overlay.getByRole("button", { name: "Close", exact: true }).first().click()
   // A switch is live: no bar holds it; flipping it back is the way back.
   await expect(panel.getByRole("region", { name: "Unsaved changes" })).toHaveCount(0)
+  // Checkpoint this state before flipping back: a no-net edit may retain a valid active
+  // draft while Save is disabled. Both saves flush their draft writes before cleanup.
+  await saveRevision(panel)
   await toggle.click()
   await expect(toggle).toBeChecked({ checked: was })
   // The next tests share the preset: leave it saved.
-  if (await saveButton(panel).isEnabled()) await saveRevision(panel)
+  await saveRevision(panel)
   await expectSaveState(panel, NOTHING_TO_SAVE)
   const opened = await admin((api) =>
     Effect.map(api.OpenEditor({ refId: preset.id }), (editor) =>
