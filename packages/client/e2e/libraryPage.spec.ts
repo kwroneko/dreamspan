@@ -83,9 +83,9 @@ for (const width of [1440, 390])
         .getByRole("group", { name: "Show" })
         .getByRole("button", { name: /^Personas/ })
         .click()
-      await expect(rows.first()).toContainText("Persona")
-      expect(await rows.count()).toBeGreaterThan(0)
-      for (const text of await rows.allTextContents()) expect(text).toContain("Persona")
+      // Only personas are listed, so none is marked.
+      await expect(rows.first()).toBeVisible()
+      await expect(rows.locator("[data-persona-badge]")).toHaveCount(0)
       await shot(page, `personas-${width}-${theme}`, width)
       await page.getByRole("group", { name: "Show" }).getByRole("button", { name: "All", exact: true }).click()
 

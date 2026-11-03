@@ -142,6 +142,8 @@ interface Item {
   readonly detail?: string
   /** A character's shell card (not a persona's), for its favourite star. */
   readonly shell: ShellCard | undefined
+  /** Shown in a persona-only list (Personas), where a persona badge would mark every row. */
+  readonly personaOnly?: boolean
 }
 type ShellCard = ShellLibrary["cards"][number]
 const persona = (item: Item) => item.card?.persona === true
@@ -188,7 +190,7 @@ function Badges({ item, seen }: { item: Item; seen: boolean }) {
   const { entry } = item
   return (
     <>
-      {persona(item) && <PersonaBadge />}
+      {persona(item) && !item.personaOnly && <PersonaBadge />}
       {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
       {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
       {entry.kind === "card" && seen && <CardSurface placement="badge" entityId={entry.entityId} label={entry.label} />}
@@ -380,7 +382,9 @@ function Section({
     PRESET_VIEWS.map((v) => v.value)
   )
   const shown = cards
-    ? all.filter((item) => prefs.show === "all" || (prefs.show === "personas") === persona(item))
+    ? all
+        .filter((item) => prefs.show === "all" || (prefs.show === "personas") === persona(item))
+        .map((item) => (prefs.show === "personas" ? { ...item, personaOnly: true } : item))
     : all
   const items: ReadonlyArray<Item> = presets
     ? presetsInView(

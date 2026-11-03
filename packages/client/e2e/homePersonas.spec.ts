@@ -114,7 +114,7 @@ for (const width of [1440, 390]) {
     const start = page.getByRole("dialog", { name: "Start a chat with…" })
     await start.getByRole("combobox", { name: "Show" }).click()
     await page.getByRole("option", { name: /^Personas/ }).click()
-    await expect(start.locator("[data-persona-badge]")).toHaveText("Persona")
+    await expect(start.locator("[data-persona-badge]")).toHaveCount(0)
 
     const chat = await admin((api) =>
       Effect.gen(function* () {
