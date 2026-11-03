@@ -326,6 +326,11 @@ export function NoteBlock({
       <Block ref={box} aria-label={`Note ${title}`} className="bg-canvas">
         <BlockHeader className="@container/note-header block!">
           <div data-note-title-row className="flex min-w-0 items-center gap-1">
+            {/* The note's switch leads the header, as before, so nothing moves when opening
+              the note adds its save cluster at the end (owner, 2026-11-03). */}
+            {entry.control && (
+              <span className="flex h-8 w-10 shrink-0 items-center justify-center">{entry.control}</span>
+            )}
             {loaded ? (
               <InlineRename
                 value={typedTitle}
@@ -347,7 +352,6 @@ export function NoteBlock({
             {/* The open note's save cluster, its settings and ⋯, together at the end with even
               gaps (DESIGN §10.1); the settings button stays put when opening the note adds Save. */}
             <span data-note-controls className="ml-auto flex shrink-0 items-center gap-1">
-              {entry.control && <span className="flex h-8 shrink-0 items-center">{entry.control}</span>}
               {open && loaded && (
                 <span
                   data-note-save
