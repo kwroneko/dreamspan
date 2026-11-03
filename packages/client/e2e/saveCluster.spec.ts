@@ -181,8 +181,19 @@ for (const width of [1440, 390])
     const check = async (surface: string, scope: Locator, beside: Locator, edit: () => Promise<void>) => {
       const cluster = saveCluster(scope).first()
       await expect(cluster).toHaveAttribute("data-save-state", "clean", { timeout: 30_000 })
-      const before = (await cluster.boundingBox())!
-      const other = (await beside.boundingBox())!
+      await expect(beside).toBeVisible()
+      // Panel loading and sheet layout can move the whole row between protocol calls.
+      // Compare both controls in the same frame, preserving the actual overlap assertion.
+      const { before, other } = await cluster.evaluate(
+        (element, beside) => {
+          const box = (node: Element) => {
+            const { y, width, height } = node.getBoundingClientRect()
+            return { y, width, height }
+          }
+          return { before: box(element), other: box(beside!) }
+        },
+        await beside.elementHandle()
+      )
       expect(before.y < other.y + other.height && other.y < before.y + before.height, `${surface}: one row`).toBe(true)
       await edit()
       await expect(cluster).toHaveAttribute("data-save-state", "unsaved", { timeout: 30_000 })

@@ -17,7 +17,9 @@ import {
   useContext,
   useId,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -492,6 +494,21 @@ function Rows({
   selected: ReadonlySet<number>
 }) {
   "use no memo"
+  // URL setters change with their target. Keep row actions stable while calling the latest
+  // table handlers, so a focus/expansion update renders only the rows it changes.
+  const handlers = useRef(row)
+  useLayoutEffect(() => {
+    handlers.current = row
+  })
+  const callbacks = useMemo<Pick<RowProps, "onSelect" | "onToggle" | "onSettings" | "onAction">>(
+    () => ({
+      onSelect: (uid, selected) => handlers.current.onSelect(uid, selected),
+      onToggle: (uid, open, at) => handlers.current.onToggle(uid, open, at),
+      onSettings: (uid, open) => handlers.current.onSettings(uid, open),
+      onAction: (uid, action) => handlers.current.onAction(uid, action)
+    }),
+    []
+  )
   // eslint-disable-next-line react-hooks/incompatible-library -- mutable instance; memoization is disabled above
   const virtualizer = useVirtualizer({
     count: uids.length,
@@ -545,6 +562,7 @@ function Rows({
         >
           <EntryRow
             {...row}
+            {...callbacks}
             uid={uids[item.index]!}
             open={opened.has(uids[item.index]!)}
             settings={settings.has(uids[item.index]!)}
@@ -598,16 +616,7 @@ const changedUids = (store: EditorStore, root: FieldPath) =>
     })
   )
 
-export function LorebookTable({
-  store,
-  root,
-  book,
-  added = null,
-  panel = false,
-  tools,
-  toolPanel,
-  saveControls
-}: {
+export function LorebookTable(props: {
   store: EditorStore
   root: FieldPath
   book: LorebookDoc
@@ -622,6 +631,13 @@ export function LorebookTable({
   /** The save cluster, beside Add entry in the editing row (DESIGN §10.1). */
   saveControls?: ReactNode
 }) {
+  // Parameter defaults currently make React Compiler skip this table and its row callbacks.
+  const { store, book, tools, toolPanel, saveControls } = props
+  // Some callers recreate this path during URL navigation; equal paths must keep row props stable.
+  const rootKey = JSON.stringify(props.root)
+  const root = useMemo(() => JSON.parse(rootKey) as FieldPath, [rootKey])
+  const added = props.added ?? null
+  const panel = props.panel ?? false
   // Both editors can render the same entry UID at once; focus must stay in this table.
   const idPrefix = useId()
   const columns = useRegistry(lorebookColumns)
@@ -697,7 +713,9 @@ export function LorebookTable({
 
   // A search visit to an entry: everything shown again, the entry open and scrolled to.
   const match = useContext(SearchNavigation)
-  useEffect(() => {
+  // Read the current table without replaying a visit on edits or folds. Effect events also
+  // avoid dependency suppressions, which disable compilation for the entire table.
+  const restoreMatch = useEffectEvent(() => {
     if (!match) return
     const frame = requestAnimationFrame(() => {
       const at = JSON.stringify(match.path.slice(0, root.length + 1)) === JSON.stringify([...root, "entries"])
@@ -713,10 +731,10 @@ export function LorebookTable({
       }
     })
     return () => cancelAnimationFrame(frame)
-    // Only a new search visit restores the match; edits and folds must not replay it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [match])
-  useEffect(() => {
+  })
+  // Only a new search visit restores the match; edits and folds must not replay it.
+  useEffect(() => restoreMatch(), [match])
+  const restoreEntry = useEffectEvent(() => {
     const local = enteredHere.current
     enteredHere.current = null
     if (entry === local || entry === null || !book.entries.some((e) => e.uid === entry)) return
@@ -725,9 +743,9 @@ export function LorebookTable({
       setFocus({ uid: entry, at: "title" })
     })
     return () => cancelAnimationFrame(frame)
-    // Restore only a new URL target, not each edit or fold of that entry.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry])
+  })
+  // Restore only a new URL target, not each edit or fold of that entry.
+  useEffect(() => restoreEntry(), [entry])
 
   // Measured, so the chat's narrow editor overlay gets the narrow layout too.
   const list = useRef<HTMLDivElement>(null)
@@ -803,7 +821,7 @@ export function LorebookTable({
     (entry) => entry.uid
   )
   const removed = savedUids.filter((uid) => !book.entries.some((entry) => entry.uid === uid))
-  const dialogEntry = dialog ? (store.value(entryPath(root, dialog.uid)) as LorebookEntry | undefined) : undefined
+  const dialogEntry = dialog ? book.entries.find((entry) => entry.uid === dialog.uid) : undefined
   const filtered = query.trim() !== "" || enabled !== "all"
   const live = book.entries.filter((entry) => selected.has(entry.uid)).map((entry) => entry.uid)
   const small = panel ? "h-8! px-2!" : "h-8! px-2.5!"
