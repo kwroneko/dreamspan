@@ -159,3 +159,51 @@ for (const width of [390, 1024, 1440])
           if (work) await header.screenshot({ path: join(work, `header-${view}-${width}-${theme}-${index}.png`) })
         }
       })
+
+test("the default persona badge shares row three at the panel minimum", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const card = cards[0]!
+  await withCookie(server(), cookie, (api) =>
+    Effect.gen(function* () {
+      yield* api.SetPersona({ entityId: card.entityId as never, persona: true })
+      yield* api.ChangeGenerationDefaults({ change: { persona: card.entityId as never } })
+    })
+  )
+  const separator = cookie.indexOf("=")
+  await page
+    .context()
+    .addCookies([{ name: cookie.slice(0, separator), value: cookie.slice(separator + 1), url: server().url }])
+  try {
+    await page.goto(`${server().url}/chats/${chat}`)
+    const panel = await openPanel(page, card.name)
+    const header = panel.locator("[data-card-header]")
+    await expect(header.locator("[data-card-tokens]")).toBeVisible()
+    await page.getByRole("separator", { name: "Resize chat panel", exact: true }).press("Home")
+    const row = header.locator('[data-card-header-row="persona"]')
+    const toggle = row.getByRole("button", { name: "Persona", exact: true })
+    const badge = row.locator("[data-default-persona]")
+    await expect(toggle).toHaveAttribute("aria-pressed", "true")
+    await expect(badge).toHaveText("Default")
+    await structure(header)
+    const bounds = (await row.boundingBox())!,
+      button = (await toggle.boundingBox())!,
+      label = (await badge.boundingBox())!
+    expect(label.x).toBeGreaterThanOrEqual(button.x + button.width)
+    expect(label.x + label.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1)
+    if (work) {
+      mkdirSync(work, { recursive: true })
+      await header.screenshot({ path: join(work, "header-default-persona-minimum.png") })
+    }
+    if (audit) {
+      await header.evaluate((el) => el.setAttribute("data-header-under-test", ""))
+      await expectLayout(page, info, "header-default-persona-minimum", { scope: "[data-header-under-test]" })
+    }
+  } finally {
+    await withCookie(server(), cookie, (api) =>
+      Effect.gen(function* () {
+        yield* api.ChangeGenerationDefaults({ change: { persona: null } })
+        yield* api.SetPersona({ entityId: card.entityId as never, persona: false })
+      })
+    )
+  }
+})

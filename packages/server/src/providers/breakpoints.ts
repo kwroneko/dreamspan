@@ -7,6 +7,7 @@
 // transcript with the payload in order, by role and text. pi-ai keeps user, assistant
 // and tool-result messages in order, but drops empty ones and merges consecutive tool
 // results, so a plain index mapping would break.
+import type { CacheLayout } from "@rp/shared/providers.ts"
 import type { Message } from "@earendil-works/pi-ai"
 import { Predicate } from "effect"
 
@@ -123,13 +124,14 @@ const firstMarker = (value: unknown): unknown => {
 export const applyAnthropicBreakpoints = (
   payload: Record<string, unknown>,
   transcript: ReadonlyArray<Message>,
-  breakpoints: ReadonlyArray<number>
+  breakpoints: ReadonlyArray<number>,
+  capabilities: CacheLayout = {}
 ): Array<number> => {
   const marker = firstMarker(payload)
   if (!marker || !Array.isArray(payload.messages)) return []
   const wire = payload.messages as Array<WireMessage>
   const aligned = alignTranscript(transcript, wire)
-  let budget = MAX_ANTHROPIC_BREAKPOINTS - countMarkers(payload)
+  let budget = Math.min(MAX_ANTHROPIC_BREAKPOINTS, capabilities.maxMarkers ?? 4) - countMarkers(payload)
   const placed: Array<number> = []
   for (const index of breakpoints) {
     if (budget <= 0) break
@@ -145,4 +147,64 @@ export const applyAnthropicBreakpoints = (
     placed.push(index)
   }
   return placed
+}
+
+// Only actual wire content blocks count, never similarly named tool-schema properties.
+const bedrockMarkers = (messages: ReadonlyArray<WireMessage>): number =>
+  messages.reduce(
+    (n, message) =>
+      n +
+      (Array.isArray(message.content)
+        ? message.content.filter((block) => {
+            const control = block.prompt_cache_breakpoint
+            return Predicate.isObject(control) && control.mode === "explicit"
+          }).length
+        : 0),
+    0
+  )
+
+/** Bedrock OpenAI-compatible checkpoints; explicit callers opt into this wire extension. */
+export const applyBedrockBreakpoints = (
+  payload: Record<string, unknown>,
+  transcript: ReadonlyArray<Message>,
+  breakpoints: ReadonlyArray<number>,
+  responses: boolean,
+  capabilities: CacheLayout = {}
+): void => {
+  const items = responses ? payload.input : payload.messages
+  if (!Array.isArray(items) || breakpoints.length === 0) return
+  const wire = items as Array<WireMessage>
+  const textType = responses ? "input_text" : "text"
+  const normalized = wire.map((m) => ({
+    ...m,
+    content: typeof m.content === "string" ? m.content : (m.content ?? []).map((b) => ({ ...b, text: b.text }))
+  }))
+  // Chat payload is already in assembly order. Responses is converted by pi-ai.
+  const aligned = responses ? alignTranscript(transcript, normalized) : transcript.map((_, i) => i)
+  const cumulative: number[] = []
+  let tokens = 0
+  for (const item of normalized) {
+    tokens += Math.ceil(wireText(item).length / 4)
+    cumulative.push(tokens)
+  }
+  const prefix = wire.findLastIndex(
+    (m, i) =>
+      (m.role === "developer" || m.role === "system") &&
+      wire.slice(0, i).every((p) => p.role === "developer" || p.role === "system")
+  )
+  const targets = [...breakpoints.flatMap((b) => (aligned[b] == null ? [] : [aligned[b]!])), prefix]
+  // Responses reserves an automatic endpoint. Explicit-only Chat needs its own final marker.
+  const limit = responses ? Math.min(4, capabilities.maxMarkers ?? 4) : (capabilities.maxMarkers ?? 4)
+  let budget = limit - (responses ? 1 : 0) - bedrockMarkers(wire)
+  const mark = (index: number) => {
+    if (budget <= 0 || index < 0 || (cumulative[index] ?? 0) < (capabilities.minTokens ?? 1024)) return
+    const item = wire[index]!
+    if (typeof item.content === "string") item.content = [{ type: textType, text: item.content }]
+    const last = item.content?.findLast((b) => b.type === textType)
+    if (!last || last.prompt_cache_breakpoint) return
+    last.prompt_cache_breakpoint = { mode: "explicit" }
+    budget--
+  }
+  if (!responses) mark(wire.length - 1)
+  for (const index of targets) mark(index)
 }

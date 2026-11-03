@@ -279,7 +279,7 @@ function Row({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForma
         {entry.label}
       </OpenLink>
       {line && (
-        <span className="col-span-2 col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 self-start text-xs text-muted sm:col-span-1">
+        <span className="col-span-2 col-start-2 row-start-2 flex min-h-5 min-w-0 items-center gap-1.5 self-start text-xs text-muted sm:col-span-1">
           <Badges item={item} seen={seen} />
           <span className="min-w-0 truncate">
             <Meta item={item} />

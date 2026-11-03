@@ -73,12 +73,12 @@ export function SaveControls({
       className="relative inline-flex shrink-0 items-start gap-1"
     >
       <Button
-        variant={failed ? "danger" : actionable ? "primary" : "ghost"}
+        variant={failed ? "danger" : actionable || pending ? "primary" : "ghost"}
         aria-label="Save"
         disabled={!actionable}
         focusableWhenDisabled
         aria-busy={pending || undefined}
-        className={`${square} ${actionable ? "" : inert}`}
+        className={`${square} ${pending ? "data-disabled:pointer-events-auto! data-disabled:opacity-100!" : actionable ? "" : inert}`}
         hint={actionable ? hints.save : hints.clean}
         onClick={() => actionable && void save(null)}
       >

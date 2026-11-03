@@ -79,9 +79,9 @@ export function BlockToggle({
           size={14}
           className={`mt-0.5 shrink-0 text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
         />
-        <span className="flex min-w-0 flex-col items-start gap-0.5">
+        <span className="flex min-w-0 max-w-full flex-col items-start gap-0.5">
           <span
-            className={`text-sm break-words ${derived ? "text-muted italic" : "font-medium"} ${dim ? "opacity-60" : ""}`}
+            className={`max-w-full text-sm break-words ${derived ? "text-muted italic" : "font-medium"} ${dim ? "opacity-60" : ""}`}
           >
             {name}
           </span>

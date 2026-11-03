@@ -28,7 +28,7 @@ const tint = (id: string) => {
   return TINTS[Math.abs(hash) % TINTS.length]!
 }
 
-const SIZES = {
+export const AVATAR_SIZES = {
   xs: "h-7.5 w-5 text-[0.5625rem]",
   sm: "h-9 w-6 text-[0.625rem]",
   chip: "h-7 w-[18.667px] text-[0.625rem]",
@@ -41,7 +41,7 @@ const SIZES = {
   fill: "aspect-[2/3] w-full text-4xl"
 } as const
 
-export type AvatarSize = keyof typeof SIZES
+export type AvatarSize = keyof typeof AVATAR_SIZES
 
 /**
  * Where `object-cover` puts an image that isn't already the cutout: an animated or very large
@@ -81,7 +81,7 @@ export function Avatar({
   const { ref, width } = useMediaWidth()
   // A filling portrait must not leave an inline baseline below it in collage cells.
   // That extra line-box space otherwise makes row gaps larger than column gaps.
-  const box = `relative ${size === "fill" ? "flex" : "inline-flex"} shrink-0 overflow-hidden rounded-sm ${SIZES[size]} ${className}`
+  const box = `relative ${size === "fill" ? "flex" : "inline-flex"} shrink-0 overflow-hidden rounded-sm ${AVATAR_SIZES[size]} ${className}`
   const content = (
     <>
       {mediaId !== null && width !== undefined && (

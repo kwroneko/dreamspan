@@ -147,6 +147,61 @@ it("known deletion must block a composer stale copy when replay fails", async ()
   await vi.waitFor(() => expect(store.snapshot().ready).toBe(true))
   expect(store.snapshot().text).toBe("")
 })
+it.each([
+  { online: false, content: "" },
+  { online: true, content: "" },
+  { online: false, content: "deleted composer text" },
+  { online: true, content: "deleted composer text" }
+])(
+  "a composer deletion copy is acknowledged only after a successful replay (online: $online, text: '$content')",
+  async ({ online, content }) => {
+    const current = new Draft({
+      ...tombstone,
+      key: new DraftKey({ targetKind: "composer", targetId: "chat", field: "fork" }),
+      status: "active",
+      content: ""
+    })
+    const copy = makeCopy(
+      "user",
+      "composer:chat",
+      "draft",
+      {
+        kind: "composer",
+        payload: {
+          chatId: "chat" as ChatId,
+          draftId: "draft",
+          rowVersion: 1,
+          session: 1,
+          next: false,
+          content
+        }
+      },
+      1
+    )
+    copies.set(copy.key, copy)
+    const replayed: Array<unknown> = []
+    const store = new ComposerDraft(
+      session(current, (tag, payload) => {
+        if (tag === "OpenComposer") return Effect.succeed(current)
+        replayed.push(payload)
+        return online ? Effect.succeed({ draft: current, recovered: false }) : Effect.fail("offline")
+      }),
+      "user",
+      {
+        setTimer: () => 0,
+        clearTimer: () => {},
+        now: () => 100000,
+        keepalive: async () => false
+      }
+    )
+    store.setFork("fork" as ForkId, false)
+    await vi.waitFor(() => expect(store.snapshot().ready).toBe(true))
+    expect(replayed).toEqual([copy.save.payload])
+    expect(store.snapshot().text).toBe("")
+    expect(copies.has(copy.key)).toBe(!online)
+  }
+)
+
 it("edited marker clears when typing returns to last saved revision", async () => {
   const snap = {
     ref: { id: "ref", kind: "card", headRevisionId: "rev", label: "card" },

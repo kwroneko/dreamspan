@@ -124,7 +124,7 @@ test("the persona's tab is a full card, with switching kept under the composer",
   await expect(switched.getByText("You", { exact: true })).toBeVisible()
 })
 
-test("History edits doesn't ask for a model before a search", async ({ page }) => {
+test("Search and replace doesn't ask for a model before a search", async ({ page }) => {
   await open(page)
   const tab = await openPanel(page, "History edits")
   await expect(tab.getByLabel("Find", { exact: true })).toBeVisible()

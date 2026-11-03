@@ -1,3 +1,6 @@
+import type { ChatBrowse } from "@rp/shared/chatBrowse.ts"
+import { useChatBrowse } from "./useChatBrowse.ts"
+import { sidebarChatBrowse } from "./ChatBrowseBar.tsx"
 import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
@@ -51,7 +54,7 @@ export function PinButton({ fork, className = "" }: { fork: ShellFork; className
         icon="pin"
         filled={fork.pinned}
         aria-pressed={fork.pinned}
-        hint={fork.pinned ? "Takes it out of Pinned chats." : "Keeps this branch in Pinned chats, above the rest."}
+        hint={fork.pinned ? "Click to unpin this branch" : "Click to pin this branch above the rest"}
         disabled={action.pending}
         className={`${fork.pinned ? "text-text!" : ""} ${className}`}
         onClick={() =>
@@ -120,7 +123,12 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
           <GroupFaces members={fork.cast} />
         </span>
         <span className="flex w-full min-w-0 flex-1 flex-col gap-1 p-2.5">
-          <span className="text-sm font-medium [overflow-wrap:anywhere]">{fork.chatName}</span>
+          <span
+            className="line-clamp-2 text-sm font-medium text-ellipsis break-normal [overflow-wrap:normal]"
+            title={fork.chatName}
+          >
+            {fork.chatName}
+          </span>
           {/* The faces show who; the names with their versions are in the tooltip. */}
           <span
             className="text-xs text-muted"
@@ -205,11 +213,11 @@ export function ForkRow({
       className={`flex w-full max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <Tooltip
-        label={
+        label={`${title}. ${
           perFork
             ? `Opens this branch${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
             : "Opens the chat on the branch you last used."
-        }
+        }`}
       >
         <button
           type="button"
@@ -218,7 +226,7 @@ export function ForkRow({
           aria-current={here ? "page" : undefined}
           data-chat-id={fork.chat.id}
           data-fork-id={fork.forkId}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className="flex min-w-0 flex-1 items-center self-stretch gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           {!branchOnly && (
             <span className="flex shrink-0 gap-0.5">
@@ -234,9 +242,9 @@ export function ForkRow({
               ))}
             </span>
           )}
-          <span className="flex min-w-0 flex-col">
+          <span className="flex min-w-0 flex-1 flex-col self-stretch">
             {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
-            <span className="text-sm [overflow-wrap:anywhere]">
+            <span data-chat-title className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]">
               <span className="font-medium">{title}</span>
               {opensHere && (
                 <>
@@ -245,7 +253,14 @@ export function ForkRow({
                 </>
               )}
             </span>
-            {branchLine !== null && <span className="text-xs [overflow-wrap:anywhere]">{branchLine}</span>}
+            {branchLine !== null && (
+              <span
+                className="line-clamp-2 text-xs text-ellipsis break-normal [overflow-wrap:normal]"
+                title={branchLine}
+              >
+                {branchLine}
+              </span>
+            )}
             {details && fork.cast.length > 1 && (
               <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
                 with {fork.cast.map((c) => c.label).join(", ")}
@@ -264,15 +279,17 @@ export function ForkRow({
             {fork.preview && (
               <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">{fork.preview}</span>
             )}
-            <span data-row-when className="text-xs text-muted">
+            <span data-row-when className="mt-auto text-xs text-muted">
               {perFork ? "Last message " : ""}
               {perFork ? formatMoment(last) : formatWhen(last)}
             </span>
           </span>
         </button>
       </Tooltip>
-      {!perFork && <BranchesButton fork={fork} entity={entity} />}
-      <PinButton fork={fork} />
+      <div className="my-1 flex shrink-0 flex-col items-end justify-between self-stretch">
+        <PinButton fork={fork} />
+        {!perFork && <BranchesButton fork={fork} entity={entity} />}
+      </div>
     </div>
   )
 }
@@ -423,12 +440,14 @@ export function PinnedChats({
   chat = null,
   home = false,
   sortBy,
+  browse,
   onSortChange
 }: {
   pinsCollapsed: boolean
   entity?: EntityId | null
   chat?: ChatId | null
   home?: boolean
+  browse?: ChatBrowse | undefined
   sortBy?: ShellSort
   onSortChange?: (sort: ShellSort) => void
 }) {
@@ -439,7 +458,14 @@ export function PinnedChats({
   const [limit, setLimit] = useState(PAGE_ROWS)
   const action = useAction()
   const open = !home || !pinsCollapsed
-  const forks = useShellForks({ entity, chat, search: "", sort, sections: [{ id: "pinned", limit }] })
+  const forks = useShellForks({
+    entity,
+    chat,
+    search: "",
+    sort,
+    ...(browse ? { browse } : {}),
+    sections: [{ id: "pinned", limit }]
+  })
   const pins = forks.section("pinned")
   if (!pins.total) return null
   return (
@@ -493,6 +519,7 @@ const SECTIONS = {
 function Browser({ data }: { data: ShellLibrary }) {
   const { scope, setScope, grid, setGrid } = useShellNavigation()
   const [browse, setBrowse] = useSidebarBrowse()
+  const [chatBrowse, setChatBrowse] = useChatBrowse()
   const search = browse.search
   const setSearch = (search: string) => setBrowse({ search })
   const params = useParams({ strict: false }) as { chatId?: string }
@@ -505,7 +532,7 @@ function Browser({ data }: { data: ShellLibrary }) {
   const kind = scope.chat ? "chat" : scope.entity ? "character" : "all"
   const sections = SECTIONS[kind]
   // Each list's length, by scope and search: another scope or search starts from its first page.
-  const listKey = `${scope.entity}/${scope.chat}/${needle}`
+  const listKey = `${scope.entity}/${scope.chat}/${needle}/${JSON.stringify(chatBrowse)}`
   const [limits, setLimits] = useState<{ key: string; limits: Partial<Record<ShellSection, number>> }>({
     key: listKey,
     limits: {}
@@ -521,6 +548,7 @@ function Browser({ data }: { data: ShellLibrary }) {
     chat: scope.chat as ChatId | null,
     search: needle,
     sort: "recent",
+    ...(!grid && kind !== "chat" ? { browse: chatBrowse } : {}),
     sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
   })
   // The chat by its name, which all its branches share.
@@ -614,6 +642,12 @@ function Browser({ data }: { data: ShellLibrary }) {
         value={search}
         onChange={(e) => setSearch(e.currentTarget.value)}
       />
+      {!grid && kind !== "chat" && (
+        <SlotOutlet
+          slot={sidebarChatBrowse}
+          props={{ browse: chatBrowse, counts: forks.filterCounts, onChange: setChatBrowse }}
+        />
+      )}
       {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups includePersonas />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
       <div data-shell-list className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
@@ -641,6 +675,7 @@ function Browser({ data }: { data: ShellLibrary }) {
             {kind !== "chat" && (
               <PinnedChats
                 pinsCollapsed={data.pinsCollapsed}
+                browse={chatBrowse}
                 entity={scope.entity}
                 sortBy={browse.pinsSort}
                 onSortChange={(pinsSort) => setBrowse({ pinsSort })}

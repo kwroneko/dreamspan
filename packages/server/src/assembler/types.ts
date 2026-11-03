@@ -159,6 +159,8 @@ type BreakpointReason = "prefix" | "summary" | "history" | "pinned"
 
 export interface AssembledRequest {
   readonly summaryStart?: number
+  /** Pinned lore starts outside the Messages system parameter, independently of cache markers. */
+  readonly pinnedStart?: number
   readonly messages: ReadonlyArray<RequestMessage>
   /** Starts the model's reply, when the model can be prefilled; dropped and reported otherwise. */
   readonly prefill: string | null
@@ -228,6 +230,8 @@ export interface HistoryStart {
     readonly examples: number
     readonly noteBudget?: { readonly sizes: Readonly<Record<string, number>>; readonly allowance: number }
     readonly revision: number
+    /** Digest at the last assembled history marker, for exact-position cache reads. */
+    readonly cacheHistory?: string
     /**
      * Lore entries placed above the history, kept activated until its start next moves
      * (DESIGN §1.3); absent when lore goes only below the history.
@@ -635,6 +639,7 @@ export interface ModelInput {
   readonly prefill: "none" | "assistant" | "tool_schema"
   readonly continueUnavailable?: string | undefined
   readonly cacheBreakpoints: "auto" | "explicit" | "none"
+  readonly cacheLayout?: import("@rp/shared/providers.ts").CacheLayout
   /** The context window when some source reported it. */
   readonly context: number | null
   /** Where `context` came from, and the catalog entry when a catalog gave it; absent on older snapshots. */

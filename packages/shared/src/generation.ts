@@ -2,6 +2,7 @@ import { LcmDefaults, LcmSettingsChange, ModelChoice } from "./lcmSettings.ts"
 // What a user's generations use when a chat doesn't choose (DATA-MODEL §5.4): a default
 // model and a default preset, both the user's own.
 import { Schema } from "effect"
+import { EntityId } from "./chat.ts"
 import { RefId } from "./library.ts"
 import { ConnectionId } from "./providers.ts"
 
@@ -11,6 +12,8 @@ export const BUILTIN_PRESET_LABEL = "Default (built-in)"
 export class GenerationDefaults extends Schema.Class<GenerationDefaults>("GenerationDefaults")({
   /** The current account model; none, and replies cannot be generated. */
   model: Schema.NullOr(ModelChoice),
+  /** The account persona for new chats only; missing or null means no persona. */
+  persona: Schema.optionalKey(Schema.NullOr(EntityId)),
   lcm: Schema.optionalKey(LcmDefaults),
   /**
    * The decision model that judges soft refusals (spec/LCM.md §2.4); none, and only a
@@ -28,6 +31,7 @@ export class GenerationDefaults extends Schema.Class<GenerationDefaults>("Genera
  * summarizer (`lcm.fallback`); null removes either.
  */
 export const GenerationDefaultsChange = Schema.Struct({
+  persona: Schema.optionalKey(Schema.NullOr(EntityId)),
   model: Schema.optionalKey(Schema.NullOr(ModelChoice)),
   preset: Schema.optionalKey(Schema.NullOr(RefId)),
   judge: Schema.optionalKey(Schema.NullOr(ModelChoice)),

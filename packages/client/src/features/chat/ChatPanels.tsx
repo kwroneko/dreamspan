@@ -112,10 +112,13 @@ export function PanelToggles({
       <IconButton
         label={open === null ? "Chat panel" : "Hide panel"}
         hint={
-          open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
+          open === null
+            ? "Click to open the chat panel: cast, settings, lorebooks, notes and summaries"
+            : "Click to hide the chat panel"
         }
         icon="panel"
         aria-expanded={open !== null}
+        aria-pressed={open !== null}
         className={open === null ? "" : "bg-surface-raised text-text"}
         onClick={toggle}
       />
@@ -126,7 +129,9 @@ export function PanelToggles({
         variant="ghost"
         aria-expanded={open !== null}
         title={
-          open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
+          open === null
+            ? "Click to open the chat panel: cast, settings, lorebooks, notes and summaries"
+            : "Click to hide the chat panel"
         }
         className="h-8 px-2.5"
         onClick={toggle}
@@ -141,7 +146,7 @@ export function PanelToggles({
         <IconButton
           key={tab.value}
           label={tab.label}
-          hint={tab.descriptor.description ? `${tab.label}: ${tab.descriptor.description}` : tab.label}
+          hint={`Click to open ${tab.label}${tab.descriptor.description ? `: ${tab.descriptor.description}` : ""}`}
           icon={tab.descriptor.icon}
           onClick={() => onToggle(tab.value)}
         />
@@ -239,7 +244,6 @@ export function ChatSidePanel({
           onValueChange={onTab}
           label="Chat panel"
           moreLabel="More tools"
-          end={wide && <IconButton label="Close the panel" icon="close" className="shrink-0" onClick={onClose} />}
         />
       </div>
       <div className="border-b border-border px-2 pt-4">

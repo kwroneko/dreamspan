@@ -1,5 +1,6 @@
 // Card import: a file's bytes to our card document, the images it carries, and its import
 // report. The format is detected from the bytes, never trusted from the file name.
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { sourceTime } from "./sourceTime.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
@@ -142,7 +143,7 @@ const cardModifiedAt = (card: CardDoc) =>
 export const importCard = (bytes: Uint8Array, limits: Limits = defaultLimits): Effect.Effect<CardImport, FormatError> =>
   attempt(() => {
     if (bytes.byteLength > limits.maxFileBytes) {
-      fail("file.too_large", `The file is larger than ${limits.maxFileBytes} bytes.`)
+      fail("file.too_large", `The file is larger than ${formatByteSize(limits.maxFileBytes)}.`)
     }
     const issues = new ReportBuilder()
     const report = (version: string, container: string) => issues.build(`card-${version}-${container}`)

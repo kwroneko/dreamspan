@@ -8,6 +8,7 @@
 // moves with every commit of another connection, and the writer is one), so a screen's
 // several reads cost one.
 import { CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
+import { CHAT_FILTERS, type ChatBrowse, type ChatFilterCounts } from "@rp/shared/chatBrowse.ts"
 import { chatName } from "@rp/shared/chatName.ts"
 import { CardUsage, ShellCard, ShellFork, type ShellForksView, type ShellSection } from "@rp/shared/chatSetupApi.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
@@ -35,6 +36,8 @@ interface ShellState {
   readonly cards: ReadonlyArray<ShellCard>
   readonly personas: ReadonlyArray<ShellCard>
   readonly forks: ReadonlyArray<Fork>
+  readonly chatIndex: ReadonlyMap<string, Fork>
+  readonly pinnedChats: ReadonlySet<string>
   readonly pinsCollapsed: boolean
   readonly fresh: ReadonlyArray<ChatSummaries>
 }
@@ -92,8 +95,49 @@ const byTurn = (forks: ReadonlyArray<Fork>, entity: string) => {
 const categoryOf = (f: Fork, entity: string) =>
   f.activity.find((a) => a.entityId === entity)?.category ?? (f.departed.some((id) => id === entity) ? "was" : "with")
 
+/** Chat metrics come from the current path, and pins from any live branch. No message reads. */
+const inChatFilter = (f: Fork, filter: ChatBrowse["filter"], pinned: ReadonlySet<string>) =>
+  filter === "pinned"
+    ? pinned.has(f.chat.id)
+    : filter === "groups"
+      ? f.cast.length >= 2
+      : filter === "solo"
+        ? f.cast.length === 1
+        : filter === "branches"
+          ? f.branches > 1
+          : true
+
+const browseChats = (rows: ReadonlyArray<Fork>, browse: ChatBrowse, state: ShellState) => {
+  const metric = (f: Fork) => {
+    const current = state.chatIndex.get(f.chat.id)!
+    switch (browse.sort) {
+      case "recent":
+        return current.chatRecentAt
+      case "started":
+        return current.chat.createdAt ?? current.createdAt
+      case "messages":
+        return current.messages
+      case "branches":
+        return current.branches
+      case "name":
+        return current.chatName
+    }
+  }
+  return rows
+    .filter((f) => inChatFilter(state.chatIndex.get(f.chat.id)!, browse.filter, state.pinnedChats))
+    .sort((a, b) => {
+      const x = metric(a),
+        y = metric(b)
+      const order = typeof x === "string" && typeof y === "string" ? x.localeCompare(y) : Number(y) - Number(x)
+      return (
+        (browse.reversed ? -order : order) || a.chat.id.localeCompare(b.chat.id) || a.forkId.localeCompare(b.forkId)
+      )
+    })
+}
+
 /** Each of `view`'s sections over `forks` (newest first), unlimited. */
-const sectionRows = (forks: ReadonlyArray<Fork>, view: ShellForksView, id: ShellSection): ReadonlyArray<Fork> => {
+const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection): ReadonlyArray<Fork> => {
+  const forks = state.forks
   const needle = view.search.trim().toLowerCase()
   const chats = view.chats === undefined ? null : new Set<string>(view.chats)
   const scoped = forks.filter(
@@ -111,22 +155,28 @@ const sectionRows = (forks: ReadonlyArray<Fork>, view: ShellForksView, id: Shell
   switch (id) {
     case "pinned":
       return sortBy(
-        scoped.filter((f) => f.pinned),
+        scoped.filter(
+          (f) =>
+            f.pinned &&
+            (!view.browse || inChatFilter(state.chatIndex.get(f.chat.id)!, view.browse.filter, state.pinnedChats))
+        ),
         view.sort
       )
     case "chats":
-      return perChat(scoped)
+      return view.browse ? browseChats(perChat(scoped), view.browse, state) : perChat(scoped)
     case "just":
     case "with":
     case "was":
-      return view.entity === null
-        ? []
-        : perChat(
-            byTurn(
-              scoped.filter((f) => categoryOf(f, view.entity!) === id),
-              view.entity
-            )
+      if (view.entity === null) return []
+      {
+        const rows = perChat(
+          byTurn(
+            scoped.filter((f) => categoryOf(f, view.entity!) === id),
+            view.entity
           )
+        )
+        return view.browse ? browseChats(rows, view.browse, state) : rows
+      }
     case "current":
       return scoped.filter((f) => f.current)
     case "peers":
@@ -459,6 +509,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         cards: shellCards.filter((c) => !byCard.get(c.card.entityId)!.persona),
         personas: shellCards.filter((c) => byCard.get(c.card.entityId)!.persona),
         forks,
+        chatIndex: new Map(perChat(forks).map((f) => [f.chat.id, f])),
+        pinnedChats: new Set(forks.filter((f) => f.pinned).map((f) => f.chat.id)),
         pinsCollapsed: prefs?.pins_collapsed === 1,
         fresh: [...fresh].map(([chatId, list]) => ({
           chatId,
@@ -490,10 +542,25 @@ export const makeShellReadHandlers = Effect.gen(function* () {
     ShellForks: ({ userId, view }) =>
       Effect.map(shellState(userId, false), (state) => {
         const sections = view.sections.map(({ id, limit }) => {
-          const rows = sectionRows(state.forks, view, id)
+          const rows = sectionRows(state, view, id)
           return { id, rows: rows.slice(0, limit), total: rows.length }
         })
+        // Scope once without the search. Counts represent chats, even if many branches match.
+        const chatIds = view.chats === undefined ? null : new Set<string>(view.chats)
+        const scoped = perChat(
+          state.forks.filter(
+            (f) =>
+              (view.entity === null || f.joined.includes(view.entity)) &&
+              (view.chat === null || f.chat.id === view.chat) &&
+              (chatIds === null || chatIds.has(f.chat.id))
+          )
+        )
+        const filterCounts = { all: 0, pinned: 0, groups: 0, solo: 0, branches: 0 } satisfies ChatFilterCounts
+        for (const row of scoped)
+          for (const filter of CHAT_FILTERS)
+            if (inChatFilter(state.chatIndex.get(row.chat.id)!, filter, state.pinnedChats)) filterCounts[filter]++
         return {
+          filterCounts,
           sections: sections.map((section) => ({ ...section, rows: section.rows.map(wire) })),
           people: peopleOf(sections.flatMap((section) => section.rows)),
           fresh: state.fresh

@@ -221,16 +221,17 @@ function Limit({
             <span className="text-xs text-muted">{source}</span>
           </span>
         </div>
-        {!open && (
-          <IconButton
-            icon="edit"
-            label={`Set the ${label.toLowerCase()} yourself`}
-            onClick={() => {
-              focusing.current = true
-              setEditing(true)
-            }}
-          />
-        )}
+        <IconButton
+          icon="edit"
+          disabled={open}
+          focusableWhenDisabled
+          hint={open ? "This limit is already open for editing." : `Set the ${label.toLowerCase()} yourself.`}
+          label={`Set the ${label.toLowerCase()} yourself`}
+          onClick={() => {
+            focusing.current = true
+            setEditing(true)
+          }}
+        />
       </div>
       {open && (
         <div className="flex flex-col gap-2 border-l-2 border-border pl-3">

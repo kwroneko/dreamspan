@@ -79,16 +79,18 @@ async function seed(page: Page, name: string) {
 async function crop(page: Page, scope: Locator, name: string) {
   if (!work) return
   mkdirSync(work, { recursive: true })
-  await scope.scrollIntoViewIfNeeded()
+  const title = name.startsWith("book-") ? scope.locator("[data-editor-header]").first() : scope
+  await title.evaluate((el) => el.scrollIntoView({ block: "start", behavior: "instant" }))
   const box = await scope.boundingBox()
+  const titleBox = await title.boundingBox()
   if (box)
     await page.screenshot({
       path: join(work, `${before ? "before" : "after"}-${name}.png`),
       clip: {
         x: Math.max(0, box.x),
-        y: Math.max(0, box.y),
+        y: Math.max(0, titleBox!.y),
         width: Math.min(box.width, page.viewportSize()!.width - Math.max(0, box.x)),
-        height: Math.min(box.height, 250, page.viewportSize()!.height - Math.max(0, box.y))
+        height: Math.min(box.height, 250, page.viewportSize()!.height - Math.max(0, titleBox!.y))
       }
     })
 }
@@ -150,7 +152,7 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
             expect(at.x - controls.x - controls.width).toBeGreaterThanOrEqual(0)
             expect(at.x - controls.x - controls.width).toBeLessThanOrEqual(8)
           }
-          await header.scrollIntoViewIfNeeded()
+          await header.evaluate((el) => el.scrollIntoView({ block: "start", behavior: "instant" }))
           const position = await cluster.boundingBox()
           const bounds = await header.boundingBox()
           expect(position!.x + position!.width).toBeGreaterThan(bounds!.x + bounds!.width - 100)
@@ -188,7 +190,7 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
             await expect(cluster.getByRole("button", { name, exact: true })).toBeEnabled()
             await expect(cluster.getByRole("button", { name, exact: true })).toHaveAccessibleDescription(hint)
           }
-          await header.scrollIntoViewIfNeeded()
+          await header.evaluate((el) => el.scrollIntoView({ block: "start", behavior: "instant" }))
           const dirtyPosition = await cluster.boundingBox()
           expect(dirtyPosition!.width).toBe(position!.width)
           expect(dirtyPosition!.height).toBe(position!.height)

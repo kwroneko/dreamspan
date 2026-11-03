@@ -3,7 +3,7 @@ import { Fieldset as BaseFieldset } from "@base-ui/react/fieldset"
 import { Input as BaseInput } from "@base-ui/react/input"
 import { useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react"
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
-import { AboutHint } from "./AboutHint.tsx"
+import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { FieldFrame, framedControl } from "./FieldFrame.tsx"
 
 // 16px text on touch screens, so iOS doesn't zoom into a focused field.
@@ -40,8 +40,9 @@ export function Field({
   return (
     <BaseField.Root invalid={error ? true : undefined} className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
       {about ? (
-        <div className={labelHidden ? "sr-only" : "flex items-center gap-1"}>
-          <BaseField.Label className="text-sm font-medium text-text">{label}</BaseField.Label>
+        <div className={labelHidden ? "sr-only" : "text-sm leading-5"}>
+          <BaseField.Label className="inline text-sm font-medium text-text">{label}</BaseField.Label>
+          {"\u00a0"}
           <AboutHint heading={aboutLabel ?? (typeof label === "string" ? label : "this field")}>{about}</AboutHint>
         </div>
       ) : (
@@ -267,14 +268,17 @@ export function Fieldset({
   children: ReactNode
   className?: string
 }) {
-  const head = <BaseFieldset.Legend className="text-sm font-medium text-text">{legend}</BaseFieldset.Legend>
+  const head = <BaseFieldset.Legend className="inline text-sm font-medium text-text">{legend}</BaseFieldset.Legend>
   return (
     <BaseFieldset.Root className={`flex min-w-0 flex-col gap-2 ${className}`}>
       {about ? (
-        <div className="flex items-center gap-1">
+        <LabelWithHelp
+          help={
+            <AboutHint heading={aboutLabel ?? (typeof legend === "string" ? legend : "this group")}>{about}</AboutHint>
+          }
+        >
           {head}
-          <AboutHint heading={aboutLabel ?? (typeof legend === "string" ? legend : "this group")}>{about}</AboutHint>
-        </div>
+        </LabelWithHelp>
       ) : (
         head
       )}

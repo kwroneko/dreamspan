@@ -128,11 +128,12 @@ export const registerRewrites = () => [
     id: "message.original-text",
     order: 91,
     group: "context",
-    available: ({ entry, generating }) =>
-      !generating &&
-      (entry.version.rewrite?.raw === true ||
-        entry.version.rewrite?.rawReasoning === true ||
-        entry.version.rewrite?.rawSections === true),
+    disabled: ({ generating }) =>
+      generating ? "Wait for this reply to finish before reading its original text." : null,
+    available: ({ entry }) =>
+      entry.version.rewrite?.raw === true ||
+      entry.version.rewrite?.rawReasoning === true ||
+      entry.version.rewrite?.rawSections === true,
     describe: viewOf(({ openDialog }) => ({
       label: "Show the original text",
       icon: "original",

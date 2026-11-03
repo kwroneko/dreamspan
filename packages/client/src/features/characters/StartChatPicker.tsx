@@ -2,6 +2,7 @@
 // sort (no Groups: a group chat starts from its group), that opens a new chat with the one
 // picked (its greeting; nothing is saved until the first send, DESIGN §2.1). Registered in the
 // sidebar's actions slot, so a plugin can replace it.
+import { CardSurface } from "../cardForks/surfaces.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { useAtomValue } from "@effect/atom-react"
@@ -93,8 +94,10 @@ function Choices({
               </span>
               {/* Only personas are listed under Personas, so none is marked there. */}
               {c.persona && browse.filter !== "personas" && <PersonaBadge />}
+              <CardSurface placement="persona-badge" entityId={c.card.entityId} />
             </Link>
             <FavouriteStar card={c} />
+            {c.persona && <CardSurface placement="persona-menu" entityId={c.card.entityId} label={c.card.name} />}
           </li>
         )
       })}

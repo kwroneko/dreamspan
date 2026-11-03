@@ -472,7 +472,7 @@ export function Editor({
                     className={`h-7! shrink-0 px-2! ${pressedButtonClass}`}
                     aria-pressed={searching}
                     aria-controls="preset-search"
-                    hint="Search and replace in the entries' text, their keys, or anywhere in the book."
+                    hint={searching ? "Click to close search and replace" : "Click to open search and replace"}
                     onClick={() => setSearching(!searching)}
                   >
                     <Icon name="replace" />

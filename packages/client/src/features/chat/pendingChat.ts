@@ -9,23 +9,6 @@ import type { CardForChat } from "@rp/shared/chatSetupApi.ts"
 import type { Caller } from "../editor/caller.ts"
 import type { ChatView, Outcome } from "./session.ts"
 
-const PERSONA_KEY = "rp.lastPersona"
-
-const savedPersona = () => {
-  try {
-    return localStorage.getItem(PERSONA_KEY)
-  } catch {
-    return null
-  }
-}
-const savePersona = (id: string | null) => {
-  try {
-    localStorage.setItem(PERSONA_KEY, id ?? "none")
-  } catch {
-    // Not remembered, then.
-  }
-}
-
 export interface PendingState {
   /** Each character's card, in the order they greet: the chat's characters. */
   readonly greeters: ReadonlyArray<CardForChat>
@@ -66,14 +49,15 @@ export class PendingChat {
     cards: ReadonlyArray<CastCard>,
     greeters: ReadonlyArray<CardForChat>,
     group: PendingGroup | null,
-    call: Caller
+    call: Caller,
+    defaultPersona: EntityId | null = null
   ) {
     this.cards = cards
     this.group = group
     this.call = call
-    const saved = savedPersona()
     const persona =
-      cards.find((card) => card.entityId === saved)?.entityId ?? cards.find((card) => card.persona)?.entityId ?? null
+      [...cards, ...greeters.map((item) => item.card)].find((card) => card.entityId === defaultPersona && card.persona)
+        ?.entityId ?? null
     const state = { greeters, persona }
     this.state = {
       ...state,
@@ -114,7 +98,6 @@ export class PendingChat {
   }
 
   setPersona(id: EntityId | null) {
-    savePersona(id)
     this.change((current) => ({ ...current, persona: id }))
   }
 

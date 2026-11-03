@@ -1,3 +1,4 @@
+import { ChatBrowseBar, sidebarChatBrowse } from "./ChatBrowseBar.tsx"
 import { registerCharacterPanels } from "./panels.tsx"
 import { routes } from "../../routes.tsx"
 import { CardPage } from "./CardPage.tsx"
@@ -9,11 +10,13 @@ import { sidebarFoot } from "./homeSlots.ts"
 import { OpenChatBranches } from "./ShellBrowser.tsx"
 import { homeSearch } from "./homeSearch.ts"
 import { cardContributions } from "../cardForks/surfaces.tsx"
+import { registerDefaultPersona } from "./defaultPersona.tsx"
 import { PersonaFolderSwitch } from "./personaFolder.tsx"
 import { CardChatsLink, CastChatsLink } from "./chatLinks.tsx"
 import { castMemberNavigation } from "../chat/presentation.tsx"
 
 export const register = () => {
+  registerDefaultPersona()
   cardContributions.register({
     id: "characters.chats-link",
     placement: "chats",
@@ -21,6 +24,7 @@ export const register = () => {
     component: CardChatsLink
   })
   castMemberNavigation.register({ id: "characters.chats-link", order: 10, component: CastChatsLink })
+  sidebarChatBrowse.register({ id: "chats.browse", order: 10, component: ChatBrowseBar })
   // The Persona switch in a card's header and on its page (personaFolder.tsx).
   cardContributions.register({
     id: "characters.persona-folder",

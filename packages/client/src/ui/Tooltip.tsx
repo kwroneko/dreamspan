@@ -54,7 +54,7 @@ export function Tooltip({
 }
 
 export const iconButtonClass = (tone: "muted" | "danger" = "muted") =>
-  `inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors select-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40 data-popup-open:bg-hover data-popup-open:text-text ${
+  `inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors select-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40 data-disabled:opacity-40 data-popup-open:bg-hover data-popup-open:text-text ${
     tone === "danger" ? "text-muted hover:text-danger" : "text-muted hover:text-text"
   }`
 
@@ -101,7 +101,7 @@ export function SquareIconButton({
 }
 
 /**
- * An icon button that toggles (`pressed`), with its label as its name and tooltip. Disabled,
+ * An icon button that toggles (`pressed`): label names it, hint explains the next click. Disabled,
  * it stays focusable and hoverable, so its tooltip can still say why it can't be used.
  * `className` places it and sets when it shows.
  */
@@ -109,6 +109,7 @@ export function ToggleIconButton({
   label,
   icon,
   pressed,
+  hint,
   disabled = false,
   className = "",
   onClick
@@ -116,12 +117,13 @@ export function ToggleIconButton({
   label: string
   icon: IconName
   pressed: boolean
+  hint?: ReactNode
   disabled?: boolean
   className?: string
   onClick: () => void
 }) {
   return (
-    <Tooltip label={label}>
+    <Tooltip label={hint ?? label}>
       <BaseButton
         aria-label={label}
         aria-pressed={pressed}

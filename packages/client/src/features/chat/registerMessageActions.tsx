@@ -1,6 +1,6 @@
 import { ForkNotesDialog } from "./ForkNotesDialog.tsx"
 import { Link } from "@tanstack/react-router"
-import { canContinue, ContinueView, runContinue } from "./ContinueAction.tsx"
+import { continueUnavailable, ContinueView, runContinue } from "./ContinueAction.tsx"
 import { copy } from "./copy.ts"
 import { invokeMessageAction, messageActions, viewOf } from "./messageActions.tsx"
 import type { ChatSession } from "./session.ts"
@@ -28,7 +28,7 @@ export const registerMessageActions = () => [
     order: 10,
     group: "change",
     pinned: true,
-    available: ({ generating }) => !generating,
+    disabled: ({ generating }) => (generating ? "Wait for this reply to finish before editing it." : null),
     run: ({ session, entry }) => {
       session.openEditor({ _tag: "Edit", versionId: entry.version.id }, entry.version.content, entry.slotId)
     },
@@ -47,7 +47,7 @@ export const registerMessageActions = () => [
     order: 20,
     group: "change",
     pinned: true,
-    available: canContinue,
+    disabled: continueUnavailable,
     run: runContinue,
     describe: ContinueView
   }),
@@ -97,8 +97,8 @@ export const registerMessageActions = () => [
       label: hidden ? "Show to the model again" : "Hide from the model",
       icon: hidden ? "eye" : "ghost",
       hint: hidden
-        ? "Send this message to the model again with the rest of the chat."
-        : "Leave this message out of what the model reads. It stays in the chat, marked Hidden.",
+        ? "Click to send this message to the model again."
+        : "Click to hide this message from the model. The message stays in the chat.",
       onSelect: async () => report(await session.setHidden(entry, !hidden))
     }))
   }),
@@ -163,7 +163,7 @@ export const registerMessageActions = () => [
           }
         : {
             label: "Delete message",
-            icon: "trash-all",
+            icon: "trash",
             tone: "danger",
             hint: "Moves this message to the bin, from which it can be restored later.",
             onSelect: async () => toast(await session.deleteMessage(entry.slotId))
@@ -174,9 +174,9 @@ export const registerMessageActions = () => [
     id: "message.delete-all",
     order: 111,
     group: "delete",
-    available: ({ entry }) => entry.versionCount > 1,
+    disabled: ({ entry }) => (entry.versionCount < 2 ? "This message has only one version; use Delete message." : null),
     describe: viewOf(({ session, entry, toast }) => ({
-      label: "Delete message",
+      label: "Delete all versions",
       icon: "trash-all",
       tone: "danger",
       hint: "Moves this message and all its versions to the bin, from which it can be restored later.",

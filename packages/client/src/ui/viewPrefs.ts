@@ -1,6 +1,6 @@
 // Account-owned viewer choices. Each account has its own query, including when users
 // sign out and back in in the same tab. Writes patch one choice in the writer transaction.
-import { useAtomValue } from "@effect/atom-react"
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { DEFAULT_DISPLAY_PREFS, type DisplayPrefsChange } from "@rp/shared/chatApi.ts"
 import { useEffect, useSyncExternalStore } from "react"
 import { Effect } from "effect"
@@ -9,6 +9,11 @@ import { useAction } from "../actions.tsx"
 import { AppClient } from "../rpc.ts"
 import { useSession } from "../session.ts"
 import { PreferenceWrites } from "./preferenceWrites.ts"
+
+const channel =
+  typeof window === "undefined" || typeof BroadcastChannel === "undefined"
+    ? null
+    : new BroadcastChannel("rp.displayPrefs")
 
 const writesFor = Atom.family((_userId: string) => Atom.make(new PreferenceWrites()))
 const prefsFor = Atom.family((userId: string) =>
@@ -28,6 +33,15 @@ const prefsFor = Atom.family((userId: string) =>
 export function useViewPrefs() {
   const userId = useSession().user.id
   const result = useAtomValue(prefsFor(userId))
+  const refresh = useAtomRefresh(prefsFor(userId))
+  useEffect(() => {
+    channel?.addEventListener("message", refresh)
+    window.addEventListener("focus", refresh)
+    return () => {
+      channel?.removeEventListener("message", refresh)
+      window.removeEventListener("focus", refresh)
+    }
+  }, [refresh])
   const action = useAction()
   const writes = useAtomValue(writesFor(userId))
   const optimistic = useSyncExternalStore(writes.subscribe, writes.snapshot)
@@ -48,7 +62,15 @@ export function useViewPrefs() {
     change: (change: DisplayPrefsChange, sent: DisplayPrefsChange = change) =>
       writes.change(change, (acknowledge) =>
         action.run(
-          (client) => client("SetDisplayPrefs", { prefs: sent }).pipe(Effect.tap(() => Effect.sync(acknowledge))),
+          (client) =>
+            client("SetDisplayPrefs", { prefs: sent }).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  acknowledge()
+                  channel?.postMessage("changed")
+                })
+              )
+            ),
           ["displayPrefs"]
         )
       )

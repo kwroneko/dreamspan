@@ -137,6 +137,8 @@ for (const width of [1440, 390]) {
       await expect(created).toHaveAccessibleDescription(/^By when the card was created$/)
     }
     await shoot(page, `characters-added-${width}`)
+    await main.getByRole("button", { name: "Order: Newest first", exact: true }).hover()
+    await expect(page.getByText("Click to sort oldest first")).toBeVisible()
     await main.getByRole("button", { name: "Order: Newest first", exact: true }).click()
     await expect.poll(() => labels(tiles(main))).toEqual(["Bram", "Dora", "Ava", "Cleo"])
     await expect(main.getByRole("button", { name: "Order: Oldest first", exact: true })).toBeVisible()

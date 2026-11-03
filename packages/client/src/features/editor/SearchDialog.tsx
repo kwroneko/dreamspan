@@ -1,45 +1,17 @@
 // Search and replace across an editor's text fields, as plain text or a regular expression
 // (DESIGN §6.2, §5.3). Replacing edits each field through its draft, like typing would.
 import { type FormEvent, type ReactNode, useRef, useState, useSyncExternalStore } from "react"
+import { SearchReplace } from "../../ui/SearchReplace.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
 import { InlinePanel } from "../../ui/InlinePanel.tsx"
-import { Field, Input } from "../../ui/Field.tsx"
 import { Alert } from "../../ui/Surface.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
 import { editorTextFields, type Searchable, searchable } from "./fields.ts"
 import type { SearchMatch } from "./searchNavigation.ts"
 import { inScope, rememberedScope, rememberScope, type SearchScopes } from "./searchScopes.ts"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { runSearch, type SearchResponse } from "./search.ts"
 import { type EditorStore, useWorkingDoc } from "./store.ts"
-
-/**
- * An option with its explanation on hover and focus: under the label it would make the
- * preset's sticky search bar too tall.
- */
-function SearchOption({
-  checked,
-  onCheckedChange,
-  hint,
-  children
-}: {
-  checked: boolean
-  onCheckedChange: (checked: boolean) => void
-  hint: string
-  children: ReactNode
-}) {
-  return (
-    <Tooltip label={hint}>
-      <span className="inline-flex">
-        <Checkbox checked={checked} onCheckedChange={onCheckedChange}>
-          {children}
-        </Checkbox>
-      </span>
-    </Tooltip>
-  )
-}
 
 /** Matches listed at most; Replace all still replaces every one. */
 const MAX_MATCHES = 500
@@ -91,13 +63,9 @@ export function SearchDialog({
   const [preserveCase, setPreserveCase] = useState(false)
   const [regex, setRegex] = useState(false)
   const [caseSensitive, setCaseSensitive] = useState(false)
-  // On a phone the options fold away, so the sticky bar leaves room for the document.
-  const [options, setOptions] = useState(false)
-  const chosenOptions = [wholeWord, preserveCase, regex, caseSensitive].filter(Boolean).length
   const [found, setFound] = useState<Found | null>(null)
   const [pending, setPending] = useState(false)
   const [scope, setScope] = useState(() => (scopes ? rememberedScope(scopes) : ""))
-  const chosen = chosenOptions + (scopes && scope !== scopes.initial ? 1 : 0)
   const fieldsOf = (doc: Parameters<typeof searchable>[1], entries?: Parameters<typeof searchable>[2]) =>
     inScope(searchable(store.snapshot!.ref.kind, doc, entries), scopes, scope)
 
@@ -182,16 +150,23 @@ export function SearchDialog({
   return wrap(
     <>
       <form onSubmit={(event) => void submit(event)} className="flex min-w-0 flex-col gap-2">
-        <div className="grid min-w-0 gap-2 @2xl:grid-cols-2">
-          <div className="flex min-w-0 items-end gap-2">
-            <Field label="Find" labelHidden={inline} className="flex-1">
-              <Input
-                {...(inline ? { placeholder: "Find" } : {})}
-                value={find}
-                onChange={(event) => setFind(event.currentTarget.value)}
-                className={regex ? "font-mono" : ""}
-              />
-            </Field>
+        <SearchReplace
+          find={find}
+          setFind={setFind}
+          replace={replace}
+          setReplace={setReplace}
+          wholeWord={wholeWord}
+          setWholeWord={setWholeWord}
+          preserveCase={preserveCase}
+          setPreserveCase={setPreserveCase}
+          regex={regex}
+          setRegex={setRegex}
+          caseSensitive={caseSensitive}
+          setCaseSensitive={setCaseSensitive}
+          inline={inline}
+          idPrefix={idPrefix}
+          scopeChanged={!!scopes && scope !== scopes.initial}
+          findActions={
             <Button
               type="submit"
               variant="primary"
@@ -201,15 +176,8 @@ export function SearchDialog({
             >
               Find
             </Button>
-          </div>
-          <div className="flex min-w-0 items-end gap-2">
-            <Field label="Replace with" labelHidden={inline} className="flex-1">
-              <Input
-                {...(inline ? { placeholder: "Replace with" } : {})}
-                value={replace}
-                onChange={(event) => setReplace(event.currentTarget.value)}
-              />
-            </Field>
+          }
+          replaceActions={
             <Button
               disabled={find === "" || !response?.ok || response.matches.length === 0}
               pending={pending}
@@ -218,29 +186,9 @@ export function SearchDialog({
             >
               Replace all
             </Button>
-            {/* On a phone the options fold behind this, beside the fields, keeping the bar short. */}
-            {inline && (
-              <Button
-                variant="ghost"
-                className="px-2! sm:hidden"
-                aria-expanded={options}
-                aria-controls={`${idPrefix}-options`}
-                hint="Shows where to look and how to match."
-                onClick={() => setOptions(!options)}
-              >
-                Options{chosen > 0 ? ` (${chosen})` : ""}
-              </Button>
-            )}
-          </div>
-        </div>
-        <div
-          className={`${inline && !options ? "hidden sm:flex" : "flex"} min-w-0 flex-wrap items-center gap-x-4 gap-y-2`}
-        >
-          <div
-            id={`${idPrefix}-options`}
-            className={`${inline ? `${options ? "flex" : "hidden"} sm:flex` : "flex"} min-w-0 flex-wrap items-center gap-x-4 gap-y-2`}
-          >
-            {scopes && (
+          }
+          scopeControl={
+            scopes ? (
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="text-sm text-muted">Look in</span>
                 <Segmented
@@ -258,37 +206,9 @@ export function SearchDialog({
                   }))}
                 />
               </div>
-            )}
-            <SearchOption
-              checked={wholeWord}
-              onCheckedChange={setWholeWord}
-              hint="Only where it isn't part of a longer word."
-            >
-              Whole word
-            </SearchOption>
-            <SearchOption
-              checked={preserveCase}
-              onCheckedChange={setPreserveCase}
-              hint="The replacement takes each match's case: all capitals, all lower case, or a capital first."
-            >
-              Preserve case
-            </SearchOption>
-            <SearchOption
-              checked={regex}
-              onCheckedChange={setRegex}
-              hint="Find is a JavaScript regular expression; Replace with can use $1 or $<name> for its groups."
-            >
-              Regular expression
-            </SearchOption>
-            <SearchOption
-              checked={caseSensitive}
-              onCheckedChange={setCaseSensitive}
-              hint="Capitals and lower case count as different letters."
-            >
-              Match case
-            </SearchOption>
-          </div>
-        </div>
+            ) : null
+          }
+        />
       </form>
       {response && !response.ok && (
         <Alert tone="danger" title="The search didn't run">

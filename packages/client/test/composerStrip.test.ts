@@ -101,8 +101,14 @@ describe("strip and box placements", () => {
   const ids = (placement: Parameters<typeof availableComposerControls>[0], c: ComposerControlContext) =>
     availableComposerControls(placement, c).map((entry) => entry.id)
 
-  it("puts the next-reply chips in the strip, Next and Reply now only with a choice of who replies", () => {
-    expect(ids("strip", context(false, 1))).toEqual(["composer.model", "composer.preset", "composer.cache"])
+  it("puts the next-reply chips in the strip, Next and Reply now retaining their places without a choice", () => {
+    expect(ids("strip", context(false, 1))).toEqual([
+      "composer.model",
+      "composer.preset",
+      "composer.cache",
+      "composer.next",
+      "composer.reply-now"
+    ])
     expect(ids("strip", context(false, 3))).toEqual([
       "composer.model",
       "composer.preset",
@@ -131,7 +137,9 @@ describe("strip and box placements", () => {
       "composer.model",
       "composer.preset",
       "composer.cache",
-      "synthetic.chip"
+      "synthetic.chip",
+      "composer.next",
+      "composer.reply-now"
     ])
     expect(ids("tools", context(true, 1))).toEqual(["synthetic.chip", "composer.history"])
     close()

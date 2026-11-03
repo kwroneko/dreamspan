@@ -1,6 +1,7 @@
 import { utilityMacros } from "@rp/shared/macros/builtins/utility.ts"
 import { parse, type Node } from "@rp/shared/macros/parse.ts"
 import type { PresetPrompt } from "@rp/shared/docs/preset.ts"
+import { AboutHint } from "../../ui/AboutHint.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { registry } from "../chat/macros.ts"
@@ -12,32 +13,125 @@ const slots: Record<string, readonly [string, string]> = {
   enhanceDefinitions: ["Enhance definitions", "Instructions for expanding the character definitions."]
 }
 const markers: Record<string, readonly [string, IconName, string]> = {
-  worldInfoBefore: ["World Info before", "insert-above", "Filled from lorebook entries placed before the definitions."],
-  worldInfoAfter: ["World Info after", "insert-below", "Filled from lorebook entries placed after the definitions."],
-  charDefinitions: ["Definitions", "people", "Filled from every cast card's definitions."],
-  charDescription: ["Description", "preset", "Filled from the cast cards' descriptions."],
-  charPersonality: ["Personality", "reasoning", "Filled from the cast cards' personalities."],
-  scenario: ["Scenario", "guidance", "Filled from the cast cards' scenarios."],
-  personaDescription: ["Persona", "model", "Filled from your cards' descriptions."],
-  dialogueExamples: ["Examples", "type", "Filled from the cast cards' example dialogues."],
-  newestMessage: ["Newest message", "continue", "Filled from the newest chat message."],
-  summaries: ["Summaries", "summary", "Filled from the chat's summary layer."]
+  worldInfoBefore: ["World Info before", "insert-above", "Lorebook entries placed before the character definitions"],
+  worldInfoAfter: ["World Info after", "insert-below", "Lorebook entries placed after the character definitions"],
+  charDefinitions: [
+    "Definitions",
+    "people",
+    "Each character's Description, Personality and Scenario, and your persona's Description, from their cards"
+  ],
+  charDescription: ["Description", "preset", "Each character's Description, from their cards"],
+  charPersonality: ["Personality", "reasoning", "Each character's Personality, from their cards"],
+  scenario: ["Scenario", "guidance", "Each character's Scenario, from their cards"],
+  personaDescription: ["Persona", "model", "Your persona's Description, from its card"],
+  dialogueExamples: ["Examples", "type", "Each character's example messages, from their cards"],
+  newestMessage: ["Newest message", "continue", "The newest message of the chat"],
+  summaries: ["Summaries", "summary", "The chat's summaries of earlier messages"]
 }
 
 export function promptKind(prompt: PresetPrompt) {
   if (prompt.identifier === "chatHistory")
-    return { label: "Chat history", icon: "chat" as const, hint: "Filled from the chat's messages, oldest first." }
+    return { label: "Chat history", icon: "chat" as const, hint: "The messages of the chat" }
   const marker = markers[prompt.identifier]
   if (prompt.marker)
     return {
       label: marker?.[0] ?? prompt.name,
       icon: marker?.[1] ?? "insert",
-      hint: marker?.[2] ?? "Filled from the current chat."
+      hint: marker?.[2] ?? "No content source"
     }
   const slot = slots[prompt.identifier]
   return slot || prompt.system_prompt
     ? { label: slot?.[0] ?? prompt.name, hint: slot?.[1] ?? "Built-in instructions for this preset slot." }
     : null
+}
+
+const sourceHelp: Record<string, readonly [string, string, string?]> = {
+  charDescription: [
+    "each character's Description from their cards",
+    "Edit Description in each character's card, Definition tab.",
+    "Includes notes placed with the definitions."
+  ],
+  charPersonality: [
+    "each character's Personality from their cards",
+    "Edit Personality in each character's card, Definition tab.",
+    "The preset's personality format applies to the combined text."
+  ],
+  scenario: [
+    "each character's Scenario from their cards",
+    "Edit Scenario in each character's card, Definition tab.",
+    "The preset's scenario format applies to the combined text."
+  ],
+  personaDescription: [
+    "your persona's Description from its card",
+    "Edit Description in your persona's card, Definition tab.",
+    "Includes notes placed with the definitions."
+  ],
+  charDefinitions: [
+    "the characters' definitions and your persona's Description from their cards",
+    "Edit the characters' Description, Personality and Scenario, and the persona's Description, in their cards' Definition tabs.",
+    "Includes notes placed with the definitions; the separate field placeholders stay empty while Definitions is enabled."
+  ],
+  dialogueExamples: [
+    "each character's example messages from their cards",
+    "Edit Example messages in each character's card, Definition tab.",
+    "Includes lorebook entries placed around examples; nothing is sent when examples are stripped."
+  ],
+  worldInfoBefore: [
+    "lorebook entries placed before the character definitions",
+    "Edit the entries in the chat's lorebooks.",
+    "Entries move below the history when lorebooks are set to appear only there."
+  ],
+  worldInfoAfter: [
+    "lorebook entries placed after the character definitions",
+    "Edit the entries in the chat's lorebooks.",
+    "Entries move below the history when lorebooks are set to appear only there."
+  ],
+  chatHistory: [
+    "the chat's messages",
+    "Edit the messages in the chat.",
+    "Older messages may be replaced by summaries or left out to fit the context; Newest message has its own placement."
+  ],
+  newestMessage: ["the newest message of the chat", "Edit the message in the chat."],
+  summaries: ["the chat's summaries of earlier messages", "Edit the summaries in the chat's Summaries tab."]
+}
+
+export function placeholderHelp(identifier: string, byDefinitions = false): string {
+  const help = sourceHelp[identifier]
+  if (!help)
+    return "This placeholder has no content source in the app, so no text is inserted when a request is built. There is no text to edit here or in the preset."
+  const [source, edit, setting] = help
+  const detail = byDefinitions
+    ? "This content is sent through the enabled Definitions block instead, including notes placed with the definitions."
+    : setting
+  return [`Each request inserts ${source}; this text isn't from the preset and can't be edited here.`, edit, detail]
+    .filter(Boolean)
+    .join(" ")
+}
+
+export function PlaceholderSource({
+  identifier,
+  byDefinitions = false,
+  heading,
+  source,
+  about
+}: {
+  identifier: string
+  byDefinitions?: boolean
+  heading?: string
+  source?: string
+  about?: string
+}) {
+  const kind = promptKind({ identifier, marker: true } as PresetPrompt)
+  return (
+    <span className="mr-1 mb-1 flex min-w-0 items-start gap-1">
+      <span data-placeholder-source className="min-w-0 text-xs leading-5 text-muted italic [overflow-wrap:anywhere]">
+        {source ?? kind?.hint}
+      </span>
+      <AboutHint heading={`${heading ?? kind?.label ?? identifier} source`}>
+        {about ?? placeholderHelp(identifier, byDefinitions)}
+      </AboutHint>
+    </span>
+  )
 }
 
 export function PromptKindTag({ prompt }: { prompt: PresetPrompt }) {
@@ -100,7 +194,9 @@ export function SummariesPlaceholder() {
         <span className="text-sm font-medium">Summaries</span>
         <PromptKindTag prompt={{ identifier: "summaries", name: "Summaries", marker: true } as PresetPrompt} />
       </div>
-      <p className="mt-1 text-xs text-muted">Filled from the chat's summary layer.</p>
+      <div className="mt-1">
+        <PlaceholderSource identifier="summaries" />
+      </div>
     </section>
   )
 }

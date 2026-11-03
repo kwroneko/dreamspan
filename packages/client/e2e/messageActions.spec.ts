@@ -98,7 +98,7 @@ const EVERY_REPLY_ACTION = [
   "Copy text",
   "Copy link",
   "Delete version",
-  "Delete message"
+  "Delete all versions"
 ]
 
 for (const width of [1440, 390] as const) {

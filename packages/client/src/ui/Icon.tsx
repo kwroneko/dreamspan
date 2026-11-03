@@ -122,6 +122,10 @@ const paths = {
     "M9 18h6",
     "M10 22h4"
   ],
+  /** A single person (Lucide user): personas included. */
+  user: ["M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2", "M8 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0"],
+  /** A person with a cross (Lucide user-x): personas excluded by the filter. */
+  "user-x": ["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", "M5 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0", "m17 8 5 5", "m22 8-5 5"],
   people: [
     "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",
     "M5 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0",

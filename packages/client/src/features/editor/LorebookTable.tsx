@@ -29,6 +29,7 @@ import {
 import type { Registry } from "../../registry.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
+import { AboutHint } from "../../ui/AboutHint.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
@@ -282,6 +283,7 @@ interface RowProps {
   wide: boolean
   /** A compact header (the side panel, a narrow screen): badges, and the columns in Settings. */
   compact: boolean
+  panel: boolean
   card: boolean
   template: string
   columns: ReadonlyArray<LorebookColumn>
@@ -298,12 +300,15 @@ function Essentials({ columns, context }: { columns: ReadonlyArray<LorebookColum
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-2">
       {columns.map((column) => (
-        <label key={column.id} className="flex min-w-0 flex-col gap-0.5 text-xs text-muted">
-          {column.header}
+        <div key={column.id} className="flex min-w-0 flex-col gap-0.5 text-xs text-muted">
+          <span className="flex items-center gap-1">
+            {column.header}
+            {column.description && <AboutHint heading={column.header}>{column.description}</AboutHint>}
+          </span>
           <span style={{ width: column.width }} className="block text-sm text-text">
             <column.cell {...context} />
           </span>
-        </label>
+        </div>
       ))}
     </div>
   )
@@ -318,6 +323,7 @@ const EntryRow = memo(function EntryRow({
   settings,
   wide,
   compact,
+  panel,
   card,
   template,
   columns,
@@ -375,7 +381,7 @@ const EntryRow = memo(function EntryRow({
   )
   const select = (
     <Tooltip label="Selects the entry, to edit several entries at once.">
-      <span className="inline-flex size-6 shrink-0 items-center justify-center pt-1">
+      <span className={`inline-flex w-4 shrink-0 items-center justify-center ${compact ? "mt-1.5" : ""}`}>
         <Checkbox labelHidden checked={selected} onCheckedChange={(next) => onSelect(uid, next)}>
           {`Select ${title}`}
         </Checkbox>
@@ -399,7 +405,9 @@ const EntryRow = memo(function EntryRow({
       open={settings}
       onToggle={() => onSettings(uid, !settings)}
       label={`Settings of ${title}`}
-      hint={settings ? "Hide the entry's settings" : EXPLAIN.settings}
+      hint={
+        settings ? "Click to hide the entry's settings" : "Click to show the entry's settings: inclusion and placement"
+      }
     />
   )
   return (
@@ -414,7 +422,7 @@ const EntryRow = memo(function EntryRow({
           className={`grid cursor-pointer items-start gap-2 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
           style={{ gridTemplateColumns: template }}
         >
-          <div className="mt-0.5 flex items-center gap-1">
+          <div className="mt-0.5 flex items-center gap-2">
             {select}
             {chevron}
             <span className="mt-1">{enabled}</span>
@@ -425,7 +433,7 @@ const EntryRow = memo(function EntryRow({
               <column.cell {...context} />
             </div>
           ))}
-          <div className="flex justify-end gap-0.5">
+          <div className="flex gap-2">
             {settingsToggle}
             {menu}
           </div>
@@ -434,13 +442,13 @@ const EntryRow = memo(function EntryRow({
         <div
           data-entry-header
           onClick={headerClick}
-          className={`flex cursor-pointer items-start gap-1 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
+          className={`flex cursor-pointer items-start gap-2 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
         >
           {select}
           {chevron}
           <span className="mt-1.5">{enabled}</span>
           <div className="min-w-0 flex-1">{titleCell}</div>
-          <div className="flex shrink-0 gap-0.5">
+          <div className="flex shrink-0 gap-2">
             {settingsToggle}
             {menu}
           </div>
@@ -457,6 +465,7 @@ const EntryRow = memo(function EntryRow({
             card={card}
             settings={settings}
             essentials={compact ? <Essentials columns={columns} context={context} /> : undefined}
+            essentialsAlways={compact && !panel}
           />
         </div>
       )}
@@ -768,7 +777,7 @@ export function LorebookTable(props: {
   }, [])
   const wide = width === 0 ? !panel : width >= WIDE
   const compact = panel || !wide
-  const template = `6.25rem minmax(10rem,1fr) ${columns.map((column) => column.width).join(" ")} 4.25rem`
+  const template = `6.25rem minmax(10rem,1fr) ${columns.map((column) => column.width).join(" ")} 4.5rem`
 
   const toggle = (uid: number, open: boolean, at?: "keys") => {
     enteredHere.current = open ? uid : null
@@ -832,7 +841,7 @@ export function LorebookTable(props: {
   // shown, none, or indeterminate while some are selected.
   const selectAll = (
     <Tooltip label={allShown ? "Clears the selection of the entries shown." : "Selects every entry shown."}>
-      <span className="inline-flex size-6 shrink-0 items-center justify-center">
+      <span className="inline-flex h-6 w-4 shrink-0 items-center justify-center">
         <Checkbox
           labelHidden
           checked={allShown}
@@ -869,11 +878,7 @@ export function LorebookTable(props: {
     <div className="flex shrink-0 items-center justify-end gap-0.5">
       <IconButton
         label={anyOpen ? "Collapse all" : "Expand all"}
-        hint={
-          anyOpen
-            ? "Collapse all: closes every entry to its one-line header."
-            : "Expand all: opens every entry shown, to read them one after another."
-        }
+        hint={anyOpen ? "Click to collapse every entry to its one-line header." : "Click to expand every entry shown."}
         icon={anyOpen ? "collapseAll" : "expandAll"}
         disabled={uids.length === 0}
         className="size-7!"
@@ -980,8 +985,8 @@ export function LorebookTable(props: {
           </div>
           {/* Fills the rest of the row up to a bounded width; with less room than its own
               minimum it takes the next line, filling it up to the same bound. */}
-          <div className="relative max-w-sm min-w-44 flex-1">
-            <Tooltip label="Shows only the entries whose title, keys or text have every word typed.">
+          <div className="flex max-w-sm min-w-44 flex-1 items-start gap-1">
+            <div className="relative min-w-0 flex-1">
               <Input
                 type="search"
                 aria-label="Filter by titles, keys and content"
@@ -993,16 +998,19 @@ export function LorebookTable(props: {
                   setQuery(event.currentTarget.value)
                 }}
               />
-            </Tooltip>
-            {count && (
-              <span
-                role="status"
-                data-layout-overlay="The entry count sits inside the filter field's end"
-                className="pointer-events-none absolute inset-y-0 right-8 flex items-center text-xs text-muted"
-              >
-                {count}
-              </span>
-            )}
+              {count && (
+                <span
+                  role="status"
+                  data-layout-overlay="The entry count sits inside the filter field's end"
+                  className="pointer-events-none absolute inset-y-0 right-8 flex items-center text-xs text-muted"
+                >
+                  {count}
+                </span>
+              )}
+            </div>
+            <AboutHint heading="Filter entries">
+              Shows only the entries whose title, keys or text have every word typed.
+            </AboutHint>
           </div>
         </div>
         <Removed store={store} root={root} uids={removed} />
@@ -1026,8 +1034,9 @@ export function LorebookTable(props: {
               {selection || <span aria-hidden="true">Title · keys</span>}
             </span>
             {columns.map((column) => (
-              <span key={column.id} aria-hidden="true" className="pl-1">
+              <span key={column.id} className="flex items-center gap-1 pl-1">
                 {column.header}
+                {column.description && <AboutHint heading={column.header}>{column.description}</AboutHint>}
               </span>
             ))}
             {listActions}
@@ -1057,6 +1066,7 @@ export function LorebookTable(props: {
               root,
               wide,
               compact,
+              panel,
               card,
               template,
               columns,

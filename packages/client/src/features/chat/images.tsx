@@ -607,6 +607,7 @@ function ContextToggle({
   return (
     <ToggleIconButton
       label={label}
+      hint={rule !== null ? label : `Click to ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
       icon={out ? "eyeOff" : "eye"}
       pressed={out}
       disabled={rule !== null || busy}

@@ -355,11 +355,13 @@ export class ComposerDraft {
       const pending = pendingOf(copy)
       if (pending?.kind !== "composer") continue
       const { chatId, draftId } = pending.payload
-      if (draftId === draft.id && deletedSince(draft, { draftId, expectedRowVersion: pending.payload.rowVersion }))
-        continue
+      const deleted =
+        draftId === draft.id && deletedSince(draft, { draftId, expectedRowVersion: pending.payload.rowVersion })
+      // The writer can acknowledge an already-applied clear by its receipt, or
+      // recover stale text behind the deletion barrier. Only its reply drops the copy.
       const saved = await this.session.call((client) => client("SaveComposer", pending.payload))
       if (!saved.ok) {
-        if (draftId === opened.id) unsent = copy
+        if (draftId === opened.id && !deleted) unsent = copy
         continue
       }
       await dropCopy(copy)

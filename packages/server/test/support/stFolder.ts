@@ -273,7 +273,15 @@ export const largeChat = (count: number) => {
  */
 export const writeStBranchFamily = (
   root: string,
-  options: { branches: number; messages: number; swipeShare?: number; name?: string; seed?: number }
+  options: {
+    branches: number
+    messages: number
+    swipeShare?: number
+    swipes?: number
+    bodyRepeats?: number
+    name?: string
+    seed?: number
+  }
 ) => {
   const { branches, messages, swipeShare = 0.3, name = "Alice" } = options
   let seed = options.seed ?? 12345
@@ -296,10 +304,14 @@ export const writeStBranchFamily = (
             .slice(1, prefix + 1)
     for (let i = prefix; i < messages; i++) {
       const user = i % 2 === 1
-      const text = `${name} branch ${branch}, message ${i}: ${body.repeat(12 + Math.floor(random() * 24))}`
+      const repeats = 12 + Math.floor(random() * 24)
+      const text = `${name} branch ${branch}, message ${i}: ${body.repeat(options.bodyRepeats ?? repeats)}`
       const swipes =
         !user && random() < swipeShare
-          ? Array.from({ length: 20 + Math.floor(random() * 31) }, (_, swipe) => `${text} Version ${swipe}.`)
+          ? Array.from(
+              { length: options.swipes ?? 20 + Math.floor(random() * 31) },
+              (_, swipe) => `${text} Version ${swipe}.`
+            )
           : undefined
       const selected = swipes === undefined ? 0 : Math.floor(random() * swipes.length)
       lines.push(

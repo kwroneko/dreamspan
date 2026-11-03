@@ -9,6 +9,8 @@ import { makeLcmHandlers } from "./api/lcm.ts"
 // Composition of the HTTP server: the RPC endpoint over a WebSocket, login and logout,
 // a health route, and the client build served as a single-page app.
 import { createServer } from "node:http"
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 import type { Socket } from "node:net"
 import type { Duplex } from "node:stream"
 import { NodeHttpServer } from "@effect/platform-node"
@@ -236,7 +238,26 @@ const RequestGuard = HttpRouter.middleware(
   { global: true }
 )
 
-const HealthRoute = HttpRouter.add("GET", "/healthz", HttpServerResponse.text("ok"))
+const HealthRoute = HttpRouter.add(
+  "GET",
+  "/healthz",
+  Effect.gen(function* () {
+    const config = yield* AppConfig
+    const buildId = yield* Effect.promise(async () => {
+      try {
+        const stamp: unknown = JSON.parse(await readFile(join(config.clientDist, "build-id.json"), "utf8"))
+        return typeof stamp === "object" && stamp !== null && "buildId" in stamp && typeof stamp.buildId === "string"
+          ? stamp.buildId
+          : undefined
+      } catch {
+        return undefined
+      }
+    })
+    return HttpServerResponse.text("ok", {
+      headers: { "cache-control": "no-store", ...(buildId ? { "x-client-build": buildId } : {}) }
+    })
+  })
+)
 
 const LoginBody = Schema.Struct({ handle: Schema.String, password: Schema.String })
 

@@ -188,7 +188,7 @@ export const registerPanels = () => [
             <m.HistoryPanel session={session} view={view} active={active} onJump={onJump} onSummaries={onSummaries} />
           )
         })),
-      "history edits"
+      "search and replace"
     )
   })
 ]

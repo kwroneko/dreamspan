@@ -4,9 +4,10 @@
 // body without the section, and Show as reply text puts the section back as a new version.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
-import { expect, test } from "@playwright/test"
+import { expect, test, type Locator } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -116,6 +117,7 @@ for (const width of [1440, 390])
       const opening = section.getByRole("textbox", { name: "Opening tag" })
       const closing = section.getByRole("textbox", { name: "Closing tag" })
       await expect(opening).toHaveCount(2)
+      await expectThinkingFields(section)
       await expect(opening.first()).toHaveValue("<think>")
       await expect(closing.first()).toHaveValue("</think>")
       await expect(opening.nth(1)).toHaveValue("<thinking>")
@@ -126,7 +128,6 @@ for (const width of [1440, 390])
       await expect(opening.first()).toHaveAccessibleDescription("Where a section starts, exactly as written.")
       await expect(section).not.toContainText("Each tag is a regular expression")
       await shot("reply-sections-editor")
-      await expect(section.getByRole("button", { name: /^Add the default pair/ })).toHaveCount(0)
       // Opting a pair into regex: its tags are patterns, checked as such.
       await asRegex.first().click()
       await expect(asRegex.first()).toBeChecked()
@@ -135,7 +136,6 @@ for (const width of [1440, 390])
       await expect(section).toContainText(/Invalid regular expression|Unterminated group/)
       await asRegex.first().click()
       await expect(section).not.toContainText(/Invalid regular expression|Unterminated group/)
-      await expect(section.getByRole("button", { name: "Add the default pair" })).toBeVisible()
       const sendBack = section.getByRole("spinbutton", { name: "Send thinking back for the last replies" })
       await sendBack.fill("")
       await sendBack.fill("2")
@@ -144,17 +144,122 @@ for (const width of [1440, 390])
       await sendBack.scrollIntoViewIfNeeded()
       await shot("reply-sections-editor-send-back")
 
-      // Literal ST-style tags can contain real line breaks. Editing must keep those bytes,
-      // including when a field is read back from the server after saving and reloading.
-      await opening.first().fill("<|plan|>\n\n")
-      await closing.first().fill("\n\n<|/plan|>")
-      await expect(opening.first()).toHaveValue("<|plan|>\n\n")
-      await expect(closing.first()).toHaveValue("\n\n<|/plan|>")
+      // Literal tag symbols survive editing, saving and reloading.
+      await opening.first().fill("<|plan|>")
+      await closing.first().fill("<|/plan|>")
+      await expect(opening.first()).toHaveValue("<|plan|>")
+      await expect(closing.first()).toHaveValue("<|/plan|>")
       await saveRevision(page)
       await page.reload()
-      await expect(opening.first()).toHaveValue("<|plan|>\n\n")
-      await expect(closing.first()).toHaveValue("\n\n<|/plan|>")
+      await expect(opening.first()).toHaveValue("<|plan|>")
+      await expect(closing.first()).toHaveValue("<|/plan|>")
       await opening.first().scrollIntoViewIfNeeded()
-      await shot("reply-sections-editor-multiline")
+      await shot("reply-sections-editor-literal")
     })
   }
+
+// A focused geometry audit of the settings, independent of reply generation.
+for (const width of [390, 1024, 1440])
+  for (const theme of ["light", "dark"] as const) {
+    test(`thinking settings layout at ${width} ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const preset = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        api.CreatePreset({ label: `Thinking layout ${width} ${theme}` })
+      )
+      await page.goto(`${server().url}/library/${preset.id}`)
+      const section = page.locator('[data-preset-section="reply-sections"]')
+      await expect(section).toBeVisible()
+      await section.scrollIntoViewIfNeeded()
+      await expectThinkingFields(section)
+      if (shots) {
+        mkdirSync(shots, { recursive: true })
+        await section.locator("..").screenshot({
+          path: resolve(shots, `thinking-settings-${width}-${theme}.png`),
+          animations: "disabled"
+        })
+      }
+      await expectLayout(page, info, "thinking-settings", { scope: '[data-preset-section="reply-sections"]' })
+      const pairs = section.locator("[data-section-pair]")
+      await expect(section.getByRole("button", { name: "Add a pair", exact: true })).toHaveCount(0)
+      await section.getByRole("button", { name: "Add another tag pair", exact: true }).click()
+      await expect(pairs).toHaveCount(3)
+      const added = pairs.last()
+      await expect(added).toHaveAttribute("data-flashing", "")
+      await expect(added).toBeInViewport({ ratio: 1 })
+      await expectLayout(page, info, "thinking-settings-added", { scope: '[data-preset-section="reply-sections"]' })
+      // Empty is valid: even the last pair retains its corner remove control.
+      for (let count = 3; count > 0; count--) {
+        await pairs.last().getByRole("button", { name: "Remove this pair", exact: true }).click()
+        await expect(pairs).toHaveCount(count - 1)
+      }
+      await expectLayout(page, info, "thinking-settings-empty", {
+        scope: '[data-preset-section="reply-sections"]'
+      })
+    })
+  }
+
+async function expectThinkingFields(section: Locator) {
+  const heading = section.getByRole("heading", { name: "Thinking at the start of a reply", exact: true })
+  const geometry = await heading.evaluate((node) => {
+    const section = node.closest('[data-preset-section="reply-sections"]')!
+    const head = node.getBoundingClientRect()
+    const add = section.querySelector('button[aria-label="Add another tag pair"]')!.getBoundingClientRect()
+    return { headingRight: head.right, headingBottom: head.bottom, addX: add.x, addY: add.y }
+  })
+  expect(geometry.addX).toBeGreaterThanOrEqual(geometry.headingRight)
+  expect(geometry.addY).toBeLessThan(geometry.headingBottom)
+  for (const pair of await section.locator("[data-section-pair]").all()) {
+    // Measure the box and X in one frame; the editor can restore its scroll position
+    // between separate Playwright geometry reads while the page settles.
+    const corner = await pair.evaluate((box) => {
+      const outer = box.getBoundingClientRect()
+      const remove = box.querySelector('button[aria-label="Remove this pair"]')!.getBoundingClientRect()
+      return { right: outer.right - remove.right, top: remove.top - outer.top }
+    })
+    expect(corner.right).toBeLessThanOrEqual(16)
+    expect(corner.top).toBeLessThanOrEqual(16)
+    await expect(pair.getByRole("checkbox")).toHaveCount(2)
+  }
+  const tags = section.getByRole("textbox")
+  for (const tag of await tags.all()) {
+    await expect(tag).toHaveJSProperty("tagName", "INPUT")
+    const box = (await tag.boundingBox())!
+    expect(box.height).toBeLessThanOrEqual(40)
+    expect(box.width).toBeLessThanOrEqual(640)
+  }
+  // DOM order also governs keyboard and screen-reader order.
+  const order = await section
+    .locator("input:not([type=hidden]):not([type=checkbox]), [role=switch], button")
+    .evaluateAll((controls) =>
+      controls
+        .map((control) =>
+          control.getAttribute("role") === "switch"
+            ? "switch"
+            : control.getAttribute("type") === "number"
+              ? "send-back"
+              : control.tagName === "INPUT"
+                ? "tag"
+                : control.textContent?.trim()
+        )
+        .filter((name) => name === "tag" || name === "switch" || name === "send-back" || name?.startsWith("Add "))
+    )
+  const toggle = order.indexOf("switch")
+  expect(toggle).toBeGreaterThan(order.lastIndexOf("tag"))
+  expect(order[toggle + 1]).toBe("send-back")
+  const tagsGeometry = await section
+    .locator("[data-section-pair]")
+    .first()
+    .evaluate((pair) => {
+      const fields = pair.querySelectorAll("input:not([type=hidden]):not([type=checkbox])")
+      return {
+        firstY: fields[0]!.getBoundingClientRect().y,
+        secondY: fields[1]!.getBoundingClientRect().y,
+        gridWidth: pair.querySelector("[data-reply-section-tags]")!.getBoundingClientRect().width
+      }
+    })
+  if (tagsGeometry.gridWidth >= 456) expect(tagsGeometry.firstY).toBe(tagsGeometry.secondY)
+  else expect(tagsGeometry.secondY).toBeGreaterThan(tagsGeometry.firstY)
+}

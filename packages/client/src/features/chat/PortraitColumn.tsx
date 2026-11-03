@@ -23,8 +23,8 @@ const MIN_VIEWER_HEIGHT = 180
 const GUTTER = 17
 
 const SINGLE = "Only keep one image open at a time"
-const SINGLE_OFF = `${SINGLE}. Closes the other images; another portrait then replaces this one.`
-const SINGLE_ON = `${SINGLE} (on). Turn it off to open images on top of each other.`
+const SINGLE_OFF = "Click to keep only one image open at a time."
+const SINGLE_ON = "Click to allow multiple images open at a time."
 
 interface Measured {
   /** The viewer's height, header included. */
@@ -188,19 +188,17 @@ function Viewer({
       <PortraitView
         portrait={portrait}
         title={(name) => <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</h2>}
-        close={
-          <>
-            <IconButton
-              label={SINGLE}
-              hint={viewer.single ? SINGLE_ON : SINGLE_OFF}
-              icon="one-image"
-              aria-pressed={viewer.single}
-              className="aria-pressed:bg-surface-raised aria-pressed:text-accent aria-pressed:ring-1 aria-pressed:ring-border"
-              onClick={() => viewer.setSingle(!viewer.single, portrait.id)}
-            />
-            <IconButton label="Close the portrait" icon="close" onClick={() => viewer.close(portrait.id)} />
-          </>
+        toggle={
+          <IconButton
+            label={SINGLE}
+            hint={viewer.single ? SINGLE_ON : SINGLE_OFF}
+            icon="one-image"
+            aria-pressed={viewer.single}
+            className="aria-pressed:bg-surface-raised aria-pressed:text-accent aria-pressed:ring-1 aria-pressed:ring-border"
+            onClick={() => viewer.setSingle(!viewer.single, portrait.id)}
+          />
         }
+        close={<IconButton label="Close the portrait" icon="close" onClick={() => viewer.close(portrait.id)} />}
       />
       {boundary}
     </aside>

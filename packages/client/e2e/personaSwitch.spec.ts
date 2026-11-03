@@ -160,7 +160,7 @@ test("Add characters: Include personas, off at first, marked when on, remembered
   await expect.poll(tiles).not.toContain("Add Nell to this chat")
   await expect(section.locator("[data-persona-badge]")).toHaveCount(0)
   await include.hover()
-  await expect(page.getByText("Include personas", { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(page.getByText("Click to show personas", { exact: true }).filter({ visible: true })).toBeVisible()
 
   // On: mixed in and marked, Pia (played here) and Nell.
   await include.click()

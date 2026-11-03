@@ -405,6 +405,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         await expect(take).toHaveCSS("opacity", "1")
         await page.keyboard.press("Tab")
         await expect(take).toBeFocused()
+        await expect(page.getByText("Click to take image 2 out of the context")).toBeVisible()
         expect(await take.boundingBox()).toEqual(box)
         await take.blur()
         await message.getByRole("button", { name: "View image 2", exact: true }).hover()
@@ -413,6 +414,9 @@ for (const colorScheme of ["light", "dark"] as const) {
       }
       const back = message.getByRole("button", { name: "Put image 2 back into the context" })
       await expect(back).toHaveAttribute("aria-pressed", "true")
+      await page.mouse.move(0, 0)
+      await back.hover()
+      await expect(page.getByText("Click to put image 2 back into the context")).toBeVisible()
       // The limit counts only what's sent: the first image is sent now.
       await expect(message.getByRole("button", { name: "Take image 1 out of the context" })).toBeEnabled()
       await page.mouse.move(0, 0)

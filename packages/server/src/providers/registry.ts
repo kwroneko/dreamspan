@@ -61,6 +61,7 @@ export interface RequestTransform {
       readonly target: RequestTarget
       readonly messages: ReadonlyArray<Message>
       readonly breakpoints: ReadonlyArray<number>
+      readonly cacheLayout?: import("@rp/shared/providers.ts").CacheLayout
     }
   ) => Record<string, unknown>
 }

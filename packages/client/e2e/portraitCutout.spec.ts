@@ -68,6 +68,52 @@ const expectEveryPortrait = async (page: Page, mediaId: string, crop: string, le
 const boxOf = async (dialog: Locator) => (await dialog.locator("[data-cutout-box]").boundingBox())!
 const stageOf = async (dialog: Locator) => (await dialog.locator("[data-cutout-stage]").boundingBox())!
 
+/** Preview pixels use the app's portrait sizes; all three follow the same live crop. */
+const expectPreviews = async (dialog: Locator, phone: boolean) => {
+  const previews = dialog.getByRole("region", { name: "Previews" })
+  await expect(previews.getByRole("heading", { name: "Previews" })).toBeVisible()
+  for (const label of ["Message", "Cast", "Tile"]) {
+    await expect(previews.getByText(label, { exact: true })).toBeVisible()
+    await expect(previews.locator(`[data-cutout-preview="${label}"] img`)).toBeVisible()
+  }
+  const message = (await dialog.locator('[data-cutout-preview="Message"]').boundingBox())!
+  const cast = (await dialog.locator('[data-cutout-preview="Cast"]').boundingBox())!
+  const tile = (await dialog.locator('[data-cutout-preview="Tile"]').boundingBox())!
+  const portraitWidth = await dialog.evaluate(
+    (node) => Number.parseFloat(getComputedStyle(node).getPropertyValue("--chat-portrait-width")) || 60
+  )
+  expect(message.width).toBeCloseTo(portraitWidth, 0)
+  expect(message.height).toBeCloseTo(portraitWidth * 1.5, 0)
+  expect(cast.width).toBeCloseTo(18.667, 1)
+  expect(cast.height).toBe(28)
+  expect(tile.width).toBe(134)
+  expect(tile.height).toBe(201)
+  const stage = await stageOf(dialog)
+  if (phone) {
+    expect(message.y).toBeGreaterThan(stage.y + stage.height)
+    expect(cast.y).toBeCloseTo(message.y, 0)
+    expect(tile.y).toBeCloseTo(message.y, 0)
+  } else {
+    expect(message.x).toBeGreaterThan(stage.x + stage.width)
+  }
+}
+
+const expectLivePreviews = async (dialog: Locator) => {
+  const box = await boxOf(dialog)
+  const stage = await stageOf(dialog)
+  const styles = await dialog.locator("[data-cutout-preview] img").evaluateAll((images) =>
+    images.map((image) => ({
+      width: (image as HTMLImageElement).style.width,
+      left: (image as HTMLImageElement).style.left
+    }))
+  )
+  expect(styles).toHaveLength(3)
+  for (const style of styles) {
+    expect(Number.parseFloat(style.width)).toBeCloseTo((stage.width / box.width) * 100, 0)
+    expect(Number.parseFloat(style.left)).toBeCloseTo(-((box.x - stage.x) / box.width) * 100, 0)
+  }
+}
+
 test("at 1440: a new picture is cut out before it's saved, adjusted later, and every portrait follows", async ({
   page
 }) => {
@@ -87,8 +133,33 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   expect(Math.abs(box.height - stage.height)).toBeLessThan(3)
   expect(Math.abs(box.x + box.width / 2 - (stage.x + stage.width / 2))).toBeLessThan(3)
   expect(box.width / box.height).toBeCloseTo(2 / 3, 1)
-  await expect(chooser.locator("[data-cutout-preview] img")).toBeVisible()
+  await expectPreviews(chooser, false)
+  await expect(chooser.getByText("The whole image is kept.", { exact: false })).toHaveCount(0)
   await shoot(page, "chooser-desktop")
+
+  // The shared toolbar slider continuously changes the box, reaching both limits.
+  const size = chooser.getByRole("slider", { name: "Cutout size", exact: true })
+  const largestSize = Number(await size.getAttribute("aria-valuenow"))
+  const track = (await chooser.locator("[data-toolbar-slider]").boundingBox())!
+  await page.mouse.move(track.x + track.width - 1, track.y + track.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(track.x + track.width / 2, track.y + track.height / 2, { steps: 8 })
+  // Previews follow before the pointer is released.
+  expect((await boxOf(chooser)).width).toBeLessThan(box.width * 0.7)
+  await expectLivePreviews(chooser)
+  await page.mouse.up()
+  await size.focus()
+  await page.keyboard.press("Home")
+  expect((await boxOf(chooser)).width).toBeCloseTo(box.width / 20, 0)
+  await page.keyboard.press("End")
+  expect((await boxOf(chooser)).width).toBeCloseTo(box.width, 0)
+  await page.keyboard.press("Home")
+  const reset = chooser.getByRole("button", { name: "Reset the cutout", exact: true })
+  await reset.hover()
+  await expect(page.getByText("Reset the cutout", { exact: true }).last()).toBeVisible()
+  await reset.click()
+  expect((await boxOf(chooser)).width).toBeCloseTo(box.width, 0)
+  expect((await boxOf(chooser)).x).toBeCloseTo(box.x, 0)
 
   // A mouse drags it left, and a corner makes it smaller, staying 2:3.
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
@@ -105,7 +176,11 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   box = await boxOf(chooser)
   expect(box.width).toBeLessThan(moved.width - 30)
   expect(box.width / box.height).toBeCloseTo(2 / 3, 1)
-  // The keyboard: arrows move it, − and + resize it, as the visible buttons' tooltips say.
+  await expectLivePreviews(chooser)
+  const cornerValue = Number(await size.getAttribute("aria-valuenow"))
+  expect(cornerValue).toBeLessThan(largestSize)
+  expect(cornerValue / largestSize).toBeCloseTo(box.width / moved.width, 2)
+  // The keyboard moves and resizes the box and keeps the size slider in sync.
   await chooser.locator("[data-cutout-box]").focus()
   await page.keyboard.press("ArrowDown")
   await page.keyboard.press("ArrowRight")
@@ -114,8 +189,19 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   expect(keyed.x).toBeGreaterThan(box.x)
   await page.keyboard.press("-")
   expect((await boxOf(chooser)).width).toBeLessThan(keyed.width)
-  await chooser.getByRole("button", { name: "Larger cutout" }).hover()
-  await expect(page.getByText("Make the cutout larger (+)")).toBeVisible()
+  const smaller = Number(await size.getAttribute("aria-valuenow"))
+  expect(smaller).toBeLessThan(cornerValue)
+  await page.keyboard.press("+")
+  expect((await boxOf(chooser)).width).toBeCloseTo(keyed.width, 0)
+  expect(Number(await size.getAttribute("aria-valuenow"))).toBeGreaterThan(smaller)
+  await chooser.getByRole("button", { name: "About cutout controls" }).hover()
+  await expect(
+    page
+      .getByText("Drag the box to move it, or a corner to resize it. Arrow keys move it; + and − resize it.", {
+        exact: true
+      })
+      .last()
+  ).toBeVisible()
   await chooser.getByRole("button", { name: "Save picture" }).click()
   await expect(chooser).toHaveCount(0)
 
@@ -181,6 +267,10 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   await expect(pictureDialog.locator("[data-cutout-box]")).toBeVisible()
   // Closed without a decision: its X in the corner.
   await expect(pictureDialog.getByRole("button", { name: "Close", exact: true })).toBeVisible()
+  const replace = (await pictureDialog.getByRole("button", { name: "Replace picture…" }).boundingBox())!
+  const cancel = (await pictureDialog.getByRole("button", { name: "Cancel", exact: true }).boundingBox())!
+  expect(replace.x).toBeLessThan(cancel.x)
+  expect(replace.y).toBe(cancel.y)
   await shoot(page, "picture-dialog-desktop")
   const picked = page.waitForEvent("filechooser")
   await pictureDialog.getByRole("button", { name: "Replace picture…" }).click()
@@ -213,6 +303,7 @@ test("at 390: the chooser fits a phone, drags by touch, and follows the blur set
   expect(dialog.x + dialog.width).toBeLessThanOrEqual(390)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await expect(chooser.getByRole("button", { name: "Save picture" })).toBeInViewport()
+  await expectPreviews(chooser, true)
   await shoot(page, "chooser-phone")
 
   // One finger drags the box to the left edge.
@@ -242,9 +333,34 @@ test("at 390: the chooser fits a phone, drags by touch, and follows the blur set
   })
   const after = await boxOf(chooser)
   const stage = await stageOf(chooser)
+  await expectLivePreviews(chooser)
   expect(after.x).toBeLessThan(before.x - 20)
   expect(Math.abs(after.x - stage.x)).toBeLessThan(3)
-  await chooser.getByRole("button", { name: "Save picture" }).click()
+  // A slow upload must not widen Save and wrap the footer under the pointer.
+  let finishUpload: (() => void) | undefined
+  const upload = new Promise<void>((resolve) => {
+    finishUpload = resolve
+  })
+  await page.route(
+    "**/library/avatar?*",
+    async (route) => {
+      await upload
+      await route.continue()
+    },
+    { times: 1 }
+  )
+  const save = chooser.getByRole("button", { name: "Save picture" })
+  const saveBefore = await save.boundingBox()
+  const dialogBefore = await chooser.boundingBox()
+  await save.click()
+  try {
+    await expect(save).toHaveAttribute("aria-busy", "true")
+    expect(await save.boundingBox()).toEqual(saveBefore)
+    expect(await chooser.boundingBox()).toEqual(dialogBefore)
+    await shoot(page, "chooser-phone-saving")
+  } finally {
+    finishUpload?.()
+  }
   await expect(chooser).toHaveCount(0)
   const saved = await named(page.getByRole("tabpanel", { name: "Metadata" }).locator("[data-view-portrait] img"))
   expect(saved.crop.startsWith("0_")).toBe(true)

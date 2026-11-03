@@ -306,6 +306,7 @@ function CardNotes({ store, call }: { store: EditorStore; call: Caller }) {
     )
     if (!result.ok) return setError(result.error)
     blocks.setOpen(result.value.id, true)
+    if (!shared) settings.setOpen(result.value.id, true)
     setAdded(result.value.id)
     setVersion(version + 1)
   }

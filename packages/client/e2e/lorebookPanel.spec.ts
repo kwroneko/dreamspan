@@ -181,7 +181,7 @@ for (const [width, scheme] of [
     await expect(editor.getByRole("region", { name: "Entry settings" })).toHaveCount(0)
     for (const control of ["Use secondary keys", "Case sensitive", "Group", "Strategy"])
       await expect(editor.getByLabel(control, { exact: true })).toHaveCount(0)
-    await expect(editor.getByText(/One per line|regular expression/)).toHaveCount(0)
+    await expect(editor.getByText(/One per line|regular expression/).filter({ visible: true })).toHaveCount(0)
     // The keys line is edited in place: clicked, it's the box, one key per line.
     await lamp.getByText("lamp, lantern", { exact: true }).click()
     await expect(lamp.getByRole("textbox", { name: "Primary keys" })).toBeFocused()

@@ -3,24 +3,37 @@ import { useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
+import { editableByteSize, parseByteSize, type SizeUnit } from "../../ui/byteSize.ts"
 import { Field, Input } from "../../ui/Field.tsx"
+import { Select } from "../../ui/Select.tsx"
+import { Disclosure } from "../../ui/Surface.tsx"
 
 const limitsAtom = AppClient.query("GetBinLimits", undefined, { reactivityKeys: ["bin.limits"] })
 const fields = [
   ["deletedItems", "Deleted items: item limit"],
-  ["deletedBytes", "Deleted items: byte limit"],
+  ["deletedBytes", "Deleted items: size limit"],
   ["recoveredTexts", "Recovered text: item limit"],
-  ["recoveredBytes", "Recovered text: byte limit"]
+  ["recoveredBytes", "Recovered text: size limit"]
 ] as const
+const unitItems = [
+  { value: "MB" as const, label: "MB", description: "Set the size in megabytes." },
+  { value: "GB" as const, label: "GB", description: "Set the size in gigabytes." }
+]
+const grouped = (text: string) => (/^\d+$/.test(text) ? text.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : text)
 
 function CapacityField({ field, label, value }: { field: keyof BinLimits; label: string; value: number }) {
-  const [text, setText] = useState(String(value))
+  const size = field === "deletedBytes" || field === "recoveredBytes"
+  const initial = editableByteSize(value)
+  const [text, setText] = useState(size ? initial.text : grouped(String(value)))
+  const [unit, setUnit] = useState<SizeUnit>(initial.unit)
   const action = useAction()
-  const number = Number(text)
-  const valid = Number.isSafeInteger(number) && number >= 1
+  const plain = text.replaceAll(",", "")
+  const number = size ? parseByteSize(text, unit) : /^\d+$/.test(plain) ? Number(plain) : null
+  const valid = number !== null && Number.isSafeInteger(number) && number >= 1
   return (
     <form
-      className="flex min-w-0 flex-wrap items-end gap-2"
+      className="flex min-w-0 flex-col items-start gap-2"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault()
         if (valid) void action.run((client) => client("ChangeBinLimit", { key: field, value: number }), ["bin.limits"])
@@ -28,22 +41,45 @@ function CapacityField({ field, label, value }: { field: keyof BinLimits; label:
     >
       <Field
         label={label}
-        about="Limit how much this section keeps. Older eligible items are permanently removed when new items need room. Saving a limit removes nothing immediately."
-        className="min-w-0 flex-1"
+        about="Set how much this section keeps before older eligible items are removed."
+        error={
+          valid
+            ? null
+            : size
+              ? "Enter a positive size within the supported range."
+              : "Enter a positive whole number up to 9,007,199,254,740,991."
+        }
+        className="w-full"
       >
-        <Input
-          type="number"
-          min={1}
-          max={Number.MAX_SAFE_INTEGER}
-          step={1}
-          value={text}
-          onChange={(event) => setText(event.currentTarget.value)}
-          required
-        />
+        <div className="flex min-w-0 items-center gap-2">
+          <Input
+            inputMode={size ? "decimal" : "numeric"}
+            value={text}
+            onBlur={() => {
+              if (!size) setText(grouped(text))
+            }}
+            onChange={(event) => setText(event.currentTarget.value.replace(/,/g, ""))}
+            required
+          />
+          {size && (
+            <Select<SizeUnit>
+              ariaLabel={`${label} unit`}
+              items={unitItems}
+              value={unit}
+              onValueChange={setUnit}
+              className="w-20! shrink-0"
+            />
+          )}
+          <Button
+            type="submit"
+            disabled={!valid || number === value}
+            pending={action.pending}
+            hint={`Save the ${label.toLowerCase()}.`}
+          >
+            Save
+          </Button>
+        </div>
       </Field>
-      <Button type="submit" disabled={!valid || number === value} pending={action.pending}>
-        Save
-      </Button>
       <ErrorAlert error={action.error} />
     </form>
   )
@@ -51,17 +87,16 @@ function CapacityField({ field, label, value }: { field: keyof BinLimits; label:
 
 export function BinCapacity() {
   return (
-    <details className="rounded-md border border-border p-3">
-      <summary className="cursor-pointer font-medium">Bin capacity</summary>
+    <Disclosure title="Bin capacity" className="rounded-md border border-border p-3">
       <AsyncView atom={limitsAtom} loading="Reading capacities…">
         {(limits) => (
-          <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+          <div className="grid min-w-0 gap-3 pb-2 lg:grid-cols-2">
             {fields.map(([field, label]) => (
               <CapacityField key={`${field}:${limits[field]}`} field={field} label={label} value={limits[field]} />
             ))}
           </div>
         )}
       </AsyncView>
-    </details>
+    </Disclosure>
   )
 }

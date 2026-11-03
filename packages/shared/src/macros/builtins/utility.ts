@@ -109,42 +109,62 @@ const repeat = (call: MacroCall, text: string) => {
 const tokens = (value: number | undefined) => (value === undefined ? "" : String(value))
 
 export const utilityMacros: ReadonlyArray<MacroSpec> = [
-  { name: "space", args: [count], handler: (call) => repeat(call, " ") },
-  { name: "newline", args: [count], handler: (call) => repeat(call, "\n") },
-  { name: "noop", handler: () => "" },
+  { kind: "directive", name: "space", args: [count], handler: (call) => repeat(call, " ") },
+  { kind: "directive", name: "newline", args: [count], handler: (call) => repeat(call, "\n") },
+  { kind: "directive", name: "noop", handler: () => "" },
   {
     // Inline, it's removed with the newlines around it after evaluation; scoped, its block
     // is trimmed like any block.
+    kind: "directive",
     name: "trim",
     args: [{ name: "content", optional: true }],
     handler: (call) => (call.isScoped ? (call.args[0] ?? "") : "{{trim}}")
   },
   {
+    kind: "directive",
     name: "if",
     args: [{ name: "condition" }, { name: "content" }],
     delayArgResolution: true,
     handler: conditional
   },
-  { name: "else", handler: () => ELSE_MARKER },
-  { name: "input", handler: (call) => call.context.input ?? "" },
+  { kind: "directive", name: "else", handler: () => ELSE_MARKER },
+  { kind: "value", name: "input", handler: (call) => call.context.input ?? "" },
   {
+    kind: "value",
     name: "maxPrompt",
     aliases: ["maxPromptTokens"],
     handler: ({ context: { maxContextTokens: max, maxResponseTokens: response } }) =>
       max === undefined || response === undefined ? "" : String(max - response)
   },
-  { name: "maxContext", aliases: ["maxContextTokens"], handler: (call) => tokens(call.context.maxContextTokens) },
-  { name: "maxResponse", aliases: ["maxResponseTokens"], handler: (call) => tokens(call.context.maxResponseTokens) },
-  { name: "reverse", args: [{ name: "value" }], handler: (call) => Array.from(call.args[0]!).reverse().join("") },
+  {
+    kind: "value",
+    name: "maxContext",
+    aliases: ["maxContextTokens"],
+    handler: (call) => tokens(call.context.maxContextTokens)
+  },
+  {
+    kind: "value",
+    name: "maxResponse",
+    aliases: ["maxResponseTokens"],
+    handler: (call) => tokens(call.context.maxResponseTokens)
+  },
+  {
+    kind: "directive",
+    name: "reverse",
+    args: [{ name: "value" }],
+    handler: (call) => Array.from(call.args[0]!).reverse().join("")
+  },
   {
     // The comment's argument is still expanded first, as in ST, so variable writes in a
     // comment take effect.
+    kind: "directive",
     name: "//",
     aliases: ["comment"],
     args: [{ name: "comment" }],
     handler: () => ""
   },
   {
+    kind: "value",
     name: "roll",
     args: [{ name: "formula" }],
     volatile: true,
@@ -153,6 +173,7 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
     handler: roll
   },
   {
+    kind: "value",
     name: "random",
     volatile: true,
     list: true,
@@ -162,9 +183,18 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
       return items.length === 0 ? "" : items[Math.floor(call.random() * items.length)]!
     }
   },
-  { name: "pick", list: true, volatile: true, accepts: oneOfTheChoices, handler: pick },
-  { name: "banned", args: [{ name: "word" }], handler: () => "" },
   {
+    kind: "value",
+    name: "pick",
+    list: true,
+    volatile: true,
+    changesPerReply: false,
+    accepts: oneOfTheChoices,
+    handler: pick
+  },
+  { kind: "directive", name: "banned", args: [{ name: "word" }], handler: () => "" },
+  {
+    kind: "value",
     name: "outlet",
     args: [{ name: "key" }],
     handler: ({ args: [key], context: { outlets } }) =>

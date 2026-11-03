@@ -4,7 +4,7 @@
 import type { CardFields } from "../context.ts"
 import type { MacroCall, MacroSpec } from "../registry.ts"
 
-type TextField = Exclude<keyof CardFields, "alternateGreetings" | "version" | "joined">
+type TextField = Exclude<keyof CardFields, "alternateGreetings" | "version" | "joined" | "joinedVolatile">
 
 /** ST's baseChatReplace: expand, optionally collapse newlines, then remove carriage returns. */
 const expanded = (call: MacroCall, text: string | undefined, scope: string) => {
@@ -17,14 +17,17 @@ const expanded = (call: MacroCall, text: string | undefined, scope: string) => {
 export const cardField = (call: MacroCall, key: TextField) => expanded(call, call.context.card?.[key], `card.${key}`)
 
 const fieldMacro = (name: string, key: TextField, aliases?: ReadonlyArray<string>): MacroSpec => ({
+  kind: "value",
   name,
   ...(aliases ? { aliases } : {}),
   handler: (call) => {
     const joined = call.context.card?.joined
     // The characters' joined fields are expanded already: their macros never expand again.
-    return joined && (key === "description" || key === "personality" || key === "scenario")
-      ? joined[key]
-      : cardField(call, key)
+    if (joined && (key === "description" || key === "personality" || key === "scenario")) {
+      if (call.context.card?.joinedVolatile?.includes(key)) call.markVolatile()
+      return joined[key]
+    }
+    return cardField(call, key)
   }
 })
 
@@ -50,15 +53,16 @@ const greeting = (call: MacroCall) => {
 }
 
 export const characterMacros: ReadonlyArray<MacroSpec> = [
-  { name: "user", handler: (call) => call.context.names.user },
-  { name: "char", handler: (call) => call.context.names.char },
+  { kind: "value", name: "user", handler: (call) => call.context.names.user },
+  { kind: "value", name: "char", handler: (call) => call.context.names.char },
   {
+    kind: "value",
     name: "group",
     aliases: ["charIfNotGroup"],
     handler: ({ context: { names } }) => names.group ?? names.char
   },
-  { name: "groupNotMuted", handler: ({ context: { names } }) => names.groupNotMuted ?? names.char },
-  { name: "notChar", handler: ({ context: { names } }) => names.notChar ?? names.user },
+  { kind: "value", name: "groupNotMuted", handler: ({ context: { names } }) => names.groupNotMuted ?? names.char },
+  { kind: "value", name: "notChar", handler: ({ context: { names } }) => names.notChar ?? names.user },
   fieldMacro("charPrompt", "systemPrompt"),
   fieldMacro("charInstruction", "postHistoryInstructions"),
   fieldMacro("charDescription", "description", ["description"]),
@@ -66,23 +70,26 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
   fieldMacro("charScenario", "scenario", ["scenario"]),
   fieldMacro("persona", "persona"),
   fieldMacro("mesExamplesRaw", "mesExamples"),
-  { name: "mesExamples", handler: (call) => formatExamples(cardField(call, "mesExamples")) },
+  { kind: "value", name: "mesExamples", handler: (call) => formatExamples(cardField(call, "mesExamples")) },
   fieldMacro("charDepthPrompt", "depthPrompt"),
   fieldMacro("charCreatorNotes", "creatorNotes", ["creatorNotes"]),
   {
+    kind: "value",
     name: "charFirstMessage",
     aliases: ["greeting"],
     args: [{ name: "index", optional: true, integer: true }],
     handler: greeting
   },
   {
+    kind: "value",
     name: "charVersion",
     aliases: ["version", "char_version"],
     handler: (call) => call.context.card?.version ?? ""
   },
-  { name: "model", handler: (call) => call.context.model ?? "" },
+  { kind: "value", name: "model", handler: (call) => call.context.model ?? "" },
   {
     // Once per expansion. Without an original it stays as written, as ST's does.
+    kind: "value",
     name: "original",
     handler: (call) => {
       const { original } = call.context
@@ -92,6 +99,7 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
   },
   {
     // Registered by ST's Summarize extension; without a summary to read it stays as written.
+    kind: "value",
     name: "summary",
     handler: (call) => {
       const { summary } = call.context
@@ -103,6 +111,7 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
     // Who the model writes as, and the direction it was given (DESIGN §2.2). Outside a
     // generation there's neither, and they stay as written. A macro's output is never expanded
     // again, so the direction is sent exactly as typed.
+    kind: "value",
     name: "speaker",
     handler: (call) => {
       const { speaker } = call.context
@@ -111,6 +120,7 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    kind: "value",
     name: "direction",
     handler: (call) => {
       const { direction } = call.context
@@ -118,8 +128,8 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
       return direction
     }
   },
-  { name: "isMobile", handler: (call) => String(call.context.isMobile ?? false) },
-  { name: "lastGenerationType", handler: (call) => call.context.lastGenerationType ?? "" },
+  { kind: "value", name: "isMobile", handler: (call) => String(call.context.isMobile ?? false) },
+  { kind: "value", name: "lastGenerationType", handler: (call) => call.context.lastGenerationType ?? "" },
   // ST extensions don't exist here (DESIGN §1.5).
-  { name: "hasExtension", args: [{ name: "extensionName" }], handler: () => "false" }
+  { kind: "value", name: "hasExtension", args: [{ name: "extensionName" }], handler: () => "false" }
 ]

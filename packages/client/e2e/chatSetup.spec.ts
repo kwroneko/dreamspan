@@ -75,6 +75,12 @@ const setUp = (page: Page) =>
     await importCard(page, { name: "Bo", description: "A diver." })
     await page.goto(`${server().url}/library`)
     for (const persona of ["Ana", "Bo"]) await markPersona(page, persona)
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const ana = (yield* api.ListCards()).find((card) => card.name === "Ana")!
+        yield* api.ChangeGenerationDefaults({ change: { persona: ana.entityId } })
+      })
+    )
   })())
 
 const login = async (page: Page) => {
@@ -152,7 +158,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await page.getByText("Advanced: message roles", { exact: true }).click()
   await expect(page.getByRole("radio", { name: /By perspective/ })).toBeChecked()
   // Closed, it stays closed.
-  await page.getByRole("button", { name: "Close the panel" }).click()
+  await page.getByRole("button", { name: "Hide panel" }).click()
   await expect(page).not.toHaveURL(/panel=/)
   await page.reload()
   await expect(page.getByRole("complementary", { name: "Chat panel" })).toHaveCount(0)

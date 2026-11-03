@@ -99,7 +99,7 @@ const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
       messages: [instructionAt]
     }
   ]
-  const { summaryStart: _start, ...rest } = request
+  const { summaryStart: _start, pinnedStart: _pinnedStart, ...rest } = request
   return {
     ...snapshot,
     pieces,

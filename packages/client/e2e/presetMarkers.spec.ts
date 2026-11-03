@@ -166,6 +166,36 @@ const check = async (page: Page, root: Locator, name: string) => {
   await expect(root.locator('[data-prompt="chatHistory"]')).toHaveAttribute("data-prompt-type", "history")
   await expect(root.locator('[data-prompt="charDescription"]')).toHaveAttribute("data-prompt-type", "placeholder")
   await expect(root.locator('[data-prompt="charDescription"] [role="textbox"]')).toHaveCount(0)
+  for (const [id, source] of [
+    ["charDescription", "Each character's Description, from their cards"],
+    ["chatHistory", "The messages of the chat"],
+    ["summaries", "The chat's summaries of earlier messages"]
+  ] as const) {
+    const line = root.locator(`[data-prompt="${id}"] [data-placeholder-source]`)
+    await expect(line).toHaveText(source)
+    await expect(line).toHaveCSS("font-style", "italic")
+    await expect(line).toHaveClass(/text-muted/)
+  }
+  const noteSource = root.locator('[data-note-slot="Notes inside the chat"] [data-placeholder-source]')
+  await expect(noteSource).toHaveText("Character's Note (depth 2)")
+  await expect(noteSource).toHaveCSS("font-style", "italic")
+  for (const [id, label, explanation] of [
+    ["charDescription", "Description", "Edit Description in each character's card, Definition tab."],
+    ["chatHistory", "Chat history", "Edit the messages in the chat."],
+    ["summaries", "Summaries", "Edit the summaries in the chat's Summaries tab."]
+  ] as const) {
+    const row = root.locator('[data-prompt="' + id + '"]')
+    await expect(row.locator("[data-placeholder-source]")).not.toHaveAttribute("data-base-ui-tooltip-trigger")
+    const help = row.getByRole("button", { name: "About " + label + " source", exact: true })
+    await expect(help).toHaveAttribute("data-about-hint", "")
+    await help.click()
+    const popup = page.getByText(explanation, { exact: false }).filter({ visible: true })
+    await expect(popup).toBeVisible()
+    await expect(popup).toContainText("can't be edited here")
+    await help.press("Tab")
+    await page.mouse.move(0, 0)
+    await expect(popup).not.toBeVisible()
+  }
   const background = (id: string) =>
     root.locator(`[data-prompt="${id}"]`).evaluate((element) => getComputedStyle(element).backgroundColor)
   expect(await background("main")).toBe(await background("synthetic-0"))
@@ -183,7 +213,8 @@ const check = async (page: Page, root: Locator, name: string) => {
     .getByText("Main Prompt", { exact: true })
     .evaluate((element) => parseFloat(getComputedStyle(element).fontSize))
   expect(historySize).toBeGreaterThan(mainSize)
-  await expect(root.locator('[data-prompt="summaries"]').getByRole("button")).toHaveCount(0)
+  // Summaries stays read-only; its only button is the standard source help.
+  await expect(root.locator('[data-prompt="summaries"]').getByRole("button")).toHaveCount(1)
   await root.locator('[data-prompt="synthetic-0"] [data-volatile-warning]').hover()
   await expect(
     page.getByText(

@@ -308,7 +308,7 @@ function SidebarToggle({ place }: { place: "sidebar" | "header" }) {
     <IconButton
       ref={ref}
       label="Hide the sidebar"
-      hint="Hide the sidebar: the button at the start of the header brings it back"
+      hint="Click to hide the sidebar"
       icon="sidebar"
       onClick={() => {
         focusNext = "header"
@@ -319,7 +319,7 @@ function SidebarToggle({ place }: { place: "sidebar" | "header" }) {
     <IconButton
       ref={ref}
       label="Show the sidebar"
-      hint="Show the sidebar: your chats, characters and the menu"
+      hint="Click to show the sidebar: your chats, characters and the menu"
       icon="sidebar"
       // A phone's and a tablet's sidebar is the menu over the page; this is the desktop's.
       className="max-lg:hidden"

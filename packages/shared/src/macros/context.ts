@@ -41,6 +41,8 @@ export interface CardFields {
    * Every character's field joined as the per-field markers fill it (ST's group join), already
    * expanded: `{{description}}`, `{{personality}}` and `{{scenario}}` read these as they are.
    */
+  /** Joined fields whose expanded content can change on each reply. */
+  readonly joinedVolatile?: ReadonlyArray<"description" | "personality" | "scenario">
   readonly joined?: {
     readonly description: string
     readonly personality: string
