@@ -11,6 +11,7 @@ import { useContext, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { sessionAtom } from "../../session.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
@@ -40,14 +41,6 @@ const statusOf = (upload: Upload) => {
   return upload.outcome.result.library ? STATUS.imported : STATUS.skipped
 }
 
-/** 900 B, 12 KB, 1.5 MB, 64 MB. */
-const size = (bytes: number) =>
-  bytes < 1024
-    ? `${bytes} B`
-    : bytes < 1024 * 1024
-      ? `${Math.ceil(bytes / 1024)} KB`
-      : `${(bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, "")} MB`
-
 /** The label of the entry an update goes into, once the library has loaded. */
 function useIntoLabel(into: RefId | null) {
   const library = useAtomValue(libraryAtom)
@@ -63,7 +56,7 @@ function UploadRow({ upload }: { upload: Upload }) {
     <li className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{upload.file.name}</span>
-        <span className="text-sm text-muted">{size(upload.file.size)}</span>
+        <span className="text-sm text-muted">{formatByteSize(upload.file.size)}</span>
         <Badge tone={status.tone}>
           {upload.status === "uploading" && <Spinner className="-ml-0.5 size-3" />}
           {status.text}
@@ -106,7 +99,7 @@ export function ImportPage() {
             id: nextId.current++,
             file,
             status: "done",
-            outcome: { _tag: "Failed", message: `This file is larger than ${size(MAX_IMPORT_BYTES)}.` }
+            outcome: { _tag: "Failed", message: `This file is larger than ${formatByteSize(MAX_IMPORT_BYTES)}.` }
           }
         : { id: nextId.current++, file, status: "waiting" }
     )
@@ -167,7 +160,9 @@ export function ImportPage() {
           <FileDrop
             label={into ? "Choose the new version, or drop it here" : "Choose files, or drop them here"}
             description={
-              left > 0 ? "Wait until these files are done to add more." : `Up to ${size(MAX_IMPORT_BYTES)} each`
+              left > 0
+                ? "Wait until these files are done to add more."
+                : `Up to ${formatByteSize(MAX_IMPORT_BYTES)} each`
             }
             multiple={!into}
             accept=".png,.json,.charx,image/png,application/json"

@@ -6,6 +6,7 @@
 // (`stImportSections`), so a plugin can replace or remove one. Report text quotes files, so
 // it's rendered as text.
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { StRoot } from "@rp/shared/stFolder.ts"
 import type {
@@ -41,7 +42,6 @@ import { libraryAtom } from "./data.ts"
 import { FolderBrowser } from "./FolderBrowser.tsx"
 import { type StImportSectionProps, stImportSections } from "./slots.ts"
 import {
-  megabytes,
   percentOf,
   ST_IMPORTS,
   ST_PREVIEW,
@@ -609,7 +609,7 @@ function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; p
         </tbody>
       </table>
       <p className="text-sm text-muted">
-        {plan.send.length} files ({megabytes(bytes)})
+        {plan.send.length} files ({formatByteSize(bytes)})
         {plan.unsupported.length > 0 &&
           `, and ${plan.unsupported.length} that only text completion uses, which aren't read`}
         .{" "}

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto"
 // summary). A chat file can be far larger than any card, so it arrives in parts cut at line
 // ends (ARCHITECTURE.md §13), and each part is read on its own: lines are separate JSON
 // documents, each under the shared JSON caps. Pure: no database, no files.
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { originalReply, type ReplySections, sectionsDisplay } from "@rp/shared/replySections.ts"
 import { ReportBuilder, shownText } from "@rp/shared/importReport.ts"
 import { Predicate } from "effect"
@@ -380,7 +381,7 @@ export const parseStChatPart = (
   issues: ReportBuilder
 ): StChatPart => {
   if (bytes.byteLength > stChatLimits.maxPartBytes) {
-    fail("st_chat.part_too_large", `A part of a chat file can be at most ${stChatLimits.maxPartBytes} bytes.`)
+    fail("st_chat.part_too_large", `A part of a chat file can be at most ${formatByteSize(stChatLimits.maxPartBytes)}.`)
   }
   let header: StChatHeader | null = null
   let lastAt = options.carryAt

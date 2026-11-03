@@ -3,6 +3,7 @@ import type { StSettingsImport } from "@rp/shared/modelSettings.ts"
 import { useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 
@@ -34,7 +35,7 @@ export function StSettingsImporter({
             setProblem(null)
             if (!file) return
             if (file.size > 2_000_000) {
-              setProblem("Choose a JSON file under 2 MB.")
+              setProblem(`Choose a JSON file no larger than ${formatByteSize(2_000_000)}.`)
               return
             }
             try {

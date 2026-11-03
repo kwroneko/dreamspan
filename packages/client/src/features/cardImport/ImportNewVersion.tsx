@@ -14,6 +14,7 @@ import { type ReactNode, useCallback, useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
+import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { AboutHint } from "../../ui/AboutHint.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
@@ -133,7 +134,7 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
   const read = async (file: File) => {
     setProblem(null)
     if (file.size > MAX_IMPORT_BYTES) {
-      setProblem(`This file is larger than ${MAX_IMPORT_BYTES / 1024 / 1024} MB.`)
+      setProblem(`This file is larger than ${formatByteSize(MAX_IMPORT_BYTES)}.`)
       return
     }
     setStep({ _tag: "Reading", file })

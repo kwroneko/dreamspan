@@ -425,6 +425,28 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_SETTINGS_ONLY === "1") {
+          for (const section of [
+            "connections",
+            "keys",
+            "network",
+            "costs",
+            "chats",
+            "display",
+            "regex",
+            "notifications",
+            "account",
+            "users",
+            "status"
+          ]) {
+            await go(`settings-${section}`, `/settings/${section}`)
+          }
+          await go("bin", "/bin")
+          await page.getByText("Bin capacity", { exact: true }).click()
+          await audit("bin-capacity")
+          for (const path of ["/import", "/import/st"]) await go(path.slice(1).replaceAll("/", "-"), path)
+          return
+        }
         if (process.env.LAYOUT_AUDIT_IMPORT_ONLY === "1") {
           await go("import-st", "/import/st")
           await page.getByRole("button", { name: "Import ST data again" }).click()
