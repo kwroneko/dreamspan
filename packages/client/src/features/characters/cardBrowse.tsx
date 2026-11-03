@@ -166,7 +166,6 @@ export function CardFilterControl({
     )
   return (
     <Segmented
-      wrap
       label="Show"
       value={shown}
       onValueChange={onChange}
@@ -263,13 +262,15 @@ export function CardSortControl({
   reversed,
   onChange,
   compact = false,
-  label = "Sort by"
+  label = "Sort by",
+  className = ""
 }: {
   sort: CardSort
   reversed: boolean
   onChange: (change: Partial<CardBrowse>) => void
   compact?: boolean
   label?: string
+  className?: string
 }) {
   const direction = (
     <SortDirection
@@ -279,7 +280,7 @@ export function CardSortControl({
     />
   )
   return (
-    <div className="flex shrink-0 items-center gap-1">
+    <div className={`flex shrink-0 items-center gap-1 ${className}`}>
       {compact ? (
         <Menu
           label={label}

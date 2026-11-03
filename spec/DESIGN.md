@@ -893,6 +893,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D], built (homecontrols, owner, 2026-11-03):** “New arrangement, chosen from the controls' container width with container queries (not viewport breakpoints), and applied identically to the left panel's grid.” Wide: filters left and sort group right, bounded search below left. Medium: filters above search left and sort right. Narrow: horizontally scrolling, unbroken filter segments above right-aligned sort, then full-width search. “Find the thresholds by measuring the controls' real widths, not by hard-coding pixel guesses, so it adapts when labels or counts change.” Implemented and obsolete as a proposal; see ARCHITECTURE §12.
+
 - **[D] Column header alignment** (owner, 2026-11-03): "the left column header has a lot of space around it and ends up looking misaligned with the centre column's header, which is less tall." The left header, centre chat header and right panel's top tab bar share one height token and continuous bottom borders wherever they sit side by side; left title/actions are vertically centred with the chat's controls, with matching vertical padding. Chats / Characters stays below that divider, spaced like the centre's content. **Built** (ARCHITECTURE §12, "Column header alignment").
   - **[P]** (headeralign, 2026-11-03) How: retain the centre header's portrait-bearing height, 65 px (48 px portrait + 8 px above/below + 1 px border), at every width through `--spacing-shell-header`. The sidebar's tabs and the panel's cast strip start 16 px below the common divider, matching the message list's leading inset.
 

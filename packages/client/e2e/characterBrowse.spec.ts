@@ -150,7 +150,7 @@ for (const width of [1440, 390]) {
     await expect(sort.getByRole("button", { name: "Name", exact: true })).toHaveAttribute("aria-pressed", "true")
     await sort.getByRole("button", { name: "Recent", exact: true }).click()
 
-    // The left panel's grid: the same filter and sort, compact.
+    // The left panel's grid: the same segmented filter and sort.
     if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
     const panel = width === 390 ? page.locator(".fixed.inset-0") : page.getByRole("complementary").first()
     // A chat's pin is a pin, not the favourite's star.
@@ -159,28 +159,28 @@ for (const width of [1440, 390]) {
     await expect(pin).toHaveText("")
     await expect(pin.locator("svg")).toHaveCount(1)
     await panel.getByRole("group", { name: "Left panel", exact: true }).getByText("Characters").click()
-    await panel.getByRole("combobox", { name: "Show" }).click()
-    await expect(page.getByRole("option")).toHaveText([
-      "All · 4",
-      "With chats · 2",
-      "Never used · 2",
-      "Favourites · 2",
-      "Personas · 0",
-      "Groups · 1"
+    const panelShow = panel.getByRole("group", { name: "Show", exact: true })
+    await expect(panelShow.getByRole("button")).toHaveText([
+      "All4",
+      "With chats2",
+      "Never used2",
+      "Favourites2",
+      "Personas0",
+      "Groups1"
     ])
-    await page.getByRole("option", { name: "Favourites · 2" }).click()
+    await panelShow.getByRole("button", { name: "Favourites", exact: true }).click()
     await expect.poll(async () => (await labels(tiles(panel))).sort()).toEqual(["Bram", "Dora"])
-    await panel.getByRole("button", { name: "Sort by: Recent" }).click()
-    await page.getByRole("menuitemcheckbox", { name: /^Added/ }).click()
+    await panel
+      .getByRole("group", { name: "Sort by", exact: true })
+      .getByRole("button", { name: "Added", exact: true })
+      .click()
     await expect(panel.locator("[data-sort-date]")).toHaveCount(2)
     await shoot(page, `characters-sidebar-${width}`)
-    await panel.getByRole("combobox", { name: "Show" }).click()
-    await page.getByRole("option", { name: "Groups · 1" }).click()
+    await panelShow.getByRole("button", { name: "Groups", exact: true }).click()
     await expect(
       panel.getByLabel("Groups", { exact: true }).getByRole("button", { name: "Open chat The pair" })
     ).toBeVisible()
-    await panel.getByRole("combobox", { name: "Show" }).click()
-    await page.getByRole("option", { name: "All · 4" }).click()
+    await panelShow.getByRole("button", { name: "All", exact: true }).click()
 
     // Start a chat: the same, without Groups.
     await panel.getByRole("button", { name: "Start a chat", exact: true }).click()
