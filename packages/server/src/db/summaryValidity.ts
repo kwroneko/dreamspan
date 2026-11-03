@@ -7,7 +7,7 @@
 // touched rows can't reach on to the chat's new one. What a summary reads, and who it reaches:
 // - a slot's shown fields (`slots` columns, its versions): the forks whose tip is it or below it.
 //   A new slot reaches none (no fork's path holds it until a fork's tip moves, below);
-//   a new version neither (it's shown only once a selection or replacement names it).
+//   Every retained version contributes participation, even an unselected alternative.
 // - a fork's row (tip, lineage, deletion): that fork. Where a fork splits off reads its
 //   parent's path too: a fork's tip moving reaches its children whose tips are below a slot
 //   one of its paths holds and the other doesn't (the slots between the two tips and their
@@ -61,7 +61,8 @@ const statements: ReadonlyArray<string> = [
     purged_at ON main.slots BEGIN ${touch(SLOT, "NEW.chat_id", "NEW.id")} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_slot_delete AFTER DELETE ON main.slots
     BEGIN ${touch(CHAT, "OLD.chat_id")} END`,
-  // An unselected human-written alternative contributes persona activity too.
+  // Every new alternative contributes its cast and author, selected or not; human
+  // alternatives also contribute persona activity.
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_insert AFTER INSERT ON main.versions
     WHEN EXISTS (SELECT 1 FROM slots WHERE id = NEW.slot_id)
     BEGIN ${touch(SLOT, slotChat("NEW.slot_id"), "NEW.slot_id")} END`,

@@ -122,7 +122,7 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
   // A message's portrait, with the panel closed (this browser reopens it where it was left).
   const hide = page.getByRole("button", { name: "Close the panel" })
   if (await hide.isVisible()) await hide.click()
-  await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
+  await page.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()
   await expect(column("Tall")).toBeVisible()
   await expect(page.getByRole("dialog")).toHaveCount(0)
   // One image at a time: another portrait's click replaces it (the stack has its own test).
@@ -266,7 +266,7 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   if (await hide.isVisible()) await hide.click()
 
   // Stacking is the default; the earlier test left one at a time on, so turn it off.
-  await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
+  await page.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()
   await setSingle(column("Tall"), false)
   await expectFitted(page, "Tall")
   await shoot(page, "stack-1")
@@ -371,7 +371,7 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   await setSingle(column("Wide"), true)
   await expect(viewers).toHaveCount(1)
   await expect(column("Wide")).toBeVisible()
-  await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
+  await page.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()
   await expect(viewers).toHaveCount(1)
   await expect(column("Tall")).toBeVisible()
 
@@ -404,7 +404,7 @@ test("a portrait opens full-screen at 390: fit and 100% differ, it pans and pinc
   await openChat(page)
   const screen = (name: string) => page.getByRole("dialog", { name, exact: true })
 
-  await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
+  await page.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()
   await expect(screen("Tall")).toBeVisible()
   const fitted = await expectFitted(page, "Tall")
   expect(fitted.width).toBeGreaterThan(360)
