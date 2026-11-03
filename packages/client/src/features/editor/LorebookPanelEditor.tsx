@@ -6,10 +6,11 @@
 // its settings a level further down. What's typed is used as it's typed; Save cuts a revision.
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import type { FieldPath } from "@rp/shared/editing.ts"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
+import { pressedButtonClass } from "../../ui/InlinePanel.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
@@ -61,6 +62,7 @@ export function LorebookPanelEditor({
   const state = useEditorState(store)
   const book = useValue<LorebookDoc | undefined>(store, root)
   const [searching, setSearching] = useState(false)
+  const findButton = useRef<HTMLButtonElement>(null)
   const [match, setMatch] = useState<SearchMatch | null>(null)
   useEffect(() => {
     if (store.snapshot === null) void store.load()
@@ -71,7 +73,7 @@ export function LorebookPanelEditor({
   return (
     <SearchNavigation value={match}>
       <section aria-label={`Lorebook ${fallbackName}`} className="flex min-w-0 flex-col gap-3">
-        <div className="flex items-start gap-1">
+        <div className="flex items-start gap-0.5">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="font-medium">
               <BookName store={store} root={root} fallback={fallbackName} />
@@ -79,22 +81,15 @@ export function LorebookPanelEditor({
             {note && <p className="text-xs text-muted">{note}</p>}
           </div>
           {onOpenLarge && (
-            <Button
-              className="h-8 shrink-0 px-2.5"
-              hint="The book in the large editor over the chat: its entries in a table with their columns."
+            <IconButton
+              label="Large editor"
+              hint="Large editor: opens the lorebook over the chat, its entries in a table with their columns."
+              icon="expand"
               onClick={onOpenLarge}
-            >
-              <Icon name="expand" />
-              Large editor
-            </Button>
+            />
           )}
           {onClose && (
-            <IconButton
-              label="Close the lorebook"
-              hint="Closes the book here; what you typed stays, used as it's typed."
-              icon="close"
-              onClick={onClose}
-            />
+            <IconButton label="Close the lorebook" hint="Closes this lorebook." icon="close" onClick={onClose} />
           )}
         </div>
         {state.saveError && (
@@ -108,17 +103,6 @@ export function LorebookPanelEditor({
             <RecoveredNotice store={store} />
           </>
         )}
-        {searching && (
-          <div id="panel-lore-search" className="rounded-md border border-border p-2">
-            <SearchDialog
-              store={store}
-              inline
-              idPrefix="panel-lore-search"
-              scopes={lorebookScopes(root)}
-              onReveal={setMatch}
-            />
-          </div>
-        )}
         {book ? (
           <LorebookTable
             store={store}
@@ -128,16 +112,34 @@ export function LorebookPanelEditor({
             saveControls={saveControls ? <SaveRevision store={store} /> : undefined}
             tools={
               <Button
+                ref={findButton}
                 variant="ghost"
-                className="h-8! w-8! px-0!"
-                aria-label="Search and replace"
-                aria-expanded={searching}
+                className={`h-8! px-2! ${pressedButtonClass}`}
+                aria-label="Find and replace"
+                aria-pressed={searching}
                 aria-controls="panel-lore-search"
                 hint="Find and replace in the entries' text, their keys, or anywhere in the book."
                 onClick={() => setSearching(!searching)}
               >
-                <Icon name="search" />
+                <Icon name="replace" />
+                {/* Its label goes first when the row is narrow (LorebookTable's collapse order). */}
+                <span className="hidden @[22rem]:inline">Find and replace</span>
               </Button>
+            }
+            toolPanel={
+              searching && (
+                <SearchDialog
+                  store={store}
+                  inline
+                  idPrefix="panel-lore-search"
+                  scopes={lorebookScopes(root)}
+                  onReveal={setMatch}
+                  onClose={() => {
+                    setSearching(false)
+                    findButton.current?.focus()
+                  }}
+                />
+              )
             }
           />
         ) : (
