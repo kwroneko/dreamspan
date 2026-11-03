@@ -143,8 +143,10 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
     if (!tracking) return
     const moved = yield* sql<{ chat_id: string; stamp: number }>`SELECT chat_id, stamp FROM shell_moved`
     if (moved.length > 0) {
+      // Decide once per moved chat. Inlining this scans all touches again for every
+      // touched version below; pinning many swipes would make settlement quadratic.
       yield* sql`WITH RECURSIVE
-        kept(chat_id, stamp) AS (
+        kept(chat_id, stamp) AS MATERIALIZED (
           SELECT m.chat_id, m.stamp FROM shell_moved m WHERE NOT EXISTS (
             SELECT 1 FROM shell_touches t WHERE t.chat_id = m.chat_id AND (t.kind = ${CHAT}
               -- A chat with insertions shows slots off its tree's paths.
