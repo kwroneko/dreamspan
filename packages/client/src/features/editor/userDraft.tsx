@@ -159,7 +159,7 @@ export class UserDraftStore {
         // response cannot erase a later clear, or carry an acknowledged clear forward.
         for (const pending of this.pendingTypes) {
           if (pending.edit < edit || (!seed && pending.edit === edit)) continue
-          this.editingFrom = editingOrigin(this.editingFrom, pending.initial, pending.content)
+          this.editingFrom = editingOrigin(this.editingFrom, pending.initial, pending.content, pending.editingFrom)
           pending.editingFrom = this.editingFrom
         }
       }

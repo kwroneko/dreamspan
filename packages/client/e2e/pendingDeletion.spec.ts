@@ -261,3 +261,105 @@ for (const width of [1440, 390])
       if (process.env.LAYOUT_AUDIT === "1")
         await expectLayout(page, test.info(), `restored-insertion-${width}-${theme}`)
     })
+
+test("a whole pending-message clear survives a blocked history queue, new text and closing before save", async ({
+  browser
+}) => {
+  const card = await admin((api) => api.CreateCard({ label: "Queued clear fixture", name: "Queued clear fixture" }))
+  const ownerId = await admin((api) => Effect.map(api.Whoami(), (user) => user.id))
+  const address = { ownerId, targetId: `pending-chat:${card.entityId}`, field: "First message" }
+  const old = "Text deliberately cleared on the other device",
+    fresh = "Fresh final key after the whole clear"
+  const initial = await admin((api) =>
+    api.SaveUserDraft({ ...address, content: old, draftId: null, expectedRowVersion: null, expectedSession: null })
+  )
+  const deviceA = await browser.newContext(),
+    deviceB = await browser.newContext()
+  let holdA = true,
+    historyHeld = false
+  try {
+    await deviceA.route("**/library/drafts", (route) => route.abort())
+    await deviceA.routeWebSocket("**/rpc", (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((message) => {
+        if (!holdA || !String(message).includes('"tag":"SaveUserDraft"')) upstream.send(message)
+      })
+      upstream.onMessage((message) => socket.send(message))
+    })
+    await deviceB.route("**/library/drafts", (route) => route.abort())
+    await deviceB.routeWebSocket("**/rpc", (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((message) => {
+        if (String(message).includes('"tag":"UserDraftHistory"')) {
+          historyHeld = true
+          return
+        }
+        upstream.send(message)
+      })
+      upstream.onMessage((message) => socket.send(message))
+    })
+    const first = await deviceA.newPage(),
+      second = await deviceB.newPage()
+    await apiLogin(first.request, server(), ADMIN.handle, ADMIN.password)
+    await apiLogin(second.request, server(), ADMIN.handle, ADMIN.password)
+    const url = `${server().url}/cards/${card.entityId}/chat`
+    await first.goto(url)
+    await expect(first.getByLabel("Message", { exact: true })).toHaveValue(old)
+    // A retained pre-clear copy can be an earlier save whose acknowledgement was lost.
+    // Keep that exact starting text without an additional live edit racing B's opening.
+    await first.evaluate(
+      (copy) => localStorage.setItem(`rp.pendingTyped:${copy.userId}:${copy.refId}`, JSON.stringify(copy)),
+      {
+        key: `synthetic-root-stale:${initial.id}`,
+        userId: ownerId,
+        refId: address.targetId,
+        field: address.field,
+        content: old,
+        at: Date.now(),
+        ancestors: [],
+        save: {
+          kind: "userDraft",
+          payload: {
+            ...address,
+            content: old,
+            editingFrom: old,
+            draftId: initial.id,
+            expectedRowVersion: initial.rowVersion,
+            expectedSession: initial.session
+          }
+        }
+      }
+    )
+    await first.close()
+    await second.goto(url)
+    const input = second.getByLabel("Message", { exact: true })
+    await expect(input).toHaveValue(old)
+    await second.getByRole("button", { name: "Undo / history", exact: true }).click()
+    await expect.poll(() => historyHeld).toBe(true)
+    await input.fill("")
+    await input.fill(fresh)
+    // The two input transitions replace the unsent empty backup with one final copy.
+    const retained = await second.evaluate(() =>
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith("rp.pendingTyped:"))
+        .map((key) => JSON.parse(localStorage.getItem(key)!))
+    )
+    expect(retained).toHaveLength(1)
+    expect(retained[0].content).toBe(fresh)
+    await second.close()
+    const restored = await deviceB.newPage()
+    await restored.goto(url)
+    await expect(restored.getByLabel("Message", { exact: true })).toHaveValue(fresh)
+    await expect
+      .poll(() => admin((api) => api.GetUserDraft(address)).then((draft) => draft?.clearedVersion ?? 0))
+      .toBeGreaterThan(0)
+    holdA = false
+    const stale = await deviceA.newPage()
+    await stale.goto(url)
+    await expect(stale.getByLabel("Message", { exact: true })).toHaveValue(fresh)
+    await expect.poll(() => admin((api) => api.GetUserDraft(address)).then((draft) => draft?.content)).toBe(fresh)
+  } finally {
+    await deviceA.close()
+    await deviceB.close()
+  }
+})

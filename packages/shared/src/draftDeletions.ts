@@ -1,10 +1,12 @@
 // Deletion belongs to the logical input, even when its edit history moves elsewhere.
 import type { Draft, ObservedDeletion, FieldDeletion, EditingOrigin } from "./drafts.ts"
+import { uuidv7 } from "./id.ts"
 
 export interface DeletionBase {
   readonly draftId: string | null
   readonly expectedRowVersion: number | null
   readonly observedDeletion?: ObservedDeletion
+  readonly editingFrom?: EditingOrigin
 }
 type Deletions = Readonly<Record<string, FieldDeletion>>
 type DeletionState = Pick<Draft, "id" | "clearedVersion" | "deletions" | "content">
@@ -13,9 +15,19 @@ export const deletionMap = (draft: Pick<Draft, "id" | "clearedVersion" | "deleti
   draft.deletions ??
   ((draft.clearedVersion ?? 0) > 0 ? { "": { draftId: draft.id, rowVersion: draft.clearedVersion! } } : {})
 
-export const beforeDeletion = (currentId: string, deletion: ObservedDeletion, base: DeletionBase | null) => {
+export const beforeDeletion = (currentId: string, deletion: FieldDeletion, base: DeletionBase | null) => {
   const seen = base?.observedDeletion
   if (seen?.draftId === deletion.draftId && seen.rowVersion >= deletion.rowVersion) return false
+  // A lost ACK must not strand typing descended from this very clear. This is an
+  // authored event identity, never permission borrowed from a later server read.
+  if (
+    deletion.clearId !== undefined &&
+    deletion.draftId === currentId &&
+    (base?.draftId === currentId || base?.draftId === null) &&
+    typeof base.editingFrom === "object" &&
+    base.editingFrom.clearId === deletion.clearId
+  )
+    return false
   // A replacement row at this unique logical target was created after the retained barrier.
   if (currentId !== deletion.draftId) {
     if (seen?.draftId === currentId && seen.rowVersion > 0) return false
@@ -154,6 +166,15 @@ export const reconcileForm = (
 ) => {
   const exact = base?.draftId === draft.id && base.expectedRowVersion === draft.rowVersion
   const before = deliberate ? (editingFrom ?? (exact ? draft.content : null)) : null
+  // Clearing the entire input is intent for the entire new document. Once that
+  // event is recorded, ordinary conservative per-input reconciliation resumes.
+  if (
+    typeof before === "object" &&
+    before !== null &&
+    before.clearId !== undefined &&
+    deletionMap(draft)[""]?.clearId !== before.clearId
+  )
+    return { content, changed: false, intent: before }
   const initial = form(originContent(before)),
     incoming = form(content),
     current = form(draft.content)
@@ -208,11 +229,16 @@ export const trackDeletions = (
 ): Deletions => {
   const markers: Record<string, FieldDeletion> = { ...deletionMap(draft) }
   const token = { draftId: draft.id, rowVersion: draft.rowVersion + 1 }
+  const clearId = typeof edit?.before === "object" && edit.before !== null ? edit.before.clearId : undefined
   if (
     deliberate &&
-    (edit ? edit.before !== null && edit.before !== "" && edit.content === "" : draft.content !== "" && content === "")
+    (clearId !== undefined ||
+      (edit
+        ? originContent(edit.before) !== null && originContent(edit.before) !== "" && edit.content === ""
+        : draft.content !== "" && content === "")) &&
+    (clearId === undefined || markers[""]?.clearId !== clearId)
   )
-    markers[""] = token
+    markers[""] = clearId === undefined ? token : { ...token, clearId }
   if (!compound) return markers
   const after = form(content),
     before = form(edit ? originContent(edit.before) : draft.content),
@@ -277,8 +303,21 @@ const assign = (incoming: Record<string, unknown>, current: unknown, path: Reado
 }
 
 /** Preserve actual local clears across failed saves, even when typing returned to its original blank. */
-export const editingOrigin = (origin: EditingOrigin | null, before: string, content: string): EditingOrigin => {
-  if (before !== "" && content === "") return before
+export const editingOrigin = (
+  origin: EditingOrigin | null,
+  before: string,
+  content: string,
+  replaying?: EditingOrigin | null
+): EditingOrigin => {
+  if (before !== "" && content === "")
+    return {
+      // The event protects the old text. Subsequent input edits start from the
+      // cleared field, so old form values cannot manufacture new input barriers.
+      content: "",
+      clearedArrays: [],
+      // Replaying a queued transition after an earlier ACK retains its authored id.
+      clearId: typeof replaying === "object" && replaying !== null ? (replaying.clearId ?? uuidv7()) : uuidv7()
+    }
   const left = form(before),
     right = form(content)
   if (left === null || right === null) return origin ?? before
@@ -299,7 +338,10 @@ export const editingOrigin = (origin: EditingOrigin | null, before: string, cont
     assign(basis, left, clear.path, at(left, clear.path))
   }
   const result = JSON.stringify(basis)
-  return arrays.length === 0 ? result : { content: result, clearedArrays: arrays }
+  const clearId = typeof origin === "object" && origin !== null ? origin.clearId : undefined
+  return arrays.length === 0 && clearId === undefined
+    ? result
+    : { content: result, clearedArrays: arrays, ...(clearId === undefined ? {} : { clearId }) }
 }
 
 /** Overlay protected inputs by identity. Anonymous-array conflicts retain the entire snapshot. */
