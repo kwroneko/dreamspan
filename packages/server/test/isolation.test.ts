@@ -395,6 +395,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         (data) => {
           for (const section of data.sections) assert.strictEqual(section.total, 0)
           assert.deepStrictEqual(data.people, [])
+          assert.deepStrictEqual(data.filterCounts, { all: 0, pinned: 0, groups: 0, solo: 0, branches: 0 })
         }
       )
   },

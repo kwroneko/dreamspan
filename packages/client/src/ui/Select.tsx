@@ -89,9 +89,9 @@ export function Select<Value>({
         >
           <BaseSelect.Popup
             ref={setPopup}
-            className="max-h-[var(--available-height)] max-w-[min(24rem,calc(100vw-1rem))] min-w-[var(--anchor-width)] origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="max-h-[var(--available-height)] max-w-[min(24rem,calc(100vw-1rem))] min-w-[var(--anchor-width)] origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
-            <BaseSelect.List>
+            <BaseSelect.List className="p-2">
               {items.map((item) => (
                 <SelectOption key={String(item.value)} item={item} />
               ))}

@@ -57,7 +57,7 @@ const shellForksAtom = Atom.family((key: string) =>
       reactivityKeys: SHELL_KEYS,
       timeToLive: "2 minutes"
     }),
-    withCast
+    (data) => ({ rows: withCast(data), filterCounts: data.filterCounts })
   )
 )
 /** Rows shown at first, and added by each "Show more". */
@@ -72,8 +72,18 @@ const empty: ShellRows = { rows: [], total: 0 }
 export function useShellForks(view: ShellForksView) {
   const atom = shellForksAtom(JSON.stringify(view))
   const result = useAtomValue(atom)
-  const lists = JSON.stringify([view.entity, view.chat, view.chats, view.sort, view.sections.map((s) => s.id)])
-  const [last, setLast] = useState<{ lists: string; data: ReadonlyMap<ShellSection, ShellRows> } | null>(null)
+  const lists = JSON.stringify([
+    view.entity,
+    view.chat,
+    view.chats,
+    view.sort,
+    view.browse,
+    view.sections.map((s) => s.id)
+  ])
+  const [last, setLast] = useState<{
+    lists: string
+    data: { rows: ReadonlyMap<ShellSection, ShellRows>; filterCounts: ShellForks["filterCounts"] }
+  } | null>(null)
   // Kept as React's "state from the previous render": set again only when the answer changes.
   if (AsyncResult.isSuccess(result) && (last?.data !== result.value || last.lists !== lists))
     setLast({ lists, data: result.value })
@@ -84,7 +94,8 @@ export function useShellForks(view: ShellForksView) {
     loading: data === null,
     waiting: !AsyncResult.isSuccess(result) || result.waiting,
     failure: AsyncResult.isFailure(result) ? result : null,
-    section: (id: ShellSection) => data?.get(id) ?? empty
+    filterCounts: data?.filterCounts ?? null,
+    section: (id: ShellSection) => data?.rows.get(id) ?? empty
   }
 }
 

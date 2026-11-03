@@ -530,6 +530,31 @@ test.describe("synthetic library and every app surface", () => {
           await audit("default-speaker-picker")
           return
         }
+        if (process.env.LAYOUT_AUDIT_SIDEBAR_ONLY === "1") {
+          for (const [scope, query] of [
+            ["all", ""],
+            ["character", `&character=${cardId}`],
+            ["branches", `&character=${cardId}&forks=${chatId}`]
+          ]) {
+            await go(`sidebar-before-${scope}`, `/?side=chats${query}`)
+            await showAppNavigation(page)
+            await audit(`sidebar-scope-${scope}`)
+            if (scope !== "branches") {
+              const panel =
+                width === 390
+                  ? page.locator(".fixed.inset-0")
+                  : page.getByRole("complementary", { name: "Sidebar", exact: true })
+              await panel.getByRole("combobox", { name: "Show chats", exact: true }).click()
+              await audit(`sidebar-filter-${scope}`)
+              await page.keyboard.press("Escape")
+              await panel.getByRole("button", { name: /^Sort chats:/ }).click()
+              await audit(`sidebar-sort-${scope}`)
+              await page.keyboard.press("Escape")
+            }
+            await hideAppNavigation(page)
+          }
+          return
+        }
         if (process.env.LAYOUT_AUDIT_PERSONA_BADGES_ONLY === "1") {
           const persona = await admin((api) =>
             Effect.gen(function* () {
