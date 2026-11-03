@@ -391,9 +391,11 @@ test.describe("synthetic library and every app surface", () => {
                   ? { scope: "[data-history-panel]" }
                   : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
                     ? { scope: 'section[aria-label="Who replies"]' }
-                    : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
-                      ? { scope: '[role="menu"]' }
-                      : {}
+                    : process.env.LAYOUT_AUDIT_LOREBOOKS_ONLY === "1"
+                      ? { scope: "[data-lorebook-audit]" }
+                      : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
+                        ? { scope: '[role="menu"]' }
+                        : {}
             )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
@@ -639,6 +641,45 @@ test.describe("synthetic library and every app surface", () => {
           await openPanel(page, "Cast")
           await page.getByRole("button", { name: `More for ${cardName}`, exact: true }).click()
           await formats("menu-pending-cast-export", true)
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_LOREBOOKS_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const panel = await openPanel(page, "Lorebooks")
+          const book = (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).find((ref) => ref.id === bookRef)!
+          await panel
+            .getByRole("list", { name: "Lorebooks in this chat" })
+            .getByRole("button")
+            .filter({ has: page.getByText(book.label, { exact: true }) })
+            .click()
+          const editor = panel.getByRole("region", { name: `Lorebook ${book.label}`, exact: true })
+          const inspect = async (scope: Locator, surface: string) => {
+            await scope.evaluate((el) => el.setAttribute("data-lorebook-audit", ""))
+            await expect(scope.getByRole("list", { name: "Entries", exact: true })).toBeVisible()
+            const collapse = scope.getByRole("button", { name: "Collapse all", exact: true })
+            if ((await collapse.count()) > 0) await collapse.click()
+            await audit(`${surface}-headers`)
+            await scope
+              .getByRole("button", { name: /^Open / })
+              .first()
+              .click()
+            const entry = scope.getByRole("group", { name: /^Lorebook entry/ }).first()
+            await entry.getByRole("button", { name: /^Settings of / }).click()
+            await audit(`${surface}-settings`)
+            const closed = entry.locator("[data-section-toggle][aria-expanded=false]")
+            while ((await closed.count()) > 0) await closed.first().click()
+            await audit(`${surface}-all-settings`)
+            const keys = entry.getByRole("textbox", { name: "Primary keys", exact: true })
+            await keys.focus()
+            await audit(`${surface}-keys`)
+            await keys.blur()
+            await scope.evaluate((el) => el.removeAttribute("data-lorebook-audit"))
+          }
+          await inspect(editor, "lorebook-panel")
+          await editor.getByRole("button", { name: "Large editor", exact: true }).click()
+          await inspect(page.getByRole("dialog", { name: "Lorebook editor", exact: true }), "lorebook-large")
+          await page.goto(`${server.url}/library/${bookRef}`)
+          await inspect(page.getByRole("main"), "lorebook-page")
           return
         }
         if (process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1") {

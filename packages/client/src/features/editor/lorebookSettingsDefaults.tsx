@@ -100,6 +100,7 @@ const SECTIONS: ReadonlyArray<Section> = [
   {
     id: "activation",
     title: "Strategy and position",
+    plain: true,
     hint: "When the entry is included, where its text goes, and its order.",
     column: 0,
     // The large editor's rows show these as columns; the outlet's name stays here.
@@ -139,6 +140,7 @@ const SECTIONS: ReadonlyArray<Section> = [
   {
     id: "export",
     title: "Card export only",
+    headerStatus: false,
     hint: "Settings kept for exporting the lorebook or card. They change nothing in chats here.",
     column: 1
   }

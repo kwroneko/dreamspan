@@ -80,7 +80,7 @@ const setUp = async (page: Page, tag: string, width: number) => {
   )
   await page.goto(`${server().url}/chats/${chatId}`)
   const panel = await openPanel(page, "Lorebooks")
-  return { panel, chatId }
+  return { panel, chatId, refId: tides }
 }
 
 const openBook = async (page: Page, panel: Locator, tag: string) => {
@@ -101,6 +101,22 @@ const openLarge = async (page: Page, editor: Locator) => {
 }
 
 const box = async (locator: Locator) => (await locator.boundingBox())!
+
+test("lorebook entry review crops", async ({ page }) => {
+  const { panel } = await setUp(page, "review", 1440)
+  const editor = await openBook(page, panel, "review")
+  await editor.getByRole("button", { name: "Open Harbour", exact: true }).click()
+  await editor.getByRole("button", { name: "Settings of Harbour", exact: true }).click()
+  await editor.screenshot({ path: join(shots, "panel-settings.png") })
+  await editor.getByText("harbour, quay", { exact: true }).click()
+  await page.waitForTimeout(700)
+  await page.screenshot({ path: join(shots, "panel-keys.png") })
+  await page.keyboard.press("Escape")
+  const large = await openLarge(page, editor)
+  await large.getByRole("button", { name: "Open Harbour", exact: true }).click()
+  await large.getByRole("button", { name: "Settings of Harbour", exact: true }).click()
+  await large.screenshot({ path: join(shots, "large-settings.png") })
+})
 
 /** The toolbar's rows: each one line, nothing wrapping into fragments, the filter field bounded. */
 const checkToolbar = async (scope: Locator, label: string) => {
@@ -255,7 +271,9 @@ test("an entry's settings are closed accordions with summaries and a marker", as
   await expect(settings.getByRole("button", { name: "Inclusion group of Lamp", exact: true })).toContainText(
     "Default settings"
   )
-  await expect(settings.getByRole("button", { name: /^Card export only of Lamp/ })).toBeVisible()
+  const exportOnly = settings.getByRole("button", { name: "Card export only of Lamp", exact: true })
+  await expect(exportOnly).toHaveText("Card export only")
+  await expect(exportOnly.locator("[data-changed]")).toHaveCount(0)
   await expect(lamp.getByText(/kept for export/i)).toHaveCount(0)
   await timing.click()
   await expect(settings.getByRole("spinbutton", { name: "Sticky" })).toHaveValue("3")
@@ -291,8 +309,7 @@ test("Edit N entries changes two settings at once, shows Mixed, and clears an em
   await expect(lamp.getByRole("button", { name: "Timing and filters of Lamp", exact: true })).toContainText(
     "Default settings"
   )
-  await lamp.getByRole("button", { name: /^Strategy and position of Lamp/ }).click()
-  await expect(lamp.getByRole("spinbutton", { name: "Order of Lamp" }).or(lamp.getByLabel("Order"))).toHaveValue("77")
+  await expect(lamp.getByRole("spinbutton", { name: "Order of Lamp", exact: true })).toHaveValue("77")
 })
 
 test("the Lorebooks list shows every source and count, the twin, and the placement switch", async ({ page }) => {
@@ -337,3 +354,114 @@ test("Go to a match in a preset prompt's name opens its name with the match sele
   ).toBe("Auxiliary")
   await page.keyboard.press("Escape")
 })
+
+/** Measure the actual hit targets, so wrapper padding cannot hide an uneven gap. */
+const equalHeaderGaps = async (scope: Locator, title: string) => {
+  const header = scope
+    .locator("[data-entry-header]")
+    .filter({ has: scope.page().getByRole("textbox", { name: `Title of ${title}`, exact: true }) })
+  const controls = header
+    .locator(
+      '[role=checkbox], [role=switch], [role=combobox], input[aria-label^="Title of "], input[type=number], button[aria-label^="Open "], button[aria-label^="Close "], button[aria-label^="More for "], button[aria-label^="Settings of "]'
+    )
+    .filter({ visible: true })
+  const rects = await controls.evaluateAll((elements) =>
+    elements
+      .map((element) => {
+        const rect = element.getBoundingClientRect()
+        return { name: element.getAttribute("aria-label"), x: rect.x, right: rect.right }
+      })
+      .sort((a, b) => a.x - b.x)
+  )
+  expect(rects.length).toBeGreaterThanOrEqual(5)
+  const gaps = rects.slice(1).map((rect, i) => rect.x - rects[i]!.right)
+  expect(Math.max(...gaps) - Math.min(...gaps), JSON.stringify({ rects, gaps })).toBeLessThanOrEqual(1)
+  for (const gap of gaps) expect(gap).toBeCloseTo(8, 0)
+}
+
+const checkEntryControls = async (scope: Locator, width: number, large = false) => {
+  const page = scope.page()
+  await equalHeaderGaps(scope, "Harbour")
+  await scope.getByRole("button", { name: "Open Harbour", exact: true }).click()
+  await equalHeaderGaps(scope, "Harbour")
+  if (large) {
+    await expect(scope.getByRole("combobox", { name: "Strategy of Harbour", exact: true })).toBeVisible()
+    await expect(scope.getByRole("combobox", { name: "Position of Harbour", exact: true })).toBeVisible()
+  }
+  const entry = scope.getByRole("group", { name: "Lorebook entry 0", exact: true })
+  await entry.getByRole("button", { name: "Settings of Harbour", exact: true }).click()
+  await expect(entry.getByRole("button", { name: /^Strategy and position/ })).toHaveCount(0)
+  for (const name of ["Strategy", "Position", "Depth", "Order", "Trigger %"]) {
+    await expect(scope.getByRole("button", { name: `About ${name}`, exact: true })).toBeVisible()
+    await expect(
+      scope.getByRole(name === "Strategy" || name === "Position" ? "combobox" : "spinbutton", {
+        name: `${name} of Harbour`,
+        exact: true
+      })
+    ).toBeVisible()
+  }
+  // Editing by pointer or keyboard never opens an explanation on the field itself.
+  const keys = entry.getByRole("textbox", { name: "Primary keys", exact: true })
+  const keyExplanation = page
+    .getByText(
+      "Include the entry when any key appears in the messages it checks. One key per line; /pattern/flags is a regular expression.",
+      { exact: true }
+    )
+    .filter({ visible: true })
+  await entry.locator("[data-entry-keys] span[data-own-click]").click()
+  await expect(keys).toBeFocused()
+  await keys.hover()
+  await page.waitForTimeout(650)
+  await expect(keyExplanation).toHaveCount(0)
+  await keys.click()
+  await keys.fill("harbour\nquay\n/pier/i")
+  await expect(keyExplanation).toHaveCount(0)
+  await keys.blur()
+  await keys.focus()
+  await page.waitForTimeout(650)
+  await expect(keyExplanation).toHaveCount(0)
+  const help = entry.getByRole("button", { name: "About Primary keys", exact: true })
+  const row = entry.locator("[data-entry-keys]")
+  expect((await box(help)).x).toBeGreaterThan((await box(keys)).x)
+  expect(Math.abs((await box(help)).y - (await box(row)).y)).toBeLessThanOrEqual(6)
+  await help.click()
+  await expect(keyExplanation).toBeVisible()
+  await expect(entry.getByRole("button", { name: "Close Harbour", exact: true })).toBeVisible()
+  for (const [name, count] of [
+    ["Strategy", 3],
+    ["Position", 8]
+  ] as const) {
+    const select = scope.getByRole("combobox", { name: `${name} of Harbour`, exact: true })
+    // The shared Select is a button with the same styled trigger as the preset editor.
+    await expect(select).toHaveJSProperty("tagName", "BUTTON")
+    await expect(select).toHaveClass(/bg-surface/)
+    await select.click()
+    const options = page.getByRole("option")
+    await expect(options).toHaveCount(count)
+    for (const option of await options.all()) {
+      const explanation = await option.getAttribute("data-explain")
+      expect(explanation?.length).toBeGreaterThan(15)
+      await option.hover()
+      if (width < 640) await expect(option.locator("[aria-hidden=true]").last()).toHaveText(explanation!)
+      else await expect(page.locator("[data-explanation]")).toHaveText(explanation!)
+    }
+    await page.keyboard.press("Escape")
+  }
+}
+
+for (const width of [390, 1024, 1440])
+  test(`entry header gaps, field help and always-visible placement controls at ${width}px`, async ({ page }) => {
+    test.setTimeout(120_000)
+    page.setDefaultTimeout(15_000)
+    const tag = `controls${width}`
+    const { panel, refId } = await setUp(page, tag, width)
+    const editor = await openBook(page, panel, tag)
+    await checkEntryControls(editor, width)
+    const large = await openLarge(page, editor)
+    await checkEntryControls(large, width, true)
+    // The library page also exercises the wide table, which the chat overlay may not fit.
+    await page.goto(`${server().url}/library/${refId}`)
+    const main = page.getByRole("main")
+    await main.getByRole("button", { name: "Close Harbour", exact: true }).click()
+    await checkEntryControls(main, width, true)
+  })

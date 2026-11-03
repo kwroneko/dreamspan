@@ -87,6 +87,10 @@ export interface LorebookEntrySection {
   readonly id: string
   readonly order: number
   readonly title: string
+  /** Always visible ahead of the boxed sections, without an accordion or heading. */
+  readonly plain?: boolean
+  /** Show the non-default marker and collapsed value summary; false for inert export fields. */
+  readonly headerStatus?: boolean
   /** The accordion header's explanation. */
   readonly hint: string
   /** The column it's in on a wide screen. */

@@ -12,6 +12,7 @@ import {
   useSyncExternalStore
 } from "react"
 import type { Registry } from "../../registry.ts"
+import { AboutHint } from "../../ui/AboutHint.tsx"
 import { BlockSection } from "../../ui/Block.tsx"
 import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { useLoreFilterCards } from "./libraryLorebooks.ts"
@@ -123,11 +124,11 @@ export function KeysLine({
   const field = valueField(path)
   useKeysReveal(target, path, keys)
   return (
-    <div className="group/keys flex min-w-0 flex-col">
-      <div
-        className={`mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 group-has-[textarea:focus]/keys:hidden ${focused ? "hidden" : ""}`}
-      >
-        <Tooltip label={EXPLAIN.keys_line}>
+    <div className="flex min-w-0 items-start gap-1" data-entry-keys>
+      <div className="group/keys flex min-w-0 flex-1 flex-col">
+        <div
+          className={`mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 group-has-[textarea:focus]/keys:hidden ${focused ? "hidden" : ""}`}
+        >
           {/* The picture of the box below, which is what the keyboard and screen readers reach. */}
           <span
             aria-hidden="true"
@@ -137,10 +138,8 @@ export function KeysLine({
           >
             {keys.length > 0 ? keys.join(", ") : empty}
           </span>
-        </Tooltip>
-        {badges}
-      </div>
-      <Tooltip label={EXPLAIN.keys}>
+          {badges}
+        </div>
         <textarea
           ref={target}
           id={id}
@@ -160,8 +159,11 @@ export function KeysLine({
             if (event.key === "Escape") event.currentTarget.blur()
           }}
         />
-      </Tooltip>
-      <FieldTools store={store} field={field} label="Primary keys" />
+        <FieldTools store={store} field={field} label="Primary keys" />
+      </div>
+      <div className="mt-0.5 shrink-0" data-own-click>
+        <AboutHint heading="Primary keys">{EXPLAIN.keys}</AboutHint>
+      </div>
     </div>
   )
 }
@@ -369,7 +371,8 @@ export function EntryDetails({
   compact,
   card,
   settings,
-  essentials
+  essentials,
+  essentialsAlways = false
 }: {
   store: EditorStore
   root: FieldPath
@@ -383,6 +386,8 @@ export function EntryDetails({
   /** Its settings are open. */
   settings: boolean
   essentials?: ReactNode
+  /** A narrow large editor keeps placement controls visible even with options closed. */
+  essentialsAlways?: boolean
 }) {
   const path = entryPath(root, uid)
   const title = useText(store, [...path, "comment"]) || "Untitled entry"
@@ -395,15 +400,16 @@ export function EntryDetails({
         ))}
       </div>
       <TextField store={store} path={[...path, "content"]} label="Entry content" labelHidden rows={2} fit />
+      {essentialsAlways && <section aria-label="Strategy and position">{essentials}</section>}
       {settings && (
         <EntrySettings
           store={store}
           path={path}
           title={title}
           wide={wide}
-          compact={compact}
+          compact={compact && !essentialsAlways}
           card={card}
-          essentials={essentials}
+          essentials={essentialsAlways ? undefined : essentials}
         />
       )}
     </div>
@@ -480,39 +486,50 @@ export function SettingsLayout({
   differs?: (section: FormSection) => boolean
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
+  const grouped = sections.filter((item) => !item.section.plain)
   const body = (item: FormSection) => (
     <div className="flex min-w-0 flex-col gap-4">
       {lead?.(item.section)}
       <Grouped settings={item.settings} render={render} />
     </div>
   )
+  const plain = sections
+    .filter((item) => item.section.plain)
+    .map((item) => (
+      <section key={item.section.id} aria-label={item.section.title} className="min-w-0">
+        {body(item)}
+      </section>
+    ))
   if (accordion)
     return (
-      <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-surface [&>:first-child]:border-t-0">
-        {sections.map((item) => (
-          <BlockSection
-            key={item.section.id}
-            open={open.has(item.section.id)}
-            onToggle={() =>
-              setOpen((set) => {
-                const next = new Set(set)
-                if (!next.delete(item.section.id)) next.add(item.section.id)
-                return next
-              })
-            }
-            title={item.section.title}
-            summary={open.has(item.section.id) ? undefined : summary?.(item)}
-            changed={differs?.(item) ?? false}
-            hint={item.section.hint}
-            label={label}
-          >
-            {open.has(item.section.id) && body(item)}
-          </BlockSection>
-        ))}
+      <div className="flex min-w-0 flex-col gap-4">
+        {plain}
+        <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-surface [&>:first-child]:border-t-0">
+          {grouped.map((item) => (
+            <BlockSection
+              key={item.section.id}
+              open={open.has(item.section.id)}
+              onToggle={() =>
+                setOpen((set) => {
+                  const next = new Set(set)
+                  if (!next.delete(item.section.id)) next.add(item.section.id)
+                  return next
+                })
+              }
+              title={item.section.title}
+              summary={item.section.headerStatus === false || open.has(item.section.id) ? undefined : summary?.(item)}
+              changed={item.section.headerStatus !== false && (differs?.(item) ?? false)}
+              hint={item.section.hint}
+              label={label}
+            >
+              {open.has(item.section.id) && body(item)}
+            </BlockSection>
+          ))}
+        </div>
       </div>
     )
   const column = (index: 0 | 1) =>
-    sections
+    grouped
       .filter((item) => !wide || item.section.column === index)
       .map((item) => (
         <section
@@ -522,7 +539,7 @@ export function SettingsLayout({
         >
           <h4 className="flex items-center gap-1.5 text-sm font-medium">
             {item.section.title}
-            {differs?.(item) && (
+            {item.section.headerStatus !== false && differs?.(item) && (
               <span data-changed aria-label="changed from the defaults" className="size-1.5 rounded-full bg-accent" />
             )}
           </h4>
@@ -530,9 +547,12 @@ export function SettingsLayout({
         </section>
       ))
   return (
-    <div className={`grid min-w-0 gap-4 ${wide ? "grid-cols-2" : ""}`}>
-      <div className="flex min-w-0 flex-col gap-4">{column(0)}</div>
-      {wide && <div className="flex min-w-0 flex-col gap-4">{column(1)}</div>}
+    <div className="flex min-w-0 flex-col gap-4">
+      {plain}
+      <div className={`grid min-w-0 gap-4 ${wide ? "grid-cols-2" : ""}`}>
+        <div className="flex min-w-0 flex-col gap-4">{column(0)}</div>
+        {wide && <div className="flex min-w-0 flex-col gap-4">{column(1)}</div>}
+      </div>
     </div>
   )
 }
