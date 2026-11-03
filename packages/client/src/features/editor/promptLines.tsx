@@ -1,15 +1,8 @@
-// The lines between a prompt list's rows (owner, 2026-11-02: "Cached part starts/cached part
-// ends ??? This is confusing"): where the chat goes, what's sent after it, and how much of the
-// request each reply reuses, each with a "?" that says what it means for where a prompt goes.
-// The request's cache points have four internal reasons; the user can act on only one
-// difference between them: what stays reused when the chat's oldest messages drop out (the
-// preset's part ahead of everything that moves) and what doesn't (the rest, down to the end of
-// the history). So there are two reuse lines at most: the first kind, and the last of the
-// other kinds, which covers every one above it.
+// Editor dividers retain every assembler breakpoint; the inspector retains its existing reuse projection.
 import { SectionLine } from "../../ui/SectionLine.tsx"
 
 export type Reuse = "every" | "until"
-type Reason = "prefix" | "summary" | "history" | "pinned"
+type Reason = import("@rp/shared/inspectorApi.ts").PresetContext["cacheAfter"][number]["reason"] | "end"
 
 const REUSE_TITLE = "Reused between replies"
 
@@ -37,16 +30,6 @@ export function ReuseLine({ kind, alone }: { kind: Reuse; alone: boolean }) {
   )
 }
 
-export const ChatStartsLine = () => (
-  <SectionLine
-    data-section="chat"
-    icon="chat"
-    label="The chat goes here"
-    title="Where the chat goes"
-    explanation="The chat's messages are sent here, oldest first, as many as fit. Prompts above this line come before the chat; notes set to a depth go inside it, that many messages before the newest one."
-  />
-)
-
 export const AfterChatLine = () => (
   <SectionLine
     data-section="after-chat"
@@ -61,32 +44,39 @@ export const AfterChatLine = () => (
 export const AT_START = "context_start"
 export const BEFORE_CHAT = "~before-chat"
 
-/**
- * The reuse lines to show for the request's cache points, by place. A point inside a part the
- * list has no row for (the new chat's opening line) shows just before the chat.
- */
+/** Every assembler breakpoint, including several that project to the same editor row. */
 export const placeReuseLines = (
   cacheAfter: ReadonlyArray<{ readonly identifier: string; readonly reason: Reason }>,
   order: ReadonlyArray<string>
-): ReadonlyMap<string, Reuse> => {
-  const history = order.indexOf("chatHistory")
-  const placed = cacheAfter.flatMap((point) => {
-    const at = order.indexOf(point.identifier)
-    if (point.identifier === AT_START) return [{ ...point, place: AT_START, position: -1 }]
-    if (at >= 0) return [{ ...point, place: point.identifier, position: at }]
-    return history >= 0 ? [{ ...point, place: BEFORE_CHAT, position: history - 0.5 }] : []
-  })
-  const every = placed.find((p) => p.reason === "prefix")
-  const until = placed
-    .filter((p) => p.reason !== "prefix")
-    .reduce<(typeof placed)[number] | undefined>(
-      (last, p) => (last && last.position >= p.position ? last : p),
-      undefined
-    )
-  const lines = new Map<string, Reuse>()
-  if (every) lines.set(every.place, "every")
-  if (until && (!every || until.position > every.position)) lines.set(until.place, "until")
+): ReadonlyMap<string, ReadonlyArray<Reason>> => {
+  const lines = new Map<string, Array<Reason>>()
+  for (const point of cacheAfter) {
+    const place =
+      point.identifier === AT_START || order.includes(point.identifier) || point.identifier === "summaries"
+        ? point.identifier
+        : order.includes("chatHistory")
+          ? BEFORE_CHAT
+          : AT_START
+    lines.set(place, [...(lines.get(place) ?? []), point.reason])
+  }
   return lines
+}
+
+const CACHE_EXPLANATION =
+  "Prompt cache breakpoint: everything above it is cached between replies. Editing a prompt above it invalidates the cache from that prompt down. Not every provider supports caching."
+
+export function CacheBreakpointLine({ kind }: { kind: Reason }) {
+  const qualifier = kind === "summary" ? "summaries" : kind === "pinned" ? "prefix" : kind
+  return (
+    <SectionLine
+      data-cache-breakpoint={kind}
+      tone="cache"
+      icon="history"
+      label={`Cache breakpoint · ${qualifier}`}
+      title="Cache breakpoint"
+      explanation={CACHE_EXPLANATION}
+    />
+  )
 }
 
 /** The same for a request's messages, by message index. */

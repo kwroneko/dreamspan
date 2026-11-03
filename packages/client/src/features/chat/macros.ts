@@ -8,7 +8,7 @@ import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
 import { Effect, Scope } from "effect"
 
 /** The built-in macros, registered once for the page's lifetime. */
-const registry = (() => {
+export const registry = (() => {
   const made = makeMacroRegistry()
   Effect.runSync(Effect.flatMap(Scope.make(), (scope) => Scope.provide(scope)(registerBuiltinMacros(made))))
   return made

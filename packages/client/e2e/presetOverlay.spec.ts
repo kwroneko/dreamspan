@@ -102,8 +102,12 @@ for (const [width, height] of [
       const chatId = await setUp(page, `Plain ${width} ${theme}`, false)
       const overlay = await open(page, chatId)
       const scroll = overlay.getByTestId("preset-scroll")
-      // Under Main: a card's prompt can replace it, whether or not one does.
-      await expect(overlay.locator('[data-prompt="main"]')).toContainText("A card's own prompt can replace it")
+      // The slot explains overrides on hover, keeping the header quiet.
+      await overlay.locator('[data-prompt="main"] [data-prompt-kind-tag]').hover()
+      await expect(
+        page.getByText("The main instruction for the chat. A card's own prompt can replace it.", { exact: true })
+      ).toBeVisible()
+      await page.mouse.move(0, 0)
 
       // "Notes inside the chat" lists each note once, with its depth.
       await expect(overlay.getByText("Tide table", { exact: false })).toHaveCount(1)
@@ -244,7 +248,7 @@ for (const width of [1440, 390])
       await scroll.evaluate((e) => {
         e.scrollTop = e.scrollHeight
       })
-      const close = overlay.getByRole("button", { name: "Close preset editor", exact: true })
+      const close = overlay.getByRole("button", { name: "Close", exact: true })
       const bar = close.locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
       await expect(bar.getByText(name, { exact: true })).toBeVisible()
       await expectSaveState(bar, NOTHING_TO_SAVE)
@@ -364,4 +368,16 @@ test("Find reveals an offscreen range inside a long prompt", async ({ page }) =>
       )
     })
     .toBe(true)
+})
+
+test("panel search opens lazy utility fields", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  const chatId = await setUp(page, "Panel utility navigation", false)
+  await page.goto(`${server().url}/chats/${chatId}`)
+  const panel = await openPanel(page, "Prompt preset")
+  await panel.getByRole("button", { name: "Search and replace", exact: true }).click()
+  await panel.getByRole("textbox", { name: "Find", exact: true }).fill("new story")
+  await panel.getByRole("button", { name: "Find", exact: true }).click()
+  await panel.getByRole("button", { name: "Go to Utility prompts: New chat prompt", exact: true }).click()
+  await expect(panel.getByRole("textbox", { name: "New chat", exact: true })).toBeFocused()
 })

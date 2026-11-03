@@ -298,7 +298,10 @@ test.describe("synthetic library and every app surface", () => {
         })
         const model = yield* api.AddUserModel({ connectionId: connection.id, key: "fake-small", overrides: {} })
         yield* api.SetGenerationDefaults({
-          defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+          defaults: {
+            model: { connection: connection.id, model: model.id },
+            preset: process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ? preset.id : null
+          }
         })
         const started = yield* api.StartChat({
           cards:
@@ -359,7 +362,7 @@ test.describe("synthetic library and every app surface", () => {
     if (!process.env.LAYOUT_AUDIT_WORK) rmSync(work, { recursive: true, force: true })
   })
 
-  for (const width of [1440, 1024, 390])
+  for (const width of process.env.LAYOUT_AUDIT_WIDTHS?.split(",").map(Number) ?? [1440, 1024, 390])
     for (const theme of ["light", "dark"] as const) {
       test(`${width} ${theme}: all surfaces`, async ({ page }, info) => {
         test.setTimeout(1_800_000)
@@ -486,6 +489,17 @@ test.describe("synthetic library and every app surface", () => {
           await openPanel(page, "Cast")
           await page.getByRole("button", { name: `More for ${cardName}`, exact: true }).click()
           await formats("menu-pending-cast-export", true)
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1") {
+          await go("group-chat", `/chats/${chatId}`)
+          const panel = await openPanel(page, "Prompt preset")
+          await expect(panel.getByRole("list", { name: "Preset blocks" })).toBeVisible({ timeout: 60000 })
+          await audit("panel-Prompt-preset")
+          await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
+          const large = page.getByRole("dialog", { name: "Preset editor", exact: true })
+          await expect(large.getByRole("list", { name: "Prompt order", exact: true })).toBeVisible({ timeout: 60000 })
+          await audit("preset-large")
           return
         }
         if (process.env.LAYOUT_AUDIT_CARD_HEADERS_ONLY === "1") {

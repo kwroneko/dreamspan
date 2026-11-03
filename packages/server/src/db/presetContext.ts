@@ -42,7 +42,7 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
             : s.field === "scenario"
               ? "scenario"
               : "charDescription"
-      if (s.kind === "summary") return "chatHistory"
+      if (s.kind === "summary") return "summaries"
       if (s.kind === "lorebook") return "worldInfoBefore"
       return null
     }
@@ -88,17 +88,19 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
     }
     return {
       blocks: [...blocks.values()],
-      cacheAfter: snapshot.request.breakpoints.map((b) => {
-        let identifier = "context_start"
-        for (let message = b.message; message >= 0; message--) {
-          const piece = sent.findLast((p) => p.messages.includes(message) && owner(p) !== null)
-          if (piece) {
-            identifier = owner(piece)!
-            break
+      cacheAfter: (snapshot.inputs.model?.cacheBreakpoints === "explicit" ? snapshot.request.breakpoints : []).map(
+        (b) => {
+          let identifier = "context_start"
+          for (let message = b.message; message >= 0; message--) {
+            const piece = sent.findLast((p) => p.messages.includes(message) && owner(p) !== null)
+            if (piece) {
+              identifier = owner(piece)!
+              break
+            }
           }
+          return { identifier, reason: b.reason }
         }
-        return { identifier, reason: b.reason }
-      }),
+      ),
       overrides: overrides.map(({ identifier, entity, revision, status }) => ({
         identifier,
         card: entity,

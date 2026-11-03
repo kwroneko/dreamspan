@@ -154,7 +154,7 @@ test("every item opens at its own address, and a stale address says so", async (
   await expect(page).toHaveURL(/\/library\/[^/]+$/)
   const editor = page.getByRole("main")
   await expect(editor.getByRole("heading", { level: 1, name })).toBeVisible()
-  await expect(editor.getByRole("button", { name: "Close preset editor" })).toHaveCount(0)
+  await expect(editor.locator("[data-window-close]")).toHaveCount(0)
   await expect(editor.getByRole("textbox", { name: "Find", exact: true })).toHaveCount(0)
   const search = editor.getByRole("button", { name: "Search and replace", exact: true })
   await expect(search).toHaveAttribute("aria-pressed", "false")

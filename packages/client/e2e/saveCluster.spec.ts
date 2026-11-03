@@ -215,10 +215,10 @@ for (const width of [1440, 390])
     await check("card", card, card.getByRole("tab", { name: "Definition", exact: true }), () =>
       typeInto(card.getByRole("textbox", { name: "Description", exact: true }), " Counts the gulls.")
     )
-    // The Prompt preset tab: Save on the left of Expand all's row.
+    // The Prompt preset tab: Save shares the editing row with Add prompt.
     await panelTab(page, "Prompt preset")
     const preset = page.getByRole("tabpanel", { name: "Prompt preset", exact: true })
-    await check("preset", preset, preset.getByRole("button", { name: "Expand all", exact: true }), async () => {
+    await check("preset", preset, preset.getByRole("button", { name: "Add prompt", exact: true }), async () => {
       await preset.getByRole("button", { name: "Expand Main Prompt", exact: true }).click()
       await typeInto(preset.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }), " Slowly.")
     })
