@@ -1,17 +1,20 @@
 // The cutout chooser (ARCHITECTURE.md §14.5c), as ST's avatar crop popup: a 2:3 box over the
 // whole image, dragged and resized with a mouse or a finger, or moved and resized from the
-// keyboard, with a live preview of the message portrait it makes. The image is never altered:
+// keyboard, with live message, cast and tile previews. The image is never altered:
 // what's saved is the box, as fractions of the image. The editor feature registers it as
 // `portrait.cutout-chooser` (portraitParts.ts), so a plugin can replace it.
 import { type AvatarCrop, cropPixels, defaultCrop, PORTRAIT_RATIO, snapCrop } from "@rp/shared/media.ts"
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useRef, useState } from "react"
 import { Button } from "./Button.tsx"
-import { Dialog, DialogActions } from "./Dialog.tsx"
+import { Dialog } from "./Dialog.tsx"
+import { AboutHint } from "./AboutHint.tsx"
+import { Icon } from "./Icon.tsx"
+import { ToolbarSlider } from "./Slider.tsx"
 import { IMAGES_SHORTCUT, useImagePrefs } from "./imagePrefs.ts"
 import { type CutoutChooserProps, PICTURE_ACCEPT } from "./portraitParts.ts"
 import { Spinner } from "./Spinner.tsx"
 import { Tooltip } from "./Tooltip.tsx"
-import { initials } from "./Avatar.tsx"
+import { AVATAR_SIZES, initials } from "./Avatar.tsx"
 
 /** The box in the image's own pixels; its height is always its width ÷ 2:3. */
 interface Box {
@@ -70,6 +73,8 @@ export const cutoutStyle = (crop: AvatarCrop): CSSProperties => ({
 })
 
 type Corner = "nw" | "ne" | "sw" | "se"
+const CUTOUT_HELP = "Drag the box to move it, or a corner to resize it. Arrow keys move it; + and − resize it."
+
 const CORNERS: ReadonlyArray<Corner> = ["nw", "ne", "sw", "se"]
 const CORNER_CLASS: Record<Corner, string> = {
   nw: "-top-3 -left-3 cursor-nwse-resize",
@@ -205,7 +210,6 @@ export function CutoutChooser({
       // Focus starts on the image, not a button whose tooltip would cover Save on a phone.
       initialFocus={() => stage.current}
       title={title}
-      description="The whole image is kept. The box is the part every small portrait shows: in messages, the cast, lists and tiles."
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
         <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
@@ -226,7 +230,7 @@ export function CutoutChooser({
                 setBox(boxOf(initial, size))
               }}
               onError={() => setFailed(true)}
-              className="block max-h-[min(60dvh,36rem)] max-w-full bg-surface-raised object-contain"
+              className="block max-h-[min(36dvh,36rem)] max-w-full bg-surface-raised object-contain sm:max-h-[min(60dvh,36rem)]"
             />
             <span
               data-image-fallback
@@ -263,7 +267,7 @@ export function CutoutChooser({
                     }}
                   />
                 </div>
-                <Tooltip label="Drag to move the cutout, or its corners to resize it. Arrow keys move it (Shift: further); + and − resize it.">
+                <Tooltip label={CUTOUT_HELP}>
                   <div
                     role="slider"
                     tabIndex={0}
@@ -318,64 +322,75 @@ export function CutoutChooser({
               The image couldn't be shown, so there's no cutout to choose.
             </p>
           )}
-          <p className="text-center text-xs text-muted">
-            Drag the box, or a corner to resize it. Keys: the arrows move it, + and − resize it.
-          </p>
+          <div data-cutout-controls className="flex w-full max-w-sm items-center justify-center gap-2">
+            <span className="shrink-0 text-xs text-muted">Cutout size</span>
+            <ToolbarSlider
+              label="Cutout size"
+              hint={image ? "Resize the cutout" : "The picture must load before resizing the cutout"}
+              value={box?.width ?? 0}
+              min={image ? minWidth(image) : 0}
+              max={image ? maxWidth(image) : 1}
+              step={image ? maxWidth(image) / 1000 : 1}
+              valueText={(value) => `${Math.round(image ? (value / maxWidth(image)) * 100 : 0)}% of the largest cutout`}
+              disabled={!box}
+              className="min-w-0 flex-1"
+              onValueChange={(width) => image && box && setBox(scaled(box, width / box.width, image))}
+            />
+            <Button
+              variant="ghost"
+              className="size-8 px-0!"
+              aria-label="Reset the cutout"
+              hint={image ? "Reset the cutout" : "The picture must load before resetting the cutout"}
+              disabled={!image}
+              onClick={() => image && setBox(boxOf(null, image))}
+            >
+              <Icon name="regenerate" size={16} />
+            </Button>
+            <AboutHint heading="cutout controls">{CUTOUT_HELP}</AboutHint>
+          </div>
           {hidden && (
             <p className="text-center text-xs text-muted">
               Images are hidden, so you can't see what the box covers: show them ({IMAGES_SHORTCUT}) to choose.
             </p>
           )}
         </div>
-        <div className="flex shrink-0 flex-col gap-3 sm:w-48">
-          <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-muted">In a message</span>
-            <div className="flex items-start gap-2 rounded-md border border-border bg-canvas p-2">
-              <span
-                data-cutout-preview
-                className="chat-portrait relative inline-flex shrink-0 overflow-hidden rounded-sm bg-surface-raised"
-              >
-                {crop && <img src={src} alt="" draggable={false} style={cutoutStyle(crop)} />}
+        <section aria-label="Previews" className="flex shrink-0 flex-col gap-2">
+          <h3 className="text-sm font-medium">Previews</h3>
+          <div className="flex items-start gap-4 sm:flex-col">
+            {(
+              [
+                ["Message", AVATAR_SIZES.chat],
+                ["Cast", AVATAR_SIZES.chip],
+                // The 8.5rem minimum library/home tile has a 1px border on each side.
+                ["Tile", "h-[201px] w-[134px]"]
+              ] as const
+            ).map(([label, size]) => (
+              <div key={label} className="flex flex-col items-start gap-1.5">
+                <span className="text-xs text-muted">{label}</span>
                 <span
-                  aria-hidden="true"
-                  data-image-fallback
-                  className="absolute inset-0 items-center justify-center text-lg font-semibold text-muted"
+                  data-cutout-preview={label}
+                  className={`relative inline-flex shrink-0 overflow-hidden rounded-sm bg-surface-raised ${size}`}
                 >
-                  {initials(name)}
+                  {crop && <img src={src} alt="" draggable={false} style={cutoutStyle(crop)} />}
+                  <span
+                    aria-hidden="true"
+                    data-image-fallback
+                    className="absolute inset-0 items-center justify-center font-semibold text-muted"
+                  >
+                    {initials(name)}
+                  </span>
                 </span>
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{name}</span>
-                <span className="mt-1 block h-2 w-full rounded-sm bg-surface-raised" />
-                <span className="mt-1 block h-2 w-3/4 rounded-sm bg-surface-raised" />
-              </span>
-            </div>
+              </div>
+            ))}
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Tooltip label="Make the cutout smaller (−)">
-              <Button disabled={!box} onClick={() => grow(1 / 1.1)} aria-label="Smaller cutout" aria-keyshortcuts="-">
-                Smaller
-              </Button>
-            </Tooltip>
-            <Tooltip label="Make the cutout larger (+)">
-              <Button disabled={!box} onClick={() => grow(1.1)} aria-label="Larger cutout" aria-keyshortcuts="+">
-                Larger
-              </Button>
-            </Tooltip>
-            <Tooltip label="Put the box back where it starts for this image: the full width from the top, or the full height in the middle">
-              <Button variant="ghost" disabled={!image} onClick={() => image && setBox(boxOf(null, image))}>
-                Default
-              </Button>
-            </Tooltip>
-          </div>
-        </div>
+        </section>
       </div>
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       )}
-      <DialogActions>
+      <div data-cutout-actions className="flex flex-wrap items-center justify-end gap-2">
         {onReplace && (
           <>
             <input
@@ -392,24 +407,37 @@ export function CutoutChooser({
                 if (file) onReplace(file)
               }}
             />
-            <Tooltip label="Replace the picture: choose another image, then its cutout. PNG, JPEG, GIF or WebP, up to 16 MB.">
-              <Button variant="ghost" disabled={pending} className="sm:mr-auto" onClick={() => picker.current?.click()}>
+            <Tooltip label="Choose a replacement picture and its cutout. PNG, JPEG, GIF or WebP, up to 16 MB.">
+              <Button
+                variant="secondary"
+                disabled={pending}
+                className="mr-auto"
+                onClick={() => picker.current?.click()}
+              >
                 Replace picture…
               </Button>
             </Tooltip>
           </>
         )}
-        <Tooltip label="Close without changing the portrait">
-          <Button variant="ghost" disabled={pending} onClick={onCancel}>
-            Cancel
-          </Button>
-        </Tooltip>
-        <Tooltip label="Save this cutout as the portrait's">
-          <Button variant="primary" pending={pending} disabled={!crop} onClick={() => crop && onSave(crop)}>
-            {saveLabel}
-          </Button>
-        </Tooltip>
-      </DialogActions>
+        <div className="ml-auto flex items-center gap-2">
+          <Tooltip label="Close without changing the picture">
+            <Button variant="secondary" disabled={pending} onClick={onCancel}>
+              Cancel
+            </Button>
+          </Tooltip>
+          <Tooltip label="Save the cutout for small portraits">
+            <Button
+              variant="primary"
+              className="relative [&>svg]:absolute"
+              pending={pending}
+              disabled={!crop}
+              onClick={() => crop && onSave(crop)}
+            >
+              <span className={pending ? "opacity-0" : undefined}>{saveLabel}</span>
+            </Button>
+          </Tooltip>
+        </div>
+      </div>
     </Dialog>
   )
 }
