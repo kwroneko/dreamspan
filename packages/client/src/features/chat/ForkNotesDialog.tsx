@@ -137,13 +137,7 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
   }, [session, source, entry.slotId])
   return (
     <>
-      <Dialog
-        open
-        wide
-        onOpenChange={(open) => !open && !pending && closeDialog()}
-        title="Branch from here"
-        description="Choose which notes this branch starts with: each as it was then, or as it is now."
-      >
+      <Dialog open wide onOpenChange={(open) => !open && !pending && closeDialog()} title="Branch from here">
         <ErrorAlert error={error ?? action.error} />
         {notes === null ? (
           <p role="status" className="text-sm text-muted">

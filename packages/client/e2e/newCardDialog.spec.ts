@@ -45,9 +45,13 @@ for (const width of [1440, 390]) {
       const scope = dialog ? page.getByRole("dialog") : page.getByRole("main")
       await expect(scope).toBeVisible()
       await expect(scope.getByRole("button", { name: "Undo / history", exact: true })).toHaveCount(0)
+      if (dialog) await expect(scope).toHaveAccessibleDescription("")
       if (process.env.LAYOUT_AUDIT) {
         await expectLayout(page, info, name)
-        await info.attach(name, { body: await page.screenshot(), contentType: "image/png" })
+        await info.attach(name, {
+          body: await page.screenshot({ path: info.outputPath(name + ".png") }),
+          contentType: "image/png"
+        })
       }
     }
     const close = () => page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click()
@@ -112,6 +116,21 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Add a model", exact: true }).click()
     await audit("add-model")
     await close()
+    await page.getByRole("button", { name: "Enter a new key", exact: true }).click()
+    await audit("enter-new-key")
+    await close()
+    await page.goto(`${server().url}/settings/users`)
+    await page.getByRole("button", { name: "New user", exact: true }).click()
+    await audit("new-user")
+    await close()
+    await page.goto(`${server().url}/library/${seeded.card.id}`)
+    await page.getByRole("button", { name: "More actions", exact: true }).click()
+    await page.getByRole("button", { name: "Mark as a fork of…", exact: true }).click()
+    await audit("mark-parent")
+    await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click()
+    await page.getByRole("button", { name: "Import a new version…", exact: true }).click()
+    await audit("import-new-version")
+    await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click()
     await page.goto(`${server().url}/settings/connections/new`)
     await audit("new-connection", false)
     await page.goto(`${server().url}/chats`)

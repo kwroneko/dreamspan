@@ -2,6 +2,8 @@
 
 # Design: requirements and decisions
 
+**Built 2026-11-02 (newcarddialog follow-up):** Standing title explanations are removed across creation and naming dialogs, with choice-relevant help beside fields; see §10.1 and ARCHITECTURE §3.10.
+
 **Built 2026-11-02 (newcarddialog):** Creation and naming forms omit detached history controls; New card omits its standing explanation and labels its subtitle field Version with a tooltip. These requirements in §10.1 are obsolete as implementation plans; see ARCHITECTURE.md §3.10.
 
 **Built 2026-11-02 (entryclicks):** The per-view lorebook expansion decision in §1.3 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §14.6.
@@ -835,6 +837,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D]** (owner, 2026-11-02, newcarddialog follow-up): "Remove every standing explanatory sentence under the title of every create, new or rename dialog"; "Where a fact really matters for a choice in the form, it goes in a '?' beside that field, and only then." Applies to preset, card, variant, fork, user, model, key, note, snippet, persona and other creation/naming surfaces. **Built; obsolete as an implementation requirement** (ARCHITECTURE §3.10).
+
 
 - **[D]** (owner, 2026-11-02, New card): "What is going on here? Why is there a random undo?" Creation and rename forms have no detached history button. New card has no standing sentence below its title; its third label is **Version**, with a question-mark tooltip, "Shown as the card's subtitle." **Built; obsolete as an implementation requirement** (ARCHITECTURE §3.10).
 - **[P]** (newcarddialog, 2026-11-02) Shared form status shows history only when an existing settings editor explicitly requests it. Draft persistence and recovery notices continue on creation and naming forms.

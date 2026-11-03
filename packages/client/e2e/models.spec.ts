@@ -47,10 +47,10 @@ test("refresh, hide, edit and add models", async ({ page }) => {
   await expect(models.locator("li", { hasText: "My large model" })).toContainText("Output 8k*")
 
   await page.getByRole("button", { name: "Add a model" }).click()
-  await page.getByRole("dialog").getByLabel("Model id").fill("fake-large")
+  await page.getByRole("dialog").getByLabel("Model id", { exact: true }).fill("fake-large")
   await page.getByRole("dialog").getByRole("button", { name: "Add model" }).click()
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("already has a model called “fake-large”")
-  await page.getByRole("dialog").getByLabel("Model id").fill("fake-unlisted")
+  await page.getByRole("dialog").getByLabel("Model id", { exact: true }).fill("fake-unlisted")
   await page.getByRole("dialog").getByRole("button", { name: "Add model" }).click()
   await expect(models.locator("li", { hasText: "fake-unlisted" })).toContainText("added by you")
 })

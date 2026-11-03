@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { mkdir } from "node:fs/promises"
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
+import { expectLayout } from "./support/layoutAudit.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveCluster, saveRevision } from "./support/saveRevision.ts"
@@ -189,6 +190,8 @@ for (const width of [1440, 390]) {
     const otherRef = (await other.json()).library.ref
     await more("Gulls", "Copy to another lorebook…")
     const copy = page.getByRole("dialog", { name: "Copy “Gulls” to another lorebook" })
+    await expect(copy).toHaveAccessibleDescription("")
+    if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "copy-lorebook-entry")
     await copy.getByRole("button", { name: `Other ${width}` }).click()
     await copy.getByRole("button", { name: `Copy to Other ${width}` }).click()
     await expect(copy).toHaveCount(0)

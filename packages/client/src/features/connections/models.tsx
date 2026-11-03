@@ -728,15 +728,10 @@ function AddModelDialog({
       })
   }
   return (
-    <Dialog
-      open
-      onOpenChange={onOpenChange}
-      title="Add a model"
-      description="For a model the provider doesn't list. Use the exact id the API expects."
-    >
+    <Dialog open onOpenChange={onOpenChange} title="Add a model">
       <form onSubmit={submit} className="flex flex-col gap-4">
         <UserDraftStatus draft={durable} />
-        <Field label="Model id">
+        <Field label="Model id" about="The exact id the provider's API expects.">
           <Input value={key} onValueChange={setKey} autoCapitalize="none" spellCheck={false} />
         </Field>
         <ErrorAlert error={action.error} title="Not added" />

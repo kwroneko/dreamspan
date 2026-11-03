@@ -70,7 +70,7 @@ export function ForkChatCard({ session, card, info, persona }: ChatCardActionPro
       >
         Fork for this chat
       </Button>
-      {open && info && <ChatCardForkDialog session={session} card={card} info={info} onClose={() => setOpen(false)} />}
+      {open && info && <ChatCardForkDialog session={session} card={card} onClose={() => setOpen(false)} />}
     </>
   )
 }
@@ -94,17 +94,7 @@ export function ChooseChatCard({ session, card, info, persona }: ChatCardActionP
   )
 }
 
-function ChatCardForkDialog({
-  session,
-  card,
-  info,
-  onClose
-}: {
-  session: ChatSession
-  card: CastCard
-  info: ChatCardInfo
-  onClose: () => void
-}) {
+function ChatCardForkDialog({ session, card, onClose }: { session: ChatSession; card: CastCard; onClose: () => void }) {
   // Keep the position the dialog was opened at even if another tab moves the chat.
   const [position] = useState(() => ({ slotId: session.snapshot().leafSlotId, forkId: session.snapshot().forkId }))
   const durable = useUserDraft(
@@ -126,12 +116,7 @@ function ChatCardForkDialog({
     if (!stay) void navigate({ to: "/library/$refId", params: { refId } })
   }
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && !action.pending && onClose()}
-      title="Fork for this chat"
-      description={`Use an independent copy of ${card.name} and its notes in this branch. Unsaved changes move to the copy; the original returns to its last save. Set the copy’s names below. Other branches keep their cards.`}
-    >
+    <Dialog open onOpenChange={(open) => !open && !action.pending && onClose()} title="Fork for this chat">
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
@@ -173,7 +158,7 @@ function ChatCardForkDialog({
         }}
       >
         <UserDraftStatus draft={durable} />
-        <Field label="Display name">
+        <Field label="Display name" about="Unsaved changes move to the copy; the original returns to its last save.">
           <Input required value={name} onChange={(event) => setName(event.currentTarget.value)} />
         </Field>
         <Field label="Version (shown as subtitle)" about="Change the version or display name to tell this fork apart.">
@@ -182,9 +167,6 @@ function ChatCardForkDialog({
         <Field label="In-character name" about="Used in prompts and {{char}}. Empty uses the display name.">
           <Input value={nickname} onChange={(event) => setNickname(event.currentTarget.value)} />
         </Field>
-        <p className="text-xs text-muted">
-          The original is used by {info.usedByChats} {info.usedByChats === 1 ? "chat" : "chats"}.
-        </p>
         {clash && (
           <p role="status" className="text-sm text-muted">
             {clash}

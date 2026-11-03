@@ -273,12 +273,7 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
       })
   }
   return (
-    <Dialog
-      open
-      onOpenChange={onOpenChange}
-      title="Save a key"
-      description="Saved once, usable by any number of connections."
-    >
+    <Dialog open onOpenChange={onOpenChange} title="Save a key">
       <form onSubmit={submit} className="flex flex-col gap-4">
         <UserDraftStatus draft={durable} />
         <Field label="Name">
