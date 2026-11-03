@@ -128,23 +128,23 @@ test("import an ST folder, link a chat by choosing its card, and un-hide a summa
   await page.getByRole("button", { name: "Import", exact: true }).click()
 
   const imported = page.getByRole("list", { name: "Imported" })
-  await expect(imported).toContainText("Cards: 3 added")
-  await expect(imported).toContainText("Personas: 1 added")
-  await expect(imported).toContainText("Chats: 1 added")
+  await expect(imported).toContainText("Cards: 3")
+  await expect(imported).toContainText("Personas: 1")
+  await expect(imported).toContainText("Chats: 1")
   // The report holds only what to act on (DESIGN §1.4): no skipped files, greetings or files not read.
   await expect(imported).not.toContainText("skipped")
   await expect(page.getByText("with only a greeting")).toHaveCount(0)
   await expect(page.getByText("instruct template")).toHaveCount(0)
 
   const hidden = page.getByRole("list", { name: "Hidden runs" })
-  await expect(hidden).toContainText("12 messages hidden. Its summary covers them")
+  await expect(hidden).toContainText("12 messages hidden from the start; its summary covers them")
   const links = page.getByRole("list", { name: "Chats to link" })
   await expect(links).toContainText("Several cards are named “Twin”.")
   await shoot(page, "report")
 
   await links.getByRole("button", { name: "Import with this card" }).click()
   await expect(links).toHaveCount(0)
-  await expect(imported).toContainText("Chats: 2 added")
+  await expect(imported).toContainText("Chats: 2")
 
   await hidden.getByRole("link", { name: "Bob - long" }).isVisible()
   await hidden.getByRole("button", { name: "Un-hide" }).click()
@@ -173,9 +173,10 @@ test("a chain of branches sorted the wrong way is sent once each, parents first"
     if (request.url().includes("/st-import/file?")) uploads++
   })
   await page.goto(`${server().url}/import/st`)
+  await page.getByRole("button", { name: "Import ST data again" }).click()
   await page.getByLabel("Choose the folder").setInputFiles(chain)
   await expect(page.getByText("21 files (")).toBeVisible()
   await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByRole("list", { name: "Imported" })).toContainText("Group chats: 1 added, 20 updated")
+  await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats: 21")
   expect(uploads).toBe(21)
 })

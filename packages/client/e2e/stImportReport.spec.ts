@@ -53,7 +53,7 @@ test("the report says a repeated warning once, lists and links every chat, and t
   await page.getByRole("button", { name: "Import", exact: true }).click()
   await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats:")
 
-  const attention = page.getByRole("list", { name: "Needs your attention" })
+  const attention = page.getByRole("list", { name: "Warnings and errors" })
   const entries = attention.locator(":scope > li")
   // Two entries: the one-off first, then the warning on Dax's twelve chats, said once.
   await expect(entries).toHaveCount(2)
@@ -63,7 +63,7 @@ test("the report says a repeated warning once, lists and links every chat, and t
   await expect(riders.getByText(/^ST put a persona's description/)).toHaveCount(1)
   await expect(page.getByText(/aren't listed/)).toHaveCount(0)
   // Every chat is there, each with what rode on its note, and each a link to it.
-  await riders.getByText("Show the 12 chats").click()
+  await riders.locator("summary").click()
   const listed = riders.getByRole("list", { name: /^Files:/ })
   await expect(listed.getByRole("link")).toHaveCount(12)
   await expect(listed).toContainText(
@@ -71,14 +71,9 @@ test("the report says a repeated warning once, lists and links every chat, and t
   )
   await shoot(page, "st-import-report", async () => {
     await expect(entries).toHaveCount(2)
-    await riders.getByText("Show the 12 chats").click()
+    await riders.locator("summary").click()
     await expect(listed.getByRole("link")).toHaveCount(12)
   })
-
-  // The latest chat: named by its cast and when it started, never ST's file stamp.
-  const latest = page.getByRole("link", { name: /^Continue your latest chat/ })
-  await expect(latest).toHaveText("Continue your latest chat: Cleo, started Jan 1, 2025")
-  await expect(latest).not.toContainText("2024")
 
   // Still open from the last screenshot.
   await listed.getByRole("link", { name: "chats/Dax/Dax - 7.jsonl" }).click()

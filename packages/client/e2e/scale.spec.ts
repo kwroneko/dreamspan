@@ -58,7 +58,7 @@ test("an import at scale runs on the server while the user leaves, reloads and u
   await page.getByLabel("Folder path").fill(root)
   await page.getByRole("button", { name: "Look in this folder" }).click()
   await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByText("This import runs on the server.")).toBeVisible()
+  await expect(page.getByText("You can close this tab while the import runs.")).toBeVisible()
 
   // A full page load: the import goes on, and the shell says so wherever the user is.
   await page.goto(`${server().url}/`)

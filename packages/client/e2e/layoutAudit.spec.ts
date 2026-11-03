@@ -382,6 +382,13 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_IMPORT_ONLY === "1") {
+          await go("import-st", "/import/st")
+          await page.getByRole("button", { name: "Import ST data again" }).click()
+          await expect(page.getByLabel("Folder path")).toBeVisible()
+          await audit("import-st-form")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_PERSONA_BADGES_ONLY === "1") {
           const persona = await admin((api) =>
             Effect.gen(function* () {

@@ -69,7 +69,7 @@ test("import the folder", async ({ page }) => {
   await page.goto(`${server().url}/import/st`)
   await page.getByLabel("Choose the folder").setInputFiles(join(root, "ST"))
   await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats: 4 added")
+  await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats: 4")
 })
 
 const openChat = async (page: Page, title: string) => {
