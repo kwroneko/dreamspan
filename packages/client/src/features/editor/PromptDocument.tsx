@@ -1,3 +1,9 @@
+import { createPortal } from "react-dom"
+import { SearchDialog } from "./SearchDialog.tsx"
+import { presetScopes } from "./searchScopes.ts"
+import { SaveRevision } from "./SaveRevision.tsx"
+import { WindowClose } from "../../ui/WindowClose.tsx"
+import { PromptKindTag, promptKind, SummariesPlaceholder, VolatileBadge, volatileMacros } from "./promptKinds.tsx"
 import { usePlaceExpansion, usePlaceNotice, usePlaceParam } from "../../usePlaceParam.ts"
 // The preset's prompt order as one document (DESIGN §6.2a). Each prompt is a bounded block: a
 // header (handle, switch, name renamed in place, how it's sent, tokens, its options and actions)
@@ -25,28 +31,27 @@ import {
   BlockMenuButton,
   BlockOptions,
   BlockOptionsToggle,
-  BlockToggle,
-  ExpandCollapseAll
+  BlockToggle
 } from "../../ui/Block.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle, useInnerPanelWidth } from "../../ui/ResizeHandle.tsx"
-import { revealIfHidden } from "../../ui/reveal.ts"
+import { revealAdded } from "../../ui/revealAdded.ts"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
-import { SearchNavigation, scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
+import { SearchNavigation, scrollToSearchField, useSearchMatch, type SearchMatch } from "./searchNavigation.ts"
 import { summaryBadge } from "./summaryBadge.ts"
 import { PRESET_LOREBOOKS_FOCUS, PresetLorebooks } from "./PresetLorebooks.tsx"
-import { AfterChatLine, AT_START, BEFORE_CHAT, ChatStartsLine, placeReuseLines, ReuseLine } from "./promptLines.tsx"
+import { AfterChatLine, AT_START, BEFORE_CHAT, placeReuseLines, CacheBreakpointLine } from "./promptLines.tsx"
 import { type EditorStore, useText, useValue } from "./store.ts"
 import { presetEditorWarnings } from "./presetSections.ts"
 import { promptLabel } from "./promptLabel.ts"
-import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
+import { tokensText, useTokenCounts } from "./tokenCounts.ts"
 
 /**
  * Where the document is shown: "document", the large editor (blocks open, the outline beside
- * them, a ＋ between blocks); "column", the side panel's Prompt preset tab (blocks closed to a
+ * them); "column", the side panel's Prompt preset tab (blocks closed to a
  * row with the first line of their text). Both are this one component and its blocks, editing
  * the same store, so the two can't drift.
  */
@@ -55,7 +60,7 @@ export type PromptLayout = "document" | "column"
 const at = (id: string) => ["prompts", `identifier=${id}`]
 const roles = ["system", "user", "assistant"].map((value) => ({ value, label: value }))
 const positions = [
-  { value: "relative", label: "In order" },
+  { value: "relative", label: "In place" },
   { value: "absolute", label: "At a depth" }
 ]
 /** When a prompt is sent (DESIGN §2.2). */
@@ -69,12 +74,10 @@ const conditionBadges = {
   with_direction: "with guidance"
 } as const
 
-const NEW_PROMPT_HINT =
-  "Adds an empty prompt of your own at the end of the list, open for typing; drag it where you want it"
+const NEW_PROMPT_HINT = "Adds a new prompt at the end of the list."
 const DEFINITIONS_LABEL = "Card definitions block"
-const DEFINITIONS_BUTTON = "Definitions block"
-const DEFINITIONS_HINT =
-  "Sends each character card's whole definition here, one labelled block per card, instead of the separate Char Description, Personality, Scenario and Persona markers"
+const DEFINITIONS_BUTTON = "Add definitions block"
+const DEFINITIONS_HINT = "Adds a definitions block: it places every cast card's definitions there."
 
 /** A prompt's first line of text, for a closed row. */
 const firstLine = (content: string) =>
@@ -84,17 +87,17 @@ const firstLine = (content: string) =>
     .find((line) => line !== "") ?? ""
 
 /** Whether every prompt's options show, by default: this browser's choice. */
-const OPTIONS_KEY = "rp.presetOptionsOpen"
-const readOptionsOpen = () => {
+const OPTIONS_KEY = "rp.presetOptionsOpen:"
+const readOptionsOpen = (userId: string) => {
   try {
-    return localStorage.getItem(OPTIONS_KEY) === "1"
+    return localStorage.getItem(OPTIONS_KEY + userId) === "1"
   } catch {
     return false
   }
 }
-const keepOptionsOpen = (open: boolean) => {
+const keepOptionsOpen = (userId: string, open: boolean) => {
   try {
-    localStorage.setItem(OPTIONS_KEY, open ? "1" : "0")
+    localStorage.setItem(OPTIONS_KEY + userId, open ? "1" : "0")
   } catch {
     /* In memory when storage is off. */
   }
@@ -114,11 +117,8 @@ function TokenCount({
   // with, as the context budget counts it (ARCHITECTURE §15 "Token counts").
   const texts = useMemo(() => [prompt.marker ? "" : content], [prompt.marker, content])
   const own = useTokenCounts(texts)
-  const label = prompt.marker
-    ? "What the open chat puts here, as its context budget estimates it: four characters a token, three more a message."
-    : tokenizerText(own.tokenizer)
   return (
-    <Tooltip label={label}>
+    <Tooltip label="Estimated tokens this prompt sends.">
       <span
         tabIndex={0}
         data-prompt-tokens
@@ -140,24 +140,24 @@ function TokenCount({
 
 /** What a card's own prompt does to Main or Post-History Instructions in the open chat. */
 function OverrideNote({
-  store,
   entry,
   context,
   className
 }: {
-  store: EditorStore
   entry: PromptOrderEntry
   context: PresetContext | null | undefined
   className: string
 }) {
-  const forbids = useValue<boolean | undefined>(store, [...at(entry.identifier), "forbid_overrides"]) ?? false
   const override = context?.overrides?.find((o) => o.identifier === entry.identifier)
-  if (entry.identifier !== "main" && entry.identifier !== "jailbreak") return null
+  if (
+    (entry.identifier !== "main" && entry.identifier !== "jailbreak") ||
+    !override ||
+    override.status === "disabled" ||
+    override.status === "missing"
+  )
+    return null
   return (
-    <p
-      className={`text-xs text-muted ${className}`}
-      data-override={override?.status ?? (forbids ? "forbidden" : "none")}
-    >
+    <p className={`text-xs text-muted ${className}`} data-override={override.status}>
       {override?.status === "replaced" ? (
         <>
           Replaced in this chat by{" "}
@@ -181,11 +181,7 @@ function OverrideNote({
           </Link>{" "}
           has {entry.identifier === "main" ? "a system prompt" : "post-history instructions"}; this prompt forbids it
         </>
-      ) : forbids ? (
-        "A card can't replace it"
-      ) : (
-        "A card's own prompt can replace it"
-      )}
+      ) : null}
     </p>
   )
 }
@@ -204,13 +200,13 @@ function MarkerNote({
   return (
     <span className="text-xs text-muted">
       {byDefinitions
-        ? "Filled by Definitions"
+        ? "Filled from Definitions"
         : filled?.labels.length
-          ? `Definitions: ${filled.labels.join(", ")}`
+          ? `Filled from ${filled.labels.join(", ")}`
           : entry.identifier === "chatHistory"
-            ? "Earlier messages in the current context"
+            ? "Filled from the chat’s messages, oldest first."
             : entry.identifier === "newestMessage"
-              ? "The latest message, placed here"
+              ? "Filled from the newest chat message."
               : "Filled from the current chat"}
     </span>
   )
@@ -279,16 +275,40 @@ function SendBadges({ prompt }: { prompt: PresetPrompt }) {
   const condition = conditionOf(prompt)
   return (
     <>
-      <Badge>{prompt.role}</Badge>
-      <Badge>{prompt.injection_position === "absolute" ? `depth ${prompt.injection_depth}` : "in order"}</Badge>
-      {condition !== "always" && <Badge tone="accent">{conditionBadges[condition]}</Badge>}
-      {prompt.injection_trigger.length > 0 && (
-        <Badge tone="accent">
-          {TRIGGERS.filter((t) => prompt.injection_trigger.includes(t.value))
-            .map((t) => t.label.toLowerCase())
-            .join(", ") || "never"}
-        </Badge>
+      {condition !== "always" && (
+        <Tooltip label={`Sent ${CONDITION_LABELS[condition].toLowerCase()}.`}>
+          <span tabIndex={0}>
+            <Badge tone="accent">{conditionBadges[condition]}</Badge>
+          </span>
+        </Tooltip>
       )}
+      {prompt.injection_trigger.length > 0 && (
+        <Tooltip label="Sent only for these generation types.">
+          <span tabIndex={0}>
+            <Badge tone="accent">
+              {TRIGGERS.filter((t) => prompt.injection_trigger.includes(t.value))
+                .map((t) => t.label.toLowerCase())
+                .join(", ") || "never"}
+            </Badge>
+          </span>
+        </Tooltip>
+      )}
+      <Tooltip
+        label={
+          prompt.injection_position === "absolute"
+            ? `Inserted ${prompt.injection_depth} messages from the end of the chat.`
+            : "Sent at this prompt's place in the list."
+        }
+      >
+        <span tabIndex={0}>
+          <Badge>{prompt.injection_position === "absolute" ? `depth ${prompt.injection_depth}` : "in place"}</Badge>
+        </span>
+      </Tooltip>
+      <Tooltip label={`Sent as ${prompt.role === "assistant" ? "an" : "a"} ${prompt.role} message.`}>
+        <span tabIndex={0} data-prompt-role>
+          <Badge>{prompt.role}</Badge>
+        </span>
+      </Tooltip>
     </>
   )
 }
@@ -315,7 +335,8 @@ function PromptBlock({
   optionsOpen,
   toggleOptions,
   actions,
-  autoFocus = false
+  autoFocus = false,
+  aboveBreakpoint = false
 }: {
   store: EditorStore
   entry: PromptOrderEntry
@@ -332,6 +353,7 @@ function PromptBlock({
   actions: RowActions
   /** Just added: its text is focused as it mounts, ready to type. */
   autoFocus?: boolean
+  aboveBreakpoint?: boolean
 }) {
   const path = at(entry.identifier)
   const namePath = [...path, "name"]
@@ -356,22 +378,28 @@ function PromptBlock({
   const column = layout === "column"
   const open = !prompt.marker && !collapsed
   const first = firstLine(content)
+  const kind = promptKind(prompt)
+  const landmark = entry.identifier === "chatHistory"
 
   const sendSwitch = entry.identifier !== "newestMessage" && (
-    <Switch
-      labelHidden
-      checked={entry.enabled}
-      onCheckedChange={(enabled) =>
-        writePresetOrder(
-          store,
-          presetOrder(store.value(["prompts"]) as PresetPrompt[], store.value(["order"]) as PromptOrderEntry[]).map(
-            (e) => (e.identifier === entry.identifier ? { ...e, enabled } : e)
-          )
-        )
-      }
-    >
-      <span className="sr-only">Send {name}</span>
-    </Switch>
+    <Tooltip label={entry.enabled ? `Stops sending ${name}.` : `Sends ${name}.`}>
+      <span className="inline-flex">
+        <Switch
+          labelHidden
+          checked={entry.enabled}
+          onCheckedChange={(enabled) =>
+            writePresetOrder(
+              store,
+              presetOrder(store.value(["prompts"]) as PresetPrompt[], store.value(["order"]) as PromptOrderEntry[]).map(
+                (e) => (e.identifier === entry.identifier ? { ...e, enabled } : e)
+              )
+            )
+          }
+        >
+          <span className="sr-only">Send {name}</span>
+        </Switch>
+      </span>
+    </Tooltip>
   )
   const markedName =
     nameMatch && prompt.marker ? (
@@ -384,13 +412,29 @@ function PromptBlock({
       name
     )
   const summary = !prompt.marker && /\{\{summary\}\}/i.test(content) && context?.summary && (
-    <Badge>{summaryBadge(context.summary)}</Badge>
+    <Tooltip label="Shows what the summary note macro sends.">
+      <span tabIndex={0}>
+        <Badge>{summaryBadge(context.summary)}</Badge>
+      </span>
+    </Tooltip>
   )
 
   const title = prompt.marker ? (
-    <span className={`flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1 py-1 ${column ? "flex-1" : ""}`}>
-      <span className="text-sm text-muted [overflow-wrap:anywhere]">{markedName}</span>
-      {!entry.enabled && <Badge>off</Badge>}
+    <span className="flex min-w-0 flex-1 flex-col gap-1 px-1 py-1">
+      <span className="flex min-w-0 items-center gap-2">
+        <Icon name={kind && "icon" in kind ? kind.icon! : "insert"} />
+        <span className={landmark ? "truncate text-base font-semibold" : "truncate text-sm font-medium"}>
+          {landmark && !nameMatch ? "Chat history" : markedName}
+        </span>
+        {!entry.enabled && (
+          <Tooltip label="This block is switched off.">
+            <span>
+              <Badge>off</Badge>
+            </span>
+          </Tooltip>
+        )}
+        {!landmark && <PromptKindTag prompt={prompt} />}
+      </span>
       <MarkerNote entry={entry} context={context} byDefinitions={byDefinitions} />
     </span>
   ) : (
@@ -398,7 +442,7 @@ function PromptBlock({
       open={!collapsed}
       onToggle={toggle}
       label={name}
-      name={name}
+      name={<span className="block truncate">{name}</span>}
       hint={collapsed ? "Show the prompt's text" : "Hide the prompt's text"}
       derived={label.derived}
       dim={!entry.enabled}
@@ -406,12 +450,10 @@ function PromptBlock({
         column &&
         collapsed &&
         !label.derived &&
-        first !== "" && <span className="line-clamp-1 text-xs text-muted [overflow-wrap:anywhere]">{first}</span>
+        first !== "" && <span className="block max-w-full truncate text-xs text-muted">{first}</span>
       }
     />
   )
-  // A closed row in the column keeps its width for the name and first line: renaming and the
-  // options are in the header once it's open.
   const full = !column || open
   const named = prompt.marker ? (
     title
@@ -420,7 +462,7 @@ function PromptBlock({
       value={typed}
       label={name}
       allowEmpty
-      className={column ? "min-w-0 flex-1 basis-40" : "min-w-0 max-w-md"}
+      className="min-w-0 max-w-md"
       onRename={(next) => {
         store.setText(namePath, next)
         void store.save(textField(namePath))
@@ -435,7 +477,7 @@ function PromptBlock({
   const menu = (
     <Menu
       label={`Actions for ${name}`}
-      hint="More: open it in the large editor, insert a prompt beside it, delete it"
+      hint="More actions for this prompt."
       trigger={<BlockMenuButton label={`Actions for ${name}`} />}
     >
       {actions.openLarge && (
@@ -465,7 +507,7 @@ function PromptBlock({
             icon="trash"
             tone="danger"
             onClick={remove}
-            description="Takes it out of the preset when you save the new order; until then Revert brings it back"
+            description="Takes this prompt out of the preset when you save."
           >
             Delete the prompt
           </MenuItem>
@@ -474,7 +516,7 @@ function PromptBlock({
     </Menu>
   )
 
-  const optionsToggle = !prompt.marker && full && (
+  const optionsToggle = !prompt.marker && (
     <BlockOptionsToggle
       open={optionsOpen}
       onToggle={toggleOptions}
@@ -489,44 +531,55 @@ function PromptBlock({
       tabIndex={-1}
       id={column ? undefined : `prompt-${entry.identifier}`}
       data-prompt={entry.identifier}
-      dashed={prompt.marker}
-      className={`scroll-mt-[var(--preset-toolbar-height,1rem)] ${column ? "bg-canvas" : ""}`}
+      dashed={false}
+      data-prompt-type={landmark ? "history" : prompt.marker ? "placeholder" : kind ? "builtin" : "custom"}
+      className={`scroll-mt-[var(--preset-toolbar-height,1rem)] ${landmark ? "prompt-history" : prompt.marker ? "prompt-placeholder" : column ? "bg-canvas" : ""}`}
     >
-      <BlockHeader className={column ? "" : "@lg:items-center"}>
+      <BlockHeader className={column ? "flex-wrap" : "prompt-document-header flex-wrap"}>
         {handle}
         <span className="flex h-8 w-10 shrink-0 items-center justify-center">{sendSwitch}</span>
-        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-          {named}
-          {/* Wide (owner, 2026-11-02): the chips, count and actions follow the name instead of
-              sitting at the far end of a wide row, and a closed prompt's first line fills the rest. */}
-          {!column && (
-            <span className="flex max-w-full min-w-0 flex-wrap items-center gap-1">
-              {!prompt.marker && <SendBadges prompt={prompt} />}
-              <TokenCount prompt={prompt} content={content} context={context} />
-              {summary}
-              {optionsToggle}
-              {menu}
-            </span>
+        <div className="min-w-0 flex-1">
+          <div data-prompt-title-row className="flex min-w-0 items-center gap-1">
+            {named}
+            {!prompt.marker && <PromptKindTag prompt={prompt} />}
+            {!column && optionsToggle}
+            {!column && menu}
+          </div>
+          {!column && !prompt.marker && !label.derived && first !== "" && (
+            <div data-prompt-preview className="mt-0.5 truncate px-1 text-xs text-muted">
+              {first}
+            </div>
           )}
-          {!column && collapsed && !prompt.marker && !label.derived && first !== "" && (
-            <span className="min-w-0 flex-1 basis-48 truncate text-sm text-muted">{first}</span>
-          )}
-          {column && summary}
-        </span>
-        {/* In the column a prompt's count goes with its chips, so a narrow header leaves the name
-            (and its rename field) the width; a marker's, and a closed row's, stay at the end. */}
+        </div>
+        {!column && (
+          <div
+            data-prompt-info
+            className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2 self-start min-h-8"
+          >
+            {aboveBreakpoint && <VolatileBadge names={volatileMacros(content)} />}
+            {summary}
+            {!prompt.marker && <SendBadges prompt={prompt} />}
+            <TokenCount prompt={prompt} content={content} context={context} />
+          </div>
+        )}
         {column && (prompt.marker || !open) && (
-          <span className="flex h-8 shrink-0 items-center pl-1">
+          <span className="ml-auto flex h-8 shrink-0 items-center pl-1">
             <TokenCount prompt={prompt} content={content} context={context} />
           </span>
         )}
         {column && optionsToggle}
         {column && menu}
       </BlockHeader>
-      {column && open && !prompt.marker && (
-        <div className="flex flex-wrap items-center gap-1 px-2 pb-1 pl-12">
-          <SendBadges prompt={prompt} />
-          <TokenCount prompt={prompt} content={content} context={context} />
+      {column && !prompt.marker && (open || summary || (aboveBreakpoint && volatileMacros(content).length > 0)) && (
+        <div data-prompt-info className="flex flex-wrap items-center gap-2 px-3 pb-2">
+          {aboveBreakpoint && <VolatileBadge names={volatileMacros(content)} />}
+          {summary}
+          {open && (
+            <>
+              <SendBadges prompt={prompt} />
+              <TokenCount prompt={prompt} content={content} context={context} />
+            </>
+          )}
         </div>
       )}
       {open && optionsOpen && (
@@ -534,7 +587,7 @@ function PromptBlock({
           <PromptOptions store={store} path={path} prompt={prompt} />
         </BlockOptions>
       )}
-      {full && <OverrideNote store={store} entry={entry} context={context} className="px-3 pb-1" />}
+      {full && <OverrideNote entry={entry} context={context} className="px-3 pb-2" />}
       {open && (
         <BlockBody dim={!entry.enabled}>
           <TextField
@@ -600,10 +653,16 @@ export function PromptDocument({
   layout = "document",
   onOpenLarge,
   onOpenLorebook,
-  saveControls
+  saveControls,
+  toolbarTarget,
+  toolbarEnd,
+  onSearchReveal
 }: {
   store: EditorStore
   /** The save cluster, at the start of the list's own toolbar row (DESIGN §10.1). */
+  toolbarTarget?: HTMLElement | null | undefined
+  toolbarEnd?: ReactNode
+  onSearchReveal?: ((match: SearchMatch) => void) | undefined
   saveControls?: ReactNode
   context?: PresetContext | null | undefined
   focus?: string | undefined
@@ -616,7 +675,11 @@ export function PromptDocument({
   onOpenLorebook?: ((ref: RefId) => void) | undefined
 }) {
   const column = layout === "column"
-  const searchMatch = useContext(SearchNavigation)
+  const userId = useSession().user.id
+  const [searching, setSearching] = useState(false)
+  const [searchTarget, setSearchTarget] = useState<SearchMatch | null>(null)
+  const inheritedMatch = useContext(SearchNavigation)
+  const searchMatch = searchTarget ?? inheritedMatch
   const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
   const savedOrder = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
   const order = presetOrder(prompts, savedOrder)
@@ -633,11 +696,15 @@ export function PromptDocument({
       ? "This prompt is no longer in the preset."
       : null
   )
-  // Options fold away by default; "Show all options" is this browser's choice.
-  const [options, setOptions] = useState<Opened>(() => ({ all: readOptionsOpen(), except: new Set() }))
+  // Auto-expansion is remembered per account in this browser.
+  const [autoOptions, setAutoOptions] = useState(() => readOptionsOpen(userId))
+  const [options, setOptions] = useState<Opened>(() => ({ all: readOptionsOpen(userId), except: new Set() }))
   // The prompt just added, whose text takes the focus as its editor mounts.
   const [added, setAdded] = useState<string | null>(null)
-  const reveal = (identifier: string) => setOpened((current) => withOpen(current, identifier, true))
+  const reveal = (identifier: string) => {
+    setOpened((current) => withOpen(current, identifier, true))
+    if (autoOptions) setOptions((current) => withOpen(current, identifier, true))
+  }
   useEffect(() => {
     const [list, identity, part] = searchMatch?.path ?? []
     if (list === "prompts" && typeof identity === "string" && identity.startsWith("identifier=")) {
@@ -658,7 +725,7 @@ export function PromptDocument({
     [...prompts, newestMessage].map((p) => [p.identifier, p.marker ? p.name : promptLabel(p.name, p.content).text])
   )
   if (!names.has(charDefinitions.identifier)) names.set(charDefinitions.identifier, charDefinitions.name)
-  /** Opens a prompt and scrolls to it; `added`: one just made, scrolled to only if its header is hidden. */
+  /** Opens and scrolls to a prompt; a new block also flashes after the toolbar has measured. */
   const jump = (identifier: string, added = false) => {
     reveal(identifier)
     requestAnimationFrame(() => {
@@ -667,7 +734,7 @@ export function PromptDocument({
       )
       if (!target) return
       if (added) {
-        revealIfHidden(target.firstElementChild instanceof HTMLElement ? target.firstElementChild : target)
+        revealAdded(target)
         return
       }
       const scroll = root.current?.closest<HTMLElement>("[data-preset-scroll]")
@@ -736,38 +803,34 @@ export function PromptDocument({
     const chat = order.findIndex((e) => e.identifier === "chatHistory")
     return chat >= 0 ? chat : order.length
   }
+  const definitionsPlace = order[definitionsAt()]?.identifier
+  const definitionsHint = hasDefinitions
+    ? "The preset already has its definitions block; drag the block to move it."
+    : `Adds a definitions block ${definitionsPlace && perFieldMarkers.includes(definitionsPlace) ? "before the first definition marker" : definitionsPlace === "chatHistory" ? "just above the chat history" : "at the end of the list"}: it places every cast card's definitions there.`
   const addButtons = (
-    <div className="flex flex-wrap items-center gap-1">
+    <div className="flex shrink-0 items-center gap-1">
       <Button
-        variant={column ? "ghost" : "secondary"}
-        className={column ? "h-7 px-2" : ""}
+        className="preset-add-prompt h-8! px-2!"
+        aria-label="Add prompt"
         hint={NEW_PROMPT_HINT}
         onClick={() => add(order.length)}
       >
         <Icon name="plus" />
-        New prompt
+        <span>Add prompt</span>
       </Button>
-      {hasDefinitions ? (
-        // Disabled, it still explains itself on hover and focus.
-        <Tooltip label="The preset already has its definitions block; drag it to move it">
-          <span tabIndex={0} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
-            <Button variant={column ? "ghost" : "secondary"} className={column ? "h-7 px-2" : ""} disabled>
-              <Icon name="insert" />
-              {DEFINITIONS_BUTTON}
-            </Button>
-          </span>
-        </Tooltip>
-      ) : (
-        <Button
-          variant={column ? "ghost" : "secondary"}
-          className={column ? "h-7 px-2" : ""}
-          hint={DEFINITIONS_HINT}
-          onClick={() => addDefinitions(definitionsAt())}
-        >
-          <Icon name="insert" />
-          {DEFINITIONS_BUTTON}
-        </Button>
-      )}
+      <Tooltip label={definitionsHint}>
+        <span tabIndex={hasDefinitions ? 0 : undefined}>
+          <Button
+            className="preset-add-definitions h-8! px-2!"
+            aria-label={DEFINITIONS_BUTTON}
+            disabled={hasDefinitions}
+            onClick={() => addDefinitions(definitionsAt())}
+          >
+            <Icon name="insert" />
+            <span>{DEFINITIONS_BUTTON}</span>
+          </Button>
+        </span>
+      </Tooltip>
     </div>
   )
   const slot = (label: string, predicate: (p: PresetContext["notes"][number]["placement"]) => boolean) => {
@@ -786,13 +849,21 @@ export function PromptDocument({
     if (notes === "") return null
     // A row like the prompts' (dashed: it stands for what fills it), its icon in their handle's column.
     return (
-      <Block dashed data-note-slot={label} className="my-1 flex min-h-10 items-center gap-2 py-1 ps-1 pe-2 text-sm">
+      <Block
+        data-note-slot={label}
+        data-prompt-type="placeholder"
+        className="prompt-placeholder my-1 flex min-h-10 items-center gap-2 px-3 py-2 text-sm"
+      >
         <span className="flex size-8 shrink-0 items-center justify-center text-muted" aria-hidden="true">
           <Icon name="note" />
         </span>
-        <span className="min-w-0 flex-1 break-words">
-          <span className="font-medium">{label}</span>
-          <span className="text-muted">: {notes}</span>
+        <span className="flex min-w-0 flex-1 flex-col items-start gap-1 break-words">
+          <Tooltip label="Filled from active notes at this placement.">
+            <span tabIndex={0} className="prompt-kind-tag rounded px-1.5 py-0.5 font-medium">
+              {label}
+            </span>
+          </Tooltip>
+          <span className="text-xs text-muted">Filled from {notes}</span>
         </span>
       </Block>
     )
@@ -809,56 +880,81 @@ export function PromptDocument({
     context?.cacheAfter ?? [],
     order.map((e) => e.identifier)
   )
-  const reuseAlone = ![...reuse.values()].includes("every")
-  const reuseLine = (place: string) => {
-    const kind = reuse.get(place)
-    return kind && <ReuseLine kind={kind} alone={reuseAlone} />
-  }
+  const reuseLine = (place: string) =>
+    reuse.get(place)?.map((kind, i) => <CacheBreakpointLine key={`${place}:${i}`} kind={kind} />)
+  const breakpointPositions = [...reuse.keys()].map((id) =>
+    id === AT_START
+      ? -1
+      : id === BEFORE_CHAT || id === "summaries"
+        ? history - 0.5
+        : order.findIndex((e) => e.identifier === id)
+  )
+  const firstBreakpoint = breakpointPositions.length ? Math.min(...breakpointPositions) : -1
   const newestAfterTail = order.findIndex((e) => e.identifier === "newestMessage") > history + 1
   const anyOpen = order.some((e) => isOpen(opened, e.identifier))
-  const small = column ? "h-7 px-2" : ""
-  const variant = column ? "ghost" : "secondary"
   const controls = (
-    // One toolbar row: the save cluster, New prompt and the definitions block, then expand and options.
-    // In the side panel's column the row is too narrow for all of them, and the save cluster must
-    // share Expand all's row (DESIGN §10.1 [D] One row), so there the add buttons come last and wrap.
-    <ExpandCollapseAll
-      compact={column}
-      start={
-        <div className="flex flex-wrap items-center gap-1">
-          {saveControls}
-          {!column && addButtons}
-        </div>
-      }
-      anyOpen={anyOpen}
-      allOpen={false}
-      expandHint="Show every prompt's text"
-      collapseHint="Fold every prompt to its header: an outline of the preset"
-      onExpand={() => setOpened({ all: true, except: new Set() })}
-      onCollapse={() => setOpened({ all: false, except: new Set() })}
-    >
-      <Tooltip
-        label={
-          options.all
-            ? "Fold every prompt's options away again (remembered in this browser)"
-            : "Open every prompt's options at once (remembered in this browser)"
-        }
-      >
+    <div data-preset-layout={layout} className="preset-toolbar @container flex min-w-0 flex-col gap-2">
+      <div data-preset-edit-row className="preset-edit-row flex items-center gap-2">
+        {addButtons}
+        <div className="flex shrink-0 items-center">{saveControls ?? <SaveRevision store={store} />}</div>
         <Button
-          variant={variant}
-          className={small}
-          aria-pressed={options.all}
+          className="preset-search h-8! shrink-0 px-2! aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-accent"
+          aria-label="Search and replace"
+          aria-pressed={searching}
+          hint="Search and replace in the preset's text."
+          onClick={() => setSearching(!searching)}
+        >
+          <Icon name="search" />
+          <span>Search and replace</span>
+        </Button>
+        {toolbarEnd && <div className="preset-toolbar-end flex shrink-0 items-center gap-1">{toolbarEnd}</div>}
+      </div>
+      {searching && (
+        <div className="relative border-t border-border pt-10">
+          <div className="absolute top-1 right-0">
+            <WindowClose onClick={() => setSearching(false)} />
+          </div>
+          <SearchDialog
+            store={store}
+            inline
+            scopes={presetScopes}
+            onReveal={(match) => {
+              setSearchTarget(match)
+              onSearchReveal?.(match)
+            }}
+          />
+        </div>
+      )}
+      <div data-preset-view-row className="flex items-center gap-3">
+        <Button
+          variant="ghost"
+          className="h-8! shrink-0 px-2!"
+          hint={anyOpen ? "Fold every prompt to its header." : "Show every prompt's text."}
           onClick={() => {
-            keepOptionsOpen(!options.all)
-            setOptions({ all: !options.all, except: new Set() })
+            setOpened({ all: !anyOpen, except: new Set() })
+            if (!anyOpen && autoOptions) setOptions({ all: true, except: new Set() })
           }}
         >
-          <Icon name="sliders" />
-          {options.all ? "Hide all options" : "Show all options"}
+          {anyOpen ? "Collapse all" : "Expand all"}
         </Button>
-      </Tooltip>
-      {column && addButtons}
-    </ExpandCollapseAll>
+        <Tooltip label="Opening a prompt also opens its options.">
+          <label className="flex items-center gap-2 text-sm whitespace-nowrap">
+            <input
+              type="checkbox"
+              className="accent-accent"
+              checked={autoOptions}
+              onChange={(event) => {
+                const next = event.target.checked
+                keepOptionsOpen(userId, next)
+                setAutoOptions(next)
+                setOptions({ all: next, except: new Set() })
+              }}
+            />
+            Auto-expand options
+          </label>
+        </Tooltip>
+      </div>
+    </div>
   )
   const list = (
     <div className="@container min-w-0 flex-1">
@@ -880,8 +976,8 @@ export function PromptDocument({
               {entry.identifier === "chatHistory" && (
                 <>
                   {reuseLine(BEFORE_CHAT)}
-                  <ChatStartsLine />
-                  {slot("Notes inside the chat", (p) => p.mode === "depth")}
+                  <SummariesPlaceholder />
+                  {reuseLine("summaries")}
                 </>
               )}
               {history >= 0 && index === afterHistory && tailStarts}
@@ -899,12 +995,19 @@ export function PromptDocument({
                   definitions={definitionsOn}
                   autoFocus={added === entry.identifier}
                   layout={layout}
+                  aboveBreakpoint={entry.enabled && index <= firstBreakpoint}
                   collapsed={!isOpen(opened, entry.identifier)}
-                  toggle={() => setOpened(withOpen(opened, entry.identifier, !isOpen(opened, entry.identifier)))}
+                  toggle={() => {
+                    if (!isOpen(opened, entry.identifier)) reveal(entry.identifier)
+                    else setOpened(withOpen(opened, entry.identifier, false))
+                  }}
                   optionsOpen={isOpen(options, entry.identifier)}
-                  toggleOptions={() =>
-                    setOptions(withOpen(options, entry.identifier, !isOpen(options, entry.identifier)))
-                  }
+                  toggleOptions={() => {
+                    if (!isOpen(opened, entry.identifier)) {
+                      reveal(entry.identifier)
+                      setOptions(withOpen(options, entry.identifier, true))
+                    } else setOptions(withOpen(options, entry.identifier, !isOpen(options, entry.identifier)))
+                  }}
                   actions={{
                     openLarge: onOpenLarge && (() => onOpenLarge(entry.identifier)),
                     insertAbove: () => add(index),
@@ -926,6 +1029,7 @@ export function PromptDocument({
                   (p) => p.mode === "tail" || (p.mode === "depth" && p.depth === 0)
                 )}
               {reuseLine(entry.identifier)}
+              {entry.identifier === "chatHistory" && slot("Notes inside the chat", (p) => p.mode === "depth")}
             </>
           )
         }}
@@ -936,51 +1040,53 @@ export function PromptDocument({
     </div>
   )
   return (
-    <div
-      ref={root}
-      className="flex min-w-0 flex-col gap-3"
-      // The user moved on before the new prompt's editor mounted (renaming it, say): its text
-      // doesn't take the focus back. A menu handing focus back to its trigger isn't moving on.
-      onFocusCapture={(event) => {
-        const id = (event.target as HTMLElement).closest<HTMLElement>("[data-prompt]")?.dataset.prompt
-        const target = event.target as HTMLElement
-        if (
-          id &&
-          id !== promptFocus &&
-          (target.matches("input, textarea, [contenteditable=true]") || target.shadowRoot !== null)
-        ) {
-          focusedHere.current = id
-          setPromptFocus(id, true)
-        }
-        if (added === null || !(event.target instanceof HTMLElement)) return
-        if (event.target.hasAttribute("aria-haspopup")) return
-        const own = `[data-prompt="${CSS.escape(added)}"]`
-        if (event.target.closest(`${own} [contenteditable], ${own} textarea`)) return
-        setAdded(null)
-      }}
-    >
-      {controls}
-      {column ? (
-        list
-      ) : (
-        <div className="@container flex min-w-0 gap-4">
-          <Outline>
-            <SortableList
-              items={order}
-              itemKey={(e) => e.identifier}
-              itemLabel={(e) => names.get(e.identifier) ?? e.identifier}
-              label="Outline order"
-              namesAsHandles
-              onSelect={(e) => jump(e.identifier)}
-              onMove={move}
-            >
-              {(_e, handle) => handle}
-            </SortableList>
-          </Outline>
-          {list}
-        </div>
-      )}
-    </div>
+    <SearchNavigation value={searchMatch}>
+      <div
+        ref={root}
+        className="flex min-w-0 flex-col gap-3"
+        // The user moved on before the new prompt's editor mounted (renaming it, say): its text
+        // doesn't take the focus back. A menu handing focus back to its trigger isn't moving on.
+        onFocusCapture={(event) => {
+          const id = (event.target as HTMLElement).closest<HTMLElement>("[data-prompt]")?.dataset.prompt
+          const target = event.target as HTMLElement
+          if (
+            id &&
+            id !== promptFocus &&
+            (target.matches("input, textarea, [contenteditable=true]") || target.shadowRoot !== null)
+          ) {
+            focusedHere.current = id
+            setPromptFocus(id, true)
+          }
+          if (added === null || !(event.target instanceof HTMLElement)) return
+          if (event.target.hasAttribute("aria-haspopup")) return
+          const own = `[data-prompt="${CSS.escape(added)}"]`
+          if (event.target.closest(`${own} [contenteditable], ${own} textarea`)) return
+          setAdded(null)
+        }}
+      >
+        {toolbarTarget ? createPortal(controls, toolbarTarget) : controls}
+        {column ? (
+          list
+        ) : (
+          <div className="@container flex min-w-0 gap-4">
+            <Outline>
+              <SortableList
+                items={order}
+                itemKey={(e) => e.identifier}
+                itemLabel={(e) => names.get(e.identifier) ?? e.identifier}
+                label="Outline order"
+                namesAsHandles
+                onSelect={(e) => jump(e.identifier)}
+                onMove={move}
+              >
+                {(_e, handle) => handle}
+              </SortableList>
+            </Outline>
+            {list}
+          </div>
+        )}
+      </div>
+    </SearchNavigation>
   )
 }
 

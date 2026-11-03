@@ -64,7 +64,11 @@ test.beforeAll(async ({ browser }) => {
   await admin((api) =>
     api.EditModel({
       modelId: model.id,
-      overrides: { context: 128000, settings: { samplers: { openai_max_context: 128000 } } },
+      overrides: {
+        context: 128000,
+        cacheBreakpoints: "explicit",
+        settings: { samplers: { openai_max_context: 128000 } }
+      },
       expectedRowVersion: model.rowVersion
     })
   )
@@ -168,7 +172,7 @@ for (const width of [1440, 390])
       )
       await main.scrollIntoViewIfNeeded()
       await shoot("preset-main-replaced")
-      await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+      await overlay.getByRole("button", { name: "Close", exact: true }).click()
       // The card editor says its prompts are used.
       await page.goto(`${server().url}/library/${ariaCard.id}`)
       const note = page.locator('[data-prompt-use="replaceable"]').first()
@@ -196,7 +200,7 @@ test("a prompt that forbids overrides says so in both editors; entries by positi
   await overlay.locator('[data-prompt="main"]').getByRole("button", { name: "Options of Main Prompt" }).click()
   await overlay.locator('[data-prompt="main"]').getByRole("switch", { name: "A card can't replace it" }).click()
   await saveRevision(overlay)
-  await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  await overlay.getByRole("button", { name: "Close", exact: true }).click()
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const) {
       const shoot = await setUp(page, width, theme, false)

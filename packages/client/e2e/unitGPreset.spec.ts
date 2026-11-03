@@ -99,7 +99,7 @@ for (const width of [1440, 390])
       const outerScroll = await page.evaluate(() => scrollY)
       const panel = await openPanel(page, "Prompt preset")
       await expect(panel.getByRole("list", { name: "Preset blocks" })).toBeVisible()
-      await expect(panel.getByRole("listitem").filter({ hasText: "Chat History" })).toContainText(/~[1-9][\d,]+ tokens/)
+      await expect(panel.getByRole("listitem").filter({ hasText: "Chat history" })).toContainText(/~[1-9][\d,]+ tokens/)
       const shoot = async (name: string) => {
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
         await page.screenshot({ path: join(shots, `${name}-${width}-${theme}.png`) })
@@ -119,7 +119,7 @@ for (const width of [1440, 390])
       })
       // The search is folded away until asked for.
       await expect(overlay.getByRole("textbox", { name: "Find", exact: true })).toHaveCount(0)
-      await overlay.getByRole("button", { name: "Search", exact: true }).click()
+      await overlay.getByRole("button", { name: "Search and replace", exact: true }).click()
       await expect(overlay.getByRole("textbox", { name: "Find", exact: true })).toBeInViewport()
       await shoot("document")
       await overlay.getByRole("button", { name: "Collapse all", exact: true }).click()
@@ -147,15 +147,15 @@ for (const width of [1440, 390])
           return at!.getBoundingClientRect().height
         })
       if (width < 640) {
-        // Keep the preset name and Close without wrapping Rename onto a spare row.
-        expect(sticky).toBeLessThan(400)
+        // The separate editing/view rows and open search leave most of the screen to the document.
+        expect(sticky).toBeLessThan(page.viewportSize()!.height / 2)
         const options = overlay.getByRole("button", { name: "Options", exact: true })
         await options.click()
         await expect(overlay.getByRole("checkbox", { name: "Whole word", exact: true })).toBeVisible()
         await options.click()
       }
       await shoot("search-preview")
-      await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+      await overlay.getByRole("button", { name: "Close", exact: true }).first().click()
       await expect(overlay).toHaveCount(0)
       await expectTextBox(composer, `An unfinished message ${width} ${theme}`)
       const notes = await openPanel(page, "Notes")
@@ -181,7 +181,7 @@ for (const width of [1440, 390])
       await editor
         .getByRole("textbox", { name: "Prompt: Post-History Instructions", exact: true })
         .fill(`Keep continuity ${width} ${theme}.`)
-      await editor.getByRole("button", { name: "Search", exact: true }).click()
+      await editor.getByRole("button", { name: "Search and replace", exact: true }).click()
       await editor.getByRole("textbox", { name: "Find", exact: true }).fill("continuity")
       await editor.getByRole("textbox", { name: "Replace with", exact: true }).fill("coherence")
       await editor.getByRole("button", { name: "Find", exact: true }).click()
@@ -223,7 +223,7 @@ test("a panel switch is shared with the overlay as flipped, with no unsaved bar"
   await openPresetAt(page, panel, "Main Prompt")
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   await expect(overlay.getByRole("switch", { name: "Send Main Prompt", exact: true })).toBeChecked({ checked: !was })
-  await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  await overlay.getByRole("button", { name: "Close", exact: true }).first().click()
   // A switch is live: no bar holds it; flipping it back is the way back.
   await expect(panel.getByRole("region", { name: "Unsaved changes" })).toHaveCount(0)
   await toggle.click()
@@ -248,7 +248,7 @@ test("text typed in the overlay is live in the panel too, and the overlay's Save
   const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
   await main.fill("An hour of careful prompt work.")
   await expectSaveState(overlay, UNSAVED)
-  await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  await overlay.getByRole("button", { name: "Close", exact: true }).first().click()
   // No bar holds typed text; the tab's Save says there's something to save.
   const bar = panel.getByRole("region", { name: "Unsaved changes" })
   await expect(bar).toHaveCount(0)
@@ -258,7 +258,7 @@ test("text typed in the overlay is live in the panel too, and the overlay's Save
   // The overlay's toolbar saves it, asking nothing.
   await saveRevision(overlay)
   await expectSaveState(overlay, NOTHING_TO_SAVE)
-  await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  await overlay.getByRole("button", { name: "Close", exact: true }).first().click()
   await expectSaveState(panel, NOTHING_TO_SAVE)
 })
 
@@ -281,7 +281,7 @@ test("the panel's Revert puts back an order the overlay changed, without asking"
   await overlay.getByRole("list", { name: "Prompt order" }).getByRole("button", { name: "Move Main Prompt" }).focus()
   await page.keyboard.press("ArrowDown")
   await expect.poll(names).not.toBe(before)
-  await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  await overlay.getByRole("button", { name: "Close", exact: true }).first().click()
   const bar = panel.getByRole("region", { name: "Unsaved changes" })
   await expect(bar).toContainText("new order")
   await bar.getByRole("button", { name: "Revert", exact: true }).click()

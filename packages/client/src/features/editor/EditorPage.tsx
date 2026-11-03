@@ -22,6 +22,7 @@ import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
+import { WindowClose } from "../../ui/WindowClose.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
@@ -141,6 +142,7 @@ export function Editor({
   }
   // A preset's search sits in the sticky bar, so its matches stay beside the document; it's
   // folded away until asked for.
+  const [presetToolbar, setPresetToolbar] = useState<HTMLDivElement | null>(null)
   const [searching, setSearching] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [more, setMore] = useState(false)
@@ -227,7 +229,7 @@ export function Editor({
   const overPreset = onClose !== undefined && ref.kind === "preset"
   /** The entry's name, renamed in place (a card's name is its own field), and what kind it is. */
   const title = (size: string) => (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <div className={`flex min-w-0 items-center gap-2 ${ref.kind === "preset" ? "" : "flex-wrap"}`}>
       <h1 className={`min-w-0 ${size} font-semibold [overflow-wrap:anywhere]`}>
         {bookOnly ? (
           <BookName store={store} root={CARD_BOOK} fallback={`${ref.label}'s lorebook`} />
@@ -236,7 +238,9 @@ export function Editor({
         ) : ref.kind === "lorebook" ? (
           <BookName store={store} root={[]} fallback={ref.label} />
         ) : (
-          <RefName store={store} />
+          <RefName store={store}>
+            {ref.kind === "preset" ? <span className="block min-w-0 truncate">{ref.label}</span> : undefined}
+          </RefName>
         )}
       </h1>
       {(ref.kind !== "card" || bookOnly) && <Badge>{bookOnly ? "lorebook" : (KINDS[ref.kind] ?? ref.kind)}</Badge>}
@@ -252,7 +256,7 @@ export function Editor({
   return (
     <SearchNavigation value={searchMatch}>
       <div ref={root} className="flex flex-col gap-6">
-        <header className="flex flex-col gap-1">
+        <header className={overPreset && variants.length <= 1 && !ref.subtitle ? "hidden" : "flex flex-col gap-1"}>
           {onClose ? null : ref.chatId !== null ? (
             <span className="text-sm">
               <OverrideChat chatId={ref.chatId} prefix="← Back to " />
@@ -356,11 +360,7 @@ export function Editor({
             (ref.kind === "preset" ? (
               <div className="flex min-w-0 items-center justify-between gap-2">
                 {title("text-base")}
-                <Tooltip label="Back to the chat; unsaved changes stay as drafts">
-                  <Button className="shrink-0" onClick={onClose}>
-                    Close preset editor
-                  </Button>
-                </Tooltip>
+                <WindowClose onClick={onClose} />
               </div>
             ) : (
               // A card's name is the heading just above: the bar keeps only the way back.
@@ -371,83 +371,83 @@ export function Editor({
                 </Button>
               </div>
             ))}
-          <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
-            <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
-            {!scopes && (
-              <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
-                Search
-              </Button>
-            )}
-            <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
-              History
-            </Button>
-            {ref.kind === "card" && (
-              <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
-            )}
-            {ref.kind !== "card" ? (
-              ref.kind !== "note" &&
-              ref.refKind !== "chat_override" && (
-                <Button
-                  hint="A named copy with its own changes, which still gets this one's updates."
-                  onClick={() => setOpen("fork")}
-                >
-                  Make a variant
-                </Button>
-              )
-            ) : (
-              // What's used less, grouped; each opens its own dialog.
-              <Popover
-                open={more}
-                onOpenChange={setMore}
-                trigger={
-                  <span className="flex items-center gap-1">
-                    More
-                    <Icon name="down" />
-                  </span>
-                }
-                triggerLabel="More actions"
-                title="More actions"
-                triggerClassName={buttonClass("secondary")}
-                side="bottom"
-                align="end"
-                keepMounted
-              >
-                <div
-                  className="flex flex-col items-stretch gap-1 *:justify-start [&_button]:w-full [&_button]:justify-start"
-                  onClickCapture={() => setMore(false)}
-                >
-                  <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
-                </div>
-              </Popover>
-            )}
-            {/* A preset's search toggle ends the row (unitGPreset keeps the sticky bar under 400 px). */}
-            <div className="flex min-w-0 items-center justify-end gap-2 sm:ml-auto">
-              {scopes && (
-                <Button
-                  variant="ghost"
-                  className="h-7! shrink-0 px-2!"
-                  aria-expanded={searching}
-                  aria-controls="preset-search"
-                  hint={
-                    ref.kind === "preset"
-                      ? "Find and replace in the prompts' text, their names, or anywhere in the preset."
-                      : "Find and replace in the entries' text, their keys, or anywhere in the book."
-                  }
-                  onClick={() => setSearching(!searching)}
-                >
-                  <Icon name="search" />
+          {ref.kind === "preset" ? (
+            <div ref={setPresetToolbar} />
+          ) : (
+            <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
+              <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
+              {!scopes && (
+                <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
                   Search
                 </Button>
               )}
+              <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
+                History
+              </Button>
+              {ref.kind === "card" && (
+                <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
+              )}
+              {ref.kind !== "card" ? (
+                ref.kind !== "note" &&
+                ref.refKind !== "chat_override" && (
+                  <Button
+                    hint="A named copy with its own changes, which still gets this one's updates."
+                    onClick={() => setOpen("fork")}
+                  >
+                    Make a variant
+                  </Button>
+                )
+              ) : (
+                // What's used less, grouped; each opens its own dialog.
+                <Popover
+                  open={more}
+                  onOpenChange={setMore}
+                  trigger={
+                    <span className="flex items-center gap-1">
+                      More
+                      <Icon name="down" />
+                    </span>
+                  }
+                  triggerLabel="More actions"
+                  title="More actions"
+                  triggerClassName={buttonClass("secondary")}
+                  side="bottom"
+                  align="end"
+                  keepMounted
+                >
+                  <div
+                    className="flex flex-col items-stretch gap-1 *:justify-start [&_button]:w-full [&_button]:justify-start"
+                    onClickCapture={() => setMore(false)}
+                  >
+                    <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
+                  </div>
+                </Popover>
+              )}
+              {/* Other editors retain their existing search toggle. */}
+              <div className="flex min-w-0 items-center justify-end gap-2 sm:ml-auto">
+                {scopes && (
+                  <Button
+                    variant="ghost"
+                    className="h-7! shrink-0 px-2!"
+                    aria-expanded={searching}
+                    aria-controls="preset-search"
+                    hint="Find and replace in the entries' text, their keys, or anywhere in the book."
+                    onClick={() => setSearching(!searching)}
+                  >
+                    <Icon name="search" />
+                    Search
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
           {clash && (
             <p role="status" className="text-sm text-muted">
               {clash}
             </p>
           )}
           {ref.kind === "preset" && <HeldChangesBar store={store} />}
-          {scopes && searching && (
+          {ref.kind !== "preset" && scopes && searching && (
             <div id="preset-search">
               <SearchDialog store={store} inline scopes={scopes} onReveal={setSearchMatch} />
             </div>
@@ -498,7 +498,41 @@ export function Editor({
             onOpenBook={() => setBookView(true)}
           />
         )}
-        {ref.kind === "preset" && <PresetEditor store={store} call={call} context={context} focus={focus} />}
+        {ref.kind === "preset" && (
+          <PresetEditor
+            store={store}
+            call={call}
+            context={context}
+            focus={focus}
+            toolbarTarget={presetToolbar}
+            onSearchReveal={setSearchMatch}
+            saveControls={<SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />}
+            toolbarEnd={
+              <>
+                <Button
+                  className="h-8! px-2!"
+                  aria-label="History"
+                  hint="Every saved revision, to compare or restore."
+                  onClick={() => setOpen("history")}
+                >
+                  <Icon name="history" />
+                  <span>History</span>
+                </Button>
+                {ref.refKind !== "chat_override" && (
+                  <Button
+                    className="h-8! px-2!"
+                    aria-label="Make a variant"
+                    hint="Makes a named copy with its own changes."
+                    onClick={() => setOpen("fork")}
+                  >
+                    <Icon name="branch" />
+                    <span>Make a variant</span>
+                  </Button>
+                )}
+              </>
+            }
+          />
+        )}
         {ref.kind === "note" && (
           <Card>
             <NoteFields store={store} />

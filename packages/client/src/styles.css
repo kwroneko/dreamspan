@@ -472,3 +472,177 @@ main:has(> [data-fill]) {
     pointer-events: none;
   }
 }
+
+/* Preset slot and placeholder tints, chosen for readable labels in both themes. */
+:root {
+  --prompt-main: oklch(43% 0.11 265);
+  --prompt-jailbreak: oklch(43% 0.11 15);
+  --prompt-nsfw: oklch(43% 0.11 330);
+  --prompt-enhanceDefinitions: oklch(43% 0.11 145);
+  --prompt-worldInfoBefore: oklch(43% 0.11 85);
+  --prompt-worldInfoAfter: oklch(43% 0.11 190);
+  --prompt-charDefinitions: oklch(43% 0.11 290);
+  --prompt-charDescription: oklch(43% 0.11 220);
+  --prompt-charPersonality: oklch(43% 0.11 45);
+  --prompt-scenario: oklch(43% 0.11 115);
+  --prompt-personaDescription: oklch(43% 0.11 355);
+  --prompt-dialogueExamples: oklch(43% 0.11 240);
+  --prompt-newestMessage: oklch(43% 0.11 165);
+  --prompt-summaries: oklch(43% 0.11 310);
+  --prompt-chatHistory: oklch(43% 0.11 260);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --prompt-main: oklch(80% 0.1 265);
+    --prompt-jailbreak: oklch(80% 0.1 15);
+    --prompt-nsfw: oklch(80% 0.1 330);
+    --prompt-enhanceDefinitions: oklch(80% 0.1 145);
+    --prompt-worldInfoBefore: oklch(80% 0.1 85);
+    --prompt-worldInfoAfter: oklch(80% 0.1 190);
+    --prompt-charDefinitions: oklch(80% 0.1 290);
+    --prompt-charDescription: oklch(80% 0.1 220);
+    --prompt-charPersonality: oklch(80% 0.1 45);
+    --prompt-scenario: oklch(80% 0.1 115);
+    --prompt-personaDescription: oklch(80% 0.1 355);
+    --prompt-dialogueExamples: oklch(80% 0.1 240);
+    --prompt-newestMessage: oklch(80% 0.1 165);
+    --prompt-summaries: oklch(80% 0.1 310);
+    --prompt-chatHistory: oklch(80% 0.1 260);
+  }
+}
+:root[data-theme="dark"] {
+  --prompt-main: oklch(80% 0.1 265);
+  --prompt-jailbreak: oklch(80% 0.1 15);
+  --prompt-nsfw: oklch(80% 0.1 330);
+  --prompt-enhanceDefinitions: oklch(80% 0.1 145);
+  --prompt-worldInfoBefore: oklch(80% 0.1 85);
+  --prompt-worldInfoAfter: oklch(80% 0.1 190);
+  --prompt-charDefinitions: oklch(80% 0.1 290);
+  --prompt-charDescription: oklch(80% 0.1 220);
+  --prompt-charPersonality: oklch(80% 0.1 45);
+  --prompt-scenario: oklch(80% 0.1 115);
+  --prompt-personaDescription: oklch(80% 0.1 355);
+  --prompt-dialogueExamples: oklch(80% 0.1 240);
+  --prompt-newestMessage: oklch(80% 0.1 165);
+  --prompt-summaries: oklch(80% 0.1 310);
+  --prompt-chatHistory: oklch(80% 0.1 260);
+}
+
+[data-prompt] {
+  --prompt-tint: var(--accent);
+}
+[data-prompt="main"] {
+  --prompt-tint: var(--prompt-main);
+}
+[data-prompt="jailbreak"] {
+  --prompt-tint: var(--prompt-jailbreak);
+}
+[data-prompt="nsfw"] {
+  --prompt-tint: var(--prompt-nsfw);
+}
+[data-prompt="enhanceDefinitions"] {
+  --prompt-tint: var(--prompt-enhanceDefinitions);
+}
+[data-prompt="worldInfoBefore"] {
+  --prompt-tint: var(--prompt-worldInfoBefore);
+}
+[data-prompt="worldInfoAfter"] {
+  --prompt-tint: var(--prompt-worldInfoAfter);
+}
+[data-prompt="charDefinitions"] {
+  --prompt-tint: var(--prompt-charDefinitions);
+}
+[data-prompt="charDescription"] {
+  --prompt-tint: var(--prompt-charDescription);
+}
+[data-prompt="charPersonality"] {
+  --prompt-tint: var(--prompt-charPersonality);
+}
+[data-prompt="scenario"] {
+  --prompt-tint: var(--prompt-scenario);
+}
+[data-prompt="personaDescription"] {
+  --prompt-tint: var(--prompt-personaDescription);
+}
+[data-prompt="dialogueExamples"] {
+  --prompt-tint: var(--prompt-dialogueExamples);
+}
+[data-prompt="newestMessage"] {
+  --prompt-tint: var(--prompt-newestMessage);
+}
+[data-prompt="summaries"] {
+  --prompt-tint: var(--prompt-summaries);
+}
+[data-prompt="chatHistory"] {
+  --prompt-tint: var(--prompt-chatHistory);
+}
+.prompt-kind-tag {
+  color: var(--prompt-tint);
+  background: color-mix(in oklch, var(--prompt-tint) 13%, var(--surface));
+}
+.prompt-placeholder {
+  background: color-mix(in oklch, var(--prompt-tint) 7%, var(--surface));
+}
+.prompt-history {
+  background: color-mix(in oklch, var(--prompt-chatHistory) 20%, var(--surface));
+  border-color: var(--prompt-chatHistory);
+}
+/* Collapse whole action labels in a defined order; never wrap fragments. */
+.preset-toolbar button {
+  white-space: nowrap;
+}
+@container (width < 52rem) {
+  [data-preset-layout="document"] .preset-search > span {
+    display: none;
+  }
+}
+@container (width < 44rem) {
+  [data-preset-layout="document"] .preset-add-definitions > span {
+    display: none;
+  }
+}
+@container (width < 25rem) {
+  [data-preset-layout="document"] .preset-add-prompt > span {
+    display: none;
+  }
+}
+@container (width < 38rem) {
+  [data-preset-layout="column"] .preset-search > span {
+    display: none;
+  }
+}
+@container (width < 30rem) {
+  [data-preset-layout="column"] .preset-add-definitions > span {
+    display: none;
+  }
+}
+@container (width < 20rem) {
+  [data-preset-layout="column"] .preset-add-prompt > span {
+    display: none;
+  }
+}
+@container (width < 35rem) {
+  .preset-toolbar-end button > span {
+    display: none;
+  }
+}
+@container (width < 36rem) {
+  .prompt-document-header > [data-prompt-info] {
+    flex-basis: 100%;
+  }
+}
+
+:root {
+  --prompt-notes: oklch(43% 0.11 65);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --prompt-notes: oklch(80% 0.1 65);
+  }
+}
+:root[data-theme="dark"] {
+  --prompt-notes: oklch(80% 0.1 65);
+}
+[data-note-slot] {
+  --prompt-tint: var(--prompt-notes);
+}
