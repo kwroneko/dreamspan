@@ -1,4 +1,4 @@
-import { reconcileDeletedFields } from "@rp/shared/draftDeletions.ts"
+import { editingOrigin, reconcileDeletedFields, reconcileForm } from "@rp/shared/draftDeletions.ts"
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -54,9 +54,11 @@ export class UserDraftStore {
   // The base of the displayed text, independent of reads/restores the user hasn't seen.
   private observedDeletion: ObservedDeletion | null = null
   private base = baseOf(null)
+  private editingFrom: string | null = null
   private lastPersistAcknowledged = false
   private edits = 0
-  private pendingTypes = new Set<{ initial: string; content: string }>()
+  private acknowledgedEdit = -1
+  private pendingTypes = new Set<{ initial: string; content: string; editingFrom: string | null; edit: number }>()
   private copy: Copy | null = null
   private queue: Promise<unknown> = Promise.resolve()
   private listeners = new Set<() => void>()
@@ -93,20 +95,21 @@ export class UserDraftStore {
     this.listeners.forEach((listener) => listener())
   }
   private address = () => ({ ownerId: this.userId, targetId: this.targetId, field: this.field })
-  private payload = (content: string, seed = false) => ({
+  private payload = (content: string, seed = false, editingFrom = this.editingFrom) => ({
     ...this.address(),
     content,
     ...(seed ? { seed: true } : {}),
+    ...(editingFrom === null ? {} : { editingFrom }),
     ...(this.observedDeletion === null ? {} : { observedDeletion: this.observedDeletion }),
     ...this.base
   })
-  private remember(content: string, current: boolean, seed = false) {
+  private remember(content: string, current: boolean, seed = false, editingFrom = this.editingFrom) {
     const previous = current ? this.copy : null
     const copy = makeCopy(
       this.userId,
       this.targetId,
       this.field,
-      { kind: "userDraft", payload: this.payload(content, seed) },
+      { kind: "userDraft", payload: this.payload(content, seed, editingFrom) },
       current ? Date.now() : (this.copy?.at ?? Date.now()) - 1,
       previous ? [previous] : []
     )
@@ -116,10 +119,17 @@ export class UserDraftStore {
     }
     return { copy, kept: keepCopy(copy, previous) }
   }
-  private async persist(content: string, seed = false) {
+  private async persist(content: string, seed = false, editingFrom = this.editingFrom, edit = this.edits) {
+    // A repeated Save of an acknowledged edit is not a new clear of remote typing.
+    if (!seed && edit <= this.acknowledgedEdit) editingFrom = content
     this.lastPersistAcknowledged = false
     // Refile on our own preceding acknowledgement, never a fresh read of another tab's base.
-    const { copy, kept } = this.remember(content, content === this.state.text, seed)
+    const { copy, kept } = this.remember(
+      content,
+      !seed && edit === this.edits && content === this.state.text,
+      seed,
+      editingFrom
+    )
     await kept
     const result = await this.run((client) =>
       client("SaveUserDraft", copy.save.kind === "userDraft" ? copy.save.payload : this.payload(content, seed))
@@ -133,12 +143,23 @@ export class UserDraftStore {
     // A deletion may have won while this request was in flight. Recovery acknowledges
     // the copy into the bin, not as new field text; never rebase later typing onto it unseen.
     const accepted = result.value.status === "active" && result.value.content === content
-    if (accepted || this.state.text === content) {
+    const showing = edit === this.edits && this.state.text === content
+    if (accepted || showing) {
       this.base = baseOf(result.value)
+      this.editingFrom = result.value.status === "active" ? result.value.content : null
+      if (accepted) {
+        if (!seed) this.acknowledgedEdit = Math.max(this.acknowledgedEdit, edit)
+        // Replay actual later transitions onto this exact acknowledgement. An earlier
+        // response cannot erase a later clear, or carry an acknowledged clear forward.
+        for (const pending of this.pendingTypes) {
+          if (pending.edit < edit || (!seed && pending.edit === edit)) continue
+          this.editingFrom = editingOrigin(this.editingFrom, pending.initial, pending.content)
+          pending.editingFrom = this.editingFrom
+        }
+      }
       this.observedDeletion = null
     }
-    if (!accepted && this.state.text === content)
-      this.update({ text: result.value.status === "active" ? result.value.content : null })
+    if (!accepted && showing) this.update({ text: result.value.status === "active" ? result.value.content : null })
     if (this.copy === copy) this.copy = null
     dropTypedBackup(copy)
     await dropCopy(copy)
@@ -146,7 +167,13 @@ export class UserDraftStore {
     // now, even if another queued operation delays its own save or the page closes.
     if (accepted && this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
     this.update({
-      error: accepted ? null : "This text was deleted elsewhere. Find your copy in recovered texts.",
+      error: accepted
+        ? null
+        : deletedSince(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null) ||
+            reconcileDeletedFields(result.value, copy.save.kind === "userDraft" ? copy.save.payload : null, content)
+              .changed
+          ? "This text was deleted elsewhere. Find your copy in recovered texts."
+          : "This text changed elsewhere. Review the updated text.",
       displaced: result.value.displaced ?? this.state.displaced,
       recovered: this.state.recovered + result.value.recovered
     })
@@ -160,8 +187,10 @@ export class UserDraftStore {
       ])
       if (result.ok) {
         this.draft = result.value
-        if (this.edits === 0) this.base = baseOf(result.value)
-        else if (
+        if (this.edits === 0) {
+          this.base = baseOf(result.value)
+          this.editingFrom = result.value?.status === "active" ? result.value.content : null
+        } else if (
           result.value !== null &&
           this.base.draftId === null &&
           this.pendingTypes.size > 0 &&
@@ -187,14 +216,26 @@ export class UserDraftStore {
           dropTypedBackup(copy)
           continue
         }
+        const copyBase = save?.kind === "userDraft" ? save.payload : null
+        const formCopy =
+          this.draft === null
+            ? null
+            : reconcileForm(
+                this.draft,
+                copyBase,
+                copy.content,
+                copyBase?.editingFrom,
+                save?.kind !== "userDraft" || save.payload.seed !== true
+              )
         const safeCopy =
           this.draft === null
             ? { content: copy.content, changed: false, rejected: false }
             : reconcileDeletedFields(
                 this.draft,
                 save?.kind === "userDraft" && save.payload.seed !== true ? save.payload : null,
-                copy.content
+                formCopy?.content ?? copy.content
               )
+        const copiedFormChanged = safeCopy.changed || formCopy?.changed === true
         if (safeCopy.rejected) {
           await keepCopy(copy)
           dropTypedBackup(copy)
@@ -223,6 +264,7 @@ export class UserDraftStore {
             this.draft = replay.value
             if (this.edits === 0) {
               this.base = baseOf(replay.value)
+              this.editingFrom = replay.value.status === "active" ? replay.value.content : null
               this.copy = null
               this.update({ text: replay.value.status === "active" ? replay.value.content : null })
             }
@@ -237,8 +279,9 @@ export class UserDraftStore {
               // Legacy copies have no draft identity: their replay and any continuation
               // must keep the null base, rather than adopting the opening read unseen.
               this.base = baseOf(null)
-              this.copy = safeCopy.changed ? null : copy
-              if (safeCopy.changed) this.observedDeletion = observeDeletion(this.draft!)
+              this.copy = copiedFormChanged ? null : copy
+              this.editingFrom = safeCopy.content
+              if (safeCopy.changed) this.observedDeletion = observeDeletion(this.draft)
               this.update({ text: safeCopy.content })
             }
             this.update({ error: replay.error.message })
@@ -252,6 +295,7 @@ export class UserDraftStore {
           this.draft = replay.value
           if (this.edits === 0) {
             this.base = baseOf(replay.value)
+            this.editingFrom = replay.value.status === "active" ? replay.value.content : null
             this.copy = null
             this.update({ text: replay.value.status === "active" ? replay.value.content : null })
           }
@@ -269,8 +313,12 @@ export class UserDraftStore {
               expectedRowVersion: save.payload.expectedRowVersion,
               expectedSession: save.payload.expectedSession
             }
-            this.copy = safeCopy.changed ? null : copy
-            if (safeCopy.changed) this.observedDeletion = observeDeletion(this.draft!)
+            this.copy = copiedFormChanged ? null : copy
+            this.editingFrom = save.payload.editingFrom ?? formCopy?.intent ?? safeCopy.content
+            if (safeCopy.changed && this.draft !== null) {
+              this.editingFrom = reconcileDeletedFields(this.draft, save.payload, this.editingFrom).content
+              this.observedDeletion = observeDeletion(this.draft)
+            }
             this.update({ text: safeCopy.content })
           }
           this.update({ error: replay.error.message })
@@ -303,6 +351,7 @@ export class UserDraftStore {
     }
     this.draft = draft
     this.base = baseOf(draft)
+    this.editingFrom = draft.status === "active" ? draft.content : null
     this.update({ text: draft.status === "active" ? draft.content : null, remote: null, history: null })
   }
   receive = (draft: Draft) => {
@@ -362,6 +411,7 @@ export class UserDraftStore {
         // This is an explicit choice of the observed remote version. Saving on that base
         // keeps the local text as a displaced history step, even for similar prose.
         this.base = baseOf(remote)
+        this.editingFrom = remote.content
         await this.remember(remote.content, true).kept
         if (!(await this.persist(remote.content))) return false
       }
@@ -383,17 +433,19 @@ export class UserDraftStore {
   }
   type = (content: string, saved: string) => {
     const initial = this.state.text ?? saved
+    this.editingFrom = editingOrigin(this.editingFrom, initial, content)
     this.edits++
     this.update({ text: content, history: null })
     void this.remember(content, true).kept
-    const pending = { initial, content }
+    const pending = { initial, content, editingFrom: this.editingFrom, edit: this.edits }
     this.pendingTypes.add(pending)
     this.queue = this.queue.then(async () => {
       try {
+        if (pending.edit <= this.acknowledgedEdit) return
         if (this.draft === null || this.draft.status !== "active") {
-          if (!(await this.persist(pending.initial, true))) return
+          if (!(await this.persist(pending.initial, true, pending.initial, pending.edit))) return
         }
-        await this.persist(pending.content)
+        await this.persist(pending.content, false, pending.editingFrom, pending.edit)
       } finally {
         this.pendingTypes.delete(pending)
       }
@@ -406,8 +458,10 @@ export class UserDraftStore {
     outcome: "committed" | "discarded" = "committed",
     rebase?: (text: string) => string
   ) => {
+    const edit = this.edits
+    const editingFrom = this.editingFrom
     const operation = this.queue.then(async () => {
-      if (!(await this.persist(content))) return false
+      if (!(await this.persist(content, false, editingFrom, edit))) return false
       const draft = this.draft!
       if (!(await save())) return false
       // Only this form's acknowledged Save can advance the settings version in later
@@ -416,7 +470,9 @@ export class UserDraftStore {
         for (const pending of this.pendingTypes) {
           pending.initial = rebase(pending.initial)
           pending.content = rebase(pending.content)
+          if (pending.editingFrom !== null) pending.editingFrom = rebase(pending.editingFrom)
         }
+        if (this.editingFrom !== null) this.editingFrom = rebase(this.editingFrom)
         if (this.state.text !== null && this.state.text !== content) {
           this.update({ text: rebase(this.state.text) })
           await this.remember(this.state.text!, true).kept
@@ -435,6 +491,7 @@ export class UserDraftStore {
         this.base = baseOf(ended.value)
         if (this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
       }
+      if (this.state.text === content) this.editingFrom = null
       this.update({
         text: this.state.text === content ? null : this.state.text,
         error: ended.ok ? null : ended.error.message,
@@ -475,6 +532,7 @@ export class UserDraftStore {
         this.update({ error: null, recovered: this.state.recovered + result.value.recovered })
         if (this.edits === edits) {
           this.base = baseOf(result.value)
+          this.editingFrom = result.value.content
           this.update({ text: result.value.content, history: null })
         }
       } else this.update({ error: result.error.message })
@@ -505,6 +563,7 @@ export class UserDraftStore {
         this.update({ error: null, recovered: this.state.recovered + result.value.recovered })
         if (this.edits === edits) {
           this.base = baseOf(result.value)
+          this.editingFrom = result.value.content
           this.update({ text: result.value.content })
         }
       } else this.update({ error: result.error.message })

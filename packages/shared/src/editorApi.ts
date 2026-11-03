@@ -145,6 +145,8 @@ export const UserDraftSave = Schema.Struct({
   content: Schema.String,
   /** Saved form values establishing its first state, before the actual typed edit. */
   seed: Schema.optionalKey(Schema.Boolean),
+  /** Text actually edited, retaining evidence of local clears until acknowledgement. */
+  editingFrom: Schema.optionalKey(Schema.String),
   expectedRowVersion: Schema.NullOr(Schema.Int),
   expectedSession: Schema.NullOr(Schema.Int)
 })

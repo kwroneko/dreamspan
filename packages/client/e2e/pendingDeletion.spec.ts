@@ -1,3 +1,5 @@
+import { expectLayout } from "./support/layoutAudit.ts"
+import { messageMenu } from "./support/message.ts"
 // Two independent devices, with a deliberately fast clock and an unsent browser copy.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -179,3 +181,83 @@ test("an editor's stale browser copy cannot restore a field emptied on another d
     await deviceB.close()
   }
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`fresh insertion typing after Cancel restores before autosave at ${width} ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      const { chat, sent } = await admin((api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.CreateChat({ title: "Synthetic immediate insertion reload" })
+          const sent = yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "Synthetic anchor"
+          })
+          if (sent._tag !== "Posted") throw new Error("queued")
+          const target = {
+            _tag: "Insert" as const,
+            chatId: chat.id,
+            forkId: sent.chat.currentForkId!,
+            anchor: sent.entry.slotId
+          }
+          const draft = yield* api.SaveMessageDraft({
+            target,
+            draftId: null,
+            expectedRowVersion: null,
+            expectedSession: null,
+            content: "Cancelled insertion text"
+          })
+          yield* api.DiscardMessageDraft({ target, draftId: draft.id, expectedRowVersion: draft.rowVersion })
+          return { chat, sent }
+        })
+      )
+      let connection = 0
+      let leaving = false
+      await page.route("**/library/drafts", (route) => route.abort())
+      await page.routeWebSocket("**/rpc", (socket) => {
+        const original = ++connection === 1
+        const upstream = socket.connectToServer()
+        socket.onMessage((data) => {
+          const request = JSON.parse(String(data)) as { tag?: string }
+          if (request.tag === "SaveMessageDraft" || (original && leaving && request.tag === "GetMessageDraft")) return
+          upstream.send(data)
+        })
+        upstream.onMessage((data) => socket.send(data))
+      })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${chat.id}`)
+      await messageMenu(page.locator(`article[data-slot="${sent.entry.slotId}"]`), "Insert message below")
+      const box = page.getByTestId("insert-text")
+      await expect(box).toBeEnabled()
+      await page.clock.install()
+      await page.clock.pauseAt(new Date(Date.now() + 100))
+      await box.fill("fresh final keystroke after reopening")
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              new Promise<boolean>((resolve) => {
+                const open = indexedDB.open("rp-editor-copies", 1)
+                open.onsuccess = () => {
+                  const db = open.result
+                  const all = db.transaction("copies").objectStore("copies").getAll()
+                  all.onsuccess = () => {
+                    resolve(all.result.some((copy) => copy.content === "fresh final keystroke after reopening"))
+                    db.close()
+                  }
+                }
+              })
+          )
+        )
+        .toBe(true)
+      leaving = true
+      await page.reload()
+      await page.clock.resume()
+      await expect(box).toHaveValue("fresh final keystroke after reopening")
+      await page.screenshot({ path: test.info().outputPath("restored-insertion.png") })
+      if (process.env.LAYOUT_AUDIT === "1")
+        await expectLayout(page, test.info(), `restored-insertion-${width}-${theme}`)
+    })

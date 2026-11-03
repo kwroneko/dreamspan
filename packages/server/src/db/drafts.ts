@@ -4,6 +4,7 @@ import {
   beforeDeletion,
   deletionMap,
   reconcileDeletedFields,
+  reconcileForm,
   trackDeletions,
   type DeletionBase
 } from "@rp/shared/draftDeletions.ts"
@@ -517,7 +518,8 @@ export const makeDraftStore = (
     baseRevision: string | null,
     displaced = false,
     imagesJson: string | null = draft.images_json,
-    deliberate = true
+    deliberate = true,
+    formEdit?: { readonly before: string | null; readonly content: string }
   ) =>
     Effect.gen(function* () {
       const at = now()
@@ -533,10 +535,18 @@ export const makeDraftStore = (
       // A save after a commit or discard starts a new drafting session.
       const reopened = draft.status !== "active"
       const textChanged = reopened || !isEmptyPatch(patch) || imagesChanged
+      const deletions = trackDeletions(
+        toDraft(draft),
+        content,
+        draft.target_kind === "user_field",
+        deliberate,
+        formEdit
+      )
+      const clears = deletions[""]?.draftId === draft.id && deletions[""]?.rowVersion === draft.row_version + 1
       yield* sql`UPDATE drafts SET content = ${content}, images_json = ${imagesJson}, status = 'active',
                    base_revision = ${baseRevision ?? draft.base_revision},
-                   deletions_json = ${JSON.stringify(trackDeletions(toDraft(draft), content, draft.target_kind === "user_field", deliberate))},
-                   cleared_version = CASE WHEN ${deliberate && content === "" && draft.content !== "" ? 1 : 0} THEN row_version + 1 ELSE cleared_version END,
+                   deletions_json = ${JSON.stringify(deletions)},
+                   cleared_version = CASE WHEN ${clears ? 1 : 0} THEN row_version + 1 ELSE cleared_version END,
                    row_version = row_version + 1,
                    text_version = CASE WHEN ${textChanged ? 1 : 0} THEN row_version + 1 ELSE text_version END,
                    updated_at = ${at}
@@ -598,6 +608,7 @@ export const makeDraftStore = (
       readonly baseRevision: string | null
       readonly ended: "recover" | "reopen"
       readonly observedDeletion?: ObservedDeletion | undefined
+      readonly editingFrom?: string | undefined
       readonly deliberate?: boolean
       readonly deletionBase?: DeletionBase
       readonly next?: boolean
@@ -616,10 +627,15 @@ export const makeDraftStore = (
       }
       const barrier = deletionMap(toDraft(draft))[""]
       const deleted = barrier !== undefined && beforeDeletion(draft.id, barrier, deletionBase)
+      const original = content
+      const formEdit =
+        draft.target_kind === "user_field"
+          ? reconcileForm(toDraft(draft), deletionBase, content, options.editingFrom, options.deliberate ?? true)
+          : null
       const reconciled = reconcileDeletedFields(
         toDraft(draft),
         options.deliberate === false ? null : deletionBase,
-        content
+        formEdit?.content ?? content
       )
       if (deleted || reconciled.rejected || (ended && options.ended === "recover" && options.next !== true)) {
         const recovered = toBin(draft) && content.trim() !== "" && content !== shown(draft)
@@ -627,7 +643,7 @@ export const makeDraftStore = (
         return { draft: toDraft(draft, recovered ? 1 : 0), recovered }
       }
       let recoveredInput = false
-      if (reconciled.changed) {
+      if (reconciled.changed || formEdit?.changed) {
         if (toBin(draft) && content.trim() !== "") {
           yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
           recoveredInput = true
@@ -676,7 +692,8 @@ export const makeDraftStore = (
               : options.baseRevision,
         changed,
         imagesJson,
-        options.deliberate ?? true
+        options.deliberate ?? true,
+        formEdit === null ? undefined : { before: formEdit.intent, content: original }
       )
       return {
         draft: toDraft((yield* byId(draft.id))!, recovered + Number(recoveredInput), displaced),
@@ -697,6 +714,7 @@ export const makeDraftStore = (
     readonly images?: MessageImages | undefined
     readonly base: Base | null
     readonly baseRevision: string | null
+    readonly editingFrom?: string | undefined
     readonly seed?: boolean | undefined
     readonly checkTarget: Effect.Effect<void, NotFound, never>
     readonly observedDeletion?: ObservedDeletion | undefined
@@ -758,6 +776,7 @@ export const makeDraftStore = (
           baseRevision: options.baseRevision,
           ended: "reopen",
           deliberate: options.key.targetKind !== "user_field" || options.seed !== true,
+          editingFrom: options.editingFrom,
           observedDeletion: options.observedDeletion,
           deletionBase: {
             draftId: options.draftId ?? (legacyBaseHere ? existing.id : null),

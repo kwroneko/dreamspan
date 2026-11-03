@@ -25,103 +25,296 @@ export const beforeDeletion = (currentId: string, deletion: ObservedDeletion, ba
 }
 
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
-const form = (content: string): Record<string, unknown> | null => {
+const form = (content: string | null): Record<string, unknown> | null => {
   try {
-    const parsed: unknown = JSON.parse(content)
+    const parsed: unknown = JSON.parse(content ?? "null")
     return object(parsed) ? parsed : null
   } catch {
     return null
   }
 }
-const at = (doc: unknown, path: ReadonlyArray<string>): { present: boolean; value?: unknown } => {
-  for (const key of path) {
-    if (!object(doc) || !Object.hasOwn(doc, key)) return { present: false }
-    doc = doc[key]
+const identity = (segment: string) => {
+  const match = /^(id|identifier|uid)=(.*)$/s.exec(segment)
+  return match ? { key: match[1]!, value: match[2]! } : null
+}
+const identityKey = (lists: ReadonlyArray<ReadonlyArray<unknown>>) =>
+  ["id", "identifier", "uid"].find(
+    (key) =>
+      lists.some((list) => list.length > 0) &&
+      lists.every((list) => {
+        const ids = list.map((item) =>
+          object(item) && Object.hasOwn(item, key) && (typeof item[key] === "string" || typeof item[key] === "number")
+            ? String(item[key])
+            : null
+        )
+        return ids.every((id) => id !== null) && new Set(ids).size === ids.length
+      })
+  )
+type Value = { present: boolean; value?: unknown; unsafe?: boolean }
+const at = (doc: unknown, path: ReadonlyArray<string>): Value => {
+  for (const segment of path) {
+    if (Array.isArray(doc)) {
+      const id = identity(segment)
+      if (id === null) return { present: false, unsafe: true }
+      const matches = doc.filter(
+        (item) => object(item) && Object.hasOwn(item, id.key) && String(item[id.key]) === id.value
+      )
+      if (matches.length > 1) return { present: false, unsafe: true }
+      if (matches.length === 0) return { present: false }
+      doc = matches[0]
+    } else {
+      if (!object(doc) || !Object.hasOwn(doc, segment)) return { present: false }
+      doc = doc[segment]
+    }
   }
   return { present: true, value: doc }
 }
 const pathOf = (key: string): ReadonlyArray<string> | null => {
   try {
     const path: unknown = JSON.parse(key)
-    return Array.isArray(path) && path.length > 0 && path.every((k) => typeof k === "string") ? path : null
+    return Array.isArray(path) && path.every((k) => typeof k === "string") ? path : null
   } catch {
     return null
   }
 }
-const valueOf = (token: ObservedDeletion, value: { present: boolean; value?: unknown }): FieldDeletion =>
+const valueOf = (token: ObservedDeletion, value: Value): FieldDeletion =>
   value.present
     ? { draftId: token.draftId, rowVersion: token.rowVersion, value: value.value }
     : { draftId: token.draftId, rowVersion: token.rowVersion, missing: true }
+const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+const own = (value: unknown, key: string): unknown =>
+  object(value) && Object.hasOwn(value, key) ? value[key] : undefined
+const empty = (value: unknown) => value === "" || value === null || value === undefined
+const put = (parent: Record<string, unknown>, key: string, value: unknown) => {
+  if (value === undefined) delete parent[key]
+  else Object.defineProperty(parent, key, { value, enumerable: true, writable: true, configurable: true })
+}
+interface Clear {
+  readonly path: ReadonlyArray<string>
+  readonly array: boolean
+}
+const textCounts = (value: unknown, counts = new Map<string, number>()) => {
+  const stack: unknown[] = [value]
+  while (stack.length) {
+    const item = stack.pop()
+    if (typeof item === "string" && item !== "") counts.set(item, (counts.get(item) ?? 0) + 1)
+    else if (object(item)) stack.push(...Object.values(item))
+  }
+  return counts
+}
+/** Actual removals from the form the author edited, never differences from another tab's text. */
+const clearsFrom = (
+  before: unknown,
+  after: unknown,
+  path: ReadonlyArray<string> = [],
+  clears: Clear[] = []
+): Clear[] => {
+  if (equal(before, after)) return clears
+  if (Array.isArray(before)) {
+    const next = Array.isArray(after) ? after : []
+    const key = identityKey([before, next])
+    if (key !== undefined) {
+      for (const item of before) {
+        const segment = `${key}=${String(own(item, key))}`
+        const found = next.find((candidate) => String(own(candidate, key)) === String(own(item, key)))
+        if (found === undefined) clears.push({ path: [...path, segment], array: false })
+        else clearsFrom(item, found, [...path, segment], clears)
+      }
+    } else {
+      const remaining = textCounts(after)
+      if ([...textCounts(before)].some(([text, count]) => (remaining.get(text) ?? 0) < count))
+        clears.push({ path, array: true })
+    }
+  } else if (object(before)) {
+    for (const key of Object.keys(before)) clearsFrom(before[key], own(after, key), [...path, key], clears)
+  } else if (typeof before === "string" && before !== "" && empty(after)) clears.push({ path, array: false })
+  return clears
+}
+const prefix = (parent: ReadonlyArray<string>, child: ReadonlyArray<string>) =>
+  parent.every((part, index) => child[index] === part)
 
-/** Record newly cleared inputs; retain their latest values through unrelated edits and commits. */
+/** Old snapshots may contain untouched blanks. Only a proved removal may clear current text. */
+export const reconcileForm = (
+  draft: DeletionState & Pick<Draft, "rowVersion">,
+  base: DeletionBase | null,
+  content: string,
+  editingFrom?: string,
+  deliberate = true
+) => {
+  const exact = base?.draftId === draft.id && base.expectedRowVersion === draft.rowVersion
+  const before = deliberate ? (editingFrom ?? (exact ? draft.content : null)) : null
+  const initial = form(before),
+    incoming = form(content),
+    current = form(draft.content)
+  if (incoming === null || current === null) return { content, changed: false, intent: before }
+  const clears = initial === null ? [] : clearsFrom(initial, incoming)
+  const merge = (left: unknown, right: unknown, path: ReadonlyArray<string>): unknown => {
+    if (equal(left, right)) return right
+    const cleared = clears.some((clear) => equal(clear.path, path))
+    if (Array.isArray(left)) {
+      if (!Array.isArray(right)) return clears.some((clear) => prefix(path, clear.path)) ? right : left
+      const key = identityKey([left, right])
+      if (key === undefined) return initial !== null && !equal(at(initial, path).value, right) ? right : left
+      const merged = right.map((item) => {
+        const segment = `${key}=${String(own(item, key))}`
+        return merge(
+          left.find((candidate) => String(own(candidate, key)) === String(own(item, key))),
+          item,
+          [...path, segment]
+        )
+      })
+      for (const item of left)
+        if (
+          !right.some((candidate) => String(own(candidate, key)) === String(own(item, key))) &&
+          !clears.some((clear) => equal(clear.path, [...path, `${key}=${String(own(item, key))}`]))
+        )
+          merged.push(item)
+      return merged
+    }
+    if (object(left) && object(right) && !Array.isArray(right)) {
+      const result = { ...right }
+      for (const key of Object.keys(left)) put(result, key, merge(left[key], own(right, key), [...path, key]))
+      return result
+    }
+    if (empty(right) && !cleared) {
+      if (typeof left === "string" && left !== "") return left
+      if (object(left) && !clears.some((clear) => prefix(path, clear.path))) return left
+    }
+    return right
+  }
+  const merged = merge(current, incoming, [])
+  const result = equal(merged, incoming) ? content : JSON.stringify(merged)
+  return { content: result, changed: result !== content, intent: before }
+}
+
+/** Record only author-proved clears, and retain protected values through edits and commits. */
 export const trackDeletions = (
   draft: Pick<Draft, "id" | "clearedVersion" | "deletions" | "rowVersion" | "content">,
   content: string,
   compound: boolean,
-  deliberate: boolean
+  deliberate: boolean,
+  edit?: { readonly before: string | null; readonly content: string }
 ): Deletions => {
   const markers: Record<string, FieldDeletion> = { ...deletionMap(draft) }
   const token = { draftId: draft.id, rowVersion: draft.rowVersion + 1 }
-  if (deliberate && draft.content !== "" && content === "") markers[""] = token
+  if (
+    deliberate &&
+    (edit ? edit.before !== null && edit.before !== "" && edit.content === "" : draft.content !== "" && content === "")
+  )
+    markers[""] = token
   if (!compound) return markers
   const after = form(content),
-    before = form(draft.content)
-  if (deliberate && before !== null && after !== null) {
-    const stack: Array<{ left: unknown; right: unknown; path: ReadonlyArray<string> }> = [
-      { left: before, right: after, path: [] }
-    ]
-    while (stack.length) {
-      const { left, right, path } = stack.pop()!
-      if (object(left)) {
-        for (const key of new Set([...Object.keys(left), ...(object(right) ? Object.keys(right) : [])]))
-          stack.push({
-            left: Object.hasOwn(left, key) ? left[key] : undefined,
-            right: object(right) && Object.hasOwn(right, key) ? right[key] : undefined,
-            path: [...path, key]
-          })
-      } else if (typeof left === "string" && left !== "" && (right === "" || right === null || right === undefined)) {
-        markers[JSON.stringify(path)] = token
-      }
+    before = form(edit ? edit.before : draft.content),
+    intended = form(edit ? edit.content : content)
+  if (deliberate && before !== null && intended !== null && after !== null) {
+    for (const clear of clearsFrom(before, intended)) {
+      const final = at(after, clear.path)
+      if (
+        final.unsafe ||
+        !(clear.array ? equal(final.value, at(intended, clear.path).value) : !final.present || empty(final.value))
+      )
+        continue
+      const key = JSON.stringify(clear.path)
+      const current = at(form(draft.content), clear.path)
+      // Retrying the same clear while changing another input is not a new deletion.
+      if (
+        markers[key] !== undefined &&
+        (clear.array ? equal(current.value, final.value) : !current.present || empty(current.value))
+      )
+        continue
+      markers[key] = token
     }
   }
   if (after !== null)
     for (const [key, marker] of Object.entries(markers)) {
       const path = pathOf(key)
-      if (path !== null) markers[key] = valueOf(marker, at(after, path))
+      if (path !== null) {
+        const value = at(after, path)
+        if (!value.unsafe) markers[key] = valueOf(marker, value)
+      }
     }
   return markers
 }
 
-/** Overlay only protected inputs. Other keystrokes in the same serialized form survive. */
+const clone = (value: unknown): unknown => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
+
+const assign = (incoming: Record<string, unknown>, current: unknown, path: ReadonlyArray<string>, wanted: Value) => {
+  let parent: unknown = incoming
+  for (let index = 0; index < path.length - 1; index++) {
+    const segment = path[index]!
+    if (Array.isArray(parent)) {
+      const child = at(parent, [segment])
+      // A cleared child cannot recreate an item that the incoming edit removed.
+      if (!child.present || !object(child.value)) return
+      parent = child.value
+    } else if (object(parent)) {
+      if (!object(own(parent, segment)))
+        put(parent, segment, Array.isArray(at(current, path.slice(0, index + 1)).value) ? [] : {})
+      parent = parent[segment]
+    } else return
+  }
+  const last = path.at(-1)!
+  if (Array.isArray(parent)) {
+    const id = identity(last)
+    if (id === null) return
+    const index = parent.findIndex((item) => String(own(item, id.key)) === id.value)
+    if (!wanted.present) {
+      if (index >= 0) parent.splice(index, 1)
+    } else if (index >= 0) parent[index] = clone(wanted.value)
+    else parent.push(clone(wanted.value))
+  } else if (object(parent)) put(parent, last, wanted.present ? clone(wanted.value) : undefined)
+}
+
+/** Preserve actual local clears across failed saves, even when typing returned to its original blank. */
+export const editingOrigin = (origin: string | null, before: string, content: string): string => {
+  if (before !== "" && content === "") return before
+  const left = form(before),
+    right = form(content)
+  if (left === null || right === null) return origin ?? before
+  let basis = form(origin) ?? form(before)!
+  for (const clear of clearsFrom(left, right)) {
+    if (clear.path.length === 0) {
+      basis = left
+      continue
+    }
+    // A locally added, then removed item may not occur in the acknowledged origin yet.
+    for (let length = 1; length < clear.path.length; length++) {
+      const parent = clear.path.slice(0, length)
+      if (!at(basis, parent).present && at(left, parent).present) assign(basis, left, parent, at(left, parent))
+    }
+    assign(basis, left, clear.path, at(left, clear.path))
+  }
+  return JSON.stringify(basis)
+}
+
+/** Overlay protected inputs by identity. Anonymous-array conflicts retain the entire snapshot. */
 export const reconcileDeletedFields = (draft: DeletionState, base: DeletionBase | null, content: string) => {
   const protectedFields = Object.entries(deletionMap(draft)).filter(
     ([key, token]) => key !== "" && beforeDeletion(draft.id, token, base)
   )
   if (protectedFields.length === 0) return { content, changed: false, rejected: false }
-  const incoming = form(content)
+  let incoming = form(content)
   if (incoming === null) return { content: draft.content, changed: true, rejected: true }
   const current = form(draft.content)
   let changed = false
   for (const [key, marker] of protectedFields) {
     const path = pathOf(key)
     if (path === null) continue
+    const supplied = at(incoming, path),
+      now = at(current, path)
+    // Older positional markers cannot be projected onto a possibly reordered list.
+    if (supplied.unsafe || now.unsafe) return { content: draft.content, changed: true, rejected: true }
     const wanted = marker.missing
       ? { present: false }
       : Object.hasOwn(marker, "value")
         ? { present: true, value: marker.value }
-        : at(current, path)
-    const supplied = at(incoming, path)
-    if (supplied.present === wanted.present && JSON.stringify(supplied.value) === JSON.stringify(wanted.value)) continue
-    let parent = incoming
-    for (const segment of path.slice(0, -1)) {
-      if (!Object.hasOwn(parent, segment) || !object(parent[segment]))
-        Object.defineProperty(parent, segment, { value: {}, enumerable: true, writable: true, configurable: true })
-      parent = parent[segment] as Record<string, unknown>
-    }
-    const last = path.at(-1)!
-    if (wanted.present)
-      Object.defineProperty(parent, last, { value: wanted.value, enumerable: true, writable: true, configurable: true })
-    else delete parent[last]
+        : now
+    if (supplied.present === wanted.present && equal(supplied.value, wanted.value)) continue
+    if (path.length === 0) {
+      const replacement = clone(wanted.value)
+      if (!object(replacement)) return { content: draft.content, changed: true, rejected: true }
+      incoming = replacement
+    } else assign(incoming, current, path, wanted)
     changed = true
   }
   return { content: changed ? JSON.stringify(incoming) : content, changed, rejected: false }

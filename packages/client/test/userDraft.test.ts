@@ -444,7 +444,9 @@ it("closing a conflicted editor sends the refused local copy with the base it wa
     const init = fetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(init[0]).toBe("/library/drafts")
     expect(init[1].keepalive).toBe(true)
-    expect(JSON.parse(init[1].body as string).userDrafts).toEqual([payload("Local text as the page closes")])
+    expect(JSON.parse(init[1].body as string).userDrafts).toEqual([
+      { ...payload("Local text as the page closes"), editingFrom: "original" }
+    ])
     expect(
       (await copiesOf(ownerId, key.targetId)).some((copy) => copy.content === "Local text as the page closes")
     ).toBe(true)
@@ -641,4 +643,83 @@ it("a refused form initialization copy remains distinguishable from deliberate t
     payload: { seed: true }
   })
   expect([...memory.values()].some((copy) => copy.content.includes("last keystroke"))).toBe(true)
+})
+
+it("compound copies and closing saves retain the actual form edited, not a later server read", async () => {
+  const initial = JSON.stringify({ name: "", baseUrl: "" })
+  const { store, handlers, saves } = harness(draft(initial))
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async (save) => {
+    saves.push(save)
+    throw new Error("offline")
+  }
+  const typed = JSON.stringify({ name: "", baseUrl: "https://a.invalid" })
+  store.type(typed, initial)
+  await until(() => saves.length > 0)
+  expect(saves[0]).toMatchObject({ content: typed, editingFrom: initial, expectedRowVersion: 1 })
+  expect([...memory.values()].find((copy) => copy.content === typed)?.save).toMatchObject({
+    kind: "userDraft",
+    payload: { editingFrom: initial }
+  })
+})
+
+it("clearing locally typed but unacknowledged text retains deletion intent in the next copy", async () => {
+  const initial = JSON.stringify({ name: "", baseUrl: "" })
+  const typed = JSON.stringify({ name: "locally typed name", baseUrl: "" })
+  const cleared = JSON.stringify({ name: "", baseUrl: "" })
+  const { store, handlers } = harness(draft(initial))
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async () => {
+    throw new Error("lost acknowledgement")
+  }
+  store.type(typed, initial)
+  store.type(cleared, initial)
+  store.type(JSON.stringify({ name: "", baseUrl: "https://last.invalid" }), initial)
+  const copy = [...memory.values()].find((copy) => copy.content.includes("https://last.invalid"))
+  expect(copy?.save).toMatchObject({ kind: "userDraft", payload: { editingFrom: typed } })
+})
+
+it("an earlier acknowledgement cannot erase a later local clear before a failed intermediate save", async () => {
+  const initial = JSON.stringify({ name: "", baseUrl: "" })
+  const url = JSON.stringify({ name: "", baseUrl: "https://a.invalid" })
+  const typed = JSON.stringify({ name: "Typed then removed", baseUrl: "https://a.invalid" })
+  const { store, handlers, saves } = harness(draft(initial))
+  store.open()
+  await until(() => store.snapshot().ready)
+  const first = deferred<Draft>()
+  handlers.SaveUserDraft = async (input) => {
+    saves.push(input)
+    if (saves.length === 1) return first.promise
+    if (input.content === typed) throw new Error("lost intermediate acknowledgement")
+    return draft(input.content, 4)
+  }
+  store.type(url, initial)
+  await until(() => saves.length === 1)
+  store.type(typed, initial)
+  store.type(url, initial)
+  first.resolve(draft(url, 2))
+  await until(() => saves.length === 3)
+  expect(saves[2]).toMatchObject({ content: url, editingFrom: typed })
+})
+
+it("acknowledging a clear removes its old intent from a later unrelated input change", async () => {
+  const original = JSON.stringify({ name: "Name actually cleared", baseUrl: "" })
+  const cleared = JSON.stringify({ name: "", baseUrl: "" })
+  const url = JSON.stringify({ name: "", baseUrl: "https://a.invalid" })
+  const { store, handlers, saves } = harness(draft(original))
+  store.open()
+  await until(() => store.snapshot().ready)
+  const first = deferred<Draft>()
+  handlers.SaveUserDraft = async (input) => {
+    saves.push(input)
+    return saves.length === 1 ? first.promise : draft(input.content, 3)
+  }
+  store.type(cleared, original)
+  await until(() => saves.length === 1)
+  store.type(url, original)
+  first.resolve(draft(cleared, 2))
+  await until(() => saves.length === 2)
+  expect(saves[1]).toMatchObject({ content: url, editingFrom: cleared })
 })

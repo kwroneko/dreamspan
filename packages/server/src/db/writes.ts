@@ -223,7 +223,8 @@ export const makeWriteHandlers = (bin: Bin) =>
         expectedSession,
         baseRevision,
         observedDeletion,
-        seed
+        seed,
+        editingFrom
       }) =>
         Effect.gen(function* () {
           if (images !== undefined) yield* checkImages(userId, images)
@@ -237,6 +238,7 @@ export const makeWriteHandlers = (bin: Bin) =>
             checkTarget: draftTarget(userId, key),
             observedDeletion,
             seed,
+            editingFrom,
             images
           })
         }).pipe(transaction("SaveDraft")),

@@ -59,6 +59,8 @@ export const targetOf = (draft: Draft): MessageDraftTarget | null =>
 export interface MessageDraftView {
   /** What the box shows. */
   readonly text: string
+  /** A fresh editor loads its causal base before taking keystrokes. */
+  readonly loading: boolean
   /** Typed text not on the server yet. */
   readonly unsaved: boolean
   readonly error: AppError | null
@@ -108,6 +110,8 @@ export class MessageDraft {
   /** Typed here and not saved yet. */
   private local: string | null = null
   private edits = 0
+  private opened: boolean
+  private opening: Promise<void> | null = null
   /** The browser copy of `local`. */
   private pending: Copy | null = null
   /** Copies on their way to the server, which a newer one mustn't replace. */
@@ -127,8 +131,10 @@ export class MessageDraft {
     this.userId = userId
     this.target = target
     this.draft = draft
+    this.opened = draft !== null
     this.base = baseOf(draft)
     this.view = {
+      loading: draft === null,
       text: draft?.status === "active" ? draft.content : initial,
       images: draft?.status === "active" ? draft.images : undefined,
       unsaved: false,
@@ -157,6 +163,37 @@ export class MessageDraft {
     return run
   }
 
+  /** Opening a fresh field establishes its base before the UI permits its first key. */
+  open(): Promise<void> {
+    if (this.opened) return Promise.resolve()
+    if (this.opening !== null) return this.opening
+    this.opening = this.serial(async () => {
+      if (this.opened) return
+      const read = await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
+      if (!read.ok && read.error.tag !== "NotFound") {
+        this.set({ error: read.error })
+        return
+      }
+      this.opened = true
+      this.draft = read.ok ? read.value : null
+      if (this.local === null) {
+        this.base = baseOf(this.draft)
+        this.set({
+          text: this.draft?.status === "active" ? this.draft.content : this.initialText,
+          images: this.draft?.status === "active" ? this.draft.images : this.view.images
+        })
+      } else if (this.draft?.status !== "active" && this.draft?.content === this.initialText) {
+        // A programmatic edit begun during opening is kept too; UI input waits for this read.
+        this.observedDeletion = observeDeletion(this.draft)
+        this.keep(this.local)
+      }
+      this.set({ loading: false, error: null })
+    }).finally(() => {
+      this.opening = null
+    })
+    return this.opening
+  }
+
   /**
    * Sends this browser's copies of the editor's text that never reached the server, oldest
    * first, each onto the draft it was typed on (another tab's newer text stays one step back
@@ -172,6 +209,7 @@ export class MessageDraft {
         const read = await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
         if (read.ok) {
           this.draft = read.value
+          this.opened = true
           if (this.local === null) this.base = baseOf(read.value)
         }
       }
@@ -180,11 +218,32 @@ export class MessageDraft {
       for (const copy of [...copies].sort((a, b) => a.at - b.at)) {
         const save = pendingOf(copy)
         if (save?.kind !== "message" || deletedSince(this.draft, save.payload)) continue
+        // A safe local copy is the editor's text before its network replay finishes.
+        // Keep its own causal tuple; the opening read never authorizes an old copy.
+        if (this.edits === edits && !hadLocal) {
+          this.local = copy.content
+          this.pending = copy
+          this.base = {
+            draftId: save.payload.draftId,
+            rowVersion: save.payload.expectedRowVersion,
+            session: save.payload.expectedSession
+          }
+          this.observedDeletion = save.payload.observedDeletion ?? null
+          this.replayedAt = copy.at
+          this.set({ text: copy.content, images: save.payload.images, loading: false, unsaved: true })
+        }
         this.sending.add(copy)
         const replayed = await this.session.call((client) => client("SaveMessageDraft", save.payload))
         this.sending.delete(copy)
         if (replayed.ok) {
           this.draft = replayed.value
+          this.opened = true
+          if (this.pending === copy && this.local === copy.content) {
+            this.local = null
+            this.pending = null
+            this.replayedAt = null
+            this.set({ text: replayed.value.content, images: replayed.value.images, unsaved: false })
+          }
           // The text it holds is shown, unless something was typed here meanwhile.
           if (this.local === null) {
             this.base = baseOf(replayed.value)
@@ -214,6 +273,7 @@ export class MessageDraft {
       }
       const draft = this.draft
       this.set({
+        loading: false,
         text: this.local ?? (draft?.status === "active" ? draft.content : this.view.text),
         images: this.local === null ? draft?.images : this.view.images,
         unsaved: this.local !== null,
@@ -292,26 +352,14 @@ export class MessageDraft {
   }
 
   /** Saves what was typed now. Saves run one at a time, after a replay. */
-  save(): Promise<void> {
+  async save(): Promise<void> {
     this.cancelTimer()
+    if (!this.opened) {
+      await this.open()
+      if (!this.opened) return
+    }
     return this.serial(async () => {
       if (this.local === null) return
-      if (this.base.draftId === null && this.replayedAt === null) {
-        // A fresh editor can reopen a cancelled insertion/write whose empty draft
-        // isn't in the active-draft list. Match the starting text it showed before
-        // taking that resting base. Offline replay always keeps its original base.
-        const opened =
-          this.draft === null
-            ? await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
-            : { ok: true as const, value: this.draft }
-        if (!opened.ok && opened.error.tag !== "NotFound") return this.set({ error: opened.error })
-        const resting = opened.ok ? opened.value : null
-        this.draft = resting
-        if (resting !== null && resting.status !== "active" && resting.content === this.initialText) {
-          this.observedDeletion = observeDeletion(resting)
-          if (this.local !== null) this.keep(this.local)
-        }
-      }
       // Take the text and its copy together after the read: typing during it is newer.
       const sent = this.local
       if (sent === null) return
@@ -389,6 +437,7 @@ export class MessageDraft {
   async history(before?: number, limit = DraftHistoryPolicy.maxEntries + 1) {
     await this.save()
     if (this.local !== null) return { ok: false as const, error: this.view.error ?? notSaved }
+    if (this.draft === null && this.opened) return { ok: true as const, value: [] }
     if (this.draft === null) {
       // A reopened edit has a resting draft from its earlier saves: its states are listed too.
       const read = await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
@@ -455,6 +504,8 @@ export class MessageDraft {
    */
   async discard(): Promise<Outcome<unknown>> {
     await this.imageUploads
+    // Nothing was typed or shown yet: closing a pending read cannot discard unseen text.
+    if (this.view.loading && this.local === null) return { ok: true, value: null }
     await this.save()
     if (this.local !== null) return { ok: false, error: this.view.error ?? notSaved }
     this.forget()

@@ -332,3 +332,118 @@ it("message recovery cannot overwrite typing during its resting-draft read", asy
   expect([...copies.values()].some((copy) => copy.content === "typed before close")).toBe(true)
   await store.save()
 })
+
+it("a fresh insertion loads its post-Cancel base before its first durable key and reloads in place", async () => {
+  vi.useFakeTimers()
+  try {
+    const resting = new Draft({
+      ...tombstone,
+      key: new DraftKey({ targetKind: "insert", targetId: "chat", field: "fork:" }),
+      content: ""
+    })
+    const target = { _tag: "Insert" as const, chatId: "chat" as ChatId, forkId: "fork" as ForkId, anchor: null }
+    let fail = true
+    const transport = session(resting, (tag) =>
+      tag === "GetMessageDraft"
+        ? fail
+          ? Effect.fail("interrupted open")
+          : Effect.succeed(resting)
+        : Effect.fail("interrupted save")
+    )
+    const first = new MessageDraft(transport, "user", target, "", null)
+    expect(first.snapshot().loading).toBe(true)
+    await first.open()
+    expect(first.snapshot().loading).toBe(true)
+    fail = false
+    await first.open()
+    expect(first.snapshot().loading).toBe(false)
+    first.setText("fresh final keystroke after reopening")
+    const kept = [...copies.values()]
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.save).toMatchObject({
+      kind: "message",
+      payload: { draftId: resting.id, expectedRowVersion: resting.rowVersion, expectedSession: resting.session }
+    })
+    const reopened = new MessageDraft(transport, "user", target, "", null)
+    await reopened.restore(kept)
+    expect(reopened.snapshot().text).toBe("fresh final keystroke after reopening")
+    expect(reopened.snapshot().loading).toBe(false)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it("a known post-Cancel copy is visible while its replay save is still pending", async () => {
+  const resting = new Draft({
+    ...tombstone,
+    key: new DraftKey({ targetKind: "insert", targetId: "chat", field: "fork:" }),
+    content: ""
+  })
+  const target = { _tag: "Insert" as const, chatId: "chat" as ChatId, forkId: "fork" as ForkId, anchor: null }
+  const fresh = "fresh before autosave"
+  const copy = makeCopy(
+    "user",
+    "messages:chat",
+    "insert:fork:",
+    {
+      kind: "message",
+      payload: {
+        target,
+        draftId: resting.id,
+        expectedRowVersion: resting.rowVersion,
+        expectedSession: resting.session,
+        content: fresh
+      }
+    },
+    1
+  )
+  copies.set(copy.key, copy)
+  let release!: () => void
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const transport = session(resting, (tag) =>
+    tag === "GetMessageDraft"
+      ? Effect.succeed(resting)
+      : Effect.promise(async () => {
+          await pending
+          return new Draft({ ...resting, status: "active", content: fresh, rowVersion: 6 })
+        })
+  )
+  const reopened = new MessageDraft(transport, "user", target, "", null)
+  const restoring = reopened.restore([copy])
+  try {
+    await vi.waitFor(() => expect(reopened.snapshot().text).toBe(fresh))
+  } finally {
+    release()
+    await restoring
+  }
+  expect(reopened.snapshot().unsaved).toBe(false)
+})
+
+it("a fresh editor can be closed while its opening read is pending", async () => {
+  let release!: () => void
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const transport = session(null, () =>
+    Effect.promise(async () => {
+      await pending
+      return tombstone
+    })
+  )
+  const editor = new MessageDraft(transport, "user", target, "", null)
+  const opening = editor.open()
+  let closed = false
+  const closing = editor.discard().then((result) => {
+    closed = result.ok
+  })
+  try {
+    await vi.waitFor(() => expect(closed).toBe(true), { timeout: 1000 })
+  } finally {
+    release()
+    await opening
+    await closing
+  }
+  expect(copies.size).toBe(0)
+})

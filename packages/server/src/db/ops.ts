@@ -741,6 +741,7 @@ export class WriteOps extends RpcGroup.make(
       draftId: Schema.NullOr(Schema.String),
       content: Schema.String,
       seed: Schema.optionalKey(Schema.Boolean),
+      editingFrom: Schema.optionalKey(Schema.String),
       observedDeletion: Schema.optionalKey(ObservedDeletion),
       images: Schema.optionalKey(MessageImages),
       /** The draft as last seen: null if none was. */
