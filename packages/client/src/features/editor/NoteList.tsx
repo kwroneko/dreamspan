@@ -28,6 +28,7 @@ import { InlineRename } from "../../ui/InlineRename.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { type OpenBlocks, useOpenBlocks } from "../../ui/openBlocks.ts"
 import { Popover } from "../../ui/Popover.tsx"
+import { revealAdded } from "../../ui/reveal.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { WindowClose } from "../../ui/WindowClose.tsx"
@@ -36,7 +37,6 @@ import type { Caller } from "./caller.ts"
 import { RecoveredNotice, RestoredNotice, TextField } from "./controls.tsx"
 import { type NoteCard, NoteSettings, noteSettingLines, noteState, noteTitle, SharedBanner } from "./notes.tsx"
 import { usePresetWorkspace } from "./PresetWorkspace.tsx"
-import { revealAdded } from "./revealAdded.ts"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { SaveRevision } from "./SaveRevision.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText, useValue } from "./store.ts"
@@ -163,7 +163,7 @@ export function NoteBlock({
     const element = box.current
     // After the text box has its height; told only then, so clearing `reveal` can't cancel it.
     const frame = requestAnimationFrame(() => {
-      revealAdded(element, element.querySelector("header"))
+      revealAdded(element)
       onRevealed?.()
     })
     return () => cancelAnimationFrame(frame)

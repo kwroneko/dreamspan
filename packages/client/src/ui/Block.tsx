@@ -157,6 +157,58 @@ export function BlockBody({ children, dim = false }: { children: ReactNode; dim?
   return <div className={`border-t border-border px-2 pt-2 pb-2 ${dim ? "opacity-70" : ""}`}>{children}</div>
 }
 
+/**
+ * A section folded inside the opened block (a lorebook entry's settings): a row with its name
+ * and a short summary that opens it, then its options' panel.
+ */
+export function BlockSection({
+  open,
+  onToggle,
+  title,
+  summary,
+  hint,
+  label,
+  changed = false,
+  children
+}: {
+  open: boolean
+  onToggle: () => void
+  title: string
+  summary?: ReactNode
+  /** Something in it differs from the defaults: a quiet dot beside its title. */
+  changed?: boolean
+  hint: string
+  /** Whose section, for its accessible name: "<title> of <label>". */
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <div className="border-t border-border">
+      <Tooltip label={hint}>
+        <button
+          type="button"
+          data-layout-audit-ignore="inset: Disclosure is the full-width section header"
+          data-section-toggle
+          aria-expanded={open}
+          aria-label={`${title} of ${label}${changed ? ", changed from the defaults" : ""}`}
+          onClick={onToggle}
+          className="flex w-full min-w-0 items-center gap-1.5 px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+        >
+          <Icon
+            name="right"
+            size={14}
+            className={`shrink-0 text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+          />
+          <span className="shrink-0 font-medium">{title}</span>
+          {changed && <span data-changed aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-accent" />}
+          {!open && summary && <span className="min-w-0 truncate text-xs text-muted">{summary}</span>}
+        </button>
+      </Tooltip>
+      {open && <BlockOptions>{children}</BlockOptions>}
+    </div>
+  )
+}
+
 /** A list of blocks' Expand all and Collapse all. */
 export function ExpandCollapseAll({
   onExpand,
