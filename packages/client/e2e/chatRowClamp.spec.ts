@@ -79,6 +79,8 @@ for (const width of [1440, 390])
           }
           const others = [...node.parentElement!.children].filter((el) => el !== node)
           const metadataHeight = others.reduce((sum, el) => sum + el.getBoundingClientRect().height, 0)
+          const portrait = row.querySelector("[data-portrait]")?.getBoundingClientRect()
+          const stacked = portrait !== undefined && box.top >= portrait.bottom
           const accessories = [
             ...row.querySelectorAll<HTMLElement>(
               "[data-portrait], [data-branches-button], button[aria-label^='Pin '], button[aria-label^='Unpin ']"
@@ -108,6 +110,8 @@ for (const width of [1440, 390])
             ellipsis: style.textOverflow,
             rowHeight: rowBox.height,
             titleTop: box.top,
+            stacked,
+            rowTop: rowBox.top,
             dateBottom: dateBox.bottom,
             openRight: openBox.right,
             railWidth: row.lastElementChild!.getBoundingClientRect().width,
@@ -117,7 +121,8 @@ for (const width of [1440, 390])
                 number(style.lineHeight) * 2 + metadataHeight
               ) +
               vertical(button) +
-              vertical(row),
+              vertical(row) +
+              (stacked ? 36 + 8 : 0),
             accessories
           }
         })
@@ -131,17 +136,20 @@ for (const width of [1440, 390])
         expect(measurement.ellipsis).toBe("ellipsis")
         if (measurement.title === token) expect(measurement.height).toBeLessThanOrEqual(measurement.lineHeight + 1)
         for (const accessory of measurement.accessories) {
-          if (accessory.portrait) expect(accessory.centerOffset).toBeLessThanOrEqual(1)
+          if (accessory.portrait && !measurement.stacked) expect(accessory.centerOffset).toBeLessThanOrEqual(1)
+          else if (accessory.portrait) expect(accessory.bottom).toBeLessThanOrEqual(measurement.titleTop - 8)
           else {
-            expect(accessory.left).toBeGreaterThanOrEqual(measurement.openRight)
+            if (!measurement.stacked) expect(accessory.left).toBeGreaterThanOrEqual(measurement.openRight)
             expect(
               Math.abs(
-                accessory.branches ? accessory.bottom - measurement.dateBottom : accessory.top - measurement.titleTop
+                accessory.branches
+                  ? accessory.bottom - measurement.dateBottom
+                  : accessory.top - (measurement.stacked ? measurement.rowTop + 13 : measurement.titleTop)
               )
             ).toBeLessThanOrEqual(1)
           }
-          expect(accessory.width).toBeGreaterThanOrEqual(32)
-          expect(accessory.height).toBe(accessory.portrait ? 48 : 32)
+          expect(accessory.width).toBeGreaterThanOrEqual(accessory.portrait && measurement.stacked ? 24 : 32)
+          expect(accessory.height).toBe(accessory.portrait ? (measurement.stacked ? 36 : 48) : 32)
         }
         const actions = measurement.accessories.filter((accessory) => !accessory.portrait)
         expect(measurement.railWidth).toBeCloseTo(Math.max(...actions.map((action) => action.width)), 0)
