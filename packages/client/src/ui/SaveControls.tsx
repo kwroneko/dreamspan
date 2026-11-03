@@ -48,7 +48,8 @@ export function SaveControls({
   onRevert,
   saveHint = saveHints.save,
   revertLabel = "Revert to the last save",
-  revertHint = saveHints.revert
+  revertHint = saveHints.revert,
+  labelsInHints = false
 }: {
   /** Something differs from the last save. */
   changed: boolean
@@ -70,6 +71,8 @@ export function SaveControls({
   /** Revert's accessible name, where it undoes less than every edit (a held order: "Revert"). */
   revertLabel?: string
   revertHint?: string
+  /** Repeat icon labels above their explanations in a compact toolbar. */
+  labelsInHints?: boolean
 }) {
   const [writing, setWriting] = useState(false)
   const [reverting, setReverting] = useState(false)
@@ -114,6 +117,16 @@ export function SaveControls({
             : state === "clean"
               ? saveHints.clean
               : saveHint
+  const explain = (label: string, hint: string) =>
+    labelsInHints ? (
+      <>
+        <span className="font-medium">{label}</span>
+        <br />
+        <span>{hint}</span>
+      </>
+    ) : (
+      hint
+    )
   const announcement = state === "saved" ? "Saved" : state === "failed" ? `Couldn't save: ${sentence(failed!)}` : ""
 
   return (
@@ -147,7 +160,7 @@ export function SaveControls({
                 ? "cursor-default bg-transparent! text-success! opacity-100! data-disabled:pointer-events-auto!"
                 : ""
             } ${state === "saving" ? "data-disabled:pointer-events-auto! data-disabled:opacity-100!" : ""}`}
-            hint={hint}
+            hint={explain("Save", hint)}
             onClick={() => actionable && void save(null)}
           >
             {state === "saving" ? (
@@ -166,7 +179,10 @@ export function SaveControls({
             disabled={!actionable}
             focusableWhenDisabled
             className={`${square} ${actionable ? "" : inert}`}
-            hint={actionable ? saveHints.message : state === "saving" ? saveHints.saving : hint}
+            hint={explain(
+              "Save with a message…",
+              actionable ? saveHints.message : state === "saving" ? saveHints.saving : hint
+            )}
             onClick={() => actionable && setWriting(true)}
           >
             <Icon name="save-message" />
@@ -180,7 +196,7 @@ export function SaveControls({
               disabled={!revertable}
               focusableWhenDisabled
               className={`${square} ${revertable || reverting ? "" : inert}`}
-              hint={revertHint}
+              hint={explain(revertLabel, revertHint)}
               onClick={() => {
                 if (!revertable) return
                 setReverting(true)

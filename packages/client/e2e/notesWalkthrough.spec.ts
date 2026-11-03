@@ -169,7 +169,7 @@ for (const width of [1440, 390])
       const tab = await notesAt(page, width, theme)
       const own = tab.getByRole("region", { name: "This chat's notes" })
       // Each header says where the note goes and when, open or closed; opening shows its text.
-      const row = noteToggle(own, "Aria's outfit")
+      const row = noteBlock(own, "Aria's outfit").locator("header")
       await expect(row).toContainText("End of tail")
       await expect(row).toContainText("Aria Vance's turn")
       const outfit = noteBlock(own, "Aria's outfit")
@@ -180,7 +180,7 @@ for (const width of [1440, 390])
       // An imported group chat has Aria's own author's note off, as ST ignores it there.
       const aria = tab.getByRole("region", { name: "Aria Vance's notes" })
       await expect(aria.getByRole("switch", { name: /Character author's note/ })).not.toBeChecked()
-      await expect(noteToggle(aria, "Character author's note")).toContainText("Private")
+      await expect(noteBlock(aria, "Character author's note").locator("header")).toContainText("Private")
 
       // Add a new note: it opens, on from here.
       await own.getByRole("button", { name: "Add note", exact: true }).click({ timeout: 10_000 })
@@ -213,7 +213,7 @@ for (const width of [1440, 390])
       )
       await page.keyboard.press("Escape")
       await saveRevision(fresh)
-      await expect(noteToggle(own, "Note").last()).toContainText("Start of context")
+      await expect(noteBlock(own, "Note").last().locator("header")).toContainText("Start of context")
       // Its switch turns it off from here.
       await own.getByRole("switch", { name: "Note: on in this chat" }).last().click()
       await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).not.toBeChecked()

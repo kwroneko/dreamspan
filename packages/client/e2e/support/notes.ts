@@ -5,7 +5,7 @@ import { expect, type Locator, type Page } from "@playwright/test"
 /** The note's block, by its title. */
 export const noteBlock = (scope: Page | Locator, title: string) => scope.getByRole("region", { name: `Note ${title}` })
 
-/** The header's button that opens or closes it: its name and the line under it ("End of tail · always"). */
+/** The header's button that opens or closes it: its title (the summary is a separate header row). */
 export const noteToggle = (scope: Page | Locator, title: string) =>
   scope.getByRole("button", { name: new RegExp(`^(Expand|Collapse) ${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
 

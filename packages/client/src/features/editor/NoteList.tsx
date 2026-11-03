@@ -20,7 +20,6 @@ import {
   BlockMenuButton,
   BlockOptions,
   BlockOptionsToggle,
-  BlockToggle,
   ExpandCollapseAll
 } from "../../ui/Block.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -31,6 +30,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { revealAdded } from "../../ui/reveal.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
+import { useTruncated } from "../../ui/useTruncated.ts"
 import { WindowClose } from "../../ui/WindowClose.tsx"
 import { browserEnv } from "./backup.ts"
 import type { Caller } from "./caller.ts"
@@ -249,18 +249,64 @@ export function NoteBlock({
     onRelinked?.()
   }
 
-  const status = (
-    <span className="flex flex-wrap items-center gap-1 text-xs text-muted">
-      <span>{headerState(doc, cards)}</span>
-      {/* Without a switch (a card's editor), whether a card's note is on in every chat. */}
-      {!entry.control && doc["on_by_default"] === true && <Badge>On in every chat</Badge>}
-      {entry.sharedBinned && <Badge tone="warning">linked note is in the bin</Badge>}
-      {doc["exportable"] === false && card && <Badge>Private</Badge>}
-      {doc["kind"] === "imported_summary" && <Badge>summary</Badge>}
+  const summary = headerState(doc, cards)
+  const { ref: titleRef, truncated: titleTruncated } = useTruncated(title)
+  const { ref: summaryRef, truncated: summaryTruncated } = useTruncated(summary)
+  const titleHint = open ? "Hide the note's text" : "Show the note's text"
+  const name = (
+    <span ref={titleRef} data-note-title className="block min-w-0 truncate">
+      {title}
     </span>
   )
-  const name = (
-    <span className="flex min-w-0 items-center gap-1.5">
+  const toggle = large ? (
+    <Tooltip label={<span className="[overflow-wrap:anywhere]">{title}</span>} enabled={titleTruncated}>
+      <h2 className="min-w-0 truncate px-1 text-base font-semibold">{name}</h2>
+    </Tooltip>
+  ) : (
+    <Tooltip
+      label={
+        titleTruncated ? (
+          <>
+            <span className="[overflow-wrap:anywhere]">{title}</span>
+            <br />
+            <span>{titleHint}</span>
+          </>
+        ) : (
+          titleHint
+        )
+      }
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={`${open ? "Collapse" : "Expand"} ${title}`}
+        onClick={() => onOpenChange(!open)}
+        className={`flex min-w-0 shrink items-center gap-1 rounded-md px-1 py-1 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus ${derived ? "text-muted italic" : "font-medium"}`}
+      >
+        <Icon
+          name="right"
+          size={14}
+          className={`shrink-0 text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+        />
+        {name}
+      </button>
+    </Tooltip>
+  )
+  const status = (
+    <div
+      data-note-status
+      className={`flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted ${large ? "pl-1" : "pl-[22px]"}`}
+    >
+      <Tooltip label={<span className="[overflow-wrap:anywhere]">{summary}</span>} enabled={summaryTruncated}>
+        <span
+          ref={summaryRef}
+          data-note-summary
+          tabIndex={summaryTruncated ? 0 : undefined}
+          className="block min-w-0 flex-1 truncate outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          {summary}
+        </span>
+      </Tooltip>
       {linked && (
         <Tooltip label="Shows a shared note's text. Editing it changes it everywhere it's used.">
           <span className="shrink-0 text-muted">
@@ -269,116 +315,113 @@ export function NoteBlock({
           </span>
         </Tooltip>
       )}
-      <span className="min-w-0 [overflow-wrap:anywhere]">{title}</span>
-    </span>
-  )
-  const toggle = large ? (
-    <span className="flex min-w-0 flex-1 flex-col gap-0.5 px-1 pt-0.5 pb-1">
-      <h2 className="text-base font-semibold">{name}</h2>
-      {status}
-    </span>
-  ) : (
-    <BlockToggle
-      open={open}
-      onToggle={() => onOpenChange(!open)}
-      label={title}
-      name={name}
-      detail={status}
-      derived={derived}
-      hint={open ? "Hide the note's text" : "Show the note's text"}
-    />
+      {!entry.control && doc["on_by_default"] === true && <Badge>On in every chat</Badge>}
+      {entry.sharedBinned && <Badge tone="warning">linked note is in the bin</Badge>}
+      {doc["exportable"] === false && card && <Badge>Private</Badge>}
+      {doc["kind"] === "imported_summary" && <Badge>summary</Badge>}
+    </div>
   )
   return (
     <li>
       <Block ref={box} aria-label={`Note ${title}`} className="bg-canvas">
-        <BlockHeader>
-          {entry.control && <span className="flex h-8 w-10 shrink-0 items-center justify-center">{entry.control}</span>}
-          {loaded ? (
-            <InlineRename
-              value={typedTitle}
-              label={title}
-              hint="Renames this note"
-              allowEmpty
-              // The pencil on the title's line, centred with it and with the header's buttons.
-              className="mt-0.5 min-w-0 flex-1 items-start!"
-              onRename={(next) => {
-                store.setText(["title"], next)
-                void store.save(textField(["title"]))
-              }}
-            >
-              {toggle}
-            </InlineRename>
-          ) : (
-            <span className="mt-0.5 flex min-w-0 flex-1">{toggle}</span>
-          )}
-          {/* The open note's save cluster, its settings and ⋯, together at the end with even
-              gaps (DESIGN §10.1); the settings button stays put when opening the note adds Save. */}
-          <span className="flex shrink-0 items-center gap-1">
-            {open && loaded && <SaveRevision store={store} />}
-            <BlockOptionsToggle
-              open={open && settingsShown}
-              onToggle={toggleSettings}
-              label={`Settings of ${title}`}
-              hint={
-                open && settingsShown
-                  ? "Hides this note's settings."
-                  : open
-                    ? "Shows this note's settings: position, depth, role and when it applies."
-                    : "Opens this note with its settings: position, depth, role and when it applies."
-              }
-            />
-            <Menu
-              label={`Actions for ${title}`}
-              hint={
-                workspace && !large
-                  ? "More: Large editor, History, Save as shared note, Delete"
-                  : "More: History, Save as shared note, Delete"
-              }
-              trigger={<BlockMenuButton label={`Actions for ${title}`} />}
-            >
-              {workspace && !large && (
-                <MenuItem
-                  icon="expand"
-                  description="Opens this note in the main column, where it stays open while the side panel changes."
-                  onClick={() => workspace.open(ref.id, NOTE_FOCUS)}
-                >
-                  Large editor
-                </MenuItem>
-              )}
-              <MenuItem
-                icon="history"
-                disabled={!loaded}
-                description="Shows this note's saved revisions and what changed in each."
-                onClick={() => setHistory(true)}
+        <BlockHeader className="@container/note-header block!">
+          <div data-note-title-row className="flex min-w-0 items-center gap-1">
+            {loaded ? (
+              <InlineRename
+                value={typedTitle}
+                label={title}
+                hint="Renames this note"
+                allowEmpty
+                // The pencil on the title's line, centred with it and with the header's buttons.
+                className="min-w-0 flex-1 gap-1!"
+                onRename={(next) => {
+                  store.setText(["title"], next)
+                  void store.save(textField(["title"]))
+                }}
               >
-                History
-              </MenuItem>
-              {!linked && (
-                <MenuItem
-                  icon="link"
-                  disabled={!loaded}
-                  description="Turns this note's text into a shared note that other chats and cards can use too."
-                  onClick={() => void relink("share")}
+                {toggle}
+              </InlineRename>
+            ) : (
+              <span className="flex min-w-0 flex-1">{toggle}</span>
+            )}
+            {/* The open note's save cluster, its settings and ⋯, together at the end with even
+              gaps (DESIGN §10.1); the settings button stays put when opening the note adds Save. */}
+            <span data-note-controls className="ml-auto flex shrink-0 items-center gap-1">
+              {entry.control && <span className="flex h-8 shrink-0 items-center">{entry.control}</span>}
+              {open && loaded && (
+                <span
+                  data-note-save
+                  className="inline-flex h-8 items-center @max-[22rem]/note-header:[&_[data-save-state]_button]:h-6! @max-[22rem]/note-header:[&_[data-save-state]_button]:w-6!"
                 >
-                  Save as shared note
-                </MenuItem>
+                  <SaveRevision store={store} labelsInHints />
+                </span>
               )}
-              {entry.onDeleted && (
-                <>
-                  <MenuSeparator />
+              <BlockOptionsToggle
+                open={open && settingsShown}
+                onToggle={toggleSettings}
+                label={`Settings of ${title}`}
+                hint={
+                  open && settingsShown
+                    ? "Hides this note's settings."
+                    : open
+                      ? "Shows this note's settings: position, depth, role and when it applies."
+                      : "Opens this note with its settings: position, depth, role and when it applies."
+                }
+              />
+              <Menu
+                label={`Actions for ${title}`}
+                hint={
+                  workspace && !large
+                    ? "More: Large editor, History, Save as shared note, Delete"
+                    : "More: History, Save as shared note, Delete"
+                }
+                trigger={<BlockMenuButton label={`Actions for ${title}`} />}
+              >
+                {workspace && !large && (
                   <MenuItem
-                    icon="trash"
-                    tone="danger"
-                    description="Moves this note to the bin, from which it can be restored later."
-                    onClick={() => void remove()}
+                    icon="expand"
+                    description="Opens this note in the main column, where it stays open while the side panel changes."
+                    onClick={() => workspace.open(ref.id, NOTE_FOCUS)}
                   >
-                    Delete the note
+                    Large editor
                   </MenuItem>
-                </>
-              )}
-            </Menu>
-            {large && <WindowClose onClick={large.onClose} />}
-          </span>
+                )}
+                <MenuItem
+                  icon="history"
+                  disabled={!loaded}
+                  description="Shows this note's saved revisions and what changed in each."
+                  onClick={() => setHistory(true)}
+                >
+                  History
+                </MenuItem>
+                {!linked && (
+                  <MenuItem
+                    icon="link"
+                    disabled={!loaded}
+                    description="Turns this note's text into a shared note that other chats and cards can use too."
+                    onClick={() => void relink("share")}
+                  >
+                    Save as shared note
+                  </MenuItem>
+                )}
+                {entry.onDeleted && (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem
+                      icon="trash"
+                      tone="danger"
+                      description="Moves this note to the bin, from which it can be restored later."
+                      onClick={() => void remove()}
+                    >
+                      Delete the note
+                    </MenuItem>
+                  </>
+                )}
+              </Menu>
+              {large && <WindowClose onClick={large.onClose} />}
+            </span>
+          </div>
+          {status}
         </BlockHeader>
         <BranchLine store={store} />
         {entry.detail}

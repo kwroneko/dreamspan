@@ -21,7 +21,15 @@ import { type EditorStore, useEditorState, useHeld, useText } from "./store.ts"
 const contentOf = (field: string, value: unknown) =>
   parseField(field)?.kind === "value" ? JSON.stringify(value) : typeof value === "string" ? value : ""
 
-export function SaveRevision({ store, onSaved }: { store: EditorStore; onSaved?: (saved: SavedRef) => void }) {
+export function SaveRevision({
+  store,
+  onSaved,
+  labelsInHints = false
+}: {
+  store: EditorStore
+  onSaved?: (saved: SavedRef) => void
+  labelsInHints?: boolean
+}) {
   const state = useEditorState(store)
   const held = useHeld(store)
   const ref = state.snapshot!.ref
@@ -97,6 +105,7 @@ export function SaveRevision({ store, onSaved }: { store: EditorStore; onSaved?:
   return (
     <>
       <SaveControls
+        labelsInHints={labelsInHints}
         changed={state.dirty > 0 || held !== ""}
         pending={pending}
         blocked={clash}
