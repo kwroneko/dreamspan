@@ -265,11 +265,23 @@ test.describe("synthetic library and every app surface", () => {
         })
       )
     }
+    if (process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1") {
+      await admin((api) =>
+        Effect.gen(function* () {
+          for (const name of ["Iris", "Echo", "Nova", "Sky Keeper", "Hidden Rowan", "Hidden Willow"])
+            yield* api.CreateCard({ label: name, name })
+        })
+      )
+    }
     const seeded = await admin((api) =>
       Effect.gen(function* () {
         const cards = yield* api.ListLibrary({ kind: "card" })
         const a = cards.find((c) => c.label === "Aria Vance") ?? cards[0]!
         const b = cards.find((c) => c.entityId !== a.entityId)!
+        const overflowCards =
+          process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1"
+            ? (yield* api.ListCards()).filter((card) => !card.persona).slice(0, 6)
+            : []
         const preset = (yield* api.ListLibrary({ kind: "preset" }))[0]!
         const book = (yield* api.ListLibrary({ kind: "lorebook" }))[0]!
         const connection = yield* api.CreateConnection({
@@ -289,7 +301,10 @@ test.describe("synthetic library and every app surface", () => {
           defaults: { model: { connection: connection.id, model: model.id }, preset: null }
         })
         const started = yield* api.StartChat({
-          cards: [a.entityId, b.entityId],
+          cards:
+            process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1"
+              ? overflowCards.map((card) => card.entityId)
+              : [a.entityId, b.entityId],
           persona: null,
           greeting: null,
           first: { _tag: "Send", content: "A synthetic group gathers at the harbour.", speakerEntityId: null }
@@ -517,6 +532,15 @@ test.describe("synthetic library and every app surface", () => {
           await page.getByRole("button", { name: "Start a chat", exact: true }).click()
           await expect(page.getByRole("dialog", { name: "Start a chat with…", exact: true })).toBeVisible()
           await audit("dialog-start-chat-popover")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1") {
+          await go("home-groups", "/?show=groups")
+          await go("library-rows", "/library")
+          await go("chat-list", "/chats")
+          await go("group-chat-header", `/chats/${chatId}`)
+          await openPanel(page, "Cast")
+          await audit("panel-Cast")
           return
         }
         if (process.env.LAYOUT_AUDIT_HEADER_ONLY === "1") {

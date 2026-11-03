@@ -387,7 +387,7 @@ function ChatHeaderFrame({
           characters.length > 0 && (
             <div
               data-layout-audit-ignore="overlap: Header portraits intentionally form a stack"
-              className="flex shrink-0 -space-x-2 @max-[40rem]/header:hidden"
+              className="flex shrink-0 items-center -space-x-2 @max-[40rem]/header:hidden"
             >
               {characters.slice(0, 4).map((c) => (
                 <Tooltip key={c.entityId} label={`Opens ${c.label}'s card in the side panel.`} side="bottom">
@@ -407,9 +407,24 @@ function ChatHeaderFrame({
                 </Tooltip>
               ))}
               {characters.length > 4 && (
-                <span className="inline-flex size-9 items-center justify-center rounded-full bg-surface-raised text-xs text-muted ring-2 ring-surface">
-                  +{characters.length - 4}
-                </span>
+                <Tooltip
+                  label={characters
+                    .slice(4)
+                    .map((c) => c.label)
+                    .join(", ")}
+                  side="bottom"
+                >
+                  <span
+                    tabIndex={0}
+                    aria-label={`Other characters: ${characters
+                      .slice(4)
+                      .map((c) => c.label)
+                      .join(", ")}`}
+                    className="inline-flex h-12 w-8 shrink-0 items-center justify-center rounded-sm bg-surface-raised text-xs text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  >
+                    +{characters.length - 4}
+                  </span>
+                </Tooltip>
               )}
             </div>
           )
