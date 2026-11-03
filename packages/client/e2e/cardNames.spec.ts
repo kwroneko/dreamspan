@@ -85,11 +85,11 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "New card", exact: true }).click()
     const dialog = page.getByRole("dialog", { name: "New card" })
     await dialog.getByRole("textbox", { name: "Display name", exact: true }).fill("Aria Vance")
-    await dialog.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("1")
+    await dialog.getByRole("textbox", { name: "Version", exact: true }).fill("1")
     await expect(dialog.getByRole("status")).toHaveText(clash)
     await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeDisabled()
     await shoot("new-clash")
-    await dialog.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill(`new-${width}`)
+    await dialog.getByRole("textbox", { name: "Version", exact: true }).fill(`new-${width}`)
     await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeEnabled()
     await dialog.getByRole("button", { name: "Cancel" }).click()
     // An imported collision remains editable when only other fields change.

@@ -2,6 +2,8 @@
 
 # Design: requirements and decisions
 
+**Built 2026-11-02 (newcarddialog):** Creation and naming forms omit detached history controls; New card omits its standing explanation and labels its subtitle field Version with a tooltip. These requirements in §10.1 are obsolete as implementation plans; see ARCHITECTURE.md §3.10.
+
 **Built 2026-11-02 (entryclicks):** The per-view lorebook expansion decision in §1.3 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §14.6.
 
 **Built 2026-11-02 (snippetpick):** Where sent text goes (one click to the expanded snippet used last, else a menu at the button; §4.1) is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §14.2.
@@ -833,6 +835,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D]** (owner, 2026-11-02, New card): "What is going on here? Why is there a random undo?" Creation and rename forms have no detached history button. New card has no standing sentence below its title; its third label is **Version**, with a question-mark tooltip, "Shown as the card's subtitle." **Built; obsolete as an implementation requirement** (ARCHITECTURE §3.10).
+- **[P]** (newcarddialog, 2026-11-02) Shared form status shows history only when an existing settings editor explicitly requests it. Draft persistence and recovery notices continue on creation and naming forms.
 
 - **[D] Decided (owner, 2026-11-02):** “Every modal that can be dismissed without a decision (closing it loses nothing, or simply cancels) must have a visible close button: an X in the top-right corner. Clicking outside still closes it too.” “Modals that demand a specific resolution (confirm/cancel choices such as ‘Discard changes?’, destructive confirmations, anything where outside-click is already disabled) don't get the X; their buttons are the way out.” **Built, obsolete as an implementation requirement:** shared dialog, sheet and popover behavior is documented in ARCHITECTURE §5; portrait/picture viewers are reserved for the separate portraitview work.
 

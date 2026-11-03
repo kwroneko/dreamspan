@@ -102,7 +102,7 @@ function Instruction({
           {text !== saved && " Not saved yet."}
         </span>
       </div>
-      <UserDraftStatus draft={draft} />
+      <UserDraftStatus draft={draft} history />
       {problem && <p className="text-sm text-danger">{problem}</p>}
     </Fieldset>
   )

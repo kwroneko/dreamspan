@@ -428,7 +428,7 @@ export function ModelSettingsEditor({
   const learned = savedModel.overrides.learned
   return (
     <form ref={form} onSubmit={submit} className="flex min-w-0 flex-col gap-4 [overflow-wrap:anywhere]" noValidate>
-      <UserDraftStatus draft={durable} />
+      <UserDraftStatus draft={durable} history />
       <Field label="Display name">
         <Input value={name} onValueChange={setName} placeholder={model.upstream.name ?? model.key} />
       </Field>

@@ -44,12 +44,7 @@ export function NewCardButton() {
   return (
     <>
       <Button onClick={() => setOpen(true)}>New card</Button>
-      <Dialog
-        open={open}
-        onOpenChange={setOpen}
-        title="New card"
-        description="These names are saved with the card and travel with its exported file."
-      >
+      <Dialog open={open} onOpenChange={setOpen} title="New card">
         <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
           <UserDraftStatus draft={durable} />
           <Field label="Display name" about={DISPLAY_HINT}>
@@ -62,7 +57,7 @@ export function NewCardButton() {
               onChange={(event) => setNickname(event.currentTarget.value)}
             />
           </Field>
-          <Field label="Version (shown as subtitle)">
+          <Field label="Version" about="Shown as the card's subtitle.">
             <Input value={version} onChange={(event) => setVersion(event.currentTarget.value)} />
           </Field>
           {clash && (
