@@ -11,7 +11,7 @@ import { useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { showToast } from "../../ui/Toast.tsx"
-import type { CardSurfaceContext } from "../cardForks/surfaces.tsx"
+import { CardSurface, type CardSurfaceContext } from "../cardForks/surfaces.tsx"
 import { shellAtom } from "./shellData.tsx"
 
 export const PERSONA_FOLDER_HINT = "Keeps this card in the persona folder, so you can play it in chats."
@@ -47,7 +47,7 @@ export function PersonaFolderSwitch({ entityId }: CardSurfaceContext) {
   if (listed === null) return null
   const on = shown ?? listed
   return (
-    <div data-persona-folder className="flex">
+    <div data-persona-folder className="flex items-center gap-2">
       <Switch
         compact
         checked={on}
@@ -61,6 +61,7 @@ export function PersonaFolderSwitch({ entityId }: CardSurfaceContext) {
       >
         Persona
       </Switch>
+      <CardSurface placement="persona-badge" entityId={entityId} />
     </div>
   )
 }

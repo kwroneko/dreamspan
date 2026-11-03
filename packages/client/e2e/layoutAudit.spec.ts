@@ -407,6 +407,71 @@ test.describe("synthetic library and every app surface", () => {
           await audit("import-st-form")
           return
         }
+        if (process.env.LAYOUT_AUDIT_DEFAULT_PERSONA_ONLY === "1") {
+          const persona = await admin((api) =>
+            Effect.gen(function* () {
+              const card = (yield* api.ListCards()).find((card) => card.persona)!
+              const ref = (yield* api.ListLibrary({ kind: "card" })).find((ref) => ref.entityId === card.entityId)!
+              yield* api.ChangeGenerationDefaults({ change: { persona: card.entityId } })
+              return { card, ref }
+            })
+          )
+          await go("default-library-list", "/library?show=personas")
+          await page
+            .getByRole("button", {
+              name: `More actions for ${persona.ref.label}${persona.ref.subtitle ? ` · ${persona.ref.subtitle}` : ""}`,
+              exact: true
+            })
+            .click()
+          await audit("default-library-menu")
+          await go("default-library-grid", "/library?show=personas&view=grid")
+          await go("default-home", "/?show=personas")
+          await showAppNavigation(page)
+          await page
+            .getByRole("group", { name: "Left panel", exact: true })
+            .getByRole("button", { name: "Characters", exact: true })
+            .click()
+          const leftShow = page.getByRole("combobox", { name: "Show", exact: true })
+          await leftShow.click()
+          await page.getByRole("option", { name: /^Personas/ }).click()
+          await audit("default-sidebar")
+          await page.getByRole("button", { name: "Start a chat", exact: true }).click()
+          const start = page.getByRole("dialog", { name: "Start a chat with…" })
+          await start.getByRole("combobox", { name: "Show" }).click()
+          await page.getByRole("option", { name: /^Personas/ }).click()
+          await audit("default-start-picker")
+          await page.keyboard.press("Escape")
+          await hideAppNavigation(page)
+          await go("default-card", `/cards/${persona.card.entityId}`)
+          await go("default-editor", `/library/${persona.ref.id}`)
+          await page.getByRole("button", { name: "More actions", exact: true }).click()
+          await audit("default-editor-menu")
+          await go("default-pending", `/cards/${cardId}/chat`)
+          await openPanel(page, "Cast")
+          await audit("default-pending-cast")
+          await page.getByRole("button", { name: /^Playing as / }).click()
+          await audit("default-persona-picker")
+          await page
+            .getByRole("option", { name: persona.card.name, exact: true })
+            .getByRole("button", { name: /^Persona actions for/ })
+            .click()
+          await audit("default-persona-menu")
+          await page.keyboard.press("Escape")
+          await page.keyboard.press("Escape")
+          await closePanel(page)
+          await go("default-chat", `/chats/${chatId}`)
+          await openPanel(page, "Cast")
+          const add = page.getByRole("button", { name: "Add characters", exact: true })
+          if ((await add.getAttribute("aria-expanded")) !== "true") await add.click()
+          const section = page.getByRole("region", { name: "Add characters", exact: true })
+          await section.getByRole("combobox", { name: "Show" }).click()
+          await page.getByRole("option", { name: /^Personas/ }).click()
+          await audit("default-add-characters")
+          await closePanel(page)
+          await page.getByRole("button", { name: /^Speaking as / }).click()
+          await audit("default-speaker-picker")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_PERSONA_BADGES_ONLY === "1") {
           const persona = await admin((api) =>
             Effect.gen(function* () {

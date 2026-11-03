@@ -1,4 +1,5 @@
 // The user's generation defaults in `user_settings`; one naming something gone reads as none.
+import type { EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { GenerationDefaults } from "@rp/shared/generation.ts"
 import { newChatLcm } from "@rp/shared/lcmSettings.ts"
@@ -8,6 +9,7 @@ import { GlobalRegex } from "@rp/shared/regexScripts.ts"
 import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
 
+export const DEFAULT_PERSONA = "chat.persona"
 export const DEFAULT_MODEL = "generation.model"
 export const DEFAULT_PRESET = "generation.preset"
 export const DEFAULT_JUDGE = "generation.judge"
@@ -29,6 +31,15 @@ export const ownedPreset = (sql: SqlClient.SqlClient, userId: UserId, ref: strin
     WHERE r.id = ${ref} AND e.owner_user_id = ${userId} AND e.kind = 'preset' AND e.deleted_at IS NULL
       AND r.ref_kind <> 'chat_override'`.pipe(Effect.map(([row]) => row?.n === 1))
 
+/** A live, unarchived card in this account's persona folder. */
+export const ownedPersona = (sql: SqlClient.SqlClient, userId: UserId, entityId: string) =>
+  sql<{ n: number }>`
+    SELECT count(*) AS n FROM entities e JOIN entity_tags t ON t.entity_id = e.id AND t.tag = 'persona'
+    WHERE e.id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'card'
+      AND e.deleted_at IS NULL AND e.archived_at IS NULL AND e.purged_at IS NULL`.pipe(
+    Effect.map(([row]) => row?.n === 1)
+  )
+
 const setting = (sql: SqlClient.SqlClient, userId: UserId, key: string) =>
   sql<{ value_json: string }>`SELECT value_json FROM user_settings WHERE user_id = ${userId} AND key = ${key}`.pipe(
     Effect.map(([row]) => (row ? (JSON.parse(row.value_json) as unknown) : null))
@@ -38,6 +49,8 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
   Effect.gen(function* () {
     const model = (yield* setting(sql, userId, DEFAULT_MODEL)) as { connection?: unknown; model?: unknown } | null
     const preset = yield* setting(sql, userId, DEFAULT_PRESET)
+    const persona = yield* setting(sql, userId, DEFAULT_PERSONA)
+    const personaOk = typeof persona === "string" && (yield* ownedPersona(sql, userId, persona))
     const modelOk =
       typeof model?.connection === "string" &&
       typeof model.model === "string" &&
@@ -53,6 +66,7 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
     const lcm = stored ? { ...rest, ...((yield* usable(fallback)) ? { fallback } : {}) } : null
     const judge = (yield* setting(sql, userId, DEFAULT_JUDGE)) as { connection?: unknown; model?: unknown } | null
     return new GenerationDefaults({
+      persona: personaOk ? (persona as EntityId) : null,
       model: modelOk ? { connection: model!.connection as ConnectionId, model: model!.model as ModelId } : null,
       ...(lcm ? { lcm } : {}),
       ...((yield* usable(judge))

@@ -460,11 +460,7 @@ export function Editor({
                     className={`h-7! shrink-0 px-2! ${pressedButtonClass}`}
                     aria-pressed={searching}
                     aria-controls="preset-search"
-                    hint={
-                      ref.kind === "preset"
-                        ? "Search and replace in the prompts' text, their names, or anywhere in the preset."
-                        : "Search and replace in the entries' text, their keys, or anywhere in the book."
-                    }
+                    hint="Search and replace in the entries' text, their keys, or anywhere in the book."
                     onClick={() => setSearching(!searching)}
                   >
                     <Icon name="replace" />

@@ -9,11 +9,13 @@ import { sidebarFoot } from "./homeSlots.ts"
 import { OpenChatBranches } from "./ShellBrowser.tsx"
 import { homeSearch } from "./homeSearch.ts"
 import { cardContributions } from "../cardForks/surfaces.tsx"
+import { registerDefaultPersona } from "./defaultPersona.tsx"
 import { PersonaFolderSwitch } from "./personaFolder.tsx"
 import { CardChatsLink, CastChatsLink } from "./chatLinks.tsx"
 import { castMemberNavigation } from "../chat/presentation.tsx"
 
 export const register = () => {
+  registerDefaultPersona()
   cardContributions.register({
     id: "characters.chats-link",
     placement: "chats",

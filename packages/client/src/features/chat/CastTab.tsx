@@ -1,3 +1,4 @@
+import { useDefaultPersona } from "../characters/defaultPersona.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useChatCards } from "./chatCards.ts"
 // The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who you play (the persona, who
@@ -158,7 +159,15 @@ function Member({
 }
 
 /** Who you play: one row, apart from the characters, with no count of the chats it's in. */
-function You({ card, children }: { card: CastCard | undefined; children: ReactNode }) {
+function You({
+  card,
+  children,
+  isDefault = false
+}: {
+  card: CastCard | undefined
+  children: ReactNode
+  isDefault?: boolean
+}) {
   const showPanel = useShowPanel()
   return (
     <div role="group" aria-label="Your persona" className="flex max-w-controls items-center gap-3">
@@ -183,6 +192,7 @@ function You({ card, children }: { card: CastCard | undefined; children: ReactNo
             className="line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
           >
             {card.name}
+            {isDefault ? " (default)" : ""}
           </button>
         ) : (
           <span className="font-medium">No persona</span>
@@ -359,12 +369,13 @@ export function PendingCastTab({ pending }: { pending: PendingChat }) {
   const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
   const infoOf = usePendingCardInfo()
   const playing = pending.playing(state)
+  const defaultPersona = useDefaultPersona()
   const characters = state.greeters.map((item) => item.card).filter((card) => card.entityId !== state.persona)
   const sameName = (card: CastCard) =>
     characters.some((other) => other.entityId !== card.entityId && other.name === card.name)
   return (
     <div className="flex flex-col gap-4">
-      <You card={playing ?? undefined}>
+      <You card={playing ?? undefined} isDefault={playing !== null && playing.entityId === defaultPersona}>
         <PendingPersonaSwitch pending={pending} trigger="Switch" />
       </You>
       <div className="flex flex-col gap-1">
