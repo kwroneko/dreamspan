@@ -64,7 +64,11 @@ test.beforeAll(async ({ browser }) => {
   await admin((api) =>
     api.EditModel({
       modelId: model.id,
-      overrides: { context: 128000, settings: { samplers: { openai_max_context: 128000 } } },
+      overrides: {
+        context: 128000,
+        cacheBreakpoints: "explicit",
+        settings: { samplers: { openai_max_context: 128000 } }
+      },
       expectedRowVersion: model.rowVersion
     })
   )
@@ -141,20 +145,19 @@ for (const width of [1440, 390])
       await expect(books.getByRole("switch", { name: /^Harbor Almanac/ })).toBeChecked()
       await expect(books).toContainText("From the preset Celia 4.2")
       // Where entries go: one setting for the chat's books, with its why a click away.
-      const placement = tab.getByRole("group", { name: "Where entries go" })
-      const below = placement.getByRole("button", { name: "Below the history" })
-      await expect(below).toHaveAttribute("aria-pressed", "true")
+      const below = tab.getByRole("switch", { name: "Force all lorebook entries below the history" })
+      await expect(below).toBeChecked()
       await tab.getByRole("button", { name: "Why below the history" }).click()
       const popover = page.getByRole("dialog", { name: "Below the history" })
       await expect(popover).toContainText("cache")
       await shoot("lorebooks-popover")
       await page.keyboard.press("Escape")
       await expect(popover).toHaveCount(0)
-      await placement.getByRole("button", { name: "Where each entry says" }).click()
-      await expect(below).toHaveAttribute("aria-pressed", "false")
+      await below.click()
+      await expect(below).not.toBeChecked()
       await shoot("lorebooks-setting-off")
       await below.click()
-      await expect(below).toHaveAttribute("aria-pressed", "true")
+      await expect(below).toBeChecked()
       await shoot("lorebooks-setting-on")
       // The preset editor at the Main Prompt: Aria's system prompt replaces it in this chat.
       const presetPanel = await openPanel(page, "Prompt preset")
@@ -168,7 +171,7 @@ for (const width of [1440, 390])
       )
       await main.scrollIntoViewIfNeeded()
       await shoot("preset-main-replaced")
-      await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+      await overlay.getByRole("button", { name: "Close", exact: true }).click()
       // The card editor says its prompts are used.
       await page.goto(`${server().url}/library/${ariaCard.id}`)
       const note = page.locator('[data-prompt-use="replaceable"]').first()
@@ -196,7 +199,7 @@ test("a prompt that forbids overrides says so in both editors; entries by positi
   await overlay.locator('[data-prompt="main"]').getByRole("button", { name: "Options of Main Prompt" }).click()
   await overlay.locator('[data-prompt="main"]').getByRole("switch", { name: "A card can't replace it" }).click()
   await saveRevision(overlay)
-  await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  await overlay.getByRole("button", { name: "Close", exact: true }).click()
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const) {
       const shoot = await setUp(page, width, theme, false)

@@ -1,14 +1,32 @@
 import { describe, expect, it, vi } from "vitest"
 import { emptyEntry } from "../src/features/editor/lorebookDefaults.ts"
-import { applyMassChange, lorebookMassSettings, patchEdits, touched } from "../src/features/editor/lorebookMass.ts"
+import { applyMassChange, patchEdits, touched } from "../src/features/editor/lorebookMass.ts"
+import {
+  commonValue,
+  lorebookEntrySettings,
+  manyPatch,
+  sectionSummary
+} from "../src/features/editor/lorebookSettings.ts"
+import { registerLorebookEntrySettings } from "../src/features/editor/lorebookSettingsDefaults.tsx"
 import type { EditorStore } from "../src/features/editor/store.ts"
-import { registerLorebookMassSettings } from "../src/features/editor/lorebookMassDefaults.ts"
 import { inScope, lorebookScopes, presetScopes } from "../src/features/editor/searchScopes.ts"
+
+// The form's own controls aren't rendered here: only the settings' data and logic.
+vi.mock("../src/features/editor/LorebookEntryDetails.tsx", () => ({
+  CharacterFilter: () => null,
+  DelayUntilRecursion: () => null,
+  Keys: () => null
+}))
+vi.mock("../src/features/editor/controls.tsx", () => ({
+  NumberField: () => null,
+  TextField: () => null,
+  TriggersField: () => null
+}))
 
 const entry = (uid: number, more: Partial<ReturnType<typeof emptyEntry>> = {}) => ({ ...emptyEntry(uid), ...more })
 
-registerLorebookMassSettings()
-const setting = (id: string) => lorebookMassSettings.list().find((s) => s.id === id)!
+registerLorebookEntrySettings()
+const setting = (id: string) => lorebookEntrySettings.list().find((s) => s.id === id)!
 
 describe("changing a setting on many entries", () => {
   const entries = [entry(1), entry(2, { constant: true }), entry(3, { position: "at_depth", role: "user" })]
@@ -95,5 +113,32 @@ describe("a change to many entries (owner, 2026-11-02)", () => {
     applyMassChange(store as unknown as EditorStore, "Enabled all 1 entry", [])
     expect(store.setValue).not.toHaveBeenCalled()
     expect(store.commit).not.toHaveBeenCalled()
+  })
+})
+
+describe("the entry settings form for many entries (owner, 2026-11-02)", () => {
+  const entries = [
+    entry(1),
+    entry(2, { enabled: false, sticky: 3 }),
+    entry(3, { enabled: false, sticky: 3, group: "weather" })
+  ]
+  it("shows a shared value, or Mixed with how many have which", () => {
+    expect(commonValue(setting("depth"), entries)).toEqual({ mixed: false, value: 4 })
+    expect(commonValue(setting("enabled"), entries)).toEqual({ mixed: true, breakdown: "2 off, 1 on" })
+  })
+  it("applies several ticked settings at once; nothing chosen changes nothing", () => {
+    const settings = lorebookEntrySettings.list()
+    const patch = manyPatch(settings, { order: 50, strategy: "constant", position: undefined })
+    expect(patch).toEqual({ order: 50, constant: true, vectorized: false })
+    expect(touched(patchEdits([], entries, patch))).toBe(3)
+  })
+  it("clears a ticked empty field: unset where it can be, else a new entry's value", () => {
+    const settings = lorebookEntrySettings.list()
+    expect(manyPatch(settings, { sticky: "", group: "", depth: "" })).toEqual({ sticky: null, group: "", depth: 4 })
+  })
+  it("summarises a section by what differs from the defaults", () => {
+    const timing = lorebookEntrySettings.list().filter((s) => s.section === "timing")
+    expect(sectionSummary(timing, entry(1))).toBe("Default settings")
+    expect(sectionSummary(timing, entries[1]!)).toBe("Sticky 3")
   })
 })

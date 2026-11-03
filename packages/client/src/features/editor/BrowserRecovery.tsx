@@ -5,6 +5,8 @@ import { Button } from "../../ui/Button.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { copiesOfUser, type Copy, dropCopy, flushCopies, pendingOf } from "./backup.ts"
 
+import { dropTypedBackup } from "./typedBackup.ts"
+
 export function RecoveryNotice() {
   return (
     <p role="status">
@@ -126,6 +128,7 @@ export function BrowserRecovery({
         confirmLabel="Delete copy"
         onConfirm={async () => {
           if (deleting === null) return
+          dropTypedBackup(deleting)
           await dropCopy(deleting)
           setDeleting(null)
           await read()

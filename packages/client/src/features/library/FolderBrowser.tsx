@@ -11,6 +11,7 @@ import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
 import { Badge } from "../../ui/Surface.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 
 const row =
   "flex w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50"
@@ -51,7 +52,7 @@ export function FolderBrowser({
           <FailureView cause={failure.cause} onRetry={refresh} />
           {/* The folder it started at may be gone since: the home folder still is. */}
           {shown !== null && (
-            <Button variant="ghost" className="self-start" onClick={() => setShown(null)}>
+            <Button variant="ghost" className="self-start" hint="Opens the home folder." onClick={() => setShown(null)}>
               Go to the home folder
             </Button>
           )}
@@ -63,28 +64,31 @@ export function FolderBrowser({
         className="flex max-h-72 flex-col overflow-y-auto rounded-md border border-border bg-canvas p-2"
       >
         {listing.parent !== null && (
-          <button
-            type="button"
-            className={`${row} text-muted`}
-            disabled={disabled || waiting}
-            onClick={() => open(listing.parent!)}
-          >
-            <span aria-hidden>↑</span>
-            <span className="min-w-0 truncate">Up to {listing.parent}</span>
-          </button>
+          <Tooltip label="Opens the parent folder.">
+            <button
+              type="button"
+              className={`${row} text-muted`}
+              disabled={disabled || waiting}
+              onClick={() => open(listing.parent!)}
+            >
+              <span aria-hidden>↑</span>
+              <span className="min-w-0 truncate">Up to {listing.parent}</span>
+            </button>
+          </Tooltip>
         )}
         {listing.folders.map((folder) => (
-          <button
-            key={folder.name}
-            type="button"
-            className={row}
-            disabled={disabled || waiting}
-            onClick={() => open(`${listing.path === "/" ? "" : listing.path}/${folder.name}`)}
-          >
-            <FolderIcon />
-            <span className="min-w-0 truncate">{folder.name}</span>
-            {folder.st && <Badge tone="success">SillyTavern</Badge>}
-          </button>
+          <Tooltip key={folder.name} label={`Opens ${folder.name} and fills the folder path.`}>
+            <button
+              type="button"
+              className={row}
+              disabled={disabled || waiting}
+              onClick={() => open(`${listing.path === "/" ? "" : listing.path}/${folder.name}`)}
+            >
+              <FolderIcon />
+              <span className="min-w-0 truncate">{folder.name}</span>
+              {folder.st && <Badge tone="success">SillyTavern</Badge>}
+            </button>
+          </Tooltip>
         ))}
         {listing.folders.length === 0 && <p className="px-2 py-1.5 text-sm text-muted">No folders in here.</p>}
         {listing.truncated && <p className="px-2 py-1.5 text-sm text-muted">More folders aren't listed.</p>}

@@ -103,7 +103,7 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
     .getByRole("button", { name: "Save picture" })
     .click()
   await expect(page.getByRole("img", { name: "The card's avatar" })).toBeVisible()
-  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await page.getByRole("button", { name: "Search and replace", exact: true }).click()
   await page.getByRole("textbox", { name: "Find" }).fill("Wren")
   await page.getByRole("dialog").getByRole("button", { name: "Find" }).click()
   await expect(page.getByRole("dialog").getByRole("status")).toHaveText("1 match.")

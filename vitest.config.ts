@@ -65,7 +65,15 @@ export default defineConfig({
         test: { ...server, name: "server", include: ["test/**/*.test.ts"], exclude: SLOW_SERVER_FILES }
       },
       {
-        test: { ...server, name: "server-slow", include: SLOW_SERVER_FILES, testTimeout: 600_000 }
+        test: {
+          ...server,
+          name: "server-slow",
+          include: SLOW_SERVER_FILES,
+          testTimeout: 600_000,
+          // Registered during imports, before a test file can change runtime config.
+          // Large synthetic fixtures can take more than 10 s to remove.
+          hookTimeout: 60_000
+        }
       }
     ]
   }

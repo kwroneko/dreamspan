@@ -51,11 +51,11 @@ export const handlers = FormatOps.toLayer(
         source === null
           ? Effect.succeed({ report: StParse.disabled("group"), group: null })
           : Effect.flatMap(parser(source, "group"), (run) => run(bytes, fileName)),
-      ParseStLibraryFile: ({ bytes, fileName, expect, parser: source, textSwitches, authorNoteLore }) =>
+      ParseStLibraryFile: ({ bytes, fileName, expect, parser: source, textSwitches, authorNoteLore, loreMapping }) =>
         (source === null
           ? Effect.succeed(StParse.unreadLibraryFile(bytes))
           : Effect.flatMap(parser(source, "library-file"), (run) =>
-              run(bytes, fileName, expect, textSwitches, authorNoteLore)
+              run(bytes, fileName, expect, textSwitches, authorNoteLore, loreMapping)
             )
         ).pipe(Effect.provideService(Importers.Importers, registry)),
       BuildStPersona: ({ bytes, fileName, persona, parser: source, authorNote }) =>

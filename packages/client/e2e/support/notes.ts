@@ -5,7 +5,7 @@ import { expect, type Locator, type Page } from "@playwright/test"
 /** The note's block, by its title. */
 export const noteBlock = (scope: Page | Locator, title: string) => scope.getByRole("region", { name: `Note ${title}` })
 
-/** The header's button that opens or closes it: its name and the line under it ("End of tail · always"). */
+/** The header's button that opens or closes it: its title (the summary is a separate header row). */
 export const noteToggle = (scope: Page | Locator, title: string) =>
   scope.getByRole("button", { name: new RegExp(`^(Expand|Collapse) ${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
 
@@ -28,7 +28,7 @@ export const closeNoteBlock = async (block: Locator, title: string) => {
 /** Opens a note's block, then its Settings section, when they're closed. */
 export const openNoteSettings = async (block: Locator, title: string) => {
   await openNoteBlock(block, title)
-  const settings = block.getByRole("button", { name: `Settings of ${title}` })
+  const settings = block.getByRole("button", { name: `Settings of ${title}`, exact: true })
   if ((await settings.getAttribute("aria-expanded")) !== "true") await settings.click()
   await expect(settings).toHaveAttribute("aria-expanded", "true")
   return block

@@ -173,7 +173,7 @@ test("Send as a card added to the chat, and Generate with guidance that a swipe 
   await openPanel(page, "Cast")
   await addToCast(page, "Tobin")
   await page.getByRole("button", { name: "More for Tobin" }).click()
-  await page.getByRole("button", { name: "Write as Tobin" }).click()
+  await page.getByRole("menuitem", { name: "Write as Tobin" }).click()
   await page.keyboard.press("Escape")
   await composer(page).fill("Tobin pushes off from the dock.")
   await page.getByRole("button", { name: "Send as Tobin" }).click()

@@ -9,7 +9,6 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
-import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
 import { closePortrait } from "./support/portrait.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40" })
@@ -150,18 +149,12 @@ for (const width of [1440, 390])
       await expect(full).toBeVisible()
       await shoot(page, `portrait-${width}-${colorScheme}`)
       await closePortrait(page)
-      await showAppNavigation(page)
-      const imageSettings = page
-        .getByRole("button", { name: "Image settings", exact: true })
-        .filter({ visible: true })
-        .last()
-      await imageSettings.click()
-      await page.getByLabel("Message portrait size").click()
+      const display = await openPanel(page, "Display")
+      await display.getByLabel("Message portrait size", { exact: true }).click()
       await expect(page.getByRole("option", { name: "Large (84 × 126)" })).toBeVisible()
       await shoot(page, `portrait-size-${width}-${colorScheme}`)
       await page.keyboard.press("Escape")
-      await page.keyboard.press("Escape")
-      await hideAppNavigation(page)
+      await closePanel(page)
       const cast = await openPanel(page, "Cast")
       await expect(cast.getByRole("list", { name: "Characters in this chat" })).toBeVisible()
       await shoot(page, `cast-portraits-${width}-${colorScheme}`)

@@ -1,3 +1,4 @@
+import { makeStImportPrefix, stImportPrefixHandlers } from "./stImportPrefix.ts"
 import { stateModuleHandlers } from "./stateModules.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeInsertWriteHandlers } from "./insertWrites.ts"
@@ -60,25 +61,31 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
           makeGenerationWriteHandlers
         ])
         // --- ST data folder import (ARCHITECTURE.md §13)
-        const stImport = yield* makeStImportWriteHandlers()
+        const prefix = makeStImportPrefix()
+        const stImport = yield* makeStImportWriteHandlers(prefix)
         return WriteOps.of(
-          stateModuleHandlers({
-            ...(yield* makeHistoryWriteHandlers),
-            ...(yield* makeInsertWriteHandlers(bin)),
-            ...graph,
-            ...library,
-            ...binOps,
-            ...providers,
-            ...accounts,
-            ...chatSetup,
-            ...stImport,
-            ...(yield* makeStImportJobWriteHandlers),
-            ...generation,
-            ...(yield* makeLcmWriteHandlers(bin)),
-            ...(yield* makeLcmQueueHandlers),
-            ...(yield* makeLcmUiWriteHandlers),
-            ...(yield* makeLcmEnableWriteHandlers(bin))
-          })
+          stateModuleHandlers(
+            stImportPrefixHandlers(
+              {
+                ...(yield* makeHistoryWriteHandlers),
+                ...(yield* makeInsertWriteHandlers(bin)),
+                ...graph,
+                ...library,
+                ...binOps,
+                ...providers,
+                ...accounts,
+                ...chatSetup,
+                ...stImport,
+                ...(yield* makeStImportJobWriteHandlers),
+                ...generation,
+                ...(yield* makeLcmWriteHandlers(bin)),
+                ...(yield* makeLcmQueueHandlers),
+                ...(yield* makeLcmUiWriteHandlers),
+                ...(yield* makeLcmEnableWriteHandlers(bin))
+              },
+              prefix
+            )
+          )
         )
       })
     )

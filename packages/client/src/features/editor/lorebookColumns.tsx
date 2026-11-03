@@ -9,7 +9,7 @@ import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Input } from "../../ui/Field.tsx"
+import { Field, Input } from "../../ui/Field.tsx"
 import { NativeSelect } from "../../ui/Select.tsx"
 import { useSession } from "../../session.ts"
 import { useCaller } from "./caller.ts"
@@ -198,25 +198,25 @@ function ToAnotherBook({ store, path, entry, title, onClose, move }: LorebookAct
   }
   const verb = move ? "Move" : "Copy"
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && onClose()}
-      title={`${verb} “${title}” to another lorebook`}
-      description={
-        move
-          ? "It's saved in the lorebook you choose right away. Here it's removed as a change, saved with this book's other changes."
-          : "It's saved in the lorebook you choose right away. This book keeps it."
-      }
-    >
+    <Dialog open onOpenChange={(open) => !open && onClose()} title={`${verb} “${title}” to another lorebook`}>
       <ErrorAlert error={error} />
-      <Input
-        type="search"
-        aria-label="Find a lorebook"
-        placeholder="Find a lorebook"
-        value={query}
-        onChange={(event) => setQuery(event.currentTarget.value)}
-        autoFocus
-      />
+      <Field
+        label="Lorebook"
+        about={
+          move
+            ? "Saves the entry in the chosen lorebook immediately; removal from this book waits for Save."
+            : "Saves the copy in the chosen lorebook immediately."
+        }
+      >
+        <Input
+          type="search"
+          aria-label="Find a lorebook"
+          placeholder="Find a lorebook"
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          autoFocus
+        />
+      </Field>
       {books === null ? (
         error === null && <p className="text-sm text-muted">Loading the library's lorebooks…</p>
       ) : shown.length === 0 ? (
@@ -224,7 +224,7 @@ function ToAnotherBook({ store, path, entry, title, onClose, move }: LorebookAct
           {books.length === 0 ? "There's no other lorebook." : "No lorebook matches."}
         </p>
       ) : (
-        <ul aria-label="Lorebooks" className="flex max-h-72 flex-col overflow-y-auto">
+        <ul aria-label="Lorebooks" className="flex max-h-72 flex-col overflow-y-auto p-2">
           {shown.map((ref) => (
             <li key={ref.id}>
               <button

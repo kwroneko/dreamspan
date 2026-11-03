@@ -1,4 +1,4 @@
-import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
+import { useUserDraft, UserDraftNotices } from "../editor/userDraft.tsx"
 import { StSettingsImporter } from "./StSettingsImport.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
 // The connection list and the form for a new connection.
@@ -201,7 +201,7 @@ function NewConnectionForm({
   const sentTo = origin ? `It's sent only to ${origin} and never shown again.` : "It's never shown again."
   return (
     <Card>
-      <CardHeader inline title="New connection" actions={<UserDraftUndo draft={durable} />} />
+      <CardHeader inline title="New connection" />
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <UserDraftNotices draft={durable} />
         <Field label="Provider">

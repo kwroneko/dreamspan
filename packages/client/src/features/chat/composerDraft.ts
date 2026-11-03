@@ -1,3 +1,4 @@
+import { deletedSince } from "@rp/shared/drafts.ts"
 // The composer's text as a server draft (DESIGN §6.2): one per fork, saved while the
 // user types, read back on a reload or another device, with its undo history on the server.
 // It follows the editors' rules (features/editor/store.ts): a copy in this browser while a
@@ -310,17 +311,25 @@ export class ComposerDraft {
     for (const copy of await copiesOfUser(this.userId)) {
       const save = pendingOf(copy)
       if (save?.kind !== "pendingChat" || save.payload.chatId !== this.chatId) continue
+      const original = save.payload.composerBase
+      const base = original ?? { draftId: opened.id, rowVersion: opened.rowVersion, session: opened.session }
+      // Unversioned legacy handoffs cannot prove they were typed after a known deletion.
+      if (
+        (!original || original.draftId === opened.id) &&
+        deletedSince(opened, original ? { draftId: original.draftId, expectedRowVersion: original.rowVersion } : null)
+      )
+        continue
       const adopted = makeCopy(
         this.userId,
         copyTarget(this.chatId),
-        opened.id,
+        base.draftId,
         {
           kind: "composer",
           payload: {
             chatId: this.chatId,
-            draftId: opened.id,
-            rowVersion: opened.rowVersion,
-            session: opened.session,
+            draftId: base.draftId,
+            rowVersion: base.rowVersion,
+            session: base.session,
             next: false,
             content: copy.content
           }
@@ -346,9 +355,13 @@ export class ComposerDraft {
       const pending = pendingOf(copy)
       if (pending?.kind !== "composer") continue
       const { chatId, draftId } = pending.payload
+      const deleted =
+        draftId === draft.id && deletedSince(draft, { draftId, expectedRowVersion: pending.payload.rowVersion })
+      // The writer can acknowledge an already-applied clear by its receipt, or
+      // recover stale text behind the deletion barrier. Only its reply drops the copy.
       const saved = await this.session.call((client) => client("SaveComposer", pending.payload))
       if (!saved.ok) {
-        if (draftId === opened.id) unsent = copy
+        if (draftId === opened.id && !deleted) unsent = copy
         continue
       }
       await dropCopy(copy)

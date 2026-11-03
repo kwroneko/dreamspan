@@ -2,7 +2,8 @@
 // drag to reorder; each prompt's role, position and depth; prefill text;
 // and the regex scripts, which run only once the user allows them (ARCHITECTURE.md §9).
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX } from "@rp/shared/docs/preset.ts"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
+import type { SearchMatch } from "./searchNavigation.ts"
 import { PromptDocument } from "./PromptDocument.tsx"
 import { usePresetWorkspace } from "./PresetWorkspace.tsx"
 import { DocumentRegexScripts } from "./RegexScripts.tsx"
@@ -57,12 +58,20 @@ export function PresetEditor({
   store,
   call,
   context,
-  focus
+  focus,
+  toolbarTarget,
+  toolbarEnd,
+  saveControls,
+  onSearchReveal
 }: {
   store: EditorStore
   call: Caller
   context?: PresetContext | null | undefined
   focus?: string | undefined
+  toolbarTarget?: HTMLElement | null | undefined
+  toolbarEnd?: ReactNode
+  saveControls?: ReactNode
+  onSearchReveal?: ((match: SearchMatch) => void) | undefined
 }) {
   const [goTo, setGoTo] = useState<{ readonly identifier: string } | null>(null)
   const workspace = usePresetWorkspace()
@@ -76,6 +85,10 @@ export function PresetEditor({
         />
         <PromptDocument
           store={store}
+          toolbarTarget={toolbarTarget}
+          toolbarEnd={toolbarEnd}
+          saveControls={saveControls}
+          onSearchReveal={onSearchReveal}
           context={context}
           focus={focus}
           goTo={goTo}

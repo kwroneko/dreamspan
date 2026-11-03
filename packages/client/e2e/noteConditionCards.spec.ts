@@ -9,7 +9,7 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import { valueField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
-import { noteSettings, noteToggle } from "./support/notes.ts"
+import { noteBlock, noteSettings } from "./support/notes.ts"
 import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -70,7 +70,7 @@ for (const width of [1440, 390]) {
       ]
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chatId}?panel=notes`)
-    const row = noteToggle(page, "Outfit")
+    const row = noteBlock(page, "Outfit").locator("header")
     // The header names only the cast's cards: Pell never counts here.
     await expect(row).toContainText("Ethan's turn")
     const note = await noteSettings(page, "Outfit")

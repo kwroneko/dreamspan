@@ -259,7 +259,33 @@ describe("context assembly from the database", () => {
           { title: "Empty active note", placement: { mode: "section", section: "tail_start" }, due: true }
         ]
       )
-      assert.isAbove(context.cacheAfter.length, 0)
+      assert.deepEqual(context.cacheAfter, [])
+      const writer = yield* Database.Writer
+      const connectionId = uuidv7() as ConnectionId
+      yield* writer.CreateConnection({
+        userId,
+        connectionId,
+        kind: "openai-chat",
+        api: "openai-completions",
+        settings: {
+          name: "Cache markers",
+          baseUrl: null,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        credential: { existing: null }
+      })
+      const model = yield* writer.AddUserModel({
+        userId,
+        connectionId,
+        key: "synthetic",
+        overrides: { cacheBreakpoints: "explicit" }
+      })
+      yield* state({ key: "model.binding", value: { connection: connectionId, model: model.id } })
+      const explicit = yield* reader.CacheWarmth({ userId, chatId: chat.id, leafSlotId: sent.slotId })
+      assert.isAbove(explicit.presetContext!.cacheAfter.length, 0)
       assert.notInclude(JSON.stringify(context), "The road flooded.")
     }).pipe(Effect.provide(database()))
   )

@@ -5,18 +5,18 @@
 // with its message cuts a revision; moving, deleting or adding a prompt and attaching or taking
 // off a lorebook wait behind the floating bar's Save and Revert (@rp/shared/presetHeld.ts;
 // owner 2026-11-02), a prompt's on/off switch excepted.
+import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { Button } from "../../ui/Button.tsx"
-import { Icon } from "../../ui/Icon.tsx"
 import { Disclosure } from "../../ui/Surface.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { RecoveredNotice, RestoredNotice } from "../editor/controls.tsx"
 import { PresetSettings } from "../editor/PresetEditor.tsx"
 import { presetEditorWarnings } from "../editor/presetSections.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
+import { SearchNavigation, type SearchMatch } from "../editor/searchNavigation.ts"
 import { PromptDocument } from "../editor/PromptDocument.tsx"
 import { RefName } from "../editor/RefDialogs.tsx"
 import { HeldChangesBar } from "../editor/SaveRevert.tsx"
@@ -29,52 +29,61 @@ function PresetColumn({ store }: { store: EditorStore }) {
   const workspace = usePresetWorkspace()
   const call = useCaller()
   const state = useEditorState(store)
+  const [searchMatch, setSearchMatch] = useState<SearchMatch | null>(null)
   const [goTo, setGoTo] = useState<{ readonly identifier: string } | null>(null)
   useEffect(() => {
     void store.load()
   }, [store])
   useLeaveGuard(store)
+  const matchPrompt = searchMatch?.path[1]
+  const settingsMatch =
+    searchMatch !== null &&
+    (searchMatch.path[0] !== "prompts" ||
+      (typeof matchPrompt === "string" && Boolean(endOfRequestText(matchPrompt.replace(/^identifier=/, "")))))
   if (state.loadError) return <ErrorAlert error={state.loadError} />
   if (!state.snapshot) return <p role="status">Loading preset…</p>
   return (
-    <div className="flex min-h-full flex-col gap-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="font-medium">
-            <RefName store={store} />
-          </span>
-        </div>
-        <Tooltip label="Edit the preset in a large editor over the chat">
-          <Button
-            className="h-8 shrink-0 px-2.5"
-            aria-label="Open the preset in the large editor"
+    <SearchNavigation value={searchMatch}>
+      <div className="flex min-h-full flex-col gap-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="min-w-0 font-medium">
+              <RefName store={store}>
+                <span className="block min-w-0 truncate">{state.snapshot.ref.label}</span>
+              </RefName>
+            </span>
+          </div>
+          <IconButton
+            label="Open the preset in the large editor"
+            hint="Opens this preset in the large editor"
+            icon="expand"
             onClick={() => workspace?.open(store.refId)}
-          >
-            <Icon name="expand" />
-            Large editor
-          </Button>
-        </Tooltip>
+          />
+        </div>
+        {state.saveError && (
+          <ErrorAlert
+            error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
+          />
+        )}
+        <RestoredNotice count={state.restored} />
+        <RecoveredNotice store={store} />
+        <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
+        <PromptDocument
+          store={store}
+          context={workspace?.context}
+          layout="column"
+          onSearchReveal={setSearchMatch}
+          saveControls={<SaveRevision store={store} />}
+          goTo={goTo}
+          onOpenLarge={(identifier) => workspace?.open(store.refId, identifier)}
+          onOpenLorebook={workspace ? (ref) => workspace.open(ref) : undefined}
+        />
+        <Disclosure lazy defaultOpen={settingsMatch} title="End of request, prefill, utility prompts, regex scripts">
+          <PresetSettings store={store} call={call} />
+        </Disclosure>
+        <HeldChangesBar store={store} floating />
       </div>
-      {state.saveError && (
-        <ErrorAlert error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }} />
-      )}
-      <RestoredNotice count={state.restored} />
-      <RecoveredNotice store={store} />
-      <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
-      <PromptDocument
-        store={store}
-        context={workspace?.context}
-        layout="column"
-        saveControls={<SaveRevision store={store} />}
-        goTo={goTo}
-        onOpenLarge={(identifier) => workspace?.open(store.refId, identifier)}
-        onOpenLorebook={workspace ? (ref) => workspace.open(ref) : undefined}
-      />
-      <Disclosure lazy title="End of request, prefill, utility prompts, regex scripts">
-        <PresetSettings store={store} call={call} />
-      </Disclosure>
-      <HeldChangesBar store={store} floating />
-    </div>
+    </SearchNavigation>
   )
 }
 

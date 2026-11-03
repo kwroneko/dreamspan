@@ -26,6 +26,8 @@ import { GroupFaces } from "./GroupFaces.tsx"
 import { sidebarFoot } from "./homeSlots.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
+import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
+import { useBranchHeight } from "./useBranchHeight.ts"
 import {
   CharacterGrid,
   PAGE_ROWS,
@@ -118,7 +120,12 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
           <GroupFaces members={fork.cast} />
         </span>
         <span className="flex w-full min-w-0 flex-1 flex-col gap-1 p-2.5">
-          <span className="text-sm font-medium [overflow-wrap:anywhere]">{fork.chatName}</span>
+          <span
+            className="line-clamp-2 text-sm font-medium text-ellipsis break-normal [overflow-wrap:normal]"
+            title={fork.chatName}
+          >
+            {fork.chatName}
+          </span>
           {/* The faces show who; the names with their versions are in the tooltip. */}
           <span
             className="text-xs text-muted"
@@ -203,11 +210,11 @@ export function ForkRow({
       className={`flex w-full max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <Tooltip
-        label={
+        label={`${title}. ${
           perFork
             ? `Opens this branch${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
             : "Opens the chat on the branch you last used."
-        }
+        }`}
       >
         <button
           type="button"
@@ -234,7 +241,7 @@ export function ForkRow({
           )}
           <span className="flex min-w-0 flex-col">
             {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
-            <span className="text-sm [overflow-wrap:anywhere]">
+            <span data-chat-title className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]">
               <span className="font-medium">{title}</span>
               {opensHere && (
                 <>
@@ -243,7 +250,14 @@ export function ForkRow({
                 </>
               )}
             </span>
-            {branchLine !== null && <span className="text-xs [overflow-wrap:anywhere]">{branchLine}</span>}
+            {branchLine !== null && (
+              <span
+                className="line-clamp-2 text-xs text-ellipsis break-normal [overflow-wrap:normal]"
+                title={branchLine}
+              >
+                {branchLine}
+              </span>
+            )}
             {details && fork.cast.length > 1 && (
               <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
                 with {fork.cast.map((c) => c.label).join(", ")}
@@ -305,9 +319,10 @@ export function OpenChatBranches() {
       { id: "other", limit: 5000 }
     ]
   })
-  if (chatId === null || grid || scope.chat === chatId) return null
   const rows = [...forks.section("peers").rows, ...forks.section("other").rows]
-  if (rows.length < 2) return null
+  const visible = chatId !== null && !grid && scope.chat !== chatId && rows.length > 0
+  const { ref, height, min, max, change, reset } = useBranchHeight(userId, visible)
+  if (!visible) return null
   const toggle = () => {
     setExpanded(!expanded)
     try {
@@ -319,9 +334,26 @@ export function OpenChatBranches() {
   const chatLabel = rows[0]!.chatName
   return (
     <section
+      ref={ref}
       aria-label="Branches of the open chat"
-      className="flex max-h-[45%] min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
+      style={expanded ? { height } : undefined}
+      className="relative flex min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
     >
+      {expanded && (
+        <div className="absolute inset-x-0 top-0">
+          <ResizeHandle
+            label="Resize chats and branches"
+            axis="y"
+            direction={-1}
+            width={height}
+            min={min}
+            max={max}
+            onChange={change}
+            onReset={reset}
+            hint="Drag to resize the chat list and branch viewer, or use the up and down arrow keys (Shift for bigger steps), Home and End. Double-click resets."
+          />
+        </div>
+      )}
       {/* The same 8 px gutters as the list above (layoutlint), so these rows line up with its rows. */}
       <div className="flex max-w-controls min-w-0 items-center gap-1 px-2">
         <Tooltip label={expanded ? "Hides the open chat's branches." : "Shows the open chat's branches here."}>
@@ -413,6 +445,8 @@ export function PinnedChats({
   onSortChange?: (sort: ShellSort) => void
 }) {
   const [localSort, setSort] = useState<ShellSort>("recent")
+  const params = useParams({ strict: false }) as { chatId?: string }
+  const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const sort = sortBy ?? localSort
   const [limit, setLimit] = useState(PAGE_ROWS)
   const action = useAction()
@@ -437,7 +471,12 @@ export function PinnedChats({
       {open && (
         <>
           {pins.rows.map((fork) => (
-            <ForkRow key={`${fork.chat.id}/${fork.forkId}`} fork={fork} perFork />
+            <ForkRow
+              key={`${fork.chat.id}/${fork.forkId}`}
+              fork={fork}
+              perFork
+              here={fork.chat.id === params.chatId && (shown ? fork.forkId === shown : fork.current)}
+            />
           ))}
           <ShowMore shown={pins.rows.length} total={pins.total} onMore={() => setLimit((n) => n + PAGE_ROWS)} />
         </>
@@ -589,7 +628,7 @@ function Browser({ data }: { data: ShellLibrary }) {
       />
       {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups includePersonas />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
-      <div className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
+      <div data-shell-list className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
         {grid ? (
           // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
           browse.filter === "groups" ? (

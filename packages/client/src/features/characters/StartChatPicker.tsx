@@ -91,7 +91,8 @@ function Choices({
                   {browse.sort !== "recent" && <SortDate card={c} sort={browse.sort} />}
                 </span>
               </span>
-              {c.persona && <PersonaBadge />}
+              {/* Only personas are listed under Personas, so none is marked there. */}
+              {c.persona && browse.filter !== "personas" && <PersonaBadge />}
             </Link>
             <FavouriteStar card={c} />
           </li>

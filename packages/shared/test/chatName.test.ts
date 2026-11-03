@@ -27,6 +27,8 @@ describe("chat names", () => {
     // A name the user gave stays: in ST (no stamp), or a rename here (which keeps the stamp).
     expect(chatName("Moonlit road", two)).toEqual({ name: "Moonlit road", started: null })
     expect(chatName("Moonlit road - 2026-05-11@07h51m55s691ms", two).name).toBe("Moonlit road")
+    // A renamed group's name is explicit even when it matches one of its characters.
+    expect(chatName("Cleo: 2026-05-11@07h51m55s691ms", two).name).toBe("Cleo")
   })
 
   it("dates an imported chat by when it started, given that, never by a stale file name", () => {

@@ -37,8 +37,8 @@ export const EXPLAIN = {
     "Delay until recursion: matched only once another entry's text is scanned, not the messages alone.",
   ignore_budget:
     "Still included once the lorebook budget, or this book's own, is used up. Its text still counts toward them.",
-  sticky: "Sticky: stays in for this many messages after it triggers. Kept for export; not used yet.",
-  cooldown: "Cooldown: can't trigger again for this many messages after it's been in. Kept for export; not used yet.",
+  sticky: "Sticky: keeps the entry included for this many messages after a match.",
+  cooldown: "Cooldown: waits this many messages after the entry stops before allowing another match.",
   delay: "Delay: not included until the chat has this many messages.",
   outlet_name: "Sent where a prompt has {{outlet::this name}}.",
   content: "The text sent to the model when the entry is in."

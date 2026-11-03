@@ -23,7 +23,7 @@ const startAdding = async (page: Page, name: string) => {
 const remove = (page: Page, name: string) =>
   inCast(page, async (tab) => {
     await tab.getByRole("button", { name: `More for ${name}`, exact: true }).click()
-    await page.getByRole("button", { name: "Remove from chat", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Remove from chat", exact: true }).click()
   })
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "10000", FAKE_GENERATOR_TOKENS: "10" })

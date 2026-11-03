@@ -7,7 +7,7 @@
 // touched rows can't reach on to the chat's new one. What a summary reads, and who it reaches:
 // - a slot's shown fields (`slots` columns, its versions): the forks whose tip is it or below it.
 //   A new slot reaches none (no fork's path holds it until a fork's tip moves, below);
-//   a new version neither (it's shown only once a selection or replacement names it).
+//   Every retained version contributes participation, even an unselected alternative.
 // - a fork's row (tip, lineage, deletion): that fork. Where a fork splits off reads its
 //   parent's path too: a fork's tip moving reaches its children whose tips are below a slot
 //   one of its paths holds and the other doesn't (the slots between the two tips and their
@@ -61,7 +61,8 @@ const statements: ReadonlyArray<string> = [
     purged_at ON main.slots BEGIN ${touch(SLOT, "NEW.chat_id", "NEW.id")} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_slot_delete AFTER DELETE ON main.slots
     BEGIN ${touch(CHAT, "OLD.chat_id")} END`,
-  // An unselected human-written alternative contributes persona activity too.
+  // Every new alternative contributes its cast and author, selected or not; human
+  // alternatives also contribute persona activity.
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_insert AFTER INSERT ON main.versions
     WHEN EXISTS (SELECT 1 FROM slots WHERE id = NEW.slot_id)
     BEGIN ${touch(SLOT, slotChat("NEW.slot_id"), "NEW.slot_id")} END`,
@@ -105,7 +106,8 @@ const statements: ReadonlyArray<string> = [
     BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(SELF, "NEW.chat_id", "NEW.id")}
     INSERT INTO shell_touches (kind, chat_id, ref, from_slot, to_slot) SELECT '${TIP}', NEW.chat_id, NEW.id,
       OLD.tip_slot_id, NEW.tip_slot_id WHERE OLD.tip_slot_id IS NOT NEW.tip_slot_id
-        AND OLD.tip_slot_id IS NOT NULL AND NEW.tip_slot_id IS NOT NULL AND OLD.chat_id IS NEW.chat_id;
+        AND OLD.tip_slot_id IS NOT NULL AND NEW.tip_slot_id IS NOT NULL AND OLD.chat_id IS NEW.chat_id
+        AND EXISTS (SELECT 1 FROM forks child WHERE child.parent_fork_id = NEW.id);
     ${touch(
       KIN,
       "OLD.chat_id",
@@ -142,8 +144,10 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
     if (!tracking) return
     const moved = yield* sql<{ chat_id: string; stamp: number }>`SELECT chat_id, stamp FROM shell_moved`
     if (moved.length > 0) {
+      // Decide once per moved chat. Inlining this scans all touches again for every
+      // touched version below; pinning many swipes would make settlement quadratic.
       yield* sql`WITH RECURSIVE
-        kept(chat_id, stamp) AS (
+        kept(chat_id, stamp) AS MATERIALIZED (
           SELECT m.chat_id, m.stamp FROM shell_moved m WHERE NOT EXISTS (
             SELECT 1 FROM shell_touches t WHERE t.chat_id = m.chat_id AND (t.kind = ${CHAT}
               -- A chat with insertions shows slots off its tree's paths.

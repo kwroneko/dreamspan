@@ -14,25 +14,25 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
 const shots = resolve(process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-add-buttons-screenshots"))
 mkdirSync(shots, { recursive: true })
 
-const checkNotes = async (page: Page, scope: Locator) => {
-  const create = scope.getByRole("button", { name: "New note", exact: true })
-  const pick = scope.getByRole("button", { name: "Pick a shared note", exact: true })
+const checkNotes = async (page: Page, scope: Locator, addHint: string) => {
+  // In the section's header row (owner, 2026-11-02), side by side, the same height.
+  const header = scope.locator("[data-note-section-header]").first()
+  const create = header.getByRole("button", { name: "Add note", exact: true })
+  const pick = header.getByRole("button", { name: "Link shared note", exact: true })
   await create.scrollIntoViewIfNeeded()
   const a = (await create.boundingBox())!
   const b = (await pick.boundingBox())!
-  expect([a.width, a.height, b.width, b.height]).toEqual([32, 32, 32, 32])
+  expect([a.height, b.height]).toEqual([32, 32])
   expect(b.x - a.x - a.width).toBe(4)
   expect(a.y).toBe(b.y)
   await create.focus()
   await page.keyboard.press("Shift+Tab")
   await page.keyboard.press("Tab")
-  await expect(page.getByText("An empty note of its own here.", { exact: true })).toBeVisible()
+  await expect(page.getByText(addHint).filter({ visible: true })).toBeVisible()
   await page.keyboard.press("Tab")
   await expect(pick).toBeFocused()
   await expect(
-    page.getByText("A note that shows a shared note's text: editing it changes it everywhere it's used.", {
-      exact: true
-    })
+    page.getByText("Adds a shared note here. Editing it changes it everywhere it's used.").filter({ visible: true })
   ).toBeVisible()
   await page.keyboard.press("Enter")
   const dialog = page.getByRole("dialog", { name: "Pick a shared note", exact: true })
@@ -63,17 +63,21 @@ for (const width of [1440, 390])
       const notes = await openPanel(page, "Notes")
       await expect(notes.getByRole("region", { name: "Mira's notes" })).toBeVisible()
       await shoot("chat-notes")
-      await checkNotes(page, notes.getByRole("region", { name: "This chat's notes" }))
-      await checkNotes(page, notes.getByRole("region", { name: "Mira's notes" }))
+      await checkNotes(page, notes.getByRole("region", { name: "This chat's notes" }), "Adds a new note to this chat.")
+      await checkNotes(page, notes.getByRole("region", { name: "Mira's notes" }), "Adds a new note to Mira.")
       await page.goto(`${server().url}/chats/${chat.id}?panel=card:${card.entityId}`)
       const cardPanel = page.getByRole("tabpanel", { name: "Mira", exact: true })
       await cardFieldsTab(cardPanel, "Notes")
       await expect(cardPanel.getByRole("list", { name: "The card's notes" })).toBeVisible()
       await shoot("card-tab-notes")
-      await checkNotes(page, cardPanel.getByRole("tabpanel", { name: "Notes", exact: true }))
+      await checkNotes(
+        page,
+        cardPanel.getByRole("tabpanel", { name: "Notes", exact: true }),
+        "Adds a new note to Mira."
+      )
       await page.goto(`${server().url}/library/${card.id}`)
       const fullNotes = await cardFieldsTab(page, "Notes")
       await expect(fullNotes.getByRole("list", { name: "The card's notes" })).toBeVisible()
       await shoot("card-editor-notes")
-      await checkNotes(page, fullNotes)
+      await checkNotes(page, fullNotes, "Adds a new note to Mira.")
     })

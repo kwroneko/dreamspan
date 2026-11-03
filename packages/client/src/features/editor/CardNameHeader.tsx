@@ -131,16 +131,17 @@ function CardTokens({ store }: { store: EditorStore }) {
 }
 
 /**
- * The header's last row: the token counts, then what's registered for a card's header
- * (`cardContributions`, placement "header": the Persona switch), beside them where the width
- * allows, else under them, so the header keeps the portrait's height wherever it can.
+ * The header's final rows: the chat count, then what's registered for a card's header (`cardContributions`,
+ * placement "header": the Persona switch), then the token counts on their own last row.
+ * Direct children of CardHeader's stack keep its spacing even below the portrait.
  */
 export function CardTokensRow({ store, entityId, label }: { store: EditorStore; entityId: string; label: string }) {
   return (
-    <div className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 [&>[data-card-tokens]]:shrink-0">
-      <CardTokens store={store} />
+    <>
+      <CardSurface placement="chats" entityId={entityId as EntityId} label={label} />
       <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
-    </div>
+      <CardTokens store={store} />
+    </>
   )
 }
 

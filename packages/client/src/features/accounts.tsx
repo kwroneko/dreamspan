@@ -125,9 +125,9 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => v
     if (result.ok) onOpenChange(false)
   }
   return (
-    <Dialog open onOpenChange={onOpenChange} title="New user" description="They log in with this handle and password.">
+    <Dialog open onOpenChange={onOpenChange} title="New user">
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <Field label="Handle" about="Letters, digits, '.', '_' and '-'.">
+        <Field label="Handle" about="The sign-in name: letters, digits, '.', '_' and '-'.">
           <Input value={handle} onValueChange={setHandle} autoCapitalize="none" spellCheck={false} autoComplete="off" />
         </Field>
         <Field label="Display name (optional)">

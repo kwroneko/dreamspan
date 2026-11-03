@@ -84,7 +84,6 @@ for (const width of [1800, 390])
       await expect(page.getByRole("menuitem", { name: "Duplicate", exact: true })).toBeVisible()
       await page.keyboard.press("Escape")
       await expect(toggle(scope, false)).toBeVisible()
-      await scope.getByRole("button", { name: "Select", exact: true }).click()
       const select = scope.getByRole("checkbox", { name: "Select Harbour", exact: true })
       await select.click()
       await expect(select).toBeChecked()
@@ -140,7 +139,10 @@ for (const view of ["side panel", "large editor"])
       page,
       context
     }) => {
-      test.setTimeout(300_000)
+      // Forty held presses plus tracing take longer under 6× CPU throttling. Bound each
+      // action separately so a lost target still fails promptly within the larger loop budget.
+      test.setTimeout(rate === 1 ? 300_000 : 600_000)
+      page.setDefaultTimeout(15_000)
       const panel = await setup(page, 1800, 174)
       let scope = panel
       if (view === "large editor") {
@@ -149,12 +151,15 @@ for (const view of ["side panel", "large editor"])
       }
       const cdp = await context.newCDPSession(page)
       await cdp.send("Emulation.setCPUThrottlingRate", { rate })
-      const earlier = scope
-        .getByRole("listitem")
-        .filter({ has: page.getByRole("textbox", { name: "Title of Harbour", exact: true }) })
-      const later = scope
-        .getByRole("listitem")
-        .filter({ has: page.getByRole("textbox", { name: "Title of Entry 1", exact: true }) })
+      // Resolve each view's unique title ID once. Repeating broad role queries for every
+      // candidate row can exhaust the throttled test's budget before its clicks finish.
+      const rowFor = async (title: string) => {
+        const id = await scope.getByRole("textbox", { name: `Title of ${title}`, exact: true }).getAttribute("id")
+        expect(id).toBeTruthy()
+        return page.locator(`[id=${JSON.stringify(id)}]`).locator("xpath=ancestor::*[@role='listitem'][1]")
+      }
+      const earlier = await rowFor("Harbour")
+      const later = await rowFor("Entry 1")
       const setOpen = async (row: Locator, title: string, open: boolean) => {
         const button = row.getByRole("button", { name: new RegExp(`^(Open|Close) ${title}$`) })
         if ((await button.getAttribute("aria-expanded")) !== String(open)) await button.click()

@@ -35,10 +35,15 @@ for (const width of [1440, 390])
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/import/st`)
+    await expect(page.getByRole("heading", { name: "History", exact: true })).toBeVisible()
+    const again = page.getByRole("button", { name: "Import ST data again" })
+    if (await again.isVisible()) await again.click()
     await page.getByLabel("Choose the folder").setInputFiles(root)
     await expect(page.getByText("2 files (")).toBeVisible()
     await page.getByRole("button", { name: "Import", exact: true }).click()
-    await expect(page.getByRole("link", { name: "Open your characters" })).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "Result", exact: true }).locator("xpath=ancestor::section[1]")
+    ).toContainText("Finished")
 
     const chatId = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       Effect.gen(function* () {

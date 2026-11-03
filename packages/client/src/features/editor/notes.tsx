@@ -12,18 +12,19 @@ import { usePresetWorkspace } from "./PresetWorkspace.tsx"
 import { SNIPPET_FOCUS } from "./workspaceViews.ts"
 import { Predicate } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
+import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert } from "../../ui/Surface.tsx"
-import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { Caller } from "./caller.ts"
 import { FieldTools, SwitchField, TextField } from "./controls.tsx"
 import { type EditorStore, useEditorState, useValue } from "./store.ts"
@@ -569,21 +570,6 @@ export const noteState = (doc: Doc, cards: ReadonlyArray<NoteCard>) =>
     " · "
   )
 
-/** A note's settings in a few words, for its settings section while folded. */
-export const settingsSummary = (doc: Doc) => {
-  const placement = (doc["placement"] as Placement | undefined) ?? END_OF_TAIL
-  const role = placement.mode === "none" ? null : (placement.role ?? "system")
-  return [
-    role === null ? null : `as ${role}`,
-    doc["scan_lore"] === true ? "lorebook scan" : null,
-    doc["on_by_default"] === true ? "on in every chat" : null,
-    doc["exportable"] === false && Predicate.isObject(doc["owner"]) && "card" in doc["owner"] ? "private" : null,
-    doc["agent_editable"] === true ? "agent may edit" : null
-  ]
-    .filter((part) => part !== null)
-    .join(" · ")
-}
-
 /**
  * A note's settings as History reads them (owner, 2026-11-01: words, never JSON): "Position:
  * in the history, depth 1, as system", "When: Aria's turn".
@@ -687,17 +673,68 @@ export function SharedNotePicker({
   )
 }
 
-/** A new note, or one showing a shared note. */
-export function AddNoteButtons({ onNew, onPick }: { onNew: () => void; onPick: () => void }) {
+/** Below this width a notes section's header shows its add buttons as icons, each named on hover. */
+const LABELS_FROM_PX = 320
+
+/**
+ * A notes section's header row (owner, 2026-11-02): its name on the left, and on the right
+ * **Add note** and **Link shared note**, an icon and a short label where there's room, the icon
+ * alone (its label on hover) where it's narrow. Note order means nothing, so adding is here,
+ * never at the end of the list.
+ */
+export function NoteSectionHeader({
+  title,
+  addHint,
+  onNew,
+  onPick
+}: {
+  /** The section's name: "This chat", a card's name. */
+  title: string
+  /** What Add note adds and where: "Adds a new note to this chat." */
+  addHint: string
+  onNew: () => void
+  onPick: () => void
+}) {
+  const row = useRef<HTMLDivElement>(null)
+  const [narrow, setNarrow] = useState(false)
+  useLayoutEffect(() => {
+    const element = row.current!
+    const measure = () => setNarrow(element.getBoundingClientRect().width < LABELS_FROM_PX)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const action = (label: string, icon: IconName, hint: string, onClick: () => void) => (
+    <Button
+      variant="ghost"
+      aria-label={label}
+      className={narrow ? "size-8! px-0!" : "h-8! gap-1.5 px-2!"}
+      hint={
+        narrow ? (
+          <>
+            <span className="block font-medium">{label}</span>
+            {hint}
+          </>
+        ) : (
+          hint
+        )
+      }
+      onClick={onClick}
+    >
+      <Icon name={icon} />
+      {!narrow && <span className="text-sm">{label}</span>}
+    </Button>
+  )
   return (
-    <div className="inline-flex items-center gap-1">
-      <IconButton label="New note" hint="An empty note of its own here." icon="write" onClick={onNew} />
-      <IconButton
-        label="Pick a shared note"
-        hint="A note that shows a shared note's text: editing it changes it everywhere it's used."
-        icon="link"
-        onClick={onPick}
-      />
+    <div ref={row} data-note-section-header="" className="flex min-h-8 min-w-0 items-center gap-2">
+      <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h3>
+      <span className="flex shrink-0 items-center gap-1">
+        {action("Add note", "plus", addHint, onNew)}
+        {action("Link shared note", "link", SHARED_NOTE_HINT, onPick)}
+      </span>
     </div>
   )
 }
+
+const SHARED_NOTE_HINT = "Adds a shared note here. Editing it changes it everywhere it's used."

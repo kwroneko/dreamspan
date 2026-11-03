@@ -261,14 +261,9 @@ function SetKeyDialog({
     if (result.ok) onOpenChange(false)
   }
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="Enter a new key"
-      description={origin ? `The key will be sent only to ${origin}. It's never shown again.` : undefined}
-    >
+    <Dialog open={open} onOpenChange={onOpenChange} title="Enter a new key">
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <Field label="Key">
+        <Field label="Key" about={origin ? `The key is sent only to ${origin}. It's never shown again.` : undefined}>
           {/* Keyed by the address, so a changed address empties the field. */}
           <SecretInput key={origin} name="apiKey" onEmptyChange={(empty) => setTypedFor(empty ? null : origin)} />
         </Field>

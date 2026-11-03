@@ -12,9 +12,15 @@ export const makeLibraryHandlers = Effect.gen(function* () {
   return {
     ListExportFormats: () =>
       formats.listExports.pipe(Effect.mapError(() => new ServerError({ message: "ListExportFormats failed" }))),
-    ListLibrary: ({ kind, archived }) =>
+    ListLibrary: ({ kind, archived, withFilterData }) =>
       Effect.flatMap(CurrentUser, (user) =>
-        reader.ListLibrary({ userId: user.id, kind, tag: null, archived: archived ?? false })
+        reader.ListLibrary({
+          userId: user.id,
+          kind,
+          tag: null,
+          archived: archived ?? false,
+          ...(withFilterData ? { withFilterData } : {})
+        })
       ).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], (error) =>
           Effect.logError("ListLibrary failed", error).pipe(

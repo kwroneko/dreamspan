@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
-import { expect, test } from "@playwright/test"
+import { expect, type Locator, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { NOTHING_TO_SAVE, expectSaveState, saveRevision } from "./support/saveRevision.ts"
@@ -10,6 +10,15 @@ import { expectTextBox } from "./support/textbox.ts"
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "80", FAKE_GENERATOR_TOKENS: "80" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 const shots = process.env.SCREENSHOT_DIR
+
+// The generic override explanation lives in the slot tag; the option retains its actual value.
+const expectOverridesForbidden = async (main: Locator) => {
+  const options = main.getByRole("button", { name: "Options of Main Prompt", exact: true })
+  const wasOpen = (await options.getAttribute("aria-expanded")) === "true"
+  if (!wasOpen) await options.click()
+  await expect(main.getByRole("switch", { name: "A card can't replace it", exact: true })).toBeChecked()
+  if (!wasOpen) await options.click()
+}
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
@@ -41,14 +50,14 @@ for (const width of [1440, 390])
       const preset = presets.find((p) => p.label === `Fresh ${width} ${theme}`)!
       expect(preset).toBeDefined()
       const main = page.locator('[data-prompt="main"]')
-      await expect(main.locator("[data-override]")).toHaveAttribute("data-override", "forbidden")
+      await expectOverridesForbidden(main)
       const content = `A synthetic instruction at ${width} in ${theme}.`
       await main.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }).fill(content)
       await saveRevision(page)
       await expectSaveState(page, NOTHING_TO_SAVE)
       await page.goto(`${server().url}/library/${preset.id}`)
       await expectTextBox(page.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }), content)
-      await expect(page.locator('[data-prompt="main"] [data-override]')).toHaveAttribute("data-override", "forbidden")
+      await expectOverridesForbidden(page.locator('[data-prompt="main"]'))
 
       await page.goto(`${server().url}/bin`)
       await page.getByText("Bin capacity", { exact: true }).click()

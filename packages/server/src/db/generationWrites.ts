@@ -148,6 +148,9 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           updated_at: now
         })}`
         yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
+        yield* sql`INSERT INTO lore_activations (rollout_id, entries_json, message_offset)
+          SELECT ${rolloutId}, coalesce(json_extract(${snapshot}, '$.loreTiming'), '[]'),
+            CASE WHEN json_extract(${snapshot}, '$.inputs.type') = 'continue' THEN 1 ELSE 0 END`
         // Pin the cast actually assembled, including an earlier-message swipe and a cast
         // change racing the placeholder's creation. Later undo cannot rewrite this evidence.
         yield* sql`UPDATE versions SET cast_json = (

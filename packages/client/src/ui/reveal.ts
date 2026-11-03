@@ -57,3 +57,65 @@ export function revealIfHidden(header: HTMLElement, parts: ReadonlyArray<HTMLEle
   else window.scrollBy(0, delta)
   return true
 }
+
+/**
+ * What an "Add <thing>" button calls on the item it added (owner, 2026-11-02): the whole item
+ * scrolled into view, its header included (only as far as needed; an item taller than the view
+ * shows from its header down), then its box flashes a few times so the user sees which one it
+ * is. With reduced motion it doesn't flash: a steady highlight fades instead.
+ */
+export function revealAdded(item: HTMLElement) {
+  const reveal = () => {
+    if (!inView(item)) {
+      const scroller = scrollParentOf(item)
+      const view = viewOf(item, scroller)
+      const rect = item.getBoundingClientRect()
+      const top = view.top + Math.min(view.room, 16)
+      // Fits: scroll just enough for its bottom (or its top) to show; else its top at the top.
+      const delta =
+        rect.height <= view.bottom - top
+          ? rect.top < top
+            ? rect.top - top
+            : rect.bottom - view.bottom + 8
+          : rect.top - top
+      if (scroller) scroller.scrollTop += delta
+      else window.scrollBy(0, delta)
+    }
+  }
+  reveal()
+  // A newly mounted text editor can grow after its first frame: keep the whole box in view
+  // while it settles, without restarting the flash.
+  const growing = new ResizeObserver(reveal)
+  growing.observe(item)
+  setTimeout(() => growing.disconnect(), 1000)
+  flash(item)
+}
+
+/** The box flashing: an accent ring three times, or one fading highlight with reduced motion. */
+function flash(element: HTMLElement) {
+  if (typeof element.animate !== "function") return
+  const ring = "inset 0 0 0 2px var(--color-accent)"
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+  element.dataset.flashing = ""
+  const animation = reduced
+    ? element.animate(
+        [{ boxShadow: ring }, { boxShadow: ring, offset: 0.6 }, { boxShadow: "inset 0 0 0 2px transparent" }],
+        {
+          duration: 1600,
+          easing: "ease-out"
+        }
+      )
+    : element.animate(
+        [
+          { boxShadow: "inset 0 0 0 2px transparent" },
+          { boxShadow: ring },
+          { boxShadow: "inset 0 0 0 2px transparent" }
+        ],
+        {
+          duration: 450,
+          iterations: 3,
+          easing: "ease-in-out"
+        }
+      )
+  animation.onfinish = animation.oncancel = () => delete element.dataset.flashing
+}

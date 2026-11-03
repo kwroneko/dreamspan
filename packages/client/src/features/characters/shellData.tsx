@@ -250,7 +250,7 @@ export function CharacterGrid({
           sort={sort}
           {...(pick ? { pick } : {})}
           status={status?.get(c.card.entityId)}
-          marked={(markPersonas || pick !== undefined) && c.persona}
+          marked={markPersonas && c.persona}
         />
       ))}
       {children}

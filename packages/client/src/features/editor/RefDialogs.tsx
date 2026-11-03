@@ -90,15 +90,17 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
       open
       onOpenChange={(open) => !open && !pending && onClose()}
       title={ref.kind === "card" ? "Fork card" : "Make a variant"}
-      description={
-        ref.kind === "card"
-          ? `Make an independent copy of “${ref.label}” and its notes. Unsaved changes move to the copy; the original returns to its last save. Set the copy’s names below.`
-          : `Make a variant of “${ref.label}” with its own changes. It still receives updates to the original.`
-      }
     >
       <UserDraftStatus draft={durable} />
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
-        <Field label={ref.kind === "card" ? "Display name" : "Library label"}>
+        <Field
+          label={ref.kind === "card" ? "Display name" : "Library label"}
+          about={
+            ref.kind === "card"
+              ? "Unsaved changes move to the copy; the original returns to its last save."
+              : "The variant receives updates to the original."
+          }
+        >
           <Input value={label} onChange={(event) => setLabel(event.currentTarget.value)} required />
         </Field>
         <Field

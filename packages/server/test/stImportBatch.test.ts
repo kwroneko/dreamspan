@@ -1,13 +1,19 @@
+import { docHash } from "../src/db/documents.ts"
+import { FORK_SUMMARY_FORMAT } from "../src/db/forkSummaries.ts"
 // Compare every stored message field and the derived indexes against the positional
 // import path, which still writes each version and slot separately.
-import { assert, layer } from "@effect/vitest"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { assert, it, layer } from "@effect/vitest"
 import { Effect } from "effect"
 import type { SlotId } from "@rp/shared/chat.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { Formats } from "../src/importer/Formats.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
-import { card, largeChat } from "./support/stFolder.ts"
+import { StParserRegistry } from "../src/importer/stParserRegistry.ts"
+import { tempDir } from "./support/tempDir.ts"
+import { card, largeChat, writeStBranchFamily } from "./support/stFolder.ts"
 import { sendStFile } from "./support/stUpload.ts"
 
 const config = testConfig()
@@ -143,3 +149,168 @@ layer(serverLayer(config), { excludeTestServices: true })("batched ST message in
     })
   )
 })
+
+it.live(
+  "stores identical branch families with 20–50 swipes through cached and positional matching",
+  () => {
+    const root = tempDir("st-family-parity")
+    const family = writeStBranchFamily(root, { branches: 8, messages: 40, swipeShare: 1 })
+    const clockStart = Date.now()
+    const run = (cached: boolean, change: "clean" | "local" | "swipe" | "subset") => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        if (!cached)
+          yield* (yield* StParserRegistry).register({
+            id: "chat-part",
+            module: new URL("./support/stParserPlugin.ts", import.meta.url).href,
+            exportName: "positionalChatPart"
+          })
+        const api = yield* client()
+        const owner = (yield* api.Whoami()).id
+        const { importId } = yield* api.StartStImport({ unsupported: [] })
+        yield* sendStFile(importId, "characters/Alice.png", card("Alice", "Hello."))
+        for (const file of family.files) {
+          let bytes = new Uint8Array(readFileSync(join(root, file.path)))
+          if ((change === "swipe" || change === "subset") && file === family.files[1]) {
+            const lines = new TextDecoder().decode(bytes).split("\n")
+            const first = JSON.parse(lines[1]!)
+            if (change === "subset") {
+              first.swipes = [first.mes]
+              first.swipe_info = [first.swipe_info[first.swipe_id]]
+              first.swipe_id = 0
+            } else {
+              first.swipes.push("A new synthetic swipe on the branch's shared first message.")
+              first.swipe_info.push({ send_date: first.send_date, extra: {} })
+            }
+            lines[1] = JSON.stringify(first)
+            bytes = new TextEncoder().encode(lines.join("\n"))
+          }
+          const result = yield* sendStFile(importId, file.path, bytes, {}, 256 * 1024)
+          assert.include(["added", "updated"], result.outcome)
+          if (change === "local" && file === family.files[0]) {
+            const chat = (yield* api.ListChats({ limit: 10, before: null }))[0]!
+            const entry = (yield* api.ReadPath({
+              chatId: chat.id,
+              leafSlotId: null,
+              range: { _tag: "Bottom" },
+              limit: 100
+            })).entries[0]!
+            yield* api.EditVersion({
+              slotId: entry.slotId,
+              sourceVersionId: entry.version.id,
+              content: "A local edit made while the folder is still importing.",
+              images: [],
+              expectedRowVersion: entry.rowVersion
+            })
+          }
+        }
+        yield* api.FinishStImport({ importId, notSent: [] })
+        const report = yield* api.GetStImportReport({ importId })
+        const tables = [
+          "entities",
+          "entity_refs",
+          "entity_revisions",
+          "chats",
+          "lanes",
+          "forks",
+          "slots",
+          "versions",
+          "state_events",
+          "fork_overrides"
+        ]
+        const rows = yield* fixtureSql(
+          config.dataDir,
+          [
+            ...tables.map((table) => ({ sql: `SELECT * FROM ${table} ORDER BY id` })),
+            { sql: "SELECT * FROM jobs WHERE kind = 'st-import-chat' ORDER BY id" },
+            { sql: "SELECT * FROM version_participants ORDER BY version_id, entity_id" },
+            { sql: "SELECT v.id, f.content FROM versions v JOIN versions_fts f ON f.rowid = v.seq ORDER BY v.id" },
+            { sql: "SELECT * FROM media_assets ORDER BY id" },
+            {
+              // Read before the shell can refresh stale rows: compare stored validity,
+              // including the exact stamps and the summaries they protect.
+              sql: `SELECT f.id AS expected_fork, s.*, c.shell_stamp AS chat_stamp,
+                coalesce(u.stamp, 0) AS owner_stamp,
+                s.format = ? AND s.stamp = c.shell_stamp AND s.user_stamp = coalesce(u.stamp, 0) AS valid
+                FROM forks f JOIN chats c ON c.id = f.chat_id
+                LEFT JOIN fork_summaries s ON s.fork_id = f.id
+                LEFT JOIN shell_user_stamps u ON u.user_id = c.owner_user_id ORDER BY f.id`,
+              params: [FORK_SUMMARY_FORMAT]
+            },
+            { sql: "PRAGMA foreign_key_check" }
+          ],
+          { readOnly: true }
+        )
+        assert.deepStrictEqual(rows.at(-1), [])
+        assert.lengthOf(rows[6]!, family.uniqueMessages)
+        assert.lengthOf(rows[7]!, family.uniqueVersions + (change === "local" || change === "swipe" ? 1 : 0))
+        assert.lengthOf(rows[5]!, family.files.length)
+        assert.lengthOf(rows[14]!, family.files.length)
+        assert.isTrue(rows[14]!.every((row) => row.valid === 1))
+        const library = yield* api.GetShellLibrary()
+        // All physical storage and derived search/participation rows, plus the shell's
+        // summaries. Only independent IDs, sequence offsets and wall clocks differ.
+        const ids = new Map<string, string>([
+          [importId, "import"],
+          [owner, "owner"]
+        ])
+        for (const [table, entries] of rows.entries())
+          for (const [index, row] of entries.entries()) {
+            if (typeof row.id === "string" && table !== 12) ids.set(row.id, `${table}:${index}`)
+            if (table === 7) row.seq = index
+            if (table === 2) {
+              assert.strictEqual(row.doc_hash, docHash(JSON.parse(row.doc_json as string)))
+              row.doc_hash = "verified from document"
+            }
+          }
+        // Summary baseline hashes include source-slot UUIDs. Their complete stored
+        // texts, revision history and coverage are compared above/below as ordinary rows.
+        let summarySignature = 0
+        for (const row of rows[10]!) {
+          const payload = JSON.parse(row.payload_json as string)
+          const summary = JSON.parse(payload.state).summary
+          if (typeof summary === "string" && !ids.has(summary))
+            ids.set(summary, `summary-signature:${summarySignature++}`)
+        }
+        const normalize = (value: unknown): unknown => {
+          if (typeof value === "number" && value >= clockStart) return "clock"
+          if (typeof value === "string") {
+            const known = ids.get(value)
+            if (known !== undefined) return known
+            if (value.startsWith("{") || value.startsWith("[")) {
+              try {
+                return normalize(JSON.parse(value))
+              } catch {
+                /* ordinary text */
+              }
+            }
+            return value.replace(/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi, (id) => ids.get(id) ?? id)
+          }
+          if (Array.isArray(value)) return value.map(normalize)
+          if (value !== null && typeof value === "object")
+            return Object.fromEntries(Object.entries(value).map(([key, val]) => [key, normalize(val)]))
+          return value
+        }
+        return {
+          rows: rows.map((table) => table.map(normalize)),
+          report: normalize(report),
+          library: normalize(library)
+        }
+      }).pipe(Effect.provide(serverLayer(config)), Effect.scoped)
+    }
+    return Effect.gen(function* () {
+      for (const change of ["clean", "local", "swipe", "subset"] as const) {
+        const positional = yield* run(false, change)
+        const cached = yield* run(true, change)
+        for (const [table, rows] of positional.rows.entries()) {
+          assert.lengthOf(cached.rows[table]!, rows.length, `table ${table}`)
+          for (const [row, expected] of rows.entries())
+            assert.deepStrictEqual(cached.rows[table]![row], expected, `table ${table}, row ${row}`)
+        }
+        assert.deepStrictEqual(cached.report, positional.report)
+        assert.deepStrictEqual(cached.library, positional.library)
+      }
+    })
+  },
+  120_000
+)

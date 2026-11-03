@@ -13,6 +13,7 @@ import { classifyStPath } from "@rp/shared/stFolder.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { databaseFile } from "../src/db/connection.ts"
+import { Report } from "../src/importer/stReport.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { card, encode, header, jsonl, message, stFolder } from "./support/stFolder.ts"
 import { jobEnded, sendStFile } from "./support/stUpload.ts"
@@ -282,6 +283,9 @@ describe("ST import jobs", () => {
             bytesTotal: 1000,
             at: Date.now()
           })
+          const report = new Report()
+          report.issue("settings.json", "warning", "st.preset_missing", "The selected preset wasn't imported.")
+          report.issue("broken.json", "error", "st.invalid_json", "Invalid JSON.")
           yield* writer.StImportJobUpdate({
             userId: user.id,
             id,
@@ -292,8 +296,14 @@ describe("ST import jobs", () => {
             bytesDone: 400,
             currentFile: "chats/A/A.jsonl",
             countsJson: JSON.stringify({ chat: { added: 4, updated: 0, unchanged: 0, skipped: 0, failed: 0 } }),
-            attention: 0
+            attention: 2,
+            reportJson: JSON.stringify(report.build())
           })
+          // A recovery checkpoint must not leak its pending warning while still running.
+          assert.deepStrictEqual(
+            (yield* api.GetStImport({ importId: id })).report!.issues.map((issue) => issue.code),
+            ["st.invalid_json"]
+          )
         }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
         // The same data folder, a new server.
         yield* Effect.gen(function* () {
@@ -305,6 +315,10 @@ describe("ST import jobs", () => {
           assert.strictEqual(job!.counts.chat?.added, 4)
           assert.isNull(job!.currentFile)
           assert.include(job!.error!, "server stopped")
+          assert.deepStrictEqual(
+            (yield* api.GetStImport({ importId: id })).report!.issues.map((issue) => issue.code),
+            ["st.preset_missing", "st.invalid_json"]
+          )
         }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
       })
     },

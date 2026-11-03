@@ -17,7 +17,6 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ActionMenu, type ActionMenuItem } from "../../ui/Menu.tsx"
 import { Popover } from "../../ui/Popover.tsx"
-import { Segmented } from "../../ui/Segmented.tsx"
 import { inlineExplanationClass } from "../../ui/Explanation.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
@@ -36,29 +35,36 @@ import type { ChatSession, ChatView } from "./session.ts"
 
 const entries = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
 
+/** Two books' names alike, ignoring case and spacing ("Ann 's Lorebook" and "Ann's lorebook"). */
+const sameName = (a: string, b: string) => a.toLowerCase().replace(/\s+/g, "") === b.toLowerCase().replace(/\s+/g, "")
+
 const heading = "text-xs font-medium tracking-wide text-muted uppercase"
 
 const NO_BOOKS: ReadonlyArray<PresetLorebook> = []
 
 /**
- * Where this chat's entries go (DESIGN §1.3): below the history, or where each entry's position
- * says. One setting for every book in the chat, so it follows the books, in plain words.
+ * Where this chat's entries go (DESIGN §1.3; owner, 2026-11-02): one switch, on by default, that
+ * forces every lorebook's entries below the history, its full explanation behind "?".
  */
 function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   const [open, setOpen] = useState(false)
   return (
-    <section aria-labelledby="lore-placement" className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <h3 id="lore-placement" className={heading}>
-          Where entries go
-        </h3>
+    <section aria-label="Where entries go" className="flex flex-col gap-1">
+      <div className="flex items-start gap-1">
+        <Switch
+          checked={on}
+          onCheckedChange={onChange}
+          hint="On, every matching entry goes in one block just after the history. Off, each entry goes where its own position says."
+        >
+          Force all lorebook entries below the history
+        </Switch>
         <Popover
           open={open}
           onOpenChange={setOpen}
           trigger="?"
           triggerLabel="Why below the history"
           hint="Why?"
-          triggerClassName={`${buttonClass("ghost")} h-7 w-7 px-0`}
+          triggerClassName={`${buttonClass("ghost")} -mt-1 h-7 w-7 shrink-0 px-0`}
           title="Below the history"
           side="bottom"
           align="end"
@@ -69,31 +75,13 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
             slowly and at full price.
           </p>
           <p className="text-sm">
-            Below the history, every entry that matches goes in one block just after the history, and is looked at again
-            every turn. Where each entry says, entries above the history stay until the history's start next moves.
+            On, every entry that matches goes in one block just after the history, and is looked at again every turn.
+            Off, each entry goes where its own position says; entries above the history stay until the history's start
+            next moves.
           </p>
         </Popover>
       </div>
-      <Segmented
-        label="Where entries go"
-        wrap
-        value={on ? "below" : "positions"}
-        onValueChange={(next) => onChange(next === "below")}
-        options={[
-          {
-            value: "below",
-            label: "Below the history",
-            description: "Every matching entry goes in one block just after the history, so the history stays cached."
-          },
-          {
-            value: "positions",
-            label: "Where each entry says",
-            description:
-              "Each entry goes where its own position says. One above the history can make the provider read the whole history again."
-          }
-        ]}
-      />
-      <p className="text-sm text-muted">For every book in this chat.</p>
+      <p className="ps-12 text-sm text-muted">Applies to this chat, for all lorebooks.</p>
     </section>
   )
 }
@@ -261,6 +249,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
   const openPreset = () => preset.ref && workspace?.open(preset.ref, PRESET_LOREBOOKS_FOCUS)
   const presetLabel = presetName ? `From the preset ${presetName}` : "From the preset"
 
+  const ownOn = own.filter((card) => !(cast?.cardLorebooksOff ?? []).includes(card.entityId))
   const shownOf = (row: BookRow): Shown => {
     if (row.source === "card") {
       const card = cards.get(row.id)!
@@ -280,10 +269,18 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
     }
     const ref = byId.get(row.id)
     const name = nameOf(row.id)
+    const twin = ownOn.find(
+      (card) =>
+        sameName(card.lorebookName ?? `${card.name}'s lorebook`, name) &&
+        (ref?.lorebookEntries === undefined || card.lorebookEntries === ref.lorebookEntries)
+    )
     if (row.source === "preset")
       return {
         name,
-        from: row.on ? "Sent with the preset" : "In the preset, switched off there",
+        from: [
+          row.on ? "Sent with the preset" : "In the preset, switched off there",
+          ...(ref?.lorebookEntries === undefined ? [] : [entries(ref.lorebookEntries)])
+        ].join(" · "),
         switchHint: `Switches it in the preset ${presetName ?? ""}: every chat using that preset, as you switch it.`,
         presetLink: { label: presetLabel, open: openPreset },
         edit: ref ? { ref: ref.id, root: [] } : null,
@@ -297,7 +294,10 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
           : row.presetSends
             ? "Off in this chat, but the preset sends it"
             : "Off in this chat",
-        ...(ref?.subtitle ? [ref.subtitle] : [])
+        ...(ref?.lorebookEntries === undefined ? [] : [entries(ref.lorebookEntries)]),
+        ...(ref?.subtitle ? [ref.subtitle] : []),
+        // The same book as a card's own, both active (an ST import keeps both): its entries go twice.
+        ...(twin && row.on ? [`Also active as ${twin.name}'s own lorebook`] : [])
       ].join(" · "),
       switchHint: "Off stops the book in this chat; it stays listed here, off, until you remove it.",
       ...(row.presetSends ? { presetLink: { label: `Also ${presetLabel.toLowerCase()}`, open: openPreset } } : {}),

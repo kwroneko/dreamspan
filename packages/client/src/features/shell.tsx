@@ -137,8 +137,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   // On the chats page the list is the page; the sidebar doesn't show it twice.
   const onChats = useLocation({ select: (location) => location.pathname === "/chats" })
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-3">
-      <div className="flex items-center gap-1 p-2">
+    <div className="flex h-full min-h-0 flex-col gap-3 px-3 pb-3">
+      <div className="-mx-3 mb-1 flex h-shell-header shrink-0 items-center gap-1 border-b border-border px-5 py-2">
         <Link to="/" className="mr-auto truncate font-semibold" onClick={onNavigate}>
           rp-harness
         </Link>
@@ -249,6 +249,21 @@ const hiddenKey = (userId: string) => `rp.sidebarHidden.${userId}`
 /** Where storage is off. */
 const hiddenInMemory = new Map<string, boolean>()
 const hiddenListeners = new Set<() => void>()
+const setSidebarHidden = (userId: string, next: boolean) => {
+  hiddenInMemory.set(userId, next)
+  try {
+    if (next) localStorage.setItem(hiddenKey(userId), "1")
+    else localStorage.removeItem(hiddenKey(userId))
+  } catch {
+    /* In memory when storage is off. */
+  }
+  for (const listener of hiddenListeners) listener()
+}
+/** Reveal navigation after an entry point elsewhere scopes the left column. */
+export const showAppNavigation = (userId: string) => {
+  setSidebarHidden(userId, false)
+  if (!matchMedia("(min-width: 1024px)").matches) openAppMenu()
+}
 const readHidden = (userId: string) => {
   try {
     return localStorage.getItem(hiddenKey(userId)) === "1"
@@ -271,14 +286,7 @@ function useSidebarHidden(): [boolean, (hidden: boolean) => void] {
   const userId = useSession().user.id
   const hidden = useSyncExternalStore(subscribeHidden, () => readHidden(userId))
   const set = (next: boolean) => {
-    hiddenInMemory.set(userId, next)
-    try {
-      if (next) localStorage.setItem(hiddenKey(userId), "1")
-      else localStorage.removeItem(hiddenKey(userId))
-    } catch {
-      /* In memory when storage is off. */
-    }
-    for (const listener of hiddenListeners) listener()
+    setSidebarHidden(userId, next)
   }
   return [hidden, set]
 }

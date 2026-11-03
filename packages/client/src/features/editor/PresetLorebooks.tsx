@@ -56,10 +56,10 @@ export function PresetLorebooks({
             return (
               <li
                 key={book.id}
-                className={`flex items-center gap-1 rounded-md border border-border px-2 py-1.5 ${book.enabled ? "" : "opacity-70"}`}
+                className={`flex items-center gap-1 rounded-md border border-border px-2 py-2 ${book.enabled ? "" : "opacity-70"}`}
               >
                 <Icon name="book" className="shrink-0 text-muted" />
-                <div className="min-w-0 flex-1 pl-1">
+                <div className="min-w-0 flex-1 pl-2">
                   <Switch
                     checked={book.enabled}
                     disabled={!ref}

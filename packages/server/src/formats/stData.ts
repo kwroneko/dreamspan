@@ -51,6 +51,8 @@ interface StSummarySettings {
 }
 
 export interface StSettings {
+  readonly characterTags?: Readonly<Record<string, ReadonlyArray<string>>>
+  readonly tagNames?: Readonly<Record<string, string>>
   /** `power_user` settings that are a preset's here, copied into each imported preset. */
   readonly textSwitches?: {
     readonly pin_examples?: boolean
@@ -156,6 +158,17 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
       role: numberOr(described.role, 0)
     })
   }
+  const tagNames = Object.fromEntries(
+    (Array.isArray(settings.tags) ? settings.tags : []).slice(0, 10000).flatMap((value) => {
+      const tag = object(value)
+      return typeof tag.id === "string" && typeof tag.name === "string" ? [[bounded(tag.id), bounded(tag.name)]] : []
+    })
+  )
+  const characterTags = Object.fromEntries(
+    Object.entries(object(settings.tag_map))
+      .slice(0, 10000)
+      .map(([name, ids]) => [bounded(name.replace(/\.[^.]*$/, "")), strings(ids, 1000)])
+  )
   const worldInfo = object(object(settings.world_info_settings).world_info)
   const extensions = object(settings.extension_settings)
   const memory = object(extensions.memory)
@@ -189,6 +202,8 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
     ...(switches || reasoning
       ? { textSwitches: { ...switches, ...(reasoning ? { reply_sections: reasoning } : {}) } }
       : {}),
+    ...(Object.keys(tagNames).length ? { tagNames } : {}),
+    ...(Object.keys(characterTags).length ? { characterTags } : {}),
     selectedPreset: typeof selectedPreset === "string" && selectedPreset !== "" ? bounded(selectedPreset) : null,
     defaultPersona:
       typeof powerUser.default_persona === "string" && powerUser.default_persona !== ""

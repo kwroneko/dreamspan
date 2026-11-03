@@ -104,6 +104,12 @@ export const setImageMode = (mode: ImageMode) => {
   store(MODE_KEY, mode)
 }
 
+/** Choose concealment without hiding images that are currently shown. */
+export const setImageConceal = (conceal: Exclude<ImageMode, "show">) => {
+  if (current.mode === "show") store(CONCEAL_KEY, conceal)
+  else setImageMode(conceal)
+}
+
 /** Show ↔ the concealment last picked: the one-click toggle. */
 export const toggleImages = () => setImageMode(current.mode === "show" ? current.conceal : "show")
 

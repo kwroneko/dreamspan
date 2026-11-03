@@ -22,9 +22,9 @@ interface Violation {
 }
 
 /** The smallest surrounding content inset (0.5rem, shared rowSpacing.ts). */
-export async function layoutAudit(page: Page, options: { inset?: number } = {}): Promise<Violation[]> {
+export async function layoutAudit(page: Page, options: { inset?: number; scope?: string } = {}): Promise<Violation[]> {
   return page.evaluate(
-    ({ inset }) => {
+    ({ inset, scope }) => {
       const tolerance = 1
       const controls =
         "button, input:not([type=hidden]), textarea, select, a[href], [role=button], [role=switch], [role=checkbox], [role=radio], [role=combobox], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=option], [role=tab], [contenteditable=true]"
@@ -149,6 +149,7 @@ export async function layoutAudit(page: Page, options: { inset?: number } = {}):
       const results: Violation[] = []
       const seen = new Set<string>()
       const add = (kind: Violation["kind"], el: HTMLElement, measurement: string, related?: HTMLElement) => {
+        if (scope && ![...ancestors(el)].some((node) => node.matches(scope))) return
         if (ignored(el, kind) || (related && ignored(related, kind))) return
         const selector = path(el),
           key = `${kind}:${selector}:${related ? path(related) : ""}`
@@ -467,18 +468,18 @@ export async function layoutAudit(page: Page, options: { inset?: number } = {}):
         }
       return results
     },
-    { inset: options.inset ?? 8 }
+    { inset: options.inset ?? 8, scope: options.scope }
   )
 }
 
 /** Attach ALL measurements and a crop per violation before failing the test. */
-export async function expectLayout(page: Page, info: TestInfo, surface: string) {
+export async function expectLayout(page: Page, info: TestInfo, surface: string, options: { scope?: string } = {}) {
   await page.mouse.move(0, 0)
   await page.evaluate(async () => {
     await document.fonts.ready
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
   })
-  const violations = await layoutAudit(page)
+  const violations = await layoutAudit(page, options)
   const slug = surface.replace(/[^a-z0-9-]/gi, "-")
   for (const [i, violation] of violations.entries()) {
     violation.crop = info.outputPath(`${slug}-${i}-${violation.kind}.png`)

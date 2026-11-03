@@ -1,9 +1,9 @@
 // The save cluster, the same everywhere something is saved as a version (owner, 2026-11-01 and
 // 2026-11-02, DESIGN §10.1): two icon buttons, Save and Save with a message, and Revert beside
-// them while something changed. What's typed is already in use as it's typed, so saving keeps
-// a version to come back to; the cluster says only what the user needs: whether there's
-// anything to save, that it's saving, that it saved, or why it couldn't. It keeps one size in
-// every state: Revert's place is kept while it's hidden, and each state swaps an icon or a
+// them, always shown and greyed out while nothing changed (owner, 2026-11-02). What's typed is
+// already in use as it's typed, so saving keeps a version to come back to; the cluster says
+// only what the user needs: whether there's anything to save, that it's saving, that it saved,
+// or why it couldn't. It keeps one size in every state, and each state swaps an icon or a
 // colour, never text. Its explanations, on hover and focus, carry the words. Save with a
 // message opens a one-line field in its place (Enter saves, Escape cancels). Editors bind it
 // to their store (`SaveRevision`, `HeldChangesBar`).
@@ -48,7 +48,8 @@ export function SaveControls({
   onRevert,
   saveHint = saveHints.save,
   revertLabel = "Revert to the last save",
-  revertHint = saveHints.revert
+  revertHint = saveHints.revert,
+  labelsInHints = false
 }: {
   /** Something differs from the last save. */
   changed: boolean
@@ -60,7 +61,8 @@ export function SaveControls({
   /** Saves with this message (null: none); false keeps the message field open. */
   onSave: (message: string | null) => Promise<boolean>
   /**
-   * Puts every change back as the last save had it; shown while something changed. The text
+   * Puts every change back as the last save had it; always shown, enabled while something
+   * changed. The text
    * there now stays in each field's edit history, so it asks nothing.
    */
   onRevert?: (() => Promise<unknown>) | undefined
@@ -69,6 +71,8 @@ export function SaveControls({
   /** Revert's accessible name, where it undoes less than every edit (a held order: "Revert"). */
   revertLabel?: string
   revertHint?: string
+  /** Repeat icon labels above their explanations in a compact toolbar. */
+  labelsInHints?: boolean
 }) {
   const [writing, setWriting] = useState(false)
   const [reverting, setReverting] = useState(false)
@@ -100,6 +104,7 @@ export function SaveControls({
   }
 
   const actionable = state === "unsaved" || state === "failed"
+  const revertable = changed && state !== "saving" && !reverting
   const hint =
     state === "saving"
       ? saveHints.saving
@@ -112,6 +117,16 @@ export function SaveControls({
             : state === "clean"
               ? saveHints.clean
               : saveHint
+  const explain = (label: string, hint: string) =>
+    labelsInHints ? (
+      <>
+        <span className="font-medium">{label}</span>
+        <br />
+        <span>{hint}</span>
+      </>
+    ) : (
+      hint
+    )
   const announcement = state === "saved" ? "Saved" : state === "failed" ? `Couldn't save: ${sentence(failed!)}` : ""
 
   return (
@@ -145,7 +160,7 @@ export function SaveControls({
                 ? "cursor-default bg-transparent! text-success! opacity-100! data-disabled:pointer-events-auto!"
                 : ""
             } ${state === "saving" ? "data-disabled:pointer-events-auto! data-disabled:opacity-100!" : ""}`}
-            hint={hint}
+            hint={explain("Save", hint)}
             onClick={() => actionable && void save(null)}
           >
             {state === "saving" ? (
@@ -164,28 +179,32 @@ export function SaveControls({
             disabled={!actionable}
             focusableWhenDisabled
             className={`${square} ${actionable ? "" : inert}`}
-            hint={actionable ? saveHints.message : state === "saving" ? saveHints.saving : hint}
+            hint={explain(
+              "Save with a message…",
+              actionable ? saveHints.message : state === "saving" ? saveHints.saving : hint
+            )}
             onClick={() => actionable && setWriting(true)}
           >
             <Icon name="save-message" />
           </Button>
           {onRevert && (
-            // Its place is kept while nothing changed, so the cluster never changes size.
-            <span className={changed && state !== "saving" ? "contents" : "invisible inline-flex"}>
-              <Button
-                variant="ghost"
-                aria-label={revertLabel}
-                pending={reverting}
-                className={square}
-                hint={revertHint}
-                onClick={() => {
-                  setReverting(true)
-                  void onRevert().finally(() => setReverting(false))
-                }}
-              >
-                {!reverting && <Icon name="undo" />}
-              </Button>
-            </span>
+            // Always shown (owner, 2026-11-02): greyed out while there's nothing to revert.
+            <Button
+              variant="ghost"
+              aria-label={revertLabel}
+              pending={reverting}
+              disabled={!revertable}
+              focusableWhenDisabled
+              className={`${square} ${revertable || reverting ? "" : inert}`}
+              hint={explain(revertLabel, revertHint)}
+              onClick={() => {
+                if (!revertable) return
+                setReverting(true)
+                void onRevert().finally(() => setReverting(false))
+              }}
+            >
+              {!reverting && <Icon name="undo" />}
+            </Button>
           )}
         </>
       )}

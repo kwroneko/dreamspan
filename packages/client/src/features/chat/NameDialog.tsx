@@ -30,7 +30,7 @@ export function NameDialog({
   label: string
   /** The name now, which the field starts with. */
   initial: string
-  /** Under the field: what an empty name does, say. */
+  /** Help beside the field: what an empty name does, say. */
   description?: ReactNode
   maxLength: number
   saveLabel?: string
@@ -98,7 +98,7 @@ function NameForm({
         if (!pending) void durable.commit(name, () => onSave(name))
       }}
     >
-      <Field label={label} description={description}>
+      <Field label={label} about={description}>
         <Input
           value={name}
           maxLength={maxLength}

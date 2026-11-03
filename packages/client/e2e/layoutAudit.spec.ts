@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { ChatId, EntityId, VersionId } from "@rp/shared/chat.ts"
 import { findStRoots } from "@rp/shared/stFolder.ts"
@@ -51,6 +51,9 @@ test("the detector catches geometry defects and respects documented intent", asy
   expect(found.find((v) => v.kind === "inset" && v.related === "#edge")?.measurement).toContain("left 0.00px")
   expect(found.find((v) => v.kind === "alignment")?.measurement).toContain("4.00px")
   expect(found.some((v) => v.kind === "inset" && v.related === "#menu-edge")).toBe(true)
+  const scoped = await layoutAudit(page, { scope: "#menu-edge" })
+  expect(scoped.length).toBeGreaterThan(0)
+  expect(scoped.every((v) => v.related === "#menu-edge")).toBe(true)
   await page.setContent(`<style>body{margin:20px}button{padding:8px}</style>
     <div style="width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Intended ellipsis on this very long text</div>
     <div data-layout-audit-ignore="inset: joined segments share an outer border" style="border:1px solid"><button>A</button></div>
@@ -262,11 +265,23 @@ test.describe("synthetic library and every app surface", () => {
         })
       )
     }
+    if (process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1") {
+      await admin((api) =>
+        Effect.gen(function* () {
+          for (const name of ["Iris", "Echo", "Nova", "Sky Keeper", "Hidden Rowan", "Hidden Willow"])
+            yield* api.CreateCard({ label: name, name })
+        })
+      )
+    }
     const seeded = await admin((api) =>
       Effect.gen(function* () {
         const cards = yield* api.ListLibrary({ kind: "card" })
         const a = cards.find((c) => c.label === "Aria Vance") ?? cards[0]!
         const b = cards.find((c) => c.entityId !== a.entityId)!
+        const overflowCards =
+          process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1"
+            ? (yield* api.ListCards()).filter((card) => !card.persona).slice(0, 6)
+            : []
         const preset = (yield* api.ListLibrary({ kind: "preset" }))[0]!
         const book = (yield* api.ListLibrary({ kind: "lorebook" }))[0]!
         const connection = yield* api.CreateConnection({
@@ -283,10 +298,16 @@ test.describe("synthetic library and every app surface", () => {
         })
         const model = yield* api.AddUserModel({ connectionId: connection.id, key: "fake-small", overrides: {} })
         yield* api.SetGenerationDefaults({
-          defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+          defaults: {
+            model: { connection: connection.id, model: model.id },
+            preset: process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ? preset.id : null
+          }
         })
         const started = yield* api.StartChat({
-          cards: [a.entityId, b.entityId],
+          cards:
+            process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1"
+              ? overflowCards.map((card) => card.entityId)
+              : [a.entityId, b.entityId],
           persona: null,
           greeting: null,
           first: { _tag: "Send", content: "A synthetic group gathers at the harbour.", speakerEntityId: null }
@@ -341,7 +362,7 @@ test.describe("synthetic library and every app surface", () => {
     if (!process.env.LAYOUT_AUDIT_WORK) rmSync(work, { recursive: true, force: true })
   })
 
-  for (const width of [1440, 1024, 390])
+  for (const width of process.env.LAYOUT_AUDIT_WIDTHS?.split(",").map(Number) ?? [1440, 1024, 390])
     for (const theme of ["light", "dark"] as const) {
       test(`${width} ${theme}: all surfaces`, async ({ page }, info) => {
         test.setTimeout(1_800_000)
@@ -356,7 +377,12 @@ test.describe("synthetic library and every app surface", () => {
             timeout: 30000
           })
           const inspect = async (suffix = "") => {
-            const violations = await expectLayout(page, info, surface + suffix)
+            const violations = await expectLayout(
+              page,
+              info,
+              surface + suffix,
+              process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1" ? { scope: '[role="menu"]' } : {}
+            )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
             writeFileSync(join(work, `findings-${width}-${theme}.json`), JSON.stringify(findings, null, 2))
@@ -394,6 +420,13 @@ test.describe("synthetic library and every app surface", () => {
           await page.getByText("Bin capacity", { exact: true }).click()
           await audit("bin-capacity")
           for (const path of ["/import", "/import/st"]) await go(path.slice(1).replaceAll("/", "-"), path)
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_IMPORT_ONLY === "1") {
+          await go("import-st", "/import/st")
+          await page.getByRole("button", { name: "Import ST data again" }).click()
+          await expect(page.getByLabel("Folder path")).toBeVisible()
+          await audit("import-st-form")
           return
         }
         if (process.env.LAYOUT_AUDIT_PERSONA_BADGES_ONLY === "1") {
@@ -439,6 +472,56 @@ test.describe("synthetic library and every app surface", () => {
           if (await page.getByRole("tablist", { name: "Chat panel", exact: true }).isVisible()) await closePanel(page)
           await page.getByRole("button", { name: /^Speaking as / }).click()
           await audit("persona-speaker-switcher")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1") {
+          const formats = async (surface: string, nested: boolean) => {
+            if (nested) {
+              // The detector moves the pointer aside. Open by keyboard so the submenu
+              // remains present throughout the measurements and scroll-end samples.
+              await page.mouse.move(0, 0)
+              const trigger = page.getByRole("menuitem", { name: "Export…", exact: true })
+              await trigger.focus()
+              await trigger.press("ArrowRight")
+            } else await page.getByRole("button", { name: "Export…", exact: true }).click()
+            await expect(page.getByRole("menuitem", { name: "PNG", exact: true })).toBeVisible()
+            await audit(surface)
+            await expect(page.getByRole("menuitem", { name: "PNG", exact: true })).toBeVisible()
+          }
+          await go("library-before-export", "/library")
+          await page
+            .getByRole("listitem")
+            .filter({ has: page.locator(`a[href="/library/${cardRef}"]`) })
+            .getByRole("button", { name: /^More actions for/ })
+            .click()
+          await formats("menu-library-export", true)
+          await go("editor-before-export", `/library/${cardRef}`)
+          await formats("menu-editor-export", false)
+          await go("chat-before-export", `/chats/${chatId}`)
+          await openPanel(page, "Cast")
+          await page.getByRole("button", { name: `More for ${cardName}`, exact: true }).click()
+          await formats("menu-cast-export", true)
+          await page.keyboard.press("Escape")
+          await page.keyboard.press("Escape")
+          const characterTab = await openPanel(page, cardName)
+          await characterTab.getByRole("button", { name: "Export…", exact: true }).click()
+          await expect(page.getByRole("menuitem", { name: "PNG", exact: true })).toBeVisible()
+          await audit("menu-character-export")
+          await go("pending-before-export", `/cards/${cardId}/chat`)
+          await openPanel(page, "Cast")
+          await page.getByRole("button", { name: `More for ${cardName}`, exact: true }).click()
+          await formats("menu-pending-cast-export", true)
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1") {
+          await go("group-chat", `/chats/${chatId}`)
+          const panel = await openPanel(page, "Prompt preset")
+          await expect(panel.getByRole("list", { name: "Preset blocks" })).toBeVisible({ timeout: 60000 })
+          await audit("panel-Prompt-preset")
+          await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
+          const large = page.getByRole("dialog", { name: "Preset editor", exact: true })
+          await expect(large.getByRole("list", { name: "Prompt order", exact: true })).toBeVisible({ timeout: 60000 })
+          await audit("preset-large")
           return
         }
         if (process.env.LAYOUT_AUDIT_CARD_HEADERS_ONLY === "1") {
@@ -487,15 +570,96 @@ test.describe("synthetic library and every app surface", () => {
           await audit("dialog-start-chat-popover")
           return
         }
+        if (process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1") {
+          await go("home-groups", "/?show=groups")
+          await go("library-rows", "/library")
+          await go("chat-list", "/chats")
+          await go("group-chat-header", `/chats/${chatId}`)
+          await openPanel(page, "Cast")
+          await audit("panel-Cast")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_IMAGES_ONLY === "1") {
+          await go("shell-header", "/")
+          await showAppNavigation(page)
+          await audit("shell-navigation-header")
+          const navigation =
+            width < 1024 ? page.locator('[data-layout-overlay="Mobile navigation drawer covers the page"]') : page
+          await navigation
+            .getByRole("button", { name: /^(Blur|Hide|Show) all images$/ })
+            .filter({ visible: true })
+            .first()
+            .click({ button: "right" })
+          await audit("image-concealment-menu")
+          await page.keyboard.press("Escape")
+          await hideAppNavigation(page)
+          await go("chat-before-display", `/chats/${chatId}`)
+          await openPanel(page, "Display")
+          await audit("panel-Display")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_HEADER_ONLY === "1") {
           await go("pending-chat-header", `/cards/${cardId}/chat`)
           await go("saved-chat-header", `/chats/${chatId}`)
+          await openPanel(page, "This chat")
+          await audit("panel-header")
           return
         }
         if (process.env.LAYOUT_AUDIT_NOTES_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, "Notes")
           await audit("panel-Notes")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_PERSONA_TOGGLE_ONLY === "1") {
+          const toggle = (scope: Page | Locator) => scope.getByRole("button", { name: "Include personas", exact: true })
+          const checkRow = async (scope: Page | Locator) => {
+            const button = toggle(scope)
+            const direction = scope.getByRole("button", { name: /^Order:/ }).last()
+            const a = (await button.boundingBox())!
+            const b = (await direction.boundingBox())!
+            expect(a.y).toBe(b.y)
+            expect(a.width).toBe(b.width)
+            expect(a.height).toBe(b.height)
+            expect(a.x).toBeGreaterThan(b.x)
+          }
+          await go("home-all", "/")
+          const main = page.getByRole("main")
+          await checkRow(main)
+          await toggle(main).click()
+          await audit("home-include-personas")
+          await showAppNavigation(page)
+          await page
+            .getByRole("group", { name: "Left panel", exact: true })
+            .getByRole("button", { name: "Characters", exact: true })
+            .click()
+          const sideToggle = page.getByRole("button", { name: "Include personas", exact: true }).first()
+          // The sidebar's grid is the first browser in document order.
+          await expect(sideToggle).toBeVisible()
+          await checkRow(sideToggle.locator(".."))
+          await audit("sidebar-Characters")
+          await sideToggle.click()
+          await audit("sidebar-include-personas")
+          if (width === 1440) {
+            const handle = page.getByRole("separator", { name: "Resize sidebar", exact: true })
+            const box = (await handle.boundingBox())!
+            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+            await page.mouse.down()
+            await page.mouse.move(0, box.y + box.height / 2, { steps: 10 })
+            await page.mouse.up()
+            await checkRow(sideToggle.locator(".."))
+            await audit("sidebar-minimum-include-personas")
+          }
+          await hideAppNavigation(page)
+          await go("group-chat", `/chats/${chatId}`)
+          const cast = await openPanel(page, "Cast")
+          const add = cast.getByRole("button", { name: "Add characters", exact: true })
+          if ((await add.getAttribute("aria-expanded")) === "false") await add.click()
+          const section = cast.getByRole("region", { name: "Add characters", exact: true })
+          await checkRow(section)
+          await audit("cast-add-characters")
+          await toggle(section).click()
+          await audit("cast-add-personas")
           return
         }
         if (process.env.LAYOUT_AUDIT_HOME_ONLY === "1") {
@@ -549,10 +713,10 @@ test.describe("synthetic library and every app surface", () => {
         }
         // Personas mixed in, each marked "Persona" (personalists).
         if (selected.test("home-include-personas")) {
-          const include = page.getByRole("main").getByRole("checkbox", { name: "Include personas" })
-          await include.check()
+          const include = page.getByRole("main").getByRole("button", { name: "Include personas", exact: true })
+          await include.click()
           await audit("home-include-personas")
-          await include.uncheck()
+          await include.click()
         }
         await showAppNavigation(page)
         for (const name of ["Characters", "Chats"]) {

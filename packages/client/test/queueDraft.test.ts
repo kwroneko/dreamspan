@@ -34,7 +34,8 @@ it("a failed queue draft save keeps the edit and refuses Cancel until a retry su
       return {
         ok: true,
         value: await Effect.runPromise(
-          run((_tag: string, payload: { content: string }) => {
+          run((tag: string, payload: { content: string }) => {
+            if (tag === "GetMessageDraft") return Effect.succeed(null)
             saved = payload.content
             return Effect.succeed(draft(saved))
           })

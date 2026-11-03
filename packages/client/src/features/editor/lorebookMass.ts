@@ -1,49 +1,16 @@
 // Changes to many lorebook entries at once (owner, 2026-11-01): Enable all / Disable all, and
-// "Change for selected…", which sets one setting on the selected entries and leaves every
-// other setting as it was. The settings it offers are a registry a plugin can add to, replace
-// or disable (spec/PLUGINS.md §8); the defaults are registered in lorebookColumns.tsx.
+// "Edit N entries" (LorebookMassEdit), which sets the settings ticked on the selected entries
+// and leaves every other setting as it was. Its settings are the entry form's registry
+// (lorebookSettings.ts).
 //
 // A change to many entries is an ordinary unsaved change, as any edit is (owner, 2026-11-02:
 // "Isn't that how you would undo it if they didn't save themselves?"): Revert beside Save
 // undoes it and Save keeps it. No revision is cut for it, and its toast has no Undo of its own.
 import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
 import type { FieldPath } from "@rp/shared/editing.ts"
-import { makeRegistry } from "../../registry.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { entryPath } from "./lorebookTable.ts"
 import type { EditorStore } from "./store.ts"
-
-export type MassValue = string | number | boolean | null
-
-/** How a setting's new value is picked in the dialog. */
-type MassInput =
-  | {
-      readonly kind: "choice"
-      readonly options: ReadonlyArray<{ readonly value: string; readonly label: string; readonly description?: string }>
-    }
-  | {
-      readonly kind: "number"
-      readonly min?: number
-      readonly max?: number
-      readonly integer?: boolean
-      readonly nullable?: boolean
-    }
-  | { readonly kind: "switch"; readonly on: string; readonly off: string }
-  | { readonly kind: "text" }
-
-export interface LorebookMassSetting {
-  readonly id: string
-  readonly order: number
-  readonly label: string
-  /** What the setting does, as its explanation in the picker. */
-  readonly description: string
-  readonly input: MassInput
-  /** The dialog's starting value: the first selected entry's. */
-  readonly current: (entry: LorebookEntry) => MassValue
-  /** The fields it sets for a value: only these change. */
-  readonly patch: (value: MassValue) => Partial<LorebookEntry>
-}
-export const lorebookMassSettings = makeRegistry<LorebookMassSetting>()
 
 export interface EntryEdit {
   readonly path: FieldPath

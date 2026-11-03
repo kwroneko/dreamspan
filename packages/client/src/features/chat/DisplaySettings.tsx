@@ -10,7 +10,8 @@ import type { GlobalRegex } from "@rp/shared/regexScripts.ts"
 import { createContext, useContext, useMemo, useEffect, useState, type ReactNode } from "react"
 import { AppClient } from "../../rpc.ts"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
-import { Fieldset } from "../../ui/Field.tsx"
+import { Field, Fieldset } from "../../ui/Field.tsx"
+import { Select } from "../../ui/Select.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useSession } from "../../session.ts"
 import { onLibraryChange } from "../../libraryChanges.ts"
@@ -178,6 +179,22 @@ export function DisplaySettings() {
           ]}
         />
       </Fieldset>
+      <Field
+        label="Message portrait size"
+        about="Sets message portrait size on all your devices."
+        error={viewer.error?.message}
+      >
+        <Select<typeof viewer.prefs.portraitSize>
+          value={viewer.prefs.portraitSize}
+          onValueChange={(portraitSize) => void viewer.change({ portraitSize })}
+          items={[
+            { value: "small", label: "Smallest (48 × 72)" },
+            { value: "default", label: "Small (60 × 90)" },
+            { value: "large", label: "Medium (72 × 108)" },
+            { value: "largest", label: "Large (84 × 126)" }
+          ]}
+        />
+      </Field>
       <MessageColorSettings />
       <MessageDetailSettings />
       <Fieldset

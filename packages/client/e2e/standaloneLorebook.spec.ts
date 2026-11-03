@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { mkdir } from "node:fs/promises"
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
+import { expectLayout } from "./support/layoutAudit.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveCluster, saveRevision } from "./support/saveRevision.ts"
@@ -189,6 +190,8 @@ for (const width of [1440, 390]) {
     const otherRef = (await other.json()).library.ref
     await more("Gulls", "Copy to another lorebook…")
     const copy = page.getByRole("dialog", { name: "Copy “Gulls” to another lorebook" })
+    await expect(copy).toHaveAccessibleDescription("")
+    if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "copy-lorebook-entry")
     await copy.getByRole("button", { name: `Other ${width}` }).click()
     await copy.getByRole("button", { name: `Copy to Other ${width}` }).click()
     await expect(copy).toHaveCount(0)
@@ -198,9 +201,9 @@ for (const width of [1440, 390]) {
 
     // Search and replace, in the toolbar, reaches closed entries and their keys; it looks
     // everywhere unless told otherwise.
-    const toggle = page.getByRole("button", { name: "Search", exact: true })
+    const toggle = page.getByRole("button", { name: "Search and replace", exact: true })
     await toggle.click()
-    await expect(toggle).toHaveAttribute("aria-expanded", "true")
+    await expect(toggle).toHaveAttribute("aria-pressed", "true")
     const finder = page.getByRole("region", { name: "Search and replace" })
     // On a phone "Look in" folds behind Options with the other options.
     if (width < 640) await finder.getByRole("button", { name: /^Options/ }).click()
@@ -272,7 +275,7 @@ test("find results go to a standalone entry's text and keys, even past the entry
   await search.fill("fog")
   await expect(page.getByRole("textbox", { name: "Title of Lamp" })).toHaveCount(0)
   // The search stays open in the toolbar between visits.
-  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await page.getByRole("button", { name: "Search and replace", exact: true }).click()
   const dialog = page.getByRole("region", { name: "Search and replace" })
   const find = async (text: string, target: RegExp) => {
     await dialog.getByRole("textbox", { name: "Find", exact: true }).fill(text)

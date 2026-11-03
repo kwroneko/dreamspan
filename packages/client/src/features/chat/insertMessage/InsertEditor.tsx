@@ -46,11 +46,14 @@ export function InsertEditor({
   editor: MessageDraft
 }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
-  const { text, error: draftError } = useSyncExternalStore(editor.subscribe, editor.snapshot)
+  const { text, loading, error: draftError } = useSyncExternalStore(editor.subscribe, editor.snapshot)
   const castView = useCast()
   const choice = useComposerChoice(session)
   const phone = usePhone()
   const fieldId = useId()
+  useEffect(() => {
+    if (!loading) document.getElementById(fieldId)?.focus()
+  }, [loading, fieldId])
   const [picked, setPicked] = useState<EntityId | null | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   // When it opened: whether the cache is still warm is read as of then.
@@ -191,12 +194,24 @@ export function InsertEditor({
         <AutoGrowTextarea
           id={fieldId}
           data-testid="insert-text"
+          data-layout-audit-ignore="inset: The textarea fills its own bordered field"
+          disabled={loading}
           autoFocus
           value={text}
           placeholder={`What ${name} says, or guidance for Generate…`}
           onChange={(event) => editor.setText(event.currentTarget.value)}
         />
       </div>
+      {loading && (
+        <p role="status" className="text-sm text-muted">
+          Loading saved text…{" "}
+          {draftError && (
+            <Button type="button" onClick={() => void editor.open()} hint="Loads the saved edit before you type.">
+              Retry
+            </Button>
+          )}
+        </p>
+      )}
       {lines.length > 0 && (
         <ul className="flex flex-col gap-0.5 text-xs text-muted" aria-label="What inserting here changes">
           {lines.map((line) => (
@@ -213,14 +228,18 @@ export function InsertEditor({
         <Button
           type="button"
           variant="primary"
-          disabled={busy}
+          disabled={busy || loading}
           hint={`The model writes ${name}'s message here; text you typed is its direction.`}
           onClick={() => void submit("Generate")}
         >
           <Icon name="regenerate" />
           Generate as {name}
         </Button>
-        <Button type="submit" disabled={busy || text.trim() === ""} hint={`Adds your text here as ${name}'s message.`}>
+        <Button
+          type="submit"
+          disabled={busy || loading || text.trim() === ""}
+          hint={`Adds your text here as ${name}'s message.`}
+        >
           <Icon name="check" />
           Insert
         </Button>

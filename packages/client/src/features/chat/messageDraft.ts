@@ -1,3 +1,4 @@
+import { deletedSince, observeDeletion, type ObservedDeletion } from "@rp/shared/drafts.ts"
 import type { MessageImages } from "@rp/shared/chat.ts"
 // The text of a message editor (DESIGN §6.2): an edit of a version, or a version of a
 // message the user is writing. Typed into a server draft like a summary's (summaryDraft.ts),
@@ -10,7 +11,7 @@ import type { MessageImages } from "@rp/shared/chat.ts"
 // server has it: a save that fails, a closed tab or a reload leaves the copy, filed under
 // the chat, which opening the chat again replays, with the draft it was typed on.
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { MessageDraftTarget } from "@rp/shared/chatApi.ts"
+import type { MessageDraftSave, MessageDraftTarget } from "@rp/shared/chatApi.ts"
 import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, dropCopy, keepCopy, makeCopy, pendingOf, type ReplayConflict } from "../editor/backup.ts"
@@ -58,6 +59,8 @@ export const targetOf = (draft: Draft): MessageDraftTarget | null =>
 export interface MessageDraftView {
   /** What the box shows. */
   readonly text: string
+  /** A fresh editor loads its causal base before taking keystrokes. */
+  readonly loading: boolean
   /** Typed text not on the server yet. */
   readonly unsaved: boolean
   readonly error: AppError | null
@@ -96,14 +99,19 @@ export class MessageDraft {
   private readonly listeners = new Set<() => void>()
   /** The draft as the server last answered with it. */
   private draft: Draft | null
+  private readonly initialText: string
   /**
    * What the text shown was typed on, which its saves name. It changes only with the text
    * shown, or when the server answers a save with exactly the text sent: text restored from
    * a copy keeps the copy's base until the server has it, whatever the server holds now.
    */
   private base: Base
+  private observedDeletion: ObservedDeletion | null = null
   /** Typed here and not saved yet. */
   private local: string | null = null
+  private edits = 0
+  private opened: boolean
+  private opening: Promise<void> | null = null
   /** The browser copy of `local`. */
   private pending: Copy | null = null
   /** Copies on their way to the server, which a newer one mustn't replace. */
@@ -123,14 +131,17 @@ export class MessageDraft {
     this.userId = userId
     this.target = target
     this.draft = draft
+    this.opened = draft !== null
     this.base = baseOf(draft)
     this.view = {
+      loading: draft === null,
       text: draft?.status === "active" ? draft.content : initial,
       images: draft?.status === "active" ? draft.images : undefined,
       unsaved: false,
       error: null,
       conflict: null
     }
+    this.initialText = this.view.text
   }
 
   readonly subscribe = (listener: () => void) => {
@@ -152,6 +163,37 @@ export class MessageDraft {
     return run
   }
 
+  /** Opening a fresh field establishes its base before the UI permits its first key. */
+  open(): Promise<void> {
+    if (this.opened) return Promise.resolve()
+    if (this.opening !== null) return this.opening
+    this.opening = this.serial(async () => {
+      if (this.opened) return
+      const read = await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
+      if (!read.ok && read.error.tag !== "NotFound") {
+        this.set({ error: read.error })
+        return
+      }
+      this.opened = true
+      this.draft = read.ok ? read.value : null
+      if (this.local === null) {
+        this.base = baseOf(this.draft)
+        this.set({
+          text: this.draft?.status === "active" ? this.draft.content : this.initialText,
+          images: this.draft?.status === "active" ? this.draft.images : this.view.images
+        })
+      } else if (this.draft?.status !== "active" && this.draft?.content === this.initialText) {
+        // A programmatic edit begun during opening is kept too; UI input waits for this read.
+        this.observedDeletion = observeDeletion(this.draft)
+        this.keep(this.local)
+      }
+      this.set({ loading: false, error: null })
+    }).finally(() => {
+      this.opening = null
+    })
+    return this.opening
+  }
+
   /**
    * Sends this browser's copies of the editor's text that never reached the server, oldest
    * first, each onto the draft it was typed on (another tab's newer text stays one step back
@@ -160,24 +202,62 @@ export class MessageDraft {
    */
   restore(copies: ReadonlyArray<Copy>) {
     return this.serial(async () => {
+      const edits = this.edits
+      const hadLocal = this.local !== null
+      // Active-only lists omit Cancel tombstones. Read the resting row before replay.
+      if (this.draft === null) {
+        const read = await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
+        if (read.ok) {
+          this.draft = read.value
+          this.opened = true
+          if (this.local === null) this.base = baseOf(read.value)
+        }
+      }
       let error: AppError | null = null
       let conflict = this.view.conflict
       for (const copy of [...copies].sort((a, b) => a.at - b.at)) {
         const save = pendingOf(copy)
-        if (save?.kind !== "message") continue
+        if (save?.kind !== "message" || deletedSince(this.draft, save.payload)) continue
+        // A safe local copy is the editor's text before its network replay finishes.
+        // Keep its own causal tuple; the opening read never authorizes an old copy.
+        if (this.edits === edits && !hadLocal) {
+          this.local = copy.content
+          this.pending = copy
+          this.base = {
+            draftId: save.payload.draftId,
+            rowVersion: save.payload.expectedRowVersion,
+            session: save.payload.expectedSession
+          }
+          this.observedDeletion = save.payload.observedDeletion ?? null
+          this.replayedAt = copy.at
+          this.set({ text: copy.content, images: save.payload.images, loading: false, unsaved: true })
+        }
         this.sending.add(copy)
         const replayed = await this.session.call((client) => client("SaveMessageDraft", save.payload))
         this.sending.delete(copy)
         if (replayed.ok) {
           this.draft = replayed.value
+          this.opened = true
+          await this.acknowledgeBase(copy, save.payload, replayed.value)
+          if (this.pending === copy && this.local === copy.content) {
+            this.local = null
+            this.pending = null
+            this.replayedAt = null
+            this.set({ text: replayed.value.content, images: replayed.value.images, unsaved: false })
+          }
           // The text it holds is shown, unless something was typed here meanwhile.
-          if (this.local === null) this.base = baseOf(replayed.value)
+          if (this.local === null) {
+            this.base = baseOf(replayed.value)
+            this.observedDeletion = null
+          }
           if (replayed.value.displaced !== null) conflict = { ...replayed.value.displaced, typedAt: copy.at }
           void dropCopy(copy)
         } else {
           // Still not on the server: the box shows it, on the base it was typed on.
-          if (this.pending !== null && this.pending.at < copy.at) this.pending = null
-          if (this.pending === null) {
+          if (this.edits === edits && !hadLocal) {
+            if (this.pending !== null && this.pending.at < copy.at) this.pending = null
+          }
+          if (this.pending === null && this.edits === edits && !hadLocal) {
             this.local = copy.content
             this.set({ images: save.payload.images })
             this.pending = copy
@@ -186,6 +266,7 @@ export class MessageDraft {
               rowVersion: save.payload.expectedRowVersion,
               session: save.payload.expectedSession
             }
+            this.observedDeletion = save.payload.observedDeletion ?? null
             this.replayedAt = copy.at
           }
           error = replayed.error
@@ -193,6 +274,7 @@ export class MessageDraft {
       }
       const draft = this.draft
       this.set({
+        loading: false,
         text: this.local ?? (draft?.status === "active" ? draft.content : this.view.text),
         images: this.local === null ? draft?.images : this.view.images,
         unsaved: this.local !== null,
@@ -207,12 +289,39 @@ export class MessageDraft {
     const base = this.base
     return {
       target: this.target,
+      ...(this.observedDeletion === null ? {} : { observedDeletion: this.observedDeletion }),
       draftId: base.draftId,
       content,
       ...(this.view.images === undefined ? {} : { images: this.view.images }),
       expectedRowVersion: base.rowVersion,
       expectedSession: base.session
     }
+  }
+
+  /** Only an exact save can advance copies actually typed from its displayed text. */
+  private async acknowledgeBase(copy: Copy | null, sent: typeof MessageDraftSave.Type, draft: Draft) {
+    const images = draft.images ?? []
+    const exact =
+      draft.status === "active" &&
+      draft.content === sent.content &&
+      (sent.images === undefined ||
+        (images.length === sent.images.length &&
+          sent.images.every(
+            (image, index) => image.mediaId === images[index]?.mediaId && image.altText === images[index]?.altText
+          )))
+    const descended =
+      copy !== null &&
+      this.pending !== null &&
+      (this.pending === copy || this.pending.ancestors.includes(copy.key)) &&
+      this.base.draftId === sent.draftId &&
+      this.base.rowVersion === sent.expectedRowVersion &&
+      this.base.session === sent.expectedSession
+    if (exact && descended) {
+      this.base = baseOf(draft)
+      this.observedDeletion = null
+      if (this.pending !== copy && this.local !== null) await this.keep(this.local)
+    }
+    return exact
   }
 
   /** Copies `content` into this browser, in place of the last copy unless that one is being sent. */
@@ -228,7 +337,7 @@ export class MessageDraft {
       previous === null ? [] : [previous]
     )
     this.pending = copy
-    void keepCopy(copy, replaces ? previous : null)
+    return keepCopy(copy, replaces ? previous : null)
   }
 
   /** The copy, once the text it holds is on the server or thrown away on purpose. */
@@ -261,6 +370,7 @@ export class MessageDraft {
   }
 
   setText(text: string) {
+    this.edits++
     this.local = text
     this.keep(text)
     this.set({ text, unsaved: true })
@@ -269,9 +379,15 @@ export class MessageDraft {
   }
 
   /** Saves what was typed now. Saves run one at a time, after a replay. */
-  save(): Promise<void> {
+  async save(): Promise<void> {
     this.cancelTimer()
+    if (!this.opened) {
+      await this.open()
+      if (!this.opened) return
+    }
     return this.serial(async () => {
+      if (this.local === null) return
+      // Take the text and its copy together after the read: typing during it is newer.
       const sent = this.local
       if (sent === null) return
       const sentImages = this.view.images
@@ -287,14 +403,16 @@ export class MessageDraft {
       }
       // The server has exactly the text sent: what's typed from it is on the draft as it is now.
       this.draft = result.value
-      this.base = baseOf(result.value)
+      const exact = await this.acknowledgeBase(copy, payload, result.value)
+      if (this.local === sent && this.view.images === sentImages) {
+        this.base = baseOf(result.value)
+        this.observedDeletion = null
+      }
       if (copy !== null) void dropCopy(copy)
       if (this.local === sent && this.view.images === sentImages) {
         this.local = null
         if (this.pending === copy) this.pending = null
-      } else if (this.local !== null && this.pending !== null && !this.sending.has(this.pending)) {
-        // More typed since: its copy now names the draft as the server has it.
-        this.keep(this.local)
+        if (!exact) this.set({ text: result.value.content, images: result.value.images })
       }
       // The first save of text replayed from this browser can go over text saved elsewhere too.
       const conflict =
@@ -302,7 +420,7 @@ export class MessageDraft {
           ? { ...result.value.displaced, typedAt: this.replayedAt }
           : this.view.conflict
       this.replayedAt = null
-      this.set({ error: null, unsaved: this.local !== null, conflict })
+      this.set({ error: exact ? null : deletedElsewhere, unsaved: this.local !== null, conflict })
     })
   }
 
@@ -343,6 +461,7 @@ export class MessageDraft {
   async history(before?: number, limit = DraftHistoryPolicy.maxEntries + 1) {
     await this.save()
     if (this.local !== null) return { ok: false as const, error: this.view.error ?? notSaved }
+    if (this.draft === null && this.opened) return { ok: true as const, value: [] }
     if (this.draft === null) {
       // A reopened edit has a resting draft from its earlier saves: its states are listed too.
       const read = await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
@@ -409,6 +528,8 @@ export class MessageDraft {
    */
   async discard(): Promise<Outcome<unknown>> {
     await this.imageUploads
+    // Nothing was typed or shown yet: closing a pending read cannot discard unseen text.
+    if (this.view.loading && this.local === null) return { ok: true, value: null }
     await this.save()
     if (this.local !== null) return { ok: false, error: this.view.error ?? notSaved }
     this.forget()
@@ -419,9 +540,11 @@ export class MessageDraft {
     )
     if (result.ok) {
       this.draft = result.value
-      // Typed while the discard was out: that text wasn't discarded, so the editor stays open
-      // with it, its copy and the base it was typed on.
+      // Our own acknowledged Cancel precedes this later typing. Refile it on that
+      // acknowledged deletion, so recovery never confuses it with the cancelled text.
       if (this.local !== null) {
+        this.observedDeletion = observeDeletion(result.value)
+        this.keep(this.local)
         this.set({ error: typedDuringCancel })
         return { ok: false, error: typedDuringCancel }
       }
@@ -441,6 +564,13 @@ const typedDuringCancel: AppError = {
 const notSaved: AppError = {
   tag: "NotSaved",
   message: "The text isn't on the server yet. Wait for it to be kept, then try again.",
+  problems: [],
+  reason: null
+}
+
+const deletedElsewhere: AppError = {
+  tag: "NotSaved",
+  message: "This text was deleted elsewhere. Find your copy in recovered texts.",
   problems: [],
   reason: null
 }

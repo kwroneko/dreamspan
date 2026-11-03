@@ -20,25 +20,30 @@ export function SectionLine({
 }: {
   label: string
   icon: IconName
-  tone?: "section" | "reuse"
+  tone?: "section" | "reuse" | "cache"
   /** The explanation's heading. */
   title: string
   explanation: string
 } & { [key: `data-${string}`]: string | undefined }) {
   const [open, setOpen] = useState(false)
   const reuse = tone === "reuse"
+  const cache = tone === "cache"
   return (
     <div
       {...data}
       data-section-line=""
-      className={`my-2 flex min-h-10 items-center gap-2 border-t-2 pt-1 ps-1 ${rowActionInsetClass} ${
-        reuse ? "border-dashed border-accent text-accent" : "border-text/70 text-text"
+      className={`my-2 flex items-center gap-2 ps-1 ${rowActionInsetClass} ${
+        cache
+          ? "min-h-8 border-t border-dashed border-accent/50 pt-2 text-muted"
+          : reuse
+            ? "min-h-10 border-t-2 border-dashed border-accent pt-1 text-accent"
+            : "min-h-10 border-t-2 border-text/70 pt-2 text-text"
       }`}
     >
       <span className="flex size-8 shrink-0 items-center justify-center" aria-hidden="true">
         <Icon name={icon} />
       </span>
-      <span className="min-w-0 flex-1 text-sm font-semibold">{label}</span>
+      <span className={`min-w-0 flex-1 text-sm ${cache ? "font-normal" : "font-semibold"}`}>{label}</span>
       <Popover
         open={open}
         onOpenChange={setOpen}

@@ -117,7 +117,13 @@ export class StChatPart extends Schema.Class<StChatPart>("StChatPart")({
   /** Of the part's bytes. */
   sha256: Sha256,
   header: Schema.NullOr(StChatHeader),
-  batches: Schema.Array(Schema.Struct({ messagesJson: Schema.String, speakers: Schema.Array(Schema.String) })),
+  batches: Schema.Array(
+    Schema.Struct({
+      messagesJson: Schema.String,
+      speakers: Schema.Array(Schema.String),
+      hashes: Schema.optionalKey(Schema.Array(Schema.String))
+    })
+  ),
   messages: Schema.Int,
   userTurns: Schema.Int,
   lastUserSpeaker: Schema.NullOr(Schema.String),
@@ -147,7 +153,16 @@ const StTextSwitches = Schema.Struct({
   reply_sections: Schema.optionalKey(ReplySectionSettings)
 })
 
+export const StLoreMapping = Schema.Struct({
+  cards: Schema.Record(Schema.String, Schema.String),
+  tags: Schema.Record(Schema.String, Schema.String),
+  cardTags: Schema.optionalKey(Schema.Array(Schema.String))
+})
+export type StLoreMapping = typeof StLoreMapping.Type
+
 export class StSettings extends Schema.Class<StSettings>("StSettings")({
+  characterTags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  tagNames: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   textSwitches: Schema.optionalKey(StTextSwitches),
   selectedPreset: Schema.NullOr(Schema.String),
   defaultPersona: Schema.NullOr(Schema.String),
@@ -261,6 +276,7 @@ export class FormatOps extends RpcGroup.make(
       fileName: Schema.String,
       expect: EntityKind,
       parser,
+      loreMapping: Schema.optionalKey(StLoreMapping),
       textSwitches: Schema.optionalKey(StTextSwitches),
       /** Where a World Info entry ST placed before or after its author's note goes (`authorNotePlace`). */
       authorNoteLore: Schema.optionalKey(Schema.Struct({ depth: Schema.Int, role: LoreRole }))
