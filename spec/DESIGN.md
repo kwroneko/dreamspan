@@ -1,3 +1,5 @@
+**Built 2026-11-03 (panelclose):** The right-panel close-control decision in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
+
 **Built 2026-11-02 (tokenizers):** Local open-model tokenizers, reported-input comparison and per-model calibration in §4 are implemented and obsolete as implementation proposals; see ARCHITECTURE §6 and §15. Tokenizers serve display counts; synthetic scale measurements exceeded the budget's 20% performance allowance, so the assembly cut retains its fast estimate. Current Gemini tokenizer equivalence to Gemma was not established.
 
 # Design: requirements and decisions
@@ -903,6 +905,8 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 
 - **[D]** (owner, 2026-11-02, New card): "What is going on here? Why is there a random undo?" Creation and rename forms have no detached history button. New card has no standing sentence below its title; its third label is **Version**, with a question-mark tooltip, "Shown as the card's subtitle." **Built; obsolete as an implementation requirement** (ARCHITECTURE §3.10).
 - **[P]** (newcarddialog, 2026-11-02) Shared form status shows history only when an existing settings editor explicitly requests it. Draft persistence and recovery notices continue on creation and naming forms.
+
+- **[D]** Right-panel close control (owner, 2026-11-02): “Remove the × from the right panel's tab bar on layouts where the chat header's panel toggle is visible while the panel is open”; “Keep a way to close the panel where the panel covers the chat header.” The tab bar reclaims the space and the header toggle shows a pressed state. **Built; obsolete as an implementation requirement** (panelclose; ARCHITECTURE §12). **[P], built:** keep the phone sheet's existing top-right `WindowClose`, matching the left navigation drawer.
 
 - **[D] Decided (owner, 2026-11-02):** “Every modal that can be dismissed without a decision (closing it loses nothing, or simply cancels) must have a visible close button: an X in the top-right corner. Clicking outside still closes it too.” “Modals that demand a specific resolution (confirm/cancel choices such as ‘Discard changes?’, destructive confirmations, anything where outside-click is already disabled) don't get the X; their buttons are the way out.” **Built, obsolete as an implementation requirement:** shared dialog, sheet and popover behavior is documented in ARCHITECTURE §5; portrait/picture viewers are reserved for the separate portraitview work.
 

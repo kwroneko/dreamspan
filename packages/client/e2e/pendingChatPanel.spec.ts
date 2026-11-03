@@ -34,7 +34,7 @@ const tabNames = async (page: Page) => {
   const tools = page.getByRole("tablist", { name: "Chat panel" })
   await expect(tools).toBeVisible()
   const names = await tools.getByRole("tab").allInnerTexts()
-  const more = tools.getByRole("button", { name: "More tools" })
+  const more = page.getByRole("button", { name: "More tools", exact: true })
   if (await more.isVisible()) {
     await more.click()
     names.push(...(await page.getByRole("menuitem").allInnerTexts()))

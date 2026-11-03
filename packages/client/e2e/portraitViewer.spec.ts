@@ -179,7 +179,7 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
   const controlsBox = (await toolbar.locator("[data-zoom-controls]").boundingBox())!
   expect(controlsBox.x + controlsBox.width).toBeLessThanOrEqual(columnBox.x + columnBox.width + 0.5)
   await shoot(page, "column-narrow")
-  await page.getByRole("button", { name: "Close the panel" }).click()
+  await page.getByRole("button", { name: "Hide panel" }).click()
   await expect.poll(async () => (await column.boundingBox())!.width).toBeGreaterThan(400)
   // Wide: one aligned row: slider, percentage, Fit, 100%, then the column's own buttons.
   const slider = toolbar.getByRole("slider", { name: "Zoom" })

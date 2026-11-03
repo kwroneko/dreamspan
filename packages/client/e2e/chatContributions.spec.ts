@@ -139,7 +139,7 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   await notes()
   await contribution(page, "close", "notes")
   await notes()
-  await page.getByRole("button", { name: "Close the panel", exact: true }).click()
+  await page.getByRole("button", { name: "Hide panel", exact: true }).click()
   await contribution(page, "install", "history")
   // The menu stays for the chat's commands, without the history ones; keys are listed apart.
   await page.getByRole("button", { name: "Chat actions", exact: true }).click()

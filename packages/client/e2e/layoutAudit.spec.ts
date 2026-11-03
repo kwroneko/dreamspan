@@ -583,6 +583,25 @@ test.describe("synthetic library and every app surface", () => {
           await audit("panel-header")
           return
         }
+        if (process.env.LAYOUT_AUDIT_PANELS_ONLY === "1") {
+          await go("group-chat", `/chats/${chatId}`)
+          for (const name of [
+            "This chat",
+            "Cast",
+            "Model",
+            "Prompt preset",
+            "Notes",
+            "Lorebooks",
+            "Summaries",
+            "Display",
+            "Snippets",
+            "History edits"
+          ]) {
+            await openPanel(page, name)
+            await audit(`panel-${name}`)
+          }
+          return
+        }
         if (process.env.LAYOUT_AUDIT_NOTES_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, "Notes")
