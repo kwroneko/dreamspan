@@ -932,8 +932,19 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         pins.lcmDefaults = read.lcm ?? null
         return pins.lcmDefaults
       }),
-    preset: () =>
+    preset: (chain) =>
       Effect.gen(function* () {
+        // Unlike the current account preset, a summary's specific choice must be live.
+        if (chain.summary) {
+          const [available] =
+            yield* sql`SELECT r.id FROM entity_refs r JOIN entities e ON e.id=r.entity_id WHERE r.id=${chain.summary}
+            AND e.owner_user_id=${userId} AND e.kind='preset' AND e.deleted_at IS NULL AND e.archived_at IS NULL
+            AND (r.chat_id IS NULL OR r.chat_id=${chatId})`
+          if (available) {
+            const found = yield* presetFrom(chain.summary, "user")
+            if (found) return found
+          }
+        }
         const user = (yield* defaults).preset
         if (user !== null) {
           const found = yield* presetFrom(user, "user")

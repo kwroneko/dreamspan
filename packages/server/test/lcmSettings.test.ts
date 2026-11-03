@@ -32,7 +32,7 @@ lcmTest("a new chat copies the account default, its fields fall back to it, and 
     const copied = yield* read(chat.id)
     assert.deepStrictEqual(copied.stored, {
       enabled: true,
-      withPreset: false,
+      withPreset: "raw",
       withNotes: false,
       recentTarget: 10_000,
       recentMax: 20_000,

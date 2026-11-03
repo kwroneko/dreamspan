@@ -74,7 +74,13 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
       detail: presetDetail(ref, view),
       ...(archivedRow && view !== "archived" ? { badge: <Badge tone="warning">Archived</Badge> } : {}),
       tooltip: lines([
-        inUse ? "In use for the next reply in every chat" : "Use it for the next reply in every chat",
+        selection.usage === "summary"
+          ? inUse
+            ? "In use for summaries"
+            : "Use this preset for summaries"
+          : inUse
+            ? "In use for the next reply in every chat"
+            : "Use it for the next reply in every chat",
         ...presetTimes(ref)
       ]),
       action: archivedRow
@@ -96,7 +102,7 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
   }
   const items: Array<PickerItem> = [
     ...(pinned ? [row(pinned)] : []),
-    ...(view !== "archived" && matchesBuiltin
+    ...(selection.usage !== "summary" && view !== "archived" && matchesBuiltin
       ? [
           {
             value: BUILTIN,
@@ -180,7 +186,7 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
       )}
       <ErrorAlert error={selection.error} />
       <PickerFooterButton
-        hint={`${NEW_PRESET_HINT}, chosen for the next reply and opened for editing`}
+        hint={`${NEW_PRESET_HINT}, ${selection.usage === "summary" ? "chosen for summaries" : "chosen for the next reply"} and opened for editing`}
         icon="plus"
         onClick={onNew}
       >

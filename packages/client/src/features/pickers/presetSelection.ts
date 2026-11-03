@@ -20,6 +20,8 @@ const presetsAtom = allOf({ live: livePresets, archived: archivedPresets })
 export const BUILTIN = "builtin"
 
 export interface PresetSelection {
+  /** Summary pickers choose only library refs and describe their own use. */
+  readonly usage?: "summary" | undefined
   /** False until the account's choice and both lists are read. */
   readonly loaded: boolean
   /** `BUILTIN` or the chosen ref's id. */

@@ -266,7 +266,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
               messages: rest.n,
               recentTarget: recent.target,
               recentMax: recent.maximum,
-              withPreset: settings.withPreset,
+              withPreset: settings.withPreset !== "raw",
               layerMax: built.lcm?.layerBudget?.maximum ?? Number.MAX_SAFE_INTEGER,
               prefix,
               layer: layerBefore,
@@ -274,7 +274,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
               leafTarget: settings.leafTarget,
               fanout: state.lcm?.fanout ?? 5,
               condenseTarget: state.lcm?.condenseTarget ?? 800,
-              cached: (model.cacheTtlS ?? 0) > 0,
+              cached: settings.withPreset === "current" && (model.cacheTtlS ?? 0) > 0,
               cacheWrites: (priced?.write ?? 0) > 0
             })
             return {
@@ -287,7 +287,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
               cachedInput: totals.cachedInput,
               cacheWrite: totals.cacheWrite,
               output: totals.output,
-              cached: (model.cacheTtlS ?? 0) > 0,
+              cached: settings.withPreset === "current" && (model.cacheTtlS ?? 0) > 0,
               model: info,
               blocked: null,
               seconds: backfillSeconds(totals, speed)

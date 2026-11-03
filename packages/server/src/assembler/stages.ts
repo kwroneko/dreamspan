@@ -229,7 +229,15 @@ const presetStage: AssemblerStage = {
   run: (assembly) =>
     Effect.gen(function* () {
       const sources = yield* AssemblySources
-      assembly.preset = yield* sources.preset({ role: null, chat: null, connection: null })
+      const settings = assembly.request.summarizing
+        ? resolveLcm(need(assembly, "state").lcm, sources.lcmDefaults ? yield* sources.lcmDefaults() : null)
+        : null
+      assembly.preset = yield* sources.preset({
+        role: null,
+        chat: null,
+        connection: null,
+        ...(settings?.withPreset === "specific" && settings.preset ? { summary: settings.preset } : {})
+      })
       const model = assembly.model
       if (model?.settings)
         assembly.preset = {

@@ -1,5 +1,5 @@
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
-import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { chatSettingSections, summarySettingFields } from "./presentation.tsx"
 // The side panel's "This chat" tab (DESIGN §5.4, §8; DATA-MODEL §5.3, §5.4): first what a
@@ -66,7 +66,14 @@ function Instruction({
   }
   return (
     <Fieldset legend="Instruction" about="{{words}} is the summary length, set under Advanced.">
-      <CodeEditor label="This chat's summarization instruction" value={text} base={base} rows={5} onChange={setText} />
+      <CodeEditor
+        label="This chat's summarization instruction"
+        value={text}
+        base={base}
+        rows={5}
+        onChange={setText}
+        tools={<UserDraftUndo draft={draft} />}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <Button
           disabled={disabled || text === saved || text.trim() === ""}
@@ -102,7 +109,7 @@ function Instruction({
           {text !== saved && " Not saved yet."}
         </span>
       </div>
-      <UserDraftStatus draft={draft} history />
+      <UserDraftNotices draft={draft} />
       {problem && <p className="text-sm text-danger">{problem}</p>}
     </Fieldset>
   )

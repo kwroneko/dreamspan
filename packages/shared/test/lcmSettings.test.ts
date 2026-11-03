@@ -1,7 +1,7 @@
 // The summarization settings' small rules (DESIGN §8): a maximum lowered past its target takes
 // the target with it, and the instruction asks for the summary length in words.
 import { describe, expect, it } from "vitest"
-import { loweredTarget, resolveLcm, summaryWords } from "../src/lcmSettings.ts"
+import { loweredTarget, newChatLcm, resolveLcm, summaryWords } from "../src/lcmSettings.ts"
 
 describe("loweredTarget", () => {
   it("keeps the target while it is below the new maximum", () => {
@@ -35,5 +35,26 @@ describe("the built-ins", () => {
       18_000,
       false
     ])
+  })
+})
+
+describe("summary preset choice", () => {
+  it("resolves all three modes, preserves legacy booleans and gives a chat precedence", () => {
+    expect(resolveLcm(null, null).withPreset).toBe("current")
+    expect(resolveLcm({ withPreset: true }, null).withPreset).toBe("current")
+    expect(resolveLcm({ withPreset: false }, null).withPreset).toBe("raw")
+    expect(resolveLcm(null, { withPreset: "raw" }).withPreset).toBe("raw")
+    const specific = "specific" as const
+    expect(resolveLcm(null, { withPreset: specific }).withPreset).toEqual(specific)
+    expect(resolveLcm({ withPreset: "current" }, { withPreset: specific }).withPreset).toBe("current")
+    expect(resolveLcm({ withPreset: specific }, { withPreset: "raw" }).withPreset).toEqual(specific)
+    expect(resolveLcm({}, { withPreset: specific }).from.withPreset).toBe("account")
+    expect(resolveLcm({ withPreset: specific }, null).from.withPreset).toBe("chat")
+    const accountRef = "account-summary" as import("../src/library.ts").RefId
+    const chatRef = "chat-summary" as import("../src/library.ts").RefId
+    const defaults = { withPreset: specific, preset: accountRef }
+    expect(newChatLcm(defaults)).toMatchObject(defaults)
+    expect(resolveLcm({ withPreset: specific, preset: chatRef }, defaults).preset).toBe(chatRef)
+    expect(resolveLcm({}, defaults).preset).toBe(accountRef)
   })
 })

@@ -55,6 +55,8 @@ interface Binding {
 
 /** The settings scope chain's levels above the chat (DATA-MODEL §5.4), as refs to presets. */
 export interface PresetChain {
+  /** A summary request's specific preset; unavailable refs fall back to the account preset. */
+  readonly summary?: string | undefined
   /** `preset.binding` scoped to the role, then the chat's own. */
   readonly role: Binding | null
   readonly chat: Binding | null

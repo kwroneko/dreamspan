@@ -1,8 +1,18 @@
 import { Schema } from "effect"
+import { RefId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 
 /** A model of the user's, by its connection. */
 export const ModelChoice = Schema.Struct({ connection: ConnectionId, model: ModelId })
+
+/** A summary request uses the current preset, a selected library preset, or no preset.
+ * The optional `preset` ref holds the specific choice. */
+export const SummaryPreset = Schema.Literals(["current", "specific", "raw"])
+export type SummaryPreset = typeof SummaryPreset.Type
+/** Old stored booleans remain readable without migrating chat state. */
+const StoredSummaryPreset = Schema.Union([SummaryPreset, Schema.Boolean])
+export const summaryPreset = (value: SummaryPreset | boolean): SummaryPreset =>
+  value === true ? "current" : value === false ? "raw" : value
 
 const Tokens = Schema.Int.check(Schema.isGreaterThan(0))
 
@@ -12,8 +22,9 @@ export type LcmWhen = typeof LcmWhen.Type
 
 /** The settings a chat and the account default share (DESIGN §8), all optional but `enabled` in a chat. */
 const sizes = {
-  /** Send the summary request with the chat's full preset (ST's Classic), or the instruction and messages only (Raw). */
-  withPreset: Schema.optionalKey(Schema.Boolean),
+  /** Choose the preset used by summary requests, or send only the instruction and messages. */
+  withPreset: Schema.optionalKey(StoredSummaryPreset),
+  preset: Schema.optionalKey(RefId),
   /** Send the chat's notes with a summary request: they may tell of events after the chunk. */
   withNotes: Schema.optionalKey(Schema.Boolean),
   /** Recent messages kept as written: above the maximum the oldest are summarized back to the target. */
@@ -72,6 +83,7 @@ export type LcmDefaults = typeof LcmDefaults.Type
 export type LcmField =
   | "enabled"
   | "withPreset"
+  | "preset"
   | "withNotes"
   | "tail"
   | "recentTarget"
@@ -85,7 +97,8 @@ export type LcmField =
 /** A change to a chat's settings: a field set, or null to follow the account default again. */
 export const LcmSettingsChange = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
-  withPreset: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+  withPreset: Schema.optionalKey(Schema.NullOr(StoredSummaryPreset)),
+  preset: Schema.optionalKey(Schema.NullOr(RefId)),
   withNotes: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
   tail: Schema.optionalKey(Schema.NullOr(Schema.String)),
   recentTarget: Schema.optionalKey(Schema.NullOr(Tokens)),
@@ -106,7 +119,7 @@ export type LcmSettingsChange = typeof LcmSettingsChange.Type
  */
 export const LCM_BUILTIN = {
   enabled: true,
-  withPreset: true,
+  withPreset: "current",
   withNotes: false,
   recentTarget: 12_000,
   recentMax: 20_000,
@@ -129,7 +142,8 @@ export const BUILTIN_SUMMARY_INSTRUCTION =
 /** The settings that apply to a chat, each from the chat, else the account default, else built in. */
 export interface ResolvedLcm {
   readonly enabled: boolean
-  readonly withPreset: boolean
+  readonly withPreset: SummaryPreset
+  readonly preset: typeof RefId.Type | null
   readonly withNotes: boolean
   /** Null: the built-in instruction. */
   readonly tail: string | null
@@ -175,7 +189,8 @@ export const resolveLcm = (
   }
   return {
     enabled: pick("enabled", chat ? false : LCM_BUILTIN.enabled) as boolean,
-    withPreset: pick("withPreset", LCM_BUILTIN.withPreset) as boolean,
+    withPreset: summaryPreset(pick("withPreset", LCM_BUILTIN.withPreset) as SummaryPreset | boolean),
+    preset: pick("preset", null) as typeof RefId.Type | null,
     withNotes: pick("withNotes", LCM_BUILTIN.withNotes) as boolean,
     tail: pick("tail", null) as string | null,
     recentTarget: pick("recentTarget", LCM_BUILTIN.recentTarget) as number,
@@ -199,6 +214,7 @@ export const newChatLcm = (defaults: LcmDefaults | null | undefined, enabled?: b
   return {
     enabled: enabled ?? r.enabled,
     withPreset: r.withPreset,
+    ...(r.preset !== null ? { preset: r.preset } : {}),
     withNotes: r.withNotes,
     recentTarget: r.recentTarget,
     recentMax: r.recentMax,

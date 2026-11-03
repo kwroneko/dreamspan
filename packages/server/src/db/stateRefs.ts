@@ -146,9 +146,23 @@ export const checkStateReferences = (
               WHERE m.id = ${reference.id} AND m.connection_id = ${reference.connection ?? null} AND c.owner_user_id = ${userId}`
         }
       })()
-      return Effect.flatMap(count, ([row]) =>
-        row?.n === 1 ? Effect.void : Effect.fail(new NotFound({ entity: reference.table, id: reference.id }))
-      )
+      return Effect.gen(function* () {
+        if ((yield* count)[0]?.n === 1) return
+        // Retain a purged summary choice already stored by this user. This lets existing
+        // settings remain editable and new chats copy their default while using fallback.
+        if (data.key === "lcm.settings" && reference.table === "ref") {
+          const [retained] = yield* sql<{ ok: number }>`SELECT
+            NOT EXISTS (SELECT 1 FROM entity_refs WHERE id=${reference.id}) AND (
+              EXISTS (SELECT 1 FROM user_settings WHERE user_id=${userId} AND key='generation.lcm'
+                AND json_extract(value_json, '$.preset')=${reference.id}) OR
+              EXISTS (SELECT 1 FROM state_events e JOIN chats c ON c.id=e.chat_id
+                WHERE c.id=${chatId} AND c.owner_user_id=${userId} AND e.key='lcm.settings'
+                  AND json_extract(e.value_json, '$.preset')=${reference.id})
+            ) AS ok`
+          if (retained?.ok === 1) return
+        }
+        return yield* new NotFound({ entity: reference.table, id: reference.id })
+      })
     },
     { discard: true }
   )
@@ -226,6 +240,9 @@ export const withoutPurged = <E extends FoldableEvent>(
     return events.flatMap((event): ReadonlyArray<FoldableEvent> => {
       const routing = routingByGroup.get(partition(event))!
       if (scopeReferences(event.scope).some((reference) => gone.has(reference.id))) return []
+      // Summary settings retain an unavailable preset for fallback and the settings warning;
+      // dropping this event would also lose its switch, instruction and token bands.
+      if (event.data.key === "lcm.settings") return [event]
       if (!references(event.data).some((reference) => gone.has(reference.id))) return [event]
       const { data } = event
       if (data.key === "card.swap") {
