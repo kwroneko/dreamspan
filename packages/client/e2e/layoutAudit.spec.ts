@@ -330,6 +330,10 @@ test.describe("synthetic library and every app surface", () => {
         })
         if (reply._tag !== "Posted") throw new Error("fixture reply queued")
         yield* api.CreateFork({ chatId: started.chat.id, fromForkId: null, atSlotId: started.entry.slotId })
+        if (process.env.LAYOUT_AUDIT_CHAT_ROWS_ONLY === "1") {
+          const forks = yield* api.ListForks({ chatId: started.chat.id })
+          yield* api.PinFork({ forkId: forks[0]!.id, pinned: true })
+        }
         return {
           chatId: started.chat.id,
           cardId: a.entityId,
@@ -778,6 +782,27 @@ test.describe("synthetic library and every app surface", () => {
         }
         if (process.env.LAYOUT_AUDIT_HOME_ONLY === "1") {
           await go("home-all", "/")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_CHAT_ROWS_ONLY === "1") {
+          await go("home-pinned-chats", "/")
+          for (const [scope, query] of [
+            ["all", ""],
+            ["character", `&character=${cardId}`],
+            ["branches", `&character=${cardId}&forks=${chatId}`]
+          ]) {
+            await page.goto(`${server.url}/chats/${chatId}?side=chats${query}`)
+            if (width === 390)
+              await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
+            await showAppNavigation(page)
+            const navigation =
+              width === 390
+                ? page.locator('[data-layout-overlay="Mobile navigation drawer covers the page"]')
+                : page.getByRole("complementary", { name: "Sidebar", exact: true })
+            await expect(navigation.locator("[data-chat-id]").first()).toBeVisible()
+            await audit(`sidebar-scope-${scope}`)
+            await hideAppNavigation(page)
+          }
           return
         }
         if (process.env.LAYOUT_AUDIT_GRIDS_ONLY === "1") {

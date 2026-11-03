@@ -49,7 +49,7 @@ test.beforeAll(async () => {
 })
 
 for (const width of [1440, 390])
-  test(`chat titles stay within two lines at ${width}px`, async ({ page }, info) => {
+  test(`chat titles and corner actions fit at ${width}px`, async ({ page }, info) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width, height: 1000 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -65,6 +65,8 @@ for (const width of [1440, 390])
           const button = node.closest("button")!
           const row = button.parentElement!
           const rowBox = row.getBoundingClientRect()
+          const dateBox = row.querySelector("[data-row-when]")!.getBoundingClientRect()
+          const openBox = button.getBoundingClientRect()
           const number = (value: string) => parseFloat(value) || 0
           const vertical = (el: Element) => {
             const css = getComputedStyle(el)
@@ -87,7 +89,12 @@ for (const width of [1440, 390])
               width: rect.width,
               height: rect.height,
               centerOffset: Math.abs(rect.y + rect.height / 2 - (rowBox.y + rowBox.height / 2)),
-              portrait: el.hasAttribute("data-portrait")
+              portrait: el.hasAttribute("data-portrait"),
+              branches: el.hasAttribute("data-branches-button"),
+              top: rect.top,
+              bottom: rect.bottom,
+              left: rect.left,
+              right: rect.right
             }
           })
           return {
@@ -100,12 +107,22 @@ for (const width of [1440, 390])
             wordBreak: style.wordBreak,
             ellipsis: style.textOverflow,
             rowHeight: rowBox.height,
+            titleTop: box.top,
+            dateBottom: dateBox.bottom,
+            openRight: openBox.right,
+            railWidth: row.lastElementChild!.getBoundingClientRect().width,
             maxRowHeight:
-              Math.max(48, number(style.lineHeight) * 2 + metadataHeight) + vertical(button) + vertical(row),
+              Math.max(
+                row.querySelector("[data-branches-button]") ? 72 : 48,
+                number(style.lineHeight) * 2 + metadataHeight
+              ) +
+              vertical(button) +
+              vertical(row),
             accessories
           }
         })
         geometry.push({ scene, ...measurement })
+        expect(measurement.width).toBeGreaterThan(0)
         expect(measurement.height).toBeLessThanOrEqual(2 * measurement.lineHeight + 1)
         expect(measurement.rowHeight).toBeLessThanOrEqual(measurement.maxRowHeight + 1)
         expect(measurement.clamp).toBe("2")
@@ -114,9 +131,25 @@ for (const width of [1440, 390])
         expect(measurement.ellipsis).toBe("ellipsis")
         if (measurement.title === token) expect(measurement.height).toBeLessThanOrEqual(measurement.lineHeight + 1)
         for (const accessory of measurement.accessories) {
-          expect(accessory.centerOffset).toBeLessThanOrEqual(1)
+          if (accessory.portrait) expect(accessory.centerOffset).toBeLessThanOrEqual(1)
+          else {
+            expect(accessory.left).toBeGreaterThanOrEqual(measurement.openRight)
+            expect(
+              Math.abs(
+                accessory.branches ? accessory.bottom - measurement.dateBottom : accessory.top - measurement.titleTop
+              )
+            ).toBeLessThanOrEqual(1)
+          }
           expect(accessory.width).toBeGreaterThanOrEqual(32)
           expect(accessory.height).toBe(accessory.portrait ? 48 : 32)
+        }
+        const actions = measurement.accessories.filter((accessory) => !accessory.portrait)
+        expect(measurement.railWidth).toBeCloseTo(Math.max(...actions.map((action) => action.width)), 0)
+        if (actions.length === 2) {
+          const pin = actions.find((action) => !action.branches)!
+          const branches = actions.find((action) => action.branches)!
+          expect(pin.bottom).toBeLessThanOrEqual(branches.top)
+          expect(pin.right).toBeCloseTo(branches.right, 0)
         }
         await button.scrollIntoViewIfNeeded()
         await button.hover()
@@ -124,6 +157,12 @@ for (const width of [1440, 390])
           measurement.title.replace(/opens here$/, "").trim()
         )
         await page.mouse.move(0, 0)
+        if (actions.length === 2 && process.env.SCREENSHOT_DIR) {
+          await mkdir(process.env.SCREENSHOT_DIR, { recursive: true })
+          await button.locator("..").screenshot({
+            path: join(process.env.SCREENSHOT_DIR, `${width}-${scene}-branches-crop.png`)
+          })
+        }
         if (measurement.width === 0 && process.env.SCREENSHOT_DIR) {
           await mkdir(process.env.SCREENSHOT_DIR, { recursive: true })
           await button.locator("..").screenshot({
@@ -133,6 +172,10 @@ for (const width of [1440, 390])
       }
       if (process.env.SCREENSHOT_DIR) {
         await mkdir(process.env.SCREENSHOT_DIR, { recursive: true })
+        await buttons
+          .first()
+          .locator("..")
+          .screenshot({ path: join(process.env.SCREENSHOT_DIR, `${width}-${scene}-crop.png`) })
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `${width}-${scene}.png`) })
       }
     }
