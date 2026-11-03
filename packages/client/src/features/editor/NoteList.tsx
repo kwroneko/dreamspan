@@ -491,7 +491,7 @@ export function NoteBlock({
 export function useNoteBlocks(count: number) {
   const userId = useSession().user.id
   const blocks = useOpenBlocks(`rp.noteBlocks.${userId}`, count)
-  // Settings stay folded until a note's are opened.
+  // Existing notes default to folded settings; creation explicitly opens a new note's.
   const settings = useOpenBlocks(`rp.noteSettings.${userId}`, Number.POSITIVE_INFINITY)
   return { blocks, settings }
 }

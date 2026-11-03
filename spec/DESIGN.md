@@ -1,3 +1,5 @@
+**Built 2026-11-03 (newnoteopen):** The new-note expansion decision in §4.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
+
 **Built 2026-11-03 (panelclose):** The right-panel close-control decision in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
 **Built 2026-11-03 (personafilter):** The icon-toggle explanation and persona-filter appearance decisions in §10.1 are implemented and obsolete as requirements; see ARCHITECTURE §5.
 **Built 2026-11-03 (historyedits):** The Search and replace box layout and Applied edits requirements in §10.3 are implemented and obsolete as implementation plans; see ARCHITECTURE §3.13.
@@ -457,6 +459,9 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 - **[P]** Library: variants are grouped under one character entry. Sorting is explicit (last chatted or last edited, never "last viewed"). Any two variants can be diffed. **Partial**: family tree/filter, explicit sorting and saved family-card comparisons are built (ARCHITECTURE §14); collapsing each family into one grid entry remains an unbuilt proposal.
 
 ### 4.1 Card modules and character notes
+
+- **[D]** (owner, 2026-11-03): A note the user creates new starts expanded, with its settings (placement, depth, role, conditions and other options) expanded too, then scrolls into view and flashes. “The user must be able to discover these options exist.” Existing and reopened notes retain their remembered state; copies made by Fork for this chat are excluded. Collapsing a newly created note or its settings is remembered normally. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
+
 - **[D] Wanted:**
   - something like author's notes, but **several, and per character**, placed at the tail or earlier
   - **only on that character's turn** in group chats
