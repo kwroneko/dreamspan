@@ -207,3 +207,37 @@ test("ending a held round with a new message removes its controls in both tabs",
   await expect(round(page)).toHaveCount(0)
   await expect(round(other)).toHaveCount(0)
 })
+
+for (const width of [1440, 1024, 390]) {
+  for (const theme of ["light", "dark"] as const) {
+    test(`reply settings wrap to the available panel width at ${width}px in ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      const chatId = await groupChat(`Reply layout ${width} ${theme}`)
+      await page.goto(`${server().url}/chats/${chatId}`)
+      const cast = await openPanel(page, "Cast")
+      // Panels are resizable: exercise room for both controls, rather than a viewport breakpoint.
+      if (width === 1440) await page.getByRole("separator", { name: "Resize chat panel" }).press("End")
+      const select = cast.getByRole("combobox", { name: "Who replies", exact: true })
+      const toggle = cast.getByRole("switch", { name: "One reply at a time" })
+      await expect(select).toBeVisible()
+      await expect(toggle).toBeVisible()
+      const picker = (await select.boundingBox())!
+      const switchBox = (await toggle.boundingBox())!
+      if (width === 1440) {
+        expect(switchBox.x).toBeGreaterThanOrEqual(picker.x + picker.width + 16)
+        expect(Math.abs(switchBox.y + switchBox.height / 2 - picker.y - picker.height / 2)).toBeLessThan(1)
+      } else {
+        expect(switchBox.y).toBeGreaterThanOrEqual(picker.y + picker.height + 8)
+        expect(Math.abs(switchBox.x - picker.x)).toBeLessThan(1)
+      }
+      if (process.env.RP_SCREENS) {
+        mkdirSync(process.env.RP_SCREENS, { recursive: true })
+        await cast.getByRole("region", { name: "Who replies", exact: true }).screenshot({
+          path: join(process.env.RP_SCREENS, `${width}-${theme}-reply-settings.png`)
+        })
+      }
+    })
+  }
+}

@@ -381,7 +381,11 @@ test.describe("synthetic library and every app surface", () => {
               page,
               info,
               surface + suffix,
-              process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1" ? { scope: '[role="menu"]' } : {}
+              process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
+                ? { scope: 'section[aria-label="Who replies"]' }
+                : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
+                  ? { scope: '[role="menu"]' }
+                  : {}
             )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
@@ -554,6 +558,16 @@ test.describe("synthetic library and every app surface", () => {
           await go("chat-list", "/chats")
           await go("group-chat-header", `/chats/${chatId}`)
           await openPanel(page, "Cast")
+          await audit("panel-Cast")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1") {
+          await go("group-chat-header", `/chats/${chatId}`)
+          const cast = await openPanel(page, "Cast")
+          if (width === 1440) await page.getByRole("separator", { name: "Resize chat panel" }).press("End")
+          const replies = cast.getByRole("region", { name: "Who replies", exact: true })
+          await expect(replies.getByRole("switch", { name: "One reply at a time" })).toBeVisible()
+          await replies.screenshot({ path: join(work, `${width}-${theme}-reply-settings.png`), animations: "disabled" })
           await audit("panel-Cast")
           return
         }
