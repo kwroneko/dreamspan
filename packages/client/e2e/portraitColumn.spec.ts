@@ -367,8 +367,11 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
     "false"
   )
   await column("Wide").getByRole("button", { name: SINGLE, exact: true }).hover()
-  await expect(page.getByText(/^Only keep one image open at a time\. Closes the other images/)).toBeVisible()
+  await expect(page.getByText("Click to keep only one image open at a time.")).toBeVisible()
   await setSingle(column("Wide"), true)
+  await page.mouse.move(0, 0)
+  await column("Wide").getByRole("button", { name: SINGLE, exact: true }).hover()
+  await expect(page.getByText("Click to allow multiple images open at a time.")).toBeVisible()
   await expect(viewers).toHaveCount(1)
   await expect(column("Wide")).toBeVisible()
   await page.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()

@@ -522,7 +522,11 @@ function PromptBlock({
       open={optionsOpen}
       onToggle={toggleOptions}
       label={`Options of ${name}`}
-      hint={optionsOpen ? "Hide the prompt's options" : "Show the prompt's options: role, position, condition…"}
+      hint={
+        optionsOpen
+          ? "Click to hide the prompt's options"
+          : "Click to show the prompt's options: role, position, condition…"
+      }
     />
   )
 
@@ -912,7 +916,7 @@ export function PromptDocument({
           className="preset-search h-8! shrink-0 px-2! aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-accent"
           aria-label="Search and replace"
           aria-pressed={searching}
-          hint="Search and replace in the preset's text."
+          hint={searching ? "Click to close search and replace" : "Click to open search and replace"}
           onClick={() => setSearching(!searching)}
         >
           <Icon name="search" />

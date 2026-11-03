@@ -54,7 +54,7 @@ test("phone sheets close immediately and after changing image privacy", async ({
     await page.mouse.move(0, 0)
     await toggle.hover()
     const tooltip = page.getByText(
-      "Shows or hides images on this device (Alt+Shift+B). Right-click to choose blur or hide.",
+      `Click to ${(await toggle.getAttribute("aria-label"))!.toLowerCase()}. Right-click to choose blur or hide.`,
       { exact: true }
     )
     await expect(tooltip).toBeVisible()

@@ -75,7 +75,7 @@ function ArchiveAction({ entry }: LibraryItemProps) {
   return (
     <IconButton
       label={`${archived ? "Unarchive" : "Archive"} ${entry.label}`}
-      hint={archived ? "Unarchive: show it in the lists again" : "Archive: hide it from the lists; nothing is deleted"}
+      hint={archived ? "Click to unarchive: show in the lists again" : "Click to archive: hide from the lists"}
       icon={archived ? "unarchive" : "archive"}
       disabled={action.pending}
       onClick={() =>

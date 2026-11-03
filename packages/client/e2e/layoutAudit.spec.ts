@@ -684,11 +684,25 @@ test.describe("synthetic library and every app surface", () => {
             expect(a.width).toBe(b.width)
             expect(a.height).toBe(b.height)
             expect(a.x).toBeGreaterThan(b.x)
+            await page.mouse.move(0, 0)
+            await button.hover()
+            const pressed = (await button.getAttribute("aria-pressed")) === "true"
+            await expect(
+              page.getByText(pressed ? "Click to hide personas" : "Click to show personas", { exact: true })
+            ).toBeVisible()
+            if (!pressed) {
+              await expect(button).toHaveCSS("opacity", "1")
+            }
+            await page.mouse.move(0, 0)
           }
           await go("home-all", "/")
           const main = page.getByRole("main")
           await checkRow(main)
+          await expect(toggle(main)).toHaveAttribute("aria-pressed", "false")
+          await expect(toggle(main).locator("svg path")).toHaveCount(4)
           await toggle(main).click()
+          await expect(toggle(main)).toHaveAttribute("aria-pressed", "true")
+          await expect(toggle(main).locator("svg path")).toHaveCount(2)
           await audit("home-include-personas")
           await showAppNavigation(page)
           await page
@@ -700,7 +714,11 @@ test.describe("synthetic library and every app surface", () => {
           await expect(sideToggle).toBeVisible()
           await checkRow(sideToggle.locator(".."))
           await audit("sidebar-Characters")
+          await expect(sideToggle).toHaveAttribute("aria-pressed", "false")
+          await expect(sideToggle.locator("svg path")).toHaveCount(4)
           await sideToggle.click()
+          await expect(sideToggle).toHaveAttribute("aria-pressed", "true")
+          await expect(sideToggle.locator("svg path")).toHaveCount(2)
           await audit("sidebar-include-personas")
           if (width === 1440) {
             const handle = page.getByRole("separator", { name: "Resize sidebar", exact: true })
@@ -720,8 +738,42 @@ test.describe("synthetic library and every app surface", () => {
           const section = cast.getByRole("region", { name: "Add characters", exact: true })
           await checkRow(section)
           await audit("cast-add-characters")
+          await expect(toggle(section)).toHaveAttribute("aria-pressed", "false")
+          await expect(toggle(section).locator("svg path")).toHaveCount(4)
           await toggle(section).click()
+          await expect(toggle(section)).toHaveAttribute("aria-pressed", "true")
+          await expect(toggle(section).locator("svg path")).toHaveCount(2)
           await audit("cast-add-personas")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_ICON_TOGGLES_ONLY === "1") {
+          await go("group-chat", `/chats/${chatId}`)
+          const versions = page.getByRole("button", { name: /choose a version$/ }).last()
+          await versions.click()
+          await expect(page.getByRole("dialog", { name: /^Versions of message/ })).toBeVisible()
+          await audit("version-picker")
+          await page.keyboard.press("Escape")
+          for (const name of ["Cast", "Prompt preset", "Lorebooks", "Notes"]) {
+            await openPanel(page, name)
+            await audit(`panel-${name}`)
+          }
+          const card = await openPanel(page, cardName)
+          const view = card.getByRole("button", { name: /^View .*'s picture$/ })
+          if ((await view.count()) > 0) {
+            await view.first().click()
+            await expect(page.locator("[data-image-viewer]").first()).toBeVisible()
+            await audit("portrait-viewer")
+            await page.keyboard.press("Escape")
+          }
+          await closePanel(page)
+          for (const [surface, path] of [
+            ["library", "/library"],
+            ["card-editor", `/library/${cardRef}`],
+            ["preset-editor", `/library/${presetRef}`],
+            ["lorebook-editor", `/library/${bookRef}`]
+          ] as const) {
+            await go(surface, path)
+          }
           return
         }
         if (process.env.LAYOUT_AUDIT_HOME_ONLY === "1") {

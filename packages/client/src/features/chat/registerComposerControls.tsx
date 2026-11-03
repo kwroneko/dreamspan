@@ -27,7 +27,7 @@ function GuidanceToggle({
   hint: string
 }) {
   return (
-    <Tooltip label={`Guidance ${guidance ? "on" : "off"}: ${hint}`}>
+    <Tooltip label={`Click to turn guidance ${guidance ? "off" : "on"}. ${hint}`}>
       <Button
         role="switch"
         aria-checked={guidance}

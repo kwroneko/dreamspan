@@ -23,8 +23,8 @@ const MIN_VIEWER_HEIGHT = 180
 const GUTTER = 17
 
 const SINGLE = "Only keep one image open at a time"
-const SINGLE_OFF = `${SINGLE}. Closes the other images; another portrait then replaces this one.`
-const SINGLE_ON = `${SINGLE} (on). Turn it off to open images on top of each other.`
+const SINGLE_OFF = "Click to keep only one image open at a time."
+const SINGLE_ON = "Click to allow multiple images open at a time."
 
 interface Measured {
   /** The viewer's height, header included. */

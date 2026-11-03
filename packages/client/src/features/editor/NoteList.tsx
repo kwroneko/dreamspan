@@ -362,10 +362,10 @@ export function NoteBlock({
                 label={`Settings of ${title}`}
                 hint={
                   open && settingsShown
-                    ? "Hides this note's settings."
+                    ? "Click to hide this note's settings."
                     : open
-                      ? "Shows this note's settings: position, depth, role and when it applies."
-                      : "Opens this note with its settings: position, depth, role and when it applies."
+                      ? "Click to show this note's settings: position, depth, role and when it applies."
+                      : "Click to open this note with its settings: position, depth, role and when it applies."
                 }
               />
               <Menu

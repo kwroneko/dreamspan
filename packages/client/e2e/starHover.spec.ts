@@ -91,7 +91,7 @@ async function checkStars(page: Page, scope: Locator, surface: "home" | "sidebar
     await star.hover()
     await hitTest(star)
     await expect(
-      page.getByText(i % 2 ? "A favourite: click to remove" : "Add to favourites", { exact: true })
+      page.getByText(i % 2 ? "Click to remove from favourites" : "Click to add to favourites", { exact: true })
     ).toBeVisible()
     await hitTest(star)
     // Portrait controls must retain their contrast chip on hover and while explained.

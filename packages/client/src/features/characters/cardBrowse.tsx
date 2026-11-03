@@ -201,10 +201,10 @@ export function IncludePersonas({
   return (
     <IconButton
       label="Include personas"
-      hint={browse.withPersonas ? "Personas included" : "Include personas"}
-      icon="people"
+      hint={browse.withPersonas ? "Click to hide personas" : "Click to show personas"}
+      icon={browse.withPersonas ? "user" : "user-x"}
       aria-pressed={browse.withPersonas}
-      className="aria-pressed:bg-surface-raised aria-pressed:text-accent"
+      className={`${browse.withPersonas ? "" : "text-text!"} aria-pressed:bg-surface-raised aria-pressed:text-accent`}
       onClick={() => onChange({ withPersonas: !browse.withPersonas })}
     />
   )
@@ -250,7 +250,7 @@ export function SortDirection({
   return (
     <IconButton
       label={`Order: ${order}`}
-      hint={`${order}. Click for ${orderName(kind, !reversed).toLowerCase()}`}
+      hint={`Click to sort ${orderName(kind, !reversed).toLowerCase()}`}
       icon={reversed ? "sortUp" : "sortDown"}
       onClick={onToggle}
     />
@@ -347,7 +347,7 @@ export function FavouriteStar({ card, className = "" }: { card: ShellCard; class
   return (
     <IconButton
       label={on ? `Remove ${name} from favourites` : `Add ${name} to favourites`}
-      hint={on ? "A favourite: click to remove" : "Add to favourites"}
+      hint={on ? "Click to remove from favourites" : "Click to add to favourites"}
       icon="star"
       filled={on}
       aria-pressed={on}

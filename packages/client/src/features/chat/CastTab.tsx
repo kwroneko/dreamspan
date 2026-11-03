@@ -142,7 +142,11 @@ function Member({
       <IconButton
         icon={muted ? "muted" : "volume"}
         label={muted ? `Unmute ${name}` : `Mute ${name}`}
-        hint={muted ? "Muted: never picked to reply. Unmute" : "Mute: never picked to reply"}
+        hint={
+          muted
+            ? "Click to allow this character to be picked to reply"
+            : "Click to mute this character: never picked to reply"
+        }
         className={muted ? "text-warning!" : ""}
         onClick={() => onChange({ _tag: "Presence", entityId: card.entityId, present: muted })}
       />

@@ -298,7 +298,7 @@ for (const theme of ["light", "dark"] as const)
     const show = page.locator("header").getByRole("button", { name: "Show the sidebar", exact: true })
     // Focus moves to the button that brings it back.
     await expect(show).toBeFocused()
-    await expect(page.getByText("Show the sidebar: your chats, characters and the menu")).toBeVisible()
+    await expect(page.getByText("Click to show the sidebar: your chats, characters and the menu")).toBeVisible()
     // Only the chat: the messages' column centred in the window at the chat width.
     const column = (await page.getByTestId("messages").locator("> div").boundingBox())!
     expect(Math.abs(column.x + column.width / 2 - 960)).toBeLessThanOrEqual(2)
