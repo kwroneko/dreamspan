@@ -511,16 +511,18 @@ function PendingFor({
   card,
   cards,
   greeters,
-  group
+  group,
+  defaultPersona
 }: {
   card: CardForChat
+  defaultPersona: EntityId | null
   cards: ReadonlyArray<CastCard>
   greeters: ReadonlyArray<CardForChat>
   group: { name: string; chatId: ChatId; members: ReadonlyArray<string> } | null
 }) {
   const call = useCaller()
   const [pending] = useState(
-    () => new PendingChat(cards, greeters, group && { name: group.name, chatId: group.chatId }, call)
+    () => new PendingChat(cards, greeters, group && { name: group.name, chatId: group.chatId }, call, defaultPersona)
   )
   return <Pending pending={pending} card={card} groupMembers={group?.members ?? null} />
 }
@@ -531,6 +533,7 @@ export function StartChatPage() {
   const action = useAction()
   const [loaded, setLoaded] = useState<{
     card: CardForChat
+    defaultPersona: EntityId | null
     cards: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? loaded.card.card.name : "New chat")
@@ -545,19 +548,31 @@ export function StartChatPage() {
       .run((client) =>
         Effect.all({
           card: client("GetCardForChat", { entityId }),
-          cards: client("ListCards", undefined)
+          cards: client("ListCards", undefined),
+          defaults: client("GetGenerationDefaults", undefined)
         })
       )
       .then((result) => {
         if (result.ok)
-          setLoaded({ card: result.value.card, cards: result.value.cards.filter((c) => c.entityId !== entityId) })
+          setLoaded({
+            card: result.value.card,
+            cards: result.value.cards.filter((c) => c.entityId !== entityId),
+            defaultPersona: result.value.defaults.persona ?? null
+          })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card and attempt
   }, [entityId, attempt])
   return (
     <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
       {loaded ? (
-        <PendingFor key={entityId} card={loaded.card} cards={loaded.cards} greeters={[loaded.card]} group={null} />
+        <PendingFor
+          key={entityId}
+          card={loaded.card}
+          cards={loaded.cards}
+          greeters={[loaded.card]}
+          group={null}
+          defaultPersona={loaded.defaultPersona}
+        />
       ) : action.error ? (
         <div className="chat-column pt-4">
           <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
@@ -577,6 +592,7 @@ export function StartGroupChatPage() {
   const action = useAction()
   const [loaded, setLoaded] = useState<{
     group: ChatGroup
+    defaultPersona: EntityId | null
     cards: ReadonlyArray<CardForChat>
     all: ReadonlyArray<CastCard>
   } | null>(null)
@@ -592,25 +608,31 @@ export function StartGroupChatPage() {
         Effect.gen(function* () {
           const { group } = yield* client("ListGroupChats", { chatId })
           // Every member's greetings: each greets in turn.
-          const { greeters, cards } = yield* Effect.all(
+          const { greeters, cards, defaults } = yield* Effect.all(
             {
               greeters: Effect.forEach(
                 group.members,
                 (member) => client("GetCardForChat", { entityId: member.entityId }),
                 { concurrency: "unbounded" }
               ),
-              cards: client("ListCards", undefined)
+              cards: client("ListCards", undefined),
+              defaults: client("GetGenerationDefaults", undefined)
             },
             { concurrency: "unbounded" }
           )
-          return { group, greeters, cards }
+          return { group, greeters, cards, defaults }
         })
       )
       .then((result) => {
         if (!result.ok) return
-        const { group, greeters, cards } = result.value
+        const { group, greeters, cards, defaults } = result.value
         const inGroup = new Set<string>(group.members.map((member) => member.entityId))
-        setLoaded({ group, cards: greeters, all: cards.filter((c) => !inGroup.has(c.entityId)) })
+        setLoaded({
+          group,
+          cards: greeters,
+          all: cards.filter((c) => !inGroup.has(c.entityId)),
+          defaultPersona: defaults.persona ?? null
+        })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group and attempt
   }, [chatId, attempt])
@@ -621,6 +643,7 @@ export function StartGroupChatPage() {
           key={chatId}
           card={loaded.cards[0]!}
           cards={loaded.all}
+          defaultPersona={loaded.defaultPersona}
           greeters={loaded.cards}
           group={{
             name: loaded.group.name,

@@ -10,11 +10,13 @@ import {
   DEFAULT_JUDGE,
   DEFAULT_LCM,
   DEFAULT_MODEL,
+  DEFAULT_PERSONA,
   DEFAULT_PRESET,
   GLOBAL_REGEX,
   readGlobalRegex,
   ownedModel,
   ownedPreset,
+  ownedPersona,
   readDefaults
 } from "./generationSettings.ts"
 import { makeDisplayPrefsWriteHandlers } from "./displayPrefs.ts"
@@ -251,6 +253,12 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
     SetGenerationDefaults: ({ userId, defaults }) =>
       Effect.gen(function* () {
         const { model, preset } = defaults
+        if (
+          defaults.persona !== undefined &&
+          defaults.persona !== null &&
+          !(yield* ownedPersona(sql, userId, defaults.persona))
+        )
+          return yield* new NotFound({ entity: "persona", id: defaults.persona })
         if (model !== null && !(yield* ownedModel(sql, userId, model.connection, model.model))) {
           return yield* new NotFound({ entity: "model", id: model.model })
         }
@@ -262,6 +270,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
             return yield* new NotFound({ entity: "model", id: choice.model })
         const locked = yield* connectionLock(userId, model)
+        if (defaults.persona !== undefined) yield* putSetting(userId, DEFAULT_PERSONA, defaults.persona)
         yield* putSetting(userId, DEFAULT_MODEL, model)
         yield* putSetting(userId, DEFAULT_PRESET, locked ?? preset)
         if (defaults.lcm !== undefined) yield* putSetting(userId, DEFAULT_LCM, defaults.lcm)
@@ -290,6 +299,13 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
     // tab's change to a setting not named here stays.
     ChangeGenerationDefaults: ({ userId, change }) =>
       Effect.gen(function* () {
+        if (
+          change.persona !== undefined &&
+          change.persona !== null &&
+          !(yield* ownedPersona(sql, userId, change.persona))
+        )
+          return yield* new NotFound({ entity: "persona", id: change.persona })
+        if (change.persona !== undefined) yield* putSetting(userId, DEFAULT_PERSONA, change.persona)
         if (change.model && !(yield* ownedModel(sql, userId, change.model.connection, change.model.model)))
           return yield* new NotFound({ entity: "model", id: change.model.model })
         if (change.preset && !(yield* ownedPreset(sql, userId, change.preset)))

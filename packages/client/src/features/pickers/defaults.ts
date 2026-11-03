@@ -7,7 +7,7 @@ import { AppClient } from "../../rpc.ts"
 import type { ChatSession } from "../chat/session.ts"
 
 export const defaultsAtom = AppClient.query("GetGenerationDefaults", undefined, {
-  reactivityKeys: ["settings"],
+  reactivityKeys: ["settings", "library"],
   timeToLive: "400 millis"
 })
 

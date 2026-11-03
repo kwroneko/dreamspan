@@ -75,6 +75,12 @@ const setUp = (page: Page) =>
     await importCard(page, { name: "Bo", description: "A diver." })
     await page.goto(`${server().url}/library`)
     for (const persona of ["Ana", "Bo"]) await markPersona(page, persona)
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const ana = (yield* api.ListCards()).find((card) => card.name === "Ana")!
+        yield* api.ChangeGenerationDefaults({ change: { persona: ana.entityId } })
+      })
+    )
   })())
 
 const login = async (page: Page) => {

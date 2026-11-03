@@ -2307,7 +2307,7 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** At startup: rollouts a previous process left running are interrupted. */
   Rpc.make("InterruptRollouts", { success: Schema.Struct({ interrupted: Schema.Int }), error: StorageError }),
-  /** The user's default model and preset; NotFound when either isn't the user's and live. */
+  /** The account defaults, including its new-chat persona; choices must be owned and live. */
   Rpc.make("SetGenerationDefaults", {
     payload: { userId: UserId, defaults: GenerationDefaults },
     success: GenerationDefaults,

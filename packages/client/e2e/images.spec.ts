@@ -62,7 +62,7 @@ for (const width of [1440, 390]) {
       if (await another.isVisible()) await another.click()
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
       await page.getByLabel("Message", { exact: true }).fill("Hello from the image test.")
-      await page.getByRole("button", { name: /^Send as / }).click()
+      await page.getByRole("button", { name: /^Send(?: as .+)?$/ }).click()
       await expect(page).toHaveURL(/\/chats\//)
       // A message portrait opens the original: beside the chat, or full-screen on a phone.
       await page.getByRole("button", { name: "View Synthetic 001's portrait" }).first().click()

@@ -331,7 +331,16 @@ function CharacterTile({
           {state.mark}
         </span>
       )}
-      <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
+      {card.persona ? (
+        <div className="flex items-start gap-2 p-2">
+          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+            <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
+          </div>
+          <CardSurface placement="persona-menu" entityId={c.entityId} label={c.label} />
+        </div>
+      ) : (
+        <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
+      )}
     </div>
   )
 }
