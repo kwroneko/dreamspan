@@ -101,7 +101,8 @@ const statements: ReadonlyArray<string> = [
     BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(SELF, "NEW.chat_id", "NEW.id")}
     INSERT INTO shell_touches (kind, chat_id, ref, from_slot, to_slot) SELECT '${TIP}', NEW.chat_id, NEW.id,
       OLD.tip_slot_id, NEW.tip_slot_id WHERE OLD.tip_slot_id IS NOT NEW.tip_slot_id
-        AND OLD.tip_slot_id IS NOT NULL AND NEW.tip_slot_id IS NOT NULL AND OLD.chat_id IS NEW.chat_id;
+        AND OLD.tip_slot_id IS NOT NULL AND NEW.tip_slot_id IS NOT NULL AND OLD.chat_id IS NEW.chat_id
+        AND EXISTS (SELECT 1 FROM forks child WHERE child.parent_fork_id = NEW.id);
     ${touch(
       KIN,
       "OLD.chat_id",

@@ -1927,6 +1927,8 @@ export class WriteOps extends RpcGroup.make(
       matching: Schema.Boolean,
       /** A JSON array of the format worker's messages (formats/stChat.ts), passed on unread. */
       messagesJson: Schema.String,
+      /** Exact normalized message hashes from the format worker; optional for plugins. */
+      hashes: Schema.optionalKey(Schema.Array(Schema.String)),
       /** Each speaker key of the messages, as a card of the user's, or null. */
       speakers: Schema.Record(Schema.String, Schema.NullOr(EntityId)),
       /** Full-folder cards/personas by speaker; a manual link alone never dates their arrival. */

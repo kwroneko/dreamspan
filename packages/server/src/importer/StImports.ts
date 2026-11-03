@@ -138,6 +138,7 @@ interface Target {
 }
 
 interface Batch {
+  readonly hashes?: ReadonlyArray<string>
   readonly messagesJson: string
   readonly speakers: ReadonlyArray<string>
 }
@@ -777,6 +778,7 @@ export class StImports extends Context.Service<
             parentSlotId: progress.cursor,
             matching: progress.matching,
             messagesJson: batch.messagesJson,
+            ...(batch.hashes === undefined ? {} : { hashes: batch.hashes }),
             ...(progress.link.group?.arrival === undefined
               ? {}
               : { groupArrival: progress.link.group.arrival, groupId: progress.link.group.id }),

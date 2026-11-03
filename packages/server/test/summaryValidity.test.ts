@@ -78,6 +78,24 @@ const run = <A, E>(body: Effect.Effect<A, E, SqlClient.SqlClient>) =>
   body.pipe(Effect.provide(writerConnection(join(tempDir("summary-validity"), "db.sqlite"))))
 
 describe("per-fork summary validity", () => {
+  it.effect("a tip move walks descendant paths only when the fork has children", () =>
+    run(
+      Effect.gen(function* () {
+        const { sql, reached } = yield* setup
+        const move = (tip: string, expectedTouches: number) =>
+          Effect.gen(function* () {
+            yield* sql`UPDATE forks SET tip_slot_id = ${tip} WHERE id = 'X'`
+            const [row] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM shell_touches WHERE kind = 'tip'`
+            assert.strictEqual(row!.n, expectedTouches)
+          })
+        assert.deepStrictEqual(yield* reached(move("c", 0)), ["X"])
+        yield* sql`INSERT INTO forks (id, chat_id, parent_fork_id, tip_slot_id, created_at, lineage_json)
+          VALUES ('child', 'main', 'X', 'c', 1, '[["child",null],["X",5],["main",5]]')`
+        assert.deepStrictEqual(yield* reached(move("x", 1)), ["X", "child"])
+      })
+    )
+  )
+
   it.effect("a write to a slot reaches every fork whose path holds it, and only those", () =>
     run(
       Effect.gen(function* () {

@@ -78,7 +78,7 @@ export const summaryStamps = (sql: SqlClient.SqlClient, userId: string) =>
  * and their events (`shellSlotsQuery`, `shellEventsQuery`, by fork id). Iterative, so deep
  * imported paths need no recursion.
  */
-export const computeForkSummaries = (sql: SqlClient.SqlClient, records: ReadonlyArray<ForkRow>) =>
+export const computeForkSummaries = (sql: SqlClient.SqlClient, records: ReadonlyArray<ForkRow>, pathsOnly = false) =>
   Effect.gen(function* () {
     if (records.length === 0) return []
     const chatIds = JSON.stringify([...new Set(records.map((r) => r.chat_id))])
@@ -94,12 +94,14 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
         : yield* sql<Pick<ForkRow, "id" | "chat_id" | "tip_slot_id">>`SELECT f.id, f.chat_id, f.tip_slot_id
             FROM json_each(${JSON.stringify(others)}) j CROSS JOIN forks f ON f.id = j.value WHERE f.deleted_at IS NULL`)
     ]
-    // A fork whose lineage overrides nothing walks its chat's tree, read once for all of them;
-    // the others read their own paths. Many forks sharing a long prefix read it once.
+    // Many plain forks share one tree read. A small import refresh must read only its
+    // paths: reading the whole growing tree at every new branch is quadratic.
     const plain = new Set(
-      (yield* sql.unsafe<{ id: string }>(shellPlainForksQuery, [JSON.stringify(walked.map((r) => r.id))])).map(
-        (row) => row.id
-      )
+      pathsOnly
+        ? []
+        : (yield* sql.unsafe<{ id: string }>(shellPlainForksQuery, [JSON.stringify(walked.map((r) => r.id))])).map(
+            (row) => row.id
+          )
     )
     const own = walked.filter((r) => !plain.has(r.id))
     const treeChats = [...new Set(walked.flatMap((r) => (plain.has(r.id) ? [r.chat_id] : [])))]
@@ -371,6 +373,6 @@ export const refreshChatSummaries = (sql: SqlClient.SqlClient, userId: string, c
       WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL AND (s.fork_id IS NULL OR s.format <> ${FORK_SUMMARY_FORMAT}
         OR s.stamp <> ${chat.shell_stamp} OR s.user_stamp <> ${userStamp})`
     if (records.length === 0) return
-    const forks = yield* computeForkSummaries(sql, records)
+    const forks = yield* computeForkSummaries(sql, records, records.length <= 2)
     yield* storeSummaries(sql, userId, [{ chatId, stamp: chat.shell_stamp, userStamp, forks: JSON.stringify(forks) }])
   })
