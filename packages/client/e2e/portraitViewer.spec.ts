@@ -61,7 +61,7 @@ test.beforeAll(async ({ browser }) => {
     api.StartChat({
       cards: [refs.Tall!.entityId],
       persona: refs.Juniper!.entityId,
-      greeting: null,
+      greeting: 0,
       first: { _tag: "Send", content: "Is anyone here?", speakerEntityId: null }
     })
   )
@@ -100,7 +100,8 @@ test("every editable portrait: one Picture button lower right, a click opens the
   await expect(page.getByRole("complementary", { name: "Tall's portrait", exact: true })).toBeVisible()
   // A click opens, never replaces: no dialog, no file chooser.
   await expect(page.getByRole("dialog")).toHaveCount(0)
-  await page.getByRole("button", { name: "Close the portrait" }).click()
+  await tab.getByRole("button", { name: "View Tall's picture", exact: true }).click()
+  await expect(page.getByRole("complementary", { name: "Tall's portrait", exact: true })).toHaveCount(0)
 
   // The persona's tab: the same button in the same place, with the "You" badge.
   await openChat(page, `card:${refs.Juniper!.entityId}`)
@@ -120,6 +121,8 @@ test("every editable portrait: one Picture button lower right, a click opens the
   await expect(personaPortrait.locator("svg")).toHaveCount(1)
   await personaTab.getByRole("button", { name: "View Juniper's picture", exact: true }).click()
   await expect(page.getByRole("complementary", { name: "Juniper's portrait", exact: true })).toBeVisible()
+  await personaTab.getByRole("button", { name: "View Juniper's picture", exact: true }).click()
+  await expect(page.getByRole("complementary", { name: "Juniper's portrait", exact: true })).toHaveCount(0)
 
   // The full editor's own page: header and Metadata both, a click opening a full-screen viewer.
   await page.goto(`${server().url}/library/${refs.Tall!.id}`)
@@ -142,6 +145,58 @@ test("every editable portrait: one Picture button lower right, a click opens the
   await expect(bare.getByRole("button", { name: "View Bare's picture" })).toHaveCount(0)
   await bare.getByRole("button", { name: "Picture", exact: true }).hover()
   await expect(page.getByText(/^Picture: add one\./)).toBeVisible()
+})
+
+test("header portrait clicks toggle open then closed, shared with messages, the full editor and pending greetings", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openChat(page, `card:${refs.Tall!.entityId}`)
+  const tab = page.getByRole("tabpanel", { name: "Tall" })
+  const header = tab.getByRole("button", { name: "View Tall's picture", exact: true })
+  const viewer = page.getByRole("complementary", { name: "Tall's portrait", exact: true })
+  const twice = async (portrait: Locator) => {
+    await portrait.click()
+    await expect(viewer).toBeVisible()
+    await portrait.click()
+    await expect(viewer).toHaveCount(0)
+  }
+  await twice(header)
+
+  // Either surface can close the image the other opened: they share the card's identity.
+  const message = page
+    .locator("article[data-slot]")
+    .getByRole("button", { name: "View Tall's portrait", exact: true })
+    .first()
+  await message.click()
+  await expect(viewer).toBeVisible()
+  await header.click()
+  await expect(viewer).toHaveCount(0)
+  await header.click()
+  await expect(viewer).toBeVisible()
+  await message.click()
+  await expect(viewer).toHaveCount(0)
+
+  // The full editor over a chat keeps its header accessible beside the image column.
+  await tab.getByRole("button", { name: "Open Tall in the full editor", exact: true }).click()
+  const editor = page.getByRole("dialog", { name: "Card editor", exact: true })
+  await twice(
+    editor.locator("[data-card-header-portrait]").getByRole("button", { name: "View Tall's picture", exact: true })
+  )
+  const metadata = await cardFieldsTab(editor, "Metadata")
+  await twice(
+    metadata.getByRole("region", { name: "Picture" }).getByRole("button", { name: "View Tall's picture", exact: true })
+  )
+  await editor.getByRole("button", { name: "Back to the chat", exact: true }).click()
+
+  // A pending greeting uses the stock avatar toggle too, before a chat has been saved.
+  await page.goto(`${server().url}/cards/${refs.Tall!.entityId}/chat?panel=card:${refs.Tall!.entityId}`)
+  const greeting = page.getByRole("article", { name: "Greeting from Tall", exact: true })
+  await twice(greeting.getByRole("button", { name: "View Tall's portrait", exact: true }))
+  const pendingHeader = page
+    .getByRole("tabpanel", { name: "Tall" })
+    .getByRole("button", { name: "View Tall's picture", exact: true })
+  await twice(pendingHeader)
 })
 
 /** The image's rect and its box's, in page pixels. */

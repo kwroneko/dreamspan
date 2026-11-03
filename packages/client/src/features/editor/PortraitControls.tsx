@@ -12,7 +12,7 @@ import { mediaUrl } from "../../ui/mediaImage.ts"
 import { PICTURE_ACCEPT, useCutoutChooser } from "../../ui/portraitParts.ts"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import type { Caller } from "./caller.ts"
-import { usePortraitViewer } from "../../ui/Portrait.tsx"
+import { useOpenPortrait } from "../../ui/Portrait.tsx"
 import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
 
 interface Choosing {
@@ -158,18 +158,18 @@ function ViewablePortrait({
   mediaId: string | null
   crop: AvatarCrop | null
 }) {
-  const viewer = usePortraitViewer()
+  const togglePortrait = useOpenPortrait()
   const avatar = (
     <Avatar id={id} name={name} mediaId={mediaId} crop={crop} size="fill" className="size-full" alt={alt} />
   )
-  if (mediaId === null || !viewer) return avatar
+  if (mediaId === null || !togglePortrait) return avatar
   return (
     <Tooltip label="View the whole picture">
       <button
         type="button"
         aria-label={`View ${name}'s picture`}
         data-view-portrait
-        onClick={() => viewer.show({ id, name, mediaId })}
+        onClick={() => togglePortrait({ id, name, mediaId })}
         className="relative inline-flex size-full shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         {avatar}

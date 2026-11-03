@@ -181,12 +181,13 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
       await page.getByRole("button", { name: "Close the panel" }).click()
     } else {
       await openPanel(page, shape.name)
-      // The tab's own portrait shows the whole image (owner, 2026-11-02), staying open when
-      // it's the one shown.
-      await page
+      // The tab's own portrait toggles the image already shown by the character chip.
+      const portrait = page
         .getByRole("tabpanel", { name: shape.name })
         .getByRole("button", { name: `View ${shape.name}'s picture`, exact: true })
-        .click()
+      await portrait.click()
+      await expect(column(shape.name)).toHaveCount(0)
+      await portrait.click()
       await expect(column(shape.name)).toBeVisible()
       await page.getByRole("button", { name: "Close the panel" }).click()
     }
@@ -404,7 +405,8 @@ test("a portrait opens full-screen at 390: fit and 100% differ, it pans and pinc
   await openChat(page)
   const screen = (name: string) => page.getByRole("dialog", { name, exact: true })
 
-  await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
+  // The phone can restore a reading position with the user's message first.
+  await page.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()
   await expect(screen("Tall")).toBeVisible()
   const fitted = await expectFitted(page, "Tall")
   expect(fitted.width).toBeGreaterThan(360)

@@ -99,6 +99,7 @@ export function PortraitProvider({
   )
 }
 
+/** The shared click toggle for viewer portraits, including editable card headers. */
 export const useOpenPortrait = () => useContext(Context)?.open
 export const usePortraitViewer = () => useContext(Context)
 
