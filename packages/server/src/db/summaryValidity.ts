@@ -152,9 +152,20 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
               -- A chat with insertions shows slots off its tree's paths.
               OR (t.kind = ${SLOT} AND EXISTS (
                 SELECT 1 FROM fork_overrides o WHERE o.chat_id = m.chat_id AND o.kind = 'insert'))))),
-        below(id) AS (
-          SELECT t.ref FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id WHERE t.kind = ${SLOT}
-          UNION SELECT s.id FROM below b JOIN slots s ON s.parent_slot_id = b.id),
+        -- A shared old slot can have hundreds of thousands of descendants. Reach its
+        -- forks by chain intervals, never by enumerating that message history. Deduplicate
+        -- swipes pinned together before joining them to the forks' segments.
+        touched(chat_id, chain_id, depth) AS MATERIALIZED (
+          SELECT DISTINCT s.chat_id, s.chain_id, s.depth FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id
+            JOIN slots s ON s.id = t.ref WHERE t.kind = ${SLOT}),
+        segments(fork_id, chat_id, chain_id, lo, hi) AS (
+          SELECT f.id, f.chat_id, s.chain_id, h.depth, s.depth FROM kept k
+            CROSS JOIN forks f ON f.chat_id = k.chat_id
+            JOIN slots s ON s.id = f.tip_slot_id JOIN slots h ON h.id = s.chain_id
+          WHERE EXISTS (SELECT 1 FROM touched t WHERE t.chat_id = k.chat_id)
+          UNION ALL SELECT g.fork_id, g.chat_id, p.chain_id, h.depth, p.depth FROM segments g
+            JOIN slots head ON head.id = g.chain_id JOIN slots p ON p.id = head.parent_slot_id
+            JOIN slots h ON h.id = p.chain_id WHERE p.depth < g.lo AND h.depth <= p.depth),
         -- Each fork written once, from its lowest number (null: every lineage entry holding it),
         -- so the chat's lineages are read once per fork, not once per row it wrote.
         written(chat_id, ref, seq) AS (
@@ -183,8 +194,8 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
               -- Paths in a chat with insertions aren't the tree's.
               SELECT 1 FROM fork_overrides o WHERE o.chat_id = t.chat_id AND o.kind = 'insert'))
           UNION ALL SELECT f.id FROM shifted h JOIN forks f ON f.parent_fork_id = h.fork AND f.tip_slot_id = h.id
-          UNION ALL SELECT f.id FROM kept k JOIN forks f ON f.chat_id = k.chat_id
-            WHERE f.tip_slot_id IN (SELECT id FROM below)
+          UNION ALL SELECT g.fork_id FROM segments g JOIN touched t ON t.chat_id = g.chat_id
+            AND t.chain_id = g.chain_id AND t.depth BETWEEN g.lo AND g.hi
           -- instr first: only the lineages naming the fork are parsed.
           UNION ALL SELECT f.id FROM written w JOIN forks f ON f.chat_id = w.chat_id AND instr(f.lineage_json, w.ref) > 0
             CROSS JOIN json_each(f.lineage_json) l

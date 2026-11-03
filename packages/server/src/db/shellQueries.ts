@@ -49,7 +49,8 @@ export const shellEventsQuery = `SELECT f.id AS fork_id, e.chat_id, e.slot_id, e
 export const shellPlainForksQuery = `SELECT f.id FROM json_each(?) j CROSS JOIN forks f ON f.id = j.value
   WHERE f.lineage_json IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM json_each(f.lineage_json) l CROSS JOIN fork_overrides o
-    WHERE o.fork_id = l.value ->> 0 AND o.kind IN ('select', 'replace', 'delete_slot'))`
+    WHERE o.fork_id = l.value ->> 0 AND o.kind IN ('select', 'replace', 'delete_slot')
+      AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807))`
 
 /**
  * Every slot of the chats given (a JSON array of ids) as `shellSlotsQuery` reads it for a fork
