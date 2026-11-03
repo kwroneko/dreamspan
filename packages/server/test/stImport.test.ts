@@ -345,7 +345,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.sameMembers([...partyState.participants], [aliceCard, bobCard, sam])
       assert.deepStrictEqual(partyState.absent, [bobCard])
       assert.deepStrictEqual(partyState.vars, { scene: "inn" })
-      assert.strictEqual((yield* api.GetChat({ chatId: party })).title, "Party: Party - 2025")
+      assert.strictEqual((yield* api.GetChat({ chatId: party })).title, "Party - 2025")
 
       // Personas: in the persona folder, with their avatars; Kim's description at depth.
       const conn = db()

@@ -1089,7 +1089,12 @@ export class StImports extends Context.Service<
           countAs: file.kind,
           modifiedAt: request.modifiedAt ?? session.importedAt,
           nextPart: 0,
-          title: stChatTitle(file.name, mainChat, file.kind === "group_chat" ? (link.group?.name ?? null) : null),
+          title: stChatTitle(
+            file.name,
+            mainChat,
+            file.kind === "group_chat" ? (link.group?.name ?? "") : null,
+            link.group?.members.map((member) => session.cards.get(stem(member))?.name ?? null)
+          ),
           header,
           link,
           target: own === undefined ? null : { chatId: own.chatId, recordId: own.recordId },
