@@ -20,7 +20,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { browseCards, mixesPersonas } from "./cardBrowse.tsx"
 import { useSidebarBrowse } from "./useSidebarBrowse.ts"
-import { CardBrowseBar } from "./CardBrowseBar.tsx"
+import { CardGridControls } from "./CardGridControls.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
 import { sidebarFoot } from "./homeSlots.ts"
@@ -621,14 +621,24 @@ function Browser({ data }: { data: ShellLibrary }) {
           )}
         </nav>
       )}
-      <Input
-        aria-label={grid ? "Find a character" : "Find a chat"}
-        placeholder="Find by name"
-        className="max-w-controls"
-        value={search}
-        onChange={(e) => setSearch(e.currentTarget.value)}
-      />
-      {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups includePersonas />}
+      {grid ? (
+        <CardGridControls
+          data={data}
+          browse={browse}
+          onChange={setBrowse}
+          search={search}
+          onSearch={setSearch}
+          searchLabel="Find a character"
+        />
+      ) : (
+        <Input
+          aria-label="Find a chat"
+          placeholder="Find by name"
+          className="max-w-controls"
+          value={search}
+          onChange={(e) => setSearch(e.currentTarget.value)}
+        />
+      )}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
       <div data-shell-list className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
         {grid ? (
