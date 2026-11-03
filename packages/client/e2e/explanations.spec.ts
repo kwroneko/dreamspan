@@ -197,8 +197,8 @@ for (const theme of ["light", "dark"] as const) {
     ).toBeVisible()
     await page.screenshot({ path: join(shots, `lorebook-menu-390-${theme}.png`) })
     await page.keyboard.press("Escape")
-    const where = page.getByRole("group", { name: "Where entries go" })
-    await expect(where.locator("..").locator("p")).toHaveText(/one block just after the history/)
+    const where = page.getByRole("region", { name: "Where entries go" })
+    await expect(where).toContainText(/one block just after the history/)
     await page.screenshot({ path: join(shots, `choice-390-${theme}.png`) })
     await context.close()
   })
@@ -216,13 +216,13 @@ for (const theme of ["light", "dark"] as const) {
     await expect(
       page.getByText("The lorebooks this chat reads, each with its switch, and where their entries go.")
     ).toBeVisible()
-    // A choice explains itself on hover, and to a screen reader.
-    const below = lore
-      .getByRole("group", { name: "Where entries go" })
-      .getByRole("button", { name: "Below the history" })
+    // A switch explains itself on hover, and to a screen reader.
+    const below = lore.getByRole("switch", { name: "Force all lorebook entries below the history" })
     await expect(below).toHaveAccessibleDescription(/one block just after the history/)
     await below.hover()
-    await expect(page.getByText(/one block just after the history, so the history stays cached/).last()).toBeVisible()
+    await expect(
+      page.getByText(/^On, every matching entry goes in one block just after the history/).last()
+    ).toBeVisible()
     await page.screenshot({ path: join(shots, `choice-1440-${theme}.png`) })
 
     // The owner's example: a book's ⋯ item and its switch say what they do.

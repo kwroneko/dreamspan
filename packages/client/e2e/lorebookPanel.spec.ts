@@ -1,7 +1,7 @@
 // The chat's Lorebooks tab and the lorebook editors (owner, 2026-11-01): one stable list with
 // the card's own book, the chat's and the preset's, switches that show at once and keep their
 // rows, a book opened below the list with compact entry headers, Expand all, Enable all /
-// Disable all and Change for selected as unsaved changes Revert takes back, search and replace by Content /
+// Disable all and Edit N entries as unsaved changes Revert takes back, search and replace by Content /
 // Keys / Both, and a preset sending a book. Made-up books, card and preset only.
 import { mkdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -189,6 +189,7 @@ for (const [width, scheme] of [
     await page.keyboard.press("Escape")
     await expect(lamp.getByText("lamp, lantern", { exact: true })).toBeVisible()
     await lamp.getByRole("button", { name: "Settings of Lamp" }).click()
+    await lamp.getByRole("button", { name: /^Secondary keys of Lamp/ }).click()
     await expect(lamp.getByRole("switch", { name: "Use secondary keys" })).toBeVisible()
     await expect(editor.getByRole("region", { name: "Entry settings" })).toHaveCount(1)
     await editor.getByRole("button", { name: "Collapse all", exact: true }).click()
@@ -196,7 +197,8 @@ for (const [width, scheme] of [
 
     // Disable all is an ordinary unsaved change (owner, 2026-11-02): no revision, no Undo of its
     // own; Revert beside Save takes it back.
-    await editor.getByRole("button", { name: "Disable all", exact: true }).click()
+    await editor.getByRole("button", { name: "More for all entries", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Disable all" }).click()
     const toast = page.getByText("Disabled all 3 entries", { exact: true })
     await expect(toast).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
@@ -212,17 +214,16 @@ for (const [width, scheme] of [
       timeout: 30_000
     })
 
-    // Change for selected: one setting on the chosen entries; the others keep theirs.
-    await editor.getByRole("button", { name: "Select", exact: true }).click()
+    // Edit 2 entries: the ticked setting on the chosen entries; the others keep theirs.
     await editor.getByRole("checkbox", { name: "Select Harbour" }).click()
     await editor.getByRole("checkbox", { name: "Select Lamp" }).click()
-    await editor.getByRole("button", { name: "Change for selected…", exact: true }).click()
-    const dialog = page.getByRole("dialog", { name: "Change for 2 selected entries" })
-    await dialog.getByRole("combobox", { name: "Setting" }).selectOption("strategy")
-    await dialog.getByRole("combobox", { name: "New value" }).selectOption("vectorized")
-    await expect(dialog.getByText("Changes all 2 selected.")).toBeVisible()
+    await editor.getByRole("button", { name: "Edit 2 entries", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Edit 2 entries" })
+    await dialog.getByRole("checkbox", { name: "Change Strategy", exact: true }).click()
+    await dialog.getByRole("combobox", { name: "Strategy" }).click()
+    await page.getByRole("option", { name: "Vectorized" }).click()
     await dialog.getByRole("button", { name: "Apply to 2 entries", exact: true }).click()
-    await expect(page.getByText("Set Strategy to Vectorized on 2 entries", { exact: true })).toBeVisible({
+    await expect(page.getByText("Changed Strategy on 2 entries", { exact: true })).toBeVisible({
       timeout: 30_000
     })
     for (const title of ["Harbour", "Lamp"])
@@ -233,7 +234,9 @@ for (const [width, scheme] of [
           .getByText("Vector", { exact: true })
       ).toBeVisible()
     await expect(fog.getByText("Constant", { exact: true })).toBeVisible()
-    await editor.getByRole("button", { name: "Done selecting", exact: true }).click()
+    await editor.getByRole("checkbox", { name: "Select all entries shown" }).click()
+    await editor.getByRole("checkbox", { name: "Select all entries shown" }).click()
+    await expect(editor.getByRole("checkbox", { name: "Select all entries shown" })).not.toBeChecked()
     // Unsaved too, until Save keeps it as the next revision.
     await expectSaveState(editor, UNSAVED)
     await editor.getByRole("button", { name: "Save", exact: true }).first().click()
@@ -242,7 +245,7 @@ for (const [width, scheme] of [
     })
 
     // Search and replace in the keys only.
-    await editor.getByRole("button", { name: "Search and replace", exact: true }).click()
+    await editor.getByRole("button", { name: "Find and replace", exact: true }).click()
     // On a phone "Look in" folds behind Options with the other options.
     if (width < 640) await editor.getByRole("button", { name: /^Options/ }).click()
     await editor.getByRole("button", { name: "Keys", exact: true }).click()
@@ -316,8 +319,8 @@ test("the large editor: Look in, the pencil rename, text and keys first, Revert"
   await page.getByRole("textbox", { name: "New name for Tides page" }).fill("Tides renamed")
   await page.getByRole("textbox", { name: "New name for Tides page" }).press("Enter")
   await expect(page.getByRole("heading", { name: "Tides renamed" })).toBeVisible()
-  await page.getByRole("button", { name: "Search", exact: true }).click()
-  const search = page.getByRole("region", { name: "Search and replace" })
+  await page.getByRole("button", { name: "Find and replace", exact: true }).click()
+  const search = page.getByRole("region", { name: "Find and replace" })
   for (const scope of ["Content", "Keys", "Both", "Everything"])
     await expect(search.getByRole("button", { name: scope, exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Open Harbour", exact: true }).click()

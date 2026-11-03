@@ -338,8 +338,8 @@ test("search and replace runs across fields, and a pattern that backtracks forev
     personality: `${"a".repeat(34)}!`
   })
   await open(page, refId)
-  await page.getByRole("button", { name: "Search", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "Search and replace" })
+  await page.getByRole("button", { name: "Find and replace", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Find and replace" })
   await dialog.getByRole("textbox", { name: "Find" }).fill("keeper")
   await dialog.getByRole("button", { name: "Find" }).click()
   await expect(dialog.getByRole("status")).toHaveText("2 matches.")
@@ -718,8 +718,8 @@ test("card search opens and selects code editor and single-line matches", async 
   const refId = await savedCard("Find keeper", { description: "The keeper keeps the lamp." })
   await open(page, refId)
   for (const label of ["Description", "Display name"]) {
-    await page.getByRole("button", { name: "Search", exact: true }).click()
-    const dialog = page.getByRole("dialog", { name: "Search and replace" })
+    await page.getByRole("button", { name: "Find and replace", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Find and replace" })
     await dialog.getByRole("textbox", { name: "Find", exact: true }).fill("keeper")
     await dialog.getByRole("button", { name: "Find", exact: true }).click()
     await dialog.getByRole("button", { name: `Go to ${label}`, exact: true }).click()
