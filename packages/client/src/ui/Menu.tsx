@@ -87,7 +87,7 @@ export function Menu({
             aria-label={label}
             data-menu={marker}
             {...(finalFocus ? { finalFocus } : {})}
-            className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none [&:not(:has(.menu-mark))_.menu-slot]:hidden transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             <MenuActionsContext value>{children}</MenuActionsContext>
           </BaseMenu.Popup>
@@ -153,6 +153,7 @@ export function MenuSubmenu({
         {...explanation.describedBy}
         data-explain={open ? undefined : description}
       >
+        <span className="menu-slot w-4 shrink-0" />
         <ItemText parts={explanation.parts}>{label}</ItemText>
         <Icon name="right" className="shrink-0 text-muted" />
       </BaseMenu.SubmenuTrigger>
@@ -170,7 +171,7 @@ export function MenuSubmenu({
           <BaseMenu.Popup
             ref={setPopup}
             aria-label={label}
-            className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none [&:not(:has(.menu-mark))_.menu-slot]:hidden transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             {children}
           </BaseMenu.Popup>
@@ -216,7 +217,7 @@ export function ContextMenu({
           <BaseContextMenu.Popup
             ref={setPopup}
             aria-label={label}
-            className="max-h-[var(--available-height)] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none"
+            className="max-h-[var(--available-height)] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none [&:not(:has(.menu-mark))_.menu-slot]:hidden"
           >
             {children}
           </BaseContextMenu.Popup>
@@ -250,7 +251,7 @@ function MenuRadioItem({ value, label, description }: { value: string; label: st
   const explanation = useItemExplanation(description)
   return (
     <BaseMenu.RadioItem value={value} closeOnClick className={itemClass("default")} {...explanation.describedBy}>
-      <span className="inline-flex w-4 shrink-0 justify-center text-accent">
+      <span className="menu-mark inline-flex w-4 shrink-0 justify-center text-accent">
         <BaseMenu.RadioItemIndicator>
           <Icon name="check" />
         </BaseMenu.RadioItemIndicator>
@@ -293,7 +294,7 @@ export function MenuItem({
   const explanation = useItemExplanation(description)
   return (
     <BaseMenu.Item className={itemClass(tone)} {...explanation.describedBy} {...props}>
-      {icon && <Icon name={icon} className="text-muted" />}
+      {icon ? <Icon name={icon} className="menu-mark text-muted" /> : <span className="menu-slot w-4 shrink-0" />}
       <ItemText parts={explanation.parts}>{children}</ItemText>
     </BaseMenu.Item>
   )
@@ -314,7 +315,7 @@ export function MenuLinkItem({
   const explanation = useItemExplanation(description)
   return (
     <BaseMenu.LinkItem className={itemClass("default")} render={render} closeOnClick {...explanation.describedBy}>
-      {icon && <Icon name={icon} className="text-muted" />}
+      {icon ? <Icon name={icon} className="menu-mark text-muted" /> : <span className="menu-slot w-4 shrink-0" />}
       <ItemText parts={explanation.parts}>{children}</ItemText>
     </BaseMenu.LinkItem>
   )
@@ -344,7 +345,7 @@ export function MenuCheckboxItem({
       {...explanation.describedBy}
       className={itemClass("default")}
     >
-      <BaseMenu.CheckboxItemIndicator keepMounted className="inline-flex w-4 justify-center text-accent">
+      <BaseMenu.CheckboxItemIndicator keepMounted className="menu-mark inline-flex w-4 justify-center text-accent">
         {checked ? <Icon name="check" /> : null}
       </BaseMenu.CheckboxItemIndicator>
       <ItemText parts={explanation.parts}>{children}</ItemText>
@@ -507,7 +508,7 @@ export function ActionMenu({
         >
           <BaseMenu.Popup
             ref={setPopup}
-            className="flex max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] flex-col overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="flex max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] flex-col overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none [&:not(:has(.menu-mark))_.menu-slot]:hidden transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             {items.map((entry) =>
               "checked" in entry ? (
