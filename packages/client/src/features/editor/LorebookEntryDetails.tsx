@@ -448,12 +448,12 @@ export function SettingsLayout({
               })
             }
             title={item.section.title}
-            summary={summary?.(item)}
+            summary={open.has(item.section.id) ? undefined : summary?.(item)}
             changed={differs?.(item) ?? false}
             hint={item.section.hint}
             label={label}
           >
-            {body(item)}
+            {open.has(item.section.id) && body(item)}
           </BlockSection>
         ))}
       </div>
