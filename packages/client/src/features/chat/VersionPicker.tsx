@@ -155,6 +155,7 @@ function Row({
         <div className={`flex shrink-0 items-center py-0.5 ${rowActionInsetClass}`}>
           <IconButton
             label={version.starred ? `Unstar version ${number}` : `Star version ${number}`}
+            hint={`Click to ${version.starred ? "unstar" : "star"} version ${number}`}
             icon="star"
             filled={version.starred}
             aria-pressed={version.starred}
@@ -165,6 +166,7 @@ function Row({
             label={
               version.hidden ? `Show version ${number} in the arrows again` : `Hide version ${number} from the arrows`
             }
+            hint={`Click to ${version.hidden ? "show" : "hide"} version ${number} ${version.hidden ? "in" : "from"} the arrows`}
             icon={version.hidden ? "eye" : "ghost"}
             onClick={() => onFlag({ hidden: !version.hidden })}
           />

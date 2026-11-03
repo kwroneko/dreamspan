@@ -47,8 +47,10 @@ for (const width of [1440, 390]) {
 
     // Off by default: the persona isn't among the characters.
     await expect(include(page)).toHaveAttribute("aria-pressed", "false")
+    await expect(include(page).locator("svg path")).toHaveCount(4)
+    await expect(include(page).locator("svg path").nth(2)).toHaveAttribute("d", "m17 8 5 5")
     await include(page).hover()
-    await expect(page.getByText("Include personas", { exact: true }).filter({ visible: true })).toBeVisible()
+    await expect(page.getByText("Click to show personas", { exact: true }).filter({ visible: true })).toBeVisible()
     await expect.poll(() => tiles(page)).toEqual(["Open Corin", "Open Delia"])
 
     // The Personas tab: the persona folder alone, unmarked, without the toggle.
@@ -61,9 +63,10 @@ for (const width of [1440, 390]) {
     await show(page, "All").click()
     await include(page).click()
     await expect(include(page)).toHaveAttribute("aria-pressed", "true")
+    await expect(include(page).locator("svg path")).toHaveCount(2)
     await main(page).getByRole("heading", { name: "Characters", exact: true }).hover()
     await include(page).hover()
-    await expect(page.getByText("Personas included", { exact: true }).filter({ visible: true })).toBeVisible()
+    await expect(page.getByText("Click to hide personas", { exact: true }).filter({ visible: true })).toBeVisible()
     await expect.poll(() => tiles(page)).toEqual(["Open Corin", "Open Delia", "Open Pia (persona)"])
     const badge = main(page).locator("[data-persona-badge]")
     await expect(badge).toHaveCount(1)

@@ -97,8 +97,8 @@ export const registerMessageActions = () => [
       label: hidden ? "Show to the model again" : "Hide from the model",
       icon: hidden ? "eye" : "ghost",
       hint: hidden
-        ? "Send this message to the model again with the rest of the chat."
-        : "Leave this message out of what the model reads. It stays in the chat, marked Hidden.",
+        ? "Click to send this message to the model again."
+        : "Click to hide this message from the model. The message stays in the chat.",
       onSelect: async () => report(await session.setHidden(entry, !hidden))
     }))
   }),

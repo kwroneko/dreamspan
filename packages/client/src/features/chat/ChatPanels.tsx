@@ -110,7 +110,9 @@ export function PanelToggles({
       <IconButton
         label={open === null ? "Chat panel" : "Hide panel"}
         hint={
-          open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
+          open === null
+            ? "Click to open the chat panel: cast, settings, lorebooks, notes and summaries"
+            : "Click to hide the chat panel"
         }
         icon="panel"
         aria-expanded={open !== null}
@@ -124,7 +126,9 @@ export function PanelToggles({
         variant="ghost"
         aria-expanded={open !== null}
         title={
-          open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
+          open === null
+            ? "Click to open the chat panel: cast, settings, lorebooks, notes and summaries"
+            : "Click to hide the chat panel"
         }
         className="h-8 px-2.5"
         onClick={toggle}
@@ -139,7 +143,7 @@ export function PanelToggles({
         <IconButton
           key={tab.value}
           label={tab.label}
-          hint={tab.descriptor.description ? `${tab.label}: ${tab.descriptor.description}` : tab.label}
+          hint={`Click to open ${tab.label}${tab.descriptor.description ? `: ${tab.descriptor.description}` : ""}`}
           icon={tab.descriptor.icon}
           onClick={() => onToggle(tab.value)}
         />

@@ -16,10 +16,7 @@ export function ImageControls() {
       open={open}
       onOpenChange={setOpen}
       trigger={
-        <Tooltip
-          label={`Shows or hides images on this device (${IMAGES_SHORTCUT}). Right-click to choose blur or hide.`}
-          side="bottom"
-        >
+        <Tooltip label={`Click to ${label.toLowerCase()}. Right-click to choose blur or hide.`} side="bottom">
           <Button
             variant="ghost"
             aria-label={label}

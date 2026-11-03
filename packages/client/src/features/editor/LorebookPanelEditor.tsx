@@ -118,7 +118,7 @@ export function LorebookPanelEditor({
                 aria-label="Search and replace"
                 aria-pressed={searching}
                 aria-controls="panel-lore-search"
-                hint="Search and replace in the entries' text, their keys, or anywhere in the book."
+                hint={searching ? "Click to close search and replace" : "Click to open search and replace"}
                 onClick={() => setSearching(!searching)}
               >
                 <Icon name="replace" />

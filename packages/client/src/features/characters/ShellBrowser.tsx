@@ -51,7 +51,7 @@ export function PinButton({ fork, className = "" }: { fork: ShellFork; className
         icon="pin"
         filled={fork.pinned}
         aria-pressed={fork.pinned}
-        hint={fork.pinned ? "Takes it out of Pinned chats." : "Keeps this branch in Pinned chats, above the rest."}
+        hint={fork.pinned ? "Click to unpin this branch" : "Click to pin this branch above the rest"}
         disabled={action.pending}
         className={`${fork.pinned ? "text-text!" : ""} ${className}`}
         onClick={() =>

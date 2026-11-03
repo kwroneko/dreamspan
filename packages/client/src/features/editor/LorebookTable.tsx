@@ -399,7 +399,9 @@ const EntryRow = memo(function EntryRow({
       open={settings}
       onToggle={() => onSettings(uid, !settings)}
       label={`Settings of ${title}`}
-      hint={settings ? "Hide the entry's settings" : EXPLAIN.settings}
+      hint={
+        settings ? "Click to hide the entry's settings" : "Click to show the entry's settings: inclusion and placement"
+      }
     />
   )
   return (
@@ -870,11 +872,7 @@ export function LorebookTable(props: {
     <div className="flex shrink-0 items-center justify-end gap-0.5">
       <IconButton
         label={anyOpen ? "Collapse all" : "Expand all"}
-        hint={
-          anyOpen
-            ? "Collapse all: closes every entry to its one-line header."
-            : "Expand all: opens every entry shown, to read them one after another."
-        }
+        hint={anyOpen ? "Click to collapse every entry to its one-line header." : "Click to expand every entry shown."}
         icon={anyOpen ? "collapseAll" : "expandAll"}
         disabled={uids.length === 0}
         className="size-7!"
