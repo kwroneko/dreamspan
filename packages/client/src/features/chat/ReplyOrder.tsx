@@ -4,6 +4,8 @@
 // (`replyPolicy.ts`), each explained beside it; a plugin's policy with a label is offered too.
 // The choice is a `reply.order` state event at the leaf shown, imported from ST's group.
 import { useState, useSyncExternalStore } from "react"
+import { SlotOutlet } from "../../slots.tsx"
+import { castSections } from "./presentation.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -31,13 +33,16 @@ export function ReplyOrderSection({ session }: { session: ChatSession }) {
   }
   return (
     <section aria-label="Who replies" className="flex flex-col gap-2 border-t border-border pt-3">
-      <Field
-        label="Who replies"
-        about="Who replies to what you send when you haven't picked anyone under Next, with two or more characters here."
-        className="w-full sm:w-72"
-      >
-        <Select items={items} value={current} onValueChange={(order) => void choose(order)} />
-      </Field>
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+        <Field
+          label="Who replies"
+          about="Who replies to what you send when you haven't picked anyone under Next, with two or more characters here."
+          className="w-72 max-w-full shrink-0"
+        >
+          <Select items={items} value={current} onValueChange={(order) => void choose(order)} />
+        </Field>
+        <SlotOutlet slot={castSections} only="cast.one-reply" props={{ session }} />
+      </div>
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -64,7 +69,10 @@ export function OneReplySection({ session }: { session: ChatSession }) {
     setError(outcome.ok ? null : `Couldn't change how many reply: ${outcome.error.message}`)
   }
   return (
-    <section aria-label="One reply at a time" className="flex flex-col gap-2">
+    <section
+      aria-label="One reply at a time"
+      className="flex min-h-9 shrink-0 flex-col justify-center gap-2 [&_[role=switch]]:mt-0"
+    >
       <Switch
         checked={on}
         disabled={pending !== null}

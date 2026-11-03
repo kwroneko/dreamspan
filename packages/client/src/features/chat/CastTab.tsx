@@ -297,7 +297,7 @@ export function CastTab({ session }: { session: ChatSession }) {
         )}
       </div>
       {/* Add characters, and what a plugin adds (castSections). */}
-      <SlotOutlet slot={castSections} props={{ session }} />
+      <SlotOutlet slot={castSections} except={["cast.one-reply"]} props={{ session }} />
       {AsyncResult.isFailure(infoResult) && (
         <p className="text-sm text-muted">The cards' details couldn't be read; editing them may not work.</p>
       )}
