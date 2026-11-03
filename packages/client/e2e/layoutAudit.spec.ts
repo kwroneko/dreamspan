@@ -696,3 +696,41 @@ test.describe("synthetic library and every app surface", () => {
       })
     }
 })
+
+for (const width of [390, 1440])
+  for (const theme of ["light", "dark"] as const)
+    test(`new version notice ${width} ${theme}`, async ({ page }, info) => {
+      const server = await startServer(withAdmin)
+      try {
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme })
+        await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+        await page.route("**/healthz", async (route) => {
+          const response = await route.fetch()
+          await route.fulfill({ response, headers: { ...response.headers(), "x-client-build": "next-deployment" } })
+        })
+        await page.goto(`${server.url}/settings/status`)
+        const notice = page.getByRole("status", { name: "New version" })
+        await expect(notice).toBeVisible()
+        await page.mouse.move(0, 0)
+        const findings = (await layoutAudit(page)).filter(
+          (v) => v.selector.includes("#client-version-notice") || v.related?.includes("#client-version-notice")
+        )
+        for (const [i, finding] of findings.entries()) {
+          finding.crop = info.outputPath(`version-${width}-${theme}-${i}.png`)
+          await page.screenshot({ path: finding.crop, clip: finding.box })
+          await info.attach(`notice ${i}`, { path: finding.crop, contentType: "image/png" })
+        }
+        writeFileSync(info.outputPath("notice-measurements.json"), JSON.stringify(findings, null, 2))
+        await info.attach("notice measurements", {
+          body: JSON.stringify(findings, null, 2),
+          contentType: "application/json"
+        })
+        await notice.screenshot({ path: info.outputPath(`version-${width}-${theme}.png`) })
+        expect(findings).toEqual([])
+      } finally {
+        await page.unrouteAll({ behavior: "wait" })
+        await page.close()
+        await server.stop()
+      }
+    })

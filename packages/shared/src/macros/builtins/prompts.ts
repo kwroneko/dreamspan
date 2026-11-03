@@ -11,6 +11,7 @@ import type { MacroSpec } from "../registry.ts"
 import { cardField } from "./character.ts"
 
 const empty = (name: string, ...aliases: ReadonlyArray<string>): MacroSpec => ({
+  kind: "value",
   name,
   ...(aliases.length > 0 ? { aliases } : {}),
   handler: () => ""
@@ -33,7 +34,7 @@ export const promptMacros: ReadonlyArray<MacroSpec> = [
   empty("instructFirstUserPrefix", "instructFirstInput"),
   empty("instructLastUserPrefix", "instructLastInput"),
   empty("defaultSystemPrompt", "instructSystem", "instructSystemPrompt"),
-  { name: "systemPrompt", handler: (call) => cardField(call, "systemPrompt") },
-  { name: "exampleSeparator", aliases: ["chatSeparator"], handler: () => "***" },
-  { name: "chatStart", handler: () => "***" }
+  { kind: "value", name: "systemPrompt", handler: (call) => cardField(call, "systemPrompt") },
+  { kind: "value", name: "exampleSeparator", aliases: ["chatSeparator"], handler: () => "***" },
+  { kind: "value", name: "chatStart", handler: () => "***" }
 ]

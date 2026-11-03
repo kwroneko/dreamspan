@@ -1,4 +1,5 @@
 import { replyHooks } from "../chat/replyHooks.ts"
+import { editorExtensions } from "../../ui/editorExtensions.ts"
 import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
 import { registerUserDraftNotices } from "./userDraft.tsx"
 import { libraryActions } from "../library/slots.ts"
@@ -48,6 +49,10 @@ function LazyEditorPage() {
 }
 
 export const register = () => {
+  editorExtensions.register({
+    id: "editor.macro-highlighting",
+    load: () => import("../../ui/macroHighlight.ts").then((module) => module.macroHighlight)
+  })
   // Live text is what's sent: open editors flush before a reply, and read again after one cut revisions.
   replyHooks.register({
     id: "editor.live-text",

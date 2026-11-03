@@ -48,6 +48,9 @@ export const proseTheme = EditorView.theme({
     color: "var(--danger)",
     backgroundColor: "color-mix(in oklch, var(--danger) 15%, transparent)"
   },
+  ".rp-macro-comment": { color: "var(--macro-comment)" },
+  ".rp-macro-value": { color: "var(--macro-value)" },
+  ".rp-macro-directive": { color: "var(--macro-directive)" },
   ".rp-flash": {
     backgroundColor: "color-mix(in oklch, var(--accent) 30%, transparent)",
     borderRadius: "2px"

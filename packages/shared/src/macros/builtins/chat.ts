@@ -38,13 +38,14 @@ const idleDuration = (call: MacroCall) => {
 }
 
 export const chatMacros: ReadonlyArray<MacroSpec> = [
-  { name: "lastMessage", handler: (call) => lastText(call) },
-  { name: "lastMessageId", handler: (call) => optional(lastIndex(call)) },
-  { name: "lastUserMessage", handler: (call) => lastText(call, (m) => m.fromUser && !m.system) },
-  { name: "lastCharMessage", handler: (call) => lastText(call, (m) => !m.fromUser && !m.system) },
-  { name: "firstIncludedMessageId", handler: (call) => optional(call.context.firstIncludedMessageId) },
-  { name: "firstDisplayedMessageId", handler: (call) => optional(call.context.firstDisplayedMessageId) },
+  { kind: "value", name: "lastMessage", handler: (call) => lastText(call) },
+  { kind: "value", name: "lastMessageId", handler: (call) => optional(lastIndex(call)) },
+  { kind: "value", name: "lastUserMessage", handler: (call) => lastText(call, (m) => m.fromUser && !m.system) },
+  { kind: "value", name: "lastCharMessage", handler: (call) => lastText(call, (m) => !m.fromUser && !m.system) },
+  { kind: "value", name: "firstIncludedMessageId", handler: (call) => optional(call.context.firstIncludedMessageId) },
+  { kind: "value", name: "firstDisplayedMessageId", handler: (call) => optional(call.context.firstDisplayedMessageId) },
   {
+    kind: "value",
     name: "lastSwipeId",
     handler: (call) => {
       const i = lastIndex(call)
@@ -52,6 +53,7 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    kind: "value",
     name: "currentSwipeId",
     handler: (call) => {
       const i = lastIndex(call)
@@ -60,6 +62,7 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    kind: "value",
     name: "allChatRange",
     handler: (call) => {
       const length = call.context.messages?.length ?? 0
@@ -67,6 +70,7 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    kind: "value",
     name: "time",
     volatile: "clock",
     args: [{ name: "offset", optional: true }],
@@ -75,11 +79,12 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
       return m ? formatMoment(atOffset(call.context.now, Number.parseInt(m[1]!, 10)), "LT") : now(call, "LT")
     }
   },
-  { name: "date", volatile: "clock", handler: (call) => now(call, "LL") },
-  { name: "weekday", volatile: "clock", handler: (call) => now(call, "dddd") },
-  { name: "isotime", volatile: "clock", handler: (call) => now(call, "HH:mm") },
-  { name: "isodate", volatile: "clock", handler: (call) => now(call, "YYYY-MM-DD") },
+  { kind: "value", name: "date", volatile: "clock", handler: (call) => now(call, "LL") },
+  { kind: "value", name: "weekday", volatile: "clock", handler: (call) => now(call, "dddd") },
+  { kind: "value", name: "isotime", volatile: "clock", handler: (call) => now(call, "HH:mm") },
+  { kind: "value", name: "isodate", volatile: "clock", handler: (call) => now(call, "YYYY-MM-DD") },
   {
+    kind: "value",
     name: "datetimeformat",
     args: [{ name: "format" }],
     volatile: "clock",
@@ -88,8 +93,9 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
       return now(call, call.args[0]!)
     }
   },
-  { name: "idleDuration", aliases: ["idle_duration"], volatile: "clock", handler: idleDuration },
+  { kind: "value", name: "idleDuration", aliases: ["idle_duration"], volatile: "clock", handler: idleDuration },
   {
+    kind: "value",
     name: "timeDiff",
     args: [{ name: "left" }, { name: "right" }],
     handler: (call) => humanize(parseMoment(call.args[0]!) - parseMoment(call.args[1]!), true)
