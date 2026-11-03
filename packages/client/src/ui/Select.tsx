@@ -38,8 +38,13 @@ export function Select<Value>({
   placeholder,
   className = "",
   ariaLabel,
-  shown
+  shown,
+  disabled = false,
+  mixed = false
 }: {
+  disabled?: boolean
+  /** No value because the values it stands for differ: the placeholder ("Mixed") in italics. */
+  mixed?: boolean
   items: ReadonlyArray<SelectItem<Value>>
   value: Value | null
   onValueChange: (value: Value) => void
@@ -55,6 +60,7 @@ export function Select<Value>({
     <BaseSelect.Root
       items={items as Array<SelectItem<Value>>}
       value={value}
+      disabled={disabled}
       onValueChange={(next) => {
         if (next !== null) onValueChange(next as Value)
       }}
@@ -63,7 +69,10 @@ export function Select<Value>({
         aria-label={ariaLabel}
         className={`flex h-9 w-full max-w-controls min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-base text-text shadow-xs outline-none select-none focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 data-disabled:opacity-50 sm:text-sm ${className}`}
       >
-        <BaseSelect.Value className="truncate data-placeholder:text-muted" placeholder={placeholder}>
+        <BaseSelect.Value
+          className={`truncate data-placeholder:text-muted ${mixed ? "data-placeholder:italic" : ""}`}
+          placeholder={placeholder}
+        >
           {shown ? (current: Value | null) => (current === null ? placeholder : shown(current)) : undefined}
         </BaseSelect.Value>
         <BaseSelect.Icon className="text-muted">

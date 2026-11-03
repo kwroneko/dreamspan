@@ -1,14 +1,34 @@
 // Everything a lorebook entry holds, as the table's opened row shows it (LorebookTable.tsx):
-// its text, keys, matching, group, recursion and timing. Every edit is a field draft.
-import { type ReactNode, type RefObject, useContext, useEffect, useRef } from "react"
-import { TRIGGERS } from "@rp/shared/presetConditions.ts"
+// its text, then its settings form (lorebookSettings.ts). Every edit is a field draft.
+import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import {
+  Fragment,
+  type ReactNode,
+  type RefObject,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react"
+import type { Registry } from "../../registry.ts"
+import { BlockSection } from "../../ui/Block.tsx"
 import { type FieldPath, textField, valueField } from "@rp/shared/editing.ts"
 import { useEditorFocus } from "../../textActions.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
-import { FieldTools, NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
+import { FieldTools, NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
+import {
+  changed,
+  formSections,
+  type LorebookEntrySection,
+  lorebookEntrySections,
+  type LorebookEntrySetting,
+  lorebookEntrySettings,
+  sectionSummary
+} from "./lorebookSettings.ts"
 import { EXPLAIN } from "./lorebookExplain.ts"
 import { entryPath } from "./lorebookTable.ts"
 import { SearchNavigation, scrollToSearchField } from "./searchNavigation.ts"
@@ -41,7 +61,7 @@ function useKeysReveal(target: RefObject<HTMLTextAreaElement | null>, path: Fiel
 const splitKeys = (text: string) => (text === "" ? [] : text.split("\n"))
 
 /** One key per line: commas in a /pattern/flags key must survive unchanged. */
-function Keys({
+export function Keys({
   store,
   path,
   label,
@@ -109,6 +129,7 @@ export function KeysLine({
           {/* The picture of the box below, which is what the keyboard and screen readers reach. */}
           <span
             aria-hidden="true"
+            data-own-click
             onClick={() => target.current?.focus()}
             className="min-w-0 cursor-text rounded-sm px-2 text-xs break-words text-muted hover:bg-hover hover:text-text"
           >
@@ -181,7 +202,7 @@ export function InheritedSwitch({
 }
 
 /** ST's "delay until recursion": off, any recursion step, or from a given level on. */
-function DelayUntilRecursion({ store, path }: { store: EditorStore; path: FieldPath }) {
+export function DelayUntilRecursion({ store, path }: { store: EditorStore; path: FieldPath }) {
   const value = useValue<boolean | number>(store, path)
   const on = value !== false && value !== 0
   return (
@@ -220,7 +241,7 @@ function DelayUntilRecursion({ store, path }: { store: EditorStore; path: FieldP
 }
 
 /** A list of names, one per line, as an optional object's field. */
-function CharacterFilter({ store, path }: { store: EditorStore; path: FieldPath }) {
+export function CharacterFilter({ store, path }: { store: EditorStore; path: FieldPath }) {
   const filter = useValue<
     { is_exclude: boolean; names: ReadonlyArray<string>; tags: ReadonlyArray<string> } | undefined
   >(store, path)
@@ -254,15 +275,6 @@ function CharacterFilter({ store, path }: { store: EditorStore; path: FieldPath 
   )
 }
 
-const MATCH_SOURCES = [
-  ["match_persona_description", "Persona description"],
-  ["match_character_description", "Character description"],
-  ["match_character_personality", "Personality"],
-  ["match_character_depth_prompt", "Character's note"],
-  ["match_scenario", "Scenario"],
-  ["match_creator_notes", "Creator's notes"]
-] as const
-
 /** The row's own fields, edited in the table: their Undo, History and Revert, while changed. */
 const ROW_FIELDS = [
   [["comment"], "Title"],
@@ -288,15 +300,12 @@ function RowFieldChange({ store, path, label }: { store: EditorStore; path: Fiel
   )
 }
 
-const group = "flex flex-col gap-4 rounded-lg border border-border p-3"
-const groupTitle = "text-sm font-medium"
-
 /**
  * An opened entry (owner, 2026-11-01: "only entry content and primary keys should generally be
- * expanded right away"; 2026-11-02: open entries are for scrolling and skimming): its text,
- * sized to it, with no label; its keys are on the header's line (KeysLine). Everything else is
- * its settings, a second level the header's settings button opens above the text, as a preset
- * prompt's options open. `essentials` are the row's own settings where the row doesn't show
+ * expanded right away"; 2026-11-02: open entries are for scrolling and skimming, and the text
+ * comes right after the keys): its text, sized to it, with no label; its keys are on the
+ * header's line (KeysLine). Its settings, which the header's settings button opens, come below
+ * the text (EntrySettings). `essentials` are the row's own settings where the row doesn't show
  * them (the side panel and narrow screens: strategy, position, depth, order, trigger %).
  */
 export function EntryDetails({
@@ -304,6 +313,7 @@ export function EntryDetails({
   root,
   uid,
   wide,
+  compact,
   card,
   settings,
   essentials
@@ -311,8 +321,10 @@ export function EntryDetails({
   store: EditorStore
   root: FieldPath
   uid: number
-  /** The settings in two columns. */
+  /** The settings in two open columns (the large editor); otherwise accordions. */
   wide: boolean
+  /** The row hides its columns: they're in the settings' first section. */
+  compact: boolean
   /** A card's embedded book, with the card book's own fields. */
   card: boolean
   /** Its settings are open. */
@@ -329,240 +341,243 @@ export function EntryDetails({
           <RowFieldChange key={label} store={store} path={[...path, ...at]} label={label} />
         ))}
       </div>
-      {settings && <EntrySettings store={store} path={path} wide={wide} card={card} essentials={essentials} />}
       <TextField store={store} path={[...path, "content"]} label="Entry content" labelHidden rows={2} fit />
+      {settings && (
+        <EntrySettings
+          store={store}
+          path={path}
+          title={title}
+          wide={wide}
+          compact={compact}
+          card={card}
+          essentials={essentials}
+        />
+      )}
     </div>
   )
+}
+
+const useRegistry = <A extends { readonly id: string; readonly order: number }>(registry: Registry<A>) => {
+  const snapshot = useSyncExternalStore(registry.subscribe, registry.snapshot, registry.snapshot)
+  return [...snapshot.entries].sort((a, b) => a.order - b.order)
+}
+
+/** The form's sections and their settings, from the registries. */
+export const useFormSections = (options: { card: boolean; many: boolean }) =>
+  formSections(useRegistry(lorebookEntrySections), useRegistry(lorebookEntrySettings), options)
+
+export type FormSection = ReturnType<typeof formSections>[number]
+
+/** Settings in a row sharing a `group` (the places keys are also looked for) under one heading. */
+function Grouped({
+  settings,
+  render
+}: {
+  settings: ReadonlyArray<LorebookEntrySetting>
+  render: (setting: LorebookEntrySetting) => ReactNode
+}) {
+  const runs: Array<{ group?: string; settings: Array<LorebookEntrySetting> }> = []
+  for (const setting of settings) {
+    const last = runs.at(-1)
+    if (setting.group && last?.group === setting.group) last.settings.push(setting)
+    else runs.push({ ...(setting.group ? { group: setting.group } : {}), settings: [setting] })
+  }
+  return (
+    <>
+      {runs.map((run) =>
+        run.group ? (
+          <Fieldset key={run.settings[0]!.id} legend={run.group}>
+            {run.settings.map((setting) => (
+              <Fragment key={setting.id}>{render(setting)}</Fragment>
+            ))}
+          </Fieldset>
+        ) : (
+          <Fragment key={run.settings[0]!.id}>{render(run.settings[0]!)}</Fragment>
+        )
+      )}
+    </>
+  )
+}
+
+/**
+ * The settings form's layout, for one entry or many (LorebookMassEdit): accordions, closed until
+ * opened, each with its one-line summary and a dot when it differs from the defaults (the side
+ * panel, owner 2026-11-02: "expanding settings blows up the sidebar entry"), or every section
+ * open in two columns (the large editor and a wide dialog).
+ */
+export function SettingsLayout({
+  sections,
+  accordion,
+  wide,
+  label,
+  render,
+  lead,
+  summary,
+  differs
+}: {
+  sections: ReadonlyArray<FormSection>
+  accordion: boolean
+  wide: boolean
+  /** Whose settings, for the sections' accessible names: "Matching of <label>". */
+  label: string
+  render: (setting: LorebookEntrySetting) => ReactNode
+  /** What a section shows before its fields (the row's columns). */
+  lead?: (section: LorebookEntrySection) => ReactNode
+  summary?: (section: FormSection) => string
+  differs?: (section: FormSection) => boolean
+}) {
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
+  const body = (item: FormSection) => (
+    <div className="flex min-w-0 flex-col gap-4">
+      {lead?.(item.section)}
+      <Grouped settings={item.settings} render={render} />
+    </div>
+  )
+  if (accordion)
+    return (
+      <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-surface [&>:first-child]:border-t-0">
+        {sections.map((item) => (
+          <BlockSection
+            key={item.section.id}
+            open={open.has(item.section.id)}
+            onToggle={() =>
+              setOpen((set) => {
+                const next = new Set(set)
+                if (!next.delete(item.section.id)) next.add(item.section.id)
+                return next
+              })
+            }
+            title={item.section.title}
+            summary={summary?.(item)}
+            changed={differs?.(item) ?? false}
+            hint={item.section.hint}
+            label={label}
+          >
+            {body(item)}
+          </BlockSection>
+        ))}
+      </div>
+    )
+  const column = (index: 0 | 1) =>
+    sections
+      .filter((item) => !wide || item.section.column === index)
+      .map((item) => (
+        <section
+          key={item.section.id}
+          aria-label={item.section.title}
+          className="flex min-w-0 flex-col gap-4 rounded-lg border border-border p-3"
+        >
+          <h4 className="flex items-center gap-1.5 text-sm font-medium">
+            {item.section.title}
+            {differs?.(item) && (
+              <span data-changed aria-label="changed from the defaults" className="size-1.5 rounded-full bg-accent" />
+            )}
+          </h4>
+          {body(item)}
+        </section>
+      ))
+  return (
+    <div className={`grid min-w-0 gap-4 ${wide ? "grid-cols-2" : ""}`}>
+      <div className="flex min-w-0 flex-col gap-4">{column(0)}</div>
+      {wide && <div className="flex min-w-0 flex-col gap-4">{column(1)}</div>}
+    </div>
+  )
+}
+
+/** One entry's setting, as its own control bound to the entry's field. */
+function SingleSetting({
+  store,
+  path,
+  setting
+}: {
+  store: EditorStore
+  path: FieldPath
+  setting: LorebookEntrySetting
+}) {
+  if (setting.single) return <setting.single store={store} path={path} setting={setting} />
+  const at = [...path, setting.field ?? setting.id]
+  const input = setting.input
+  switch (input.kind) {
+    case "switch":
+      return (
+        <SwitchField
+          store={store}
+          path={at}
+          label={setting.label}
+          about={setting.description}
+          checkbox={!!setting.group}
+        />
+      )
+    case "inherit":
+      return (
+        <InheritedSwitch
+          store={store}
+          path={at}
+          label={setting.label}
+          fallback={input.fallback}
+          description={setting.description}
+        />
+      )
+    case "choice":
+      return (
+        <SelectField store={store} path={at} label={setting.label} about={setting.description} items={input.options} />
+      )
+    case "number":
+      return (
+        <NumberField
+          store={store}
+          path={at}
+          label={setting.label}
+          about={setting.description}
+          integer={input.integer ?? false}
+          nullable={input.nullable ?? false}
+          {...(input.min === undefined ? {} : { min: input.min })}
+          {...(input.max === undefined ? {} : { max: input.max })}
+        />
+      )
+    case "text":
+      return <TextField store={store} path={at} label={setting.label} about={setting.description} />
+  }
 }
 
 /** Everything about an entry but its title, keys and text, opened from its header. */
 function EntrySettings({
   store,
   path,
+  title,
   wide,
+  compact,
   card,
   essentials
 }: {
   store: EditorStore
   path: FieldPath
+  title: string
   wide: boolean
+  compact: boolean
   card: boolean
   essentials?: ReactNode
 }) {
-  const position = useValue<string>(store, [...path, "position"])
-  const selective = useValue<boolean>(store, [...path, "selective"])
+  const entry = useValue<LorebookEntry | undefined>(store, path)
+  const all = useFormSections({ card, many: false })
+  if (!entry) return null
+  const sections = all
+    .filter((item) => item.section.visible?.(entry, compact) ?? true)
+    .map((item) => ({ ...item, settings: item.settings.filter((setting) => setting.visible?.(entry) ?? true) }))
   return (
-    <section aria-label="Entry settings" className="min-w-0 rounded-lg border border-border bg-surface-raised/50">
-      <div className="flex min-w-0 flex-col gap-4 p-3">
-        {essentials}
-        <div className={`grid min-w-0 gap-4 ${wide ? "grid-cols-2" : ""}`}>
-          <div className="flex min-w-0 flex-col gap-4">
-            <section className={group} aria-label="Secondary keys">
-              <SwitchField
-                store={store}
-                path={[...path, "selective"]}
-                label="Use secondary keys"
-                about={EXPLAIN.selective}
-              />
-              {selective && (
-                <>
-                  <SelectField
-                    store={store}
-                    path={[...path, "selective_logic"]}
-                    label="Logic"
-                    items={[
-                      { value: "and_any", label: "AND ANY", description: "At least one secondary key also appears." },
-                      { value: "and_all", label: "AND ALL", description: "Every secondary key also appears." },
-                      { value: "not_any", label: "NOT ANY", description: "None of the secondary keys appears." },
-                      { value: "not_all", label: "NOT ALL", description: "At least one secondary key is missing." }
-                    ]}
-                  />
-                  <Keys
-                    store={store}
-                    path={[...path, "secondary_keys"]}
-                    label="Secondary keys"
-                    description={EXPLAIN.secondary_keys}
-                  />
-                </>
-              )}
-            </section>
-            {position === "outlet" && (
-              <TextField
-                store={store}
-                path={[...path, "outlet_name"]}
-                label="Outlet name"
-                about={EXPLAIN.outlet_name}
-              />
-            )}
-            <section className={group} aria-label="Matching">
-              <h4 className={groupTitle}>Matching</h4>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <InheritedSwitch
-                  store={store}
-                  path={[...path, "case_sensitive"]}
-                  label="Case sensitive"
-                  fallback="off"
-                  description={EXPLAIN.case_sensitive}
-                />
-                <InheritedSwitch
-                  store={store}
-                  path={[...path, "match_whole_words"]}
-                  label="Whole words"
-                  fallback="on"
-                  description={EXPLAIN.match_whole_words}
-                />
-              </div>
-              <NumberField
-                store={store}
-                path={[...path, "scan_depth"]}
-                label="Scan depth"
-                about="Check this many recent messages for keys. Empty uses the book’s setting, or 2."
-                integer
-                nullable
-                min={0}
-              />
-              <Fieldset legend="Also look for keys in">
-                {MATCH_SOURCES.map(([key, label]) => (
-                  <SwitchField key={key} store={store} path={[...path, key]} label={label} checkbox />
-                ))}
-              </Fieldset>
-              <TriggersField
-                store={store}
-                path={[...path, "triggers"]}
-                label="Generation types (none ticked: all)"
-                items={TRIGGERS}
-              />
-            </section>
-          </div>
-          <div className="flex min-w-0 flex-col gap-4">
-            <section className={group} aria-label="Inclusion group">
-              <h4 className={groupTitle}>Inclusion group</h4>
-              <TextField store={store} path={[...path, "group"]} label="Group" about={EXPLAIN.group} />
-              <SwitchField
-                store={store}
-                path={[...path, "group_override"]}
-                label="Prioritize this entry in its group"
-                about={EXPLAIN.group_override}
-              />
-              <div className="grid gap-4 sm:grid-cols-2">
-                <NumberField
-                  store={store}
-                  path={[...path, "group_weight"]}
-                  label="Group weight"
-                  min={0}
-                  about={EXPLAIN.group_weight}
-                />
-                <InheritedSwitch
-                  store={store}
-                  path={[...path, "use_group_scoring"]}
-                  label="Group scoring"
-                  fallback="off"
-                  description={EXPLAIN.use_group_scoring}
-                />
-              </div>
-            </section>
-            <section className={group} aria-label="Recursion and budget">
-              <h4 className={groupTitle}>Recursion and budget</h4>
-              <SwitchField
-                store={store}
-                path={[...path, "exclude_recursion"]}
-                label="Non-recursable"
-                about="Other entries' text can't trigger it."
-              />
-              <SwitchField
-                store={store}
-                path={[...path, "prevent_recursion"]}
-                label="Prevent further recursion"
-                about="Its text doesn't trigger other entries."
-              />
-              <DelayUntilRecursion store={store} path={[...path, "delay_until_recursion"]} />
-              <SwitchField
-                store={store}
-                path={[...path, "ignore_budget"]}
-                label="Ignore the token budget"
-                about="Still included once the lorebook budget, or this book's own, is used up. Its text still counts toward them."
-              />
-              <SwitchField
-                store={store}
-                path={[...path, "use_probability"]}
-                label="Use the trigger %"
-                about="Off, a match always includes it."
-              />
-            </section>
-            <details className={group}>
-              <summary className={`cursor-pointer ${groupTitle}`}>Timing, filters and automation</summary>
-              <p className="text-sm text-muted">
-                Sticky, cooldown, character filters and automation are kept for export but have no effect here yet.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <NumberField
-                  store={store}
-                  path={[...path, "sticky"]}
-                  label="Sticky"
-                  integer
-                  nullable
-                  min={0}
-                  about="Keep the entry included for this many messages after a match. Kept for export; not used yet."
-                />
-                <NumberField
-                  store={store}
-                  path={[...path, "cooldown"]}
-                  label="Cooldown"
-                  integer
-                  nullable
-                  min={0}
-                  about="Wait this many messages before including it again. Kept for export; not used yet."
-                />
-                <NumberField
-                  store={store}
-                  path={[...path, "delay"]}
-                  label="Delay"
-                  integer
-                  nullable
-                  min={0}
-                  about="Not included until the chat has this many messages."
-                />
-              </div>
-              <CharacterFilter store={store} path={[...path, "character_filter"]} />
-              <TextField
-                store={store}
-                path={[...path, "automation_id"]}
-                label="Automation ID"
-                about="Run this automation when the entry is included. Kept for export; nothing runs here yet."
-              />
-              <SwitchField
-                store={store}
-                path={[...path, "add_memo"]}
-                label="Add the title as a memo"
-                about="Kept for export. It changes nothing sent to the model."
-              />
-              {card && (
-                <>
-                  <TextField
-                    store={store}
-                    path={[...path, "name"]}
-                    label="Name in exports"
-                    about="The entry's name in an exported card."
-                  />
-                  <NumberField
-                    store={store}
-                    path={[...path, "priority"]}
-                    label="Priority in exports"
-                    about="The entry's priority in an exported card. Order decides here."
-                    optional
-                  />
-                  <SwitchField
-                    store={store}
-                    path={[...path, "use_regex"]}
-                    label="Keys are regular expressions"
-                    about="Kept for export. Keys here are regular expressions when written as /pattern/flags."
-                  />
-                </>
-              )}
-            </details>
-          </div>
-        </div>
-      </div>
+    <section aria-label="Entry settings" className="min-w-0">
+      <SettingsLayout
+        sections={sections}
+        accordion={!wide}
+        wide={wide}
+        label={title}
+        render={(setting) => <SingleSetting store={store} path={path} setting={setting} />}
+        lead={(section) =>
+          section.lead ? <section.lead store={store} path={path} entry={entry} essentials={essentials} /> : null
+        }
+        summary={(item) => sectionSummary(item.settings, entry)}
+        differs={(item) => item.settings.some((setting) => changed(setting, entry))}
+      />
     </section>
   )
 }

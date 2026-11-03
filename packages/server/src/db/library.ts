@@ -53,6 +53,8 @@ export interface RefRow {
   /** The followed ref's label; null for an upstream ref. */
   readonly followed_label: string | null
   readonly card_nickname: unknown
+  /** A lorebook's entry count, from its head revision; null for other kinds. */
+  readonly lorebook_entries?: number | null
 }
 
 export const toLibraryRef = (row: RefRow) =>
@@ -70,6 +72,9 @@ export const toLibraryRef = (row: RefRow) =>
             nickname: typeof row.card_nickname === "string" ? row.card_nickname : ""
           })
         }
+      : {}),
+    ...(row.kind === "lorebook" && typeof row.lorebook_entries === "number"
+      ? { lorebookEntries: row.lorebook_entries }
       : {}),
     headRevisionId: row.head_revision_id as RevisionId,
     followsRefId: row.follows_ref_id as RefId | null,
@@ -98,6 +103,9 @@ const refSelect = `
     CASE WHEN e.kind = 'card' THEN
       (SELECT json_extract(h.doc_json, '$.nickname') FROM entity_revisions h WHERE h.id = r.head_revision_id)
       ELSE NULL END AS card_nickname,
+    CASE WHEN e.kind = 'lorebook' THEN
+      (SELECT json_array_length(h.doc_json, '$.entries') FROM entity_revisions h WHERE h.id = r.head_revision_id)
+      ELSE NULL END AS lorebook_entries,
     CASE WHEN r.ref_kind = 'upstream'
       THEN coalesce((SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import'
             ORDER BY i.seq DESC LIMIT 1), (SELECT p.head_revision_id FROM entity_refs p WHERE p.entity_id = e.forked_from_entity_id AND p.ref_kind = 'upstream'))

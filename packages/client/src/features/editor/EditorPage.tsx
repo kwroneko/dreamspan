@@ -23,6 +23,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
+import { pressedButtonClass } from "../../ui/InlinePanel.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -146,6 +147,7 @@ export function Editor({
   // A preset's search sits in the sticky bar, so its matches stay beside the document; it's
   // folded away until asked for.
   const [searching, setSearching] = useState(false)
+  const searchButton = useRef<HTMLButtonElement>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [more, setMore] = useState(false)
   // A card opened on its own lorebook shows the book alone, in the large editor, until "Show
@@ -399,8 +401,9 @@ export function Editor({
           <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
             <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
             {!scopes && (
-              <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
-                Search
+              <Button hint="Search and replace text in every field." onClick={() => setOpen("search")}>
+                <Icon name="replace" />
+                Search and replace
               </Button>
             )}
             <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
@@ -449,19 +452,20 @@ export function Editor({
             <div className="flex min-w-0 items-center justify-end gap-2 sm:ml-auto">
               {scopes && (
                 <Button
+                  ref={searchButton}
                   variant="ghost"
-                  className="h-7! shrink-0 px-2!"
-                  aria-expanded={searching}
+                  className={`h-7! shrink-0 px-2! ${pressedButtonClass}`}
+                  aria-pressed={searching}
                   aria-controls="preset-search"
                   hint={
                     ref.kind === "preset"
-                      ? "Find and replace in the prompts' text, their names, or anywhere in the preset."
-                      : "Find and replace in the entries' text, their keys, or anywhere in the book."
+                      ? "Search and replace in the prompts' text, their names, or anywhere in the preset."
+                      : "Search and replace in the entries' text, their keys, or anywhere in the book."
                   }
                   onClick={() => setSearching(!searching)}
                 >
-                  <Icon name="search" />
-                  Search
+                  <Icon name="replace" />
+                  Search and replace
                 </Button>
               )}
             </div>
@@ -473,9 +477,17 @@ export function Editor({
           )}
           {ref.kind === "preset" && <HeldChangesBar store={store} />}
           {scopes && searching && (
-            <div id="preset-search">
-              <SearchDialog store={store} inline scopes={scopes} onReveal={setSearchMatch} />
-            </div>
+            <SearchDialog
+              store={store}
+              inline
+              idPrefix="preset-search"
+              scopes={scopes}
+              onReveal={setSearchMatch}
+              onClose={() => {
+                setSearching(false)
+                searchButton.current?.focus()
+              }}
+            />
           )}
         </div>
 
