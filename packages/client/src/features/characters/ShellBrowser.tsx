@@ -118,7 +118,12 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
           <GroupFaces members={fork.cast} />
         </span>
         <span className="flex w-full min-w-0 flex-1 flex-col gap-1 p-2.5">
-          <span className="text-sm font-medium [overflow-wrap:anywhere]">{fork.chatName}</span>
+          <span
+            className="line-clamp-2 text-sm font-medium text-ellipsis break-normal [overflow-wrap:normal]"
+            title={fork.chatName}
+          >
+            {fork.chatName}
+          </span>
           {/* The faces show who; the names with their versions are in the tooltip. */}
           <span
             className="text-xs text-muted"
@@ -203,11 +208,11 @@ export function ForkRow({
       className={`flex w-full max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <Tooltip
-        label={
+        label={`${title}. ${
           perFork
             ? `Opens this branch${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
             : "Opens the chat on the branch you last used."
-        }
+        }`}
       >
         <button
           type="button"
@@ -234,7 +239,7 @@ export function ForkRow({
           )}
           <span className="flex min-w-0 flex-col">
             {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
-            <span className="text-sm [overflow-wrap:anywhere]">
+            <span data-chat-title className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]">
               <span className="font-medium">{title}</span>
               {opensHere && (
                 <>
@@ -243,7 +248,14 @@ export function ForkRow({
                 </>
               )}
             </span>
-            {branchLine !== null && <span className="text-xs [overflow-wrap:anywhere]">{branchLine}</span>}
+            {branchLine !== null && (
+              <span
+                className="line-clamp-2 text-xs text-ellipsis break-normal [overflow-wrap:normal]"
+                title={branchLine}
+              >
+                {branchLine}
+              </span>
+            )}
             {details && fork.cast.length > 1 && (
               <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
                 with {fork.cast.map((c) => c.label).join(", ")}
