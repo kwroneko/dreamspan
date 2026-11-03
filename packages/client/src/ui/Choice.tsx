@@ -57,7 +57,10 @@ export function Checkbox({
   description,
   about,
   aboutLabel,
-  hint
+  hint,
+  indeterminate = false,
+  disabled = false,
+  labelHidden = false
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
@@ -67,26 +70,33 @@ export function Checkbox({
   aboutLabel?: string
   /** What ticking it does, when the label doesn't say. */
   hint?: string | undefined
+  /** Some but not all of what it stands for are ticked (a list's header checkbox), or mixed values. */
+  indeterminate?: boolean
+  disabled?: boolean
+  /** A checkbox whose visible label is elsewhere: its label stays out of the layout. */
+  labelHidden?: boolean
 }) {
   const id = useId()
   const aboutId = useId()
   const row = (
-    <label className="flex items-start gap-2.5">
+    <label className={`flex items-start ${labelHidden ? "" : "gap-2.5"}`}>
       <BaseCheckbox.Root
         checked={checked}
+        indeterminate={indeterminate}
+        disabled={disabled}
         onCheckedChange={(next) => onCheckedChange(next)}
         {...(hint || about
           ? { "aria-describedby": [hint ? id : null, about ? aboutId : null].filter(Boolean).join(" ") }
           : {})}
-        className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
+        className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast data-checked:border-accent data-checked:bg-accent data-indeterminate:border-accent data-indeterminate:bg-accent data-disabled:opacity-50 ${focusRing}`}
       >
         <BaseCheckbox.Indicator className="flex data-unchecked:hidden">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
-            <path d="m2.5 8.5 4 4 7-9" strokeWidth="2" />
+            <path d={indeterminate ? "M3.5 8h9" : "m2.5 8.5 4 4 7-9"} strokeWidth="2" />
           </svg>
         </BaseCheckbox.Indicator>
       </BaseCheckbox.Root>
-      <ChoiceLabel description={description} hint={hint ? { id, text: hint } : undefined}>
+      <ChoiceLabel hidden={labelHidden} description={description} hint={hint ? { id, text: hint } : undefined}>
         {children}
       </ChoiceLabel>
     </label>
@@ -120,8 +130,11 @@ export function Switch({
   describedBy,
   labelHidden = false,
   disabled = false,
-  compact = false
+  compact = false,
+  mixed = false
 }: {
+  /** The values it stands for differ (several entries at once): the thumb sits in the middle. */
+  mixed?: boolean
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   children: ReactNode
@@ -144,14 +157,17 @@ export function Switch({
     <label className={`flex items-start ${compact ? "gap-2" : "gap-3"}`}>
       <BaseSwitch.Root
         disabled={disabled}
-        checked={checked}
+        checked={mixed ? false : checked}
         onCheckedChange={(next) => onCheckedChange(next)}
+        {...(mixed ? { "data-mixed": "" } : {})}
         {...(hint || about || describedBy
           ? { "aria-describedby": [hint ? id : null, about ? aboutId : null, describedBy].filter(Boolean).join(" ") }
           : {})}
-        className={`mt-0.5 flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
+        className={`mt-0.5 flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 data-mixed:border-dashed ${focusRing}`}
       >
-        <BaseSwitch.Thumb className="size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none" />
+        <BaseSwitch.Thumb
+          className={`size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none ${mixed ? "translate-x-2 opacity-60" : ""}`}
+        />
       </BaseSwitch.Root>
       <ChoiceLabel
         hidden={labelHidden}

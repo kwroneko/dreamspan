@@ -3,6 +3,7 @@
 // say which tokenizer counted, and bulk lorebook changes and preset structure wait behind
 // Save/Revert (their own steps are in lorebookPanel, presetTab and editor). At 1440 and 390, in
 // both themes. Made-up cards only.
+import { switchAll } from "./support/lorebook.ts"
 import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
@@ -356,7 +357,7 @@ for (const width of [1440, 390])
         }
       })
       await page.goto(`${server().url}/library/${book}`)
-      await page.getByRole("button", { name: "Disable all", exact: true }).click()
+      await switchAll(page, "Disable all")
       await expect(page.getByText("Disabled all 2 entries", { exact: true })).toBeVisible({ timeout: 30_000 })
       await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
       await expectSaveState(page, UNSAVED)

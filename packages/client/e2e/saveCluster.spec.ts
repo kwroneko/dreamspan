@@ -3,6 +3,7 @@
 // all of them; both buttons are reached by keyboard, their explanations shown on focus. Saving
 // is held, and a failure made, by catching the save on its way to the server. In the chat's
 // panel, it shares each surface's toolbar row and keeps its size. Everything here is made up.
+import { switchAll } from "./support/lorebook.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { openPanel, panelTab } from "./support/panel.ts"
@@ -214,8 +215,8 @@ for (const width of [1440, 390])
     const lore = await openPanel(page, "Lorebooks")
     await lore.getByRole("button", { name: new RegExp(`^Tides ${width}`) }).click()
     const editor = lore.getByRole("region", { name: `Lorebook Tides ${width}` })
-    await check("lorebook", editor, editor.getByRole("button", { name: "Expand all", exact: true }), () =>
-      editor.getByRole("button", { name: "Disable all", exact: true }).click()
+    await check("lorebook", editor, editor.getByRole("button", { name: "Add entry" }), () =>
+      switchAll(editor, "Disable all")
     )
     // A note: Save in its header, beside its menu.
     const notes = await openPanel(page, "Notes")

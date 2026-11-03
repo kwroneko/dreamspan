@@ -1,116 +1,145 @@
-// "Change for selected…" (owner, 2026-11-01): one setting, its new value, applied to the
-// selected entries; only that setting changes. Applied as a revision of its own, which the
-// toast's Undo and History take back (lorebookMass.ts).
+// "Edit N entries" (owner, 2026-11-02): the entry settings form (lorebookSettings.ts) for the
+// selected entries at once. Each setting has a checkbox: unticked, it's left alone, shown
+// greyed with the value the entries share or "Mixed"; ticked, its value goes on every selected
+// entry, and an empty text or number clears it. Several settings apply at once, as unsaved
+// changes like any edit (lorebookMass.ts).
 import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
 import type { FieldPath } from "@rp/shared/editing.ts"
-import { useState, useSyncExternalStore } from "react"
+import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
+import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
-import { Segmented } from "../../ui/Segmented.tsx"
-import { NativeSelect } from "../../ui/Select.tsx"
-import {
-  applyMassChange,
-  type LorebookMassSetting,
-  lorebookMassSettings,
-  type MassValue,
-  patchEdits,
-  touched
-} from "./lorebookMass.ts"
+import { Select } from "../../ui/Select.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
+import { SettingsLayout, useFormSections } from "./LorebookEntryDetails.tsx"
+import { applyMassChange, patchEdits, touched } from "./lorebookMass.ts"
+import { type Common, commonValue, type LorebookEntrySetting, manyPatch, type MassValue } from "./lorebookSettings.ts"
 import { entryPath } from "./lorebookTable.ts"
 import type { EditorStore } from "./store.ts"
 
-const useSettings = () => {
-  const snapshot = useSyncExternalStore(
-    lorebookMassSettings.subscribe,
-    lorebookMassSettings.snapshot,
-    lorebookMassSettings.snapshot
+const entriesLabel = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
+
+/** The quiet marker beside a setting whose entries differ; its hover says how. */
+function MixedMarker({ breakdown }: { breakdown: string }) {
+  return (
+    <Tooltip label={breakdown}>
+      <span
+        data-mixed
+        tabIndex={0}
+        aria-label={`Mixed: ${breakdown}`}
+        className="inline-flex h-4 shrink-0 items-center rounded-sm border border-dashed border-border px-1 text-[10px] leading-none text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        ≠
+      </span>
+    </Tooltip>
   )
-  return [...snapshot.entries].sort((a, b) => a.order - b.order)
 }
 
-/** A value as the revision's message says it. */
-const valueLabel = (setting: LorebookMassSetting, value: MassValue) => {
-  const input = setting.input
-  if (input.kind === "choice") return input.options.find((option) => option.value === value)?.label ?? String(value)
-  if (input.kind === "switch") return value === true ? input.on.toLowerCase() : input.off.toLowerCase()
-  if (value === null || value === "") return "empty"
-  return input.kind === "text" ? `“${String(value)}”` : String(value)
-}
-
-function ValueInput({
+/** A setting's control for many entries, beside the checkbox that says whether it changes. */
+function ManySetting({
   setting,
+  common,
+  ticked,
   value,
+  onTick,
   onChange
 }: {
-  setting: LorebookMassSetting
-  value: MassValue
+  setting: LorebookEntrySetting
+  common: Common
+  ticked: boolean
+  value: MassValue | undefined
+  onTick: (ticked: boolean) => void
   onChange: (value: MassValue) => void
 }) {
   const input = setting.input
-  const [typed, setTyped] = useState(value === null ? "" : String(value))
-  if (input.kind === "choice")
-    return (
-      <Field label="New value">
-        <NativeSelect
-          ariaLabel="New value"
-          items={input.options}
-          value={String(value)}
-          onValueChange={(next) => onChange(next)}
-        />
-      </Field>
-    )
-  if (input.kind === "switch")
-    return (
-      <Segmented
-        label="New value"
-        value={value === true ? "on" : "off"}
-        onValueChange={(next) => onChange(next === "on")}
-        options={[
-          { value: "on", label: input.on },
-          { value: "off", label: input.off }
-        ]}
-      />
-    )
-  if (input.kind === "text")
-    return (
-      <Field label="New value">
-        <Input value={String(value ?? "")} onChange={(event) => onChange(event.currentTarget.value)} />
-      </Field>
-    )
+  const mixed = !ticked && common.mixed
+  // Unticked it shows what the entries have; ticked, what will be set (nothing chosen yet: empty).
+  const shown = ticked ? value : common.mixed ? undefined : common.value
+  const marker = common.mixed && <MixedMarker breakdown={common.breakdown} />
+  const label = setting.label
+  const control = (() => {
+    switch (input.kind) {
+      case "switch":
+        return (
+          <Switch
+            checked={shown === true}
+            mixed={mixed || (ticked && shown === undefined)}
+            disabled={!ticked}
+            onCheckedChange={onChange}
+            about={setting.description}
+            aboutLabel={setting.label}
+          >
+            {label}
+          </Switch>
+        )
+      case "choice":
+      case "inherit": {
+        const items =
+          input.kind === "choice"
+            ? input.options
+            : [
+                { value: "inherit", label: `Default (${input.fallback})`, description: "Not set on the entry." },
+                { value: "true", label: "On" },
+                { value: "false", label: "Off" }
+              ]
+        return (
+          <Field label={label} about={setting.description} aboutLabel={setting.label}>
+            <Select
+              ariaLabel={setting.label}
+              items={items}
+              value={shown === undefined || shown === null ? null : String(shown)}
+              disabled={!ticked}
+              mixed={common.mixed && shown === undefined}
+              placeholder={common.mixed ? "Mixed" : "Choose"}
+              onValueChange={onChange}
+            />
+          </Field>
+        )
+      }
+      case "number":
+      case "text":
+        return (
+          <Field label={label} about={setting.description} aboutLabel={setting.label}>
+            <Input
+              aria-label={setting.label}
+              {...(input.kind === "number"
+                ? {
+                    type: "number",
+                    inputMode: "numeric" as const,
+                    min: input.min,
+                    max: input.max,
+                    step: input.integer ? 1 : "any"
+                  }
+                : {})}
+              disabled={!ticked}
+              placeholder={common.mixed && !ticked ? "Mixed" : ticked ? "Empty: clears it" : ""}
+              className="placeholder:italic"
+              value={shown === undefined || shown === null ? "" : String(shown)}
+              onChange={(event) => {
+                const text = event.currentTarget.value
+                if (input.kind === "text") return onChange(text)
+                onChange(text.trim() === "" ? "" : Number(text))
+              }}
+            />
+          </Field>
+        )
+    }
+  })()
   return (
-    <Field
-      label="New value"
-      about={[
-        input.min !== undefined && input.max !== undefined ? `From ${input.min} to ${input.max}.` : "",
-        input.nullable ? "Empty: not set, so the default applies." : ""
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      <Input
-        type="number"
-        inputMode="numeric"
-        min={input.min}
-        max={input.max}
-        step={input.integer ? 1 : "any"}
-        value={typed}
-        onChange={(event) => {
-          const text = event.currentTarget.value
-          setTyped(text)
-          const number = Number(text)
-          if (text.trim() === "") {
-            if (input.nullable) onChange(null)
-          } else if (
-            Number.isFinite(number) &&
-            (!input.integer || Number.isInteger(number)) &&
-            (input.min === undefined || number >= input.min) &&
-            (input.max === undefined || number <= input.max)
-          )
-            onChange(number)
-        }}
-      />
-    </Field>
+    <div className="flex min-w-0 items-start gap-2" data-setting={setting.id}>
+      <Tooltip
+        label={ticked ? "Leaves this setting as each entry has it." : "Changes this setting on every selected entry."}
+      >
+        <span className="inline-flex shrink-0 pt-0.5">
+          <Checkbox labelHidden checked={ticked} onCheckedChange={onTick}>
+            {`Change ${setting.label}`}
+          </Checkbox>
+        </span>
+      </Tooltip>
+      <div className={`min-w-0 flex-1 ${ticked ? "" : "opacity-60"}`}>{control}</div>
+      {marker && <span className="shrink-0 pt-1">{marker}</span>}
+    </div>
   )
 }
 
@@ -125,54 +154,53 @@ export function MassEditDialog({
   uids: ReadonlyArray<number>
   onClose: () => void
 }) {
-  const settings = useSettings()
+  const card = root.length > 0
+  const sections = useFormSections({ card, many: true })
   const entries = uids.flatMap((uid) => {
     const entry = store.value(entryPath(root, uid)) as LorebookEntry | undefined
     return entry ? [entry] : []
   })
-  const [id, setId] = useState(settings[0]?.id ?? "")
-  const setting = settings.find((s) => s.id === id) ?? settings[0]
-  const [values, setValues] = useState<Readonly<Record<string, MassValue>>>({})
-  if (!setting || entries.length === 0) return null
-  const value = id in values ? values[id]! : setting.current(entries[0]!)
-  const edits = patchEdits(root, entries, setting.patch(value))
+  // The ticked settings and their values (undefined: nothing chosen yet).
+  const [ticked, setTicked] = useState<Readonly<Record<string, MassValue | undefined>>>({})
+  if (entries.length === 0) return null
+  const settings = sections.flatMap((item) => item.settings)
+  const edits = patchEdits(root, entries, manyPatch(settings, ticked))
   const count = touched(edits)
+  const changedNames = settings.filter((setting) => setting.id in ticked).map((setting) => setting.label)
   const apply = () => {
-    applyMassChange(
-      store,
-      `Set ${setting.label} to ${valueLabel(setting, value)} on ${count} ${count === 1 ? "entry" : "entries"}`,
-      edits
-    )
+    applyMassChange(store, `Changed ${changedNames.join(", ")} on ${entriesLabel(count)}`, edits)
     onClose()
   }
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && onClose()}
-      title={`Change for ${entries.length} selected ${entries.length === 1 ? "entry" : "entries"}`}
-      description="Change one setting for every selected entry. Save keeps the change; Revert undoes it."
-    >
-      <Field label="Setting" about={setting.description}>
-        <NativeSelect
-          ariaLabel="Setting"
-          items={settings.map((s) => ({ value: s.id, label: s.label, description: s.description }))}
-          value={setting.id}
-          onValueChange={setId}
-        />
-      </Field>
-      <ValueInput
-        key={setting.id}
-        setting={setting}
-        value={value}
-        onChange={(next) => setValues((all) => ({ ...all, [setting.id]: next }))}
+    <Dialog open wide onOpenChange={(open) => !open && onClose()} title={`Edit ${entriesLabel(entries.length)}`}>
+      <SettingsLayout
+        sections={sections}
+        accordion={false}
+        wide={window.matchMedia("(min-width: 40rem)").matches}
+        label={`${entriesLabel(entries.length)}`}
+        render={(setting) => {
+          const common = commonValue(setting, entries)
+          return (
+            <ManySetting
+              setting={setting}
+              common={common}
+              ticked={setting.id in ticked}
+              value={ticked[setting.id]}
+              onTick={(next) =>
+                setTicked((all) => {
+                  const copy = { ...all }
+                  // A mixed text or number starts empty, which clears it; a mixed choice, unchosen.
+                  const typed = setting.input.kind === "text" || setting.input.kind === "number"
+                  if (next) copy[setting.id] = common.mixed ? (typed ? "" : undefined) : common.value
+                  else delete copy[setting.id]
+                  return copy
+                })
+              }
+              onChange={(value) => setTicked((all) => ({ ...all, [setting.id]: value }))}
+            />
+          )
+        }}
       />
-      <p role="status" className="text-sm text-muted">
-        {count === 0
-          ? "Every selected entry already has this."
-          : count === entries.length
-            ? `Changes all ${count} selected.`
-            : `Changes ${count} of the ${entries.length} selected; the others already have it.`}
-      </p>
       <DialogActions>
         <Button variant="ghost" hint="Closes this without changing any entry." onClick={onClose}>
           Cancel
@@ -180,10 +208,10 @@ export function MassEditDialog({
         <Button
           variant="primary"
           disabled={count === 0}
-          hint="Sets it on these entries as an unsaved change: Save keeps it, Revert undoes it."
+          hint="Sets the ticked settings on the selected entries that don't have them yet."
           onClick={apply}
         >
-          Apply to {count} {count === 1 ? "entry" : "entries"}
+          Apply to {entriesLabel(count)}
         </Button>
       </DialogActions>
     </Dialog>

@@ -1,6 +1,7 @@
 // Screenshots of the save cluster wherever it appears (ui/SaveControls.tsx), in each state, at
 // 1440 and 390 px, light and dark; only with SCREENSHOT_DIR set. Saving is held and a failure
 // made by catching the save on its way to the server. Every card, book and preset is made up.
+import { switchAll } from "./support/lorebook.ts"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
@@ -154,7 +155,7 @@ for (const width of [1440, 390])
         await states(
           "library-lorebook",
           () => page.locator("main"),
-          (n) => page.getByRole("button", { name: n === 1 ? "Disable all" : "Enable all", exact: true }).click()
+          (n) => switchAll(page, n === 1 ? "Disable all" : "Enable all")
         )
 
         // The chat's panel: the card's tab, its preset, its notes, snippets and lorebooks.
@@ -222,9 +223,5 @@ for (const width of [1440, 390])
         .getByRole("button", { name: new RegExp(`^Tides ${tag}`) })
         .click()
       const book = () => lore().getByRole("region", { name: `Lorebook Tides ${tag}` })
-      await states("panel-lorebook", book, (n) =>
-        book()
-          .getByRole("button", { name: n === 1 ? "Disable all" : "Enable all", exact: true })
-          .click()
-      )
+      await states("panel-lorebook", book, (n) => switchAll(book(), n === 1 ? "Disable all" : "Enable all"))
     })
