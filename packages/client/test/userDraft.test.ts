@@ -745,3 +745,41 @@ it("anonymous clear evidence stays in durable copies and RPCs when the same text
   await until(() => saves.length === 2)
   expect(saves[1]?.editingFrom).toEqual({ content: original, clearedArrays: [["items"]] })
 })
+
+it("a whole-field clear keeps its identity through closing saves and an earlier unrelated acknowledgement", async () => {
+  const { store, handlers, saves } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  const first = deferred<Draft>()
+  handlers.SaveUserDraft = async (input) => {
+    saves.push(input)
+    if (saves.length === 1) return first.promise
+    throw new Error("closed before later acknowledgements")
+  }
+  store.type("Intermediate text", "original")
+  await until(() => saves.length === 1)
+  store.type("", "original")
+  store.type("Fresh after the clear", "original")
+  const copy = [...memory.values()].find((copy) => copy.content === "Fresh after the clear")!
+  expect(copy.save.kind).toBe("userDraft")
+  if (copy.save.kind !== "userDraft") return
+  const intent = copy.save.payload.editingFrom
+  expect(intent).toMatchObject({ content: "", clearedArrays: [], clearId: expect.any(String) })
+  const send = vi.fn(async () => new Response(null, { status: 204 }))
+  vi.stubGlobal("fetch", send)
+  try {
+    store.leave()
+    const init = send.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init[1].keepalive).toBe(true)
+    expect(JSON.parse(init[1].body as string).userDrafts[0].editingFrom).toEqual(intent)
+    first.resolve(draft("Intermediate text", 2))
+    await until(() => saves.length === 3)
+    expect(saves[1]?.editingFrom).toEqual(intent)
+    expect(saves[2]?.editingFrom).toEqual(intent)
+    expect(saves[2]?.expectedRowVersion).toBe(2)
+  } finally {
+    first.resolve(draft("Intermediate text", 2))
+    vi.unstubAllGlobals()
+    vi.stubGlobal("location", { protocol: "http:", host: "localhost" })
+  }
+})

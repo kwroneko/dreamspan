@@ -528,14 +528,6 @@ export const makeDraftStore = (
       // Saving the same text against a new base revision only moves the base.
       const sameBase = baseRevision === null || baseRevision === draft.base_revision
       const imagesChanged = imagesJson !== draft.images_json
-      if (isEmptyPatch(patch) && !imagesChanged && draft.status === "active" && sameBase) return 0
-      const recovered =
-        isEmptyPatch(patch) && !imagesChanged
-          ? 0
-          : yield* record(draft, content, patch, kind, at, displaced, imagesJson)
-      // A save after a commit or discard starts a new drafting session.
-      const reopened = draft.status !== "active"
-      const textChanged = reopened || !isEmptyPatch(patch) || imagesChanged
       const deletions = trackDeletions(
         toDraft(draft),
         content,
@@ -543,6 +535,17 @@ export const makeDraftStore = (
         deliberate,
         formEdit
       )
+      const newDeletion = Object.values(deletions).some(
+        (marker) => marker.draftId === draft.id && marker.rowVersion === draft.row_version + 1
+      )
+      if (isEmptyPatch(patch) && !imagesChanged && draft.status === "active" && sameBase && !newDeletion) return 0
+      const recovered =
+        isEmptyPatch(patch) && !imagesChanged
+          ? 0
+          : yield* record(draft, content, patch, kind, at, displaced, imagesJson)
+      // A save after a commit or discard starts a new drafting session.
+      const reopened = draft.status !== "active"
+      const textChanged = reopened || !isEmptyPatch(patch) || imagesChanged
       const clears = deletions[""]?.draftId === draft.id && deletions[""]?.rowVersion === draft.row_version + 1
       yield* sql`UPDATE drafts SET content = ${content}, images_json = ${imagesJson}, status = 'active',
                    base_revision = ${baseRevision ?? draft.base_revision},
@@ -624,6 +627,9 @@ export const makeDraftStore = (
       const deletionBase = options.deletionBase ?? {
         draftId: draft.id,
         expectedRowVersion: base?.rowVersion ?? null,
+        ...(options.deliberate === false || options.editingFrom === undefined
+          ? {}
+          : { editingFrom: options.editingFrom }),
         ...(options.observedDeletion ? { observedDeletion: options.observedDeletion } : {})
       }
       const barrier = deletionMap(toDraft(draft))[""]
@@ -782,6 +788,7 @@ export const makeDraftStore = (
           deletionBase: {
             draftId: options.draftId ?? (legacyBaseHere ? existing.id : null),
             expectedRowVersion: options.base?.rowVersion ?? null,
+            ...(options.seed === true || options.editingFrom === undefined ? {} : { editingFrom: options.editingFrom }),
             ...(options.observedDeletion ? { observedDeletion: options.observedDeletion } : {})
           },
           images: options.images
@@ -813,6 +820,21 @@ export const makeDraftStore = (
         options.baseRevision,
         options.images === undefined ? firstImages : imageJson(options.images)
       )
+      if (options.key.targetKind === "user_field" && options.seed !== true && options.editingFrom !== undefined) {
+        const created = (yield* find(options.userId, options.key))!
+        // A page can close before even its initial seed save. Its final copy still
+        // carries actual clears, recorded at this row's first version atomically.
+        const deletions = trackDeletions(
+          { ...toDraft(created), content: "", rowVersion: created.row_version - 1 },
+          options.content,
+          true,
+          true,
+          { before: options.editingFrom, content: options.content }
+        )
+        if (Object.keys(deletions).length > 0)
+          yield* sql`UPDATE drafts SET deletions_json = ${JSON.stringify(deletions)},
+                     cleared_version = ${deletions[""]?.rowVersion ?? 0} WHERE id = ${created.id}`
+      }
       return toDraft((yield* find(options.userId, options.key))!)
     })
 

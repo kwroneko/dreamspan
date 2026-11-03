@@ -6,10 +6,14 @@ import { Schema } from "effect"
 import { beforeDeletion, deletionMap } from "./draftDeletions.ts"
 import { MessageImages } from "./chat.ts"
 
-/** Legacy strings remain valid; anonymous input clears need evidence independent of final text counts. */
+/** Authored clear events survive later typing; legacy string-only origins remain valid. */
 export const EditingOrigin = Schema.Union([
   Schema.String,
-  Schema.Struct({ content: Schema.String, clearedArrays: Schema.Array(Schema.Array(Schema.String)) })
+  Schema.Struct({
+    content: Schema.String,
+    clearedArrays: Schema.Array(Schema.Array(Schema.String)),
+    clearId: Schema.optionalKey(Schema.String)
+  })
 ])
 export type EditingOrigin = typeof EditingOrigin.Type
 
@@ -82,6 +86,8 @@ export type ObservedDeletion = typeof ObservedDeletion.Type
 
 export const FieldDeletion = Schema.Struct({
   ...ObservedDeletion.fields,
+  /** The authored whole-field clear, so its unacknowledged continuation can be recognized. */
+  clearId: Schema.optionalKey(Schema.String),
   value: Schema.optionalKey(Schema.Unknown),
   missing: Schema.optionalKey(Schema.Boolean)
 })
@@ -234,6 +240,7 @@ export const deletedSince = (
     readonly draftId: string | null
     readonly expectedRowVersion: number | null
     readonly observedDeletion?: ObservedDeletion
+    readonly editingFrom?: EditingOrigin
   } | null
 ): boolean => {
   if (draft === null) return false
