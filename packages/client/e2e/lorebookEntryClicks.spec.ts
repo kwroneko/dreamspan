@@ -8,7 +8,7 @@ import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 
-async function setup(page: Page, width = 1800) {
+async function setup(page: Page, width = 1800, entries = 1) {
   await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const response = await page.request.post(`${server().url}/library/import?name=Entry-clicks.json`, {
@@ -16,9 +16,18 @@ async function setup(page: Page, width = 1800) {
     data: Buffer.from(
       JSON.stringify({
         name: "Entry clicks",
-        entries: {
-          0: { uid: 0, key: ["harbour", "quay"], comment: "Harbour", content: "Boats at the quay.", order: 10 }
-        }
+        entries: Object.fromEntries(
+          Array.from({ length: entries }, (_, uid) => [
+            uid,
+            {
+              uid,
+              key: uid === 0 ? ["harbour", "quay"] : [`harbour${uid}`, `quay${uid}`],
+              comment: uid === 0 ? "Harbour" : `Entry ${uid}`,
+              content: "Boats at the quay.",
+              order: entries - uid
+            }
+          ])
+        )
       })
     )
   })
@@ -122,3 +131,74 @@ test("entry expansion is independent in the side panel and large editor and surv
   await expect(toggle(editor, false)).toBeVisible()
   await expect(toggle(panel, false)).toBeVisible()
 })
+
+// A real mouse press leaves time for blur and the virtualizer's measurement before release.
+// Folding the earlier keys box at pointerdown used to move the clicked row out from under it.
+for (const view of ["side panel", "large editor"])
+  for (const rate of [1, 6]) {
+    test(`keys keep their click after another keys box blurs in the ${view}, CPU ${rate}x`, async ({
+      page,
+      context
+    }) => {
+      test.setTimeout(300_000)
+      const panel = await setup(page, 1800, 174)
+      let scope = panel
+      if (view === "large editor") {
+        await panel.getByRole("button", { name: "Large editor", exact: true }).click()
+        scope = page.getByRole("dialog", { name: "Lorebook editor", exact: true })
+      }
+      const cdp = await context.newCDPSession(page)
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate })
+      const earlier = scope
+        .getByRole("listitem")
+        .filter({ has: page.getByRole("textbox", { name: "Title of Harbour", exact: true }) })
+      const later = scope
+        .getByRole("listitem")
+        .filter({ has: page.getByRole("textbox", { name: "Title of Entry 1", exact: true }) })
+      const setOpen = async (row: Locator, title: string, open: boolean) => {
+        const button = row.getByRole("button", { name: new RegExp(`^(Open|Close) ${title}$`) })
+        if ((await button.getAttribute("aria-expanded")) !== String(open)) await button.click()
+      }
+      for (const expanded of [false, true])
+        for (let attempt = 0; attempt < 20; attempt++) {
+          await scope.getByRole("searchbox").focus()
+          await setOpen(later, "Entry 1", expanded)
+          await setOpen(earlier, "Harbour", true)
+          await earlier.getByText("harbour, quay", { exact: true }).click()
+          await expect(keys(earlier)).toBeFocused()
+          const target = expanded
+            ? later.getByText("harbour1, quay1", { exact: true })
+            : later.getByRole("button", { name: /^Keys of Entry 1:/ })
+          await target.scrollIntoViewIfNeeded()
+          // Cycle through a key's text, the comma/space between keys and the line's trailing padding.
+          const point = await target.evaluate((element, position) => {
+            const box = element.getBoundingClientRect()
+            let x = position === 2 ? box.right - 2 : box.x + 10
+            if (position === 1 && element.firstChild) {
+              const range = document.createRange()
+              const comma = element.firstChild.textContent!.indexOf(",")
+              range.setStart(element.firstChild, comma + 1)
+              range.setEnd(element.firstChild, comma + 2)
+              const gap = range.getBoundingClientRect()
+              x = gap.x + gap.width / 2
+            }
+            return { x, y: box.y + box.height / 2 }
+          }, attempt % 3)
+          await page.mouse.move(point.x, point.y)
+          await page.mouse.down()
+          try {
+            await page.waitForTimeout(80)
+            const hit = await target.evaluate((element, position) => {
+              const actual = document.elementFromPoint(position.x, position.y)
+              return { owns: element.contains(actual), actual: actual?.outerHTML.slice(0, 250) }
+            }, point)
+            expect(hit, `attempt ${attempt}, expanded ${expanded}`).toMatchObject({ owns: true })
+          } finally {
+            await page.mouse.up()
+          }
+          await expect(keys(later)).toBeFocused()
+          await keys(later).press("Escape")
+        }
+      await cdp.detach()
+    })
+  }
