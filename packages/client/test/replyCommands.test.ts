@@ -57,6 +57,33 @@ it("continues a model without prefill (owner, 2026-10-31), and reports an unreso
   expect(runCommandShortcut(key, context)).toBe(false)
 })
 
+it("waits for next-context capability before continuing, and drops actions whose target changed", async () => {
+  for (const change of ["ready", "fork", "leaf", "version", "row", "disposed", "unresolved"] as const) {
+    const { session, view } = setup()
+    Object.assign(view, { history: null, leafSlotId: entry.slotId })
+    let resolve!: (active: boolean) => void
+    const ensure = vi.fn(() => new Promise<boolean>((done) => (resolve = done)))
+    Object.assign(session, { ensureNextContext: ensure, snapshot: () => ({ ...view }) })
+    const report = vi.fn()
+    const target = { entry, session, report } as unknown as Parameters<typeof invokeMessageAction>[1]
+    const running = invokeMessageAction("message.continue", target, "keyboard")
+    expect(ensure).toHaveBeenCalledOnce()
+    expect(session.continueVersion).not.toHaveBeenCalled()
+    Object.assign(view, { history: { model: { prefill: "assistant" } } })
+    if (change === "fork") view.forkId = "another-fork"
+    if (change === "leaf") Object.assign(view, { leafSlotId: "another-tip" })
+    if (change === "row") view.entries = [{ ...entry, rowVersion: 2 } as PathEntry]
+    if (change === "version")
+      view.entries = [{ ...entry, version: { ...entry.version, id: "another-version" } } as PathEntry]
+    if (change === "unresolved") Object.assign(view, { history: { model: {} } })
+    resolve(change !== "disposed")
+    await running
+    if (change === "ready") expect(session.continueVersion).toHaveBeenCalledWith(entry, false)
+    else expect(session.continueVersion).not.toHaveBeenCalled()
+    if (change === "unresolved") expect(report).toHaveBeenCalledWith(expect.objectContaining({ ok: false }))
+  }
+})
+
 it("ignores composition, repeated keys and extra modifiers", () => {
   const { context } = setup()
   for (const extra of [{ isComposing: true }, { shiftKey: true }, { ctrlKey: true }, { repeat: true }])

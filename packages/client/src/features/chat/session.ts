@@ -277,6 +277,7 @@ export class ChatSession {
   }
 
   private contextReads = 0
+  private contextPending: Promise<void> | null = null
 
   private lcmReads = 0
   /** The newest read applied: a slow read is never dropped for a newer one still in flight. */
@@ -347,7 +348,21 @@ export class ChatSession {
       : null
   }
 
-  private async refreshContext() {
+  /** Waits for the context already being read, or reads it when none is in flight. */
+  async ensureNextContext() {
+    await (this.contextPending ?? this.refreshContext())
+    return !this.disposed
+  }
+
+  private refreshContext() {
+    const pending = this.readContext().finally(() => {
+      if (this.contextPending === pending) this.contextPending = null
+    })
+    this.contextPending = pending
+    return pending
+  }
+
+  private async readContext() {
     const read = ++this.contextReads
     const forkId = this.view.forkId
     const leafSlotId = this.view.leafSlotId

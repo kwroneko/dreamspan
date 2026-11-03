@@ -369,6 +369,37 @@ describe("ChatSession", () => {
     s.dispose()
   })
 
+  it("shares an in-flight next-context read with a Continue waiting for capability", async () => {
+    const registry = AtomRegistry.make()
+    const s = new ChatSession(chatId, null, registry, "user")
+    const internals = s as unknown as {
+      view: ReturnType<typeof s.snapshot>
+      refreshContext: () => Promise<void>
+      call: () => Promise<unknown>
+    }
+    let answer!: (value: unknown) => void
+    const call = vi.fn(() => new Promise((done) => (answer = done)))
+    internals.call = call
+    internals.view = { ...s.snapshot(), loading: false }
+    const reading = internals.refreshContext()
+    const waiting = s.ensureNextContext()
+    expect(call).toHaveBeenCalledOnce()
+    answer({
+      ok: true,
+      value: { leafSlotId: null, warmth: null, historyStart: null, summarizedThrough: null, model: null }
+    })
+    await reading
+    expect(await waiting).toBe(true)
+    expect(s.snapshot().history?.model).toBeNull()
+    // A completed read isn't reused after another request needs a fresh context.
+    const next = s.ensureNextContext()
+    expect(call).toHaveBeenCalledTimes(2)
+    s.dispose()
+    answer({ ok: false })
+    expect(await next).toBe(false)
+    registry.dispose()
+  })
+
   it("reads its own context instead of applying another fork's Cache event at the same tip", () => {
     const { s, receive } = session()
     const internals = s as unknown as { view: ReturnType<typeof s.snapshot>; refreshContext: () => Promise<void> }
