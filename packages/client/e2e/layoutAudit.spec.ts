@@ -51,6 +51,9 @@ test("the detector catches geometry defects and respects documented intent", asy
   expect(found.find((v) => v.kind === "inset" && v.related === "#edge")?.measurement).toContain("left 0.00px")
   expect(found.find((v) => v.kind === "alignment")?.measurement).toContain("4.00px")
   expect(found.some((v) => v.kind === "inset" && v.related === "#menu-edge")).toBe(true)
+  const scoped = await layoutAudit(page, { scope: "#menu-edge" })
+  expect(scoped.length).toBeGreaterThan(0)
+  expect(scoped.every((v) => v.related === "#menu-edge")).toBe(true)
   await page.setContent(`<style>body{margin:20px}button{padding:8px}</style>
     <div style="width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Intended ellipsis on this very long text</div>
     <div data-layout-audit-ignore="inset: joined segments share an outer border" style="border:1px solid"><button>A</button></div>
@@ -356,7 +359,12 @@ test.describe("synthetic library and every app surface", () => {
             timeout: 30000
           })
           const inspect = async (suffix = "") => {
-            const violations = await expectLayout(page, info, surface + suffix)
+            const violations = await expectLayout(
+              page,
+              info,
+              surface + suffix,
+              process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1" ? { scope: '[role="menu"]' } : {}
+            )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
             writeFileSync(join(work, `findings-${width}-${theme}.json`), JSON.stringify(findings, null, 2))
@@ -417,6 +425,45 @@ test.describe("synthetic library and every app surface", () => {
           if (await page.getByRole("tablist", { name: "Chat panel", exact: true }).isVisible()) await closePanel(page)
           await page.getByRole("button", { name: /^Speaking as / }).click()
           await audit("persona-speaker-switcher")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1") {
+          const formats = async (surface: string, nested: boolean) => {
+            if (nested) {
+              // The detector moves the pointer aside. Open by keyboard so the submenu
+              // remains present throughout the measurements and scroll-end samples.
+              await page.mouse.move(0, 0)
+              const trigger = page.getByRole("menuitem", { name: "Export…", exact: true })
+              await trigger.focus()
+              await trigger.press("ArrowRight")
+            } else await page.getByRole("button", { name: "Export…", exact: true }).click()
+            await expect(page.getByRole("menuitem", { name: "PNG", exact: true })).toBeVisible()
+            await audit(surface)
+            await expect(page.getByRole("menuitem", { name: "PNG", exact: true })).toBeVisible()
+          }
+          await go("library-before-export", "/library")
+          await page
+            .getByRole("listitem")
+            .filter({ has: page.locator(`a[href="/library/${cardRef}"]`) })
+            .getByRole("button", { name: /^More actions for/ })
+            .click()
+          await formats("menu-library-export", true)
+          await go("editor-before-export", `/library/${cardRef}`)
+          await formats("menu-editor-export", false)
+          await go("chat-before-export", `/chats/${chatId}`)
+          await openPanel(page, "Cast")
+          await page.getByRole("button", { name: `More for ${cardName}`, exact: true }).click()
+          await formats("menu-cast-export", true)
+          await page.keyboard.press("Escape")
+          await page.keyboard.press("Escape")
+          const characterTab = await openPanel(page, cardName)
+          await characterTab.getByRole("button", { name: "Export…", exact: true }).click()
+          await expect(page.getByRole("menuitem", { name: "PNG", exact: true })).toBeVisible()
+          await audit("menu-character-export")
+          await go("pending-before-export", `/cards/${cardId}/chat`)
+          await openPanel(page, "Cast")
+          await page.getByRole("button", { name: `More for ${cardName}`, exact: true }).click()
+          await formats("menu-pending-cast-export", true)
           return
         }
         if (process.env.LAYOUT_AUDIT_CARD_HEADERS_ONLY === "1") {

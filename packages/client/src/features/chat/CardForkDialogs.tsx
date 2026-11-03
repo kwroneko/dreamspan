@@ -9,6 +9,7 @@ import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
+import { MenuAction } from "../../ui/Menu.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -35,7 +36,7 @@ export function EditChatCard({ session, card, info }: ChatCardActionProps) {
   const navigate = useNavigate()
   const workspace = usePresetWorkspace()
   return (
-    <Button
+    <MenuAction
       variant="ghost"
       className="h-8! px-2!"
       aria-label={`Open ${card.name} in the full editor`}
@@ -52,7 +53,7 @@ export function EditChatCard({ session, card, info }: ChatCardActionProps) {
       }}
     >
       Full editor
-    </Button>
+    </MenuAction>
   )
 }
 export function ForkChatCard({ session, card, info, persona }: ChatCardActionProps) {
@@ -60,7 +61,7 @@ export function ForkChatCard({ session, card, info, persona }: ChatCardActionPro
   if (persona || session === null) return null
   return (
     <>
-      <Button
+      <MenuAction
         variant="ghost"
         className="h-8! px-2!"
         disabled={!info || card.inBin}
@@ -69,7 +70,7 @@ export function ForkChatCard({ session, card, info, persona }: ChatCardActionPro
         onClick={() => setOpen(true)}
       >
         Fork for this chat
-      </Button>
+      </MenuAction>
       {open && info && <ChatCardForkDialog session={session} card={card} info={info} onClose={() => setOpen(false)} />}
     </>
   )
@@ -79,7 +80,7 @@ export function ChooseChatCard({ session, card, info, persona }: ChatCardActionP
   if (persona || session === null) return null
   return (
     <>
-      <Button
+      <MenuAction
         variant="ghost"
         className="h-8! px-2!"
         disabled={!info || card.inBin}
@@ -88,7 +89,7 @@ export function ChooseChatCard({ session, card, info, persona }: ChatCardActionP
         onClick={() => setOpen(true)}
       >
         Use another version
-      </Button>
+      </MenuAction>
       {open && <CardVersionDialog session={session} card={card} onClose={() => setOpen(false)} />}
     </>
   )

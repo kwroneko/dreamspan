@@ -73,7 +73,7 @@ for (const width of [1440, 390])
       await shot("cast")
       // The card's actions are under its row's ⋯.
       await page.getByRole("button", { name: `More for ${name}`, exact: true }).click()
-      await expect(page.getByRole("button", { name: `Fork for this chat: ${name}`, exact: true })).toBeVisible()
+      await expect(page.getByRole("menuitem", { name: `Fork for this chat: ${name}`, exact: true })).toBeVisible()
       await page.keyboard.press("Escape")
       // The card's own tab is also a chat surface, with the same editing scope and actions.
       const details = await openPanel(page, name)

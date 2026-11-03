@@ -17,7 +17,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
-import { MenuItem } from "../../ui/Menu.tsx"
+import { MenuAction, MenuItem } from "../../ui/Menu.tsx"
 import { ReadableDiff } from "../../ui/ReadableDiff.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
@@ -330,7 +330,7 @@ export function ImportNewVersion({
   // The Cast tab knows every card's ref: a family read per card there was an N+1 (night/tabperf).
   const action = (ref: RefId | undefined) => (
     <>
-      <Button
+      <MenuAction
         variant={compact ? "ghost" : "secondary"}
         className={compact ? "h-8! px-2!" : ""}
         hint={EXPLAIN.action}
@@ -338,7 +338,7 @@ export function ImportNewVersion({
         onClick={() => setOpen(true)}
       >
         Import a new version…
-      </Button>
+      </MenuAction>
       {open && ref && <NewVersionDialog refId={ref} label={label} onClose={() => setOpen(false)} />}
     </>
   )

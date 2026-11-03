@@ -3,8 +3,16 @@
 // An item's `description` explains it beside the item while it's highlighted, or under its
 // label on touch screens and narrow windows (`Explanation.tsx`), so the label can stay short.
 import { Menu as BaseMenu } from "@base-ui/react/menu"
-import { type ComponentProps, type ReactElement, type ReactNode, useId, useState } from "react"
-import { buttonClass } from "./Button.tsx"
+import {
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+  createContext,
+  useContext,
+  useId,
+  useState
+} from "react"
+import { Button, buttonClass } from "./Button.tsx"
 import { HighlightExplanation, useItemExplanation } from "./Explanation.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 import { Tooltip } from "./Tooltip.tsx"
@@ -20,8 +28,11 @@ export function Menu({
   open,
   finalFocus,
   marker,
-  hint
+  hint,
+  keepMounted = false
 }: {
+  /** Keep action components mounted when closed so their dialogs stay open. */
+  keepMounted?: boolean
   /** The element that opens it, usually a button; it receives the trigger's props. */
   trigger: ReactElement
   /** What the trigger opens, on hover and focus: an icon-only ⋯ says what's in it. */
@@ -59,7 +70,7 @@ export function Menu({
       ) : (
         <BaseMenu.Trigger render={trigger} />
       )}
-      <BaseMenu.Portal>
+      <BaseMenu.Portal keepMounted={keepMounted}>
         <BaseMenu.Positioner
           data-layout-overlay="Menu floats above the page"
           className="z-50 outline-none"
@@ -75,12 +86,95 @@ export function Menu({
             {...(finalFocus ? { finalFocus } : {})}
             className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
-            {children}
+            <MenuActionsContext value>{children}</MenuActionsContext>
           </BaseMenu.Popup>
           <HighlightExplanation popup={popup} />
         </BaseMenu.Positioner>
       </BaseMenu.Portal>
     </BaseMenu.Root>
+  )
+}
+
+const MenuActionsContext = createContext(false)
+export const useMenuActions = () => useContext(MenuActionsContext)
+
+/** An existing action shown as a menu item inside a Menu, or a button elsewhere. */
+export function MenuAction({
+  hint,
+  children,
+  onClick,
+  disabled,
+  ...props
+}: {
+  hint: string
+  children: ReactNode
+  onClick: () => void
+  disabled?: boolean | undefined
+  variant?: ComponentProps<typeof Button>["variant"]
+  className?: string
+  "aria-label"?: string
+}) {
+  const inMenu = useMenuActions()
+  return inMenu ? (
+    <MenuItem description={hint} onClick={onClick} disabled={disabled} aria-label={props["aria-label"]}>
+      {children}
+    </MenuItem>
+  ) : (
+    <Button hint={hint} onClick={onClick} disabled={disabled} {...props}>
+      {children}
+    </Button>
+  )
+}
+
+/** A real submenu: hover, click, Enter and the forward arrow use Base UI's menu handling. */
+export function MenuSubmenu({
+  label,
+  description,
+  children
+}: {
+  label: string
+  description: string
+  children: ReactNode
+}) {
+  const [popup, setPopup] = useState<HTMLElement | null>(null)
+  const explanation = useItemExplanation(description)
+  const [open, setOpen] = useState(false)
+  return (
+    <BaseMenu.SubmenuRoot open={open} onOpenChange={setOpen}>
+      <BaseMenu.SubmenuTrigger
+        label={label}
+        delay={0}
+        closeDelay={200}
+        onClick={() => setOpen(true)}
+        className={itemClass("default")}
+        {...explanation.describedBy}
+        data-explain={open ? undefined : description}
+      >
+        <span className="w-4" />
+        <ItemText parts={explanation.parts}>{label}</ItemText>
+        <Icon name="right" className="shrink-0 text-muted" />
+      </BaseMenu.SubmenuTrigger>
+      <BaseMenu.Portal>
+        <BaseMenu.Positioner
+          data-layout-overlay="Submenu floats above its parent menu"
+          className="z-50 outline-none"
+          positionMethod="fixed"
+          side="right"
+          align="start"
+          sideOffset={4}
+          collisionPadding={8}
+        >
+          <BaseMenu.Popup
+            ref={setPopup}
+            aria-label={label}
+            className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+          >
+            {children}
+          </BaseMenu.Popup>
+          <HighlightExplanation popup={popup} />
+        </BaseMenu.Positioner>
+      </BaseMenu.Portal>
+    </BaseMenu.SubmenuRoot>
   )
 }
 
@@ -285,15 +379,6 @@ export function MenuItemWithCheckbox({
 
 export function MenuSeparator() {
   return <BaseMenu.Separator className="mx-1 my-1 h-px bg-border" />
-}
-
-export function MenuGroup({ label, children }: { label: ReactNode; children: ReactNode }) {
-  return (
-    <BaseMenu.Group>
-      <BaseMenu.GroupLabel className="px-2.5 pt-1.5 pb-1 text-xs font-medium text-muted">{label}</BaseMenu.GroupLabel>
-      {children}
-    </BaseMenu.Group>
-  )
 }
 
 export type ActionMenuItem =

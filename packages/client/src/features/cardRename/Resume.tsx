@@ -2,7 +2,7 @@ import type { CardSaved } from "../editor/cardSaved.ts"
 import { useState, useSyncExternalStore } from "react"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { useSession } from "../../session.ts"
-import { Button } from "../../ui/Button.tsx"
+import { MenuAction } from "../../ui/Menu.tsx"
 import { usePending } from "./pending.ts"
 import { CardSavedFlow } from "../editor/CardSavedFlow.tsx"
 import { cardSavedContribution, cardSavedContributions } from "../editor/cardSaved.ts"
@@ -19,12 +19,12 @@ export function Resume({ entityId }: { entityId: EntityId }) {
   if (!opened && (!pending || !cardSavedContribution(pending))) return null
   return (
     <>
-      <Button
+      <MenuAction
         hint="Asks again whether to put the card's new name in place of the old one in past messages."
         onClick={() => setOpened(pending)}
       >
         Resume history replacement
-      </Button>
+      </MenuAction>
       {opened && <CardSavedFlow change={opened} onDone={() => setOpened(null)} />}
     </>
   )

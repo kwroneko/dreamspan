@@ -1,6 +1,6 @@
 // Export… beside a card's other actions: the full editor's header (`cardContributions`
 // `actions`) and the chat's character and persona tabs (`chatCardActions`). The library's item
-// menu has its own Export as group (`library.export`). Every one of them asks through
+// menu shares ExportMenu (`library.export`); Cast uses its submenu. Every one asks through
 // `requestExport`, answered by the check registered here in `appTools` (`card-export.check`):
 // unsaved changes are asked about before the file is written (owner, 2026-11-02). Each is a
 // registration of its own, so a plugin can replace or disable it.

@@ -69,13 +69,26 @@ for (const width of [1440, 390])
       await expect(long.getByRole("button", { name: /^Forks of / })).toBeVisible()
       await shot(page, `search-${width}-${theme}`, width)
       await long.getByRole("button", { name: /^More actions for / }).click()
-      const menu = page.getByRole("menu")
-      for (const item of ["Fork…", "Forks", "Compare with parent", "Mark as a fork of…", "Unlink from parent", "PNG"])
+      const menu = page.getByRole("menu", { name: /^More actions for/ })
+      for (const item of [
+        "Fork…",
+        "Forks",
+        "Compare with parent",
+        "Mark as a fork of…",
+        "Unlink from parent",
+        "Export…"
+      ])
         await expect(menu.getByRole("menuitem", { name: item, exact: true })).toBeVisible()
       await expect(menu.getByRole("menuitemcheckbox", { name: "Persona" })).not.toBeChecked()
       // A fork has no import line to update from.
       await expect(menu.getByRole("menuitem", { name: /Update from file/ })).toHaveCount(0)
       await shot(page, `menu-${width}-${theme}`, width)
+      await menu.getByRole("menuitem", { name: "Export…", exact: true }).hover()
+      await expect(
+        page.getByRole("menu", { name: "Export…", exact: true }).getByRole("menuitem", { name: "PNG", exact: true })
+      ).toBeVisible()
+      await page.keyboard.press("Escape")
+      await expect(menu).toBeVisible()
       await page.keyboard.press("Escape")
       await search.fill("")
 

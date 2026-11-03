@@ -14,11 +14,9 @@ import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { Button } from "../../ui/Button.tsx"
-import { Icon } from "../../ui/Icon.tsx"
-import { Popover } from "../../ui/Popover.tsx"
+import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { castView } from "./cast.ts"
 import { useShowPanel } from "./panels.tsx"
@@ -33,7 +31,7 @@ import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
-/** The row's ⋯: what's used less, each a button in a panel that stays mounted for the dialogs they open. */
+/** The row's ⋯: registered menu actions, kept mounted for the dialogs they open. */
 function MemberMore({
   session,
   card,
@@ -47,50 +45,31 @@ function MemberMore({
   onChange: (change: CastChange) => void
   onPersona: () => void
 }) {
-  const [open, setOpen] = useState(false)
   const showPanel = useShowPanel()
   const name = card.name
   return (
-    <Popover
-      open={open}
-      onOpenChange={setOpen}
-      trigger={<Icon name="more" />}
-      triggerLabel={`More for ${name}`}
-      hint={`More for ${name}`}
-      triggerClassName={iconButtonClass()}
-      title={name}
-      side="bottom"
-      align="end"
-      keepMounted
-    >
-      <div
-        className="flex flex-col items-stretch gap-0.5 [&_button]:h-auto! [&_button]:min-h-8 [&_button]:w-full [&_button]:justify-start [&_button]:px-2! [&_button]:py-1.5 [&_button]:text-left [&_button]:whitespace-normal"
-        onClickCapture={() => setOpen(false)}
+    <Menu trigger={<IconButton icon="more" label={`More for ${name}`} />} label={name} keepMounted>
+      <MenuItem
+        description={`The composer writes as ${name}: what you send is their message.`}
+        onClick={() => writeAs(session, card.entityId)}
       >
-        <Button
-          variant="ghost"
-          hint={`The composer writes as ${name}: what you send is their message.`}
-          onClick={() => writeAs(session, card.entityId)}
-        >
-          Write as {name}
-        </Button>
-        <Button variant="ghost" hint="Edit their card here." onClick={() => showPanel(`card:${card.entityId}`)}>
-          Edit the card here
-        </Button>
-        <ChatCardActions session={session} card={card} info={info} />
-        <Button variant="ghost" hint={`You play ${name} in this chat: {{user}} is them.`} onClick={onPersona}>
-          Use as my persona
-        </Button>
-        <Button
-          variant="ghost"
-          className="text-danger!"
-          hint="They leave the chat. Earlier messages stay."
-          onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
-        >
-          Remove from chat
-        </Button>
-      </div>
-    </Popover>
+        Write as {name}
+      </MenuItem>
+      <MenuItem description="Edit their card here." onClick={() => showPanel(`card:${card.entityId}`)}>
+        Edit the card here
+      </MenuItem>
+      <ChatCardActions session={session} card={card} info={info} />
+      <MenuItem description={`You play ${name} in this chat: {{user}} is them.`} onClick={onPersona}>
+        Use as my persona
+      </MenuItem>
+      <MenuItem
+        tone="danger"
+        description="They leave the chat. Earlier messages stay."
+        onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
+      >
+        Remove from chat
+      </MenuItem>
+    </Menu>
   )
 }
 
@@ -315,7 +294,6 @@ function PendingMember({
   removable: boolean
   onRemove: () => void
 }) {
-  const [open, setOpen] = useState(false)
   const showPanel = useShowPanel()
   const name = card.name
   return (
@@ -333,42 +311,24 @@ function PendingMember({
         </button>
         {version && <span className="max-w-full truncate text-xs text-muted">{version}</span>}
       </div>
-      <Popover
-        open={open}
-        onOpenChange={setOpen}
-        trigger={<Icon name="more" />}
-        triggerLabel={`More for ${name}`}
-        hint={`More for ${name}`}
-        triggerClassName={iconButtonClass()}
-        title={name}
-        side="bottom"
-        align="end"
-        keepMounted
-      >
-        <div
-          className="flex flex-col items-stretch gap-0.5 [&_button]:h-auto! [&_button]:min-h-8 [&_button]:w-full [&_button]:justify-start [&_button]:px-2! [&_button]:py-1.5 [&_button]:text-left [&_button]:whitespace-normal"
-          onClickCapture={() => setOpen(false)}
+      <Menu trigger={<IconButton icon="more" label={`More for ${name}`} />} label={name} keepMounted>
+        <MenuItem
+          description="Opens their card's fields in this panel."
+          onClick={() => showPanel(`card:${card.entityId}`)}
         >
-          <Button
-            variant="ghost"
-            hint="Opens their card's fields in this panel."
-            onClick={() => showPanel(`card:${card.entityId}`)}
+          Edit the card here
+        </MenuItem>
+        <ChatCardActions session={null} card={card} info={info} />
+        {removable && (
+          <MenuItem
+            tone="danger"
+            description="Leaves them out of the new chat, with their greeting."
+            onClick={onRemove}
           >
-            Edit the card here
-          </Button>
-          <ChatCardActions session={null} card={card} info={info} />
-          {removable && (
-            <Button
-              variant="ghost"
-              className="text-danger!"
-              hint="Leaves them out of the new chat, with their greeting."
-              onClick={onRemove}
-            >
-              Remove from chat
-            </Button>
-          )}
-        </div>
-      </Popover>
+            Remove from chat
+          </MenuItem>
+        )}
+      </Menu>
     </li>
   )
 }

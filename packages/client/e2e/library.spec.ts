@@ -154,6 +154,8 @@ test("import files, read their reports as text, export them, and update one from
   await expect(page.getByRole("list", { name: "Presets" })).toContainText("narrator")
 
   await page.getByRole("button", { name: "More actions for narrator" }).click()
+  await page.getByRole("menuitem", { name: "Export…", exact: true }).hover()
+  await expect(page.getByRole("menuitem", { name: "Preset JSON", exact: true })).toBeVisible()
   const exported = await exportedFile(
     page,
     browser,
@@ -166,6 +168,8 @@ test("import files, read their reports as text, export them, and update one from
 
   await page.getByRole("tab", { name: /^Cards/ }).click()
   await page.getByRole("button", { name: `More actions for ${NAME}` }).click()
+  await page.getByRole("menuitem", { name: "Export…", exact: true }).hover()
+  await expect(page.getByRole("menuitem", { name: "V2 JSON", exact: true })).toBeVisible()
   const cardFile = await exportedFile(
     page,
     browser,
