@@ -557,6 +557,25 @@ test.describe("synthetic library and every app surface", () => {
           await audit("panel-Cast")
           return
         }
+        if (process.env.LAYOUT_AUDIT_IMAGES_ONLY === "1") {
+          await go("shell-header", "/")
+          await showAppNavigation(page)
+          await audit("shell-navigation-header")
+          const navigation =
+            width < 1024 ? page.locator('[data-layout-overlay="Mobile navigation drawer covers the page"]') : page
+          await navigation
+            .getByRole("button", { name: /^(Blur|Hide|Show) all images$/ })
+            .filter({ visible: true })
+            .first()
+            .click({ button: "right" })
+          await audit("image-concealment-menu")
+          await page.keyboard.press("Escape")
+          await hideAppNavigation(page)
+          await go("chat-before-display", `/chats/${chatId}`)
+          await openPanel(page, "Display")
+          await audit("panel-Display")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_HEADER_ONLY === "1") {
           await go("pending-chat-header", `/cards/${cardId}/chat`)
           await go("saved-chat-header", `/chats/${chatId}`)

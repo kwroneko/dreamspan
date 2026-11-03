@@ -244,10 +244,14 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("img", { name: /full portrait$/ })).toBeVisible()
       await shoot("portrait")
       await closePortrait(page)
-      // A phone's chat header replaces the app's bar: its ← opens the menu, which has the image settings.
+      // A phone's chat header replaces the app's bar: its ← opens the menu, which has the image toggle.
       if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
-      await page.getByRole("button", { name: "Image settings", exact: true }).first().click()
-      await shoot("image-settings")
+      await page
+        .getByRole("button", { name: /^(Blur|Hide|Show) all images$/ })
+        .filter({ visible: true })
+        .first()
+        .click({ button: "right" })
+      await shoot("image-concealment")
       await page.keyboard.press("Escape")
       await shoot("left-chats")
       await page
