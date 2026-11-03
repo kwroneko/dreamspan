@@ -44,22 +44,31 @@ export function RoundControls({ view, session, report }: ComposerControlContext)
     <div
       role="group"
       aria-label="This round"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-dashed border-border px-3 py-1.5 text-sm"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-dashed border-border px-3 py-2 text-sm"
     >
       <Badge tone={held ? "warning" : "neutral"}>{held ? "round stopped" : "round"}</Badge>
       <span className="min-w-[10rem] flex-1 text-muted [overflow-wrap:anywhere]">
         {held ? `Still to reply: ${names}` : `Then ${names}, in turn`}
       </span>
       <span className="ml-auto flex flex-wrap items-center gap-1">
-        {held && (
-          <Tooltip
-            label={`${names} reply in turn now, after the last message as it is (edited or not). Sending a message instead starts a new round.`}
+        <Tooltip
+          label={
+            !held
+              ? "This round is already running."
+              : busy
+                ? "Wait for the round to update."
+                : `${names} reply in turn now, after the last message as it is.`
+          }
+        >
+          <Button
+            variant={held ? "primary" : "ghost"}
+            disabled={busy || !held}
+            focusableWhenDisabled
+            onClick={() => void run("continue")}
           >
-            <Button variant="primary" disabled={busy} onClick={() => void run("continue")}>
-              Continue round
-            </Button>
-          </Tooltip>
-        )}
+            Continue round
+          </Button>
+        </Tooltip>
         {end}
       </span>
     </div>

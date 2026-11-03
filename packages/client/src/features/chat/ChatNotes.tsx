@@ -208,6 +208,7 @@ export function NotesTab({
     const on = await session.changeCast({ _tag: "Note", entityId: made.value.entityId, active: true })
     setError(on.ok ? null : on.error)
     blocks.setOpen(made.value.id, true)
+    if (!shared) settings.setOpen(made.value.id, true)
     setAdded(made.value.id)
     refresh()
   }

@@ -170,7 +170,7 @@ for (const width of [1440, 390])
 // button shows only while it has a selection and focus, since a box left keeps its selection
 // unseen. A box of patterns (a regex script's lines) has none (owner, 2026-11-01).
 for (const width of [1440, 390])
-  test(`a text box's bar shows only while it's in use, and only under prose ${width}`, async ({ page }) => {
+  test(`a text box's bar keeps its controls, and appears only under prose ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/settings/regex`)
@@ -187,8 +187,8 @@ for (const width of [1440, 390])
     const bar = page.locator("[data-field-frame]").filter({ has: box })
     const toolbar = bar.getByRole("toolbar", { name: "Text actions" })
     const sendSelection = bar.getByRole("button", { name: "Send selection to snippet" })
-    // Not in use, they aren't there, but the strip under the text keeps its room.
-    await expect(toolbar).toHaveCount(0)
+    // Controls keep their places while the frame hides its idle strip by opacity.
+    await expect(toolbar).toHaveCount(1)
     const size = async () => {
       const { width, height } = (await bar.boundingBox())!
       return { width, height }
@@ -209,7 +209,7 @@ for (const width of [1440, 390])
     for (let i = 0; i < 4; i++) await box.press("Shift+ArrowLeft")
     await expect(sendSelection).toBeVisible()
     await box.blur()
-    await expect(toolbar).toHaveCount(0)
+    await expect(toolbar).toHaveCount(1)
     await box.focus()
     await expect(sendSelection).toBeVisible()
     await box.press("ArrowRight")

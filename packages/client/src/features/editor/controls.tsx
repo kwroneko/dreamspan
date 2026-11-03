@@ -60,26 +60,16 @@ const loaded = <A,>(result: CallResult<A>): Loaded<A> =>
 /**
  * A text field's edit history control (`ui/EditHistory`, owner 2026-11-01): every state it had,
  * from any device, past its revisions; picking one puts it in the box as the newest state.
- * Shown once the field was typed into. The box's own Ctrl+Z is the everyday undo.
+ * Disabled until the field has history. The box's own Ctrl+Z is the everyday undo.
  */
-function FieldEditHistory({
-  store,
-  field,
-  label,
-  reserve = false
-}: {
-  store: EditorStore
-  field: string
-  label: string
-  /** In a box's strip: its room is kept before there's any history, so what's beside it never moves. */
-  reserve?: boolean
-}) {
+function FieldEditHistory({ store, field, label }: { store: EditorStore; field: string; label: string }) {
   const has = useHasHistory(store, field)
   const load = useCallback(async (before?: number) => loaded(await store.history(field, 50, before)), [store, field])
   const read = useCallback(async (seq: number) => loaded(await store.stateText(field, seq)), [store, field])
   const restore = useCallback(async (seq: number) => loaded(await store.restore(field, seq)), [store, field])
-  if (!has) return reserve ? <span aria-hidden="true" className={`shrink-0 ${chromeButton}`} /> : null
-  return <EditHistory label={label} load={load} read={read} restore={restore} className={chromeButton} />
+  return (
+    <EditHistory label={label} load={load} read={read} restore={restore} disabled={!has} className={chromeButton} />
+  )
 }
 
 /**
@@ -194,7 +184,7 @@ export function TextField({
   const status = <FieldStatus store={store} field={field} aside={aside} />
   const tools = (
     <>
-      <FieldEditHistory store={store} field={field} label={label} reserve />
+      <FieldEditHistory store={store} field={field} label={label} />
       {/* Open large (owner, 2026-11-02): every multi-line prose field. The code editor's box
           (card, preset and note text) has its own, in `ui/CodeEditorView`. */}
       {rows !== undefined && !card && !mono && !readOnly && (
@@ -313,7 +303,7 @@ function LargeField({
           fullHeight
           expand={false}
           autoFocus
-          tools={<FieldEditHistory store={store} field={field} label={label} reserve />}
+          tools={<FieldEditHistory store={store} field={field} label={label} />}
           status={<FieldStatus store={store} field={field} />}
           onChange={(next) => store.setText(path, next)}
           onBlur={() => void store.save(field)}

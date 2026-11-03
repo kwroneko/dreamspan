@@ -4,17 +4,13 @@
 // prefix and suffix are; a pair is a regular expression only when "Treat as a regex" is on
 // (owner, 2026-11-02). The whole setting is one field of the preset; absent, the defaults show
 // and the first change writes them out.
-import {
-  DEFAULT_REPLY_SECTIONS,
-  DEFAULT_SECTION_PAIRS,
-  type ReplySectionSettings,
-  type SectionPair
-} from "@rp/shared/replySections.ts"
-import { Button } from "../../ui/Button.tsx"
+import { DEFAULT_REPLY_SECTIONS, type ReplySectionSettings, type SectionPair } from "@rp/shared/replySections.ts"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
-import { useState } from "react"
-import { Field, Input, Textarea } from "../../ui/Field.tsx"
-import { Card, CardHeader } from "../../ui/Surface.tsx"
+import { useEffect, useRef, useState } from "react"
+import { Field, Input } from "../../ui/Field.tsx"
+import { Card } from "../../ui/Surface.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
+import { revealAdded } from "../../ui/reveal.ts"
 import { type EditorStore, useValue } from "./store.ts"
 
 const PATH = ["reply_sections"]
@@ -48,7 +44,10 @@ function PairRow({
   const regex = pair.regex === true
   return (
     <li className="flex flex-col gap-2 rounded-md border border-border p-3" data-section-pair={index}>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="flex justify-end">
+        <IconButton icon="close" label="Remove this pair" hint="Remove this pair" onClick={onRemove} />
+      </div>
+      <div className="grid w-full max-w-controls grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-2">
         <Field
           label="Opening tag"
           about={
@@ -56,8 +55,7 @@ function PairRow({
           }
           error={tagError(pair.open, regex)}
         >
-          <Textarea
-            rows={2}
+          <Input
             value={pair.open}
             spellCheck={false}
             className="font-mono"
@@ -69,8 +67,7 @@ function PairRow({
           about={regex ? "Where it ends: a regular expression." : "Where it ends, exactly as written."}
           error={tagError(pair.close, regex)}
         >
-          <Textarea
-            rows={2}
+          <Input
             value={pair.close}
             spellCheck={false}
             className="font-mono"
@@ -101,9 +98,6 @@ function PairRow({
             Treat as a regex
           </Checkbox>
         </div>
-        <Button variant="ghost" hint="These tags no longer mark thinking." onClick={onRemove}>
-          Remove pair
-        </Button>
       </div>
     </li>
   )
@@ -114,75 +108,78 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
   const settings = stored ?? DEFAULT_REPLY_SECTIONS
   // What's typed in the number field while it isn't a valid count yet (empty, say).
   const [typed, setTyped] = useState<string | null>(null)
-  // The default pairs this preset doesn't have, as literal tags.
-  const missingDefaults = DEFAULT_SECTION_PAIRS.filter(
-    (initial) =>
-      !settings.pairs.some((pair) => pair.regex !== true && pair.open === initial.open && pair.close === initial.close)
-  )
+  const list = useRef<HTMLUListElement>(null)
+  const added = useRef<number | null>(null)
+  useEffect(() => {
+    const index = added.current
+    added.current = null
+    if (index === null) return
+    const box = list.current?.children[index]
+    if (box instanceof HTMLElement) revealAdded(box)
+  }, [settings.pairs])
   const change = (next: Partial<ReplySectionSettings>) => store.setValue(PATH, { ...settings, ...next })
   const setPair = (index: number, pair: SectionPair) =>
     change({ pairs: settings.pairs.map((other, i) => (i === index ? pair : other)) })
+  const addPairs = (pairs: ReadonlyArray<SectionPair>) => {
+    added.current = settings.pairs.length
+    change({ pairs: [...settings.pairs, ...pairs] })
+  }
   return (
     <Card>
-      <CardHeader title="Thinking at the start of a reply" />
-      <div className="flex flex-col gap-4" data-preset-section="reply-sections">
-        <Switch
-          checked={settings.enabled}
-          about="Keep tagged thinking separate from the reply. Only tags at the start count; tags later in the reply stay as written. Several thinking sections at the start all move. Off keeps thinking in the reply text."
-          onCheckedChange={(enabled) => change({ enabled })}
-        >
-          Move tagged thinking into its own panel
-        </Switch>
-        <ul className="flex flex-col gap-2">
-          {settings.pairs.map((pair, index) => (
-            <PairRow
-              key={index}
-              pair={pair}
-              index={index}
-              onChange={(next) => setPair(index, next)}
-              onRemove={() => change({ pairs: settings.pairs.filter((_, i) => i !== index) })}
+      <div data-preset-section="reply-sections">
+        <div className="mb-4 flex items-start gap-2">
+          <h2 className="min-w-0 text-base font-semibold">Thinking at the start of a reply</h2>
+          <div className="flex shrink-0 gap-2">
+            <IconButton
+              icon="plus"
+              label="Add another tag pair"
+              hint="Add another tag pair"
+              onClick={() => addPairs([{ open: "", close: "" }])}
             />
-          ))}
-        </ul>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            hint="Another opening and closing tag that mark thinking."
-            onClick={() => change({ pairs: [...settings.pairs, { open: "", close: "" }] })}
-          >
-            Add a pair
-          </Button>
-          {missingDefaults.length > 0 && (
-            <Button
-              variant="ghost"
-              hint={`Adds back ${missingDefaults.map((pair) => `${pair.open} … ${pair.close}`).join(" and ")}, matched as written.`}
-              onClick={() => change({ pairs: [...settings.pairs, ...missingDefaults] })}
-            >
-              {missingDefaults.length > 1 ? "Add the default pairs" : "Add the default pair"}
-            </Button>
-          )}
+          </div>
         </div>
-        <Field
-          label="Send thinking back for the last replies"
-          about="How many of the most recent replies with thinking send it back to the model, in its tags. 0: never; the model sees only the reply text."
-        >
-          <Input
-            type="number"
-            min={0}
-            max={1000}
-            step={1}
-            inputMode="numeric"
-            className="max-w-28"
-            value={typed ?? String(settings.send_back)}
-            onChange={(event) => {
-              const text = event.currentTarget.value
-              setTyped(text)
-              const value = Number(text)
-              if (text.trim() !== "" && Number.isInteger(value) && value >= 0 && value <= 1000)
-                change({ send_back: value })
-            }}
-            onBlur={() => setTyped(null)}
-          />
-        </Field>
+        <div className="flex flex-col gap-4">
+          <ul ref={list} className="flex flex-col gap-2">
+            {settings.pairs.map((pair, index) => (
+              <PairRow
+                key={index}
+                pair={pair}
+                index={index}
+                onChange={(next) => setPair(index, next)}
+                onRemove={() => change({ pairs: settings.pairs.filter((_, i) => i !== index) })}
+              />
+            ))}
+          </ul>
+          <Switch
+            checked={settings.enabled}
+            about="Keep tagged thinking separate from the reply. Only tags at the start count; tags later in the reply stay as written. Several thinking sections at the start all move. Off keeps thinking in the reply text."
+            onCheckedChange={(enabled) => change({ enabled })}
+          >
+            Move tagged thinking into its own panel
+          </Switch>
+          <Field
+            label="Send thinking back for the last replies"
+            about="How many of the most recent replies with thinking send it back to the model, in its tags. 0: never; the model sees only the reply text."
+          >
+            <Input
+              type="number"
+              min={0}
+              max={1000}
+              step={1}
+              inputMode="numeric"
+              className="max-w-28"
+              value={typed ?? String(settings.send_back)}
+              onChange={(event) => {
+                const text = event.currentTarget.value
+                setTyped(text)
+                const value = Number(text)
+                if (text.trim() !== "" && Number.isInteger(value) && value >= 0 && value <= 1000)
+                  change({ send_back: value })
+              }}
+              onBlur={() => setTyped(null)}
+            />
+          </Field>
+        </div>
       </div>
     </Card>
   )

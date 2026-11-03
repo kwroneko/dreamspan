@@ -119,13 +119,15 @@ export function ChoiceChip<Value>({
   choices,
   value,
   onChoose,
-  footer
+  footer,
+  disabled = false
 }: {
   /** The trigger's accessible name. */
   label: string
   title: string
   chip: ReactNode
   hint?: ReactNode
+  disabled?: boolean
   choices: ReadonlyArray<StripChoice<Value>>
   value: Value
   onChoose: (value: Value) => void
@@ -148,6 +150,7 @@ export function ChoiceChip<Value>({
       }}
       trigger={chip}
       triggerLabel={label}
+      triggerDisabled={disabled}
       hint={hint}
       title={title}
       triggerClassName={chipClass()}

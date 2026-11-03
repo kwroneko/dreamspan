@@ -1,3 +1,4 @@
+import { ChatBrowseBar, sidebarChatBrowse } from "./ChatBrowseBar.tsx"
 import { registerCharacterPanels } from "./panels.tsx"
 import { routes } from "../../routes.tsx"
 import { CardPage } from "./CardPage.tsx"
@@ -23,6 +24,7 @@ export const register = () => {
     component: CardChatsLink
   })
   castMemberNavigation.register({ id: "characters.chats-link", order: 10, component: CastChatsLink })
+  sidebarChatBrowse.register({ id: "chats.browse", order: 10, component: ChatBrowseBar })
   // The Persona switch in a card's header and on its page (personaFolder.tsx).
   cardContributions.register({
     id: "characters.persona-folder",

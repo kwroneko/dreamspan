@@ -26,10 +26,9 @@ import { Icon } from "../../ui/Icon.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { type OpenBlocks, useOpenBlocks } from "../../ui/openBlocks.ts"
-import { Popover } from "../../ui/Popover.tsx"
 import { revealAdded } from "../../ui/reveal.ts"
 import { Badge } from "../../ui/Surface.tsx"
-import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useTruncated } from "../../ui/useTruncated.ts"
 import { WindowClose } from "../../ui/WindowClose.tsx"
 import { browserEnv } from "./backup.ts"
@@ -61,34 +60,6 @@ export interface NoteListEntry {
   readonly onDeleted?: (item: BinItem) => void
   /** Its editor starts again from the saved note when this changes (a relink). */
   readonly generation?: number
-}
-
-const BRANCH_EXPLANATION =
-  "A chat's note is tied to its branch: a change applies from the branch's latest message on, and earlier messages keep what they were sent with. Each branch keeps its own version, and its own unsaved changes. History says where each change took effect."
-
-/** Where a chat's own note's change applies, said only when it matters (owner, 2026-11-01). */
-function BranchLine({ store }: { store: EditorStore }) {
-  const [open, setOpen] = useState(false)
-  const at = useEditorState(store).snapshot?.chatNote
-  if (!at?.otherBranches) return null
-  const text = "Other branches have their own version"
-  return (
-    <p className="flex items-center gap-1 px-2 pb-1 pl-10 text-xs text-muted">
-      <span>{text}</span>
-      <Popover
-        open={open}
-        onOpenChange={setOpen}
-        trigger={<Icon name="info" size={14} />}
-        triggerLabel="How a chat's note follows its branch"
-        hint="How a chat's note follows its branch"
-        title="Tied to its branch"
-        triggerClassName={`${iconButtonClass()} size-6!`}
-        side="bottom"
-      >
-        <p className="text-sm">{BRANCH_EXPLANATION}</p>
-      </Popover>
-    </p>
-  )
 }
 
 /** Under a note's name: where it goes and when, and its role ("End of tail · always · as system"). */
@@ -295,7 +266,7 @@ export function NoteBlock({
   const status = (
     <div
       data-note-status
-      className={`flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted ${large ? "pl-1" : "pl-[22px]"}`}
+      className={`flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted ${large ? "pl-1" : "pl-[22px]"} ${entry.control ? "ml-11" : ""}`}
     >
       <Tooltip label={<span className="[overflow-wrap:anywhere]">{summary}</span>} enabled={summaryTruncated}>
         <span
@@ -427,7 +398,6 @@ export function NoteBlock({
           </div>
           {status}
         </BlockHeader>
-        <BranchLine store={store} />
         {entry.detail}
         {open && (
           <>
@@ -491,7 +461,7 @@ export function NoteBlock({
 export function useNoteBlocks(count: number) {
   const userId = useSession().user.id
   const blocks = useOpenBlocks(`rp.noteBlocks.${userId}`, count)
-  // Settings stay folded until a note's are opened.
+  // Existing notes default to folded settings; creation explicitly opens a new note's.
   const settings = useOpenBlocks(`rp.noteSettings.${userId}`, Number.POSITIVE_INFINITY)
   return { blocks, settings }
 }

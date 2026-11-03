@@ -42,6 +42,8 @@ export interface MacroCall {
   /** The macros at the top level of a text, as ST's extractMacroInfo reports them. */
   readonly macrosIn: (text: string) => ReadonlyArray<MacroInfo>
   /** A number in [0, 1), from the expansion's random source. */
+  /** Marks a dynamic dependency even when its text was expanded earlier. */
+  readonly markVolatile: () => void
   readonly random: () => number
   /** True the first time a key is seen in this expansion (for one-shot macros). */
   readonly once: (key: string) => boolean
@@ -79,6 +81,8 @@ export interface MacroSpec {
    * again from that time, with the arguments as they are then.
    */
   readonly volatile?: boolean | "clock"
+  /** False for a frozen macro whose result is deterministic for a fixed template/chat. */
+  readonly changesPerReply?: boolean
   /**
    * For `volatile: true`: whether the macro could have produced `value` with these
    * arguments. A frozen value it couldn't have (arguments changed, or a stored value that

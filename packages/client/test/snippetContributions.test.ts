@@ -48,3 +48,12 @@ it("registers the workspace, panel and transfers as individually replaceable con
   undo()
   expect(textActions.get("snippets.send")).toBe(original)
 })
+
+it("keeps an empty whole-text action while excluding inapplicable sources and empty selections", () => {
+  const entries = textActions.snapshot().entries
+  expect(editorTextActions(entries, "", "", undefined, true).map(({ action }) => action.id)).toEqual([
+    "snippets.send-text"
+  ])
+  expect(editorTextActions(entries, "", "", "snippet", true)).toEqual([])
+  expect(textActions.get("snippets.send-text")!.unavailable!({ text: "" })).toBe("No text to send yet.")
+})

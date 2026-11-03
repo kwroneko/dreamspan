@@ -1,42 +1,75 @@
-// Cache breakpoints, placed structurally, as deltas from reference-harness's scheme (ARCHITECTURE §15).
+// Structural boundaries; provider matching rules are capabilities, not wire-API guesses.
+import { createHash } from "node:crypto"
+import type { CacheLayout } from "@rp/shared/providers.ts"
 import type { Stability } from "./st.ts"
-import type { AssembledRequest } from "./types.ts"
+import type { AssembledRequest, RequestMessage, Piece } from "./types.ts"
 
 type Breakpoint = AssembledRequest["breakpoints"][number]
 
-/**
- * The boundaries worth a marker, most important first, since a provider with fewer free
- * markers keeps the first ones:
- * - (c) `history`: the last message before the first volatile one, the end of what the next
- *   request reproduces while the history's start holds;
- * - (a) `prefix`: the end of the leading run of prefix messages, before any pinned lore, the
- *   summary layer or the history: what survives a move of the history's start;
- * - (b) `summary`: the end of the LCM summary layer;
- * - `pinned`: after the last pinned lore, before the history.
- * After a move of the history's start (`moved`), (a) comes first: the history after it is new
- * anyway. While the start holds, (c) comes first and (a) before (b), so that with two markers
- * the prefix still survives the next move.
- */
+/** Hash complete prefixes, including framing and image identity; never retain prompt text. */
+export const cachePrefixDigests = (messages: ReadonlyArray<RequestMessage>): ReadonlyArray<string> => {
+  const hash = createHash("sha256")
+  return messages.map((m) => {
+    hash.update(JSON.stringify([m.role, m.name ?? null, m.content, m.images ?? []]) + "\n")
+    return hash.copy().digest("hex")
+  })
+}
+
+/** Summary wrappers retain provenance in nested pieces after composition. */
+export const summaryLevelOf = (pieces: ReadonlyArray<Piece>, indices: ReadonlyArray<number>): number =>
+  Math.max(
+    0,
+    ...indices.map((i) => {
+      const piece = pieces[i]!
+      return piece.source.kind === "summary" ? piece.source.level : summaryLevelOf(pieces, piece.parts ?? [])
+    })
+  )
+
+/** Priority order, before the provider subtracts SDK/tool markers from its actual budget. */
 export const placeBreakpoints = (
-  messages: ReadonlyArray<{ readonly kind: Stability; readonly summary?: boolean }>,
-  moved = false
+  messages: ReadonlyArray<{
+    readonly kind: Stability
+    readonly summary?: boolean
+    readonly summaryLevel?: number
+    readonly role?: string
+  }>,
+  moved = false,
+  options: CacheLayout & { readonly previousHistory?: number; readonly inputOnly?: boolean } = {}
 ): AssembledRequest["breakpoints"] => {
   const firstVolatile = messages.findIndex((m) => m.kind === "volatile")
   const stableEnd = (firstVolatile === -1 ? messages.length : firstVolatile) - 1
-  // The leading run of prefix messages: it ends at the first pinned lore, summary or history.
   const firstNotPrefix = messages.findIndex((m) => m.kind !== "prefix")
   const prefixEnd = (firstNotPrefix === -1 ? messages.length : firstNotPrefix) - 1
-  const firstHistory = messages.findIndex((m) => m.kind === "history")
-  const pinnedEnd = messages.findLastIndex(
-    (m, i) => m.kind === "pinned" && i <= stableEnd && (firstHistory === -1 || i < firstHistory)
-  )
-  const summaryEnd = messages.findLastIndex((m) => m.kind === "summary" || m.summary)
-  const history: Breakpoint | null =
-    stableEnd >= 0 && messages[stableEnd]!.kind === "history" ? { message: stableEnd, reason: "history" } : null
-  const prefix: Breakpoint | null = prefixEnd >= 0 ? { message: prefixEnd, reason: "prefix" } : null
-  const summary: Breakpoint | null = summaryEnd >= 0 ? { message: summaryEnd, reason: "summary" } : null
-  const pinned: Breakpoint | null = pinnedEnd >= 0 ? { message: pinnedEnd, reason: "pinned" } : null
-  const ordered = moved ? [prefix, history, summary, pinned] : [history, prefix, summary, pinned]
+  const summaryEnd = messages.findLastIndex((m, i) => i <= stableEnd && (m.kind === "summary" || m.summary))
+  // Only the leading older tier qualifies: a later high-level summary cannot skip a leaf.
+  let olderEnd = -1
+  let olderLevel = 0
+  for (let i = 0; i <= summaryEnd; i++) {
+    const level = messages[i]!.summaryLevel ?? 0
+    if (level === 0) continue
+    if (olderLevel === 0) olderLevel = level
+    if (level <= 1 || level < olderLevel) break
+    olderEnd = i
+  }
+  const at = (message: number, reason: Breakpoint["reason"]): Breakpoint | null =>
+    message >= 0 ? { message, reason } : null
+  let historyEnd = stableEnd
+  while (options.inputOnly && messages[historyEnd]?.kind === "history" && messages[historyEnd]?.role === "assistant")
+    historyEnd--
+  const history = messages[historyEnd]?.kind === "history" ? at(historyEnd, "history") : null
+  const prefix = at(prefixEnd, "prefix")
+  const summary = at(summaryEnd, "summary")
+  const split = options.summarySplit ? at(olderEnd, "summary") : null
+  const previous = options.previousHistory ?? -1
+  const repeat =
+    options.lookback === false && previous <= stableEnd && messages[previous]?.kind === "history"
+      ? at(previous, "history")
+      : null
+  const ordered = moved
+    ? [prefix, split, history, repeat, summary]
+    : options.lookback === false
+      ? [history, repeat, split, prefix, summary]
+      : [history, prefix, split, summary]
   const breakpoints: Array<Breakpoint> = []
   for (const breakpoint of ordered)
     if (breakpoint && !breakpoints.some((b) => b.message === breakpoint.message)) breakpoints.push(breakpoint)

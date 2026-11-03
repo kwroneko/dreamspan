@@ -56,6 +56,7 @@ export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
           ...stored,
           ...prefs,
           messageToolbar: mergeChoices(stored.messageToolbar, prefs.messageToolbar),
+          dismissedInfo: mergeChoices(stored.dismissedInfo, prefs.dismissedInfo),
           messageDetails: mergeChoices(stored.messageDetails, prefs.messageDetails)
         }
         yield* sql`INSERT INTO user_prefs (user_id, key, value_json) VALUES (${userId}, ${KEY}, ${JSON.stringify(merged)})

@@ -181,7 +181,7 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
     return {
       context: { messages: withPrefill(request).map((m) => ({ role: "user", content: m.content, timestamp: 0 })) },
       payload: chatCompletionsFields(request, model.kind, model.key),
-      breakpoints: []
+      breakpoints: model.cacheBreakpoints === "explicit" ? request.breakpoints.map((b) => b.message) : []
     }
   }
   const messages = withPrefill(request)
@@ -192,8 +192,11 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
   // Lore pinned above the history changes when its start moves: Anthropic's system prompt ends
   // with the prefix before it, so the marker pi-ai puts there keeps the prefix cached (DESIGN §1.3).
   const pinnedAt =
-    model.api === "anthropic-messages" && request.breakpoints.some((b) => b.reason === "pinned")
-      ? (request.breakpoints.find((b) => b.reason === "prefix")?.message ?? -1) + 1
+    model.api === "anthropic-messages"
+      ? (request.pinnedStart ??
+        (request.breakpoints.some((b) => b.reason === "pinned")
+          ? (request.breakpoints.find((b) => b.reason === "prefix")?.message ?? -1) + 1
+          : Infinity))
       : Infinity
   if (systemParameter) {
     while (
@@ -261,6 +264,7 @@ export const providerRequest = (request: AssembledRequest, model: ModelInput): P
   return {
     ...wire,
     ...(settings.cacheRetention ? { cacheRetention: settings.cacheRetention } : {}),
+    ...(settings.cacheRetention === "none" ? { breakpoints: [] } : {}),
     ...(["minimal", "low", "medium", "high", "xhigh", "max"].includes(effort ?? "")
       ? { reasoning: effort as import("@earendil-works/pi-ai").ThinkingLevel }
       : {}),

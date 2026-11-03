@@ -7,7 +7,7 @@ import { positionOf } from "./position.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { Button } from "../../ui/Button.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
@@ -16,7 +16,7 @@ import { Segmented } from "../../ui/Segmented.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { ValueDiff } from "../editor/diff.tsx"
 import { formatWhen } from "./chatTitle.ts"
 import { liveText } from "./session.ts"
@@ -384,9 +384,9 @@ export function VersionPicker({
   const pair = first && second ? ([first, second] as const) : null
   const count = entry.versionCount
   const hiddenCount = versions?.filter((v) => v.hidden).length ?? 0
-  const counter = position >= 0 ? `${position + 1}/${count}` : `${count}`
+  const counter = count === 1 ? "1/1" : position >= 0 ? `${position + 1}/${count}` : `${count}`
   const label =
-    (position >= 0 ? `Version ${position + 1} of ${count}` : `${count} versions`) +
+    (count === 1 ? "Version 1 of 1" : position >= 0 ? `Version ${position + 1} of ${count}` : `${count} versions`) +
     (hiddenCount > 0 ? `, ${hiddenCount} hidden` : "") +
     ": choose a version"
   const title = `Versions of message #${positionOf(entry) + 1}`
@@ -412,14 +412,23 @@ export function VersionPicker({
     />
   )
   const counterClass =
-    "h-8 min-w-9 rounded-md px-1 text-xs text-muted tabular-nums outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-hover"
+    "h-8! min-w-9 px-1! text-xs! rounded-md px-1 text-xs text-muted tabular-nums outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-hover"
   let picker: ReactNode
   if (narrow)
     picker = (
       <>
-        <button type="button" aria-label={label} className={counterClass} onClick={() => openChange(true)}>
-          {counter}
-        </button>
+        <Tooltip label={count < 2 ? "No other versions yet." : "Choose a version"}>
+          <Button
+            variant="ghost"
+            disabled={count < 2}
+            focusableWhenDisabled
+            aria-label={label}
+            className={counterClass}
+            onClick={() => openChange(true)}
+          >
+            {counter}
+          </Button>
+        </Tooltip>
         <Sheet open={open} onOpenChange={openChange} title={title}>
           <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 py-3">{body}</div>
         </Sheet>
@@ -432,8 +441,9 @@ export function VersionPicker({
         onOpenChange={openChange}
         trigger={counter}
         triggerLabel={label}
-        triggerClassName={counterClass}
-        hint="Choose a version"
+        triggerClassName={`${buttonClass("ghost")} ${counterClass}`}
+        triggerDisabled={count < 2}
+        hint={count < 2 ? "No other versions yet." : "Choose a version"}
         title={title}
         side="top"
         align="end"

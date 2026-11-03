@@ -84,6 +84,7 @@ for (const width of [1440, 390])
     await expect(revert).toBeDisabled()
     await expect(cluster).not.toContainText(/revision/i)
     expect(await explanation(save)).toMatch(/^Nothing to save/)
+    expect(await explanation(revert)).toMatch(/No edits to revert/)
     await measure("clean")
 
     // Unsaved: Save is actionable, and so is Revert.

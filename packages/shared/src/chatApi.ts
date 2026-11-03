@@ -127,6 +127,7 @@ const displayFields = {
    * Which details show on a message (its time, model, number, generation time, tokens), by
    * the detail's id (messageDetails.tsx): false hides one. An id no detail has is kept and ignored.
    */
+  dismissedInfo: choicesById,
   messageDetails: choicesById
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
@@ -151,6 +152,7 @@ export const DisplayPrefsChange = Schema.Struct({
   /** Merged by id with what's stored, so a write names only the choices it changes. */
   messageToolbar: Schema.optionalKey(displayFields.messageToolbar),
   /** Merged by id with what's stored, as the message toolbar's are. */
+  dismissedInfo: Schema.optionalKey(displayFields.dismissedInfo),
   messageDetails: Schema.optionalKey(displayFields.messageDetails)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
@@ -172,6 +174,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   modelSort: "name",
   singlePortrait: false,
   messageToolbar: {},
+  dismissedInfo: {},
   messageDetails: {}
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type

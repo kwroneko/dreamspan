@@ -206,23 +206,28 @@ export function QueuedMessages({
             {/* Its actions at the end of one row, never stretched across a wide column. */}
             {queued && (
               <div className="flex flex-wrap items-center justify-end gap-1">
-                {!editor && (
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      const opened = session.openEditor(
-                        { _tag: "Queue", chatId: session.id, queuedId: queued.id, rowVersion: queued.rowVersion },
-                        queued.kind === "message" ? queued.content : (queued.direction ?? "")
-                      )
-                      void opened.open().then(() => {
-                        if (session.queueEditors().includes(opened) && !opened.snapshot().loading)
-                          opened.setText(opened.snapshot().text)
-                      })
-                    }}
-                  >
-                    Edit
-                  </Button>
-                )}
+                <Button
+                  variant="ghost"
+                  disabled={editor !== undefined}
+                  focusableWhenDisabled
+                  hint={
+                    editor
+                      ? "This queued message is already open for editing."
+                      : "Edits this queued message before it is sent."
+                  }
+                  onClick={() => {
+                    const opened = session.openEditor(
+                      { _tag: "Queue", chatId: session.id, queuedId: queued.id, rowVersion: queued.rowVersion },
+                      queued.kind === "message" ? queued.content : (queued.direction ?? "")
+                    )
+                    void opened.open().then(() => {
+                      if (session.queueEditors().includes(opened) && !opened.snapshot().loading)
+                        opened.setText(opened.snapshot().text)
+                    })
+                  }}
+                >
+                  Edit
+                </Button>
                 <Withdraw queued={queued} session={session} onRecovered={onRecovered} />
               </div>
             )}

@@ -276,7 +276,7 @@ function BranchList({
   )
 }
 
-/** The control: the trigger once the chat has two branches, and the list it opens. */
+/** The branch trigger stays disabled before a second branch exists; the menu can still open its list. */
 export function BranchControl(props: BranchControlProps) {
   const { session, view } = props
   const { forks, shown, reload } = useChatForks(session, view)
@@ -300,20 +300,28 @@ export function BranchControl(props: BranchControlProps) {
   const place = `${shown && forks ? `${ordered.indexOf(shown) + 1} of ${forks.length}` : ""}${off ? ", not the one the chat opens on" : ""}`
   const title = "Branches of this chat"
   const body = <BranchList {...props} forks={forks} shown={shown} onDone={() => setOpen(false)} />
-  if (narrow || !many)
+  if (narrow)
     return (
       <>
-        {many && (
-          <button
-            type="button"
-            aria-label={`Branch: ${label}, ${place}: switch branch`}
-            onClick={() => setOpen(true)}
-            className="inline-flex h-8 max-w-32 min-w-0 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <Icon name="branch" size={16} />
-            <span className="truncate">{label}</span>
-          </button>
-        )}
+        <Button
+          variant="ghost"
+          disabled={!many}
+          focusableWhenDisabled
+          hint={
+            many
+              ? "Switches between this chat’s branches."
+              : forks === null
+                ? "Loading branches…"
+                : "No other branches yet."
+          }
+          type="button"
+          aria-label={`Branch: ${label}, ${place}: switch branch`}
+          onClick={() => setOpen(true)}
+          className="inline-flex h-8 max-w-32 min-w-0 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          <Icon name="branch" size={16} />
+          <span className="truncate">{label}</span>
+        </Button>
         {narrow ? (
           <Sheet open={open} onOpenChange={setOpen} title={title}>
             <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 py-3">{body}</div>
@@ -340,7 +348,14 @@ export function BranchControl(props: BranchControlProps) {
         </>
       }
       triggerLabel={`Branch: ${label}, ${place}: switch branch`}
-      hint="Switch to another of this chat's branches, or rename or delete them."
+      triggerDisabled={!many}
+      hint={
+        many
+          ? "Switch to another of this chat’s branches, or rename or delete them."
+          : forks === null
+            ? "Loading branches…"
+            : "No other branches yet."
+      }
       hintSide="bottom"
       triggerClassName="inline-flex h-8 max-w-72 min-w-0 shrink! items-center gap-1.5 rounded-md border border-border px-2 text-sm text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
       title={title}

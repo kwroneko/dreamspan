@@ -181,7 +181,7 @@ for (const width of [1440, 390])
       if (await more.isVisible()) {
         await more.click()
         await page.getByRole("menuitem", { name: "Applied edits" }).click()
-        await expect(page.getByRole("tab", { name: "Search and replace", exact: true })).toHaveAttribute(
+        await expect(page.getByRole("tab", { name: "History edits", exact: true })).toHaveAttribute(
           "aria-selected",
           "true"
         )

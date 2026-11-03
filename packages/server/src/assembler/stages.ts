@@ -29,7 +29,7 @@ import { anyOf, noteCondition } from "@rp/shared/docs/note.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
-import { placeBreakpoints } from "./breakpoints.ts"
+import { cachePrefixDigests, placeBreakpoints, summaryLevelOf } from "./breakpoints.ts"
 import { DEFAULT_MAX_IMAGES, imagesStage, messageImagesOf } from "./images.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
@@ -1472,6 +1472,10 @@ const composeStage = sync("compose", (assembly) => {
   }
   env.setCard({
     ...macroCard(cast, assembly.notes),
+    joinedVolatile: (Object.keys(macroFields) as Array<keyof typeof macroFields>).filter((key) => {
+      const field = macroFields[key]
+      return field !== null && env.isChanging(field.piece)
+    }),
     joined: {
       description: macroFields.description?.text ?? "",
       personality: macroFields.personality?.text ?? "",
@@ -2425,6 +2429,9 @@ const requestStage = sync("request", (assembly) => {
       max_tokens: s.openai_max_tokens,
       seed: s.seed
     },
+    ...(messages.some((m) => m.kind === "pinned")
+      ? { pinnedStart: messages.findIndex((m) => m.kind === "pinned") }
+      : {}),
     useSystemPrompt: doc.use_sysprompt,
     breakpoints: assembly.breakpoints ?? [],
     names: assembly.postNames ?? { user: "", char: "", group: [] }
@@ -2461,10 +2468,44 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
   const moved =
     previous !== null &&
     (assembly.historyMove !== "unchanged" || previous.depth !== need(assembly, "historyStart").depth)
-  assembly.breakpoints = placeBreakpoints(
-    need(assembly, "messages").map((m) => ({ ...m, summary: m.pieces.some((p) => hasSummary(assembly, p)) })),
-    moved
+  const messages = need(assembly, "messages")
+  const firstHistory = messages.findIndex((m) => m.kind === "history")
+  const fromPrompt = (index: number): boolean => {
+    const piece = assembly.pieces[index]!
+    return ["preset", "card", "note"].includes(piece.source.kind) || (piece.parts?.some(fromPrompt) ?? false)
+  }
+  const changingPrefix = messages.findIndex(
+    (m, i) =>
+      (firstHistory < 0 || i < firstHistory) &&
+      m.pieces.some((p) => fromPrompt(p) && (m.kind === "volatile" || assembly.macros?.isChanging(p)))
   )
+  if (changingPrefix >= 0)
+    assembly.issues.push({
+      kind: "cache_breakpoints",
+      message: "A prefix prompt can change between replies. A change prevents cache reuse from that prompt onward."
+    })
+  const exact = assembly.model?.cacheBreakpoints === "explicit" && assembly.model.cacheLayout?.lookback === false
+  const digests = exact ? cachePrefixDigests(messages) : []
+  const previousHistory = previous?.state?.cacheHistory
+  assembly.breakpoints = placeBreakpoints(
+    messages.map((m) => ({
+      ...m,
+      summary: m.pieces.some((p) => hasSummary(assembly, p)),
+      summaryLevel: summaryLevelOf(assembly.pieces, m.pieces)
+    })),
+    moved,
+    assembly.model?.cacheBreakpoints === "explicit"
+      ? {
+          ...assembly.model.cacheLayout,
+          inputOnly: assembly.model.api === "openai-responses",
+          previousHistory: previousHistory ? digests.indexOf(previousHistory) : -1
+        }
+      : {}
+  )
+  const history = assembly.breakpoints.find((b) => b.reason === "history")
+  const start = assembly.historyStart
+  if (exact && start?.state && history)
+    assembly.historyStart = { ...start, state: { ...start.state, cacheHistory: digests[history.message]! } }
   // A provider that can't mark every boundary keeps the first ones; say which it can't keep.
   const dropped = assembly.breakpoints.slice(EXPLICIT_MARKERS)
   if (assembly.model?.cacheBreakpoints === "explicit" && dropped.length)

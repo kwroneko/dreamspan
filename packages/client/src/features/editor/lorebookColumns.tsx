@@ -10,7 +10,7 @@ import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
-import { NativeSelect } from "../../ui/Select.tsx"
+import { Select } from "../../ui/Select.tsx"
 import { useSession } from "../../session.ts"
 import { useCaller } from "./caller.ts"
 import {
@@ -26,6 +26,7 @@ import {
   type Strategy,
   strategyOf
 } from "./lorebookTable.ts"
+import { EXPLAIN } from "./lorebookExplain.ts"
 import { EditorStore, useDirty, useValue } from "./store.ts"
 
 const edited = (dirty: boolean) => (dirty ? "border-accent ring-1 ring-accent/40" : "")
@@ -82,12 +83,12 @@ function NumberCell({
 }
 
 const STRATEGIES: ReadonlyArray<{ readonly value: Strategy; readonly label: string; readonly description: string }> = [
-  { value: "constant", label: "Constant", description: "Included without a key match, while it's enabled." },
-  { value: "normal", label: "Normal", description: "Included when one of its primary keys appears in the chat." },
+  { value: "constant", label: "Constant", description: EXPLAIN.constant },
+  { value: "normal", label: "Normal", description: EXPLAIN.normal },
   {
     value: "vectorized",
     label: "Vectorized",
-    description: "Meant to match by similarity to the chat. Not yet: for now it matches its keys."
+    description: EXPLAIN.vectorized
   }
 ]
 
@@ -96,7 +97,7 @@ function StrategyCell({ store, path, entry, title }: LorebookEntryContext) {
   const vectorized = useDirty(store, valueField([...path, "vectorized"]))
   const dirty = constant || vectorized
   return (
-    <NativeSelect
+    <Select
       ariaLabel={`Strategy of ${title}`}
       className={`h-8! ${edited(dirty)}`}
       items={STRATEGIES}
@@ -114,7 +115,7 @@ function PositionCell({ store, path, entry, title }: LorebookEntryContext) {
   const role = useDirty(store, valueField([...path, "role"]))
   const dirty = position || role
   return (
-    <NativeSelect
+    <Select
       ariaLabel={`Position of ${title}`}
       className={`h-8! ${edited(dirty)}`}
       items={POSITIONS}
@@ -258,11 +259,46 @@ const MoveToBook = (props: LorebookActionProps) => <ToAnotherBook {...props} mov
 const number = (a: number, b: number) => a - b
 
 export const registerLorebookTable = () => {
-  lorebookColumns.register({ id: "strategy", order: 10, header: "Strategy", width: "7rem", cell: StrategyCell })
-  lorebookColumns.register({ id: "position", order: 20, header: "Position", width: "7.5rem", cell: PositionCell })
-  lorebookColumns.register({ id: "depth", order: 30, header: "Depth", width: "4.25rem", cell: DepthCell })
-  lorebookColumns.register({ id: "order", order: 40, header: "Order", width: "4.75rem", cell: OrderCell })
-  lorebookColumns.register({ id: "trigger", order: 50, header: "Trigger %", width: "4.75rem", cell: TriggerCell })
+  lorebookColumns.register({
+    id: "strategy",
+    order: 10,
+    header: "Strategy",
+    description: EXPLAIN.strategy,
+    width: "7rem",
+    cell: StrategyCell
+  })
+  lorebookColumns.register({
+    id: "position",
+    order: 20,
+    header: "Position",
+    description: EXPLAIN.position,
+    width: "7.5rem",
+    cell: PositionCell
+  })
+  lorebookColumns.register({
+    id: "depth",
+    order: 30,
+    header: "Depth",
+    description: EXPLAIN.depth,
+    width: "4.25rem",
+    cell: DepthCell
+  })
+  lorebookColumns.register({
+    id: "order",
+    order: 40,
+    header: "Order",
+    description: EXPLAIN.order,
+    width: "4.75rem",
+    cell: OrderCell
+  })
+  lorebookColumns.register({
+    id: "trigger",
+    order: 50,
+    header: "Trigger %",
+    description: EXPLAIN.probability,
+    width: "4.75rem",
+    cell: TriggerCell
+  })
 
   // ST's "Priority": the highest order first.
   lorebookSorts.register({

@@ -304,13 +304,13 @@ test("the speaker stays chosen through a reload and in every tab; the switcher s
   await second.close()
 })
 
-test("a one-card chat has no Next chip, and an empty Send asks its character", async ({ page }) => {
+test("a one-card chat keeps a disabled Next chip, and an empty Send asks its character", async ({ page }) => {
   const chatId = await chatWith(["Mira"])
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Ana/)
   await expect(nextReply(page)).toBeVisible()
-  await expect(nextChip(page)).toHaveCount(0)
-  await expect(nextReply(page).getByRole("button", { name: /replies now$/ })).toHaveCount(0)
+  await expect(nextChip(page)).toBeDisabled()
+  await expect(nextReply(page).getByRole("button", { name: /replies now$/ })).toBeDisabled()
   await page.getByRole("button", { name: "Mira replies", exact: true }).click()
   await expect(lastHeader(page)).toContainText("Mira")
 })

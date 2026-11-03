@@ -120,6 +120,12 @@ for (const width of [1440, 390])
       await expect(toggle).toHaveAttribute("aria-expanded", "false")
       await expect(block.locator("[data-note-summary]")).toContainText("as system")
       await expectAligned(block, "Tide")
+      // The summary line starts under the title's text, past the switch and the chevron (owner, 2026-11-03).
+      const titleLeft = await toggle
+        .getByText("Tide", { exact: true })
+        .evaluate((el) => el.getBoundingClientRect().left)
+      const summaryLeft = await block.locator("[data-note-summary]").evaluate((el) => el.getBoundingClientRect().left)
+      expect(Math.abs(summaryLeft - titleLeft)).toBeLessThanOrEqual(1)
 
       const settings = block.getByRole("button", { name: "Settings of Tide", exact: true })
       await settings.click()

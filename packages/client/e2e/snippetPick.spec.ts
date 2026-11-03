@@ -76,8 +76,15 @@ test("one click adds to the snippet used last that's still expanded, marked on i
   await block(panel, "Bravo").getByRole("button", { name: "Collapse Bravo" }).click()
   await expect(block(panel, "Alpha").locator("[data-snippet-target]")).toHaveCount(1)
   await expect(panel.locator("[data-snippet-target]")).toHaveCount(1)
-  await block(panel, "Alpha").getByRole("img", { name: "Text sent to a snippet goes here" }).hover()
-  await expect(page.getByText("Text sent to a snippet goes here.", { exact: false }).last()).toBeVisible()
+  const dot = block(panel, "Alpha").locator("[data-snippet-target]")
+  await dot.hover()
+  await expect(
+    page
+      .getByText('This snippet is currently the default destination for "Send text to snippet" actions.', {
+        exact: true
+      })
+      .last()
+  ).toBeVisible()
 
   const { mine, editor, sendText } = await editMessage(page)
   await sendText.hover()

@@ -413,13 +413,17 @@ test.describe("synthetic library and every app surface", () => {
               page,
               info,
               surface + suffix,
-              process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
-                ? { scope: "[data-history-panel]" }
-                : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
-                  ? { scope: 'section[aria-label="Who replies"]' }
-                  : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
-                    ? { scope: '[role="menu"]' }
-                    : {}
+              process.env.LAYOUT_AUDIT_SNIPPETS_ONLY === "1"
+                ? { scope: '[role="tabpanel"], [role="dialog"]' }
+                : process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
+                  ? { scope: "[data-history-panel]" }
+                  : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
+                    ? { scope: 'section[aria-label="Who replies"]' }
+                    : process.env.LAYOUT_AUDIT_LOREBOOKS_ONLY === "1"
+                      ? { scope: "[data-lorebook-audit]" }
+                      : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
+                        ? { scope: '[role="menu"]' }
+                        : {}
             )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
@@ -452,6 +456,17 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.locator("main")).toBeVisible()
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
+        }
+        if (process.env.LAYOUT_AUDIT_HELP_ONLY === "1") {
+          await go("group-chat", `/chats/${chatId}`)
+          await openPanel(page, "Lorebooks")
+          await audit("panel-Lorebooks")
+          await openSummarySettings(page)
+          await audit("panel-summary-settings")
+          await go("preset-editor", `/library/${presetRef}`)
+          await go("card-editor", `/library/${cardRef}`)
+          for (const section of ["chats", "display", "costs"]) await go(`settings-${section}`, `/settings/${section}`)
+          return
         }
         if (process.env.LAYOUT_AUDIT_SETTINGS_ONLY === "1") {
           for (const section of [
@@ -547,6 +562,31 @@ test.describe("synthetic library and every app surface", () => {
           await audit("default-speaker-picker")
           return
         }
+        if (process.env.LAYOUT_AUDIT_SIDEBAR_ONLY === "1") {
+          for (const [scope, query] of [
+            ["all", ""],
+            ["character", `&character=${cardId}`],
+            ["branches", `&character=${cardId}&forks=${chatId}`]
+          ]) {
+            await go(`sidebar-before-${scope}`, `/?side=chats${query}`)
+            await showAppNavigation(page)
+            await audit(`sidebar-scope-${scope}`)
+            if (scope !== "branches") {
+              const panel =
+                width === 390
+                  ? page.locator(".fixed.inset-0")
+                  : page.getByRole("complementary", { name: "Sidebar", exact: true })
+              await panel.getByRole("combobox", { name: "Show chats", exact: true }).click()
+              await audit(`sidebar-filter-${scope}`)
+              await page.keyboard.press("Escape")
+              await panel.getByRole("button", { name: /^Sort chats:/ }).click()
+              await audit(`sidebar-sort-${scope}`)
+              await page.keyboard.press("Escape")
+            }
+            await hideAppNavigation(page)
+          }
+          return
+        }
         if (process.env.LAYOUT_AUDIT_PERSONA_BADGES_ONLY === "1") {
           const persona = await admin((api) =>
             Effect.gen(function* () {
@@ -631,11 +671,59 @@ test.describe("synthetic library and every app surface", () => {
           await formats("menu-pending-cast-export", true)
           return
         }
+        if (process.env.LAYOUT_AUDIT_LOREBOOKS_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const panel = await openPanel(page, "Lorebooks")
+          const book = (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).find((ref) => ref.id === bookRef)!
+          await panel
+            .getByRole("list", { name: "Lorebooks in this chat" })
+            .getByRole("button")
+            .filter({ has: page.getByText(book.label, { exact: true }) })
+            .click()
+          const editor = panel.getByRole("region", { name: `Lorebook ${book.label}`, exact: true })
+          const inspect = async (scope: Locator, surface: string) => {
+            await scope.evaluate((el) => el.setAttribute("data-lorebook-audit", ""))
+            await expect(scope.getByRole("list", { name: "Entries", exact: true })).toBeVisible()
+            const collapse = scope.getByRole("button", { name: "Collapse all", exact: true })
+            if ((await collapse.count()) > 0) await collapse.click()
+            await audit(`${surface}-headers`)
+            await scope
+              .getByRole("button", { name: /^Open / })
+              .first()
+              .click()
+            const entry = scope.getByRole("group", { name: /^Lorebook entry/ }).first()
+            await entry.getByRole("button", { name: /^Settings of / }).click()
+            await audit(`${surface}-settings`)
+            const closed = entry.locator("[data-section-toggle][aria-expanded=false]")
+            while ((await closed.count()) > 0) await closed.first().click()
+            await audit(`${surface}-all-settings`)
+            const keys = entry.getByRole("textbox", { name: "Primary keys", exact: true })
+            await keys.focus()
+            await audit(`${surface}-keys`)
+            await keys.blur()
+            await scope.evaluate((el) => el.removeAttribute("data-lorebook-audit"))
+          }
+          await inspect(editor, "lorebook-panel")
+          await editor.getByRole("button", { name: "Large editor", exact: true }).click()
+          await inspect(page.getByRole("dialog", { name: "Lorebook editor", exact: true }), "lorebook-large")
+          await page.goto(`${server.url}/library/${bookRef}`)
+          await inspect(page.getByRole("main"), "lorebook-page")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           const panel = await openPanel(page, "Prompt preset")
           await expect(panel.getByRole("list", { name: "Preset blocks" })).toBeVisible({ timeout: 60000 })
           await audit("panel-Prompt-preset")
+          const addDefinitions = panel.getByRole("button", { name: "Add definitions block", exact: true })
+          if (await addDefinitions.isEnabled()) await addDefinitions.click()
+          const unsaved = page.getByRole("region", { name: "Unsaved changes" })
+          if (await unsaved.isVisible()) {
+            await unsaved.getByRole("button", { name: "Save", exact: true }).click()
+            await expect(unsaved).toHaveCount(0)
+          }
+          await expect(panel.locator('[data-prompt="charDefinitions"]')).toBeVisible()
+          await audit("panel-Prompt-preset-definitions")
           await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
           const large = page.getByRole("dialog", { name: "Preset editor", exact: true })
           await expect(large.getByRole("list", { name: "Prompt order", exact: true })).toBeVisible({ timeout: 60000 })
@@ -731,6 +819,25 @@ test.describe("synthetic library and every app surface", () => {
           await go("saved-chat-header", `/chats/${chatId}`)
           await openPanel(page, "This chat")
           await audit("panel-header")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_SNIPPETS_ONLY === "1") {
+          await admin((api) =>
+            Effect.gen(function* () {
+              if ((yield* api.ListSnippets({ chatId })).length === 0) {
+                for (const title of ["Harbour details", "Next scene"]) {
+                  yield* api.CreateSnippet({
+                    chatId,
+                    title,
+                    content: "A lighthouse above the quiet harbour.\nLanterns shine along the pier."
+                  })
+                }
+              }
+            })
+          )
+          await go("group-chat", `/chats/${chatId}`)
+          await openPanel(page, "Snippets")
+          await audit("panel-Snippets")
           return
         }
         if (process.env.LAYOUT_AUDIT_PANELS_ONLY === "1") {
@@ -1014,7 +1121,7 @@ test.describe("synthetic library and every app surface", () => {
             "Summaries",
             "Display",
             "Snippets",
-            "Search and replace"
+            "History edits"
           ]) {
             const panel = await openPanel(page, name)
             await expect(panel.getByText(/^(Loading|Still loading)/)).toHaveCount(0, { timeout: 30000 })

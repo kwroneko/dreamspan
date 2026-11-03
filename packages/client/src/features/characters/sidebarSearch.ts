@@ -1,3 +1,4 @@
+import { chatBrowseSearch } from "./chatBrowseSearch.ts"
 /**
  * The search params that say what the left panel shows (ARCHITECTURE §12): `character` scopes
  * it to a card's chats, `forks` to one chat's forks, `side=characters` shows the character grid.
@@ -5,6 +6,7 @@
  * them as `retainSearch`, so moving around inside such a screen keeps the panel where it is.
  */
 export const sidebarSearch = [
+  ...chatBrowseSearch,
   "character",
   "forks",
   "side",

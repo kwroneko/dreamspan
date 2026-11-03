@@ -151,13 +151,15 @@ for (const width of [1440, 390])
       await shot("02-composer-off-with-text")
       await box.fill("")
 
-      // Guidance on: its own look, label and placeholder; Send gives way to generating.
+      // Guidance on: its own look, label and placeholder; Send stays disabled beside Generate.
       await guidanceSwitch(page).click()
       await expect(guidanceSwitch(page)).toBeChecked()
       const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
       await expect(guidance).toHaveAttribute("placeholder", "Guidance for the next message…")
       await expect(page.locator("[data-guidance]").first()).toBeVisible()
-      await expect(page.getByRole("button", { name: /^Send/ })).toHaveCount(0)
+      await expect(
+        page.getByTestId("composer-controls").getByRole("button", { name: /^(?:Send|.* repl(?:y|ies)$)/ })
+      ).toBeDisabled()
       await shot("03-composer-guidance-empty")
       const direction = `Have the stranger by the fire speak up (${width} ${theme}).`
       await guidance.fill(direction)

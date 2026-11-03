@@ -903,6 +903,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             c.baseUrl
           ),
           cacheBreakpoints: effective.cacheBreakpoints.value,
+          cacheLayout: effective.cacheLayout.value,
           vision: effective.vision.value,
           maxImages: effective.maxImages.value,
           context: effective.context.source === "unknown" ? null : effective.context.value,

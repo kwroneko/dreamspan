@@ -44,21 +44,33 @@ function GuidanceToggle({
 }
 
 /** ▶ beside "Next": who's next replies at once, with nothing sent from you (ST's force talk). */
-function ReplyNow({ replier, busy, ready, invoke }: ComposerControlContext & { readonly invoke: () => void }) {
+function ReplyNow({ reply, replier, busy, ready, invoke }: ComposerControlContext & { readonly invoke: () => void }) {
   const view = useCast()
   const name = nameOf(view, replier)
   const label = name ? `${name} replies now` : "No one to reply"
   return (
-    <Tooltip label={name ? `${label}, with nothing sent from you` : label}>
-      <button
+    <Tooltip
+      label={
+        !hasReplyChoice(reply)
+          ? "Choose between characters when at least two can reply."
+          : busy
+            ? "Wait for the current reply."
+            : name
+              ? `${label}, with nothing sent from you`
+              : label
+      }
+    >
+      <Button
+        variant="ghost"
+        focusableWhenDisabled
         type="button"
         aria-label={label}
-        disabled={busy || !ready || replier === null}
+        disabled={!hasReplyChoice(reply) || busy || !ready || replier === null}
         onClick={invoke}
-        className={`${chipClass()} w-9 justify-center px-0! text-accent!`}
+        className={`${chipClass()} w-9 justify-center px-0! text-accent! data-disabled:text-muted!`}
       >
         <Icon name="play" size={12} />
-      </button>
+      </Button>
     </Tooltip>
   )
 }
@@ -113,7 +125,7 @@ export const registerComposerControls = () => [
         </SquareIconButton>
       ) : (
         <Button
-          variant={context.guidance ? "primary" : "secondary"}
+          variant={context.guidance ? "primary" : "ghost"}
           aria-label={`Generate ${context.speakerName}`}
           hint={`Generate ${context.speakerName}'s first turn with the model${context.guidance ? ", following your guidance" : ""}.`}
           pending={context.busy}
@@ -121,7 +133,7 @@ export const registerComposerControls = () => [
           onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
         >
           {/* Its word only: the speaker's name is on the chip at the row's start, and in its name. */}
-          {context.guidance && <GenerateIcon />}
+          {!context.busy && <GenerateIcon />}
           Generate
         </Button>
       )
@@ -130,20 +142,27 @@ export const registerComposerControls = () => [
     id: "pending.send",
     order: 20,
     placement: "actions",
-    run: ({ start }) => start("send"),
-    component: (context) =>
-      context.guidance ? null : (
-        <SquareIconButton
-          label={context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`}
-          hint={`${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`} (${context.submitHint})`}
-          variant="primary"
-          pending={context.busy}
-          disabled={context.busy || !context.prefsReady || !context.hasText}
-          onClick={() => void pendingComposerControls.get("pending.send")?.run?.(context)}
-        >
-          <SendIcon />
-        </SquareIconButton>
-      )
+    run: async ({ guidance, start }) => {
+      if (!guidance) await start("send")
+    },
+    component: (context) => (
+      <SquareIconButton
+        label={context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`}
+        hint={
+          context.guidance
+            ? "Guidance is sent with Generate, as instructions for the reply."
+            : `${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`} (${context.submitHint})`
+        }
+        variant="primary"
+        pending={context.busy}
+        disabled={context.guidance || context.busy || !context.prefsReady || !context.hasText}
+        className="data-disabled:bg-surface-raised! data-disabled:text-muted!"
+        focusableWhenDisabled
+        onClick={() => void pendingComposerControls.get("pending.send")?.run?.(context)}
+      >
+        <SendIcon />
+      </SquareIconButton>
+    )
   }),
   // The next-reply strip of a chat not made yet: the account's model and preset, as at the saved composer.
   pendingComposerControls.register({
@@ -180,15 +199,15 @@ export const registerComposerControls = () => [
     id: "composer.next",
     order: 40,
     placement: "strip",
-    available: ({ reply }) => hasReplyChoice(reply),
     component: ({ reply }) => <NextReplyChip {...reply} />
   }),
   composerControls.register({
     id: "composer.reply-now",
     order: 50,
     placement: "strip",
-    available: ({ reply }) => hasReplyChoice(reply),
-    run: ({ replyNow }) => replyNow(),
+    run: async ({ reply, replyNow }) => {
+      if (hasReplyChoice(reply)) await replyNow()
+    },
     component: ReplyNow
   }),
   composerControls.register({
@@ -269,15 +288,18 @@ export const registerComposerControls = () => [
     id: "composer.send",
     order: 40,
     placement: "actions",
-    available: ({ guidance }) => !guidance,
-    run: ({ hasText, send, replyNow }) => (hasText ? send() : replyNow()),
-    component: ({ sendLabel, sendHint, busy, ready, hasText, replier, invoke }) => (
+    run: ({ guidance, hasText, send, replyNow }) => {
+      if (!guidance) return hasText ? send() : replyNow()
+    },
+    component: ({ guidance, sendLabel, sendHint, busy, ready, hasText, replier, invoke }) => (
       <SquareIconButton
         label={sendLabel}
-        hint={sendHint}
+        hint={guidance ? "Guidance is sent with Generate, as instructions for the reply." : sendHint}
         variant="primary"
         pending={busy}
-        disabled={!ready || (!hasText && replier === null)}
+        disabled={guidance || !ready || (!hasText && replier === null)}
+        className="data-disabled:bg-surface-raised! data-disabled:text-muted!"
+        focusableWhenDisabled
         onClick={invoke}
       >
         {!busy && <SendIcon />}

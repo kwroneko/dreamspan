@@ -16,7 +16,7 @@ import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
 import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { AboutHint } from "../../ui/AboutHint.tsx"
+import { AboutHint, LabelWithHelp } from "../../ui/AboutHint.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { MenuAction, MenuItem } from "../../ui/Menu.tsx"
@@ -192,10 +192,15 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
       )}
       {step._tag === "Pick" && (
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-1">
-            <span className="text-sm font-medium">Card file</span>
-            <AboutHint heading="Card file">The file replaces the card’s content everywhere the card is used.</AboutHint>
-          </div>
+          <LabelWithHelp
+            help={
+              <AboutHint heading="Card file">
+                The file replaces the card’s content everywhere the card is used.
+              </AboutHint>
+            }
+          >
+            <span className="inline text-sm font-medium">Card file</span>
+          </LabelWithHelp>
           <FileDrop
             label="Choose the new version's file"
             description="A PNG, JSON or CHARX card, or drop it here. It's only read to compare; nothing is stored yet."

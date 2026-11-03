@@ -19,7 +19,13 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
 test.setTimeout(180_000)
 const shots = process.env.VIEWER_SHOTS
 const shoot = async (page: Page, name: string) => {
-  if (shots) await page.screenshot({ animations: "disabled", path: join(shots, `${name}.png`) })
+  if (!shots) return
+  await page.mouse.move(0, 0)
+  await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toHaveCount(0)
+  await page.screenshot({ animations: "disabled", path: join(shots, `${name}.png`) })
+  const toolbar = page.locator("[data-portrait-toolbar]")
+  if (await toolbar.count())
+    await toolbar.screenshot({ animations: "disabled", path: join(shots, `${name}-toolbar.png`) })
 }
 
 const TALL = { name: "Tall", width: 1024, height: 1536 }
@@ -55,7 +61,7 @@ test.beforeAll(async ({ browser }) => {
     api.StartChat({
       cards: [refs.Tall!.entityId],
       persona: refs.Juniper!.entityId,
-      greeting: null,
+      greeting: 0,
       first: { _tag: "Send", content: "Is anyone here?", speakerEntityId: null }
     })
   )
@@ -94,7 +100,8 @@ test("every editable portrait: one Picture button lower right, a click opens the
   await expect(page.getByRole("complementary", { name: "Tall's portrait", exact: true })).toBeVisible()
   // A click opens, never replaces: no dialog, no file chooser.
   await expect(page.getByRole("dialog")).toHaveCount(0)
-  await page.getByRole("button", { name: "Close the portrait" }).click()
+  await tab.getByRole("button", { name: "View Tall's picture", exact: true }).click()
+  await expect(page.getByRole("complementary", { name: "Tall's portrait", exact: true })).toHaveCount(0)
 
   // The persona's tab: the same button in the same place, with the "You" badge.
   await openChat(page, `card:${refs.Juniper!.entityId}`)
@@ -114,6 +121,8 @@ test("every editable portrait: one Picture button lower right, a click opens the
   await expect(personaPortrait.locator("svg")).toHaveCount(1)
   await personaTab.getByRole("button", { name: "View Juniper's picture", exact: true }).click()
   await expect(page.getByRole("complementary", { name: "Juniper's portrait", exact: true })).toBeVisible()
+  await personaTab.getByRole("button", { name: "View Juniper's picture", exact: true }).click()
+  await expect(page.getByRole("complementary", { name: "Juniper's portrait", exact: true })).toHaveCount(0)
 
   // The full editor's own page: header and Metadata both, a click opening a full-screen viewer.
   await page.goto(`${server().url}/library/${refs.Tall!.id}`)
@@ -136,6 +145,58 @@ test("every editable portrait: one Picture button lower right, a click opens the
   await expect(bare.getByRole("button", { name: "View Bare's picture" })).toHaveCount(0)
   await bare.getByRole("button", { name: "Picture", exact: true }).hover()
   await expect(page.getByText(/^Picture: add one\./)).toBeVisible()
+})
+
+test("header portrait clicks toggle open then closed, shared with messages, the full editor and pending greetings", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openChat(page, `card:${refs.Tall!.entityId}`)
+  const tab = page.getByRole("tabpanel", { name: "Tall" })
+  const header = tab.getByRole("button", { name: "View Tall's picture", exact: true })
+  const viewer = page.getByRole("complementary", { name: "Tall's portrait", exact: true })
+  const twice = async (portrait: Locator) => {
+    await portrait.click()
+    await expect(viewer).toBeVisible()
+    await portrait.click()
+    await expect(viewer).toHaveCount(0)
+  }
+  await twice(header)
+
+  // Either surface can close the image the other opened: they share the card's identity.
+  const message = page
+    .locator("article[data-slot]")
+    .getByRole("button", { name: "View Tall's portrait", exact: true })
+    .first()
+  await message.click()
+  await expect(viewer).toBeVisible()
+  await header.click()
+  await expect(viewer).toHaveCount(0)
+  await header.click()
+  await expect(viewer).toBeVisible()
+  await message.click()
+  await expect(viewer).toHaveCount(0)
+
+  // The full editor over a chat keeps its header accessible beside the image column.
+  await tab.getByRole("button", { name: "Open Tall in the full editor", exact: true }).click()
+  const editor = page.getByRole("dialog", { name: "Card editor", exact: true })
+  await twice(
+    editor.locator("[data-card-header-portrait]").getByRole("button", { name: "View Tall's picture", exact: true })
+  )
+  const metadata = await cardFieldsTab(editor, "Metadata")
+  await twice(
+    metadata.getByRole("region", { name: "Picture" }).getByRole("button", { name: "View Tall's picture", exact: true })
+  )
+  await editor.getByRole("button", { name: "Back to the chat", exact: true }).click()
+
+  // A pending greeting uses the stock avatar toggle too, before a chat has been saved.
+  await page.goto(`${server().url}/cards/${refs.Tall!.entityId}/chat?panel=card:${refs.Tall!.entityId}`)
+  const greeting = page.getByRole("article", { name: "Greeting from Tall", exact: true })
+  await twice(greeting.getByRole("button", { name: "View Tall's portrait", exact: true }))
+  const pendingHeader = page
+    .getByRole("tabpanel", { name: "Tall" })
+    .getByRole("button", { name: "View Tall's picture", exact: true })
+  await twice(pendingHeader)
 })
 
 /** The image's rect and its box's, in page pixels. */
@@ -183,16 +244,31 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
   await expect.poll(async () => (await column.boundingBox())!.width).toBeGreaterThan(400)
   // Wide: one aligned row: slider, percentage, Fit, 100%, then the column's own buttons.
   const slider = toolbar.getByRole("slider", { name: "Zoom" })
-  const fit = toolbar.getByRole("button", { name: "Fit", exact: true })
-  const actual = toolbar.getByRole("button", { name: "100%", exact: true })
+  const presets = toolbar.getByRole("group", { name: "Zoom presets" })
+  const fit = presets.getByRole("button", { name: "Fit", exact: true })
+  const actual = presets.getByRole("button", { name: "100%", exact: true })
+  const single = toolbar.getByRole("button", { name: "Viewer options", exact: true })
+  const close = toolbar.getByRole("button", { name: "Close the portrait" })
   const sliderBox = toolbar.locator("[data-toolbar-slider]")
   const centres = await Promise.all(
-    [sliderBox, percent, fit, actual, toolbar.getByRole("button", { name: "Close the portrait" })].map(async (item) => {
+    [sliderBox, percent, fit, actual, single, close].map(async (item) => {
       const b = (await item.boundingBox())!
       return b.y + b.height / 2
     })
   )
   expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(1.5)
+  // Tight within zoom, equal gaps between groups, with a little more room before Close.
+  const boxes = await Promise.all([sliderBox, percent, presets, single, close].map((item) => item.boundingBox()))
+  const gaps = boxes.slice(1).map((box, i) => box!.x - (boxes[i]!.x + boxes[i]!.width))
+  expect(gaps[0]).toBeCloseTo(4, 0)
+  expect(gaps[1]).toBeCloseTo(12, 0)
+  expect(gaps[2]).toBeCloseTo(gaps[1]!, 0)
+  expect(gaps[3]).toBeCloseTo(20, 0)
+  const positions = async () =>
+    Promise.all([sliderBox, percent, presets, single, close].map(async (item) => (await item.boundingBox())!.x))
+  const initialPositions = await positions()
+  await expect(fit).toHaveAttribute("aria-pressed", "true")
+  await expect(actual).toHaveAttribute("aria-pressed", "false")
   await expect(viewer).toHaveAttribute("data-zoom", "fit")
   const fitted = await geometry(column)
   const fitPercent = await percent.textContent()
@@ -202,10 +278,12 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
   for (const [control, text] of [
     [fit, "Fit: show all of the picture"],
     [actual, "100%: one pixel of the picture to one pixel of the screen"],
-    [percent, /^Shown at \d+% of its own size, 1024 × 1536 pixels$/]
+    [percent, /^Shown at \d+% of its own size, 1024 × 1536 pixels$/],
+    [single, "Choose whether opening an image keeps other images open."],
+    [close, "Close the portrait"]
   ] as const) {
     await control.hover()
-    await expect(page.getByText(text)).toBeVisible()
+    await expect(page.locator("[data-layout-overlay] [data-open]").filter({ hasText: text })).toBeVisible()
   }
   await shoot(page, "column-fit")
 
@@ -215,7 +293,7 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
   const scrolled = () =>
     page.evaluate(() => [
       window.scrollY,
-      document.querySelector("[data-portrait-column] > div.overflow-y-auto")?.scrollTop ?? 0
+      document.querySelector("[data-portrait-column] > div.overflow-hidden")?.scrollTop ?? 0
     ])
   const before = await scrolled()
   await page.mouse.move(at.x, at.y)
@@ -261,6 +339,8 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
   await slider.focus()
   await page.keyboard.press("End")
   await expect(percent).toHaveText("800%")
+  await expect(presets.getByRole("button", { pressed: true })).toHaveCount(0)
+  expect(await positions()).toEqual(initialPositions)
   await expect.poll(async () => (await geometry(column)).image.width).toBeCloseTo(1024 * 8, -1)
   await page.keyboard.press("Home")
   await expect(viewer).toHaveAttribute("data-zoom", "fit")
@@ -274,11 +354,35 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
   await actual.click()
   await expect(percent).toHaveText("100%")
   await expect(actual).toHaveAttribute("aria-pressed", "true")
+  await expect(fit).toHaveAttribute("aria-pressed", "false")
+  expect(await positions()).toEqual(initialPositions)
   await expect.poll(async () => (await geometry(column)).image.width).toBeCloseTo(1024, 0)
   await shoot(page, "column-100")
   await fit.click()
   await expect(viewer).toHaveAttribute("data-zoom", "fit")
   await expect(fit).toHaveAttribute("aria-pressed", "true")
+  await expect(actual).toHaveAttribute("aria-pressed", "false")
+  expect(await positions()).toEqual(initialPositions)
+
+  await single.click()
+  const keep = page.getByRole("menuitemcheckbox", { name: "Keep one image open", exact: true })
+  await expect(keep).toHaveAttribute("aria-checked", "false")
+  await keep.hover()
+  await expect(
+    page.getByText("Click to keep only one image open at a time.", { exact: true }).filter({ visible: true })
+  ).toBeVisible()
+  await keep.click()
+  expect(await positions()).toEqual(initialPositions)
+  await single.click()
+  await expect(keep).toHaveAttribute("aria-checked", "true")
+  await keep.hover()
+  await expect(
+    page.getByText("Click to allow multiple images open at a time.", { exact: true }).filter({ visible: true })
+  ).toBeVisible()
+  await keep.click()
+  await single.click()
+  await expect(keep).toHaveAttribute("aria-checked", "false")
+  await page.keyboard.press("Escape")
 
   // Double click: to 100% at the pointer, and back to the fit.
   const box = (await viewer.boundingBox())!
@@ -301,6 +405,15 @@ test("at 390 by touch: pinch about the fingers' centre, one finger pans, double 
   const viewer = screen.locator("[data-image-viewer]")
   await expect(viewer).toHaveAttribute("data-zoom", "fit")
   const fitted = await geometry(screen)
+  const toolbar = screen.locator("[data-portrait-toolbar]")
+  const presets = toolbar.getByRole("group", { name: "Zoom presets" })
+  await expect(presets.getByRole("button", { name: "Fit", exact: true })).toHaveAttribute("aria-pressed", "true")
+  const controls = toolbar.locator("[data-zoom-controls]")
+  const presetBox = (await presets.boundingBox())!
+  const zoomBox = (await toolbar.locator("[data-zoom-group]").boundingBox())!
+  expect(Math.abs(presetBox.y + presetBox.height / 2 - (zoomBox.y + zoomBox.height / 2))).toBeLessThan(1)
+  expect(presetBox.x - (zoomBox.x + zoomBox.width)).toBeCloseTo(12, 0)
+  expect((await controls.boundingBox())!.height).toBeLessThanOrEqual(56)
   const cdp = await page.context().newCDPSession(page)
   await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 })
   const touch = (type: "touchStart" | "touchMove" | "touchEnd", points: ReadonlyArray<{ x: number; y: number }>) =>

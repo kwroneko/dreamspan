@@ -111,6 +111,16 @@ export type ConnectionSettings = typeof ConnectionSettings.Type
 const Prefill = Schema.Literals(["none", "assistant", "tool_schema"])
 const CacheBreakpoints = Schema.Literals(["auto", "explicit", "none"])
 
+/** Cache layout capabilities, independently overrideable for a serving provider/model. */
+export const CacheLayout = Schema.Struct({
+  marker: Schema.optionalKey(Schema.Literal("prompt_cache_breakpoint")),
+  lookback: Schema.optionalKey(Schema.Boolean),
+  summarySplit: Schema.optionalKey(Schema.Boolean),
+  maxMarkers: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  minTokens: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0)))
+})
+export type CacheLayout = typeof CacheLayout.Type
+
 /** Prices per million tokens, as a source reports them; the input to built-in cost formulas. */
 export const Price = Schema.Struct({
   input: Schema.Number,
@@ -148,6 +158,7 @@ const capabilityFields = {
   prefill: Schema.optionalKey(Prefill),
   cacheTtlS: Schema.optionalKey(Schema.Int),
   cacheBreakpoints: Schema.optionalKey(CacheBreakpoints),
+  cacheLayout: Schema.optionalKey(CacheLayout),
   compat: Schema.optionalKey(Compat),
   sampling: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown))
 }
@@ -208,6 +219,7 @@ export interface EffectiveModel {
   readonly prefill: Resolved<typeof Prefill.Type>
   readonly cacheTtlS: Resolved<number | null>
   readonly cacheBreakpoints: Resolved<typeof CacheBreakpoints.Type>
+  readonly cacheLayout: Resolved<CacheLayout>
   readonly compat: Readonly<Record<string, unknown>>
   readonly sampling: Readonly<Record<string, unknown>>
   readonly settings: ModelSettings
@@ -254,6 +266,7 @@ export const resolveModel = (
     prefill: pick("prefill", "none" as const),
     cacheTtlS: pick("cacheTtlS", null),
     cacheBreakpoints: pick("cacheBreakpoints", "auto" as const),
+    cacheLayout: pick("cacheLayout", {}),
     compat: { ...connectionCompat, ...upstream.compat, ...overrides.compat },
     sampling: { ...upstream.sampling, ...overrides.sampling },
     settings: { ...upstream.settings, ...overrides.settings },

@@ -56,9 +56,10 @@ export function EditHistory({
     <>
       <IconButton
         label={`Edit history of ${label}`}
-        hint="Edit history: every earlier state of this text, from any device. Picking one puts it back as the newest state; nothing is lost."
+        hint={disabled ? "No edit history yet." : "Shows earlier states of this text from any device."}
         icon="history"
         disabled={disabled}
+        focusableWhenDisabled
         className={className}
         onClick={() => setOpen(true)}
       />

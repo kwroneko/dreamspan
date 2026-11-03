@@ -661,9 +661,6 @@ export const Message = memo(function Message({
       return view.newer === null && view.entries.at(-1)?.slotId === entry.slotId
     }, [session, entry.slotId])
   )
-  // Every generated message has its arrows, to generate another; any with versions, to step
-  // through them. Before the latest message, the one that generates shows on hover or focus.
-  const showVersions = generated || entry.versionCount > 1
   /** After an edit saved as a new version, its number, so the counter's jump says why. */
   const [savedAs, setSavedAs] = useState<number | null>(null)
   useEffect(() => {
@@ -904,44 +901,37 @@ export const Message = memo(function Message({
             </Tooltip>
           </div>
         )}
-        {(showVersions || (revealed && !editing)) && (
-          // At the end of the message, as in ST: where reading it ends, and where a swipe
-          // that changes its length leaves the arrows. A tap on a phone shows why it isn't
-          // sent here too, beside the actions it reveals, so scrolling them into view never
-          // scrolls the start of the reason away.
-          <div ref={footer} className="flex flex-col gap-1">
-            {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
-            <footer className="flex min-h-8 items-center">
-              {revealed && !editing ? (
-                // The footer's width before the versions: the pinned buttons that fit, then More actions.
-                <MessageActions context={actionContext} className="-ml-1.5 flex sm:hidden" />
-              ) : (
-                <span className="flex-1" />
-              )}
-              {savedAs !== null && (
-                <span role="status" className="mr-1 text-xs text-muted">
-                  Saved as version {savedAs}
-                </span>
-              )}
-              {showVersions && (
-                <SlotOutlet
-                  slot={messageVersions}
-                  props={{
-                    entry,
-                    generated,
-                    latest,
-                    versions,
-                    position,
-                    onStep: (step) => void swipe(step),
-                    onPick: async (picked) => report(await session.select(entry, picked)),
-                    onFlag: (target, flags) => void flag(target, flags),
-                    onOpen: () => void load(true)
-                  }}
-                />
-              )}
-            </footer>
-          </div>
-        )}
+        {/* Version controls keep their room even before a second version exists. */}
+        <div ref={footer} className="flex flex-col gap-1">
+          {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
+          <footer className="flex min-h-8 items-center">
+            {revealed && !editing ? (
+              // The footer's width before the versions: the pinned buttons that fit, then More actions.
+              <MessageActions context={actionContext} className="-ml-1.5 flex sm:hidden" />
+            ) : (
+              <span className="flex-1" />
+            )}
+            {savedAs !== null && (
+              <span role="status" className="mr-1 text-xs text-muted">
+                Saved as version {savedAs}
+              </span>
+            )}
+            <SlotOutlet
+              slot={messageVersions}
+              props={{
+                entry,
+                generated,
+                latest,
+                versions,
+                position,
+                onStep: (step) => void swipe(step),
+                onPick: async (picked) => report(await session.select(entry, picked)),
+                onFlag: (target, flags) => void flag(target, flags),
+                onOpen: () => void load(true)
+              }}
+            />
+          </footer>
+        </div>
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error.message}

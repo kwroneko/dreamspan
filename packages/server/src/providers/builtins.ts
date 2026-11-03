@@ -6,7 +6,7 @@ import { openAICompletionsApi, openAIResponsesApi, anthropicMessagesApi, googleG
 // 2026-10-10).
 import { Effect, Layer } from "effect"
 import { defaultCacheRelease } from "./cacheStagger.ts"
-import { applyAnthropicBreakpoints } from "./breakpoints.ts"
+import { applyAnthropicBreakpoints, applyBedrockBreakpoints } from "./breakpoints.ts"
 import { piCatalogs, withCatalog } from "./catalog.ts"
 import { modelListers } from "./modelLists.ts"
 import { empty, ProviderRegistry, type ProviderKindEntry } from "./registry.ts"
@@ -109,7 +109,23 @@ export const layer = Layer.effectDiscard(
       id: "anthropic-explicit-breakpoints",
       appliesTo: (target) => target.api === "anthropic-messages",
       transform: (payload, request) => {
-        if (request.breakpoints.length > 0) applyAnthropicBreakpoints(payload, request.messages, request.breakpoints)
+        if (request.breakpoints.length > 0)
+          applyAnthropicBreakpoints(payload, request.messages, request.breakpoints, request.cacheLayout)
+        return payload
+      }
+    })
+    yield* registry.transforms.register({
+      id: "bedrock-openai-explicit-breakpoints",
+      appliesTo: (target) => target.api === "openai-responses" || target.api === "openai-completions",
+      transform: (payload, request) => {
+        if (request.cacheLayout?.marker !== "prompt_cache_breakpoint") return payload
+        applyBedrockBreakpoints(
+          payload,
+          request.messages,
+          request.breakpoints,
+          request.target.api === "openai-responses",
+          request.cacheLayout
+        )
         return payload
       }
     })

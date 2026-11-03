@@ -16,6 +16,7 @@ import {
 } from "../src/features/chat/composerControls.tsx"
 import {
   availableMessageActions,
+  invokeMessageAction,
   messageActions,
   MessageActions,
   type MessageActionContext
@@ -223,5 +224,15 @@ describe("message action contributions", () => {
         entry: { ...context.entry, version: { ...context.entry.version, context: null } }
       })
     ).not.toContain(original)
+  })
+  it("keeps a temporarily disabled pinned action and blocks keyboard invocation", async () => {
+    const run = vi.fn()
+    const original = messageActions.get("message.edit")!
+    for (const action of messageActions.list()) if (action !== original) dispose.push(messageActions.disable(action.id))
+    dispose.push(messageActions.register({ ...original, disabled: () => "Wait for the reply to finish.", run }))
+    expect(markup(createElement(MessageActions, { context }))).toContain('aria-disabled="true"')
+    expect(availableMessageActions(context).map((action) => action.id)).toContain("message.edit")
+    await invokeMessageAction("message.edit", context, "keyboard")
+    expect(run).not.toHaveBeenCalled()
   })
 })

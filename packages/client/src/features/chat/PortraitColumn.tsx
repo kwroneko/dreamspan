@@ -190,24 +190,27 @@ function Viewer({
         portrait={portrait}
         header={(node) => <ViewerHeader portrait={portrait}>{node}</ViewerHeader>}
         title={(name) => <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</h2>}
-        close={
-          <>
-            <Menu
-              label="Viewer options"
-              hint="Choose whether opening an image keeps other images open."
-              trigger={<IconButton label="Viewer options" icon="more" />}
+        toggle={
+          <Menu
+            label="Viewer options"
+            trigger={
+              <IconButton
+                label="Viewer options"
+                icon="more"
+                hint="Choose whether opening an image keeps other images open."
+              />
+            }
+          >
+            <MenuCheckboxItem
+              checked={viewer.single}
+              onCheckedChange={(on) => viewer.setSingle(on, portrait.id)}
+              description={viewer.single ? SINGLE_ON : SINGLE_OFF}
             >
-              <MenuCheckboxItem
-                checked={viewer.single}
-                onCheckedChange={(on) => viewer.setSingle(on, portrait.id)}
-                description={viewer.single ? SINGLE_ON : SINGLE_OFF}
-              >
-                {SINGLE}
-              </MenuCheckboxItem>
-            </Menu>
-            <IconButton label="Close the portrait" icon="close" onClick={() => viewer.close(portrait.id)} />
-          </>
+              {SINGLE}
+            </MenuCheckboxItem>
+          </Menu>
         }
+        close={<IconButton label="Close the portrait" icon="close" onClick={() => viewer.close(portrait.id)} />}
       />
       {boundary}
     </aside>

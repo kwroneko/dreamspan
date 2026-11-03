@@ -372,92 +372,99 @@ function SummaryRow({
           {!failed && <span className="text-xs text-muted">{tokensText(summary.tokens)}</span>}
           <SummaryBadges summary={summary} />
         </div>
-        {mode !== "edit" && (
-          <div className="flex shrink-0 items-center">
-            {failed ? (
-              <Tooltip
-                label={
-                  retryBlocked
-                    ? "Your own summary of these messages is used instead, so trying again changes nothing. Re-summarize that one to replace it."
-                    : summary.rerun
-                      ? "Leaves it failed: it isn't tried again."
-                      : "Tries it again with your next reply."
-                }
+        <div className="flex shrink-0 items-center">
+          {failed ? (
+            <Tooltip
+              label={
+                retryBlocked
+                  ? "Your own summary of these messages is used instead, so trying again changes nothing. Re-summarize that one to replace it."
+                  : summary.rerun
+                    ? "Leaves it failed: it isn't tried again."
+                    : "Tries it again with your next reply."
+              }
+            >
+              <Button
+                variant="ghost"
+                className="h-8 px-2"
+                aria-pressed={summary.rerun}
+                disabled={retryBlocked}
+                focusableWhenDisabled
+                aria-label={`${summary.rerun ? "Cancel re-summarizing" : "Re-summarize"} ${range.toLowerCase()} with the next reply`}
+                onClick={() => void rerun(!summary.rerun)}
               >
+                {summary.rerun ? "Cancel retry" : "Retry"}
+              </Button>
+            </Tooltip>
+          ) : (
+            <IconButton
+              icon="edit"
+              label={`Edit the summary of ${range.toLowerCase()}`}
+              hint={mode === "edit" ? "This summary is already open for editing." : "Edit the text"}
+              disabled={mode === "edit"}
+              focusableWhenDisabled
+              onClick={() => setMode("edit")}
+            />
+          )}
+          <SlotOutlet slot={summaryPreviews} props={{ summary, session }} />
+          {!failed && (
+            <Menu
+              label={`Actions for the summary of ${range.toLowerCase()}`}
+              trigger={
                 <Button
                   variant="ghost"
-                  className="h-8 px-2"
-                  aria-pressed={summary.rerun}
-                  disabled={retryBlocked}
+                  className="size-8 shrink-0 px-0!"
+                  aria-label={`Actions for the summary of ${range.toLowerCase()}`}
+                  disabled={mode === "edit"}
                   focusableWhenDisabled
-                  aria-label={`${summary.rerun ? "Cancel re-summarizing" : "Re-summarize"} ${range.toLowerCase()} with the next reply`}
-                  onClick={() => void rerun(!summary.rerun)}
-                >
-                  {summary.rerun ? "Cancel retry" : "Retry"}
-                </Button>
-              </Tooltip>
-            ) : (
-              <IconButton
-                icon="edit"
-                label={`Edit the summary of ${range.toLowerCase()}`}
-                hint="Edit the text"
-                onClick={() => setMode("edit")}
-              />
-            )}
-            <SlotOutlet slot={summaryPreviews} props={{ summary, session }} />
-            {!failed && (
-              <Menu
-                label={`Actions for the summary of ${range.toLowerCase()}`}
-                trigger={
-                  <Button
-                    variant="ghost"
-                    className="size-8 shrink-0 px-0!"
-                    aria-label={`Actions for the summary of ${range.toLowerCase()}`}
-                  >
-                    <Icon name="more" />
-                  </Button>
-                }
-              >
-                {summary.revisionCount > 1 && (
-                  <MenuItem
-                    icon="history"
-                    description="Its earlier texts, to compare or use instead."
-                    aria-label={`Revisions of the summary of ${range.toLowerCase()}`}
-                    onClick={() => setMode(mode === "revisions" ? "view" : "revisions")}
-                  >
-                    {mode === "revisions" ? "Hide revisions" : `Revisions (${summary.revisionCount})`}
-                  </MenuItem>
-                )}
-                {summary.level > 1 && (
-                  <MenuItem
-                    icon="layers"
-                    description="The summaries a level down that this one condenses."
-                    onClick={() => setMode(mode === "children" ? "view" : "children")}
-                  >
-                    {mode === "children" ? "Hide its parts" : `Condensed from ${summary.children.length}`}
-                  </MenuItem>
-                )}
-                <MenuItem
-                  icon="regenerate"
-                  disabled={retryBlocked}
-                  description={
-                    retryBlocked
-                      ? "Your own summary over these messages is used instead. Re-summarize that one."
-                      : summary.rerun
-                        ? "Keeps it as it is: it isn't written again."
-                        : summary.origin === "generated"
-                          ? "Writes it again from its messages with your next reply."
-                          : "Writes it again with your next reply. Your text stays in use; the new one waits in Revisions."
+                  hint={
+                    mode === "edit"
+                      ? "Finish editing this summary to use its other actions."
+                      : "Revisions and re-summarizing for this summary."
                   }
-                  aria-label={`${summary.rerun ? "Cancel re-summarizing" : "Re-summarize"} ${range.toLowerCase()} with the next reply`}
-                  onClick={() => void rerun(!summary.rerun)}
                 >
-                  {summary.rerun ? "Cancel re-summarize" : "Re-summarize"}
+                  <Icon name="more" />
+                </Button>
+              }
+            >
+              {summary.revisionCount > 1 && (
+                <MenuItem
+                  icon="history"
+                  description="Its earlier texts, to compare or use instead."
+                  aria-label={`Revisions of the summary of ${range.toLowerCase()}`}
+                  onClick={() => setMode(mode === "revisions" ? "view" : "revisions")}
+                >
+                  {mode === "revisions" ? "Hide revisions" : `Revisions (${summary.revisionCount})`}
                 </MenuItem>
-              </Menu>
-            )}
-          </div>
-        )}
+              )}
+              {summary.level > 1 && (
+                <MenuItem
+                  icon="layers"
+                  description="The summaries a level down that this one condenses."
+                  onClick={() => setMode(mode === "children" ? "view" : "children")}
+                >
+                  {mode === "children" ? "Hide its parts" : `Condensed from ${summary.children.length}`}
+                </MenuItem>
+              )}
+              <MenuItem
+                icon="regenerate"
+                disabled={retryBlocked}
+                description={
+                  retryBlocked
+                    ? "Your own summary over these messages is used instead. Re-summarize that one."
+                    : summary.rerun
+                      ? "Keeps it as it is: it isn't written again."
+                      : summary.origin === "generated"
+                        ? "Writes it again from its messages with your next reply."
+                        : "Writes it again with your next reply. Your text stays in use; the new one waits in Revisions."
+                }
+                aria-label={`${summary.rerun ? "Cancel re-summarizing" : "Re-summarize"} ${range.toLowerCase()} with the next reply`}
+                onClick={() => void rerun(!summary.rerun)}
+              >
+                {summary.rerun ? "Cancel re-summarize" : "Re-summarize"}
+              </MenuItem>
+            </Menu>
+          )}
+        </div>
       </div>
       {summary.error && failed && <p className="text-sm text-danger">{failureText(summary.error)}</p>}
       {blockedByManual && (
@@ -675,27 +682,47 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
         </Alert>
       )}
       <div className="flex flex-wrap gap-2">
-        {(backfill.state === "paused" || backfill.state === "capped") && (
-          <Tooltip label="Goes on summarizing, up to 150% of the estimate for what is left.">
-            <Button variant="primary" pending={pending === "continue"} onClick={() => void act("continue")}>
-              Continue
-            </Button>
-          </Tooltip>
-        )}
-        {(backfill.state === "waiting" || backfill.state === "running") && (
-          <Tooltip label="Summarizes the rest now, one request after another, instead of with your replies.">
-            <Button variant="primary" pending={pending === "summarizeNow"} onClick={() => void act("summarizeNow")}>
-              Summarize now
-            </Button>
-          </Tooltip>
-        )}
-        {backfill.state === "running" && (
-          <Tooltip label="Starts no more of these summaries until you continue.">
-            <Button pending={pending === "pause"} onClick={() => void act("pause")}>
-              Pause
-            </Button>
-          </Tooltip>
-        )}
+        <Button
+          variant={backfill.state === "paused" || backfill.state === "capped" ? "primary" : "ghost"}
+          disabled={backfill.state !== "paused" && backfill.state !== "capped"}
+          focusableWhenDisabled
+          pending={pending === "continue"}
+          hint={
+            backfill.state === "paused" || backfill.state === "capped"
+              ? "Continues summarizing the remaining messages."
+              : "Catching up is not paused."
+          }
+          onClick={() => void act("continue")}
+        >
+          Continue
+        </Button>
+        <Button
+          variant={backfill.state === "waiting" || backfill.state === "running" ? "primary" : "ghost"}
+          disabled={backfill.state !== "waiting" && backfill.state !== "running"}
+          focusableWhenDisabled
+          pending={pending === "summarizeNow"}
+          hint={
+            backfill.state === "waiting" || backfill.state === "running"
+              ? "Summarizes the remaining messages now."
+              : "Continue catching up before summarizing now."
+          }
+          onClick={() => void act("summarizeNow")}
+        >
+          Summarize now
+        </Button>
+        <Button
+          disabled={backfill.state !== "running"}
+          focusableWhenDisabled
+          pending={pending === "pause"}
+          hint={
+            backfill.state === "running"
+              ? "Pauses catching up after the current summary."
+              : "Catching up is not running."
+          }
+          onClick={() => void act("pause")}
+        >
+          Pause
+        </Button>
       </div>
       {jobs > 0 && (
         <Disclosure title="Estimate for what is left">

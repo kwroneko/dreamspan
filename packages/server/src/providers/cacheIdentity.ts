@@ -92,11 +92,18 @@ export const cacheIdentity = (input: {
   }
   const digest = (control: unknown = null) => hash.copy().update(canonicalJson(control)).digest("hex")
   const block = (value: unknown, endpoint: boolean) => {
-    const { cache_control, ...content } = Predicate.isObject(value) ? (value as Record<string, unknown>) : { value }
+    const { cache_control, prompt_cache_breakpoint, ...content } = Predicate.isObject(value)
+      ? (value as Record<string, unknown>)
+      : { value }
     add(Predicate.isObject(value) ? content : value)
     if (!cacheable(value)) return
-    if (explicit && marker(cache_control)) {
-      const key = digest(cache_control)
+    const control = marker(cache_control)
+      ? cache_control
+      : Predicate.isObject(prompt_cache_breakpoint) && prompt_cache_breakpoint.mode === "explicit"
+        ? prompt_cache_breakpoint
+        : null
+    if (explicit && control) {
+      const key = digest(control)
       prefixes.push(key)
       if (endpoint) requested = key
     }

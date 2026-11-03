@@ -10,6 +10,8 @@ export function Segmented<Value extends string>(
   props: {
     label: string
     wrap?: boolean
+    /** Compact toolbars keep explanations on hover and focus, without a second line. */
+    inlineDescription?: boolean
     options: ReadonlyArray<{ readonly value: Value; readonly label: ReactNode; readonly description?: string }>
   } & (
     | {
@@ -19,12 +21,12 @@ export function Segmented<Value extends string>(
       }
     | {
         multiple?: false
-        value: Value
+        value: Value | null
         onValueChange: (value: Value) => void
       }
   )
 ) {
-  const { label, wrap = false, options, value, multiple = false } = props
+  const { label, wrap = false, inlineDescription = true, options, value, multiple = false } = props
   const isChosen = (item: Value) => (Array.isArray(value) ? value.includes(item) : value === item)
   const id = useId()
   const described = options.some((option) => option.description)
@@ -78,7 +80,7 @@ export function Segmented<Value extends string>(
           </span>
         ) : null
       )}
-      {chosen && (
+      {inlineDescription && chosen && (
         // It wraps at the row's width rather than widen the column past the screen (w-0 min-w-full).
         <p aria-hidden="true" className={`hidden w-0 min-w-full text-xs text-muted ${inlineExplanationClass}`}>
           {chosen}
