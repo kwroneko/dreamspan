@@ -28,6 +28,8 @@ const captureHeader = async (page: Page, name: string) => {
 }
 
 const rectangularPortraits = async (portraits: Locator) => {
+  // A tab can be visible while its lazy body still shows the loading fallback.
+  await expect(portraits.filter({ visible: true }).first()).toBeVisible()
   const boxes = await portraits.evaluateAll((nodes) =>
     nodes
       .filter((node) => node.checkVisibility())
@@ -56,6 +58,15 @@ for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      // Exercise the Cast loading boundary even when its chunk is cached locally.
+      let releaseCast!: () => void
+      const castModule = new Promise<void>((resolve) => {
+        releaseCast = resolve
+      })
+      await page.route(/\/assets\/CastTab-[^/]+\.js$/, async (route) => {
+        await castModule
+        await route.continue()
+      })
       const name = `Fresh ${width} ${theme}`
       const imported = await page.request.post(`${server().url}/library/import?name=${name}.png`, {
         data: shapeCard({ name, width: 400, height: 600 }, 20),
@@ -119,6 +130,7 @@ for (const width of [1440, 390]) {
         await expect(button).not.toHaveCSS("box-shadow", "none")
       }
       const cast = await openPanel(page, "Cast")
+      releaseCast()
       await rectangularPortraits(cast.locator("[data-portrait]"))
       await page.goto(`${server().url}/chats`)
       await expect(page.locator("main [data-portrait] img").first()).toBeVisible()
