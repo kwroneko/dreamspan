@@ -159,7 +159,13 @@ export function SearchDialog({
   const response = shown?.response
   const wrap = (children: ReactNode) =>
     inline ? (
-      <InlinePanel id={idPrefix} title="Find and replace" onClose={() => onClose?.()} className="@container max-w-5xl">
+      <InlinePanel
+        id={idPrefix}
+        title="Find and replace"
+        titleHidden
+        onClose={() => onClose?.()}
+        className="@container max-w-5xl"
+      >
         {children}
       </InlinePanel>
     ) : (
@@ -178,8 +184,9 @@ export function SearchDialog({
       <form onSubmit={(event) => void submit(event)} className="flex min-w-0 flex-col gap-2">
         <div className="grid min-w-0 gap-2 @2xl:grid-cols-2">
           <div className="flex min-w-0 items-end gap-2">
-            <Field label="Find" className="flex-1">
+            <Field label="Find" labelHidden={inline} className="flex-1">
               <Input
+                {...(inline ? { placeholder: "Find" } : {})}
                 value={find}
                 onChange={(event) => setFind(event.currentTarget.value)}
                 className={regex ? "font-mono" : ""}
@@ -196,8 +203,12 @@ export function SearchDialog({
             </Button>
           </div>
           <div className="flex min-w-0 items-end gap-2">
-            <Field label="Replace with" className="flex-1">
-              <Input value={replace} onChange={(event) => setReplace(event.currentTarget.value)} />
+            <Field label="Replace with" labelHidden={inline} className="flex-1">
+              <Input
+                {...(inline ? { placeholder: "Replace with" } : {})}
+                value={replace}
+                onChange={(event) => setReplace(event.currentTarget.value)}
+              />
             </Field>
             <Button
               disabled={find === "" || !response?.ok || response.matches.length === 0}
@@ -207,21 +218,24 @@ export function SearchDialog({
             >
               Replace all
             </Button>
+            {/* On a phone the options fold behind this, beside the fields, keeping the bar short. */}
+            {inline && (
+              <Button
+                variant="ghost"
+                className="px-2! sm:hidden"
+                aria-expanded={options}
+                aria-controls={`${idPrefix}-options`}
+                hint="Shows where to look and how to match."
+                onClick={() => setOptions(!options)}
+              >
+                Options{chosen > 0 ? ` (${chosen})` : ""}
+              </Button>
+            )}
           </div>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
-          {inline && (
-            <Button
-              variant="ghost"
-              className="h-8! px-2! sm:hidden"
-              aria-expanded={options}
-              aria-controls={`${idPrefix}-options`}
-              hint="Shows where to look and how to match."
-              onClick={() => setOptions(!options)}
-            >
-              Options{chosen > 0 ? ` (${chosen})` : ""}
-            </Button>
-          )}
+        <div
+          className={`${inline && !options ? "hidden sm:flex" : "flex"} min-w-0 flex-wrap items-center gap-x-4 gap-y-2`}
+        >
           <div
             id={`${idPrefix}-options`}
             className={`${inline ? `${options ? "flex" : "hidden"} sm:flex` : "flex"} min-w-0 flex-wrap items-center gap-x-4 gap-y-2`}

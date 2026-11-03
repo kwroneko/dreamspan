@@ -170,6 +170,7 @@ export function BlockSection({
         <button
           type="button"
           data-layout-audit-ignore="inset: Disclosure is the full-width section header"
+          data-section-toggle
           aria-expanded={open}
           aria-label={`${title} of ${label}${changed ? ", changed from the defaults" : ""}`}
           onClick={onToggle}

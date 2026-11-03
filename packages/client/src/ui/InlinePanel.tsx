@@ -14,11 +14,14 @@ export function InlinePanel({
   title,
   onClose,
   className = "",
+  titleHidden = false,
   children
 }: {
   id?: string
   /** Its heading and accessible name. */
   title: string
+  /** A compact panel (a find bar): the heading for assistive technology only, the × in the corner beside the first row. */
+  titleHidden?: boolean
   onClose: () => void
   className?: string
   children: ReactNode
@@ -27,7 +30,7 @@ export function InlinePanel({
     <section
       id={id}
       aria-label={title}
-      className={`flex min-w-0 flex-col gap-2 rounded-md border border-border bg-surface p-2 ${className}`}
+      className={`relative flex min-w-0 flex-col gap-2 rounded-md border border-border bg-surface p-2 ${titleHidden ? "pr-11" : ""} ${className}`}
       onKeyDown={(event) => {
         if (event.key !== "Escape" || event.defaultPrevented) return
         event.preventDefault()
@@ -35,10 +38,19 @@ export function InlinePanel({
         onClose()
       }}
     >
-      <div className="-mt-1 -mr-1 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">{title}</h3>
-        <WindowClose onClick={onClose} />
-      </div>
+      {titleHidden ? (
+        <>
+          <h3 className="sr-only">{title}</h3>
+          <span className="absolute top-2 right-1.5">
+            <WindowClose onClick={onClose} />
+          </span>
+        </>
+      ) : (
+        <div className="-mt-1 -mr-1 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">{title}</h3>
+          <WindowClose onClick={onClose} />
+        </div>
+      )}
       {children}
     </section>
   )
