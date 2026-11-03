@@ -166,6 +166,32 @@ for (const width of [1440, 390])
       await expect(panel.locator('[data-prompt="chatHistory"]')).toContainText(/[\d,]+ tokens/)
       await expect(panel.getByRole("region", { name: "Unsaved changes" })).toHaveCount(0)
       await expectSaveState(panel, NOTHING_TO_SAVE)
+      // Each row's end: kind, tokens, options and ⋯ centred on one line with even gaps; the
+      // tokens and ⋯ line up across rows, markers included (owner, 2026-11-03).
+      const ends = await panel.locator("[data-prompt-end]").evaluateAll((rows) =>
+        rows.map((row) => {
+          const items = [
+            row.querySelector("[data-prompt-kind-tag]"),
+            row.querySelector("[data-prompt-tokens]"),
+            ...row.querySelectorAll("button")
+          ]
+            .filter((el): el is Element => el !== null)
+            .map((el) => el.getBoundingClientRect())
+          const tokens = row.querySelector("[data-prompt-tokens]")?.getBoundingClientRect()
+          return {
+            centres: items.map((r) => r.top + r.height / 2),
+            tokensRight: tokens ? tokens.right : null,
+            right: row.getBoundingClientRect().right
+          }
+        })
+      )
+      expect(ends.length).toBeGreaterThan(2)
+      for (const end of ends) {
+        for (const centre of end.centres) expect(Math.abs(centre - end.centres[0]!)).toBeLessThanOrEqual(1)
+      }
+      for (const end of ends) expect(Math.abs(end.right - ends[0]!.right)).toBeLessThanOrEqual(1)
+      const tokenRights = ends.flatMap((end) => (end.tokensRight === null ? [] : [end.tokensRight]))
+      for (const right of tokenRights) expect(Math.abs(right - tokenRights[0]!)).toBeLessThanOrEqual(1)
       await shot("collapsed")
 
       // Expand: the text in the code editor; the header's Options open the prompt's options.

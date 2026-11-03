@@ -546,7 +546,7 @@ function PromptBlock({
         <div className="min-w-0 flex-1">
           <div data-prompt-title-row className="flex min-w-0 items-center gap-1">
             {named}
-            {!prompt.marker && <PromptKindTag prompt={prompt} />}
+            {!column && !prompt.marker && <PromptKindTag prompt={prompt} />}
             {!column && optionsToggle}
             {!column && menu}
           </div>
@@ -567,13 +567,19 @@ function PromptBlock({
             <TokenCount prompt={prompt} content={content} context={context} />
           </div>
         )}
-        {column && (prompt.marker || !open) && (
-          <span className="ml-auto flex h-8 shrink-0 items-center pl-1">
-            <TokenCount prompt={prompt} content={content} context={context} />
+        {column && (
+          // One cluster on the title's line: kind, tokens, options and ⋯, centred together with
+          // even gaps. A marker has no options button; its slot stays empty so the tokens and ⋯
+          // line up with the other rows' (owner, 2026-11-03: "both alignment and spacing are off").
+          <span data-prompt-end className="ml-auto flex h-8 shrink-0 items-center gap-2 self-start">
+            {!prompt.marker && <PromptKindTag prompt={prompt} />}
+            {(prompt.marker || !open) && <TokenCount prompt={prompt} content={content} context={context} />}
+            <span className="flex items-center gap-1">
+              {optionsToggle || <span aria-hidden className="size-8 shrink-0" />}
+              {menu}
+            </span>
           </span>
         )}
-        {column && optionsToggle}
-        {column && menu}
       </BlockHeader>
       {column && !prompt.marker && (open || summary || (aboveBreakpoint && volatileMacros(content).length > 0)) && (
         <div data-prompt-info className="flex flex-wrap items-center gap-2 px-3 pb-2">
