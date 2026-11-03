@@ -2242,7 +2242,7 @@ export class WriteOps extends RpcGroup.make(
   // --- Generation (ARCHITECTURE.md §15).
   /**
    * Opens a generation's rollout before its request is sent (DATA-MODEL §7.1): the row, its
-   * frozen context snapshot (JSON text, stored as given), the version's link to it and to
+   * frozen context snapshot (JSON text, stored as given), compact lore activation receipts, the version's link to it and to
    * the model, the chat variables the preset's and cards' macros wrote, as `var.set`
    * events of the version, and the values its template messages drew. The version must be the user's and still generating, and the
    * model one of the user's live connections'.
@@ -2679,6 +2679,7 @@ export class ReadOps extends RpcGroup.make(
       kind: EntityKind,
       /** Only entities with this tag, e.g. "persona" for the persona folder. */
       tag: Schema.NullOr(Schema.String),
+      withFilterData: Schema.optionalKey(Schema.Boolean),
       archived: Schema.Boolean
     },
     success: Schema.Array(LibraryRef),

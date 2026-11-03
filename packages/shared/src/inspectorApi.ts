@@ -17,6 +17,7 @@ export const SourceActivation = Schema.Union([
     step: Schema.Int,
     why: Schema.Union([
       Schema.Struct({ kind: Schema.Literal("constant") }),
+      Schema.Struct({ kind: Schema.Literal("sticky") }),
       /** Kept from an earlier turn while the history's start holds (DESIGN §1.3). */
       Schema.Struct({ kind: Schema.Literal("pinned") }),
       Schema.Struct({

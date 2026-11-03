@@ -6,6 +6,8 @@
 
 **Built 2026-11-02 (entryclicks):** The per-view lorebook expansion decision in §1.3 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §14.6.
 
+**Built 2026-11-02 (lorebooktimed):** Sticky, cooldown and speaker character filters (§1.3) are implemented and obsolete as implementation requirements; see ARCHITECTURE.md §15.
+
 **Built 2026-11-02 (snippetpick):** Where sent text goes (one click to the expanded snippet used last, else a menu at the button; §4.1) is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §14.2.
 **Built 2026-11-02 (snippetstay):** Sending text to a snippet without navigating, with a notice offering Open (§4.1), is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §14.2.
 
@@ -78,6 +80,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** **No "Continue by prefilling" switch** (owner, 2026-11-02): the preset editor's Prefill card doesn't show ST's continue prefill. The stored `prefill.continue` stays as it is: imported from ST's `continue_prefill` and exported back unchanged, so a round trip to ST keeps it. Nothing in generation reads it, and Continue behaves as decided on 2026-10-31 (above). **Built** (ARCHITECTURE §9, §14.6).
 
 ### 1.3 Lorebooks / World Info
+- **[D]** (owner, 2026-11-02) "implement three ST world-info features that are currently imported and kept but have no effect: **sticky**, **cooldown** and **character filters**." They use ST semantics, with state causal to the selected history and independent per fork; a message's swipes share their preceding state. Filters select the character writing the reply, including in multi-character chats. **Built** (ARCHITECTURE §15).
+- **[P]** (lorebooktimed, 2026-11-02) Admissions are immutable records of generated versions, folded on the selected path with shared prefix checkpoints; previews never record admissions. Imports resolve filter filenames to card identities and local tag IDs to names, retaining their export identities. An imported transcript has no historical admissions here: timers begin with the first generation that uses an entry. Automation ID (external automation), memo (editor/export metadata), export name/priority (card format metadata) and `use_regex` (ignored by ST's keyword matcher) are legitimately inapplicable to activation. **Built** (ARCHITECTURE §8, §15).
 - **[D]** Imported lorebooks must work. Matching ST's activation and placement exactly is **not** a goal; ST's implementation is considered poor.
 - **[D]** Lorebooks usually wreck the KV cache, so they will work differently here.
 - **[D]** Decision models (Jev and others) can decide whether an entry is included. This must stay optional.

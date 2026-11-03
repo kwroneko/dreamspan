@@ -2,6 +2,9 @@
 // chat part, settings.json, a group, or one of the folder's library files, and building a
 // persona's card. Like every parse, nothing here throws on a file's content: a file that
 // can't be read is a report with an error.
+import { mapLorebookFilters } from "../formats/lorebookFilters.ts"
+import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import type { StLoreMapping } from "./ops.ts"
 import { sourceTime } from "../formats/sourceTime.ts"
 import { docHash, searchText } from "../db/documents.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
@@ -94,7 +97,8 @@ const parseLibraryFile = (
   fileName: string,
   expect: EntityKind,
   textSwitches?: StSettings["textSwitches"],
-  authorNoteLore?: AuthorNoteLore
+  authorNoteLore?: AuthorNoteLore,
+  loreMapping?: StLoreMapping
 ) =>
   Effect.map(
     authorNoteLore
@@ -102,6 +106,31 @@ const parseLibraryFile = (
       : parseFile(bytes, fileName),
     (file) => {
       let parsed = file
+      if (parsed.library && loreMapping && (expect === "lorebook" || expect === "card")) {
+        const doc = JSON.parse(parsed.library.docJson)
+        const mapped =
+          expect === "lorebook"
+            ? mapLorebookFilters(doc as LorebookDoc, loreMapping)
+            : {
+                ...doc,
+                tags: [
+                  ...doc.tags,
+                  ...new Set(
+                    (loreMapping.cardTags ?? [])
+                      .map((id) => loreMapping.tags[id] ?? id)
+                      .filter((tag) => !doc.tags.includes(tag))
+                  )
+                ],
+                ...(doc.character_book ? { character_book: mapLorebookFilters(doc.character_book, loreMapping) } : {})
+              }
+        const docJson = JSON.stringify(mapped)
+        if (docJson !== parsed.library.docJson)
+          parsed = new ParsedFile({
+            ...parsed,
+            library: { ...parsed.library, docJson, docHash: docHash(mapped), searchText: searchText(mapped) },
+            sha256: sha256(new TextEncoder().encode(JSON.stringify([parsed.sha256, mapped])))
+          })
+      }
       // A book whose entries went where the folder's default author's note is changes with it.
       if (authorNoteLore && parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_entries"))
         parsed = new ParsedFile({

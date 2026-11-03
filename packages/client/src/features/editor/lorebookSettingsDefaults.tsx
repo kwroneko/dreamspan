@@ -303,7 +303,7 @@ const SETTINGS: ReadonlyArray<Setting> = [
     input: { kind: "text" },
     current: (entry) =>
       entry.character_filter
-        ? `${entry.character_filter.is_exclude ? "Not " : ""}${[...entry.character_filter.names, ...entry.character_filter.tags].join(", ")}`
+        ? `${entry.character_filter.is_exclude ? "Not " : ""}${[...(entry.character_filter.cards ?? []).map((card) => card.name), ...entry.character_filter.names, ...entry.character_filter.tags].join(", ")}`
         : "",
     patch: () => ({}),
     many: false,

@@ -3,8 +3,8 @@
 // the user's), a new generated version that starts as its text and streams on from its end.
 // The old version stays. A model that takes the start of its reply (a prefill) gets it so; any
 // other gets the reply as its own last message and is asked to write only what follows (owner,
-// 2026-10-31). Without a model, or while its capability is unknown, the button says why it
-// isn't available, and a click (or a tap, where there's no tooltip) shows the reason in full.
+// 2026-10-31). Before the next context arrives, the action waits for it. Without a model,
+// or if its capability remains unresolved, the button says why and a click shows the reason.
 import { originalReply } from "@rp/shared/replySections.ts"
 import { useSyncExternalStore } from "react"
 import type { ChatSession } from "./session.ts"
@@ -34,7 +34,23 @@ export const canContinue = ({ entry, session }: MessageActionContext) => {
 }
 
 export const runContinue = async (context: MessageActionContext, source: "button" | "keyboard") => {
-  const blocked = continueBlocked(context.session.snapshot().history?.model)
+  const { session, entry } = context
+  const before = session.snapshot()
+  if (before.history?.model === undefined) {
+    // A finished reply can arrive before the context read held behind it resolves.
+    if (!(await session.ensureNextContext())) return
+    const current = session.snapshot()
+    const latest = current.entries.at(-1)
+    if (
+      current.forkId !== before.forkId ||
+      current.leafSlotId !== before.leafSlotId ||
+      latest?.version.id !== entry.version.id ||
+      latest?.rowVersion !== entry.rowVersion ||
+      !canContinue(context)
+    )
+      return
+  }
+  const blocked = continueBlocked(session.snapshot().history?.model)
   if (blocked !== null) {
     context.report({ ok: false, error: { tag: "ContinueUnavailable", message: blocked, problems: [], reason: null } })
     return

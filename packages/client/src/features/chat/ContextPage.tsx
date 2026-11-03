@@ -55,11 +55,13 @@ const activationText = (activation: SourceActivation): string => {
   }
   if (activation.status === "skipped") return `Skipped at step ${activation.step}: ${activation.reason}`
   const why =
-    activation.why.kind === "constant"
-      ? "constant entry"
-      : activation.why.kind === "pinned"
-        ? "pinned above the history until its start moves"
-        : `keyword “${activation.why.primaryKey}”${activation.why.secondaryKeys.length ? `; ${activation.why.logic ?? "and_any"}: ${activation.why.secondaryKeys.map((key) => `“${key}”`).join(", ")}` : ""}`
+    activation.why.kind === "sticky"
+      ? "Kept active by sticky timing"
+      : activation.why.kind === "constant"
+        ? "constant entry"
+        : activation.why.kind === "pinned"
+          ? "pinned above the history until its start moves"
+          : `keyword “${activation.why.primaryKey}”${activation.why.secondaryKeys.length ? `; ${activation.why.logic ?? "and_any"}: ${activation.why.secondaryKeys.map((key) => `“${key}”`).join(", ")}` : ""}`
   const notes =
     activation.why.kind === "keys" && activation.why.notes?.length
       ? `; found in the note${activation.why.notes.length > 1 ? "s" : ""} ${activation.why.notes.map((note) => `“${note}”`).join(", ")}`

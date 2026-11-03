@@ -58,6 +58,30 @@ const setup = (human = false) =>
 test("Alt+Enter continues without sending or consuming composer text, including guidance", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chat = await setup()
+  // Delay both ways the capability can arrive, so completion alone cannot make the
+  // shortcut ready. Releasing after the keypress reproduces the next-context race.
+  let holdContext = true
+  const held: Array<() => void> = []
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    const contextReads = new Set<number>()
+    socket.onMessage((data) => {
+      if (typeof data === "string") {
+        const frame = JSON.parse(data)
+        if (frame.tag === "GetNextContext") contextReads.add(frame.id)
+      }
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => {
+      if (
+        holdContext &&
+        typeof data === "string" &&
+        (contextReads.has(JSON.parse(data).requestId) || data.includes('"_tag":"Cache"'))
+      )
+        held.push(() => socket.send(data))
+      else socket.send(data)
+    })
+  })
   await page.goto(`${server().url}/chats/${chat.id}`)
   const reply = page.getByRole("article").last()
   await expect(reply.locator(".markdown").last()).toContainText("The ledger")
@@ -68,6 +92,11 @@ test("Alt+Enter continues without sending or consuming composer text, including 
     await box.fill("UNSENT SYNTHETIC DRAFT")
     const requests = provider.requests.length
     await box.press("Alt+Enter")
+    if (!guidance) {
+      // The action must resume on readiness without another keypress.
+      holdContext = false
+      for (const release of held) release()
+    }
     await expect.poll(() => provider.requests.length).toBe(requests + 1)
     expect(JSON.stringify(provider.requests.at(-1))).not.toContain("UNSENT SYNTHETIC DRAFT")
     expect(provider.requests.at(-1)!.messages.at(-1)!.role).toBe("assistant")

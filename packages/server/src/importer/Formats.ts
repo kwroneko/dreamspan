@@ -22,6 +22,7 @@ import {
   type ParsedFile,
   type StChatPart,
   type StGroup,
+  type StLoreMapping,
   type StLibraryFile,
   type StPersona,
   type StSettings
@@ -97,7 +98,8 @@ export class Formats extends Context.Service<
         fileName: string,
         expect: EntityKind,
         textSwitches?: StSettings["textSwitches"],
-        authorNoteLore?: AuthorNoteLore
+        authorNoteLore?: AuthorNoteLore,
+        loreMapping?: StLoreMapping
       ) => Effect.Effect<StLibraryFile, FormatWorkerFailed>
       readonly persona: (
         bytes: Uint8Array,
@@ -240,13 +242,14 @@ export const layer = (options: FormatsOptions) =>
                 Effect.suspend(() =>
                   workerFailures(client.ParseStGroup({ bytes: ownBuffer(bytes), fileName, parser: parser("group") }))
                 ),
-              libraryFile: (bytes, fileName, expect, textSwitches, authorNoteLore) =>
+              libraryFile: (bytes, fileName, expect, textSwitches, authorNoteLore, loreMapping) =>
                 Effect.suspend(() =>
                   workerFailures(
                     client.ParseStLibraryFile({
                       bytes: ownBuffer(bytes),
                       fileName,
                       expect,
+                      ...(loreMapping ? { loreMapping } : {}),
                       ...(textSwitches ? { textSwitches } : {}),
                       ...(authorNoteLore ? { authorNoteLore } : {}),
                       parser: parser("library-file")

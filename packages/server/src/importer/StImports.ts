@@ -607,7 +607,11 @@ export class StImports extends Context.Service<
         arrivalFile: StArrival
       ) =>
         Effect.gen(function* () {
-          const parsed = yield* formats.st.libraryFile(bytes, file, "card")
+          const parsed = yield* formats.st.libraryFile(bytes, file, "card", undefined, undefined, {
+            cards: Object.fromEntries([...session.cards].map(([name, card]) => [name, card.entityId])),
+            tags: session.settings?.tagNames ?? {},
+            cardTags: session.settings?.characterTags?.[stem(file)] ?? []
+          })
           const card = parsed.card
           const arrival: StArrival =
             parsed.parsed.stCreatedAt == null ? arrivalFile : { at: parsed.parsed.stCreatedAt, basis: 0 }
@@ -654,7 +658,13 @@ export class StImports extends Context.Service<
             file,
             kind,
             session.settings?.textSwitches,
-            kind === "lorebook" ? authorNotePlace(session.settings?.defaultAuthorNote ?? null).lore : undefined
+            kind === "lorebook" ? authorNotePlace(session.settings?.defaultAuthorNote ?? null).lore : undefined,
+            kind === "lorebook"
+              ? {
+                  cards: Object.fromEntries([...session.cards].map(([name, card]) => [name, card.entityId])),
+                  tags: session.settings?.tagNames ?? {}
+                }
+              : undefined
           )
           const anEntries = parsed.parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_riders")
           // ST applies its global books to every chat: here they go with the preset ST had

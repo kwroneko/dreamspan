@@ -1,4 +1,6 @@
 import type { LorebookDoc, LorebookEntry, SelectiveLogic } from "@rp/shared/docs/lorebook.ts"
+import { loreEntryKey } from "./loreTiming.ts"
+import { characterFilterPasses } from "@rp/shared/lorebookFilters.ts"
 import { compileLinear, makeRegexDeadline } from "./regex.ts"
 
 interface Book {
@@ -19,6 +21,8 @@ interface Scan {
   readonly messages: ReadonlyArray<string>
   /** Eligible messages on the full path, independently of the scan window. */
   readonly messageCount?: number
+  readonly effects?: ReadonlyMap<string, { readonly sticky: boolean; readonly cooldown: boolean }>
+  readonly speaker?: { readonly entity: string; readonly name?: string; readonly tags?: ReadonlyArray<string> }
   readonly descriptions?: Partial<Record<Description, string>>
   /**
    * Extension prompts scanned as ST's `addInject` adds them: all of them, whatever the scan
@@ -67,6 +71,7 @@ interface Source {
 
 type Why =
   | { readonly kind: "constant" }
+  | { readonly kind: "sticky" }
   | {
       readonly kind: "keys"
       readonly primaryKey: string
@@ -85,6 +90,8 @@ type SkipReason =
   | "disabled"
   | "trigger"
   | "delay"
+  | "cooldown"
+  | "character_filter"
   | "recursion"
   | "no_primary"
   | "secondary"
@@ -456,8 +463,6 @@ export const matchLorebooks = (
       currentSource = source
       const entry = source.entry
       const unsupported: Array<string> = []
-      if (entry.sticky || entry.cooldown) unsupported.push("sticky/cooldown")
-      if (entry.character_filter) unsupported.push("character filters")
       if (entry.group.includes(",")) unsupported.push("overlapping groups (group treated as one name)")
       if (entry.group && entry.group_weight !== 100) unsupported.push("group weights (deterministic choice)")
       if (entry.vectorized || entry.automation_id || /^@@(?:activate|dont_activate)/.test(entry.content))
@@ -479,19 +484,29 @@ export const matchLorebooks = (
           skip(source, "trigger")
           continue
         }
+        if (!characterFilterPasses(entry.character_filter, scan.speaker)) {
+          skip(source, "character_filter")
+          continue
+        }
+        const effect = scan.effects?.get(loreEntryKey(source.book, entry))
+        const sticky = effect?.sticky ?? false
+        if (effect?.cooldown && !sticky) {
+          skip(source, "cooldown")
+          continue
+        }
         if (entry.delay !== null && entry.delay > (scan.messageCount ?? scan.messages.length)) {
           skip(source, "delay")
           continue
         }
         const delayed = Number(entry.delay_until_recursion)
-        if ((delayed && step < delayed) || (step > 0 && (!recursive(source) || entry.exclude_recursion))) {
+        if (!sticky && ((delayed && step < delayed) || (step > 0 && (!recursive(source) || entry.exclude_recursion)))) {
           skip(source, "recursion")
           continue
         }
         const scoring = entry.group && (settings.groupScoring || scoredGroups.has(entry.group))
         const text = !entry.constant || scoring ? buffer(source) : { text: "" }
-        let why: Why = { kind: "constant" }
-        if (!entry.constant) {
+        let why: Why = { kind: entry.constant ? "constant" : sticky ? "sticky" : "constant" }
+        if (!entry.constant && !sticky) {
           let primaryKey: string | undefined
           let unsafe = false
           for (const key of entry.keys) {
@@ -559,6 +574,19 @@ export const matchLorebooks = (
       }
       const losers = new Set<(typeof sources)[number]>()
       for (const [group, members] of groups) {
+        const stickyMembers = members.filter(
+          (m) => scan.effects?.get(loreEntryKey(m.source.book, m.source.entry))?.sticky
+        )
+        if (stickyMembers.length) {
+          // ST retains every sticky member, skips scoring/override, then removes cooldown members.
+          for (const member of members)
+            if (
+              !stickyMembers.includes(member) ||
+              scan.effects?.get(loreEntryKey(member.source.book, member.source.entry))?.cooldown
+            )
+              losers.add(member.source)
+          continue
+        }
         if (admittedGroups.has(group)) {
           for (const member of members) losers.add(member.source)
           continue
@@ -587,7 +615,12 @@ export const matchLorebooks = (
           skip(source, "budget")
           continue
         }
-        if (entry.use_probability && entry.probability !== 100 && random() * 100 > entry.probability) {
+        if (
+          !scan.effects?.get(loreEntryKey(source.book, entry))?.sticky &&
+          entry.use_probability &&
+          entry.probability !== 100 &&
+          random() * 100 > entry.probability
+        ) {
           skip(source, "probability")
           failedProbability.add(source)
           continue

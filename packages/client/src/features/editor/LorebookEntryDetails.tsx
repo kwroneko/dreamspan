@@ -13,6 +13,8 @@ import {
 } from "react"
 import type { Registry } from "../../registry.ts"
 import { BlockSection } from "../../ui/Block.tsx"
+import { MultiSelect } from "../../ui/MultiSelect.tsx"
+import { useLoreFilterCards } from "./libraryLorebooks.ts"
 import { type FieldPath, textField, valueField } from "@rp/shared/editing.ts"
 import { useEditorFocus } from "../../textActions.tsx"
 import { Switch } from "../../ui/Choice.tsx"
@@ -240,36 +242,87 @@ export function DelayUntilRecursion({ store, path }: { store: EditorStore; path:
   )
 }
 
-/** A list of names, one per line, as an optional object's field. */
+/** The existing filter fields, using the library's card and tag choices. */
 export function CharacterFilter({ store, path }: { store: EditorStore; path: FieldPath }) {
-  const filter = useValue<
-    { is_exclude: boolean; names: ReadonlyArray<string>; tags: ReadonlyArray<string> } | undefined
-  >(store, path)
+  const filter = useValue<LorebookEntry["character_filter"]>(store, path)
   const current = filter ?? { is_exclude: false, names: [], tags: [] }
-  const set = (next: typeof current) =>
-    store.setValue(path, !next.is_exclude && next.names.length === 0 && next.tags.length === 0 ? undefined : next)
-  const lines = (text: string) => (text === "" ? [] : text.split("\n"))
+  const library = useLoreFilterCards().filter((ref) => ref.refKind === "upstream")
+  const chosen = [
+    ...(current.cards ?? []).map((card) => card.entity),
+    ...current.names.map((name) => `filename:${name}`)
+  ]
+  const choices = [
+    ...library.map((ref) => ({
+      value: ref.entityId as string,
+      label: ref.label,
+      description: `Apply this filter when ${ref.label} writes the reply.`
+    })),
+    ...(current.cards ?? [])
+      .filter((card) => !library.some((ref) => ref.entityId === card.entity))
+      .map((card) => ({ value: card.entity, label: card.name, unavailable: true })),
+    ...current.names.map((name) => ({ value: `filename:${name}`, label: name, unavailable: true }))
+  ]
+  const tags = [...new Set([...current.tags, ...library.flatMap((ref) => ref.filterData?.tags ?? [])])].sort()
+  const set = (next: typeof current) => {
+    store.setValue(
+      path,
+      !next.is_exclude && next.names.length === 0 && !next.cards?.length && next.tags.length === 0 ? undefined : next
+    )
+    void store.save(valueField(path))
+  }
   return (
     <div className="flex flex-col gap-2">
-      <Field label="Characters" about="One name per line. Empty: every character.">
-        <Textarea
-          rows={2}
-          value={current.names.join("\n")}
-          onChange={(event) => set({ ...current, names: lines(event.currentTarget.value) })}
-          onBlur={() => void store.save(valueField(path))}
+      <Field
+        label="Characters"
+        about="Include the entry when a chosen character writes the reply. Empty allows every character."
+      >
+        <MultiSelect
+          items={choices}
+          value={chosen}
+          addLabel="Add"
+          chosenLabel="Chosen characters"
+          listLabel="Choose characters"
+          explanation="Choose the characters whose replies can include this entry."
+          onValueChange={(values) =>
+            set({
+              ...current,
+              names: current.names.filter((name) => values.includes(`filename:${name}`)),
+              cards: values
+                .filter((value) => !value.startsWith("filename:"))
+                .map(
+                  (entity) =>
+                    current.cards?.find((card) => card.entity === entity) ?? {
+                      entity,
+                      name:
+                        library.find((ref) => ref.entityId === entity)?.filterData?.name ??
+                        library.find((ref) => ref.entityId === entity)?.label ??
+                        entity
+                    }
+                )
+            })
+          }
         />
       </Field>
-      <Field label="Character tags" about="One tag per line.">
-        <Textarea
-          rows={2}
-          value={current.tags.join("\n")}
-          onChange={(event) => set({ ...current, tags: lines(event.currentTarget.value) })}
-          onBlur={() => void store.save(valueField(path))}
+      <Field label="Character tags" about="Include the entry when the speaker has a chosen tag.">
+        <MultiSelect
+          items={tags.map((tag) => ({
+            value: tag,
+            label: tag,
+            description: `Apply this filter to characters tagged ${tag}.`
+          }))}
+          value={current.tags}
+          addLabel="Add"
+          chosenLabel="Chosen tags"
+          listLabel="Choose character tags"
+          explanation="Choose tags from the cards in your library."
+          onValueChange={(tags) => set({ ...current, tags })}
         />
       </Field>
-      <Switch checked={current.is_exclude} onCheckedChange={(next) => set({ ...current, is_exclude: next })}>
-        Everyone except these
-      </Switch>
+      <Tooltip label="Exclude the chosen characters and tags from this entry.">
+        <Switch checked={current.is_exclude} onCheckedChange={(next) => set({ ...current, is_exclude: next })}>
+          Everyone except these
+        </Switch>
+      </Tooltip>
       <FieldTools store={store} field={valueField(path)} label="Character filter" />
     </div>
   )

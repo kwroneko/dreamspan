@@ -38,6 +38,7 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   modelName: Schema.optionalKey(Schema.String),
   /** For lorebooks, how many entries its head revision has. */
   lorebookEntries: Schema.optionalKey(Schema.Int),
+  filterData: Schema.optionalKey(Schema.Struct({ name: Schema.String, tags: Schema.Array(Schema.String) })),
   headRevisionId: RevisionId,
   followsRefId: Schema.NullOr(RefId),
   chatId: Schema.NullOr(ChatId),
