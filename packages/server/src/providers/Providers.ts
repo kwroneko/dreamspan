@@ -1198,7 +1198,7 @@ export const layer = (options: ProvidersOptions = {}) =>
               const target: RequestTarget = { kind: prepared.kind.id, api: prepared.api }
               const transforms = registry.transforms.list().filter((t) => t.appliesTo(target))
               const observers = registry.observers.list().filter((o) => o.appliesTo(target))
-              const breakpoints = options.breakpoints ?? []
+              const breakpoints = options.cacheRetention === "none" ? [] : (options.breakpoints ?? [])
               const overrides = options.payload
               const events = prepared.kind.streams.streamSimple(piModel, transcript, {
                 // A keyless local server still needs a value; pi's direct calls require one.
@@ -1239,11 +1239,17 @@ export const layer = (options: ProvidersOptions = {}) =>
                   const initial =
                     overrides === undefined ? (payload as Record<string, unknown>) : merged(payload, overrides)
                   if (sources) markWireSources(initial, sources)
+                  const effective = resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
                   const transformed = transforms.reduce(
-                    (current, t) => t.transform(current, { target, messages: request.context.messages, breakpoints }),
+                    (current, t) =>
+                      t.transform(current, {
+                        target,
+                        messages: request.context.messages,
+                        breakpoints,
+                        cacheLayout: effective.cacheLayout.value
+                      }),
                     initial
                   )
-                  const effective = resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
                   const final = limitImages(transformed, effective.maxImages.value)
                   await Effect.runPromise(open(final), { signal })
                   const policy = documentedCachePolicy(

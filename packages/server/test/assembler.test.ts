@@ -2996,9 +2996,8 @@ describe("lorebooks: preset books, placement and pins (DESIGN §1.3)", () => {
       })
       // Without the previous context, nothing is pinned: the levee no longer matches.
       expect(text(await assembled({ ...first, messages: later }))).not.toContain("PIN_LEVEE")
-      // Pinned lore keeps the prefix stable until the start moves: (a) ends before it, the pinned marker after.
-      const pinnedAt = two.request.breakpoints.find((b) => b.reason === "pinned")
-      expect(pinnedAt).toBeDefined()
+      // Pinned lore remains in the stable history prefix without spending its own marker.
+      expect(two.request.breakpoints.some((b) => b.reason === "pinned")).toBe(false)
     })
 
     it("drops pins when the history's start moves, and re-evaluates", async () => {
@@ -3039,7 +3038,7 @@ describe("lorebooks: preset books, placement and pins (DESIGN §1.3)", () => {
         historyStart: one.historyStart ?? null
       })
       expect(two.historyMove).toBe("unchanged")
-      const pinnedAt = two.request.breakpoints.find((b) => b.reason === "pinned")!.message
+      const pinnedAt = two.request.messages.findLastIndex((m) => m.content.includes("PIN_SUN"))
       expect(contents(two).slice(0, pinnedAt + 1)).toEqual(contents(one).slice(0, pinnedAt + 1))
     })
 
@@ -3057,16 +3056,15 @@ describe("lorebooks: preset books, placement and pins (DESIGN §1.3)", () => {
 describe("cache breakpoints with pinned lore (DESIGN §1.3, §5.5)", () => {
   const kinds = (...list: ReadonlyArray<Stability>) => list.map((kind) => ({ kind }))
   const messages = kinds("prefix", "prefix", "pinned", "pinned", "summary", "history", "history", "volatile")
-  it("puts (c) first while the start holds, then (a) before (b), then after the pinned lore", () => {
+  it("puts (c) first while the start holds, then (a) before (b), without a pinned marker", () => {
     expect(placeBreakpoints(messages).map((b) => [b.reason, b.message])).toEqual([
       ["history", 6],
       ["prefix", 1],
-      ["summary", 4],
-      ["pinned", 3]
+      ["summary", 4]
     ])
   })
   it("puts (a) first after a move of the history's start", () => {
-    expect(placeBreakpoints(messages, true).map((b) => b.reason)).toEqual(["prefix", "history", "summary", "pinned"])
+    expect(placeBreakpoints(messages, true).map((b) => b.reason)).toEqual(["prefix", "history", "summary"])
   })
   it("reaches the history with (a) when nothing is pinned", () => {
     expect(placeBreakpoints(kinds("prefix", "prefix", "history", "volatile"), true)).toEqual([
@@ -3074,7 +3072,7 @@ describe("cache breakpoints with pinned lore (DESIGN §1.3, §5.5)", () => {
       { message: 2, reason: "history" }
     ])
   })
-  it("marks the history, the prefix and the pinned lore for an explicit provider, within its markers", async () => {
+  it("marks the history and the prefix without a dedicated marker for pinned lore for an explicit provider, within its markers", async () => {
     const pinning = {
       id: "pinning",
       entity: "pinning-entity",
@@ -3089,7 +3087,7 @@ describe("cache breakpoints with pinned lore (DESIGN §1.3, §5.5)", () => {
         summaries: []
       })
     )
-    expect(snapshot.request.breakpoints.map((b) => b.reason)).toEqual(["history", "prefix", "pinned"])
+    expect(snapshot.request.breakpoints.map((b) => b.reason)).toEqual(["history", "prefix"])
     expect(snapshot.issues.some((i) => i.kind === "cache_breakpoints")).toBe(false)
   })
   it("ends Anthropic's system prompt before the pinned lore, so pi-ai's marker there keeps the prefix", async () => {
@@ -3108,16 +3106,14 @@ describe("cache breakpoints with pinned lore (DESIGN §1.3, §5.5)", () => {
     })
     const snapshot = await assembled(fixture)
     const prefix = snapshot.request.breakpoints.find((b) => b.reason === "prefix")!
-    const pinned = snapshot.request.breakpoints.find((b) => b.reason === "pinned")!
     const lore = snapshot.request.messages.findIndex((m) => m.content.includes("PINNED"))
     expect(lore).toBeGreaterThan(prefix.message)
-    expect(lore).toBeLessThanOrEqual(pinned.message)
     const wire = providerRequest(snapshot.request, claude)
     const system = (wire.context as { systemPrompt?: string }).systemPrompt ?? ""
-    // The system prompt is the prefix up to (a), and the pinned lore after it keeps its own marker.
+    // The system prompt ends at (a), preserving it when pinned lore changes.
     expect(system).not.toContain("PINNED")
     expect(system).toContain(snapshot.request.messages[prefix.message]!.content)
-    expect(wire.breakpoints).toContain(pinned.message - prefix.message - 1)
+    expect(snapshot.request.breakpoints.some((b) => b.reason === "pinned")).toBe(false)
     // Without pinned lore the system prompt takes the whole leading run, as before.
     const plain = await assembled({ ...fixture, lorebooks: [], events: [] })
     const plainWire = providerRequest(plain.request, claude)

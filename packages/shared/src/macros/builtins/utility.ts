@@ -183,7 +183,7 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
       return items.length === 0 ? "" : items[Math.floor(call.random() * items.length)]!
     }
   },
-  { kind: "value", name: "pick", list: true, volatile: true, accepts: oneOfTheChoices, handler: pick },
+  { kind: "value", name: "pick", list: true, volatile: true, changesPerReply: false, accepts: oneOfTheChoices, handler: pick },
   { kind: "directive", name: "banned", args: [{ name: "word" }], handler: () => "" },
   {
     kind: "value",
