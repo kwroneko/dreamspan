@@ -161,6 +161,48 @@ const expectInlineNames = async (scope: Locator) => {
   // A normal 4 px stack instead of space distributed over the portrait's height.
   for (let i = 1; i < geometry.length; i++)
     expect.soft(Math.abs(geometry[i]!.top - geometry[i - 1]!.bottom - 4)).toBeLessThanOrEqual(1)
+
+  // Persona has its own row, directly above the final token row, at every panel width.
+  const persona = header.locator("[data-persona-folder]")
+  await expect(persona.getByRole("switch", { name: "Persona", exact: true })).toBeVisible()
+  const finalRows = await header.evaluate((element) => {
+    const persona = element.querySelector<HTMLElement>("[data-persona-folder]")!
+    const tokens = element.querySelector<HTMLElement>("[data-card-tokens]")!
+    const label = [...persona.querySelectorAll("span")].find((span) => span.textContent === "Persona")!
+    const toggle = persona.querySelector('[role="switch"]')!
+    const nickname = persona.previousElementSibling!.getBoundingClientRect()
+    const row = persona.getBoundingClientRect()
+    const counts = tokens.getBoundingClientRect()
+    const text = label.getBoundingClientRect()
+    const control = toggle.getBoundingClientRect()
+    const bounds = element.getBoundingClientRect()
+    return {
+      sameStack: persona.parentElement === tokens.parentElement,
+      last: tokens === tokens.parentElement!.lastElementChild,
+      nicknameGap: row.top - nickname.bottom,
+      tokenGap: counts.top - row.bottom,
+      controlFirst: control.right <= text.left,
+      centred: Math.abs(control.top + control.height / 2 - text.top - text.height / 2),
+      labelSize: getComputedStyle(label).fontSize,
+      tokenSize: getComputedStyle(tokens).fontSize,
+      labelColour: getComputedStyle(label).color,
+      tokenColour: getComputedStyle(tokens).color,
+      right: Math.max(row.right, counts.right),
+      headerRight: bounds.right,
+      bottom: counts.bottom,
+      headerBottom: bounds.bottom
+    }
+  })
+  expect.soft(finalRows.sameStack).toBe(true)
+  expect.soft(finalRows.last).toBe(true)
+  expect.soft(finalRows.nicknameGap).toBeCloseTo(4, 0)
+  expect.soft(finalRows.tokenGap).toBeCloseTo(4, 0)
+  expect.soft(finalRows.controlFirst).toBe(true)
+  expect.soft(finalRows.centred).toBeLessThanOrEqual(1)
+  expect.soft(finalRows.labelSize).toBe(finalRows.tokenSize)
+  expect.soft(finalRows.labelColour).toBe(finalRows.tokenColour)
+  expect.soft(finalRows.right).toBeLessThanOrEqual(finalRows.headerRight + 1)
+  expect.soft(finalRows.bottom).toBeLessThanOrEqual(finalRows.headerBottom + 1)
 }
 
 const open = async (page: Page, name: string) => {

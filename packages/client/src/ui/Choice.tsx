@@ -20,7 +20,8 @@ function ChoiceLabel({
   description,
   hint,
   hidden = false,
-  hintInline = true
+  hintInline = true,
+  compact = false
 }: {
   children: ReactNode
   hidden?: boolean
@@ -28,10 +29,11 @@ function ChoiceLabel({
   hint?: { readonly id: string; readonly text: string } | undefined
   /** False: the hint is only the tooltip and the description, never a line under the label. */
   hintInline?: boolean
+  compact?: boolean
 }) {
   return (
     <span className={hidden ? "sr-only" : "flex min-w-0 flex-col"}>
-      <span className="text-sm text-text">{children}</span>
+      <span className={compact ? "text-xs leading-4 text-muted" : "text-sm text-text"}>{children}</span>
       {description && <span className="text-sm text-muted">{description}</span>}
       {hint && (
         // Hidden from the name, and still the description: a reference reads hidden text.
@@ -143,7 +145,7 @@ export function Switch({
   aboutLabel?: string
   /** What switching it on or off does, when the label doesn't say. */
   hint?: string | undefined
-  /** One line in a dense place (a card's header): the hint is its tooltip only, never a line under it. */
+  /** A small, muted, centred row (a card's header), with its hint only in the tooltip. */
   compact?: boolean
   /** An explanation shown elsewhere (a row's own line), read as its description. */
   describedBy?: string | undefined
@@ -154,7 +156,7 @@ export function Switch({
   const id = useId()
   const aboutId = useId()
   const row = (
-    <label className={`flex items-start ${compact ? "gap-2" : "gap-3"}`}>
+    <label className={`flex ${compact ? "items-center gap-2" : "items-start gap-3"}`}>
       <BaseSwitch.Root
         disabled={disabled}
         checked={mixed ? false : checked}
@@ -163,7 +165,7 @@ export function Switch({
         {...(hint || about || describedBy
           ? { "aria-describedby": [hint ? id : null, about ? aboutId : null, describedBy].filter(Boolean).join(" ") }
           : {})}
-        className={`mt-0.5 flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 data-mixed:border-dashed ${focusRing}`}
+        className={`${compact ? "" : "mt-0.5"} flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 data-mixed:border-dashed ${focusRing}`}
       >
         <BaseSwitch.Thumb
           className={`size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none ${mixed ? "translate-x-2 opacity-60" : ""}`}
@@ -174,6 +176,7 @@ export function Switch({
         description={description}
         hint={hint ? { id, text: hint } : undefined}
         hintInline={!compact}
+        compact={compact}
       >
         {children}
       </ChoiceLabel>
