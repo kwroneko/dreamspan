@@ -137,10 +137,13 @@ function CardTokens({ store }: { store: EditorStore }) {
  */
 export function CardTokensRow({ store, entityId, label }: { store: EditorStore; entityId: string; label: string }) {
   return (
-    <div className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 [&>[data-card-tokens]]:shrink-0">
-      <CardTokens store={store} />
-      <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
-    </div>
+    <>
+      <CardSurface placement="chats" entityId={entityId as EntityId} label={label} />
+      <div className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 [&>[data-card-tokens]]:shrink-0">
+        <CardTokens store={store} />
+        <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
+      </div>
+    </>
   )
 }
 

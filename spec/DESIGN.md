@@ -2,6 +2,8 @@
 
 # Design: requirements and decisions
 
+**Built 2026-11-03 (chatswith):** The card-scoped chat entry points and sidebar selection in §2.1 and draggable list/branch divider in §10.1 are implemented and obsolete as implementation requirements; see ARCHITECTURE §12.
+
 **Built 2026-11-02 (entryclicks):** The per-view lorebook expansion decision in §1.3 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §14.6.
 
 **Built 2026-11-02 (snippetpick):** Where sent text goes (one click to the expanded snippet used last, else a menu at the button; §4.1) is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §14.2.
@@ -151,6 +153,9 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 ## 2. Chats and participants
 
 ### 2.1 A chat is its own object
+- **[D] Chats with a cast member** (owner, 2026-11-02): “in a chat with several characters there's no obvious way to reach ‘all chats with this character’ for one of them.” The cast member menu offers **Chats with <name>**, immediately after **Write as <name>**; for the user's persona, **Chats as <name>**. The shared card header and card page offer **N chats** (singular **1 chat**), on its own muted row, hidden for a card with no chats. These open the existing card-scoped Chats list in the left column, with its way back to All chats; the current chat stays in the centre. Scope survives Back/Forward and reload. **Built; obsolete as an implementation requirement** (chatswith; ARCHITECTURE §12).
+- **[D] Sidebar selection** (owner, 2026-11-02): “whenever the left column shows a list that contains the current chat, that chat is selected in the upper list, and the lower half's branch viewer shows its branches with the current branch selected, including a secondary branch.” If the current chat is filtered out, the upper list has no selection and the lower viewer still follows the current chat. Applies after navigation and in scoped and all-chat lists. **Built; obsolete as an implementation requirement** (chatswith; ARCHITECTURE §12).
+  - **[P]** (chatswith, 2026-11-03): Reuse the URL's `character` scope and existing breadcrumb; clear the sidebar's search when following a Chats link. Reveal a hidden sidebar, or show the existing navigation drawer on phones, closing the phone's card panel/editor. The header's new registered `chats` placement precedes the tokens row because personarow has not merged; on the card page it precedes the Persona switch. Reuse the member menu for the persona's navigation and card actions, beside Switch.
 - **[D]** In ST you *message a card*: the card is the chat target, usually a whole scenario, and effectively the only chat with that character (older chats are history travel). Group chats are a special case created by irreversibly promoting a chat. Here, **a chat is a first-class object with any number of cards**. A single-card chat is just the trivial case.
 - **[D]** Keep the convenience of ST's one click from the grid into a conversation, with the card definitions and the other participants in a side panel.
 - **[P]** A card's page offers **Continue** (its latest chat), **New chat**, and the list of all its chats as peers. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12).
@@ -833,6 +838,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D] Chat-list / branch-viewer divider** (owner, 2026-11-02): “The divider between the upper list and the lower branch viewer is draggable”: reuse the panel resizer's handle and behaviour; arrow-key resizing with `aria-valuenow`; double-click resets; remember the size per account; minimum/maximum heights keep both halves usable. On phones follow the column's existing behaviour. **Built; obsolete as an implementation requirement** (chatswith; ARCHITECTURE §12).
+  - **[P]** (chatswith, 2026-11-03): Keep the preferred lower height per account in this browser, like column widths; clamp the rendered height to the available room without rewriting that preference. Default to 45% of the browser's height, keep 112 px for branches and reserve 224 px for the upper list and its controls where the window allows. Use the same split inside the phone's existing navigation drawer.
 
 - **[D] Decided (owner, 2026-11-02):** “Every modal that can be dismissed without a decision (closing it loses nothing, or simply cancels) must have a visible close button: an X in the top-right corner. Clicking outside still closes it too.” “Modals that demand a specific resolution (confirm/cancel choices such as ‘Discard changes?’, destructive confirmations, anything where outside-click is already disabled) don't get the X; their buttons are the way out.” **Built, obsolete as an implementation requirement:** shared dialog, sheet and popover behavior is documented in ARCHITECTURE §5; portrait/picture viewers are reserved for the separate portraitview work.
 

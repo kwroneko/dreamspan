@@ -121,6 +121,7 @@ export function ResizeHandle({
   max,
   direction,
   axis = "x",
+  hint: customHint,
   onChange,
   onReset
 }: {
@@ -130,6 +131,7 @@ export function ResizeHandle({
   max: number
   direction: 1 | -1
   axis?: "x" | "y"
+  hint?: string
   onChange: (width: number) => void
   onReset: () => void
 }) {
@@ -137,7 +139,7 @@ export function ResizeHandle({
   const vertical = axis === "y"
   const at = (event: { clientX: number; clientY: number }) => (vertical ? event.clientY : event.clientX)
   const [less, more] = vertical ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"]
-  const hint = vertical ? SPLIT_HINT : HINT
+  const hint = customHint ?? (vertical ? SPLIT_HINT : HINT)
   return (
     <Tooltip label={hint} side={vertical ? "bottom" : direction === 1 ? "right" : "left"}>
       <div

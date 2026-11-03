@@ -70,7 +70,7 @@ const send = async (page: Page, text: string) => {
 test("a note made in the chat goes into the request once on, and out once off", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
-  await expect(page.getByText("The river is rising.")).toBeVisible()
+  await expect(page.getByRole("article").getByText("The river is rising.")).toBeVisible()
 
   await openPanel(page, "Notes")
   const dialog = page.getByRole("tabpanel", { name: "Notes" })
