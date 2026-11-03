@@ -117,7 +117,13 @@ export class StChatPart extends Schema.Class<StChatPart>("StChatPart")({
   /** Of the part's bytes. */
   sha256: Sha256,
   header: Schema.NullOr(StChatHeader),
-  batches: Schema.Array(Schema.Struct({ messagesJson: Schema.String, speakers: Schema.Array(Schema.String) })),
+  batches: Schema.Array(
+    Schema.Struct({
+      messagesJson: Schema.String,
+      speakers: Schema.Array(Schema.String),
+      hashes: Schema.optionalKey(Schema.Array(Schema.String))
+    })
+  ),
   messages: Schema.Int,
   userTurns: Schema.Int,
   lastUserSpeaker: Schema.NullOr(Schema.String),

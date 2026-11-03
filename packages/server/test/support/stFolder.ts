@@ -1,7 +1,8 @@
 // A synthetic SillyTavern data folder, made by code for the folder import's tests. Nothing
 // here comes from real ST data: the names, texts and settings are made up, and the shapes
 // follow ST's public source (public/global.d.ts, scripts/personas.js, extensions/memory).
-import { readFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 import { cardChunk, png, worldInfo } from "../formats/support.ts"
 
 export const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
@@ -264,4 +265,82 @@ export const largeChat = (count: number) => {
     )
   }
   return new TextEncoder().encode(lines.join("\n"))
+}
+
+/** Long, swipe-heavy branches, including branches of branches. Only synthetic text.
+ * Files are generated one at a time; keeping a whole big family in memory hides the
+ * import's own memory use. Each branch has N messages, with a random 80–99% prefix.
+ */
+export const writeStBranchFamily = (
+  root: string,
+  options: { branches: number; messages: number; swipeShare?: number; name?: string; seed?: number }
+) => {
+  const { branches, messages, swipeShare = 0.3, name = "Alice" } = options
+  let seed = options.seed ?? 12345
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+    return seed / 0x100000000
+  }
+  const files: Array<{ path: string; name: string; parent: number; prefix: number; bytes: number }> = []
+  let uniqueMessages = 0
+  let uniqueVersions = 0
+  const body = "The harbor lamps shone on the water while the travelers discussed their next journey. "
+  for (let branch = 0; branch <= branches; branch++) {
+    const parent = branch === 0 ? -1 : branch % 3 === 1 ? 0 : Math.floor(random() * branch)
+    const prefix = parent < 0 ? 0 : Math.floor(messages * (0.8 + random() * 0.19))
+    const lines =
+      parent < 0
+        ? []
+        : readFileSync(join(root, files[parent]!.path), "utf8")
+            .split("\n")
+            .slice(1, prefix + 1)
+    for (let i = prefix; i < messages; i++) {
+      const user = i % 2 === 1
+      const text = `${name} branch ${branch}, message ${i}: ${body.repeat(12 + Math.floor(random() * 24))}`
+      const swipes =
+        !user && random() < swipeShare
+          ? Array.from({ length: 20 + Math.floor(random() * 31) }, (_, swipe) => `${text} Version ${swipe}.`)
+          : undefined
+      const selected = swipes === undefined ? 0 : Math.floor(random() * swipes.length)
+      lines.push(
+        JSON.stringify(
+          message({
+            name: user ? "Sam" : name,
+            user,
+            minute: i,
+            mes: swipes?.[selected] ?? text,
+            ...(swipes === undefined ? {} : { swipes, swipeId: selected }),
+            ...(i % 193 === 0 ? { memory: `A synthetic memory at ${i}.` } : {})
+          })
+        )
+      )
+      uniqueMessages++
+      uniqueVersions += swipes?.length ?? 1
+    }
+    const fileName =
+      branch === 0
+        ? `${name} - main`
+        : `Branch #${prefix - 1} - 2025-12-27@12h00m00s${String(branch).padStart(3, "0")}ms`
+    const path = `chats/${name}/${fileName}.jsonl`
+    const text = [
+      JSON.stringify(
+        header({
+          note_prompt: "Remember the harbor.",
+          variables: { place: "harbor" },
+          ...(parent < 0 ? {} : { main_chat: files[parent]!.name })
+        })
+      ),
+      ...lines
+    ].join("\n")
+    mkdirSync(dirname(join(root, path)), { recursive: true })
+    writeFileSync(join(root, path), text)
+    files.push({ path, name: fileName, parent, prefix, bytes: Buffer.byteLength(text) })
+  }
+  return {
+    files,
+    bytes: files.reduce((n, f) => n + f.bytes, 0),
+    messageLines: messages * files.length,
+    uniqueMessages,
+    uniqueVersions
+  }
 }
