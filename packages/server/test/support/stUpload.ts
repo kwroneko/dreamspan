@@ -163,5 +163,6 @@ export const importStFolder = (
         yield* sendStFile(importId, file.path, file.bytes, { ...times(file.path), orphan: "1" }, options.partBytes)
       )
     }
+    yield* api.FinishStImport({ importId, notSent: [] })
     return { importId, answers, report: yield* api.GetStImportReport({ importId }), api }
   })

@@ -32,6 +32,7 @@ import { Notices } from "../chat/Notices.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { readStFolderFile, scanStFolder, statStFolderFile } from "./stFolderDisk.ts"
 import { StImports } from "./StImports.ts"
+import { visibleReport } from "./stReport.ts"
 
 /** Progress is written, and the user's tabs told, at most this often per job. */
 const PROGRESS_MS = 1_000
@@ -116,6 +117,7 @@ export class StImportJobs extends Context.Service<
     ) => Effect.Effect<void, NotFound | ServerError>
     readonly list: (user: User) => Effect.Effect<ReadonlyArray<StImportJob>, ServerError>
     readonly get: (user: User, importId: string) => Effect.Effect<StImportJobDetail, NotFound | ServerError>
+    readonly running: (user: User, importId: string) => boolean
     readonly seen: (user: User, importId: string) => Effect.Effect<void, NotFound | ServerError>
     readonly cancel: (user: User, importId: string) => Effect.Effect<void, NotFound | ServerError>
     readonly clear: (user: User, importId: string | null) => Effect.Effect<number, ServerError>
@@ -221,9 +223,9 @@ export class StImportJobs extends Context.Service<
         Effect.gen(function* () {
           if (live.ended) return
           live.ended = true
-          lives.delete(live.id)
           live.currentFile = null
           yield* write(live, { report: true, end: { status, error } })
+          lives.delete(live.id)
           publish(live, status)
         })
 
@@ -242,15 +244,14 @@ export class StImportJobs extends Context.Service<
             })
         })
 
-      /** A new run fences the user's upload still running: it's over (StImportJobStart writes it so). */
-      const supersede = (user: User) => {
-        for (const live of lives.values()) {
-          if (live.user.id !== user.id || live.mode !== "upload") continue
-          live.ended = true
-          lives.delete(live.id)
-          publish(live, "interrupted")
-        }
-      }
+      /** Save the old upload's final report before a new session replaces it. */
+      const supersede = (user: User) =>
+        Effect.gen(function* () {
+          for (const live of [...lives.values()]) {
+            if (live.user.id !== user.id || live.mode !== "upload") continue
+            yield* end(live, "interrupted", "Another import started before its files had all arrived.")
+          }
+        })
 
       const begin = (
         user: User,
@@ -284,7 +285,6 @@ export class StImportJobs extends Context.Service<
             lastWrite: now,
             lastReport: now
           }
-          supersede(user)
           yield* writer.StImportJobStart({
             userId: user.id,
             id: importId,
@@ -445,6 +445,7 @@ export class StImportJobs extends Context.Service<
           return yield* starting.withPermits(1)(
             Effect.gen(function* () {
               yield* busy(user)
+              yield* supersede(user)
               const importId = yield* imports.start(user, plan.unsupported)
               const live = yield* begin(
                 user,
@@ -470,6 +471,7 @@ export class StImportJobs extends Context.Service<
         starting.withPermits(1)(
           Effect.gen(function* () {
             yield* busy(user)
+            yield* supersede(user)
             const importId = yield* imports.start(user, unsupported)
             yield* begin(user, importId, "upload", info.source, null, "", info.files, info.bytes).pipe(
               stored("Starting the import")
@@ -546,12 +548,12 @@ export class StImportJobs extends Context.Service<
         const now = Date.now()
         for (const live of [...lives.values()]) {
           if (live.mode !== "upload" || now - live.lastActivity < UPLOAD_IDLE_MS) continue
-          imports.end(live.user, live.id)
           yield* end(
             live,
             "interrupted",
             "Its files stopped arriving for 10 minutes: the tab sending them was closed or lost the server. Import the folder again to go on."
           )
+          imports.end(live.user, live.id)
         }
       })
       yield* Effect.forkIn(Effect.repeat(sweep, Schedule.spaced(SWEEP_MS)), scope)
@@ -563,7 +565,10 @@ export class StImportJobs extends Context.Service<
           const latest = detail.job.status === "running" ? null : yield* reader.StImportLatestChat({ userId: user.id })
           return new StImportJobDetail({
             job: detail.job,
-            report: detail.reportJson === null ? null : decodeReport(detail.reportJson),
+            report:
+              detail.reportJson === null
+                ? null
+                : visibleReport(decodeReport(detail.reportJson), detail.job.status === "running"),
             notSent: decodeNotSent(detail.notSentJson),
             latestChat: latest === null ? null : new StImportedChat(latest)
           })
@@ -581,8 +586,8 @@ export class StImportJobs extends Context.Service<
           // An upload stops now: the files still on their way are refused. A path import
           // stops after the file it's on.
           if (live.mode === "upload") {
-            imports.end(user, importId)
             yield* end(live, "cancelled", null)
+            imports.end(user, importId)
           }
         }).pipe(stored("Cancelling the import"))
 
@@ -731,6 +736,7 @@ export class StImportJobs extends Context.Service<
         finishUpload,
         list: (user) => reader.ListStImportJobs({ userId: user.id }).pipe(stored("Listing imports")),
         get,
+        running: (user, importId) => lives.get(importId)?.user.id === user.id,
         seen: (user, importId) =>
           writer
             .StImportJobSeen({ userId: user.id, id: importId, at: Date.now() })

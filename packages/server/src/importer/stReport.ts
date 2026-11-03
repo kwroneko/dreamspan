@@ -11,6 +11,19 @@ import { StCount, type StHiddenRun, StImportReport, StIssue, type StLinkChoice }
 const MAX_ISSUES = 20_000
 const MAX_OFFERS = 2000
 
+/** Checkpoints retain advisories for recovery; running imports expose only real errors. */
+export const visibleReport = (report: StImportReport, running: boolean): StImportReport =>
+  running
+    ? new StImportReport({
+        ...report,
+        issues: report.issues.filter((issue) => issue.level === "error"),
+        unsupported: [],
+        links: [],
+        hiddenRuns: [],
+        dropped: 0
+      })
+    : report
+
 type Outcome = "added" | "updated" | "unchanged" | "skipped" | "failed"
 
 export class Report {
