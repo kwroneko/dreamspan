@@ -15,6 +15,7 @@ import { chatSurfaceProviders, type ChatSurfaceProps } from "../chat/presentatio
 import { type TextActionContext, textActions } from "../../textActions.tsx"
 import { copy } from "../chat/copy.ts"
 import { Block, BlockBody, BlockHeader, BlockToggle, ExpandCollapseAll } from "../../ui/Block.tsx"
+import { DismissibleInfo } from "../../ui/DismissibleInfo.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -110,6 +111,10 @@ export function useSnippetEditorSurface(refId: RefId, shown: boolean) {
   return { ref, onFocus: use, onPointerDown: use }
 }
 
+const targetExplanation = 'This snippet is currently the default destination for "Send text to snippet" actions.'
+const explanation =
+  "Text you keep beside your chats: lines to reuse, passages from a swipe, ideas. A snippet is never sent to the model by itself; a note can show one (Pick a shared note). Copy one to paste it anywhere, and add text to one from any editor with Send text to snippet: it goes to the open snippet marked with a dot in its corner."
+
 const firstLine = (text: string) =>
   text
     .split("\n")
@@ -192,7 +197,20 @@ function SnippetBlock({
   )
   return (
     <li>
-      <Block aria-label={`Snippet ${title}`} className="bg-canvas">
+      <Block
+        aria-label={`Snippet ${title}`}
+        aria-description={target ? targetExplanation : undefined}
+        className="relative bg-canvas"
+      >
+        {target && (
+          <Tooltip label={targetExplanation}>
+            <span
+              data-snippet-target
+              data-layout-audit-ignore="overlap: The target badge intentionally straddles the card corner border"
+              className="absolute -top-1.5 -left-1.5 size-3 cursor-default rounded-full bg-accent"
+            />
+          </Tooltip>
+        )}
         <BlockHeader>
           {loaded ? (
             <InlineRename
@@ -209,23 +227,6 @@ function SnippetBlock({
           ) : (
             <span className="flex min-w-0 flex-1">{toggle}</span>
           )}
-          {/* Where one click of Send text to snippet goes; its room is kept, so the header never moves. */}
-          <span
-            className="flex size-6 shrink-0 items-center justify-center max-sm:invisible"
-            data-snippet-target={target || undefined}
-          >
-            {target && (
-              <Tooltip label="Text sent to a snippet goes here.">
-                <span
-                  role="img"
-                  aria-label="Text sent to a snippet goes here"
-                  className="flex size-6 items-center justify-center"
-                >
-                  <span className="size-1.5 rounded-full bg-accent" />
-                </span>
-              </Tooltip>
-            )}
-          </span>
           <IconButton
             label={`Copy ${title}`}
             hint="Copies its text, to paste anywhere"
@@ -259,7 +260,7 @@ function SnippetBlock({
                 <p className="text-sm text-muted">Loading the snippet…</p>
               )}
             </BlockBody>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-2 py-1.5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-2 py-2">
               <Switch
                 checked={item.global}
                 disabled={item.global && state.chatId === null}
@@ -303,26 +304,25 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
   const ids = shown.map((item) => item.ref.id)
   return (
     <section className="flex min-w-0 flex-col gap-3" aria-label="Snippets">
-      <p className="text-sm text-muted">
-        Text you keep beside your chats: lines to reuse, passages from a swipe, ideas. A snippet is never sent to the
-        model by itself; a note can show one (Pick a shared note). Copy one to paste it anywhere, and add text to one
-        from any editor with Send text to snippet: it goes to the open snippet marked with a dot.
-      </p>
-      <div className="flex max-w-controls items-end gap-2">
-        <Field label="Search snippets" className="min-w-0 flex-1">
-          <Input value={query} onChange={(e) => setQuery(e.currentTarget.value)} placeholder="Name or text" />
-        </Field>
-        <Button
-          hint={
-            state.chatId === null
-              ? "An empty snippet for all chats"
-              : "An empty snippet for this chat, every branch of it; its switch makes it one for all chats"
-          }
-          onClick={() => void store.create()}
-        >
-          New snippet
-        </Button>
-      </div>
+      <DismissibleInfo id="snippets.intro" text={explanation}>
+        {(help) => (
+          <div className="flex max-w-controls items-end gap-2">
+            <Field label="Search snippets" about={help} className="min-w-0 flex-1">
+              <Input value={query} onChange={(e) => setQuery(e.currentTarget.value)} placeholder="Name or text" />
+            </Field>
+            <Button
+              hint={
+                state.chatId === null
+                  ? "An empty snippet for all chats"
+                  : "An empty snippet for this chat, every branch of it; its switch makes it one for all chats"
+              }
+              onClick={() => void store.create()}
+            >
+              New snippet
+            </Button>
+          </div>
+        )}
+      </DismissibleInfo>
       {shown.length > 0 && (
         <ExpandCollapseAll
           compact

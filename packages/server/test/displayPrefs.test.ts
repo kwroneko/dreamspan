@@ -135,3 +135,20 @@ it.live("message detail choices merge by detail id, apart from the toolbar's", (
     })
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )
+
+it.live("explanation dismissals merge by box id and stay within the account", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const phone = yield* client({ "Remote-User": "alice" })
+    const bob = yield* client({ "Remote-User": "bob" })
+    assert.deepStrictEqual((yield* alice.GetDisplayPrefs({})).dismissedInfo, {})
+    yield* alice.SetDisplayPrefs({ prefs: { dismissedInfo: { "snippets.intro": true } } })
+    yield* phone.SetDisplayPrefs({ prefs: { dismissedInfo: { "another.intro": true } } })
+    yield* phone.SetDisplayPrefs({ prefs: { coverageRail: true } })
+    assert.deepStrictEqual((yield* alice.GetDisplayPrefs({})).dismissedInfo, {
+      "snippets.intro": true,
+      "another.intro": true
+    })
+    assert.deepStrictEqual((yield* bob.GetDisplayPrefs({})).dismissedInfo, {})
+  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)

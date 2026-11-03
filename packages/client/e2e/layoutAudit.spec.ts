@@ -385,13 +385,15 @@ test.describe("synthetic library and every app surface", () => {
               page,
               info,
               surface + suffix,
-              process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
-                ? { scope: "[data-history-panel]" }
-                : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
-                  ? { scope: 'section[aria-label="Who replies"]' }
-                  : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
-                    ? { scope: '[role="menu"]' }
-                    : {}
+              process.env.LAYOUT_AUDIT_SNIPPETS_ONLY === "1"
+                ? { scope: '[role="tabpanel"], [role="dialog"]' }
+                : process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
+                  ? { scope: "[data-history-panel]" }
+                  : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
+                    ? { scope: 'section[aria-label="Who replies"]' }
+                    : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
+                      ? { scope: '[role="menu"]' }
+                      : {}
             )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
@@ -739,6 +741,25 @@ test.describe("synthetic library and every app surface", () => {
           await go("saved-chat-header", `/chats/${chatId}`)
           await openPanel(page, "This chat")
           await audit("panel-header")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_SNIPPETS_ONLY === "1") {
+          await admin((api) =>
+            Effect.gen(function* () {
+              if ((yield* api.ListSnippets({ chatId })).length === 0) {
+                for (const title of ["Harbour details", "Next scene"]) {
+                  yield* api.CreateSnippet({
+                    chatId,
+                    title,
+                    content: "A lighthouse above the quiet harbour.\nLanterns shine along the pier."
+                  })
+                }
+              }
+            })
+          )
+          await go("group-chat", `/chats/${chatId}`)
+          await openPanel(page, "Snippets")
+          await audit("panel-Snippets")
           return
         }
         if (process.env.LAYOUT_AUDIT_PANELS_ONLY === "1") {
