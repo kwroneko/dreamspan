@@ -248,6 +248,9 @@ for (const target of ["book", "entry"] as const)
     await page.getByRole("textbox", { name: "Lorebook name", exact: true }).fill("Draft book")
     if (target === "entry") {
       await page.getByRole("button", { name: "More for Untitled entry", exact: true }).click()
+      await expect(page.getByRole("menu", { name: "More for Untitled entry", exact: true })).toBeInViewport({
+        ratio: 1
+      })
       await page.getByRole("menuitem", { name: "Delete" }).click()
       await save(page)
       await page.getByRole("button", { name: "Add entry", exact: true }).click()

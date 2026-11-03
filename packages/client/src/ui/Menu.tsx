@@ -75,9 +75,11 @@ export function Menu({
           data-layout-overlay="Menu floats above the page"
           className="z-50 outline-none"
           positionMethod="fixed"
+          sticky
           side={side}
           align={align}
           sideOffset={4}
+          collisionPadding={8}
         >
           <BaseMenu.Popup
             ref={setPopup}
@@ -159,6 +161,7 @@ export function MenuSubmenu({
           data-layout-overlay="Submenu floats above its parent menu"
           className="z-50 outline-none"
           positionMethod="fixed"
+          sticky
           side="right"
           align="start"
           sideOffset={4}
@@ -418,12 +421,14 @@ export function ActionMenu({
           data-layout-overlay="Menu floats above the page"
           className="z-50 outline-none"
           positionMethod="fixed"
+          sticky
           sideOffset={4}
           align="end"
+          collisionPadding={8}
         >
           <BaseMenu.Popup
             ref={setPopup}
-            className="flex min-w-48 origin-[var(--transform-origin)] flex-col rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="flex max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] flex-col overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             {items.map((entry) =>
               "checked" in entry ? (

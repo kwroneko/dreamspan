@@ -21,7 +21,8 @@ import { settleSummaries } from "./summaryValidity.ts"
 import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
-export const FORK_SUMMARY_FORMAT = 3
+// Recompute rows that predate retained-swipe invalidation and human-author activity.
+export const FORK_SUMMARY_FORMAT = 4
 
 /**
  * What the shell shows of a fork: ids only, the cast with every card, binned or not, and the

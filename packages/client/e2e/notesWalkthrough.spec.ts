@@ -244,8 +244,13 @@ for (const width of [1440, 390])
       await newNote.scrollIntoViewIfNeeded()
       await expect(newNote).toBeInViewport()
       await page.screenshot({ animations: "disabled", path: join(shots, `new-note-buttons-${width}-${theme}.png`) })
+      const notes = noteBlock(tobias, "Note")
+      const previous = await notes.count()
       await newNote.click({ timeout: 10_000 })
-      const his = noteBlock(tobias, "Note").last()
+      // The preceding theme's run left a shared Note here. Wait for this addition
+      // before taking the last block, or its menu belongs to that older shared note.
+      await expect(notes).toHaveCount(previous + 1)
+      const his = notes.last()
       await his.getByRole("button", { name: "Actions for Note" }).click()
       await page.getByRole("menuitem", { name: "Save as shared note" }).click()
       await expect(
