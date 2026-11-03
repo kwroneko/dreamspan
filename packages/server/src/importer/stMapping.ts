@@ -31,21 +31,52 @@ const ST_DATE = String.raw`\d{4}-\d{1,2}-\d{1,2} ?@\d{1,2}h ?\d{1,2}m ?\d{1,2}s(
  */
 const AUTOMATIC_FORK = new RegExp(String.raw`^(?:Branch|Checkpoint|Bookmark) #\d+ - ${ST_DATE}$`, "u")
 const FORK_SUFFIX = / - (?:Branch|Checkpoint) #[1-9]\d*$/u
+const GROUP_STAMP = new RegExp(`^${ST_DATE}$`, "u")
+
+/** ST's createGroup joins the selected characters' names, in character-list order. */
+const defaultGroupName = (group: string, members: ReadonlyArray<string | null>) => {
+  if (!group.startsWith("Group: ") || members.length === 0 || members.some((name) => name === null)) return false
+  // The exported member order needn't be the character-list order. Compare all names,
+  // including repeats. Consume whole names, longest first, since a name can contain commas.
+  const pending = members.map((name) => cleanName(name!)).sort((a, b) => b.length - a.length)
+  let rest = group.slice(7)
+  while (pending.length > 0) {
+    const index = pending.findIndex((name) => rest === name || rest.startsWith(`${name}, `))
+    if (index < 0) return false
+    const [name] = pending.splice(index, 1)
+    rest = rest.slice(name!.length + (rest === name ? 0 : 2))
+  }
+  return rest === ""
+}
 
 /**
  * The title of the chat a chat file starts (owner, 2026-11-01): never a branch file's name. A
  * file's name is no name of a fork, which only the user gives here, nor of the chat: the
  * family's root is the file, or, for a branch whose parent chat wasn't imported, the main chat
  * its header names, without the branch suffix ST adds; a name ST made up for a branch says
- * nothing and goes. A group chat is the group's, with the root's name after it (`chatName`
- * shows the group's name and the day ST's stamp says); a solo chat is the root's name, else
- * empty, which shows its cast's names.
+ * nothing and goes. A stamp-only group chat uses its renamed group's name or, for ST's
+ * default group name, its cast's names. Its stamp is normalized for `chatName`, which shows
+ * the chat's createdAt, just as for character chats. A user-named file keeps that name.
  */
-export const stChatTitle = (fileName: string, mainChat: string | null, group: string | null): string => {
+export const stChatTitle = (
+  fileName: string,
+  mainChat: string | null,
+  group: string | null,
+  members: ReadonlyArray<string | null> = []
+): string => {
   let root = cleanName(mainChat ?? fileName)
   while (FORK_SUFFIX.test(root)) root = root.replace(FORK_SUFFIX, "")
   if (AUTOMATIC_FORK.test(root)) root = ""
-  if (group !== null) return root === "" ? group : `${group}: ${root}`
+  if (group !== null) {
+    const name = defaultGroupName(group, members) ? "" : group
+    if (root === "") return name
+    if (GROUP_STAMP.test(root)) {
+      // Older ST group files omit milliseconds. Keep the same internal stamp format as
+      // character chats so every existing title surface substitutes createdAt for it.
+      const stamp = /ms$/u.test(root) ? root : `${root}000ms`
+      return name === "" ? stamp : `${name}: ${stamp}`
+    }
+  }
   return root
 }
 const hash = (text: string) => createHash("sha256").update(text).digest("hex")

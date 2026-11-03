@@ -25,7 +25,8 @@ const masterRequests = (() => {
   const seen = new Map<string, number>()
   // Written in chat title order, each chat's forks by creation, as `forkRequests` reads them.
   for (const [key, value] of Object.entries(raw)) {
-    const title = key.split(" :: ")[0]!
+    // The historical capture prefixed the group name; fresh imports keep the file's name.
+    const title = key.split(" :: ")[0]!.replace(/^Both: /u, "")
     const index = seen.get(title) ?? 0
     seen.set(title, index + 1)
     out[`${title} #${index}`] = value.messages.map(({ role, content }) => ({ role, content }))
@@ -57,7 +58,7 @@ const IMPORTED: Record<string, Record<string, ReadonlyArray<RequestMessage>>> = 
   "Aria - plain #0": {
     "Sam is tall and patient.\nAria hums when nervous.\nAria wears a grey coat.": [system(riders)]
   },
-  "Both: Both - 1 #0": {
+  "Both - 1 #0": {
     "Sam is tall and patient.\nLore before the note.\nCrowded room.\nLore after the note.": [system("Crowded room.")],
     "Aria wears a grey coat.\nLore at depth one.": [
       system(`Aria wears a grey coat.\nSam is tall and patient.\n${lore}`)

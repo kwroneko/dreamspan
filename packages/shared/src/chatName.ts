@@ -7,7 +7,7 @@
 // ST's humanized date: `2026-05-11@07h51m55s691ms` now, `2024-9-10 @13h 44m 41s 16ms` in
 // ST before late 2024 (unpadded, with spaces).
 const ST_STAMP =
-  /^(.*?)(?: - |: |)(\d{4})-(\d{1,2})-(\d{1,2})\s*@\s*(\d{1,2})h\s*(\d{1,2})m\s*(\d{1,2})s\s*(\d{1,3})ms(?: - Branch #\d+)?$/
+  /^(.*?)( - |: |)(\d{4})-(\d{1,2})-(\d{1,2})\s*@\s*(\d{1,2})h\s*(\d{1,2})m\s*(\d{1,2})s\s*(\d{1,3})ms(?: - Branch #\d+)?$/
 
 export interface ChatName {
   readonly name: string
@@ -31,7 +31,7 @@ export const chatName = (
   const match = ST_STAMP.exec(title.trim())
   const castNames = cast.map((card) => card.name).join(", ")
   if (match) {
-    const [, name, y, mo, d, h, mi, s] = match
+    const [, name, separator, y, mo, d, h, mi, s] = match
     const started =
       createdAt === null
         ? new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)))
@@ -40,7 +40,7 @@ export const chatName = (
     // stamp, so both are named by the chat's characters. Any other name before the stamp is
     // one the user gave (a group's name, or a rename here, which keeps the stamp).
     const prefix = name!.trim()
-    const automatic = prefix === "" || cast.some((card) => sameName(card.name, prefix))
+    const automatic = prefix === "" || (separator !== ": " && cast.some((card) => sameName(card.name, prefix)))
     return { name: (automatic ? castNames || prefix : prefix) || "Chat", started }
   }
   return { name: title.trim() || castNames || "New chat", started: null }

@@ -60,7 +60,7 @@ const check = Effect.fnUntraced(function* (tag: string) {
   assert.strictEqual(a.addedAt, ARRIVED)
   assert.strictEqual(persona.addedAt, ARRIVED + 1000)
   const groups = yield* api.GetShellForks(view)
-  const group = groups.sections[0]!.rows.find((g) => g.chatName.startsWith(tag + ":"))!
+  const group = groups.sections[0]!.rows.find((g) => g.chatName === tag)!
   assert.isDefined(group)
   assert.strictEqual(group.addedAt, ARRIVED + 2000)
 })
@@ -151,7 +151,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       )
       assert.strictEqual(shell.cards.find((c) => c.card.name === "Only file")!.addedAt, FILE)
       const groups = (yield* api.GetShellForks(view)).sections[0]!.rows.filter((g) =>
-        g.chatName.startsWith("Fallback group:")
+        ["later", "older"].includes(g.chatName)
       )
       assert.lengthOf(groups, 2)
       assert.isTrue(groups.every((g) => g.addedAt === ARRIVED))
@@ -169,7 +169,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       yield* importStFolder(folder, { modifiedAt: times })
       assert.isTrue(
         (yield* api.GetShellForks(view)).sections[0]!.rows.filter((g) =>
-          g.chatName.startsWith("Fallback group:")
+          ["later", "older", "newer"].includes(g.chatName)
         ).every((g) => g.addedAt === ARRIVED)
       )
       // Added sorting is distinct from the newer chat/fork creation and supports reversal.
