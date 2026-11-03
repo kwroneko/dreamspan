@@ -80,6 +80,9 @@ export function LorebookPanelEditor({
             </span>
             {note && <p className="text-xs text-muted">{note}</p>}
           </div>
+          {onClose && (
+            <IconButton label="Close the lorebook" hint="Closes this lorebook." icon="close" onClick={onClose} />
+          )}
           {saveControls && <SaveRevision store={store} />}
           {onOpenLarge && (
             <IconButton
@@ -88,9 +91,6 @@ export function LorebookPanelEditor({
               icon="expand"
               onClick={onOpenLarge}
             />
-          )}
-          {onClose && (
-            <IconButton label="Close the lorebook" hint="Closes this lorebook." icon="close" onClick={onClose} />
           )}
         </div>
         {state.saveError && (

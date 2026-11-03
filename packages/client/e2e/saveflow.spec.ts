@@ -135,6 +135,21 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
           const cluster = saveCluster(scope)
           const header = cluster.locator("xpath=ancestor::*[@data-editor-header][1]")
           await expect(header).toHaveCount(1)
+          if (kind !== "card" && !large) {
+            const expand = header.getByRole("button", {
+              name: kind === "preset" ? "Open the preset in the large editor" : "Large editor",
+              exact: true
+            })
+            await expect(expand).toBeVisible()
+            await expect(header.getByRole("button").last()).toHaveAttribute(
+              "aria-label",
+              kind === "preset" ? "Open the preset in the large editor" : "Large editor"
+            )
+            const controls = (await cluster.boundingBox())!,
+              at = (await expand.boundingBox())!
+            expect(at.x - controls.x - controls.width).toBeGreaterThanOrEqual(0)
+            expect(at.x - controls.x - controls.width).toBeLessThanOrEqual(8)
+          }
           await header.scrollIntoViewIfNeeded()
           const position = await cluster.boundingBox()
           const bounds = await header.boundingBox()

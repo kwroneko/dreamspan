@@ -325,6 +325,6 @@ test("the persona's tab is a full card", async ({ page }) => {
   const greetings = await subTab(tab, "Greetings")
   await expect(greetings.getByRole("textbox", { name: "First message", exact: true })).toBeVisible()
   await expect(tab.getByRole("button", { name: /^Fork for this chat/ })).toHaveCount(0)
-  await expect(tab.getByRole("button", { name: /Change your persona/ })).toBeVisible()
+  await expect(tab.getByRole("button", { name: /Change your persona/ })).toHaveCount(0)
   await expect(tab.getByRole("button", { name: "Export…", exact: true })).toBeVisible()
 })

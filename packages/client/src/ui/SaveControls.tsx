@@ -116,7 +116,7 @@ export function SaveControls({
       <span
         role="status"
         data-layout-overlay="Brief revision confirmation appears below the fixed save cluster"
-        className={`pointer-events-none absolute top-full right-0 z-10 rounded bg-surface text-xs ${failed ? "w-64 whitespace-normal text-danger" : "whitespace-nowrap text-success"}`}
+        className={`pointer-events-none absolute top-full right-0 z-10 rounded bg-surface text-xs ${failed ? "w-64 whitespace-normal text-danger" : "max-w-full whitespace-normal text-success"}`}
       >
         {failed ? `Couldn't save: ${failed}` : justSaved && !changed ? "Revision saved." : ""}
       </span>

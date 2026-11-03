@@ -1,11 +1,11 @@
 // The side panel's tabs leading with what a person touches (night/ftabs): This chat's name,
 // persona and summaries before the advanced, collapsed parts; the persona's tab as its
-// description edited in place, with Switch persona; History edits before a search (the Model
+// description edited in place, with persona switching under the composer; History edits before a search (the Model
 // tab's form is models.spec.ts's). Every card here is made up.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { openPanel } from "./support/panel.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -93,7 +93,7 @@ test("This chat leads with the chat's name, your persona and summaries; the rest
   await expect(summaries.getByRole("group", { name: "Recent messages kept as written" })).toBeVisible()
 })
 
-test("the persona's tab is a full card, edited in place, and Switch persona", async ({ page }) => {
+test("the persona's tab is a full card, with switching kept under the composer", async ({ page }) => {
   await open(page, `card:${persona}`)
   const tab = page.getByRole("tabpanel", { name: "Juniper Ashgrove" })
   await expect(tab.getByText("You", { exact: true })).toBeVisible()
@@ -112,10 +112,16 @@ test("the persona's tab is a full card, edited in place, and Switch persona", as
   await page.keyboard.type(" She hums.")
   const save = saveButton(tab)
   await expect(save).toBeEnabled()
-  // Switch persona plays another card from here on.
-  await tab.getByRole("button", { name: /^Playing as Juniper Ashgrove/ }).click()
-  await page.getByRole("option", { name: /^Wren/ }).click()
-  await expect(page.getByRole("tab", { name: "Wren" })).toBeAttached()
+  // Persona switching has one home under the composer, outside this card's actions.
+  await expect(tab.getByRole("button", { name: /^Playing as / })).toHaveCount(0)
+  await closePanel(page)
+  await page.getByRole("button", { name: /^Speaking as / }).click()
+  await page
+    .getByRole("group", { name: "Your persona", exact: true })
+    .getByRole("option", { name: "Wren", exact: true })
+    .click()
+  const switched = await openPanel(page, "Wren")
+  await expect(switched.getByText("You", { exact: true })).toBeVisible()
 })
 
 test("History edits doesn't ask for a model before a search", async ({ page }) => {

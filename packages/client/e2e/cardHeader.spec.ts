@@ -101,7 +101,7 @@ test.beforeAll(async ({ browser }) => {
 
 const box = async (locator: Locator) => (await locator.boundingBox())!
 
-/** The shared header: save cluster above the names beside the portrait. */
+/** The shared header: name, version and save controls in its first row. */
 const measure = async (panel: Locator) => {
   const header = panel.locator("[data-card-header]")
   await expect(header).toBeVisible()
@@ -118,97 +118,35 @@ const measure = async (panel: Locator) => {
   }
 }
 
-/** Check visible text fragments, so a two-line heading cannot leave its pencil on line one. */
+/** The three rename controls share the owner's four-row header. */
 const expectInlineNames = async (scope: Locator) => {
   const header = scope.locator("[data-card-header]")
+  const stack = header.locator("[data-card-header-rows]")
+  expect(
+    await stack.locator(":scope > *").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-card-header-row")))
+  ).toEqual(["identity", "nickname", "persona", "usage"])
+  for (const name of ["the display name", "the version", "the nickname"])
+    await expect(header.getByRole("button", { name: `Rename ${name}`, exact: true })).toBeVisible()
   const geometry = await header.evaluate((element) => {
-    const bounds = element.getBoundingClientRect()
-    return [...element.querySelectorAll<HTMLElement>("[data-card-header-row]")].slice(0, 3).map((text) => {
-      const area = text.getBoundingClientRect()
-      const pencil = text.parentElement!.querySelector("button")!
-      const button = pencil.getBoundingClientRect()
-      const range = document.createRange()
-      range.selectNodeContents(text)
-      const fragments = [...range.getClientRects()].filter((r) => r.top < area.bottom && r.bottom > area.top)
-      const last = fragments.at(-1)!
-      const title = text.hasAttribute("data-inline-rename-text")
-      const clipped = text.scrollHeight > text.clientHeight + 1
-      const ellipsis = document.createElement("span")
-      ellipsis.style.cssText = `position:fixed;visibility:hidden;font:${getComputedStyle(text).font}`
-      ellipsis.textContent = "…"
-      document.body.append(ellipsis)
-      const ellipsisWidth = ellipsis.getBoundingClientRect().width
-      ellipsis.remove()
-      const end = title ? Math.min(area.right, last.right + (clipped ? ellipsisWidth : 0)) : area.right
-      return {
-        title,
-        gap: button.left - end,
-        pencilBottom: button.bottom,
-        textBottom: area.bottom,
-        right: button.right,
-        headerRight: bounds.right,
-        height: area.height,
-        lineHeight: parseFloat(getComputedStyle(text).lineHeight),
-        top: text.parentElement!.getBoundingClientRect().top,
-        bottom: text.parentElement!.getBoundingClientRect().bottom,
-        overflow: getComputedStyle(text).textOverflow
-      }
-    })
-  })
-  expect.soft(geometry).toHaveLength(3)
-  for (const row of geometry) {
-    expect.soft(row.gap, JSON.stringify(row)).toBeGreaterThanOrEqual(1)
-    expect.soft(row.gap, JSON.stringify(row)).toBeLessThanOrEqual(3)
-    expect.soft(row.right).toBeLessThanOrEqual(row.headerRight + 1)
-    expect.soft(Math.abs(row.pencilBottom - row.textBottom)).toBeLessThanOrEqual(row.title ? 1 : 6)
-    expect.soft(row.height).toBeLessThanOrEqual(row.lineHeight * (row.title ? 2 : 1) + (row.title ? 1 : 7))
-    if (!row.title) expect.soft(row.overflow).toBe("ellipsis")
-  }
-  // A normal 4 px stack instead of space distributed over the portrait's height.
-  for (let i = 1; i < geometry.length; i++)
-    expect.soft(Math.abs(geometry[i]!.top - geometry[i - 1]!.bottom - 4)).toBeLessThanOrEqual(1)
-
-  // Persona has its own row, directly above the final token row, at every panel width.
-  const persona = header.locator("[data-persona-folder]")
-  await expect(persona.getByRole("switch", { name: "Persona", exact: true })).toBeVisible()
-  const finalRows = await header.evaluate((element) => {
-    const persona = element.querySelector<HTMLElement>("[data-persona-folder]")!
-    const tokens = element.querySelector<HTMLElement>("[data-card-tokens]")!
-    const label = [...persona.querySelectorAll("span")].find((span) => span.textContent === "Persona")!
-    const toggle = persona.querySelector('[role="switch"]')!
-    const nickname = persona.previousElementSibling!.getBoundingClientRect()
-    const row = persona.getBoundingClientRect()
-    const counts = tokens.getBoundingClientRect()
-    const text = label.getBoundingClientRect()
-    const control = toggle.getBoundingClientRect()
-    const bounds = element.getBoundingClientRect()
+    const rect = (selector: string) => element.querySelector(selector)!.getBoundingClientRect()
+    const portrait = rect("[data-card-header-portrait]")
+    const stack = rect("[data-card-header-rows]")
+    const name = rect("[data-card-name]")
+    const version = rect("[data-card-version]")
+    const usage = rect('[data-card-header-row="usage"]')
     return {
-      sameStack: persona.parentElement === tokens.parentElement,
-      last: tokens === tokens.parentElement!.lastElementChild,
-      nicknameGap: row.top - nickname.bottom,
-      tokenGap: counts.top - row.bottom,
-      controlFirst: control.right <= text.left,
-      centred: Math.abs(control.top + control.height / 2 - text.top - text.height / 2),
-      labelSize: getComputedStyle(label).fontSize,
-      tokenSize: getComputedStyle(tokens).fontSize,
-      labelColour: getComputedStyle(label).color,
-      tokenColour: getComputedStyle(tokens).color,
-      right: Math.max(row.right, counts.right),
-      headerRight: bounds.right,
-      bottom: counts.bottom,
-      headerBottom: bounds.bottom
+      bottom: stack.bottom,
+      portraitBottom: portrait.bottom,
+      nameMid: name.top + name.height / 2,
+      versionMid: version.top + version.height / 2,
+      usageBottom: usage.bottom,
+      headerBottom: element.getBoundingClientRect().bottom
     }
   })
-  expect.soft(finalRows.sameStack).toBe(true)
-  expect.soft(finalRows.last).toBe(true)
-  expect.soft(finalRows.nicknameGap).toBeCloseTo(4, 0)
-  expect.soft(finalRows.tokenGap).toBeCloseTo(4, 0)
-  expect.soft(finalRows.controlFirst).toBe(true)
-  expect.soft(finalRows.centred).toBeLessThanOrEqual(1)
-  expect.soft(finalRows.labelSize).toBe(finalRows.tokenSize)
-  expect.soft(finalRows.labelColour).toBe(finalRows.tokenColour)
-  expect.soft(finalRows.right).toBeLessThanOrEqual(finalRows.headerRight + 1)
-  expect.soft(finalRows.bottom).toBeLessThanOrEqual(finalRows.headerBottom + 1)
+  expect.soft(geometry.bottom).toBeLessThanOrEqual(geometry.portraitBottom + 1)
+  expect.soft(Math.abs(geometry.nameMid - geometry.versionMid)).toBeLessThanOrEqual(1)
+  expect.soft(geometry.usageBottom).toBeLessThanOrEqual(geometry.headerBottom + 1)
+  await expect(header.getByRole("button", { name: "Persona", exact: true })).toBeVisible()
 }
 
 const open = async (page: Page, name: string) => {
@@ -241,11 +179,12 @@ for (const scheme of ["light", "dark"] as const)
         const header = panel.locator("[data-card-header]")
         const slug = name.split(" ")[0]!.toLowerCase()
         await shoot(phone ? page : page.getByRole("complementary", { name: "Chat panel" }), `${mode}-${scheme}-${slug}`)
-        // The save cluster starts at the portrait's top; the names follow beneath it.
+        // Name, version and the save cluster share the portrait's top row.
         const { header: whole, portrait, save, first } = await measure(panel)
-        expect.soft(Math.abs(portrait.y - save.y), `${name}: save top`).toBeLessThanOrEqual(1)
-        expect.soft(first.y - save.y - save.height, `${name}: names below save`).toBeGreaterThanOrEqual(0)
-        expect.soft(first.y - save.y - save.height, `${name}: compact name stack`).toBeLessThanOrEqual(12)
+        expect.soft(Math.abs(portrait.y - first.y), `${name}: identity top`).toBeLessThanOrEqual(1)
+        expect
+          .soft(Math.abs(first.y + first.height / 2 - save.y - save.height / 2), `${name}: save centred in row one`)
+          .toBeLessThanOrEqual(1)
         expect.soft(whole.x + whole.width - save.x - save.width, `${name}: save right`).toBeLessThanOrEqual(48)
         await expectInlineNames(panel)
         heights.push(whole.height)
@@ -307,9 +246,10 @@ test("the full editor's header is the same", async ({ page }) => {
         await page.waitForTimeout(300)
         await shoot(page, `editor-${width}-${scheme}-${name.split(" ")[0]!.toLowerCase()}`)
         const { header: whole, portrait, save, first } = await measure(page.locator("main"))
-        expect.soft(Math.abs(portrait.y - save.y), `${name}: save top`).toBeLessThanOrEqual(1)
-        expect.soft(first.y - save.y - save.height, `${name}: names below save`).toBeGreaterThanOrEqual(0)
-        expect.soft(first.y - save.y - save.height, `${name}: compact name stack`).toBeLessThanOrEqual(12)
+        expect.soft(Math.abs(portrait.y - first.y), `${name}: identity top`).toBeLessThanOrEqual(1)
+        expect
+          .soft(Math.abs(first.y + first.height / 2 - save.y - save.height / 2), `${name}: save centred in row one`)
+          .toBeLessThanOrEqual(1)
         expect.soft(whole.x + whole.width - save.x - save.width, `${name}: save right`).toBeLessThanOrEqual(48)
         await expectInlineNames(page.locator("main"))
         // The same Picture button over it as in a character tab, with or without a picture.

@@ -550,17 +550,20 @@ test.describe("synthetic library and every app surface", () => {
           return
         }
         if (process.env.LAYOUT_AUDIT_CARD_HEADERS_ONLY === "1") {
-          await go("card-editor-header", `/library/${cardRef}`)
+          await page.goto(`${server.url}/library/${cardRef}`)
+          await expect(page.locator("[data-card-tokens]")).toBeVisible()
+          await audit("card-editor-header", "[data-card-header]")
           await go("card-page-header", `/cards/${cardId}`)
-          await go("group-chat", `/chats/${chatId}`)
+          await page.goto(`${server.url}/chats/${chatId}`)
           await openPanel(page, cardName)
-          await audit("panel-card-header")
+          await expect(page.locator("[data-card-header] [data-card-tokens]")).toBeVisible()
+          await audit("panel-card-header", "[data-card-header]")
           if (width >= 1024) {
             const handle = page.getByRole("separator", { name: "Resize chat panel", exact: true })
             await handle.press("Home")
-            await audit("panel-card-header-narrow")
+            await audit("panel-card-header-narrow", "[data-card-header]")
             await handle.press("End")
-            await audit("panel-card-header-wide")
+            await audit("panel-card-header-wide", "[data-card-header]")
           }
           return
         }

@@ -7,7 +7,7 @@ import { useChatCards } from "./chatCards.ts"
 // (`CardHeader`; "You" is a badge on the persona's portrait), then
 // the card's actions as buttons: New chat with them, Full editor, Fork for this chat, Export…
 // and what else is registered (`chatCardActions`). The persona's tab is the same card editor
-// (DESIGN §2.2: a persona is a card), with Switch persona. Card data and actions stay in their
+// (DESIGN §2.2: a persona is a card). Card data and actions stay in their
 // feature; the panel host only sees its descriptor.
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
@@ -34,7 +34,6 @@ import type { ChatCardInfo } from "./CardForkDialogs.tsx"
 import type { PanelProps, PendingPanelProps } from "./panels.tsx"
 import type { PendingChat } from "./pendingChat.ts"
 import { usePendingCardInfo } from "./pendingCardInfo.ts"
-import { PendingPersonaSwitch, PersonaSwitch } from "./PersonaSwitch.tsx"
 import { ChatCardActions } from "./presentation.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
@@ -185,7 +184,6 @@ function CardPanel({
   return (
     <div className="flex flex-col gap-4">
       <CardHeader
-        saveControls={state.snapshot ? <SaveRevision store={store} /> : undefined}
         portrait={
           <TabPortrait
             store={store}
@@ -202,6 +200,7 @@ function CardPanel({
             <CardNameHeader
               store={store}
               call={call}
+              saveControls={<SaveRevision store={store} />}
               current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
             />
             <CardTokensRow store={store} entityId={card.entityId} label={card.label} />
@@ -218,12 +217,6 @@ function CardPanel({
       <div className="-mx-2 flex flex-wrap items-center gap-x-1">
         {!persona && !alone && <NewChat card={card} />}
         <ChatCardActions session={session} card={card} info={info} persona={persona} />
-        {persona &&
-          (session === null ? (
-            pending && <PendingPersonaSwitch pending={pending} trigger="Switch persona" />
-          ) : (
-            <PersonaSwitch session={session} trigger="Switch persona" />
-          ))}
       </div>
       {state.loadError && <ErrorAlert error={state.loadError} />}
       {!state.snapshot && !state.loadError && <p className="text-sm text-muted">Loading the card…</p>}

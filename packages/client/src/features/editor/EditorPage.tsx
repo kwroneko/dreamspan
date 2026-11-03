@@ -276,9 +276,6 @@ export function Editor({
               in place, each with its own question (CardNameHeader). */}
           {ref.kind === "card" && !bookOnly ? (
             <CardHeader
-              saveControls={
-                <SaveRevision store={store} shownNameClash={clash} onSaved={(saved) => setNotice(savedNotice(saved))} />
-              }
               portrait={
                 <StorePortrait
                   store={store}
@@ -296,6 +293,13 @@ export function Editor({
               }
             >
               <CardNameHeader
+                saveControls={
+                  <SaveRevision
+                    store={store}
+                    shownNameClash={clash}
+                    onSaved={(saved) => setNotice(savedNotice(saved))}
+                  />
+                }
                 store={store}
                 call={call}
                 current={current}
