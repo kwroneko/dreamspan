@@ -1,4 +1,5 @@
 import { docHash } from "../src/db/documents.ts"
+import { FORK_SUMMARY_FORMAT } from "../src/db/forkSummaries.ts"
 // Compare every stored message field and the derived indexes against the positional
 // import path, which still writes each version and slot separately.
 import { readFileSync } from "node:fs"
@@ -205,7 +206,6 @@ it.live(
         }
         yield* api.FinishStImport({ importId, notSent: [] })
         const report = yield* api.GetStImportReport({ importId })
-        const library = yield* api.GetShellLibrary()
         const tables = [
           "entities",
           "entity_refs",
@@ -226,6 +226,17 @@ it.live(
             { sql: "SELECT * FROM version_participants ORDER BY version_id, entity_id" },
             { sql: "SELECT v.id, f.content FROM versions v JOIN versions_fts f ON f.rowid = v.seq ORDER BY v.id" },
             { sql: "SELECT * FROM media_assets ORDER BY id" },
+            {
+              // Read before the shell can refresh stale rows: compare stored validity,
+              // including the exact stamps and the summaries they protect.
+              sql: `SELECT f.id AS expected_fork, s.*, c.shell_stamp AS chat_stamp,
+                coalesce(u.stamp, 0) AS owner_stamp,
+                s.format = ? AND s.stamp = c.shell_stamp AND s.user_stamp = coalesce(u.stamp, 0) AS valid
+                FROM forks f JOIN chats c ON c.id = f.chat_id
+                LEFT JOIN fork_summaries s ON s.fork_id = f.id
+                LEFT JOIN shell_user_stamps u ON u.user_id = c.owner_user_id ORDER BY f.id`,
+              params: [FORK_SUMMARY_FORMAT]
+            },
             { sql: "PRAGMA foreign_key_check" }
           ],
           { readOnly: true }
@@ -234,6 +245,9 @@ it.live(
         assert.lengthOf(rows[6]!, family.uniqueMessages)
         assert.lengthOf(rows[7]!, family.uniqueVersions + (change === "local" || change === "swipe" ? 1 : 0))
         assert.lengthOf(rows[5]!, family.files.length)
+        assert.lengthOf(rows[14]!, family.files.length)
+        assert.isTrue(rows[14]!.every((row) => row.valid === 1))
+        const library = yield* api.GetShellLibrary()
         // All physical storage and derived search/participation rows, plus the shell's
         // summaries. Only independent IDs, sequence offsets and wall clocks differ.
         const ids = new Map<string, string>([

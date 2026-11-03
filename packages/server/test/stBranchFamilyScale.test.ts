@@ -7,13 +7,9 @@ import { join } from "node:path"
 import { BroadcastChannel } from "node:worker_threads"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { vi } from "vitest"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { card, encode, largeChat, writeStBranchFamily } from "./support/stFolder.ts"
 import { tempDir } from "./support/tempDir.ts"
-
-// The opt-in mix removes more than 34 GB of synthetic files after the test.
-vi.setConfig({ hookTimeout: 60_000 })
 
 it.live(
   "imports a medium family of long branches with many swipes",
@@ -125,5 +121,6 @@ it.live(
       }
     }).pipe(Effect.provide(serverLayer(config)), Effect.scoped)
   },
-  3_600_000
+  // Three big families already have a 90-minute import budget, plus fixture setup.
+  process.env.ST_FAMILY_SIZE === "mix" ? 7_200_000 : 3_600_000
 )
