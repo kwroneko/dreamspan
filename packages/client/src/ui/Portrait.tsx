@@ -3,15 +3,16 @@
 // button. Where it shows is the host's: the chat's portrait column on a wide screen
 // (features/chat/PortraitColumn.tsx), a full-screen viewer here on a phone.
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
-import { createContext, type ReactNode, useContext, useState } from "react"
+import { createContext, type ReactElement, type ReactNode, useContext, useState } from "react"
 import { Button } from "./Button.tsx"
 import { initials } from "./Avatar.tsx"
 import { ImageViewer, MAX_ZOOM, type NaturalSize, type Zoom } from "./ImageViewer.tsx"
 import { useImagePrefs } from "./imagePrefs.ts"
 import { mediaUrl } from "./mediaImage.ts"
-import { close, even, keepOnly, replace, show, split, type Stack, toggle } from "./portraitStack.ts"
+import { close, even, keepOnly, move, replace, show, split, type Stack, toggle } from "./portraitStack.ts"
 import { ToolbarSlider } from "./Slider.tsx"
 import { IconButton, Tooltip } from "./Tooltip.tsx"
+import { ViewerHeader } from "./ViewerHeader.tsx"
 import { useViewPrefs } from "./viewPrefs.ts"
 
 export interface Portrait {
@@ -36,6 +37,7 @@ interface PortraitViewer {
   /** Moves the boundary below `index` (portraitStack.ts `split`), or evens the two either side of it. */
   readonly split: (index: number, upper: number, total: number, min: number) => void
   readonly even: (index: number) => void
+  readonly move: (id: string, index: number) => void
   /** "Only keep one image open at a time" (`DisplayPrefs.singlePortrait`): the account's choice. */
   readonly single: boolean
   /** Turns it on, keeping only `keep` open, or off, back to stacking. */
@@ -83,6 +85,7 @@ export function PortraitProvider({
     close: (id) => setStack((stack) => (id === undefined ? stack.slice(1) : close(stack, id))),
     shown,
     split: (index, upper, total, min) => setStack((stack) => split(stack, index, upper, total, min)),
+    move: (id, index) => setStack((stack) => move(stack, id, index)),
     even: (index) => setStack((stack) => even(stack, index)),
     single,
     setSingle: (on, keep) => {
@@ -123,6 +126,7 @@ function PortraitScreen({ portrait, onClose }: { portrait: Portrait; onClose: ()
           <PortraitView
             key={portrait.id}
             portrait={portrait}
+            header={(node) => <ViewerHeader portrait={portrait}>{node}</ViewerHeader>}
             title={(name) => (
               <BaseDialog.Title className="min-w-0 flex-1 truncate text-base font-semibold">{name}</BaseDialog.Title>
             )}
@@ -151,11 +155,13 @@ const percent = (scale: number) => `${Math.round(scale * 100)}%`
 export function PortraitView({
   portrait,
   title,
-  close
+  close,
+  header = (node) => node
 }: {
   portrait: Portrait
   title: (name: string) => ReactNode
   close: ReactNode
+  header?: (node: ReactElement) => ReactNode
 }) {
   const { mode } = useImagePrefs()
   const [zoom, setZoom] = useState<Zoom>("fit")
@@ -165,68 +171,72 @@ export function PortraitView({
   const min = scale?.min ?? 1
   const atOwnSize = zoom !== "fit" && Math.abs(shownScale - 1) < 0.005
   return (
-    <div className="@container flex min-h-0 flex-1 flex-col">
-      <div
-        data-portrait-toolbar
-        className="flex min-h-11 flex-wrap items-center gap-x-1 border-b border-border px-3 @max-[22rem]:pt-2"
-      >
-        {title(portrait.name)}
-        {visible && scale && (
-          // Narrower than its row (a narrow column), the zoom takes a row of its own under the name.
-          <div
-            data-zoom-controls
-            className="flex h-11 items-center gap-1 @max-[22rem]:order-last @max-[22rem]:h-12 @max-[22rem]:w-full"
-          >
-            <ToolbarSlider
-              label="Zoom"
-              hint="Zoom: drag to enlarge or shrink the picture. The wheel and a pinch zoom too."
-              className="w-20 shrink-0 @max-[22rem]:w-auto @max-[22rem]:min-w-10 @max-[22rem]:flex-1"
-              value={toSlider(shownScale, min)}
-              min={0}
-              max={SLIDER_STEPS}
-              step={1}
-              valueText={(value) => percent(value === toSlider(shownScale, min) ? shownScale : fromSlider(value, min))}
-              onValueChange={(value) => {
-                const next = fromSlider(value, min)
-                // The slider's low end is the fit, unless the fit enlarges the picture (then 100%).
-                setZoom(value === 0 && min < 1 ? "fit" : next)
-              }}
-            />
-            <Tooltip
-              label={
-                scale.natural
-                  ? `Shown at ${percent(shownScale)} of its own size, ${scale.natural.width} × ${scale.natural.height} pixels`
-                  : `Shown at ${percent(shownScale)} of its own size`
-              }
+    <div className="@container flex min-h-0 flex-1 flex-col overflow-hidden">
+      {header(
+        <div
+          data-portrait-toolbar
+          className="flex min-h-11 flex-wrap items-center gap-x-1 border-b border-border px-3 @max-[22rem]:pt-2"
+        >
+          {title(portrait.name)}
+          {visible && scale && (
+            // Narrower than its row (a narrow column), the zoom takes a row of its own under the name.
+            <div
+              data-zoom-controls
+              className="flex h-11 items-center gap-1 @max-[22rem]:order-last @max-[22rem]:h-12 @max-[22rem]:w-full"
             >
-              <span data-zoom-percent className="w-11 shrink-0 text-right text-xs leading-8 text-muted tabular-nums">
-                {percent(shownScale)}
-              </span>
-            </Tooltip>
-            <Tooltip label="Fit: show all of the picture">
-              <Button
-                variant="ghost"
-                className="h-8 shrink-0 px-2! aria-pressed:bg-surface-raised aria-pressed:text-text"
-                aria-pressed={zoom === "fit"}
-                onClick={() => setZoom("fit")}
+              <ToolbarSlider
+                label="Zoom"
+                hint="Zoom: drag to enlarge or shrink the picture. The wheel and a pinch zoom too."
+                className="w-20 shrink-0 @max-[22rem]:w-auto @max-[22rem]:min-w-10 @max-[22rem]:flex-1"
+                value={toSlider(shownScale, min)}
+                min={0}
+                max={SLIDER_STEPS}
+                step={1}
+                valueText={(value) =>
+                  percent(value === toSlider(shownScale, min) ? shownScale : fromSlider(value, min))
+                }
+                onValueChange={(value) => {
+                  const next = fromSlider(value, min)
+                  // The slider's low end is the fit, unless the fit enlarges the picture (then 100%).
+                  setZoom(value === 0 && min < 1 ? "fit" : next)
+                }}
+              />
+              <Tooltip
+                label={
+                  scale.natural
+                    ? `Shown at ${percent(shownScale)} of its own size, ${scale.natural.width} × ${scale.natural.height} pixels`
+                    : `Shown at ${percent(shownScale)} of its own size`
+                }
               >
-                Fit
-              </Button>
-            </Tooltip>
-            <Tooltip label="100%: one pixel of the picture to one pixel of the screen">
-              <Button
-                variant="ghost"
-                className="h-8 shrink-0 px-2! aria-pressed:bg-surface-raised aria-pressed:text-text"
-                aria-pressed={atOwnSize}
-                onClick={() => setZoom(1)}
-              >
-                100%
-              </Button>
-            </Tooltip>
-          </div>
-        )}
-        {close}
-      </div>
+                <span data-zoom-percent className="w-11 shrink-0 text-right text-xs leading-8 text-muted tabular-nums">
+                  {percent(shownScale)}
+                </span>
+              </Tooltip>
+              <Tooltip label="Fit: show all of the picture">
+                <Button
+                  variant="ghost"
+                  className="h-8 shrink-0 px-2! aria-pressed:bg-surface-raised aria-pressed:text-text"
+                  aria-pressed={zoom === "fit"}
+                  onClick={() => setZoom("fit")}
+                >
+                  Fit
+                </Button>
+              </Tooltip>
+              <Tooltip label="100%: one pixel of the picture to one pixel of the screen">
+                <Button
+                  variant="ghost"
+                  className="h-8 shrink-0 px-2! aria-pressed:bg-surface-raised aria-pressed:text-text"
+                  aria-pressed={atOwnSize}
+                  onClick={() => setZoom(1)}
+                >
+                  100%
+                </Button>
+              </Tooltip>
+            </div>
+          )}
+          {close}
+        </div>
+      )}
       {mode !== "show" && (
         <p className="px-3 pt-2 text-sm text-muted">
           Images are {mode === "blur" ? "blurred" : "hidden"} in this browser. Use the images toggle to show them.

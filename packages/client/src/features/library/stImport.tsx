@@ -65,6 +65,7 @@ import {
 /** Compact result stats, including kinds with nothing imported. */
 const KINDS = [
   ["card", "Cards"],
+  ["gallery", "Gallery images"],
   ["chat", "Chats"],
   ["preset", "Presets"],
   ["lorebook", "Lorebooks"],
@@ -74,6 +75,7 @@ const KINDS = [
 /** The preview's kinds, as the folder's files are found (`stPlan`). */
 const FOLDER_KINDS: ReadonlyArray<readonly [StSentKind, string]> = [
   ["card", "Cards"],
+  ["gallery", "Gallery images"],
   ["persona_avatar", "Personas"],
   ["chat", "Chats"],
   ["group_chat", "Group chats"],

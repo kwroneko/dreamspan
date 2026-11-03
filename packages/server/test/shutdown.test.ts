@@ -6,12 +6,13 @@ import { existsSync, rmSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
-import { AppApi } from "@rp/shared/api.ts"
+import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { Effect, Layer } from "effect"
-import { RpcClient, RpcSerialization } from "effect/rpc"
+import { RpcClient, RpcSerialization, type RpcGroup } from "effect/rpc"
 import { Socket } from "effect/socket"
 import { tempDir } from "./support/tempDir.ts"
 
+const shutdownApi: RpcGroup.RpcGroup<AppRpcs> = AppApi
 const serverDir = resolve(import.meta.dirname, "..")
 
 interface Running {
@@ -102,7 +103,7 @@ describe("shutdown", () => {
     try {
       let acknowledged = 0
       const burst = Effect.gen(function* () {
-        const client = yield* RpcClient.make(AppApi)
+        const client = yield* RpcClient.make(shutdownApi)
         const writes = Array.from({ length: 400 }, (_, i) =>
           client
             .CreateCredential({ name: `k${i}`, apiKey: `sk-burst-key-${i}-xxxxxxxx`, urls: ["http://127.0.0.1:9"] })

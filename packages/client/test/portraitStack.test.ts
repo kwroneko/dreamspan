@@ -1,3 +1,4 @@
+import { move } from "../src/ui/portraitStack.ts"
 // The portrait column's stack (owner, 2026-11-02): a click opens a portrait on top, or closes
 // the one open; with one kept at a time it replaces the image; boundaries split two heights.
 import { describe, expect, it } from "vitest"
@@ -76,4 +77,16 @@ describe("boundaries", () => {
     const evened = even(split(three, 0, 500, 600, 100), 0)
     expect(shares(evened)).toEqual([0.333, 0.333, 0.333])
   })
+})
+
+// Reordering preserves shares and leaves unknown images alone.
+it("moves an image live without changing the stack's height shares", () => {
+  const stack = [
+    { portrait: { id: "a", name: "A", mediaId: null }, weight: 2 },
+    { portrait: { id: "b", name: "B", mediaId: null }, weight: 1 }
+  ]
+  const next = move(stack, "b", 0)
+  expect(next.map((e) => e.portrait.id)).toEqual(["b", "a"])
+  expect(next[0]).toBe(stack[1])
+  expect(move(stack, "missing", 0)).toBe(stack)
 })

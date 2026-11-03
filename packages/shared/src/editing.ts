@@ -160,7 +160,7 @@ const indexIntoIdentified = (kind: EntityKind, doc: unknown, path: FieldPath) =>
 
 /** Top-level fields a draft never changes: each changes through its own action, or never. */
 const PROTECTED: Partial<Record<EntityKind, ReadonlySet<string>>> = {
-  card: new Set(["schema_version", "avatar_media_id", "avatar_crop", "asset_media_ids", "regex_approved"]),
+  card: new Set(["schema_version", "avatar_media_id", "avatar_crop", "asset_media_ids", "assets", "regex_approved"]),
   preset: new Set(["schema_version", "regex_approved"]),
   // A slot's link changes only by picking, saving as or unlinking a shared note.
   note: new Set(["schema_version", "owner", "link"])

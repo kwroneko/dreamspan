@@ -2,12 +2,12 @@ import { Summarizer } from "../../src/lcm/Summarizer.ts"
 import * as ContextGenerator from "../../src/chat/ContextGenerator.ts"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { AppApi } from "@rp/shared/api.ts"
+import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
 import { Effect, Layer, Option } from "effect"
 import { HttpServer } from "effect/http"
-import { RpcClient, RpcSerialization } from "effect/rpc"
+import { RpcClient, RpcSerialization, type RpcGroup } from "effect/rpc"
 import { Socket } from "effect/socket"
 import { PasswordCost } from "../../src/auth/passwords.ts"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
@@ -77,6 +77,7 @@ export const serverPort = Effect.map(HttpServer.HttpServer, ({ address }) => {
  * proxy or a cookie. Connecting to one of this machine's other addresses makes the
  * connection come from it.
  */
+const testApi: RpcGroup.RpcGroup<AppRpcs> = AppApi
 export const client = (headers: Record<string, string> = {}, address = "127.0.0.1") =>
   Effect.gen(function* () {
     const port = yield* serverPort
@@ -91,7 +92,7 @@ export const client = (headers: Record<string, string> = {}, address = "127.0.0.
         Layer.provide(RpcSerialization.layerJson)
       )
     )
-    return yield* RpcClient.make(AppApi).pipe(Effect.provide(protocol))
+    return yield* RpcClient.make(testApi).pipe(Effect.provide(protocol))
   })
 
 /** An HTTP POST to the test server, as JSON unless the headers say otherwise. */

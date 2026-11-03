@@ -8,7 +8,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { composerKey, type DraftKey, excerpt, parseDraftTarget } from "@rp/shared/drafts.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Data, Effect } from "effect"
-import type { SqlClient } from "effect/sql"
+import type { SqlClient, SqlError } from "effect/sql"
 import { reachableSlot } from "./graphReachability.ts"
 import { forkRecency, forksShowing, lastShown, onForkPath, sharedDepth } from "./forks.ts"
 import { displayThrough, onDisplayPath, pathPieces, placedInsertions, type SlotPlace } from "./displayPath.ts"
@@ -143,6 +143,10 @@ const liveGaps = (sql: SqlClient.SqlClient, chatId: string, forkId: string) =>
   })
 
 export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () => number = Date.now) => {
+  const assetRestorers = new Map<
+    string,
+    (userId: UserId, origin: Record<string, unknown>) => Effect.Effect<void, NotFound | SqlError.SqlError>
+  >()
   const insertItem = (item: {
     readonly userId: UserId
     readonly kind: BinItem["kind"]
@@ -752,6 +756,13 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
   const restore = (userId: UserId, itemId: string) =>
     Effect.gen(function* () {
       const item = yield* loadItem(userId, itemId)
+      if (item.kind === "card_asset") {
+        const restoreAsset = assetRestorers.get("card_asset")
+        if (!restoreAsset) return yield* new NotFound({ entity: "gallery", id: itemId })
+        yield* restoreAsset(userId, JSON.parse(item.origin_json) as Record<string, unknown>)
+        yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
+        return toBinItem(item)
+      }
       const forkId = (JSON.parse(item.origin_json) as { forkId?: string }).forkId
       if (forkId !== undefined && item.chat_id !== null) {
         yield* discardDeletedQueue(item.chat_id)
@@ -772,7 +783,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         branch: "slots",
         version: "versions",
         entity: "entities",
-        connection: "connections"
+        connection: "connections",
+        card_asset: "entities"
       }[item.kind]
       // An import's copy of a deleted branch root carries the item and the root's marker too.
       if (item.kind === "branch") {
@@ -927,6 +939,9 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         [now]
       )
 
+      yield* run(
+        `DELETE FROM bin_items WHERE kind = 'card_asset' AND origin_json ->> '$.entityId' IN (${targets("entity")})`
+      )
       yield* run(`DELETE FROM bin_items WHERE ${where}`)
       // A message erased everywhere has no other deletion left to restore, and a fork whose tip it
       // was goes up out of it.
@@ -1152,6 +1167,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
 
   return {
     drafts,
+    insertItem,
+    assetRestorers,
     deleteChat,
     deleteMessage,
     deleteFork,

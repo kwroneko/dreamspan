@@ -2,6 +2,7 @@ import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from 
 // The editor RPCs (ARCHITECTURE.md "Editing the library"; DESIGN §4, §6.2), merged into
 // AppApi. Every text field edits through a draft on the server, with its own undo history;
 // saving commits the drafts as one revision. Writes carry the row version the client saw.
+import { AssetChange, CardGallery } from "./gallery.ts"
 import { AvatarCrop } from "./media.ts"
 import { UserId } from "./domain.ts"
 import { Schema } from "effect"
@@ -499,6 +500,16 @@ export class ForkMergeApi extends RpcGroup.make(
   }),
   Rpc.make("UndoForkMerge", {
     payload: { refId: RefId, mergeRevisionId: RevisionId, expectedRowVersion: Schema.Int },
+    success: SavedRef,
+    error: Schema.Union([...Writes])
+  })
+) {}
+
+/** Card gallery operations, served separately to bound RPC handler inference. */
+export class GalleryApi extends RpcGroup.make(
+  Rpc.make("GetCardGallery", { payload: { refId: RefId }, success: CardGallery, error: Schema.Union([...Errors]) }),
+  Rpc.make("ChangeCardAsset", {
+    payload: { refId: RefId, uri: Schema.String, change: AssetChange, expectedRowVersion: Schema.Int },
     success: SavedRef,
     error: Schema.Union([...Writes])
   })

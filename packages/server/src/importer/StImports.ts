@@ -39,6 +39,8 @@ import { Reader, Writer } from "../db/Database.ts"
 import { Formats } from "./Formats.ts"
 import { MediaHolds } from "./MediaHolds.ts"
 import { prepareAvatarThumbnails } from "./prepareThumbnails.ts"
+import { describeImage } from "./images.ts"
+import { stGalleryFolder } from "@rp/shared/stFolder.ts"
 import { storeMedia } from "./mediaFiles.ts"
 import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from "./ops.ts"
 import { Report } from "./stReport.ts"
@@ -204,6 +206,7 @@ interface ChatProgress {
 }
 
 interface Session extends FolderContext {
+  readonly galleryCards: Map<string, Array<RefId>>
   readonly arrivalRefs: Map<EntityId, RefId>
   readonly importedAt: number
   settingsModifiedAt: number | null
@@ -338,6 +341,7 @@ export class StImports extends Context.Service<
             personas: new Map(),
             personaNotes: new Map(),
             cards: new Map(),
+            galleryCards: new Map(),
             worlds: new Map(),
             groups: new Map(),
             library: new Map(),
@@ -629,6 +633,10 @@ export class StImports extends Context.Service<
             parsed.parsed.stModifiedAt ?? modifiedAt,
             arrival
           )
+          if (imported.created && imported.entity !== null && card !== null) {
+            const folder = stGalleryFolder(session.settings?.galleryFolders?.[file] ?? card.name)
+            session.galleryCards.set(folder, [...(session.galleryCards.get(folder) ?? []), imported.entity.refId])
+          }
           if (imported.entity !== null && card !== null) {
             const characterNote = yield* characterAuthorNote(session, user, path, stem(file), imported.entity.entityId)
             session.cards.set(stem(file), {
@@ -1369,6 +1377,39 @@ export class StImports extends Context.Service<
         ),
         on("card", ({ session, user, path, file, bytes, request }) =>
           cardFile(session, user, path, file.file, bytes, request.modifiedAt!, request.arrival!)
+        ),
+        on("gallery", ({ session, user, file, bytes }) =>
+          Effect.gen(function* () {
+            const targets = session.galleryCards.get(file.folder) ?? []
+            if (targets.length === 0) {
+              session.report.count("gallery", "skipped")
+              return result("skipped")
+            }
+            const image = describeImage(bytes)
+            if (!image.mime.startsWith("image/")) {
+              session.report.count("gallery", "failed")
+              return result("failed", "The gallery file is not an image.")
+            }
+            const sha256 = createHash("sha256").update(bytes).digest("hex")
+            yield* holding(
+              [sha256],
+              Effect.gen(function* () {
+                yield* storeMedia(config.dataDir, sha256, bytes)
+                for (const refId of targets) {
+                  const ref = yield* reader.GetLibraryRef({ userId: user.id, refId })
+                  yield* writer.AddCardAsset({
+                    userId: user.id,
+                    refId,
+                    expectedRowVersion: ref.rowVersion,
+                    name: stem(file.file).slice(0, 255),
+                    media: { role: "asset", uri: "", sha256, byteSize: bytes.byteLength, ...image }
+                  })
+                }
+              })
+            )
+            session.report.count("gallery", "added")
+            return result("added")
+          })
         ),
         on("world", ({ session, user, path, file, bytes, request }) =>
           libraryFile(session, user, path, `${file.name}.json`, bytes, "lorebook", file.name, request.modifiedAt!)

@@ -43,6 +43,8 @@ const kindLabel = (item: BinItem) => {
       return "Version"
     case "chat":
       return "Chat"
+    case "card_asset":
+      return "Gallery image"
     case "connection":
       return "Connection"
     case "entity": {
@@ -68,6 +70,8 @@ const purgeEffect = (item: BinItem) => {
       return "The chat goes for good, with everything in it."
     case "entity":
       return "The entry goes for good, with its versions. Messages that named it keep its name."
+    case "card_asset":
+      return "The image is removed from the bin for good. Earlier card revisions keep their images."
     case "connection":
       return "The connection goes for good, with the key typed into it. Usage records keep its name."
   }

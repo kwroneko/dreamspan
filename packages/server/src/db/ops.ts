@@ -1,3 +1,4 @@
+import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
 import { ReplySections } from "@rp/shared/replySections.ts"
@@ -2179,6 +2180,22 @@ export class WriteOps extends RpcGroup.make(
     error: StorageError
   }),
   /** With `crop`, the cutout chosen for it (ARCHITECTURE.md §14.5c); without, the default. */
+  Rpc.make("AddCardAsset", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      expectedRowVersion: Schema.Int,
+      media: ImportedMedia,
+      name: Schema.String.check(Schema.isMaxLength(255))
+    },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  Rpc.make("ChangeCardAsset", {
+    payload: { userId: UserId, refId: RefId, uri: Schema.String, change: AssetChange, expectedRowVersion: Schema.Int },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
   Rpc.make("SetCardAvatar", {
     payload: {
       userId: UserId,
@@ -3028,6 +3045,11 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   // --- The card and preset editors (editorReads.ts).
+  Rpc.make("GetCardGallery", {
+    payload: { userId: UserId, refId: RefId },
+    success: CardGallery,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("OpenEditor", {
     payload: { userId: UserId, refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
     success: EditorSnapshot,

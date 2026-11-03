@@ -853,7 +853,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE "bin_items" (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
-    kind TEXT NOT NULL CHECK (kind IN ('chat', 'message', 'branch', 'version', 'entity', 'connection')),
+    kind TEXT NOT NULL CHECK (kind IN ('chat', 'message', 'branch', 'version', 'entity', 'connection', 'card_asset')),
     target_id TEXT NOT NULL,
     chat_id TEXT,
     title TEXT NOT NULL,

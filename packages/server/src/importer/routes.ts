@@ -530,92 +530,102 @@ export const layer = Layer.unwrap(
 
     // --- The card editor's avatar, and stored images back out (ARCHITECTURE.md "Editing the
     // library"). An avatar upload is an upload like an import: the same permits and limits.
-    const uploadAvatar = Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest
-      const user = yield* CurrentUser
-      if (request.headers["content-type"] !== "application/octet-stream") {
-        return jsonError(415, "expected application/octet-stream")
-      }
-      if (Number(request.headers["content-length"]) > MAX_AVATAR_BYTES) {
-        return jsonError(413, `an avatar can be at most ${formatByteSize(MAX_AVATAR_BYTES)}`)
-      }
-      const query = new URL(request.url, "http://upload").searchParams
-      const refId = query.get("ref")
-      const rowVersion = Number(query.get("rowVersion"))
-      if (!Schema.is(RefId)(refId) || !Number.isSafeInteger(rowVersion)) {
-        return jsonError(400, "expected a ref and its row version")
-      }
-      // The cutout chosen for the new image (§14.5c), as a thumbnail URL names one; none: the default.
-      const cropQuery = query.get("crop")
-      const crop = cropQuery === null ? null : parseCropKey(cropQuery)
-      if (crop === undefined) return jsonError(400, "crop must name a cutout inside the image")
-      // Before the body is read: a refused upload reads and stores nothing.
-      const target = yield* reader.GetLibraryRef({ userId: user.id, refId })
-      if (target.kind !== "card") return jsonError(409, "only cards have avatars")
-      const message = NodeHttpServerRequest.toIncomingMessage(request)
-      const limits = {
-        maxBytes: MAX_AVATAR_BYTES,
-        idleMs: BODY_IDLE_MS,
-        deadline: Date.now() + BODY_DEADLINE_MS,
-        minBytesPerSecond: BODY_MIN_BYTES_PER_SECOND,
-        rateWindowMs: BODY_RATE_WINDOW_MS
-      }
-      return yield* oneAtATime(
-        user.id,
-        Effect.gen(function* () {
-          yield* firstBytes(message, limits)
-          const taken = yield* withPermitWithin(
-            uploads,
-            limits.deadline - Date.now(),
-            Effect.gen(function* () {
-              const body = yield* readBody(message, limits)
-              const image = describeImage(body)
-              if (!INLINE_IMAGES.has(image.mime)) {
-                return jsonError(415, "an avatar must be a PNG, JPEG, GIF or WebP image")
-              }
-              const sha256 = createHash("sha256").update(body).digest("hex")
-              const change = yield* holding(
-                [sha256],
-                Effect.andThen(
-                  storeMedia(config.dataDir, sha256, body),
-                  writer.SetCardAvatar({
-                    userId: user.id,
-                    refId,
-                    expectedRowVersion: rowVersion,
-                    media: { role: "avatar", uri: "", sha256, byteSize: body.byteLength, ...image },
-                    ...(crop === null ? {} : { crop })
+    const uploadAvatar = (gallery = false) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const user = yield* CurrentUser
+        if (request.headers["content-type"] !== "application/octet-stream") {
+          return jsonError(415, "expected application/octet-stream")
+        }
+        if (Number(request.headers["content-length"]) > MAX_AVATAR_BYTES) {
+          return jsonError(413, `an image can be at most ${formatByteSize(MAX_AVATAR_BYTES)}`)
+        }
+        const query = new URL(request.url, "http://upload").searchParams
+        const assetName = (query.get("name") ?? "Image").slice(0, 255)
+        const refId = query.get("ref")
+        const rowVersion = Number(query.get("rowVersion"))
+        if (!Schema.is(RefId)(refId) || !Number.isSafeInteger(rowVersion)) {
+          return jsonError(400, "expected a ref and its row version")
+        }
+        // The cutout chosen for the new image (§14.5c), as a thumbnail URL names one; none: the default.
+        const cropQuery = query.get("crop")
+        const crop = cropQuery === null ? null : parseCropKey(cropQuery)
+        if (crop === undefined) return jsonError(400, "crop must name a cutout inside the image")
+        // Before the body is read: a refused upload reads and stores nothing.
+        const target = yield* reader.GetLibraryRef({ userId: user.id, refId })
+        if (target.kind !== "card") return jsonError(409, "only cards have avatars")
+        const message = NodeHttpServerRequest.toIncomingMessage(request)
+        const limits = {
+          maxBytes: MAX_AVATAR_BYTES,
+          idleMs: BODY_IDLE_MS,
+          deadline: Date.now() + BODY_DEADLINE_MS,
+          minBytesPerSecond: BODY_MIN_BYTES_PER_SECOND,
+          rateWindowMs: BODY_RATE_WINDOW_MS
+        }
+        return yield* oneAtATime(
+          user.id,
+          Effect.gen(function* () {
+            yield* firstBytes(message, limits)
+            const taken = yield* withPermitWithin(
+              uploads,
+              limits.deadline - Date.now(),
+              Effect.gen(function* () {
+                const body = yield* readBody(message, limits)
+                const image = describeImage(body)
+                if (!INLINE_IMAGES.has(image.mime)) {
+                  return jsonError(415, "an image must be a PNG, JPEG, GIF or WebP image")
+                }
+                const sha256 = createHash("sha256").update(body).digest("hex")
+                const change = yield* holding(
+                  [sha256],
+                  Effect.andThen(
+                    storeMedia(config.dataDir, sha256, body),
+                    gallery
+                      ? writer.AddCardAsset({
+                          userId: user.id,
+                          refId,
+                          expectedRowVersion: rowVersion,
+                          name: assetName,
+                          media: { role: "asset", uri: "", sha256, byteSize: body.byteLength, ...image }
+                        })
+                      : writer.SetCardAvatar({
+                          userId: user.id,
+                          refId,
+                          expectedRowVersion: rowVersion,
+                          media: { role: "avatar", uri: "", sha256, byteSize: body.byteLength, ...image },
+                          ...(crop === null ? {} : { crop })
+                        })
+                  )
+                )
+                yield* prepareAvatarThumbnails(formats, config.dataDir, [{ role: "avatar", sha256 }], crop)
+                return yield* HttpServerResponse.schemaJson(SavedRef)(
+                  new SavedRef({
+                    ref: change.ref,
+                    followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome })),
+                    setAside: [],
+                    recovered: 0
                   })
                 )
-              )
-              yield* prepareAvatarThumbnails(formats, config.dataDir, [{ role: "avatar", sha256 }], crop)
-              return yield* HttpServerResponse.schemaJson(SavedRef)(
-                new SavedRef({
-                  ref: change.ref,
-                  followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome })),
-                  setAside: [],
-                  recovered: 0
-                })
-              )
+              })
+            )
+            return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))
+          }).pipe(
+            Effect.catchTag("BodyRefused", ({ reason }) => {
+              const [status, text] = BODY_REFUSALS[reason]
+              return Effect.succeed(jsonError(status, text).pipe(HttpServerResponse.setHeader("connection", "close")))
             })
           )
-          return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))
-        }).pipe(
-          Effect.catchTag("BodyRefused", ({ reason }) => {
-            const [status, text] = BODY_REFUSALS[reason]
-            return Effect.succeed(jsonError(status, text).pipe(HttpServerResponse.setHeader("connection", "close")))
-          })
+        )
+      }).pipe(
+        Effect.catchTags({
+          NotFound: () => Effect.succeed(jsonError(404, "there's no such card")),
+          StaleWrite: () => Effect.succeed(jsonError(409, "the card changed since you opened it; reload it")),
+          RefOperationRefused: (error) => Effect.succeed(jsonError(409, error.reason))
+        }),
+        Effect.catch((error) =>
+          Effect.logError("an avatar upload failed", error).pipe(Effect.as(jsonError(500, "the upload failed")))
         )
       )
-    }).pipe(
-      Effect.catchTags({
-        NotFound: () => Effect.succeed(jsonError(404, "there's no such card")),
-        StaleWrite: () => Effect.succeed(jsonError(409, "the card changed since you opened it; reload it")),
-        RefOperationRefused: (error) => Effect.succeed(jsonError(409, error.reason))
-      }),
-      Effect.catch((error) =>
-        Effect.logError("an avatar upload failed", error).pipe(Effect.as(jsonError(500, "the upload failed")))
-      )
-    )
 
     const uploadMessageImage = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -824,7 +834,8 @@ export const layer = Layer.unwrap(
     return Layer.mergeAll(
       HttpRouter.add("POST", "/library/drafts", authenticated(accounts, leavingDrafts)),
       HttpRouter.add("POST", "/chat/image", authenticated(accounts, uploadMessageImage)),
-      HttpRouter.add("POST", "/library/avatar", authenticated(accounts, uploadAvatar)),
+      HttpRouter.add("POST", "/library/avatar", authenticated(accounts, uploadAvatar())),
+      HttpRouter.add("POST", "/library/gallery", authenticated(accounts, uploadAvatar(true))),
       HttpRouter.add("GET", "/library/media", authenticated(accounts, mediaFile)),
       HttpRouter.add("POST", "/library/import", authenticated(accounts, importFile)),
       HttpRouter.add("POST", "/library/export", authenticated(accounts, exportFile)),

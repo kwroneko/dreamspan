@@ -14,7 +14,15 @@ import { join } from "node:path"
 import type { Socket } from "node:net"
 import type { Duplex } from "node:stream"
 import { NodeHttpServer } from "@effect/platform-node"
-import { AppApi, AppCoreApi, AuthenticatedForkMergeApi, CurrentUser, Health } from "@rp/shared/api.ts"
+import {
+  AppApi,
+  type AppRpcs,
+  AppCoreApi,
+  AuthenticatedGalleryApi,
+  AuthenticatedForkMergeApi,
+  CurrentUser,
+  Health
+} from "@rp/shared/api.ts"
 import { ByteSize, Context, Effect, Layer, Option, Predicate, Schema } from "effect"
 import {
   Headers,
@@ -24,12 +32,12 @@ import {
   HttpServerResponse,
   HttpStaticServer
 } from "effect/http"
-import { RpcSerialization, RpcServer } from "effect/rpc"
+import { RpcSerialization, RpcServer, type RpcGroup } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
-import { makeEditorHandlers, makeForkMergeHandlers } from "./api/editor.ts"
+import { makeEditorHandlers, makeGalleryHandlers, makeForkMergeHandlers } from "./api/editor.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeBinHandlers } from "./api/bin.ts"
 import { makeComposerHandlers } from "./api/composer.ts"
@@ -122,7 +130,11 @@ const CoreHandlers = AppCoreApi.toLayer(
   })
 )
 
-const Handlers = Layer.mergeAll(CoreHandlers, AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers))
+const Handlers = Layer.mergeAll(
+  CoreHandlers,
+  AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
+  AuthenticatedGalleryApi.toLayer(makeGalleryHandlers)
+)
 
 /**
  * RPC requests received and not yet answered, so a stop can let their replies go out
@@ -167,7 +179,8 @@ const TransportHeadersOnly = Layer.effect(
   )
 )
 
-const RpcRoute = RpcServer.layerHttp({ group: AppApi, path: "/rpc", protocol: "websocket" }).pipe(
+const serverApi: RpcGroup.RpcGroup<AppRpcs> = AppApi
+const RpcRoute = RpcServer.layerHttp({ group: serverApi, path: "/rpc", protocol: "websocket" }).pipe(
   Layer.provide([Handlers, AuthenticationLive, TransportHeadersOnly])
 )
 

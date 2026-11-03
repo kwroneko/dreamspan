@@ -2,6 +2,7 @@ import * as costs from "./costs.tsx"
 import * as clientVersion from "./clientVersion.tsx"
 import * as snippets from "./snippets/index.tsx"
 // The core features, each registering its routes and slot entries the way a plugin will.
+import * as gallery from "./gallery/index.tsx"
 import * as cardRename from "./cardRename/index.tsx"
 import * as cardForks from "./cardForks/index.tsx"
 import * as cardSources from "./cardSources/index.tsx"
@@ -30,6 +31,7 @@ import * as status from "./status.tsx"
 export const registerFeatures = () => {
   cardForks.register()
   cardRename.register()
+  gallery.register()
   cardSources.register()
   cardExport.register()
   cardImport.register()

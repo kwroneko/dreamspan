@@ -1,8 +1,7 @@
 // The portrait column: cards' whole images in a column of their own left of the messages, as
 // ST's zoomed avatar sits in the gap left of its chat. The chat stays readable, scrollable and
 // sendable beside it. Several stack, the newest on top (owner, 2026-11-02), each with its own
-// header and a share of the height split by dragging the boundary between two; past what fits
-// at their minimum height the column scrolls. Its width follows the images (the widest one's
+// header and a share of the fixed height split by dragging the boundary between two. Its width follows the images (the widest one's
 // at its own box's height, a small one enlarged at most MAX_UPSCALE times) unless the user
 // resized it, and gives way with the other columns so the messages keep their minimum
 // (ui/columnLayout.ts).
@@ -14,15 +13,17 @@ import { popupOpen } from "../../ui/openPopups.ts"
 import { type Portrait, PortraitView, usePortraitViewer } from "../../ui/Portrait.tsx"
 import type { StackEntry } from "../../ui/portraitStack.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
+import { ViewerHeader } from "../../ui/ViewerHeader.tsx"
+import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 
 const MIN = 200
-/** The least a viewer is high, its header included; below it, the column scrolls. */
+/** Preferred minimum while sharing a pair; smaller pairs split their available height. */
 const MIN_VIEWER_HEIGHT = 180
 /** Room around the image: its box's padding and the column's border. */
 const GUTTER = 17
 
-const SINGLE = "Only keep one image open at a time"
+const SINGLE = "Keep one image open"
 const SINGLE_OFF = "Click to keep only one image open at a time."
 const SINGLE_ON = "Click to allow multiple images open at a time."
 
@@ -82,7 +83,7 @@ function Column() {
         onChange={change}
         onReset={reset}
       />
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {shown.map((entry, index) => {
           const below = shown[index + 1]
           const height = measured[entry.portrait.id]?.height
@@ -108,10 +109,10 @@ function Column() {
                     label={`Resize ${name(index)}'s and ${name(index + 1)}'s portraits`}
                     axis="y"
                     width={height}
-                    min={MIN_VIEWER_HEIGHT}
-                    max={Math.max(MIN_VIEWER_HEIGHT, pair - MIN_VIEWER_HEIGHT)}
+                    min={Math.min(MIN_VIEWER_HEIGHT, pair / 2)}
+                    max={Math.max(pair / 2, pair - MIN_VIEWER_HEIGHT)}
                     direction={1}
-                    onChange={(upper) => viewer.split(index, upper, pair, MIN_VIEWER_HEIGHT)}
+                    onChange={(upper) => viewer.split(index, upper, pair, Math.min(MIN_VIEWER_HEIGHT, pair / 2))}
                     onReset={() => viewer.even(index)}
                   />
                 )
@@ -182,22 +183,28 @@ function Viewer({
       ref={ref}
       aria-label={`${portrait.name}'s portrait`}
       data-portrait-viewer
-      style={{ flex: `${entry.weight} 1 0px`, minHeight: MIN_VIEWER_HEIGHT }}
+      style={{ flex: `${entry.weight} 1 0px`, minHeight: 0 }}
       className={`relative flex flex-col ${first ? "" : "border-t border-border"}`}
     >
       <PortraitView
         portrait={portrait}
+        header={(node) => <ViewerHeader portrait={portrait}>{node}</ViewerHeader>}
         title={(name) => <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</h2>}
         close={
           <>
-            <IconButton
-              label={SINGLE}
-              hint={viewer.single ? SINGLE_ON : SINGLE_OFF}
-              icon="one-image"
-              aria-pressed={viewer.single}
-              className="aria-pressed:bg-surface-raised aria-pressed:text-accent aria-pressed:ring-1 aria-pressed:ring-border"
-              onClick={() => viewer.setSingle(!viewer.single, portrait.id)}
-            />
+            <Menu
+              label="Viewer options"
+              hint="Choose whether opening an image keeps other images open."
+              trigger={<IconButton label="Viewer options" icon="more" />}
+            >
+              <MenuCheckboxItem
+                checked={viewer.single}
+                onCheckedChange={(on) => viewer.setSingle(on, portrait.id)}
+                description={viewer.single ? SINGLE_ON : SINGLE_OFF}
+              >
+                {SINGLE}
+              </MenuCheckboxItem>
+            </Menu>
             <IconButton label="Close the portrait" icon="close" onClick={() => viewer.close(portrait.id)} />
           </>
         }

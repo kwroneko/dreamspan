@@ -31,6 +31,7 @@ export const binTitle = (item: BinItem) => {
         ? `Branch of ${count} message${count === 1 ? "" : "s"} in “${chat}”`
         : `Branch in “${chat}”`
     }
+    case "card_asset":
     case "entity":
     case "connection":
       return item.title

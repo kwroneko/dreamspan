@@ -12,6 +12,7 @@ export type StFile =
   | { readonly kind: "settings" }
   | { readonly kind: "persona_avatar"; readonly file: string }
   | { readonly kind: "card"; readonly file: string }
+  | { readonly kind: "gallery"; readonly folder: string; readonly file: string }
   | { readonly kind: "world"; readonly name: string }
   | { readonly kind: "preset"; readonly name: string }
   | { readonly kind: "group"; readonly file: string }
@@ -32,6 +33,22 @@ const UNSUPPORTED: Readonly<Record<string, string>> = {
 }
 
 const IMAGE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i
+
+/** ST's sanitize-filename mapping for the gallery folder (gallery/index.js and endpoints/images.js). */
+export const stGalleryFolder = (name: string) => {
+  let clean = name.replace(/[<>:"/\\|?*\p{Cc}]/gu, "")
+  if (/^(?:\.+|con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?$/i.test(clean)) return ""
+  clean = clean.replace(/[. ]+$/u, "")
+  let result = "",
+    bytes = 0
+  for (const point of clean) {
+    const size = new TextEncoder().encode(point).length
+    if (bytes + size > 255) break
+    bytes += size
+    result += point
+  }
+  return result
+}
 
 /** A path segment that can only name a file or folder where it stands. */
 const safeSegment = (segment: string) =>
@@ -66,6 +83,8 @@ export const classifyStPath = (path: string): StFile | null => {
       return { kind: "unsupported", what: UNSUPPORTED[top!]! }
     return null
   }
+  if (segments.length === 4 && top === "user" && second === "images" && IMAGE.test(segments[3]!))
+    return { kind: "gallery", folder: third!, file: segments[3]! }
   if (segments.length === 3 && top === "chats" && /\.jsonl$/i.test(third!)) {
     return { kind: "chat", folder: second!, name: stem(third!, /\.jsonl$/i) }
   }
@@ -116,6 +135,7 @@ export const ST_FILE_ORDER: ReadonlyArray<StFile["kind"]> = [
   "settings",
   "persona_avatar",
   "card",
+  "gallery",
   "world",
   "preset",
   "group",

@@ -104,12 +104,13 @@ const expectActual = async (page: Page, region: Locator, name: string) => {
   return actual
 }
 
-const SINGLE = "Only keep one image open at a time"
+const SINGLE = "Keep one image open"
 /** Sets a viewer's "Only keep one image open at a time" toggle. */
 const setSingle = async (viewer: Locator, on: boolean) => {
-  const toggle = viewer.getByRole("button", { name: SINGLE, exact: true })
-  if ((await toggle.getAttribute("aria-pressed")) !== String(on)) await toggle.click()
-  await expect(toggle).toHaveAttribute("aria-pressed", String(on))
+  await viewer.getByRole("button", { name: "Viewer options", exact: true }).click()
+  const toggle = viewer.page().getByRole("menuitemcheckbox", { name: SINGLE, exact: true })
+  if ((await toggle.getAttribute("aria-checked")) !== String(on)) await toggle.click()
+  else await viewer.page().keyboard.press("Escape")
 }
 
 test("a portrait opens beside the chat at 1440: every kind of portrait, every shape, the chat usable", async ({
@@ -343,15 +344,15 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   await boundary.hover()
   await expect(page.getByText(/^Drag to share the height between these two images/)).toBeVisible()
 
-  // Past what fits at their minimum height, the column scrolls.
+  // More viewers share the fixed column; it never scrolls.
   await openPanel(page, "Cast")
   await cast.getByRole("button", { name: "View Phone's portrait" }).click()
   await cast.getByRole("button", { name: "View Small's portrait" }).click()
   await expect(viewers).toHaveCount(6)
   await page.getByRole("button", { name: "Hide panel" }).click()
-  const list = page.locator("[data-portrait-column] > div.overflow-y-auto")
-  expect(await list.evaluate((node) => node.scrollHeight > node.clientHeight + 1)).toBe(true)
-  for (const height of await heights()) expect(height).toBeGreaterThanOrEqual(179)
+  const list = page.locator("[data-portrait-column] > div.overflow-hidden")
+  expect(await list.evaluate((node) => node.scrollHeight > node.clientHeight + 1)).toBe(false)
+  for (const height of await heights()) expect(height).toBeGreaterThan(0)
   await shoot(page, "stack-6")
 
   // Closed one by one: Close, and Escape the top one.
@@ -362,16 +363,7 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   expect(await order()).toEqual(["Huge's portrait", "Standard's portrait", "Wide's portrait", "Tall's portrait"])
 
   // One at a time: the toggle keeps that one, closes the others, and a click then replaces it.
-  await expect(column("Wide").getByRole("button", { name: SINGLE, exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "false"
-  )
-  await column("Wide").getByRole("button", { name: SINGLE, exact: true }).hover()
-  await expect(page.getByText("Click to keep only one image open at a time.")).toBeVisible()
   await setSingle(column("Wide"), true)
-  await page.mouse.move(0, 0)
-  await column("Wide").getByRole("button", { name: SINGLE, exact: true }).hover()
-  await expect(page.getByText("Click to allow multiple images open at a time.")).toBeVisible()
   await expect(viewers).toHaveCount(1)
   await expect(column("Wide")).toBeVisible()
   await page.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()
@@ -381,10 +373,12 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   // The account's choice: after a reload, still one at a time.
   await page.reload()
   // The viewer is itself restored, as well as the one-at-a-time preference.
-  await expect(column("Tall").getByRole("button", { name: SINGLE, exact: true })).toHaveAttribute(
-    "aria-pressed",
+  await column("Tall").getByRole("button", { name: "Viewer options", exact: true }).click()
+  await expect(page.getByRole("menuitemcheckbox", { name: SINGLE, exact: true })).toHaveAttribute(
+    "aria-checked",
     "true"
   )
+  await page.keyboard.press("Escape")
   await openPanel(page, "Cast")
   await cast.getByRole("button", { name: "View Standard's portrait" }).click()
   await expect(viewers).toHaveCount(1)
@@ -396,10 +390,12 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   await openPanel(page, "Cast")
   await cast.getByRole("button", { name: "View Tall's portrait" }).click()
   await expect(viewers).toHaveCount(2)
-  await expect(column("Tall").getByRole("button", { name: SINGLE, exact: true })).toHaveAttribute(
-    "aria-pressed",
+  await column("Tall").getByRole("button", { name: "Viewer options", exact: true }).click()
+  await expect(page.getByRole("menuitemcheckbox", { name: SINGLE, exact: true })).toHaveAttribute(
+    "aria-checked",
     "false"
   )
+  await page.keyboard.press("Escape")
 })
 
 test("a portrait opens full-screen at 390: fit and 100% differ, it pans and pinches", async ({ page }) => {

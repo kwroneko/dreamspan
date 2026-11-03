@@ -1,3 +1,6 @@
+import { CardDoc } from "@rp/shared/docs/card.ts"
+import { galleryAssets } from "@rp/shared/gallery.ts"
+import { Schema } from "effect"
 import { revisionNumber } from "./revisionNumbers.ts"
 import { inFork } from "./forkState.ts"
 import { chatFork, readSnippet } from "./snippets.ts"
@@ -38,6 +41,16 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           .filter((item) => `${item.title} ${item.content}`.toLocaleLowerCase().includes(needle))
           .sort((a, b) => a.title.localeCompare(b.title))
       }).pipe(query("ListSnippets")),
+    GetCardGallery: ({ userId, refId }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        if (ref.kind !== "card") return yield* new NotFound({ entity: "card", id: refId })
+        const doc = Schema.decodeUnknownSync(CardDoc)(yield* lib.loadDoc(ref.head_revision_id))
+        return {
+          name: doc.name,
+          images: galleryAssets(doc).map((a) => ({ uri: a.uri, name: a.name, mediaId: doc.asset_media_ids![a.uri]! }))
+        }
+      }).pipe(query("GetCardGallery")),
     OpenEditor: ({ userId, refId, chatNote }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)

@@ -430,3 +430,23 @@ export const makeForkMergeHandlers = Effect.gen(function* () {
       )
   } satisfies Parameters<typeof ForkMergeApi.of>[0]
 })
+
+export const makeGalleryHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const writer = yield* Writer
+  const warmth = yield* CacheWarmth
+  const userId = Effect.map(CurrentUser, (user) => user.id)
+  const changed =
+    (id: UserId) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      Effect.tap(effect, () => warmth.refreshUser(id))
+  return {
+    GetCardGallery: ({ refId }) =>
+      Effect.flatMap(userId, (id) => reader.GetCardGallery({ userId: id, refId })).pipe(settle("GetCardGallery")),
+    ChangeCardAsset: (payload) =>
+      Effect.flatMap(userId, (id) => writer.ChangeCardAsset({ userId: id, ...payload }).pipe(changed(id))).pipe(
+        Effect.map(saved),
+        settle("ChangeCardAsset")
+      )
+  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").GalleryApi.of>[0]
+})

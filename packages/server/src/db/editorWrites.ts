@@ -26,6 +26,9 @@ import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import { CardDoc } from "@rp/shared/docs/card.ts"
+import { Schema } from "effect"
+import type { Bin } from "./bin.ts"
 import { snapCrop } from "@rp/shared/media.ts"
 import { editedDoc } from "@rp/shared/presetConditions.ts"
 import { heldPromptPaths, parseHeld } from "@rp/shared/presetHeld.ts"
@@ -91,7 +94,7 @@ const parseValue = (content: string): unknown => {
   }
 }
 
-export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
+export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   const { sql, lib, drafts } = steps
 
   /** The user's own change to a ref: a new revision on its head, passed on to its followers. */
@@ -119,6 +122,25 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
       yield* steps.moveHead(ref.id, id, null)
       return yield* steps.changed(ref.id)
     })
+
+  bin.assetRestorers.set("card_asset", (userId, origin) =>
+    Effect.gen(function* () {
+      const ref = yield* lib.ownedRef(userId, String(origin.refId))
+      if (ref.kind !== "card" || ref.entity_id !== origin.entityId)
+        return yield* new NotFound({ entity: "card", id: String(origin.refId) })
+      const head = Schema.decodeUnknownSync(CardDoc)(yield* lib.loadDoc(ref.head_revision_id))
+      const asset = Schema.decodeUnknownSync(CardDoc.fields.assets)([origin.asset])![0]!
+      if (head.assets?.some((a) => a.uri === asset.uri)) return
+      const assets = [...(head.assets ?? [])]
+      assets.splice(Math.min(assets.length, Number(origin.index)), 0, asset)
+      yield* userEdit(
+        ref,
+        { ...head, assets, asset_media_ids: { ...head.asset_media_ids, [asset.uri]: String(origin.mediaId) } },
+        "Restored a gallery image",
+        null
+      )
+    })
+  )
 
   /**
    * A chat's note edited from a position: a revision on the one bound there, and the binding
@@ -507,6 +529,112 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
 
     // The cutout goes with its image (ARCHITECTURE.md §14.5c): a new image takes the one chosen
     // for it, or none (the default), never the old image's.
+    AddCardAsset: ({ userId, refId, expectedRowVersion, media, name }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        if (ref.kind !== "card") return yield* refused(ref, "Only cards have galleries.")
+        yield* steps.checkRowVersion(ref, expectedRowVersion)
+        const head = Schema.decodeUnknownSync(CardDoc)(yield* lib.loadDoc(ref.head_revision_id))
+        const mediaId = yield* steps.recordMedia(userId, media)
+        const ext =
+          (
+            {
+              "image/png": "png",
+              "image/jpeg": "jpg",
+              "image/webp": "webp",
+              "image/gif": "gif",
+              "image/avif": "avif",
+              "image/bmp": "bmp"
+            } as Record<string, string>
+          )[media.mime] ?? "png"
+        const uri = `embeded://assets/other/images/${uuidv7()}.${ext}`
+        return yield* userEdit(
+          ref,
+          {
+            ...head,
+            assets: [...(head.assets ?? []), { type: "other", uri, name, ext }],
+            asset_media_ids: { ...head.asset_media_ids, [uri]: mediaId }
+          },
+          "Added a gallery image",
+          null
+        )
+      }).pipe(transaction(sql, "AddCardAsset")),
+
+    ChangeCardAsset: ({ userId, refId, expectedRowVersion, uri, change }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        if (ref.kind !== "card") return yield* refused(ref, "Only cards have galleries.")
+        yield* steps.checkRowVersion(ref, expectedRowVersion)
+        const head = Schema.decodeUnknownSync(CardDoc)(yield* lib.loadDoc(ref.head_revision_id))
+        const assets = [...(head.assets ?? [])]
+        const index = assets.findIndex(
+          (a) => a.uri === uri && !(a.type.toLowerCase() === "icon" && a.name.toLowerCase() === "main")
+        )
+        const asset = assets[index]
+        const mediaId = head.asset_media_ids?.[uri]
+        if (!asset || !mediaId) return yield* new NotFound({ entity: "gallery image", id: uri })
+        const ids = { ...head.asset_media_ids }
+        let doc = { ...head, assets, asset_media_ids: ids }
+        if (change.action === "rename") {
+          if (asset.type.toLowerCase() === "icon" && change.name.toLowerCase() === "main")
+            return yield* refused(ref, "Main is reserved for the current portrait.")
+          assets[index] = { ...asset, name: change.name }
+        } else if (change.action === "kind") {
+          if (change.kind === "icon" && asset.name.toLowerCase() === "main")
+            return yield* refused(ref, "Rename this image before making it an alternative portrait.")
+          assets[index] = { ...asset, type: change.kind }
+        } else if (change.action === "portrait") {
+          if (asset.type.toLowerCase() !== "icon") return yield* refused(ref, "Choose an alternative portrait.")
+          // The old portrait takes the alternative's slot and name; the new one is main.
+          assets.splice(index, 1)
+          const main = assets.findIndex((a) => a.type.toLowerCase() === "icon" && a.name.toLowerCase() === "main")
+          const replacementIndex = main >= 0 && main < index ? index - 1 : index
+          if (main >= 0) {
+            delete ids[assets[main]!.uri]
+            assets.splice(main, 1)
+          }
+          delete ids[uri]
+          if (head.avatar_media_id) {
+            const oldUri = `embeded://assets/icon/images/${uuidv7()}.${asset.ext}`
+            const [old] = yield* sql<{ mime: string }>`SELECT mime FROM media_assets WHERE id = ${head.avatar_media_id}`
+            const ext =
+              (
+                { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" } as Record<
+                  string,
+                  string
+                >
+              )[old?.mime ?? ""] ?? "png"
+            const oldAsset = { ...asset, uri: oldUri.replace(/\.[^.]*$/, `.${ext}`), ext }
+            assets.splice(Math.min(replacementIndex, assets.length), 0, oldAsset)
+            ids[oldAsset.uri] = head.avatar_media_id
+          }
+          assets.push({ ...asset, name: "main" })
+          ids[uri] = mediaId
+          const { avatar_crop: _crop, ...withoutCrop } = doc
+          doc = { ...withoutCrop, avatar_media_id: mediaId }
+        } else {
+          const item = yield* bin.insertItem({
+            userId,
+            kind: "card_asset",
+            targetId: uuidv7(),
+            chatId: null,
+            title: asset.name || "Gallery image",
+            excerpt: head.name,
+            origin: { refId, entityId: ref.entity_id, asset, index, mediaId },
+            byteSize: JSON.stringify(asset).length
+          })
+          assets.splice(index, 1)
+          delete ids[uri]
+          yield* bin.evictDeleted(userId, item)
+        }
+        return yield* userEdit(
+          ref,
+          doc,
+          change.action === "portrait" ? "Changed the portrait" : "Changed a gallery image",
+          null
+        )
+      }).pipe(transaction(sql, "ChangeCardAsset")),
+
     SetCardAvatar: ({ userId, refId, expectedRowVersion, media, crop }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)

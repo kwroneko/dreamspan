@@ -9,7 +9,7 @@ import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.t
 // except for admin-only RPCs, where admins may.
 import { readFileSync } from "node:fs"
 import { assert, describe, it, layer } from "@effect/vitest"
-import { AppApi } from "@rp/shared/api.ts"
+import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
@@ -19,7 +19,7 @@ import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { textField, valueField } from "@rp/shared/editing.ts"
 import type { LlmRequestId } from "@rp/shared/usage.ts"
 import { Context, Effect, Fiber, Layer, Option, Stream } from "effect"
-import type { Rpc, RpcGroup } from "effect/rpc"
+import type { Rpc } from "effect/rpc"
 import { Reader, Writer } from "../src/db/Database.ts"
 import type { Notice } from "@rp/shared/noticeApi.ts"
 import { Notices } from "../src/chat/Notices.ts"
@@ -188,7 +188,7 @@ const userDraftOf = (owner: Party) =>
     expectedSession: null
   })
 
-const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry } = {
+const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   GetUserDraft: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -2472,6 +2472,21 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     probe: (actor, owner) =>
       refused(actor.api.SetRegexApproval({ refId: owner.refId, approved: true, expectedRowVersion: 1 }), "NotFound")
   },
+  GetCardGallery: {
+    probe: (actor, owner) => refused(actor.api.GetCardGallery({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  ChangeCardAsset: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.ChangeCardAsset({
+          refId: owner.editor.cardRefId,
+          uri: "embeded://foreign.png",
+          expectedRowVersion: 1,
+          change: { action: "remove" }
+        }),
+        "NotFound"
+      )
+  },
   SetCardAvatarCrop: {
     probe: (actor, owner) =>
       refused(
@@ -3089,6 +3104,16 @@ const routes: Record<string, Probe> = {
       )
       assert.strictEqual(response.status, 404)
     }),
+  "POST /library/gallery": (actor, owner) =>
+    Effect.gen(function* () {
+      const response = yield* http(
+        actor,
+        `/library/gallery?ref=${owner.editor.cardRefId}&rowVersion=1&name=Foreign`,
+        avatarFile(actor.user.handle),
+        "application/octet-stream"
+      )
+      assert.strictEqual(response.status, 404)
+    }),
   "POST /library/avatar": (actor, owner) =>
     Effect.gen(function* () {
       const theirs = yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })
@@ -3470,6 +3495,17 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  AddCardAsset: (_reader, actor, owner, writer) =>
+    refused(
+      writer.AddCardAsset({
+        userId: actor.user.id,
+        refId: owner.editor.cardRefId,
+        expectedRowVersion: 1,
+        name: "Foreign",
+        media: { role: "asset", uri: "", sha256: "0".repeat(64), mime: "image/png", byteSize: 10, width: 1, height: 1 }
+      }),
+      "NotFound"
+    ),
   RenameChats: (_reader, actor, owner, writer) =>
     refused(
       writer.RenameChats({

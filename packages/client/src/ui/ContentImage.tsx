@@ -2,9 +2,13 @@
 // placeholder beside the img preserves its measured box when images are hidden.
 import type { ComponentProps } from "react"
 
-export function ContentImage({ alt, ...props }: ComponentProps<"img">) {
+export function ContentImage({
+  alt,
+  frameClassName = "",
+  ...props
+}: ComponentProps<"img"> & { frameClassName?: string }) {
   return (
-    <span className="relative inline-flex min-w-0 max-w-full items-center justify-center">
+    <span className={`relative inline-flex min-w-0 max-w-full items-center justify-center ${frameClassName}`}>
       <img {...props} alt={alt} />
       <span
         data-image-fallback

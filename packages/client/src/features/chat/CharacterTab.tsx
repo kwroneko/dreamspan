@@ -14,7 +14,7 @@ import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -174,6 +174,13 @@ function CardPanel({
   const workspace = usePresetWorkspace()
   const call = useCaller()
   const state = useEditorState(store)
+  const avatar = state.snapshot?.doc.avatar_media_id
+  const previousAvatar = useRef(avatar)
+  useEffect(() => {
+    const changed = previousAvatar.current !== undefined && previousAvatar.current !== avatar
+    previousAvatar.current = avatar
+    if (changed) void session?.rereadCast()
+  }, [avatar, session])
   useEffect(() => {
     if (store.snapshot === null) void store.load()
   }, [store])

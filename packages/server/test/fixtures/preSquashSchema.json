@@ -874,7 +874,7 @@
       "type": "table",
       "name": "bin_items",
       "tbl_name": "bin_items",
-      "sql": "CREATE TABLE \"bin_items\" ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('chat', 'message', 'branch', 'version', 'entity', 'connection')), target_id TEXT NOT NULL, chat_id TEXT, title TEXT NOT NULL, excerpt TEXT NOT NULL, origin_json TEXT NOT NULL CHECK (json_valid(origin_json)), byte_size INTEGER NOT NULL, deleted_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE \"bin_items\" ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('chat', 'message', 'branch', 'version', 'entity', 'connection', 'card_asset')), target_id TEXT NOT NULL, chat_id TEXT, title TEXT NOT NULL, excerpt TEXT NOT NULL, origin_json TEXT NOT NULL CHECK (json_valid(origin_json)), byte_size INTEGER NOT NULL, deleted_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",

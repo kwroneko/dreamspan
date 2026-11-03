@@ -161,6 +161,7 @@ export const StLoreMapping = Schema.Struct({
 export type StLoreMapping = typeof StLoreMapping.Type
 
 export class StSettings extends Schema.Class<StSettings>("StSettings")({
+  galleryFolders: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   characterTags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   tagNames: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   textSwitches: Schema.optionalKey(StTextSwitches),

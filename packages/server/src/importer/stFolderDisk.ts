@@ -14,7 +14,7 @@ import { Effect } from "effect"
 import { defaultLimits } from "../formats/safety.ts"
 
 /** Deep enough for ST's install folder: `<install>/data/<handle>/chats/<card>/<chat>.jsonl`. */
-const MAX_DEPTH = 6
+const MAX_DEPTH = 8
 /** Directory entries looked at before giving up: a path that isn't an ST folder can be huge. */
 const MAX_ENTRIES = 500_000
 /** Folders that hold code, never ST data. */

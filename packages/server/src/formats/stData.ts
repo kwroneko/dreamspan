@@ -51,6 +51,7 @@ interface StSummarySettings {
 }
 
 export interface StSettings {
+  readonly galleryFolders?: Readonly<Record<string, string>>
   readonly characterTags?: Readonly<Record<string, ReadonlyArray<string>>>
   readonly tagNames?: Readonly<Record<string, string>>
   /** `power_user` settings that are a preset's here, copied into each imported preset. */
@@ -171,6 +172,11 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
   )
   const worldInfo = object(object(settings.world_info_settings).world_info)
   const extensions = object(settings.extension_settings)
+  const galleryFolders = Object.fromEntries(
+    Object.entries(object(object(extensions.gallery).folders))
+      .slice(0, 10000)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  )
   const memory = object(extensions.memory)
   const disabled = strings(extensions.disabledExtensions, 1000)
   const note = object(extensions.note)
@@ -204,6 +210,7 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
       : {}),
     ...(Object.keys(tagNames).length ? { tagNames } : {}),
     ...(Object.keys(characterTags).length ? { characterTags } : {}),
+    ...(Object.keys(galleryFolders).length ? { galleryFolders } : {}),
     selectedPreset: typeof selectedPreset === "string" && selectedPreset !== "" ? bounded(selectedPreset) : null,
     defaultPersona:
       typeof powerUser.default_persona === "string" && powerUser.default_persona !== ""

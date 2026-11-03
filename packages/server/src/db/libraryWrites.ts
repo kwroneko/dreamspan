@@ -980,7 +980,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     }
     return {
       ...handlers,
-      ...makeEditorWriteHandlers(steps),
+      ...makeEditorWriteHandlers(steps, bin),
       ...makeCardForkWriteHandlers(steps),
       ...makeForkMergeWriteHandlers(steps)
     }

@@ -51,3 +51,9 @@ describe("ST folder paths", () => {
     expect(findStRoots(["characters/A.png", "settings.json"])).toEqual([{ prefix: "", name: "", files: 2 }])
   })
 })
+
+it("recognizes per-card gallery image folders without accepting other files", () => {
+  expect(classifyStPath("user/images/Mira/sunset.png")).toEqual({ kind: "gallery", folder: "Mira", file: "sunset.png" })
+  expect(classifyStPath("user/images/Mira/run.js")).toBeNull()
+  expect(classifyStPath("user/images/../photo.png")).toBeNull()
+})

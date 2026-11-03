@@ -81,6 +81,17 @@ export const split = <P extends StackPortrait>(
   )
 }
 
+/** Move a viewer while keeping its image, zoom state and height share. */
+export const move = <P extends StackPortrait>(stack: Stack<P>, id: string, index: number): Stack<P> => {
+  const from = stack.findIndex((e) => e.portrait.id === id)
+  if (from < 0) return stack
+  const to = Math.max(0, Math.min(stack.length - 1, index))
+  if (from === to) return stack
+  const result = [...stack]
+  result.splice(to, 0, result.splice(from, 1)[0]!)
+  return result
+}
+
 /** A double-click on a boundary: the two either side of it share their height equally. */
 export const even = <P extends StackPortrait>(stack: Stack<P>, index: number): Stack<P> => {
   const above = stack[index],

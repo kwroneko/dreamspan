@@ -17,7 +17,7 @@ import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
-import { EditorApi, ForkMergeApi } from "./editorApi.ts"
+import { EditorApi, ForkMergeApi, GalleryApi } from "./editorApi.ts"
 import {
   AccountRejected,
   Forbidden,
@@ -397,8 +397,10 @@ export class AppCoreApi extends RpcGroup.make(
 /** The fork merge RPCs (editorApi.ts), authenticated like the rest. */
 export const AuthenticatedForkMergeApi = ForkMergeApi.middleware(Authentication)
 
+export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
+
 /** The whole API: what the client calls and the server serves. */
-export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi) {}
+export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi).merge(AuthenticatedGalleryApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

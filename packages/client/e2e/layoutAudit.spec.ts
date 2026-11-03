@@ -16,6 +16,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel, openSummarySettings } from "./support/panel.ts"
 import { showAppNavigation, hideAppNavigation } from "./support/appMenu.ts"
 import { level1 } from "./support/summaries.ts"
+import { portraitPng } from "./support/portrait.ts"
 import { writeScaleFolder } from "./support/stScaleFolder.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 
@@ -353,6 +354,33 @@ test.describe("synthetic library and every app surface", () => {
       })
     )
     ;({ chatId, cardId, cardRef, presetRef, bookRef, replyId, connectionId, cardName } = seeded)
+    // Populate the shared Extra-tab gallery for its grid audit, at both panel widths.
+    for (const [index, name] of ["Alternative coat", "Happy", "Harbor", "Evening"].entries()) {
+      const ref = await admin((api) => api.OpenEditor({ refId: cardRef }))
+      const response = await fetch(
+        `${server.url}/library/gallery?ref=${cardRef}&rowVersion=${ref.ref.rowVersion}&name=${encodeURIComponent(name)}`,
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/octet-stream" },
+          body: portraitPng([], index)
+        }
+      )
+      expect(response.status).toBe(200)
+      if (index < 3)
+        await admin((api) =>
+          Effect.gen(function* () {
+            const opened = yield* api.OpenEditor({ refId: cardRef })
+            const images = yield* api.GetCardGallery({ refId: cardRef })
+            yield* api.ChangeCardAsset({
+              refId: cardRef,
+              expectedRowVersion: opened.ref.rowVersion,
+              uri: images.images.at(-1)!.uri,
+              change: { action: "kind", kind: (["icon", "emotion", "background"] as const)[index]! }
+            })
+          })
+        )
+    }
+
     await level1(
       join(work, "data"),
       chatId,
