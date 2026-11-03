@@ -8,8 +8,17 @@ import { StartChatPicker } from "./StartChatPicker.tsx"
 import { sidebarFoot } from "./homeSlots.ts"
 import { OpenChatBranches } from "./ShellBrowser.tsx"
 import { homeSearch } from "./homeSearch.ts"
+import { cardContributions } from "../cardForks/surfaces.tsx"
+import { PersonaFolderSwitch } from "./personaFolder.tsx"
 
 export const register = () => {
+  // The Persona switch in a card's header and on its page (personaFolder.tsx).
+  cardContributions.register({
+    id: "characters.persona-folder",
+    placement: "header",
+    order: 10,
+    component: PersonaFolderSwitch
+  })
   registerCharacterPanels()
   // The sidebar's "Start a chat with…" search, beside the app's name.
   sidebarActions.register({ id: "start-chat", order: 10, component: StartChatPicker })

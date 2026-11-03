@@ -236,6 +236,7 @@ function Page({ card, persona = false }: { card: CardUsage; persona?: boolean })
             </p>
           )}
           <p className="text-sm text-muted">{usageLine(card)}</p>
+          <CardSurface placement="header" entityId={card.entityId} label={card.label} />
           <div className="mt-2 flex flex-wrap gap-2">
             <CardSurface placement="actions" entityId={card.entityId} />
             {used && (

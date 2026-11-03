@@ -34,7 +34,7 @@ import { shellAtom } from "../characters/shellData.tsx"
 import { useCaller } from "./caller.ts"
 import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
 import { CardEditor } from "./CardEditor.tsx"
-import { CardHeader, CardNameHeader, CardTokens } from "./CardNameHeader.tsx"
+import { CardHeader, CardNameHeader, CardTokensRow } from "./CardNameHeader.tsx"
 import { CARD_TAB_LOREBOOK } from "./cardTabs.ts"
 import { StorePortrait } from "./PortraitControls.tsx"
 import { EnsurePortraitViewer } from "../../ui/Portrait.tsx"
@@ -273,7 +273,7 @@ export function Editor({
                 heading="h1"
                 after={<CardFavourite entityId={ref.entityId} />}
               />
-              <CardTokens store={store} />
+              <CardTokensRow store={store} entityId={ref.entityId} label={ref.label} />
             </CardHeader>
           ) : (
             !overPreset && title("text-2xl")

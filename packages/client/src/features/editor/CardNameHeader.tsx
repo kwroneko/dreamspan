@@ -9,7 +9,7 @@
 import { renameQuestion } from "@rp/shared/cardNames.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { cardTokenTexts, sumCardTokens } from "@rp/shared/cardTokens.ts"
-import { ChatId, ForkId } from "@rp/shared/chat.ts"
+import { ChatId, type EntityId, ForkId } from "@rp/shared/chat.ts"
 import { textField } from "@rp/shared/editing.ts"
 import type { NoteEntry } from "@rp/shared/editorApi.ts"
 import { useSearch } from "@tanstack/react-router"
@@ -17,6 +17,7 @@ import { Schema } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react"
 import { AppClient } from "../../rpc.ts"
+import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useSession } from "../../session.ts"
 import { DISPLAY_HINT, NICKNAME_HINT, VERSION_HINT } from "./cardNameHints.ts"
 import { InlineRename } from "../../ui/InlineRename.tsx"
@@ -94,7 +95,7 @@ const subscribeLiveNotes = (refIds: ReadonlyArray<string>) => (listener: () => v
  * The card's total and permanent token counts, as ST's character panel has them
  * (@rp/shared/cardTokens.ts), with the chat model's tokenizer, counted as you type.
  */
-export function CardTokens({ store }: { store: EditorStore }) {
+function CardTokens({ store }: { store: EditorStore }) {
   const notes = useDefaultNotes(store.refId)
   const parts = cardTokenTexts(useWorkingDoc(store), notes)
   const expand = useCountMacros(store)
@@ -126,6 +127,20 @@ export function CardTokens({ store }: { store: EditorStore }) {
         {shown(sums.total)} tokens · {shown(sums.permanent)} permanent
       </span>
     </Tooltip>
+  )
+}
+
+/**
+ * The header's last row: the token counts, then what's registered for a card's header
+ * (`cardContributions`, placement "header": the Persona switch), beside them where the width
+ * allows, else under them, so the header keeps the portrait's height wherever it can.
+ */
+export function CardTokensRow({ store, entityId, label }: { store: EditorStore; entityId: string; label: string }) {
+  return (
+    <div className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 [&>[data-card-tokens]]:shrink-0">
+      <CardTokens store={store} />
+      <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
+    </div>
   )
 }
 

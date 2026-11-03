@@ -376,6 +376,7 @@ test.describe("synthetic library and every app surface", () => {
         }
         if (process.env.LAYOUT_AUDIT_CARD_HEADERS_ONLY === "1") {
           await go("card-editor-header", `/library/${cardRef}`)
+          await go("card-page-header", `/cards/${cardId}`)
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, cardName)
           await audit("panel-card-header")

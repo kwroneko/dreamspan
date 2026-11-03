@@ -7,6 +7,7 @@ import { MenuCheckboxItem, MenuGroup, MenuItem, MenuLinkItem } from "../../ui/Me
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { requestExport } from "../cardExport/exportRequests.ts"
+import { PERSONA_FOLDER_HINT, useSetPersona } from "../characters/personaFolder.tsx"
 import { libraryItemActions, type LibraryItemProps } from "./itemActions.tsx"
 
 const compact = "h-8! px-2.5!"
@@ -38,21 +39,14 @@ function EditAction({ entry }: LibraryItemProps) {
   )
 }
 
+/** The same action as the Persona switch in a card's header (`personaFolder.tsx`). */
 function PersonaItem({ entry, persona, description }: LibraryItemProps) {
-  const action = useAction()
+  const { set } = useSetPersona()
   return (
     <MenuCheckboxItem
       checked={persona}
       description={description}
-      onCheckedChange={(next) =>
-        void action
-          .run((client) => client("SetPersona", { entityId: entry.entityId, persona: next }), ["library"])
-          .then(
-            (result) =>
-              !result.ok &&
-              showToast({ title: "Couldn’t change the persona folder", description: result.error.message })
-          )
-      }
+      onCheckedChange={(next) => void set(entry.entityId, next)}
     >
       Persona
     </MenuCheckboxItem>
@@ -145,7 +139,7 @@ export const registerItemActions = () => [
     order: 30,
     available: ({ entry }) => entry.kind === "card",
     menu: PersonaItem,
-    description: "Whether it’s in the persona folder, offered when you pick who you play."
+    description: PERSONA_FOLDER_HINT
   }),
   libraryItemActions.register({
     id: "library.update",

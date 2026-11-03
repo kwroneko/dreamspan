@@ -1,5 +1,6 @@
 // The characters' filter and sort in one compact row, for a narrow place: the left panel's
-// grid (with Groups, and Include personas under it), Start a chat and Add characters (without). The home page lays the same parts out wide.
+// grid (with Groups, and Include personas under it), Add characters (with Include personas) and
+// Start a chat (without). The home page lays the same parts out wide.
 import { type CardBrowse, CardFilterControl, CardSortControl, IncludePersonas } from "./cardBrowse.tsx"
 import { browsable, type ShellLibrary, useGroupCount } from "./shellData.tsx"
 

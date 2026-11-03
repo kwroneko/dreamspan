@@ -1,7 +1,7 @@
 // The Cast tab's Add characters section (owner, 2026-11-01; ST's group "Add Members" list):
 // under the cast, collapsed until opened (remembered per account in this browser), the same
-// character grid as the left panel's Characters, with its filter, sort and direction and the
-// search. A click on a tile adds that character to the chat from the leaf shown on, on this
+// character grid as the left panel's Characters, with its filter (Include personas under it),
+// sort and direction and the search. A click on a tile adds that character to the chat from the leaf shown on, on this
 // branch (`ChangeCast` `Join`, as the cast's other changes); the grid stays open, so several
 // can be added in a row. Who's already in the chat is marked, and a click on them does nothing.
 // It's the `cast.add-characters` entry of `castSections`, so a plugin can replace or remove it.
@@ -15,7 +15,7 @@ import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
-import { browseCards, useCardBrowse } from "../characters/cardBrowse.tsx"
+import { browseCards, mixesPersonas, useCardBrowse } from "../characters/cardBrowse.tsx"
 import { CardBrowseBar } from "../characters/CardBrowseBar.tsx"
 import {
   browsable,
@@ -180,7 +180,7 @@ function AddGrid({
     state: stateOf
   }
   // How many tiles are shown, for this search and filter: another starts from the first page.
-  const pageKey = `${search}/${browse.filter}`
+  const pageKey = `${search}/${browse.filter}/${browse.withPersonas}`
   const [shown, setShown] = useState({ key: pageKey, count: PAGE })
   const count = shown.key === pageKey ? shown.count : PAGE
   const found = browseCards(browsable(data), browse, search)
@@ -200,7 +200,7 @@ function AddGrid({
             onChange={(e) => setSearch(e.currentTarget.value)}
           />
         </Tooltip>
-        <CardBrowseBar data={data} browse={browse} onChange={setBrowse} />
+        <CardBrowseBar data={data} browse={browse} onChange={setBrowse} includePersonas />
         <p role="status" className={`min-h-4 text-xs ${said?.tone === "failed" ? "text-danger" : "text-muted"}`}>
           {said?.text ?? ""}
         </p>
@@ -208,6 +208,7 @@ function AddGrid({
       <CharacterGrid
         cards={cards}
         sort={browse.sort}
+        markPersonas={mixesPersonas(browse)}
         pick={pick}
         status={status}
         // Three small tiles a row on a phone, more as the panel widens.
