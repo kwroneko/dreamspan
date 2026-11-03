@@ -4,9 +4,10 @@
 // body without the section, and Show as reply text puts the section back as a new version.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
-import { expect, test } from "@playwright/test"
+import { expect, test, type Locator } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -116,6 +117,7 @@ for (const width of [1440, 390])
       const opening = section.getByRole("textbox", { name: "Opening tag" })
       const closing = section.getByRole("textbox", { name: "Closing tag" })
       await expect(opening).toHaveCount(2)
+      await expectThinkingFields(section)
       await expect(opening.first()).toHaveValue("<think>")
       await expect(closing.first()).toHaveValue("</think>")
       await expect(opening.nth(1)).toHaveValue("<thinking>")
@@ -144,17 +146,84 @@ for (const width of [1440, 390])
       await sendBack.scrollIntoViewIfNeeded()
       await shot("reply-sections-editor-send-back")
 
-      // Literal ST-style tags can contain real line breaks. Editing must keep those bytes,
-      // including when a field is read back from the server after saving and reloading.
-      await opening.first().fill("<|plan|>\n\n")
-      await closing.first().fill("\n\n<|/plan|>")
-      await expect(opening.first()).toHaveValue("<|plan|>\n\n")
-      await expect(closing.first()).toHaveValue("\n\n<|/plan|>")
+      // Literal tag symbols survive editing, saving and reloading.
+      await opening.first().fill("<|plan|>")
+      await closing.first().fill("<|/plan|>")
+      await expect(opening.first()).toHaveValue("<|plan|>")
+      await expect(closing.first()).toHaveValue("<|/plan|>")
       await saveRevision(page)
       await page.reload()
-      await expect(opening.first()).toHaveValue("<|plan|>\n\n")
-      await expect(closing.first()).toHaveValue("\n\n<|/plan|>")
+      await expect(opening.first()).toHaveValue("<|plan|>")
+      await expect(closing.first()).toHaveValue("<|/plan|>")
       await opening.first().scrollIntoViewIfNeeded()
-      await shot("reply-sections-editor-multiline")
+      await shot("reply-sections-editor-literal")
     })
   }
+
+// A focused geometry audit of the settings, independent of reply generation.
+for (const width of [390, 1024, 1440])
+  for (const theme of ["light", "dark"] as const) {
+    test(`thinking settings layout at ${width} ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const preset = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        api.CreatePreset({ label: `Thinking layout ${width} ${theme}` })
+      )
+      await page.goto(`${server().url}/library/${preset.id}`)
+      const section = page.locator('[data-preset-section="reply-sections"]')
+      await expect(section).toBeVisible()
+      await section.scrollIntoViewIfNeeded()
+      await expectThinkingFields(section)
+      if (shots) {
+        mkdirSync(shots, { recursive: true })
+        await section.locator("..").screenshot({
+          path: resolve(shots, `thinking-settings-${width}-${theme}.png`),
+          animations: "disabled"
+        })
+      }
+      await expectLayout(page, info, "thinking-settings", { scope: '[data-preset-section="reply-sections"]' })
+      await section.getByRole("button", { name: "Remove pair" }).first().click()
+      await section.getByRole("button", { name: "Add the default pair", exact: true }).scrollIntoViewIfNeeded()
+      await expectThinkingFields(section)
+      await expectLayout(page, info, "thinking-settings-default-pair", {
+        scope: '[data-preset-section="reply-sections"]'
+      })
+    })
+  }
+
+async function expectThinkingFields(section: Locator) {
+  const tags = section.getByRole("textbox")
+  for (const tag of await tags.all()) {
+    await expect(tag).toHaveJSProperty("tagName", "INPUT")
+    const box = (await tag.boundingBox())!
+    expect(box.height).toBeLessThanOrEqual(40)
+    expect(box.width).toBeLessThanOrEqual(640)
+  }
+  // DOM order also governs keyboard and screen-reader order.
+  const order = await section
+    .locator("input:not([type=hidden]):not([type=checkbox]), [role=switch], button")
+    .evaluateAll((controls) =>
+      controls
+        .map((control) =>
+          control.getAttribute("role") === "switch"
+            ? "switch"
+            : control.getAttribute("type") === "number"
+              ? "send-back"
+              : control.tagName === "INPUT"
+                ? "tag"
+                : control.textContent?.trim()
+        )
+        .filter((name) => name === "tag" || name === "switch" || name === "send-back" || name?.startsWith("Add "))
+    )
+  const toggle = order.indexOf("switch")
+  expect(toggle).toBeGreaterThan(order.lastIndexOf("tag"))
+  expect(toggle).toBeGreaterThan(order.indexOf("Add a pair"))
+  if (order.includes("Add the default pair")) expect(toggle).toBeGreaterThan(order.indexOf("Add the default pair"))
+  expect(order[toggle + 1]).toBe("send-back")
+  const first = (await tags.nth(0).boundingBox())!
+  const second = (await tags.nth(1).boundingBox())!
+  if ((await tags.first().locator("../..").boundingBox())!.width >= 456) expect(first.y).toBe(second.y)
+  else expect(second.y).toBeGreaterThan(first.y)
+}

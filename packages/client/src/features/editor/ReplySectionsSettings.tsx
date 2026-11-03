@@ -13,7 +13,7 @@ import {
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { useState } from "react"
-import { Field, Input, Textarea } from "../../ui/Field.tsx"
+import { Field, Input } from "../../ui/Field.tsx"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { type EditorStore, useValue } from "./store.ts"
 
@@ -48,7 +48,7 @@ function PairRow({
   const regex = pair.regex === true
   return (
     <li className="flex flex-col gap-2 rounded-md border border-border p-3" data-section-pair={index}>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid w-full max-w-controls grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-2">
         <Field
           label="Opening tag"
           about={
@@ -56,8 +56,7 @@ function PairRow({
           }
           error={tagError(pair.open, regex)}
         >
-          <Textarea
-            rows={2}
+          <Input
             value={pair.open}
             spellCheck={false}
             className="font-mono"
@@ -69,8 +68,7 @@ function PairRow({
           about={regex ? "Where it ends: a regular expression." : "Where it ends, exactly as written."}
           error={tagError(pair.close, regex)}
         >
-          <Textarea
-            rows={2}
+          <Input
             value={pair.close}
             spellCheck={false}
             className="font-mono"
@@ -126,13 +124,6 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
     <Card>
       <CardHeader title="Thinking at the start of a reply" />
       <div className="flex flex-col gap-4" data-preset-section="reply-sections">
-        <Switch
-          checked={settings.enabled}
-          about="Keep tagged thinking separate from the reply. Only tags at the start count; tags later in the reply stay as written. Several thinking sections at the start all move. Off keeps thinking in the reply text."
-          onCheckedChange={(enabled) => change({ enabled })}
-        >
-          Move tagged thinking into its own panel
-        </Switch>
         <ul className="flex flex-col gap-2">
           {settings.pairs.map((pair, index) => (
             <PairRow
@@ -161,6 +152,13 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
             </Button>
           )}
         </div>
+        <Switch
+          checked={settings.enabled}
+          about="Keep tagged thinking separate from the reply. Only tags at the start count; tags later in the reply stay as written. Several thinking sections at the start all move. Off keeps thinking in the reply text."
+          onCheckedChange={(enabled) => change({ enabled })}
+        >
+          Move tagged thinking into its own panel
+        </Switch>
         <Field
           label="Send thinking back for the last replies"
           about="How many of the most recent replies with thinking send it back to the model, in its tags. 0: never; the model sees only the reply text."
