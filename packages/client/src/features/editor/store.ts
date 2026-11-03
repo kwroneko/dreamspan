@@ -148,6 +148,12 @@ export class EditorStore {
 
   private cachedState: { readonly version: number; readonly state: EditorState } | null = null
 
+  /** Stable source for editor and ancestor tab indicators. */
+  readonly unsavedSource = {
+    subscribe: (listener: () => void) => this.subscribe(DRAFTS, STRUCTURE)(listener),
+    changed: () => this.dirtyFields().length > 0 || this.held() !== null
+  }
+
   /** The page's view of the store: a new object only when it changes. */
   state = (): EditorState => {
     const version = this.version(DRAFTS)
@@ -897,6 +903,31 @@ export class EditorStore {
     return this.snapshot?.revisionNumber ?? 1
   }
 
+  /** Restore one visible field, preserving siblings held in the same value draft. */
+  revertField(key: string, path: FieldPath, saved: unknown) {
+    const parsed = parseField(key)!
+    // A copied entry can supply text through its enclosing value draft before this
+    // particular field has ever been typed into. Keep that visible text first too.
+    if (this.current(key) === null) {
+      const visible = getAt(this.working().doc, parsed.path)
+      this.change(key, parsed.kind === "text" ? (typeof visible === "string" ? visible : "") : canonicalJson(visible))
+    }
+    const content =
+      parsed.kind === "text"
+        ? typeof saved === "string"
+          ? saved
+          : ""
+        : canonicalJson(
+            getAt(
+              applyDrafts(this.snapshot!.ref.kind, this.working().doc, [
+                { field: valueField(path), content: canonicalJson(saved) }
+              ]).doc,
+              parsed.path
+            )
+          )
+    return this.restore(key, 0, content)
+  }
+
   async restore(key: string, seq: number, content?: string) {
     const picked = this.current(key)
     await this.save(key)
@@ -1088,6 +1119,10 @@ export const useText = (store: EditorStore, path: FieldPath) =>
 /** A value from the document with the value drafts applied. */
 export const useValue = <A>(store: EditorStore, path: FieldPath) =>
   useSyncExternalStore(store.subscribe(STRUCTURE), () => store.value(path)) as A
+
+/** The last revision only: typing and draft saves do not invalidate every field's chrome. */
+export const useRevisionDoc = (store: EditorStore) =>
+  useSyncExternalStore(store.subscribe(STRUCTURE), () => store.snapshot?.doc ?? null)
 
 export const useComparisonRevision = (store: EditorStore, field: string) =>
   useSyncExternalStore(store.subscribe(field, STRUCTURE), () => store.comparisonRevision(field))

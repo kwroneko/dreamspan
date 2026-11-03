@@ -1,5 +1,5 @@
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands"
+import { defaultKeymap, history, historyKeymap, isolateHistory } from "@codemirror/commands"
 import { Compartment, EditorState, StateEffect, StateField, Transaction } from "@codemirror/state"
 import { Decoration, type DecorationSet, EditorView, keymap } from "@codemirror/view"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
@@ -7,6 +7,7 @@ import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { editorExtensions } from "./editorExtensions.ts"
 import { proseTheme } from "./codeTheme.ts"
+import { FieldRevertButton } from "./FieldRevertButton.tsx"
 import { Dialog } from "./Dialog.tsx"
 import { chromeButton, FieldFrame } from "./FieldFrame.tsx"
 import { IconButton } from "./Tooltip.tsx"
@@ -22,6 +23,7 @@ export default function CodeEditorView(props: CodeEditorProps) {
   // Open large (owner, 2026-11-02): every prose editor's text in a box filling the middle of the
   // screen, bound to the same value and changes, so it's the same draft with the same history.
   const [large, setLarge] = useState(false)
+  const [reverting, setReverting] = useState(false)
   const expand = props.expand !== false && props.textActions !== false && !props.readOnly
   useLayoutEffect(() => {
     const mounted = mountEditor(host.current!, props, setSelected)
@@ -56,7 +58,12 @@ export default function CodeEditorView(props: CodeEditorProps) {
       {/* The text actions and the field's own controls in the strip inside its bottom border. */}
       <FieldFrame
         side="bottom"
-        strip={props.textActions !== false || props.tools !== undefined || props.status !== undefined}
+        strip={
+          props.textActions !== false ||
+          props.tools !== undefined ||
+          props.status !== undefined ||
+          props.lastRevision !== undefined
+        }
         status={props.status}
         tools={
           <>
@@ -64,6 +71,21 @@ export default function CodeEditorView(props: CodeEditorProps) {
               <EditorTextActions text={props.value} selection={selection} shown={focused} source={props.source} />
             )}
             {props.tools}
+            {props.lastRevision !== undefined && !props.readOnly && (
+              <FieldRevertButton
+                changed={props.value !== props.lastRevision}
+                pending={reverting}
+                onRevert={() => {
+                  const before = props.value
+                  const saved = props.lastRevision!
+                  setReverting(true)
+                  void (props.onRevert?.() ?? Promise.resolve(true)).then((restored) => {
+                    setReverting(false)
+                    if (restored) controller.current?.edit(saved, before)
+                  })
+                }}
+              />
+            )}
             {expand && (
               <IconButton
                 label={`Open ${props.label} large`}
@@ -275,6 +297,19 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
     /** The selected text now, which a render may not have caught up with. */
     selection: () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to),
     focus: () => view.focus(),
+    edit: (value: string, before: string) => {
+      const current = view.state.doc.toString()
+      // A restore response may arrive after more typing. Keep that newer edit.
+      if (current !== before && current !== value) return
+      // The store may already have echoed the restored text. Recreate only this local
+      // undo boundary before the browser paints, without emitting an intermediate edit.
+      if (current === value) replace(before)
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: value },
+        annotations: [Transaction.userEvent.of("input"), isolateHistory.of("full")]
+      })
+      view.focus()
+    },
     finishComposition() {
       if (deferred !== null) {
         const value = deferred

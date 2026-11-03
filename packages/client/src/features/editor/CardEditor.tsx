@@ -7,7 +7,7 @@ import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // add (`cardEditorSections`). Each tab is registered (`cardTabs.ts`). Card modules are card
 // notes (§5.0).
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import { valueField, type FieldPath } from "@rp/shared/editing.ts"
+import { parseField, valueField, type FieldPath } from "@rp/shared/editing.ts"
 import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
 import {
   type ReactNode,
@@ -536,7 +536,6 @@ export function CardEditor({
   initial = CARD_TAB_DEFINITION,
   onOpenBook,
   header,
-  saveControls,
   reveal = false
 }: {
   store: EditorStore
@@ -548,11 +547,6 @@ export function CardEditor({
   reveal?: boolean
   /** Above the tabs' panels, under the tab row: nothing by default. */
   header?: ReactNode
-  /**
-   * The save cluster, at the end of the tab row, which then stays in sight while a field
-   * further down is edited (the chat's character tab; DESIGN §10.1).
-   */
-  saveControls?: ReactNode
 }) {
   const snapshot = useSyncExternalStore(cardEditorTabs.subscribe, cardEditorTabs.snapshot, cardEditorTabs.snapshot)
   const tabs = [...snapshot.entries].sort((a, b) => a.order - b.order)
@@ -604,6 +598,11 @@ export function CardEditor({
     // Only a new search visit changes tabs; selecting a tab must not replay the visit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match])
+  useEditorState(store)
+  const changed = store
+    .dirtyFields()
+    .map((field) => parseField(field)?.path)
+    .filter((path) => path !== undefined)
   const shown = tabs.some((entry) => entry.id === tab) ? tab : (tabs[0]?.id ?? "")
   if (tabs.length === 0) return null
   return (
@@ -618,13 +617,11 @@ export function CardEditor({
         value={shown}
         onValueChange={setTab}
         wrap={layout === "panel"}
-        end={saveControls}
-        rowClassName={saveControls ? "sticky -top-4 z-10 -mx-4 -mt-2 items-start! bg-surface px-4 pt-2" : ""}
-        rowOverlay={saveControls ? "Sticky tabs and save row cover the fields scrolling under them" : undefined}
         tabs={tabs.map((entry) => ({
           value: entry.id,
           label: entry.label,
           description: entry.description,
+          dirty: changed.some((path) => entry.holds?.(path)),
           panel: (
             <div className="pt-3">
               <entry.component store={store} call={call} layout={layout} onOpenBook={onOpenBook} />

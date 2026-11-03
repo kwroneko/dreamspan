@@ -203,11 +203,14 @@ for (const width of [390, 1024, 1440])
 
 async function expectThinkingFields(section: Locator) {
   const heading = section.getByRole("heading", { name: "Thinking at the start of a reply", exact: true })
-  const add = section.getByRole("button", { name: "Add another tag pair", exact: true })
-  const headBox = (await heading.boundingBox())!
-  const addBox = (await add.boundingBox())!
-  expect(addBox.x).toBeGreaterThanOrEqual(headBox.x + headBox.width)
-  expect(addBox.y).toBeLessThan(headBox.y + headBox.height)
+  const geometry = await heading.evaluate((node) => {
+    const section = node.closest('[data-preset-section="reply-sections"]')!
+    const head = node.getBoundingClientRect()
+    const add = section.querySelector('button[aria-label="Add another tag pair"]')!.getBoundingClientRect()
+    return { headingRight: head.right, headingBottom: head.bottom, addX: add.x, addY: add.y }
+  })
+  expect(geometry.addX).toBeGreaterThanOrEqual(geometry.headingRight)
+  expect(geometry.addY).toBeLessThan(geometry.headingBottom)
   for (const pair of await section.locator("[data-section-pair]").all()) {
     // Measure the box and X in one frame; the editor can restore its scroll position
     // between separate Playwright geometry reads while the page settles.
@@ -246,8 +249,17 @@ async function expectThinkingFields(section: Locator) {
   const toggle = order.indexOf("switch")
   expect(toggle).toBeGreaterThan(order.lastIndexOf("tag"))
   expect(order[toggle + 1]).toBe("send-back")
-  const first = (await tags.nth(0).boundingBox())!
-  const second = (await tags.nth(1).boundingBox())!
-  if ((await tags.first().locator("../..").boundingBox())!.width >= 456) expect(first.y).toBe(second.y)
-  else expect(second.y).toBeGreaterThan(first.y)
+  const tagsGeometry = await section
+    .locator("[data-section-pair]")
+    .first()
+    .evaluate((pair) => {
+      const fields = pair.querySelectorAll("input:not([type=hidden]):not([type=checkbox])")
+      return {
+        firstY: fields[0]!.getBoundingClientRect().y,
+        secondY: fields[1]!.getBoundingClientRect().y,
+        gridWidth: pair.querySelector("[data-reply-section-tags]")!.getBoundingClientRect().width
+      }
+    })
+  if (tagsGeometry.gridWidth >= 456) expect(tagsGeometry.firstY).toBe(tagsGeometry.secondY)
+  else expect(tagsGeometry.secondY).toBeGreaterThan(tagsGeometry.firstY)
 }

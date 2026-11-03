@@ -1,6 +1,7 @@
 // Tabs: arrow keys move between them, and each panel is labelled by its tab.
 import { Tabs as BaseTabs } from "@base-ui/react/tabs"
 import type { ReactNode } from "react"
+import { UnsavedDot, UnsavedScope, useUnsavedTabs } from "./UnsavedChanges.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
 export function Tabs<Value extends string>({
@@ -20,6 +21,7 @@ export function Tabs<Value extends string>({
     readonly value: Value
     readonly label: string
     readonly panel: ReactNode
+    readonly dirty?: boolean | undefined
     /** What the tab holds, in a tooltip on hover and focus. */
     readonly description?: string | undefined
   }>
@@ -41,6 +43,7 @@ export function Tabs<Value extends string>({
   /** Why the row may cover what scrolls under it (a sticky row), for the layout audit. */
   rowOverlay?: string | undefined
 }) {
+  const { tracker, dirty } = useUnsavedTabs()
   const list = (
     <BaseTabs.List
       aria-label={label}
@@ -54,14 +57,17 @@ export function Tabs<Value extends string>({
             data-layout-audit-ignore="inset: Tabs meet their panel divider"
             key={tab.value}
             value={tab.value}
+            data-unsaved={tab.dirty || dirty.has(tab.value) || undefined}
+            aria-description={tab.dirty || dirty.has(tab.value) ? "Unsaved changes" : undefined}
             onClick={(event) => {
               if (event.detail > 0) onPointerActivate?.(tab.value)
             }}
             {...(tab.description ? {} : { title: tab.label })}
             // A long label (a card's full name) is cut short rather than running out of the panel.
-            className={`${fill ? "max-w-56 min-w-0 shrink-0 truncate px-1.5" : wrap ? "-mb-px px-2" : "-mb-px px-3"} rounded-t-md border-b-2 border-transparent py-1.5 text-sm whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-active:border-accent data-active:text-text`}
+            className={`relative ${fill ? "max-w-56 min-w-0 shrink-0 truncate px-1.5" : wrap ? "-mb-px px-2" : "-mb-px px-3"} rounded-t-md border-b-2 border-transparent py-1.5 text-sm whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-active:border-accent data-active:text-text`}
           >
             {tab.label}
+            {(tab.dirty || dirty.has(tab.value)) && <UnsavedDot />}
           </BaseTabs.Tab>
         )
         // What the tab holds, on hover and keyboard focus.
@@ -99,7 +105,9 @@ export function Tabs<Value extends string>({
           keepMounted={keepMounted}
           className={`min-h-0 outline-none ${fill ? "flex-1 overflow-y-auto px-4 py-4" : ""}`}
         >
-          {tab.panel}
+          <UnsavedScope tracker={tracker} tab={tab.value}>
+            {tab.panel}
+          </UnsavedScope>
         </BaseTabs.Panel>
       ))}
     </BaseTabs.Root>

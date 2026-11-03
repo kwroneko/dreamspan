@@ -124,7 +124,7 @@ export function PlaceholderSource({
   const kind = promptKind({ identifier, marker: true } as PresetPrompt)
   return (
     <span className="mr-1 mb-1 flex min-w-0 items-start gap-1">
-      <span data-placeholder-source className="min-w-0 text-xs leading-5 text-muted italic">
+      <span data-placeholder-source className="min-w-0 text-xs leading-5 text-muted italic [overflow-wrap:anywhere]">
         {source ?? kind?.hint}
       </span>
       <AboutHint heading={`${heading ?? kind?.label ?? identifier} source`}>
@@ -142,7 +142,7 @@ export function PromptKindTag({ prompt }: { prompt: PresetPrompt }) {
       <span
         tabIndex={0}
         data-prompt-kind-tag
-        className="prompt-kind-tag shrink-0 rounded px-1.5 py-0.5 text-xs whitespace-nowrap"
+        className="prompt-kind-tag min-w-0 max-w-full shrink truncate rounded px-1.5 py-0.5 text-xs"
       >
         {kind.label}
       </span>

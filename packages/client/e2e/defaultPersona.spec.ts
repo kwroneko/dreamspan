@@ -105,7 +105,7 @@ for (const width of [1440, 390]) {
     // The editor's existing More menu offers the same clear action.
     await page.goto(`${server().url}/library/${b.id}`)
     await expect(page.getByRole("textbox", { name: "Description", exact: true })).toBeVisible()
-    await expect(page.getByRole("switch", { name: "Persona", exact: true })).toBeChecked()
+    await expect(page.getByRole("button", { name: "Persona", exact: true })).toHaveAttribute("aria-pressed", "true")
     await expect(page.getByRole("main").locator("[data-default-persona]")).toHaveCount(1)
     const editorMore = page.getByRole("button", { name: "More actions", exact: true })
     const editorMoreBefore = await editorMore.boundingBox()

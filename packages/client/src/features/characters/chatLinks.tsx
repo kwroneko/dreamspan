@@ -52,7 +52,6 @@ export function CardChatsLink({ entityId, label }: CardSurfaceContext) {
       <Link
         to="."
         search={search}
-        data-card-header-row
         className="w-fit rounded text-xs leading-4 text-muted tabular-nums outline-none hover:text-text hover:underline focus-visible:ring-2 focus-visible:ring-focus"
         onClick={(event) => {
           if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return

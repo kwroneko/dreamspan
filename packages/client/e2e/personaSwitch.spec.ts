@@ -15,7 +15,7 @@ const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 test.setTimeout(120_000)
 
-const HINT = "Keeps this card in the persona folder, so you can play it in chats."
+const HINT = "Mark this card as a persona: a card you play as, listed under Personas."
 const shots = process.env.SCREENSHOT_DIR
 const shoot = async (target: Page | Locator, name: string) => {
   if (!shots) return
@@ -46,7 +46,7 @@ test.beforeAll(async () => {
   )
 })
 
-const personaSwitch = (scope: Locator | Page) => scope.getByRole("switch", { name: "Persona", exact: true })
+const personaSwitch = (scope: Locator | Page) => scope.getByRole("button", { name: "Persona", exact: true })
 
 /** The home page's Personas tab, reached in the app (no reload), and its tiles. */
 const homePersonas = async (page: Page) => {
@@ -75,7 +75,7 @@ test("the side panel's character tab: on and off, and the left panel's Personas 
   const header = tab.locator("[data-card-header]")
   const height = (await header.boundingBox())!.height
   const toggle = personaSwitch(header)
-  await expect(toggle).not.toBeChecked()
+  await expect(toggle).toHaveAttribute("aria-pressed", "false")
   await toggle.hover()
   await expect(page.getByText(HINT, { exact: true }).filter({ visible: true })).toBeVisible()
   await shoot(page.getByRole("complementary", { name: "Chat panel" }), "panel-off")
@@ -91,14 +91,14 @@ test("the side panel's character tab: on and off, and the left panel's Personas 
   await expect(tiles.getByRole("button", { name: /^Open Rook/ })).toHaveCount(0)
 
   await toggle.click()
-  await expect(toggle).toBeChecked()
+  await expect(toggle).toHaveAttribute("aria-pressed", "true")
   await expect(tiles.getByRole("button", { name: /^Open Rook/ })).toBeVisible()
   // The switch is a row the header already had room for: the header keeps its height.
   expect(Math.abs((await header.boundingBox())!.height - height)).toBeLessThanOrEqual(1)
   await shoot(page.getByRole("complementary", { name: "Chat panel" }), "panel-on")
 
   await toggle.click()
-  await expect(toggle).not.toBeChecked()
+  await expect(toggle).toHaveAttribute("aria-pressed", "false")
   await expect(tiles.getByRole("button", { name: /^Open Rook/ })).toHaveCount(0)
 })
 
@@ -111,30 +111,30 @@ for (const width of [1440, 390]) {
     const header = page.getByRole("main").locator("[data-card-header]")
     await expect(header.locator("[data-card-tokens]")).toBeVisible({ timeout: 30_000 })
     const toggle = personaSwitch(header)
-    await expect(toggle).not.toBeChecked()
+    await expect(toggle).toHaveAttribute("aria-pressed", "false")
     await toggle.click()
-    await expect(toggle).toBeChecked()
+    await expect(toggle).toHaveAttribute("aria-pressed", "true")
     await shoot(page, `editor-${width}`)
     await expect.poll(() => homePersonas(page)).toContain(`Open ${name}`)
 
     // Back in the editor (the app's history, no reload): on, and switched off there.
     await backTo(page, "/library/")
-    await expect(toggle).toBeChecked()
+    await expect(toggle).toHaveAttribute("aria-pressed", "true")
     await toggle.click()
-    await expect(toggle).not.toBeChecked()
+    await expect(toggle).toHaveAttribute("aria-pressed", "false")
     await expect.poll(() => homePersonas(page)).not.toContain(`Open ${name}`)
 
     // The card page has it too.
     await page.goto(`${server().url}/cards/${ids.get(name)!.entityId}`)
     const onPage = personaSwitch(page.getByRole("main"))
-    await expect(onPage).not.toBeChecked()
+    await expect(onPage).toHaveAttribute("aria-pressed", "false")
     await onPage.click()
-    await expect(onPage).toBeChecked()
+    await expect(onPage).toHaveAttribute("aria-pressed", "true")
     await shoot(page, `cardpage-${width}`)
     await expect.poll(() => homePersonas(page)).toContain(`Open ${name}`)
     await backTo(page, "/cards/")
     await onPage.click()
-    await expect(onPage).not.toBeChecked()
+    await expect(onPage).toHaveAttribute("aria-pressed", "false")
     await expect.poll(() => homePersonas(page)).not.toContain(`Open ${name}`)
   })
 }
@@ -160,7 +160,7 @@ test("Add characters: Include personas, off at first, marked when on, remembered
   await expect.poll(tiles).not.toContain("Add Nell to this chat")
   await expect(section.locator("[data-persona-badge]")).toHaveCount(0)
   await include.hover()
-  await expect(page.getByText("Include personas", { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(page.getByText("Click to show personas", { exact: true }).filter({ visible: true })).toBeVisible()
 
   // On: mixed in and marked, Pia (played here) and Nell.
   await include.click()

@@ -328,7 +328,7 @@ export function NoteBlock({
                   data-note-save
                   className="inline-flex h-8 items-center @max-[22rem]/note-header:[&_[data-save-state]_button]:h-6! @max-[22rem]/note-header:[&_[data-save-state]_button]:w-6!"
                 >
-                  <SaveRevision store={store} labelsInHints />
+                  <SaveRevision store={store} />
                 </span>
               )}
               <BlockOptionsToggle

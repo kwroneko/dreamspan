@@ -287,16 +287,16 @@ for (const width of [1440, 390])
       await expect(unsaved).toContainText("new order")
       await expect(unsaved).not.toContainText("text of")
 
-      // Revert asks nothing: it puts the prompts back where they were, and the typed text stays.
-      await unsaved.getByRole("button", { name: "Revert", exact: true }).click()
+      // The one header Revert restores both the order and the unsaved text.
+      await again.getByRole("button", { name: "Revert", exact: true }).click()
       await expect(page.getByRole("alertdialog")).toHaveCount(0)
       await expect(unsaved).toHaveCount(0)
       expect(await rowNames(again)).toEqual(before)
       await expectTextBox(
         again.getByRole("textbox", { name: "Prompt: 🧭 Agency", exact: true }),
-        "Never decide what {{user}} does, says or feels. Not even in a time skip."
+        "Never decide what {{user}} does, says or feels."
       )
-      await expectSaveState(again, UNSAVED)
+      await expectSaveState(again, NOTHING_TO_SAVE)
       if (width < 600) await closePanel(page)
     })
 
@@ -312,23 +312,24 @@ test("switches are live; a reorder waits for Save, and Revert puts it back witho
   await expectSaveState(panel, UNSAVED)
   await expect(bar).toHaveCount(0)
 
-  // A reorder waits; Revert puts it back without asking, and the switch stays as flipped.
+  // The header Revert puts the order and every changed field back to the revision.
   const before = await rowNames(panel)
   await panel.getByRole("button", { name: "Move 🎭 Narrator voice", exact: true }).focus()
   await page.keyboard.press("ArrowDown")
   await expect(bar).toContainText("new order")
   await expect(bar).not.toContainText("switch")
-  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  await panel.getByRole("button", { name: "Revert", exact: true }).click()
   await expect(page.getByRole("alertdialog")).toHaveCount(0)
   await expect(bar).toHaveCount(0)
   expect(await rowNames(panel)).toEqual(before)
-  await expect(pacing).not.toBeChecked()
+  await expect(pacing).toBeChecked()
+  await pacing.click()
 
   // The reorder again, saved from the bar with the switch: no dialog.
   await panel.getByRole("button", { name: "Move 🎭 Narrator voice", exact: true }).focus()
   await page.keyboard.press("ArrowDown")
   await expect(bar).toContainText("new order")
-  await bar.getByRole("button", { name: "Save", exact: true }).click()
+  await panel.getByRole("button", { name: "Save", exact: true }).click()
   await expect(bar).toHaveCount(0)
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expectSaveState(panel, NOTHING_TO_SAVE)
@@ -363,7 +364,7 @@ test("adding and deleting a prompt in the column", async ({ page }) => {
   await expect(panel.locator('[data-prompt="synthetic-7"]')).toHaveCount(0)
   await expect(bar).toContainText("1 prompt added · 1 prompt deleted")
   // Revert brings the deleted prompt back and takes the added one away, without asking.
-  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  await panel.getByRole("button", { name: "Revert", exact: true }).click()
   await expect(page.getByRole("alertdialog")).toHaveCount(0)
   await expect(bar).toHaveCount(0)
   await expect(panel.locator('[data-prompt="synthetic-7"]')).toHaveCount(1)
@@ -374,7 +375,7 @@ test("adding and deleting a prompt in the column", async ({ page }) => {
   await panel.getByRole("button", { name: "Actions for Formatting", exact: true }).click()
   await page.getByRole("menuitem", { name: "Insert a prompt below", exact: true }).click()
   await expect(bar).toContainText("1 prompt added")
-  await bar.getByRole("button", { name: "Save", exact: true }).click()
+  await panel.getByRole("button", { name: "Save", exact: true }).click()
   await expect(bar).toHaveCount(0)
   const added = await rowNames(panel)
   expect(added[added.indexOf("synthetic-4") + 1]).not.toMatch(/^synthetic-/)

@@ -293,6 +293,13 @@ export function Editor({
               }
             >
               <CardNameHeader
+                saveControls={
+                  <SaveRevision
+                    store={store}
+                    shownNameClash={clash}
+                    onSaved={(saved) => setNotice(savedNotice(saved))}
+                  />
+                }
                 store={store}
                 call={call}
                 current={current}
@@ -302,7 +309,12 @@ export function Editor({
               <CardTokensRow store={store} entityId={ref.entityId} label={ref.label} />
             </CardHeader>
           ) : (
-            !overPreset && title("text-2xl")
+            !overPreset && (
+              <div data-editor-header className="flex min-w-0 items-start justify-between gap-2">
+                {title("text-2xl")}
+                <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
+              </div>
+            )
           )}
           {ref.kind === "card" && !bookOnly && <CardSurface placement="provenance" entityId={ref.entityId} />}
           {ref.subtitle && ref.kind !== "card" && !bookOnly && (
@@ -380,8 +392,9 @@ export function Editor({
         >
           {onClose &&
             (ref.kind === "preset" ? (
-              <div className="flex min-w-0 items-center justify-between gap-2">
-                {title("text-base")}
+              <div data-editor-header className="flex min-w-0 items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">{title("text-base")}</div>
+                <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
                 <WindowClose onClick={onClose} />
               </div>
             ) : (
@@ -402,7 +415,6 @@ export function Editor({
             <div ref={setPresetToolbar} />
           ) : (
             <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
-              <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
               {!scopes && (
                 <Button hint="Search and replace text in every field." onClick={() => setOpen("search")}>
                   <Icon name="replace" />
@@ -543,7 +555,6 @@ export function Editor({
             focus={focus}
             toolbarTarget={presetToolbar}
             onSearchReveal={setSearchMatch}
-            saveControls={<SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />}
             toolbarEnd={
               <>
                 <Button

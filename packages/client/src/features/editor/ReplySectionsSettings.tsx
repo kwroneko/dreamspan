@@ -4,7 +4,14 @@
 // prefix and suffix are; a pair is a regular expression only when "Treat as a regex" is on
 // (owner, 2026-11-02). The whole setting is one field of the preset; absent, the defaults show
 // and the first change writes them out.
-import { DEFAULT_REPLY_SECTIONS, type ReplySectionSettings, type SectionPair } from "@rp/shared/replySections.ts"
+import {
+  DEFAULT_REPLY_SECTIONS,
+  DEFAULT_SECTION_PAIRS,
+  type ReplySectionSettings,
+  type SectionPair
+} from "@rp/shared/replySections.ts"
+import { valueField } from "@rp/shared/editing.ts"
+import { FieldRevert } from "./FieldRevert.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { useEffect, useRef, useState } from "react"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -31,11 +38,13 @@ const tagError = (tag: string, regex: boolean) => {
 }
 
 function PairRow({
+  store,
   pair,
   index,
   onChange,
   onRemove
 }: {
+  store: EditorStore
   pair: SectionPair
   index: number
   onChange: (pair: SectionPair) => void
@@ -47,7 +56,10 @@ function PairRow({
       <div className="flex justify-end">
         <IconButton icon="close" label="Remove this pair" hint="Remove this pair" onClick={onRemove} />
       </div>
-      <div className="grid w-full max-w-controls grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-2">
+      <div
+        data-reply-section-tags
+        className="grid w-full max-w-controls grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-2"
+      >
         <Field
           label="Opening tag"
           about={
@@ -57,6 +69,16 @@ function PairRow({
         >
           <Input
             value={pair.open}
+            tools={
+              <FieldRevert
+                store={store}
+                field={valueField(PATH)}
+                path={[...PATH, "pairs", index, "open"]}
+                value={pair.open}
+                format={(value) => (typeof value === "string" ? value : (DEFAULT_SECTION_PAIRS[index]?.open ?? ""))}
+                onChange={(value) => onChange({ ...pair, open: value })}
+              />
+            }
             spellCheck={false}
             className="font-mono"
             onChange={(event) => onChange({ ...pair, open: event.currentTarget.value })}
@@ -69,6 +91,16 @@ function PairRow({
         >
           <Input
             value={pair.close}
+            tools={
+              <FieldRevert
+                store={store}
+                field={valueField(PATH)}
+                path={[...PATH, "pairs", index, "close"]}
+                value={pair.close}
+                format={(value) => (typeof value === "string" ? value : (DEFAULT_SECTION_PAIRS[index]?.close ?? ""))}
+                onChange={(value) => onChange({ ...pair, close: value })}
+              />
+            }
             spellCheck={false}
             className="font-mono"
             onChange={(event) => onChange({ ...pair, close: event.currentTarget.value })}
@@ -142,6 +174,7 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
           <ul ref={list} className="flex flex-col gap-2">
             {settings.pairs.map((pair, index) => (
               <PairRow
+                store={store}
                 key={index}
                 pair={pair}
                 index={index}

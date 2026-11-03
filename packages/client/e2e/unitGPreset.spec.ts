@@ -287,7 +287,7 @@ test("the panel's Revert puts back an order the overlay changed, without asking"
   await overlay.getByRole("button", { name: "Close", exact: true }).first().click()
   const bar = panel.getByRole("region", { name: "Unsaved changes" })
   await expect(bar).toContainText("new order")
-  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  await panel.getByRole("button", { name: "Revert", exact: true }).click()
   await expect(page.getByRole("alertdialog")).toHaveCount(0)
   await expect.poll(names).toBe(before)
   await expect(bar).toHaveCount(0)

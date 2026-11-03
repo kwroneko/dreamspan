@@ -56,6 +56,7 @@ export const registerPanels = () => [
   }),
   chatPanels.register({
     id: "preset",
+    holdsEditor: (ref) => ref.kind === "preset",
     label: "Prompt preset",
     description: "The prompt preset the next reply is built with, to choose and edit.",
     order: 30,
@@ -118,6 +119,7 @@ export const registerPanels = () => [
   }),
   chatPanels.register({
     id: "lorebooks",
+    holdsEditor: (ref) => ref.kind === "lorebook",
     label: "Lorebooks",
     description: "The lorebooks this chat reads, each with its switch, and where their entries go.",
     order: 50,

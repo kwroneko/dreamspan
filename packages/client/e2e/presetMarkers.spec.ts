@@ -319,7 +319,7 @@ for (const [width, scheme] of [
     await expect(
       page.getByText("The preset already has its definitions block; drag the block to move it.")
     ).toBeVisible()
-    await bar.getByRole("button", { name: "Revert", exact: true }).click()
+    await panel.getByRole("button", { name: "Revert", exact: true }).click()
     await expect(bar).toHaveCount(0)
 
     // The large editor as a page: the same toolbar, and rows whose details sit by their names.

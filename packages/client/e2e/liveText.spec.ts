@@ -1,7 +1,7 @@
 // Live text is what's sent (owner, 2026-11-01): a chat's note, a card's field and a preset's
 // prompt typed in the chat's panel and never saved reach the next request; the reply cuts a
 // revision labelled with it, after which the editors have nothing to save; Save asks nothing, and
-// "Save with a message…" takes a one-line message; a field's edit history puts an earlier
+// "Save with message…" takes a one-line message; a field's edit history puts an earlier
 // state back as the newest. The provider is a fake on loopback, and the cards are made up.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -148,10 +148,10 @@ for (const width of [1440, 390])
     if (!(await main.isVisible()))
       await presetTab.getByRole("button", { name: "Expand Main Prompt", exact: true }).click()
 
-    // Save asks nothing; "Save with a message…" takes one line, Enter saving it.
+    // Save asks nothing; "Save with message…" takes one line, Enter saving it.
     await typeAtEnd(page, main, " Typed after the reply.")
     await expectSaveState(presetTab, UNSAVED)
-    await presetTab.getByRole("button", { name: "Save with a message…", exact: true }).click()
+    await presetTab.getByRole("button", { name: "Save with message…", exact: true }).click()
     await presetTab.getByRole("textbox", { name: "Revision message", exact: true }).fill(`Tidied at ${width}`)
     await shoot(page, `save-with-message-${width}`)
     await page.keyboard.press("Enter")
@@ -182,7 +182,7 @@ for (const width of [1440, 390])
     // Revert, beside Save while something changed: one click, no question, the field back to the
     // revision, and what was there kept in its edit history.
     await expectSaveState(card, UNSAVED)
-    const revert = card.getByRole("button", { name: "Revert to the last save", exact: true })
+    const revert = card.getByRole("button", { name: "Revert", exact: true })
     await shoot(page, `revert-${width}`)
     await revert.click()
     await expectSaveState(card, NOTHING_TO_SAVE)

@@ -9,7 +9,7 @@ import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { Disclosure } from "../../ui/Surface.tsx"
+import { Badge, Disclosure } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { RecoveredNotice, RestoredNotice } from "../editor/controls.tsx"
@@ -45,14 +45,16 @@ function PresetColumn({ store }: { store: EditorStore }) {
   return (
     <SearchNavigation value={searchMatch}>
       <div className="flex min-h-full flex-col gap-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex min-w-0 flex-col gap-0.5">
+        <div data-editor-header className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <span className="min-w-0 font-medium">
               <RefName store={store}>
                 <span className="block min-w-0 truncate">{state.snapshot.ref.label}</span>
               </RefName>
             </span>
+            <Badge>preset</Badge>
           </div>
+          <SaveRevision store={store} />
           <IconButton
             label="Open the preset in the large editor"
             hint="Opens this preset in the large editor"
@@ -73,7 +75,6 @@ function PresetColumn({ store }: { store: EditorStore }) {
           context={workspace?.context}
           layout="column"
           onSearchReveal={setSearchMatch}
-          saveControls={<SaveRevision store={store} />}
           goTo={goTo}
           onOpenLarge={(identifier) => workspace?.open(store.refId, identifier)}
           onOpenLorebook={workspace ? (ref) => workspace.open(ref) : undefined}

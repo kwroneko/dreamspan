@@ -1,7 +1,6 @@
 import { createPortal } from "react-dom"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { presetScopes } from "./searchScopes.ts"
-import { SaveRevision } from "./SaveRevision.tsx"
 import {
   PlaceholderSource,
   PromptKindTag,
@@ -128,7 +127,7 @@ function TokenCount({
       <span
         tabIndex={0}
         data-prompt-tokens
-        className="rounded text-xs whitespace-nowrap text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className="shrink-0 rounded text-xs whitespace-nowrap text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         {prompt.marker
           ? filled
@@ -401,9 +400,13 @@ function PromptBlock({
 
   const title = prompt.marker ? (
     <span className="flex min-w-0 flex-1 flex-col gap-1 px-1 py-1">
-      <span className="flex min-w-0 items-center gap-2">
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <Icon name={kind && "icon" in kind ? kind.icon! : "insert"} />
-        <span className={landmark ? "truncate text-base font-semibold" : "truncate text-sm font-medium"}>
+        <span
+          className={
+            landmark ? "min-w-0 flex-1 truncate text-base font-semibold" : "min-w-0 flex-1 truncate text-sm font-medium"
+          }
+        >
           {landmark && !nameMatch ? "Chat history" : markedName}
         </span>
         {!entry.enabled && (
@@ -448,7 +451,7 @@ function PromptBlock({
       // Search and replace's Go to a match in the name: its field opens with the match selected.
       goTo={nameMatch}
       allowEmpty
-      className="min-w-0 max-w-md"
+      className="min-w-14 max-w-md"
       onRename={(next) => {
         store.setText(namePath, next)
         void store.save(textField(namePath))
@@ -457,7 +460,7 @@ function PromptBlock({
       {title}
     </InlineRename>
   ) : (
-    <span className="flex min-w-0 flex-1">{title}</span>
+    <span className="flex min-w-7 flex-1">{title}</span>
   )
 
   const menu = (
@@ -525,10 +528,10 @@ function PromptBlock({
       data-prompt-type={landmark ? "history" : prompt.marker ? "placeholder" : kind ? "builtin" : "custom"}
       className={`scroll-mt-[var(--preset-toolbar-height,1rem)] ${landmark ? "prompt-history" : prompt.marker ? "prompt-placeholder" : column ? "bg-canvas" : ""}`}
     >
-      <BlockHeader className={column ? "flex-wrap" : "prompt-document-header flex-wrap"}>
+      <BlockHeader className={column ? "flex-nowrap" : "prompt-document-header flex-wrap"}>
         {handle}
         <span className="flex h-8 w-10 shrink-0 items-center justify-center">{sendSwitch}</span>
-        <div className="min-w-0 flex-1">
+        <div className={column ? "min-w-7 flex-1" : "min-w-0 flex-1"}>
           <div data-prompt-title-row className="flex min-w-0 items-center gap-1">
             {named}
             {!column && !prompt.marker && <PromptKindTag prompt={prompt} />}
@@ -556,10 +559,10 @@ function PromptBlock({
           // One cluster on the title's line: kind, tokens, options and ⋯, centred together with
           // even gaps. A marker has no options button; its slot stays empty so the tokens and ⋯
           // line up with the other rows' (owner, 2026-11-03: "both alignment and spacing are off").
-          <span data-prompt-end className="ml-auto flex h-8 shrink-0 items-center gap-2 self-start">
+          <span data-prompt-end className="ml-auto flex h-8 min-w-0 items-center gap-2 self-start">
             {!prompt.marker && <PromptKindTag prompt={prompt} />}
             {(prompt.marker || !open) && <TokenCount prompt={prompt} content={content} context={context} />}
-            <span className="flex items-center gap-1">
+            <span className="flex shrink-0 items-center gap-1">
               {optionsToggle || <span aria-hidden className="size-8 shrink-0" />}
               {menu}
             </span>
@@ -649,17 +652,15 @@ export function PromptDocument({
   layout = "document",
   onOpenLarge,
   onOpenLorebook,
-  saveControls,
   toolbarTarget,
   toolbarEnd,
   onSearchReveal
 }: {
   store: EditorStore
-  /** The save cluster, at the start of the list's own toolbar row (DESIGN §10.1). */
+  /** Portal target for the list's toolbar, below the editor's title row. */
   toolbarTarget?: HTMLElement | null | undefined
   toolbarEnd?: ReactNode
   onSearchReveal?: ((match: SearchMatch) => void) | undefined
-  saveControls?: ReactNode
   context?: PresetContext | null | undefined
   focus?: string | undefined
   /** A prompt to open and scroll to, asked for again by a new object (a warning's link). */
@@ -905,7 +906,6 @@ export function PromptDocument({
     <div data-preset-layout={layout} className="preset-toolbar @container flex min-w-0 flex-col gap-2">
       <div data-preset-edit-row className="preset-edit-row flex items-center gap-2">
         {addButtons}
-        <div className="flex shrink-0 items-center">{saveControls ?? <SaveRevision store={store} />}</div>
         <Button
           ref={searchButton}
           aria-controls={searchId}

@@ -4,7 +4,7 @@ import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { CodeEditor } from "../../ui/CodeEditor.tsx"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
-import { type EditorStore, useComparisonRevision } from "./store.ts"
+import { type EditorStore, useComparisonRevision, useRevisionDoc } from "./store.ts"
 
 /** Comparison reads never alter a draft or the identity its next save will name. */
 export function CardTextEditor({
@@ -51,6 +51,7 @@ export function CardTextEditor({
   onChange: (value: string) => void
   onBlur?: (() => void) | undefined
 }) {
+  const saved = getAt(useRevisionDoc(store) ?? {}, path)
   const searchMatch = useSearchMatch(path)
   const revision = useComparisonRevision(store, field)
   const [comparison, setComparison] = useState<{ revision: typeof revision; value: string } | null>(null)
@@ -94,6 +95,12 @@ export function CardTextEditor({
         readOnly={readOnly}
         source={source}
         tools={tools}
+        lastRevision={typeof saved === "string" ? saved : ""}
+        onRevert={async () => {
+          const result = await store.revertField(field, path, typeof saved === "string" ? saved : "")
+          setError(result.ok ? null : result.error)
+          return result.ok && getAt(store.working().doc, path) === (typeof saved === "string" ? saved : "")
+        }}
         status={status}
         expand={expand}
         onChange={onChange}

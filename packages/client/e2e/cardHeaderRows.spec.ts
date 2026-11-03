@@ -1,0 +1,209 @@
+// Owner's four-row card header: no extra row may grow the stack past the portrait.
+import { mkdirSync } from "node:fs"
+import { join } from "node:path"
+import { expect, type Locator, test } from "@playwright/test"
+import { Effect } from "effect"
+import { loginCookie, withCookie } from "./support/rpc.ts"
+import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
+import { openPanel } from "./support/panel.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
+
+const server = serverPerFile(withAdmin)
+let cookie = ""
+let chat = ""
+const cards: Array<{ id: string; entityId: string; name: string; version: string; nickname: string }> = []
+const work = process.env.SCREENSHOT_DIR
+const audit = process.env.HEADER_AUDIT === "1"
+const OFF = "Mark this card as a persona: a card you play as, listed under Personas."
+const ON = "Remove the persona mark: this becomes a regular card again."
+test.beforeAll(async () => {
+  cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+  await withCookie(server(), cookie, (api) =>
+    Effect.gen(function* () {
+      const started = yield* api.CreateChat({ title: "Four header rows" })
+      chat = started.id
+      for (const [name, version, nickname] of [
+        ["Mio", "Winter 2.1", "Mio-chan"],
+        ["Wren", "", ""],
+        [
+          "Seraphina Valentina Montgomery-Blackwood of the Silver Marches",
+          "Extended edition of the northern lighthouse chronicles",
+          "Lady Seraphina of the never-ending eastern sea"
+        ]
+      ]) {
+        const card = yield* api.CreateCard({ label: name!, name: name!, version: version!, nickname: nickname! })
+        cards.push({ id: card.id, entityId: card.entityId, name: name!, version: version!, nickname: nickname! })
+        yield* api.ChangeCast({ chatId: started.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+      }
+      yield* api.SendMessage({
+        chatId: started.id,
+        parentSlotId: null,
+        branch: false,
+        content: "A synthetic harbour scene.",
+        reply: false
+      })
+    })
+  )
+})
+
+async function structure(header: Locator) {
+  expect(
+    await header.evaluate((root) =>
+      [...root.children].map((child) =>
+        child.hasAttribute("data-card-header-portrait") || child.querySelector("[data-card-header-portrait]")
+          ? "portrait"
+          : child.hasAttribute("data-card-header-rows")
+            ? "rows"
+            : "unexpected"
+      )
+    )
+  ).toEqual(["portrait", "rows"])
+  const rows = header.locator("[data-card-header-rows]")
+  expect(
+    await rows
+      .locator(":scope > *")
+      .evaluateAll((children) => children.map((row) => row.getAttribute("data-card-header-row")))
+  ).toEqual(["identity", "nickname", "persona", "usage"])
+  const geometry = await header.evaluate((root) => {
+    const box = (element: Element) => {
+      const b = element.getBoundingClientRect()
+      return { x: b.x, y: b.y, right: b.right, bottom: b.bottom, height: b.height }
+    }
+    const portrait = box(root.querySelector("[data-card-header-portrait]")!)
+    const stack = root.querySelector("[data-card-header-rows]")!
+    return { header: box(root), portrait, stack: box(stack), rows: [...stack.children].map(box) }
+  })
+  expect(geometry.header.height).toBeLessThanOrEqual(geometry.portrait.height + 1)
+  expect(geometry.stack.bottom).toBeLessThanOrEqual(geometry.portrait.bottom + 1)
+  expect(geometry.stack.y).toBeCloseTo(geometry.portrait.y, 0)
+  for (const row of geometry.rows) {
+    expect(row.x).toBeGreaterThanOrEqual(geometry.portrait.right)
+    expect(row.right).toBeLessThanOrEqual(geometry.header.right + 1)
+  }
+  for (let i = 1; i < geometry.rows.length; i++)
+    expect(geometry.rows[i]!.y - geometry.rows[i - 1]!.bottom).toBeCloseTo(4, 0)
+}
+
+for (const width of [390, 1024, 1440])
+  for (const theme of ["light", "dark"] as const)
+    for (const view of ["panel", "full"] as const)
+      test(`four card header rows: ${view}, ${width}, ${theme}`, async ({ page }, info) => {
+        test.setTimeout(180_000)
+        await page.setViewportSize({ width, height: 1000 })
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+        await page.addInitScript((theme) => localStorage.setItem("rp.theme", theme), theme)
+        const separator = cookie.indexOf("=")
+        await page
+          .context()
+          .addCookies([{ name: cookie.slice(0, separator), value: cookie.slice(separator + 1), url: server().url }])
+        for (const [index, card] of cards.entries()) {
+          await page.goto(view === "full" ? `${server().url}/library/${card.id}` : `${server().url}/chats/${chat}`)
+          const scope = view === "full" ? page.getByRole("main") : await openPanel(page, card.name)
+          const header = scope.locator("[data-card-header]")
+          await expect(header.locator("[data-card-tokens]")).toBeVisible()
+          await structure(header)
+          const identity = header.locator('[data-card-header-row="identity"]')
+          await expect(identity.getByRole("heading", { name: card.name, exact: true })).toBeVisible()
+          await expect(identity.locator("[data-card-version]")).toHaveText(card.version || "Add a version")
+          await expect(header.locator('[data-card-header-row="nickname"]')).toContainText(
+            card.nickname || "Add an in-chat nickname"
+          )
+          const save = identity.getByRole("group", { name: "Save", exact: true })
+          const at = (await save.boundingBox())!,
+            row = (await identity.boundingBox())!
+          expect(row.x + row.width - at.x - at.width).toBeLessThanOrEqual(1)
+          const usage = header.locator('[data-card-header-row="usage"]')
+          await expect(usage.getByRole("link", { name: "1 chat", exact: true })).toBeVisible()
+          await expect(usage.locator("[data-card-tokens]")).toContainText("permanent")
+          await expect(scope.getByRole("button", { name: "Switch persona", exact: true })).toHaveCount(0)
+          const toggle = header.getByRole("button", { name: "Persona", exact: true })
+          await expect(toggle).toHaveAttribute("aria-pressed", "false")
+          await expect(toggle).toHaveAccessibleDescription(OFF)
+          await toggle.hover()
+          await expect(page.getByText(OFF, { exact: true }).filter({ visible: true })).toBeVisible()
+          await expect(toggle).toHaveCSS("transition-property", "none")
+          if (width === 1440 && view === "full" && index === 0) {
+            await page.emulateMedia({ reducedMotion: "no-preference" })
+            await expect(toggle).toHaveCSS("transition-duration", "0.15s")
+            await expect(toggle).toHaveCSS("transition-property", /width/)
+          }
+          const off = (await toggle.boundingBox())!
+          await toggle.click()
+          await expect(toggle).toHaveAttribute("aria-pressed", "true")
+          await expect(toggle).toHaveAccessibleDescription(ON)
+          await expect(toggle).toBeEnabled()
+          await page.mouse.move(0, 0)
+          await toggle.hover()
+          await expect(page.getByText(ON, { exact: true }).filter({ visible: true })).toBeVisible()
+          await expect.poll(async () => (await toggle.boundingBox())!.width).toBeGreaterThan(off.width)
+          await expect(toggle.locator("span").filter({ hasText: "Persona" })).toHaveCSS("opacity", "1")
+          await structure(header)
+          await expect(toggle).toBeEnabled()
+          if (work) {
+            mkdirSync(work, { recursive: true })
+            await page.mouse.move(0, 0)
+            await header.screenshot({ path: join(work, `header-${view}-${width}-${theme}-${index}-persona.png`) })
+          }
+          if (audit) {
+            await header.evaluate((el) => el.setAttribute("data-header-under-test", ""))
+            await expectLayout(page, info, `header-${view}-${width}-${theme}-${index}`, {
+              scope: "[data-header-under-test]"
+            })
+          }
+          await toggle.click()
+          await expect(toggle).toHaveAttribute("aria-pressed", "false")
+          await expect(toggle).toBeEnabled()
+          await expect.poll(async () => (await toggle.boundingBox())!.width).toBe(off.width)
+          await structure(header)
+          await page.emulateMedia({ reducedMotion: "reduce" })
+          if (work) await header.screenshot({ path: join(work, `header-${view}-${width}-${theme}-${index}.png`) })
+        }
+      })
+
+test("the default persona badge shares row three at the panel minimum", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const card = cards[0]!
+  await withCookie(server(), cookie, (api) =>
+    Effect.gen(function* () {
+      yield* api.SetPersona({ entityId: card.entityId as never, persona: true })
+      yield* api.ChangeGenerationDefaults({ change: { persona: card.entityId as never } })
+    })
+  )
+  const separator = cookie.indexOf("=")
+  await page
+    .context()
+    .addCookies([{ name: cookie.slice(0, separator), value: cookie.slice(separator + 1), url: server().url }])
+  try {
+    await page.goto(`${server().url}/chats/${chat}`)
+    const panel = await openPanel(page, card.name)
+    const header = panel.locator("[data-card-header]")
+    await expect(header.locator("[data-card-tokens]")).toBeVisible()
+    await page.getByRole("separator", { name: "Resize chat panel", exact: true }).press("Home")
+    const row = header.locator('[data-card-header-row="persona"]')
+    const toggle = row.getByRole("button", { name: "Persona", exact: true })
+    const badge = row.locator("[data-default-persona]")
+    await expect(toggle).toHaveAttribute("aria-pressed", "true")
+    await expect(badge).toHaveText("Default")
+    await structure(header)
+    const bounds = (await row.boundingBox())!,
+      button = (await toggle.boundingBox())!,
+      label = (await badge.boundingBox())!
+    expect(label.x).toBeGreaterThanOrEqual(button.x + button.width)
+    expect(label.x + label.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1)
+    if (work) {
+      mkdirSync(work, { recursive: true })
+      await header.screenshot({ path: join(work, "header-default-persona-minimum.png") })
+    }
+    if (audit) {
+      await header.evaluate((el) => el.setAttribute("data-header-under-test", ""))
+      await expectLayout(page, info, "header-default-persona-minimum", { scope: "[data-header-under-test]" })
+    }
+  } finally {
+    await withCookie(server(), cookie, (api) =>
+      Effect.gen(function* () {
+        yield* api.ChangeGenerationDefaults({ change: { persona: null } })
+        yield* api.SetPersona({ entityId: card.entityId as never, persona: false })
+      })
+    )
+  }
+})

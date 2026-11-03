@@ -301,7 +301,10 @@ test.describe("synthetic library and every app surface", () => {
         yield* api.SetGenerationDefaults({
           defaults: {
             model: { connection: connection.id, model: model.id },
-            preset: process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ? preset.id : null
+            preset:
+              process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" || process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1"
+                ? preset.id
+                : null
           }
         })
         const started = yield* api.StartChat({
@@ -403,7 +406,7 @@ test.describe("synthetic library and every app surface", () => {
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
         await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
         const findings: unknown[] = []
-        const audit = async (surface: string) => {
+        const audit = async (surface: string, scope?: string) => {
           if (!selected.test(surface)) return
           await expect(page.getByRole("status").filter({ hasText: /^(Loading|Still loading)/ })).toHaveCount(0, {
             timeout: 30000
@@ -413,25 +416,27 @@ test.describe("synthetic library and every app surface", () => {
               page,
               info,
               surface + suffix,
-              process.env.LAYOUT_AUDIT_CHAT_ROWS_ONLY === "1"
-                ? { scope: '[data-fork-row], [aria-label="Chat filters and sorting"]' }
-                : process.env.LAYOUT_AUDIT_SNIPPETS_ONLY === "1"
-                  ? { scope: '[role="tabpanel"], [role="dialog"]' }
-                  : process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
-                    ? { scope: "[data-history-panel]" }
-                    : process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1"
-                      ? {
-                          scope: surface.startsWith("panel-")
-                            ? 'section[aria-label="Summary settings"]'
-                            : 'section[aria-label="Models for summaries"], section[aria-label="Summary defaults for new chats"]'
-                        }
-                      : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
-                        ? { scope: 'section[aria-label="Who replies"]' }
-                        : process.env.LAYOUT_AUDIT_LOREBOOKS_ONLY === "1"
-                          ? { scope: "[data-lorebook-audit]" }
-                          : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
-                            ? { scope: '[role="menu"]' }
-                            : {}
+              scope
+                ? { scope }
+                : process.env.LAYOUT_AUDIT_CHAT_ROWS_ONLY === "1"
+                  ? { scope: '[data-fork-row], [aria-label="Chat filters and sorting"]' }
+                  : process.env.LAYOUT_AUDIT_SNIPPETS_ONLY === "1"
+                    ? { scope: '[role="tabpanel"], [role="dialog"]' }
+                    : process.env.LAYOUT_AUDIT_HISTORY_ONLY === "1"
+                      ? { scope: "[data-history-panel]" }
+                      : process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1"
+                        ? {
+                            scope: surface.startsWith("panel-")
+                              ? 'section[aria-label="Summary settings"]'
+                              : 'section[aria-label="Models for summaries"], section[aria-label="Summary defaults for new chats"]'
+                          }
+                        : process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1"
+                          ? { scope: 'section[aria-label="Who replies"]' }
+                          : process.env.LAYOUT_AUDIT_LOREBOOKS_ONLY === "1"
+                            ? { scope: "[data-lorebook-audit]" }
+                            : process.env.LAYOUT_AUDIT_EXPORT_MENUS_ONLY === "1"
+                              ? { scope: '[role="menu"]' }
+                              : {}
             )
             console.log(`${width} ${theme} ${surface + suffix}: ${violations.length} violations`)
             findings.push({ surface: surface + suffix, violations })
@@ -691,6 +696,50 @@ test.describe("synthetic library and every app surface", () => {
           await formats("menu-pending-cast-export", true)
           return
         }
+        if (process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1") {
+          const bookLabel = (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).find(
+            (ref) => ref.id === bookRef
+          )!.label
+          for (const kind of ["card", "preset", "lorebook"] as const) {
+            await page.goto(`${server.url}/chats/${chatId}`)
+            let editor = await openPanel(
+              page,
+              kind === "card" ? cardName : kind === "preset" ? "Prompt preset" : "Lorebooks"
+            )
+            if (kind === "lorebook") {
+              await editor.getByRole("button").filter({ hasText: bookLabel }).first().click()
+              editor = editor.getByRole("region", { name: `Lorebook ${bookLabel}`, exact: true })
+            }
+            await expect(editor.getByRole("group", { name: "Save", exact: true }).first()).toBeVisible()
+            if (kind === "preset")
+              await expect(editor.getByRole("list", { name: "Preset blocks", exact: true })).toBeVisible({
+                timeout: 60000
+              })
+            if (kind === "lorebook")
+              await editor
+                .getByRole("button", { name: /^Open / })
+                .first()
+                .click()
+            await editor.evaluate((element) => element.setAttribute("data-saveflow-layout", ""))
+            await audit(`saveflow-${kind}-panel`, "[data-saveflow-layout]")
+            const ref = kind === "card" ? cardRef : kind === "preset" ? presetRef : bookRef
+            await page.goto(`${server.url}/chats/${chatId}?editor=${ref}`)
+            const large = page.locator('[data-testid="preset-scroll"]')
+            await expect(large.getByRole("group", { name: "Save", exact: true }).first()).toBeVisible()
+            if (kind === "preset")
+              await expect(large.getByRole("list", { name: "Prompt order", exact: true })).toBeVisible({
+                timeout: 60000
+              })
+            if (kind === "lorebook")
+              await large
+                .getByRole("button", { name: /^Open / })
+                .first()
+                .click()
+            await large.evaluate((element) => element.setAttribute("data-saveflow-layout", ""))
+            await audit(`saveflow-${kind}-large`, "[data-saveflow-layout]")
+          }
+          return
+        }
         if (process.env.LAYOUT_AUDIT_LOREBOOKS_ONLY === "1") {
           await page.goto(`${server.url}/chats/${chatId}`)
           const panel = await openPanel(page, "Lorebooks")
@@ -739,7 +788,10 @@ test.describe("synthetic library and every app surface", () => {
           if (await addDefinitions.isEnabled()) await addDefinitions.click()
           const unsaved = page.getByRole("region", { name: "Unsaved changes" })
           if (await unsaved.isVisible()) {
-            await unsaved.getByRole("button", { name: "Save", exact: true }).click()
+            await panel
+              .getByRole("group", { name: "Save", exact: true })
+              .getByRole("button", { name: "Save", exact: true })
+              .click()
             await expect(unsaved).toHaveCount(0)
           }
           await expect(panel.locator('[data-prompt="charDefinitions"]')).toBeVisible()
@@ -751,17 +803,20 @@ test.describe("synthetic library and every app surface", () => {
           return
         }
         if (process.env.LAYOUT_AUDIT_CARD_HEADERS_ONLY === "1") {
-          await go("card-editor-header", `/library/${cardRef}`)
+          await page.goto(`${server.url}/library/${cardRef}`)
+          await expect(page.locator("[data-card-tokens]")).toBeVisible()
+          await audit("card-editor-header", "[data-card-header]")
           await go("card-page-header", `/cards/${cardId}`)
-          await go("group-chat", `/chats/${chatId}`)
+          await page.goto(`${server.url}/chats/${chatId}`)
           await openPanel(page, cardName)
-          await audit("panel-card-header")
+          await expect(page.locator("[data-card-header] [data-card-tokens]")).toBeVisible()
+          await audit("panel-card-header", "[data-card-header]")
           if (width >= 1024) {
             const handle = page.getByRole("separator", { name: "Resize chat panel", exact: true })
             await handle.press("Home")
-            await audit("panel-card-header-narrow")
+            await audit("panel-card-header-narrow", "[data-card-header]")
             await handle.press("End")
-            await audit("panel-card-header-wide")
+            await audit("panel-card-header-wide", "[data-card-header]")
           }
           return
         }

@@ -1,4 +1,5 @@
 // Chat panel contributions use the client registry's reversible registration scope.
+import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { AvatarCrop } from "@rp/shared/media.ts"
 import { useNavigate } from "@tanstack/react-router"
@@ -39,6 +40,8 @@ export interface PanelDescriptor {
   readonly order: number
   readonly icon: IconName
   readonly component: ComponentType<PanelProps>
+  /** Which workspace editors belong to this tab, including edits in the large view. */
+  readonly holdsEditor?: (ref: EditorSnapshot["ref"], tab: string) => boolean
   /**
    * Its body in a chat not made yet (before the first send). Without one the tab is still
    * there, in its place, and says it opens once the chat is saved.

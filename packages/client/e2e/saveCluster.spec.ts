@@ -62,8 +62,8 @@ for (const width of [1440, 390])
 
     const cluster = saveCluster(page).first()
     const save = cluster.getByRole("button", { name: "Save", exact: true })
-    const withMessage = cluster.getByRole("button", { name: "Save with a message…", exact: true })
-    const revert = cluster.getByRole("button", { name: "Revert to the last save", exact: true })
+    const withMessage = cluster.getByRole("button", { name: "Save with message…", exact: true })
+    const revert = cluster.getByRole("button", { name: "Revert", exact: true })
     const description = page.getByRole("textbox", { name: "Description", exact: true })
     const sizes: Array<{ state: string; width: number; height: number }> = []
     const measure = async (state: string) => {
@@ -82,9 +82,8 @@ for (const width of [1440, 390])
     await expect(withMessage).toBeDisabled()
     await expect(revert).toBeVisible()
     await expect(revert).toBeDisabled()
-    await expect(cluster).not.toContainText(/revision/i)
-    expect(await explanation(save)).toMatch(/^Nothing to save/)
-    expect(await explanation(revert)).toMatch(/No edits to revert/)
+    await expect(cluster.getByRole("status")).toHaveText("")
+    expect(await explanation(save)).toBe("No changes since the last revision.")
     await measure("clean")
 
     // Unsaved: Save is actionable, and so is Revert.
@@ -93,18 +92,22 @@ for (const width of [1440, 390])
     await expect(save).toBeEnabled()
     await expect(withMessage).toBeEnabled()
     await expect(revert).toBeEnabled()
-    expect(await explanation(save)).toMatch(/History.*already in use/)
+    expect(await explanation(save)).toBe("Save a revision: a version of this you can go back to from History.")
     expect(await explanation(withMessage)).toMatch(/note saying what changed/)
     await measure("unsaved")
 
     // Keyboard: Save, then Save with a message, each explained on focus.
     await save.focus()
     await expect(
-      page.getByText(/^Keeps this version in History so you can return to it/).filter({ visible: true })
+      page
+        .getByText("Save a revision: a version of this you can go back to from History.", { exact: true })
+        .filter({ visible: true })
     ).toBeVisible()
     await page.keyboard.press("Tab")
     await expect(withMessage).toBeFocused()
-    await expect(page.getByText(/^Keeps this version in History with a note/).filter({ visible: true })).toBeVisible()
+    await expect(
+      page.getByText("Save a revision with a note saying what changed.", { exact: true }).filter({ visible: true })
+    ).toBeVisible()
     await page.keyboard.press("Tab")
     await expect(revert).toBeFocused()
 
@@ -120,7 +123,7 @@ for (const width of [1440, 390])
 
     // Just saved: a tick that settles back to quiet.
     await expect(cluster).toHaveAttribute("data-save-state", "saved", { timeout: 30_000 })
-    await expect(cluster.getByRole("status")).toHaveText("Saved")
+    await expect(cluster.getByRole("status")).toHaveText("Revision saved.")
     await measure("saved")
     await expect(cluster).toHaveAttribute("data-save-state", "clean", { timeout: 10_000 })
     await measure("settled")
@@ -133,7 +136,7 @@ for (const width of [1440, 390])
     await expect(cluster).toHaveAttribute("data-save-state", "failed", { timeout: 30_000 })
     mode = "pass"
     await expect(save).toBeEnabled()
-    expect(await explanation(save)).toMatch(/^Couldn't save: .+ Save again to retry\.$/)
+    expect(await explanation(save)).toBe("Save a revision: a version of this you can go back to from History.")
     await expect(cluster.getByRole("status")).toHaveText(/^Couldn't save/)
     await measure("failed")
     await save.click()
@@ -145,7 +148,7 @@ for (const width of [1440, 390])
   })
 
 for (const width of [1440, 390])
-  test(`the save cluster shares each panel surface's toolbar row and keeps its size at ${width}`, async ({ page }) => {
+  test(`the save cluster stays in each panel header and keeps its size at ${width}`, async ({ page }) => {
     test.setTimeout(180_000)
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -212,23 +215,28 @@ for (const width of [1440, 390])
       await page.keyboard.insertText(text)
     }
 
-    // The character tab: Save at the end of the card's tab row.
+    // The character tab: the one cluster in the shared card header.
     const card = await openPanel(page, name)
-    await check("card", card, card.getByRole("tab", { name: "Definition", exact: true }), () =>
+    await check("card", card, card.getByRole("button", { name: "Save", exact: true }), () =>
       typeInto(card.getByRole("textbox", { name: "Description", exact: true }), " Counts the gulls.")
     )
-    // The Prompt preset tab: Save shares the editing row with Add prompt.
+    // The Prompt preset tab: Save shares the title row with the large-editor action.
     await panelTab(page, "Prompt preset")
     const preset = page.getByRole("tabpanel", { name: "Prompt preset", exact: true })
-    await check("preset", preset, preset.getByRole("button", { name: "Add prompt", exact: true }), async () => {
-      await preset.getByRole("button", { name: "Expand Main Prompt", exact: true }).click()
-      await typeInto(preset.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }), " Slowly.")
-    })
-    // A lorebook in the Lorebooks tab: Save on the left of its entries' toolbar.
+    await check(
+      "preset",
+      preset,
+      preset.getByRole("button", { name: "Open the preset in the large editor", exact: true }),
+      async () => {
+        await preset.getByRole("button", { name: "Expand Main Prompt", exact: true }).click()
+        await typeInto(preset.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }), " Slowly.")
+      }
+    )
+    // A lorebook in the Lorebooks tab: Save in its title row.
     const lore = await openPanel(page, "Lorebooks")
     await lore.getByRole("button", { name: new RegExp(`^Tides ${width}`) }).click()
     const editor = lore.getByRole("region", { name: `Lorebook Tides ${width}` })
-    await check("lorebook", editor, editor.getByRole("button", { name: "Add entry" }), () =>
+    await check("lorebook", editor, editor.getByRole("button", { name: "Large editor", exact: true }), () =>
       switchAll(editor, "Disable all")
     )
     // A note: Save in its header, beside its menu.
