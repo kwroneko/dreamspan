@@ -57,3 +57,57 @@ export function revealIfHidden(header: HTMLElement, parts: ReadonlyArray<HTMLEle
   else window.scrollBy(0, delta)
   return true
 }
+
+/**
+ * What an "Add <thing>" button calls on the item it added (owner, 2026-11-02): the whole item
+ * scrolled into view, its header included (only as far as needed; an item taller than the view
+ * shows from its header down), then its box flashes a few times so the user sees which one it
+ * is. With reduced motion it doesn't flash: a steady highlight fades instead.
+ */
+export function revealAdded(item: HTMLElement) {
+  if (!inView(item)) {
+    const scroller = scrollParentOf(item)
+    const view = viewOf(item, scroller)
+    const rect = item.getBoundingClientRect()
+    const top = view.top + Math.min(view.room, 16)
+    // Fits: scroll just enough for its bottom (or its top) to show; else its top at the top.
+    const delta =
+      rect.height <= view.bottom - top
+        ? rect.top < top
+          ? rect.top - top
+          : rect.bottom - view.bottom + 8
+        : rect.top - top
+    if (scroller) scroller.scrollTop += delta
+    else window.scrollBy(0, delta)
+  }
+  flash(item)
+}
+
+/** The box flashing: an accent ring three times, or one fading highlight with reduced motion. */
+export function flash(element: HTMLElement) {
+  if (typeof element.animate !== "function") return
+  const ring = "inset 0 0 0 2px var(--color-accent)"
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+  element.dataset.flashing = ""
+  const animation = reduced
+    ? element.animate(
+        [{ boxShadow: ring }, { boxShadow: ring, offset: 0.6 }, { boxShadow: "inset 0 0 0 2px transparent" }],
+        {
+          duration: 1600,
+          easing: "ease-out"
+        }
+      )
+    : element.animate(
+        [
+          { boxShadow: "inset 0 0 0 2px transparent" },
+          { boxShadow: ring },
+          { boxShadow: "inset 0 0 0 2px transparent" }
+        ],
+        {
+          duration: 450,
+          iterations: 3,
+          easing: "ease-in-out"
+        }
+      )
+  animation.onfinish = animation.oncancel = () => delete element.dataset.flashing
+}

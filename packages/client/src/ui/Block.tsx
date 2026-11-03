@@ -150,12 +150,15 @@ export function BlockSection({
   summary,
   hint,
   label,
+  changed = false,
   children
 }: {
   open: boolean
   onToggle: () => void
   title: string
   summary?: ReactNode
+  /** Something in it differs from the defaults: a quiet dot beside its title. */
+  changed?: boolean
   hint: string
   /** Whose section, for its accessible name: "<title> of <label>". */
   label: string
@@ -168,7 +171,7 @@ export function BlockSection({
           type="button"
           data-layout-audit-ignore="inset: Disclosure is the full-width section header"
           aria-expanded={open}
-          aria-label={`${title} of ${label}`}
+          aria-label={`${title} of ${label}${changed ? ", changed from the defaults" : ""}`}
           onClick={onToggle}
           className="flex w-full min-w-0 items-center gap-1.5 px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
         >
@@ -177,7 +180,8 @@ export function BlockSection({
             size={14}
             className={`shrink-0 text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
           />
-          <span className="font-medium">{title}</span>
+          <span className="shrink-0 font-medium">{title}</span>
+          {changed && <span data-changed aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-accent" />}
           {!open && summary && <span className="min-w-0 truncate text-xs text-muted">{summary}</span>}
         </button>
       </Tooltip>
