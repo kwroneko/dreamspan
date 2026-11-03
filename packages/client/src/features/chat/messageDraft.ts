@@ -1,4 +1,4 @@
-import { observeDeletion, type ObservedDeletion } from "@rp/shared/drafts.ts"
+import { deletedSince, observeDeletion, type ObservedDeletion } from "@rp/shared/drafts.ts"
 import type { MessageImages } from "@rp/shared/chat.ts"
 // The text of a message editor (DESIGN §6.2): an edit of a version, or a version of a
 // message the user is writing. Typed into a server draft like a summary's (summaryDraft.ts),
@@ -107,6 +107,7 @@ export class MessageDraft {
   private observedDeletion: ObservedDeletion | null = null
   /** Typed here and not saved yet. */
   private local: string | null = null
+  private edits = 0
   /** The browser copy of `local`. */
   private pending: Copy | null = null
   /** Copies on their way to the server, which a newer one mustn't replace. */
@@ -164,11 +165,21 @@ export class MessageDraft {
    */
   restore(copies: ReadonlyArray<Copy>) {
     return this.serial(async () => {
+      const edits = this.edits
+      const hadLocal = this.local !== null
+      // Active-only lists omit Cancel tombstones. Read the resting row before replay.
+      if (this.draft === null) {
+        const read = await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
+        if (read.ok) {
+          this.draft = read.value
+          if (this.local === null) this.base = baseOf(read.value)
+        }
+      }
       let error: AppError | null = null
       let conflict = this.view.conflict
       for (const copy of [...copies].sort((a, b) => a.at - b.at)) {
         const save = pendingOf(copy)
-        if (save?.kind !== "message") continue
+        if (save?.kind !== "message" || deletedSince(this.draft, save.payload)) continue
         this.sending.add(copy)
         const replayed = await this.session.call((client) => client("SaveMessageDraft", save.payload))
         this.sending.delete(copy)
@@ -183,8 +194,10 @@ export class MessageDraft {
           void dropCopy(copy)
         } else {
           // Still not on the server: the box shows it, on the base it was typed on.
-          if (this.pending !== null && this.pending.at < copy.at) this.pending = null
-          if (this.pending === null) {
+          if (this.edits === edits && !hadLocal) {
+            if (this.pending !== null && this.pending.at < copy.at) this.pending = null
+          }
+          if (this.pending === null && this.edits === edits && !hadLocal) {
             this.local = copy.content
             this.set({ images: save.payload.images })
             this.pending = copy
@@ -270,6 +283,7 @@ export class MessageDraft {
   }
 
   setText(text: string) {
+    this.edits++
     this.local = text
     this.keep(text)
     this.set({ text, unsaved: true })

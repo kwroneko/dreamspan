@@ -143,6 +143,8 @@ export const UserDraftSave = Schema.Struct({
   observedDeletion: Schema.optionalKey(ObservedDeletion),
   draftId: Schema.NullOr(Schema.String),
   content: Schema.String,
+  /** Saved form values establishing its first state, before the actual typed edit. */
+  seed: Schema.optionalKey(Schema.Boolean),
   expectedRowVersion: Schema.NullOr(Schema.Int),
   expectedSession: Schema.NullOr(Schema.Int)
 })

@@ -1,4 +1,4 @@
-import { observeDeletion, type ObservedDeletion } from "@rp/shared/drafts.ts"
+import { deletedSince, observeDeletion, type ObservedDeletion } from "@rp/shared/drafts.ts"
 // The text of a summary being edited (ARCHITECTURE §3.10, §16): typed into a server draft
 // that keeps its undo history, and saved as a revision only when the user says so. The
 // rules are the other fields': the draft a save names is the one this tab last saw
@@ -76,6 +76,7 @@ export class SummaryDraft {
   private base: Base = baseOf(null)
   /** Typed here and not saved yet. */
   private local: string | null = null
+  private edits = 0
   /** The browser copy of `local`. */
   private pending: Copy | null = null
   /** Copies on their way to the server, which a newer one mustn't replace. */
@@ -156,6 +157,8 @@ export class SummaryDraft {
   }
 
   async open() {
+    const edits = this.edits
+    const hadLocal = this.local !== null
     const result = await this.session.call((client) =>
       client("GetSummaryDraft", { forkId: this.forkId, summaryId: this.summary.id })
     )
@@ -173,7 +176,7 @@ export class SummaryDraft {
       let displaced = this.view.displaced
       for (const copy of copies) {
         const save = pendingOf(copy)
-        if (save?.kind !== "summary") continue
+        if (save?.kind !== "summary" || deletedSince(this.draft, save.payload)) continue
         this.sending.add(copy)
         const replayed = await this.session.call((client) => client("SaveSummaryDraft", save.payload))
         this.sending.delete(copy)
@@ -189,8 +192,10 @@ export class SummaryDraft {
         } else {
           // Still not on the server: the box shows it, on the base it was typed on, and the
           // copy stays until the server has it.
-          if (this.pending !== null && this.pending.at < copy.at) this.pending = null
-          if (this.pending === null) {
+          if (this.edits === edits && !hadLocal) {
+            if (this.pending !== null && this.pending.at < copy.at) this.pending = null
+          }
+          if (this.pending === null && this.edits === edits && !hadLocal) {
             this.local = copy.content
             this.pending = copy
             this.observedDeletion = save.payload.observedDeletion ?? null
@@ -247,6 +252,7 @@ export class SummaryDraft {
   }
 
   setText(text: string) {
+    this.edits++
     // The first keystroke fixes the revision, before autosave or another tab's update.
     if (this.base.revisionId === null) this.base = { ...this.base, revisionId: this.summary.revisionId }
     this.local = text

@@ -740,7 +740,18 @@ export class EditorStore {
   isDirty(key: string) {
     if (isHeldField(key)) return false
     const field = this.fields.get(key)
-    return field !== undefined && (field.saved !== null || field.local !== null)
+    if (field === undefined) return false
+    const current = field.local ?? field.saved
+    const parsed = parseField(key)
+    if (current === null || parsed === null) return false
+    const saved = getAt(this.head, parsed.path)
+    if (parsed.kind === "text") return current !== (typeof saved === "string" ? saved : "")
+    if (current === "undefined") return saved !== undefined
+    try {
+      return canonicalJson(JSON.parse(current)) !== canonicalJson(saved)
+    } catch {
+      return true
+    }
   }
 
   /** Whether the field has an edit history on the server: it was ever typed into. */

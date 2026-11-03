@@ -1,3 +1,4 @@
+import type { Draft } from "@rp/shared/drafts.ts"
 import { greetingPick } from "@rp/shared/greetings.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
@@ -169,7 +170,7 @@ function Pending({
   // The saved chat's page, ready before the first send opens it.
   useEffect(preloadChatPage, [])
   const sending = useRef<string | null>(null)
-  const destination = useRef<string | null>(null)
+  const destination = useRef<{ chatId: string; composer: Draft } | null>(null)
   // The draft store reconciles its synchronous and IndexedDB backups before opening.
   useEffect(() => {
     if (!durable.ready || sending.current !== null) return
@@ -187,11 +188,12 @@ function Pending({
     if (content === "") return previous === null ? Promise.resolve() : dropCopy(previous)
     copy.current = composerCarryCopy(
       userId,
-      destination.current,
+      destination.current.chatId,
       entityId,
       group?.name ?? card.card.name,
       content,
-      previous
+      previous,
+      destination.current.composer
     )
     return keepCopy(copy.current, previous)
   }
@@ -327,7 +329,7 @@ function Pending({
     }
     // Only submitted text was acknowledged. Atomically replace the pending copy with
     // the extra text addressed to the saved chat, before navigating or opening its draft.
-    destination.current = result.value.chat.id
+    destination.current = { chatId: result.value.chat.id, composer: result.value.composer }
     await keep(typed.current)
     await durable.commit(durable.text, async () => true)
     // The saved chat opens in place: the same page, its panel at the same tab.

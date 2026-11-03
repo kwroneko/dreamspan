@@ -363,7 +363,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           })
         }
         const { entry } = yield* reader.GetSlot({ userId: id, slotId: result.slotId })
-        return { entry, chat: result.chat }
+        return { entry, chat: result.chat, composer: result.composer }
       }).pipe(Effect.uninterruptible, internal("StartChat")),
 
     GetCast: ({ chatId, slotId, forkId }) =>

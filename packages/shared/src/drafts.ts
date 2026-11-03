@@ -3,6 +3,7 @@
 // can step back to any earlier state, and a destructive change (Ctrl-A plus a stray key)
 // always leaves the state before it restorable.
 import { Schema } from "effect"
+import { beforeDeletion, deletionMap } from "./draftDeletions.ts"
 import { MessageImages } from "./chat.ts"
 
 export const DraftTargetKind = Schema.Literals([
@@ -72,6 +73,13 @@ export class DraftDisplacement extends Schema.Class<DraftDisplacement>("DraftDis
 export const ObservedDeletion = Schema.Struct({ draftId: Schema.String, rowVersion: Schema.Int })
 export type ObservedDeletion = typeof ObservedDeletion.Type
 
+export const FieldDeletion = Schema.Struct({
+  ...ObservedDeletion.fields,
+  value: Schema.optionalKey(Schema.Unknown),
+  missing: Schema.optionalKey(Schema.Boolean)
+})
+export type FieldDeletion = typeof FieldDeletion.Type
+
 export class Draft extends Schema.Class<Draft>("Draft")({
   id: Schema.String,
   key: DraftKey,
@@ -84,6 +92,8 @@ export class Draft extends Schema.Class<Draft>("Draft")({
   rowVersion: Schema.Int,
   /** Last deliberate emptying/discard, retained across later text. Recovery compares server versions, never clocks. */
   clearedVersion: Schema.optionalKey(Schema.Int),
+  /** Per-input barriers, including a moved history's original logical target. Empty key means the whole field. */
+  deletions: Schema.optionalKey(Schema.Record(Schema.String, FieldDeletion)),
   /**
    * The drafting session, counted up each time one ends (committed or discarded). Text
    * typed in a session that has ended is never taken as the start of the next one.
@@ -219,11 +229,12 @@ export const deletedSince = (
     readonly observedDeletion?: ObservedDeletion
   } | null
 ): boolean => {
-  if (draft === null || (draft.clearedVersion ?? 0) === 0) return false
-  if (base?.observedDeletion?.draftId === draft.id && base.observedDeletion.rowVersion >= draft.clearedVersion!)
-    return false
-  return base?.draftId !== draft.id || (base.expectedRowVersion ?? 0) < draft.clearedVersion!
+  if (draft === null) return false
+  const deletion = deletionMap(draft)[""]
+  return deletion !== undefined && beforeDeletion(draft.id, deletion, base)
 }
 
 export const observeDeletion = (draft: Draft | null): ObservedDeletion | null =>
-  draft !== null && (draft.clearedVersion ?? 0) > 0 ? { draftId: draft.id, rowVersion: draft.rowVersion } : null
+  draft !== null && Object.keys(deletionMap(draft)).length > 0
+    ? { draftId: draft.id, rowVersion: draft.rowVersion }
+    : null

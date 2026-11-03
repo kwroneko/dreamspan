@@ -740,6 +740,7 @@ export class WriteOps extends RpcGroup.make(
       /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
       draftId: Schema.NullOr(Schema.String),
       content: Schema.String,
+      seed: Schema.optionalKey(Schema.Boolean),
       observedDeletion: Schema.optionalKey(ObservedDeletion),
       images: Schema.optionalKey(MessageImages),
       /** The draft as last seen: null if none was. */
@@ -1636,7 +1637,7 @@ export class WriteOps extends RpcGroup.make(
       /** The chat's title; null or blank: its cast's names. */
       title: Schema.NullOr(Schema.String)
     },
-    success: AppendResult,
+    success: Schema.Struct({ ...AppendResult.fields, composer: Draft }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /**

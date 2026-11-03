@@ -286,3 +286,35 @@ test("every multi-line versioned field opens large from its strip, editing the s
   await openEntry(page, "Pier")
   await expectOpensLarge(page, page.getByRole("textbox", { name: "Entry content" }), "Entry content")
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`edited clears on returning to the saved text at ${width}px in ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height: 900 })
+      const card = await admin((api) =>
+        api.CreateCard({ label: `Reverted ${width} ${theme}`, name: "Synthetic reverted field" })
+      )
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/library/${card.id}`)
+      await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), theme)
+      const box = page.getByRole("textbox", { name: /^Description/ })
+      const frame = frameOf(box)
+      const size = await frame.boundingBox()
+      await box.fill("Temporary edit")
+      await expect(frame.locator("[data-field-edited]")).toBeVisible()
+      await box.fill("")
+      await expect(frame.locator("[data-field-edited]")).toHaveCount(0)
+      await page.locator("body").click({ position: { x: 1, y: 1 } })
+      await expect
+        .poll(() =>
+          admin((api) => api.OpenEditor({ refId: card.id })).then(
+            (snapshot) => snapshot.drafts.find((draft) => draft.key.field === '["description"]')?.content
+          )
+        )
+        .toBe("")
+      expect((await frame.boundingBox())?.height).toBe(size?.height)
+      await page.screenshot({ path: info.outputPath("reverted.png") })
+      await page.reload()
+      await expect.poll(() => textBoxValue(box)).toBe("")
+      await expect(frame.locator("[data-field-edited]")).toHaveCount(0)
+    })

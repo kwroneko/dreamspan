@@ -1,3 +1,4 @@
+import { reconcileDeletedFields } from "@rp/shared/draftDeletions.ts"
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -92,19 +93,20 @@ export class UserDraftStore {
     this.listeners.forEach((listener) => listener())
   }
   private address = () => ({ ownerId: this.userId, targetId: this.targetId, field: this.field })
-  private payload = (content: string) => ({
+  private payload = (content: string, seed = false) => ({
     ...this.address(),
     content,
+    ...(seed ? { seed: true } : {}),
     ...(this.observedDeletion === null ? {} : { observedDeletion: this.observedDeletion }),
     ...this.base
   })
-  private remember(content: string, current: boolean) {
+  private remember(content: string, current: boolean, seed = false) {
     const previous = current ? this.copy : null
     const copy = makeCopy(
       this.userId,
       this.targetId,
       this.field,
-      { kind: "userDraft", payload: this.payload(content) },
+      { kind: "userDraft", payload: this.payload(content, seed) },
       current ? Date.now() : (this.copy?.at ?? Date.now()) - 1,
       previous ? [previous] : []
     )
@@ -114,13 +116,13 @@ export class UserDraftStore {
     }
     return { copy, kept: keepCopy(copy, previous) }
   }
-  private async persist(content: string) {
+  private async persist(content: string, seed = false) {
     this.lastPersistAcknowledged = false
     // Refile on our own preceding acknowledgement, never a fresh read of another tab's base.
-    const { copy, kept } = this.remember(content, content === this.state.text)
+    const { copy, kept } = this.remember(content, content === this.state.text, seed)
     await kept
     const result = await this.run((client) =>
-      client("SaveUserDraft", copy.save.kind === "userDraft" ? copy.save.payload : this.payload(content))
+      client("SaveUserDraft", copy.save.kind === "userDraft" ? copy.save.payload : this.payload(content, seed))
     )
     if (!result.ok) {
       this.update({ error: result.error.message })
@@ -185,6 +187,19 @@ export class UserDraftStore {
           dropTypedBackup(copy)
           continue
         }
+        const safeCopy =
+          this.draft === null
+            ? { content: copy.content, changed: false, rejected: false }
+            : reconcileDeletedFields(
+                this.draft,
+                save?.kind === "userDraft" && save.payload.seed !== true ? save.payload : null,
+                copy.content
+              )
+        if (safeCopy.rejected) {
+          await keepCopy(copy)
+          dropTypedBackup(copy)
+          continue
+        }
         if (save?.kind === "setting" || save?.kind === "pendingChat") {
           // The pending composer keeps its own copy of each keystroke too. An existing server
           // draft takes precedence unless that copy is newer: the server can lag the last
@@ -209,7 +224,7 @@ export class UserDraftStore {
             if (this.edits === 0) {
               this.base = baseOf(replay.value)
               this.copy = null
-              this.update({ text: replay.value.content })
+              this.update({ text: replay.value.status === "active" ? replay.value.content : null })
             }
             this.update({
               displaced: replay.value.displaced ?? this.state.displaced,
@@ -222,8 +237,9 @@ export class UserDraftStore {
               // Legacy copies have no draft identity: their replay and any continuation
               // must keep the null base, rather than adopting the opening read unseen.
               this.base = baseOf(null)
-              this.copy = copy
-              this.update({ text: copy.content })
+              this.copy = safeCopy.changed ? null : copy
+              if (safeCopy.changed) this.observedDeletion = observeDeletion(this.draft!)
+              this.update({ text: safeCopy.content })
             }
             this.update({ error: replay.error.message })
           }
@@ -237,7 +253,7 @@ export class UserDraftStore {
           if (this.edits === 0) {
             this.base = baseOf(replay.value)
             this.copy = null
-            this.update({ text: replay.value.content })
+            this.update({ text: replay.value.status === "active" ? replay.value.content : null })
           }
           this.update({
             displaced: replay.value.displaced ?? this.state.displaced,
@@ -253,8 +269,9 @@ export class UserDraftStore {
               expectedRowVersion: save.payload.expectedRowVersion,
               expectedSession: save.payload.expectedSession
             }
-            this.copy = copy
-            this.update({ text: copy.content })
+            this.copy = safeCopy.changed ? null : copy
+            if (safeCopy.changed) this.observedDeletion = observeDeletion(this.draft!)
+            this.update({ text: safeCopy.content })
           }
           this.update({ error: replay.error.message })
         }
@@ -374,7 +391,7 @@ export class UserDraftStore {
     this.queue = this.queue.then(async () => {
       try {
         if (this.draft === null || this.draft.status !== "active") {
-          if (!(await this.persist(pending.initial))) return
+          if (!(await this.persist(pending.initial, true))) return
         }
         await this.persist(pending.content)
       } finally {

@@ -596,3 +596,49 @@ it("typing into the empty field before its tombstone read finishes starts from t
   expect(store.snapshot().text).toBe("new text typed in the empty box")
   expect(store.snapshot().error).toBeNull()
 })
+
+it("a refused compound replay protects cleared inputs while retaining other last keystrokes", async () => {
+  const raw = JSON.stringify({ name: "deleted name", baseUrl: "https://example.invalid/last-keystroke" })
+  const old = makeCopy(ownerId, key.targetId, key.field, { kind: "userDraft", payload: payload(raw) }, 1)
+  await keepCopy(old)
+  const cleared = new Draft({
+    ...draft(JSON.stringify({ name: "", baseUrl: "https://example.invalid" }), 5),
+    deletions: { '["name"]': { draftId: "draft", rowVersion: 5, value: "" } }
+  })
+  const { store, handlers, saves } = harness(cleared)
+  const save = handlers.SaveUserDraft
+  handlers.SaveUserDraft = async () => {
+    throw new Error("offline during replay")
+  }
+  store.open()
+  await until(() => store.snapshot().ready)
+  expect(JSON.parse(store.snapshot().text!)).toEqual({ name: "", baseUrl: "https://example.invalid/last-keystroke" })
+  expect(memory.has(old.key)).toBe(true)
+  handlers.SaveUserDraft = save
+  const fresh = JSON.stringify({ name: "new deliberate name", baseUrl: "https://example.invalid/last-keystroke" })
+  store.type(fresh, cleared.content)
+  await until(() => saves.length > 0)
+  expect(saves.at(-1)).toMatchObject({
+    content: fresh,
+    expectedRowVersion: 1,
+    observedDeletion: { draftId: "draft", rowVersion: 5 }
+  })
+  expect(memory.has(old.key)).toBe(true)
+})
+
+it("a refused form initialization copy remains distinguishable from deliberate typing", async () => {
+  const initial = JSON.stringify({ name: "", baseUrl: "" })
+  const { store, handlers } = harness(new Draft({ ...draft("", 4), status: "committed" }))
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async () => {
+    throw new Error("refused initialization")
+  }
+  store.type(JSON.stringify({ name: "last keystroke", baseUrl: "" }), initial)
+  await until(() => [...memory.values()].some((copy) => copy.content === initial))
+  expect([...memory.values()].find((copy) => copy.content === initial)?.save).toMatchObject({
+    kind: "userDraft",
+    payload: { seed: true }
+  })
+  expect([...memory.values()].some((copy) => copy.content.includes("last keystroke"))).toBe(true)
+})
