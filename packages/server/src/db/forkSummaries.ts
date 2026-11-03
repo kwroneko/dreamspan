@@ -80,7 +80,11 @@ export const summaryStamps = (sql: SqlClient.SqlClient, userId: string) =>
  * and their events (`shellSlotsQuery`, `shellEventsQuery`, by fork id). Iterative, so deep
  * imported paths need no recursion.
  */
-export const computeForkSummaries = (sql: SqlClient.SqlClient, records: ReadonlyArray<ForkRow>, pathsOnly = false) =>
+export const computeForkSummaries = (
+  sql: SqlClient.SqlClient,
+  records: ReadonlyArray<ForkRow>,
+  pathsOnly = records.length <= 2
+) =>
   Effect.gen(function* () {
     if (records.length === 0) return []
     const chatIds = JSON.stringify([...new Set(records.map((r) => r.chat_id))])
