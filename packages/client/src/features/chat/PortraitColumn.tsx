@@ -188,19 +188,17 @@ function Viewer({
       <PortraitView
         portrait={portrait}
         title={(name) => <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</h2>}
-        close={
-          <>
-            <IconButton
-              label={SINGLE}
-              hint={viewer.single ? SINGLE_ON : SINGLE_OFF}
-              icon="one-image"
-              aria-pressed={viewer.single}
-              className="aria-pressed:bg-surface-raised aria-pressed:text-accent aria-pressed:ring-1 aria-pressed:ring-border"
-              onClick={() => viewer.setSingle(!viewer.single, portrait.id)}
-            />
-            <IconButton label="Close the portrait" icon="close" onClick={() => viewer.close(portrait.id)} />
-          </>
+        toggle={
+          <IconButton
+            label={SINGLE}
+            hint={viewer.single ? SINGLE_ON : SINGLE_OFF}
+            icon="one-image"
+            aria-pressed={viewer.single}
+            className="aria-pressed:bg-surface-raised aria-pressed:text-accent aria-pressed:ring-1 aria-pressed:ring-border"
+            onClick={() => viewer.setSingle(!viewer.single, portrait.id)}
+          />
         }
+        close={<IconButton label="Close the portrait" icon="close" onClick={() => viewer.close(portrait.id)} />}
       />
       {boundary}
     </aside>
