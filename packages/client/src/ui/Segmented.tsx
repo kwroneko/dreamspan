@@ -9,14 +9,17 @@ import { Tooltip } from "./Tooltip.tsx"
 export function Segmented<Value extends string>({
   label,
   wrap = false,
+  inlineDescription = true,
   options,
   value,
   onValueChange
 }: {
   label: string
   wrap?: boolean
+  /** Compact toolbars keep explanations on hover and focus, without a second line. */
+  inlineDescription?: boolean
   options: ReadonlyArray<{ readonly value: Value; readonly label: ReactNode; readonly description?: string }>
-  value: Value
+  value: Value | null
   onValueChange: (value: Value) => void
 }) {
   const id = useId()
@@ -63,7 +66,7 @@ export function Segmented<Value extends string>({
           </span>
         ) : null
       )}
-      {chosen && (
+      {inlineDescription && chosen && (
         // It wraps at the row's width rather than widen the column past the screen (w-0 min-w-full).
         <p aria-hidden="true" className={`hidden w-0 min-w-full text-xs text-muted ${inlineExplanationClass}`}>
           {chosen}

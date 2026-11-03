@@ -367,7 +367,7 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
     "false"
   )
   await column("Wide").getByRole("button", { name: SINGLE, exact: true }).hover()
-  await expect(page.getByText(/^Only keep one image open at a time\. Closes the other images/)).toBeVisible()
+  await expect(page.getByText("Keep one image open: opening another replaces this one.")).toBeVisible()
   await setSingle(column("Wide"), true)
   await expect(viewers).toHaveCount(1)
   await expect(column("Wide")).toBeVisible()
