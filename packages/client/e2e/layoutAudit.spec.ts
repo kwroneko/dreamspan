@@ -687,6 +687,15 @@ test.describe("synthetic library and every app surface", () => {
           const panel = await openPanel(page, "Prompt preset")
           await expect(panel.getByRole("list", { name: "Preset blocks" })).toBeVisible({ timeout: 60000 })
           await audit("panel-Prompt-preset")
+          const addDefinitions = panel.getByRole("button", { name: "Add definitions block", exact: true })
+          if (await addDefinitions.isEnabled()) await addDefinitions.click()
+          const unsaved = page.getByRole("region", { name: "Unsaved changes" })
+          if (await unsaved.isVisible()) {
+            await unsaved.getByRole("button", { name: "Save", exact: true }).click()
+            await expect(unsaved).toHaveCount(0)
+          }
+          await expect(panel.locator('[data-prompt="charDefinitions"]')).toBeVisible()
+          await audit("panel-Prompt-preset-definitions")
           await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
           const large = page.getByRole("dialog", { name: "Preset editor", exact: true })
           await expect(large.getByRole("list", { name: "Prompt order", exact: true })).toBeVisible({ timeout: 60000 })
