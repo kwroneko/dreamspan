@@ -1,12 +1,14 @@
 // Which of a book's entries are open, remembered in this browser (owner, 2026-11-01: per entry,
-// per device), so the side panel and the large editor open a book as it was left.
+// per device; coordinator, 2026-11-02: per view), so each editor restores its own expansion.
 import type { FieldPath } from "@rp/shared/editing.ts"
 import { useState } from "react"
 
 /** At most this many open entries are remembered per book: past it, the rest open closed. */
 const LIMIT = 2000
 
-const keyOf = (refId: string, root: FieldPath) => `rp.lorebookOpen:${refId}:${root.join("/")}`
+// Keep the existing key for the large editor; the side panel has its own expansion history.
+const keyOf = (refId: string, root: FieldPath, panel: boolean) =>
+  `rp.lorebookOpen:${refId}:${root.join("/")}${panel ? ":panel" : ""}`
 
 const read = (key: string): ReadonlySet<number> => {
   try {
@@ -27,8 +29,8 @@ const write = (key: string, open: ReadonlySet<number>) => {
 }
 
 /** The open entries and their setter, remembered for this book. `initial` opens one besides (just added). */
-export function useOpenEntries(refId: string, root: FieldPath, initial: number | null) {
-  const key = keyOf(refId, root)
+export function useOpenEntries(refId: string, root: FieldPath, initial: number | null, panel: boolean) {
+  const key = keyOf(refId, root, panel)
   const [open, setOpenState] = useState<ReadonlySet<number>>(() => {
     const stored = read(key)
     return initial === null ? stored : new Set(stored).add(initial)

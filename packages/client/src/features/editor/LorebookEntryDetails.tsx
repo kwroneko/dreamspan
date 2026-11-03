@@ -3,6 +3,7 @@
 import { type ReactNode, type RefObject, useContext, useEffect, useRef } from "react"
 import { TRIGGERS } from "@rp/shared/presetConditions.ts"
 import { type FieldPath, textField, valueField } from "@rp/shared/editing.ts"
+import { useEditorFocus } from "../../textActions.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -93,13 +94,17 @@ export function KeysLine({
   /** The entry's chips, after the keys on their line. */
   badges?: ReactNode
 }) {
+  // A press on a later entry must finish before this box folds and moves that entry.
+  const { focused, onFocus, onBlur } = useEditorFocus()
   const target = useRef<HTMLTextAreaElement>(null)
   const keys = useValue<ReadonlyArray<string>>(store, path) ?? EMPTY_KEYS
   const field = valueField(path)
   useKeysReveal(target, path, keys)
   return (
     <div className="group/keys flex min-w-0 flex-col">
-      <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 group-has-[textarea:focus]/keys:hidden">
+      <div
+        className={`mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 group-has-[textarea:focus]/keys:hidden ${focused ? "hidden" : ""}`}
+      >
         <Tooltip label={EXPLAIN.keys_line}>
           {/* The picture of the box below, which is what the keyboard and screen readers reach. */}
           <span
@@ -120,10 +125,14 @@ export function KeysLine({
           placeholder="One key per line"
           rows={Math.max(1, keys.length)}
           spellCheck={false}
-          className="mt-1 min-h-8 w-full resize-none rounded-md border border-border bg-canvas px-2 py-1 text-sm text-text outline-none field-sizing-content placeholder:text-muted focus-visible:ring-2 focus-visible:ring-focus not-focus:sr-only"
+          className={`mt-1 min-h-8 w-full resize-none rounded-md border border-border bg-canvas px-2 py-1 text-sm text-text outline-none field-sizing-content placeholder:text-muted focus-visible:ring-2 focus-visible:ring-focus ${focused ? "" : "not-focus:sr-only"}`}
           value={keys.join("\n")}
           onChange={(event) => store.setValue(path, splitKeys(event.currentTarget.value))}
-          onBlur={() => void store.save(field)}
+          onFocus={onFocus}
+          onBlur={(event) => {
+            onBlur(event)
+            void store.save(field)
+          }}
           onKeyDown={(event) => {
             if (event.key === "Escape") event.currentTarget.blur()
           }}
