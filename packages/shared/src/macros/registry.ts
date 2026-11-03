@@ -63,6 +63,8 @@ export interface MacroInfo {
 }
 
 export interface MacroSpec {
+  /** Values insert text; directives change text, flow or variable state. */
+  readonly kind: "value" | "directive"
   /** A letter, then letters, digits, "_" or "-"; or "//". Matched case-insensitively. */
   readonly name: string
   readonly aliases?: ReadonlyArray<string>

@@ -1,18 +1,11 @@
 // Macros in displayed text (DESIGN §5.6, ARCHITECTURE §10): a greeting keeps `{{user}}`
 // and `{{char}}` unresolved, so it follows the chat's state. Only `expand()` decides what
 // expands: a message's stored macro mode and the explicit display-only opt-in.
-import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { expand, type FrozenValues } from "@rp/shared/macros/expand.ts"
-import { makeMacroRegistry } from "@rp/shared/macros/registry.ts"
-import { Effect, Scope } from "effect"
+import { macroRegistry as registry } from "../../macros.ts"
 
-/** The built-in macros, registered once for the page's lifetime. */
-export const registry = (() => {
-  const made = makeMacroRegistry()
-  Effect.runSync(Effect.flatMap(Scope.make(), (scope) => Scope.provide(scope)(registerBuiltinMacros(made))))
-  return made
-})()
+export { registry }
 
 /** A draw that's the same on every render of the same text, so a re-render doesn't reroll. */
 const seeded = (text: string) => {

@@ -151,10 +151,10 @@ class Parser {
     this.charged = this.steps
   }
 
-  document(): Array<Node> {
+  document(from = 0): Array<Node> {
     const t = this.text
     const nodes: Array<Node> = []
-    let i = 0
+    let i = from
     for (;;) {
       let p = t.indexOf("{{", i)
       this.count((p < 0 ? t.length : p) - i + 1)
@@ -359,9 +359,9 @@ export const isClosing = (text: string, node: MacroNode) =>
   (node.name === "//" && node.args[0] !== undefined && text.charCodeAt(node.args[0].start) === SLASH)
 
 /** Parses the top-level macros of a text, charging each character looked at as work. */
-export const parse = (text: string, charge: (steps: number) => void = () => {}): ReadonlyArray<Node> => {
+export const parse = (text: string, charge: (steps: number) => void = () => {}, from = 0): ReadonlyArray<Node> => {
   const parser = new Parser(text, charge)
-  const nodes = parser.document()
+  const nodes = parser.document(from)
   parser.flush()
   return nodes
 }

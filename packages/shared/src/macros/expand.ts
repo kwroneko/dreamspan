@@ -243,7 +243,7 @@ interface Item {
 }
 
 /** ST's #processScopedMacros over the sibling nodes `from` to `to`. */
-const pairScopes = (
+export const pairScopes = (
   text: string,
   nodes: ReadonlyArray<Node>,
   from: number,

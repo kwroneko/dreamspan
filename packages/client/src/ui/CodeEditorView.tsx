@@ -5,6 +5,7 @@ import { Decoration, type DecorationSet, EditorView, keymap } from "@codemirror/
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
+import { editorExtensions } from "./editorExtensions.ts"
 import { proseTheme } from "./codeTheme.ts"
 import { Dialog } from "./Dialog.tsx"
 import { chromeButton, FieldFrame } from "./FieldFrame.tsx"
@@ -128,6 +129,7 @@ const flashField = StateField.define<DecorationSet>({
 function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (text: string) => void) {
   const root = host.shadowRoot ?? host.attachShadow({ mode: "open" })
   const options = new Compartment()
+  const contributions = new Compartment()
   let props = initial
   let applying = false
   let deferred: string | null = null
@@ -146,6 +148,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       doc: initial.value,
       extensions: [
         proseTheme,
+        contributions.of([]),
         EditorView.lineWrapping,
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -174,6 +177,19 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       ]
     })
   })
+  let extensionVersion = 0
+  const refreshExtensions = () => {
+    const version = ++extensionVersion
+    void Promise.all(editorExtensions.list().map((entry) => entry.load()))
+      .then((extensions) => {
+        if (version === extensionVersion) view.dispatch({ effects: contributions.reconfigure(extensions) })
+      })
+      .catch(() => {
+        /* Text remains editable if an optional extension fails to load. */
+      })
+  }
+  const unsubscribe = editorExtensions.subscribe(refreshExtensions)
+  refreshExtensions()
   const replace = (value: string) => {
     value = view.state.toText(value).toString()
     if (value === view.state.doc.toString()) return
@@ -267,6 +283,8 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       }
     },
     destroy: () => {
+      extensionVersion++
+      unsubscribe()
       clearTimeout(fade)
       view.destroy()
     }

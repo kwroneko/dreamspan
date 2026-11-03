@@ -9,32 +9,46 @@ import { expanded, registryWith } from "./support.ts"
 const flagsSeen: Array<string> = []
 const order: Array<string> = []
 const specs: ReadonlyArray<MacroSpec> = [
-  { name: "user", handler: (call) => call.context.names.user },
-  { name: "char", handler: (call) => call.context.names.char },
-  { name: "group", aliases: ["charIfNotGroup"], handler: (call) => call.context.names.char },
+  { kind: "value", name: "user", handler: (call) => call.context.names.user },
+  { kind: "value", name: "char", handler: (call) => call.context.names.char },
+  { kind: "value", name: "group", aliases: ["charIfNotGroup"], handler: (call) => call.context.names.char },
   {
+    kind: "value",
     name: "newline",
     args: [{ name: "count", optional: true, integer: true }],
     handler: (c) => "\n".repeat(Number(c.args[0] ?? 1))
   },
-  { name: "reverse", args: [{ name: "value" }], handler: (call) => Array.from(call.args[0]!).reverse().join("") },
   {
+    kind: "value",
+    name: "reverse",
+    args: [{ name: "value" }],
+    handler: (call) => Array.from(call.args[0]!).reverse().join("")
+  },
+  {
+    kind: "value",
     name: "trim",
     args: [{ name: "content", optional: true }],
     handler: (c) => (c.isScoped ? (c.args[0] ?? "") : "{{trim}}")
   },
-  { name: "join", list: true, handler: (call) => call.list.join("|") },
-  { name: "three", args: [{ name: "a" }, { name: "b" }, { name: "c" }], handler: (c) => c.args.join("-") },
-  { name: "strict-int", args: [{ name: "v", integer: true }], handler: (c) => `#${c.args[0]}#` },
+  { kind: "value", name: "join", list: true, handler: (call) => call.list.join("|") },
   {
+    kind: "value",
+    name: "three",
+    args: [{ name: "a" }, { name: "b" }, { name: "c" }],
+    handler: (c) => c.args.join("-")
+  },
+  { kind: "value", name: "strict-int", args: [{ name: "v", integer: true }], handler: (c) => `#${c.args[0]}#` },
+  {
+    kind: "value",
     name: "flags",
     handler: (call) => {
       flagsSeen.push(call.flags)
       return `[${[...call.flags].join(",") || "none"}]`
     }
   },
-  { name: "scoped", args: [{ name: "content" }], handler: (call) => `isScoped:${call.isScoped}` },
+  { kind: "value", name: "scoped", args: [{ name: "content" }], handler: (call) => `isScoped:${call.isScoped}` },
   {
+    kind: "value",
     name: "outer",
     args: [{ name: "content" }],
     handler: (call) => {
@@ -43,14 +57,21 @@ const specs: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    kind: "value",
     name: "inner",
     handler: () => {
       order.push("inner")
       return "INNER"
     }
   },
-  { name: "raw", args: [{ name: "content" }], delayArgResolution: true, handler: (call) => `<${call.args[0]}>` },
-  { name: "fails", handler: () => JSON.parse("{") as string }
+  {
+    kind: "value",
+    name: "raw",
+    args: [{ name: "content" }],
+    delayArgResolution: true,
+    handler: (call) => `<${call.args[0]}>`
+  },
+  { kind: "value", name: "fails", handler: () => JSON.parse("{") as string }
 ]
 const registry = registryWith(specs)
 const run = (text: string) =>
