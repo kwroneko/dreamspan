@@ -3,7 +3,7 @@
 // so a caller can show a value live and save it once.
 import { Slider as BaseSlider } from "@base-ui/react/slider"
 import { useId, type ReactNode } from "react"
-import { AboutHint } from "./AboutHint.tsx"
+import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
 export function Slider({
@@ -47,10 +47,9 @@ export function Slider({
       className="flex w-full max-w-xl flex-col gap-2 data-disabled:opacity-50"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <span className="flex items-center gap-1">
-          <BaseSlider.Label className="text-sm font-medium text-text">{label}</BaseSlider.Label>
-          {about && <AboutHint heading={label}>{about}</AboutHint>}
-        </span>
+        <LabelWithHelp help={about && <AboutHint heading={label}>{about}</AboutHint>}>
+          <BaseSlider.Label className="inline text-sm font-medium text-text">{label}</BaseSlider.Label>
+        </LabelWithHelp>
         <span className="text-sm text-muted tabular-nums">{valueText(value)}</span>
       </div>
       <BaseSlider.Control className="flex h-6 w-full touch-none items-center select-none">

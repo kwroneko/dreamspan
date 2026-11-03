@@ -425,6 +425,17 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_HELP_ONLY === "1") {
+          await go("group-chat", `/chats/${chatId}`)
+          await openPanel(page, "Lorebooks")
+          await audit("panel-Lorebooks")
+          await openSummarySettings(page)
+          await audit("panel-summary-settings")
+          await go("preset-editor", `/library/${presetRef}`)
+          await go("card-editor", `/library/${cardRef}`)
+          for (const section of ["chats", "display", "costs"]) await go(`settings-${section}`, `/settings/${section}`)
+          return
+        }
         if (process.env.LAYOUT_AUDIT_SETTINGS_ONLY === "1") {
           for (const section of [
             "connections",
