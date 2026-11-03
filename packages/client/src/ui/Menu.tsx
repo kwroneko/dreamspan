@@ -2,6 +2,7 @@
 // dismissal; this layer carries the look. Items are plain actions, links, or a choice of one.
 // An item's `description` explains it beside the item while it's highlighted, or under its
 // label on touch screens and narrow windows (`Explanation.tsx`), so the label can stay short.
+import { ContextMenu as BaseContextMenu } from "@base-ui/react/context-menu"
 import { Menu as BaseMenu } from "@base-ui/react/menu"
 import { type ComponentProps, type ReactElement, type ReactNode, useId, useState } from "react"
 import { buttonClass } from "./Button.tsx"
@@ -81,6 +82,85 @@ export function Menu({
         </BaseMenu.Positioner>
       </BaseMenu.Portal>
     </BaseMenu.Root>
+  )
+}
+
+/** A button's alternate actions, opened by right-click or touch long-press. */
+export function ContextMenu({
+  trigger,
+  children,
+  label,
+  open,
+  onOpenChange
+}: {
+  trigger: ReactElement
+  children: ReactNode
+  label: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const [popup, setPopup] = useState<HTMLElement | null>(null)
+  return (
+    <BaseContextMenu.Root open={open} onOpenChange={onOpenChange}>
+      <BaseContextMenu.Trigger
+        render={trigger}
+        // A long-press opens while the finger is still down. Suppress the compatibility
+        // click on release, which would otherwise dismiss the menu on its own trigger.
+        onTouchEnd={(event) => {
+          if (open) event.preventDefault()
+        }}
+      />
+      <BaseContextMenu.Portal>
+        <BaseContextMenu.Positioner
+          data-layout-overlay="Context menu floats above the page"
+          className="z-50 outline-none"
+          sideOffset={4}
+          collisionPadding={8}
+        >
+          <BaseContextMenu.Popup
+            ref={setPopup}
+            aria-label={label}
+            className="max-h-[var(--available-height)] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none"
+          >
+            {children}
+          </BaseContextMenu.Popup>
+          <HighlightExplanation popup={popup} />
+        </BaseContextMenu.Positioner>
+      </BaseContextMenu.Portal>
+    </BaseContextMenu.Root>
+  )
+}
+
+/** A single choice in a menu, with the current choice checked. */
+export function MenuRadioGroup<Value extends string>({
+  value,
+  onValueChange,
+  items
+}: {
+  value: Value
+  onValueChange: (value: Value) => void
+  items: ReadonlyArray<{ value: Value; label: string; description: string }>
+}) {
+  return (
+    <BaseMenu.RadioGroup value={value} onValueChange={onValueChange}>
+      {items.map((item) => (
+        <MenuRadioItem key={item.value} {...item} />
+      ))}
+    </BaseMenu.RadioGroup>
+  )
+}
+
+function MenuRadioItem({ value, label, description }: { value: string; label: string; description: string }) {
+  const explanation = useItemExplanation(description)
+  return (
+    <BaseMenu.RadioItem value={value} closeOnClick className={itemClass("default")} {...explanation.describedBy}>
+      <span className="inline-flex w-4 shrink-0 justify-center text-accent">
+        <BaseMenu.RadioItemIndicator>
+          <Icon name="check" />
+        </BaseMenu.RadioItemIndicator>
+      </span>
+      <ItemText parts={explanation.parts}>{label}</ItemText>
+    </BaseMenu.RadioItem>
   )
 }
 

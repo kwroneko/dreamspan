@@ -28,6 +28,8 @@ const captureHeader = async (page: Page, name: string) => {
 }
 
 const rectangularPortraits = async (portraits: Locator) => {
+  // Cast reads its portraits after the tab opens; measure the loaded surface.
+  await expect(portraits.first()).toBeVisible()
   const boxes = await portraits.evaluateAll((nodes) =>
     nodes
       .filter((node) => node.checkVisibility())

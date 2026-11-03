@@ -2,7 +2,7 @@
 // phone's chat the chat header takes the app bar's place, and its ← opens that menu.
 import type { Page } from "@playwright/test"
 
-/** Shows the app's navigation (Characters, Library, Settings…, image settings) if it's hidden. */
+/** Shows the app's navigation (Characters, Library, Settings…, image toggle) if it's hidden. */
 export const showAppNavigation = async (page: Page) => {
   if (await page.getByRole("button", { name: "Close the menu", exact: true }).isVisible()) return
   const menu = page.getByRole("button", { name: "Chats and menu", exact: true }).filter({ visible: true })
