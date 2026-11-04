@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { LorebookPreset } from "@rp/shared/chatSetupApi.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { Link } from "@tanstack/react-router"
@@ -45,13 +46,15 @@ export function LorebookUse({ store, call }: { store: EditorStore; call: Caller 
           {presets.map((preset, index) => (
             <span key={preset.refId}>
               {index > 0 && ", "}
-              <Link
-                to="/library/$refId"
-                params={{ refId: preset.refId }}
-                className="text-accent underline-offset-4 hover:underline"
-              >
-                {preset.label}
-              </Link>
+              <Tooltip label={`Opens the prompt preset ${preset.label}.`}>
+                <Link
+                  to="/library/$refId"
+                  params={{ refId: preset.refId }}
+                  className="text-accent underline-offset-4 hover:underline"
+                >
+                  {preset.label}
+                </Link>
+              </Tooltip>
               {!preset.enabled && " (switched off there)"}
             </span>
           ))}
