@@ -1007,6 +1007,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D]** (owner, 2026-11-04, castgap): “Why is there so much space above the cast row of the sidebar tabs?” Match the spacing above and below the Cast row. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §12. **[P]** Reduce the host strip’s top padding to match its existing 4px bottom inset.
+
 - **[D]** (owner, 2026-11-04): Field help wrapping below the label is “obviously totally incorrect, broken and sloppy looking and it's a regression I didn't ask for.” The ? stays inline immediately after the label. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
 
 
