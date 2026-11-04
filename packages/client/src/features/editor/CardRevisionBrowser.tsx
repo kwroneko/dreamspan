@@ -1,7 +1,6 @@
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { cardNames } from "@rp/shared/cardNames.ts"
 import { Effect } from "effect"
-import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"
 // Compare immutable revisions with their first parent or the live working document.
 import { type Doc, Revision } from "@rp/shared/library.ts"
@@ -97,7 +96,7 @@ function FieldComparison({
   )
 }
 
-/** What made a revision, in words: the reply that used its text (linked), a Save, an import. */
+/** Linked usage and branch context stay on lines; ordinary origins are header badges. */
 function RevisionTitle({ revision }: { revision: Revision }) {
   const use = revision.usedBy
   // A chat's own note: where the change took effect (owner, 2026-11-01).
@@ -124,31 +123,28 @@ function RevisionTitle({ revision }: { revision: Revision }) {
         {where && <span className="block text-muted">{where}</span>}
       </>
     )
-  const origins: Record<Revision["origin"], string> = {
-    user: "Saved",
-    generation: "Used by a reply",
-    import: "Imported",
-    merge: "Took an update",
-    agent: "Changed by the agent",
-    changeset: "Changed"
-  }
   return (
     <>
-      {origins[revision.origin]}
+      {revision.origin === "generation" && "Used by a reply"}
       {where && <span className="block text-muted">{where}</span>}
     </>
   )
 }
 
+const originBadges: Partial<Record<Revision["origin"], string>> = {
+  import: "Imported",
+  merge: "Updated",
+  agent: "Agent edit",
+  changeset: "Changed"
+}
+
 function RevisionComparison({
   store,
-  call,
   revision,
   settingLines,
   onClose
 }: {
   store: EditorStore
-  call: Caller
   revision: Revision
   onClose: () => void
   settingLines?: SettingLines | undefined
@@ -175,28 +171,6 @@ function RevisionComparison({
       live = false
     }
   }, [store, revision])
-  const names = cardNames(docs?.doc ?? {})
-  const nameCheck = useCardNameCheck(names.displayName, names.version, state.snapshot!.ref)
-  const clash = state.snapshot!.ref.kind === "card" ? nameCheck : null
-  const restore = async () => {
-    if (!docs || clash) return
-    const result = await call(
-      (client) =>
-        Effect.gen(function* () {
-          if (state.snapshot!.ref.kind === "card")
-            yield* checkCardNames(client, names.displayName, names.version, state.snapshot!.ref)
-          return yield* client("RestoreRevision", {
-            refId: store.refId,
-            revisionId: revision.id,
-            expectedRowVersion: state.snapshot!.ref.rowVersion,
-            ...(store.chatNote ? { chatNote: store.chatNote } : {})
-          })
-        }),
-      ["library"]
-    )
-    if (result.ok) await store.refresh()
-    else setError(result.error)
-  }
   const current = useWorkingDoc(store)
   const before = mode === "parent" ? docs?.parent : docs?.doc
   const after = mode === "parent" ? docs?.doc : current
@@ -232,31 +206,7 @@ function RevisionComparison({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <Button
-            disabled={
-              !docs || clash !== null || (revision.id === state.snapshot!.ref.headRevisionId && state.dirty === 0)
-            }
-            focusableWhenDisabled
-            hint={
-              !docs
-                ? "The revision is loading"
-                : (clash ??
-                  (revision.id === state.snapshot!.ref.headRevisionId && state.dirty === 0
-                    ? "This revision is already the latest, with no unsaved changes"
-                    : "Restores this revision's content"))
-            }
-            onClick={() => void restore()}
-          >
-            Restore
-          </Button>
-          {docs && clash && (
-            <p role="status" className="text-sm text-muted">
-              {clash}
-            </p>
-          )}
-        </div>
+      <div className="flex justify-end">
         <IconButton label="Close comparison" hint="Closes this revision's comparison" icon="close" onClick={onClose} />
       </div>
       <ErrorAlert error={error} />
@@ -330,7 +280,9 @@ export function CardRevisionBrowser({
       live = false
     }
   }, [selectedId, selected, loaded, hasMore, revisions, store, call])
-  const head = useEditorState(store).snapshot!.ref.headRevisionId
+  const state = useEditorState(store)
+  const head = state.snapshot!.ref.headRevisionId
+  const [restoringId, setRestoringId] = useState<string | null>(null)
   useEffect(() => {
     let live = true
     const at = store.chatNote ? { chatNote: store.chatNote } : {}
@@ -355,6 +307,34 @@ export function CardRevisionBrowser({
     if (result.ok) setRevisions([...revisions, ...result.value])
     else setError(result.error)
   }
+  const restore = async (revision: Revision) => {
+    if (restoringId || revision.id === head) return
+    setRestoringId(revision.id)
+    try {
+      const doc = await store.revisionDoc(revision.id)
+      const names = cardNames(doc)
+      const result = await call(
+        (client) =>
+          Effect.gen(function* () {
+            if (state.snapshot!.ref.kind === "card")
+              yield* checkCardNames(client, names.displayName, names.version, state.snapshot!.ref)
+            return yield* client("RestoreRevision", {
+              refId: store.refId,
+              revisionId: revision.id,
+              expectedRowVersion: state.snapshot!.ref.rowVersion,
+              ...(store.chatNote ? { chatNote: store.chatNote } : {})
+            })
+          }),
+        ["library"]
+      )
+      if (result.ok) await store.refresh()
+      else setError(result.error)
+    } catch (error) {
+      setError(error as AppError)
+    } finally {
+      setRestoringId(null)
+    }
+  }
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <ErrorAlert error={error} />
@@ -367,7 +347,29 @@ export function CardRevisionBrowser({
             <RevisionEntry
               number={revision.number}
               createdAt={revision.createdAt}
-              title={<RevisionTitle revision={revision} />}
+              title={
+                revision.origin === "generation" || revision.changedAt?.length ? (
+                  <RevisionTitle revision={revision} />
+                ) : null
+              }
+              originLabel={originBadges[revision.origin]}
+              restore={
+                <Button
+                  className="h-8 px-2"
+                  disabled={revision.id === head || restoringId !== null}
+                  focusableWhenDisabled
+                  hint={
+                    revision.id === head
+                      ? "This is the latest revision"
+                      : restoringId
+                        ? "A revision is being restored"
+                        : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
+                  }
+                  onClick={() => void restore(revision)}
+                >
+                  Restore to {revisionName(revision.number).toLowerCase()}
+                </Button>
+              }
               message={revision.message}
               current={revision.id === head}
               selected={selected?.id === revision.id}
@@ -397,7 +399,6 @@ export function CardRevisionBrowser({
                 <RevisionComparison
                   key={selected.id}
                   store={store}
-                  call={call}
                   revision={selected}
                   onClose={() => setSelected(null)}
                   settingLines={settingLines}

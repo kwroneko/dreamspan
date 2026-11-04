@@ -1021,6 +1021,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] Owner, 2026-11-04 (historyui revision actions):** “The position of that restore button makes no sense, and there's no reason for it to be buried. It should be next to the compare button, and say something like "Restore to revision x"”. On the origin line: “Can it have other values? Otherwise, saved seems redundant, and imported should just be a badge next to the revision name.” Restore belongs beside Compare on each entry and works without opening the diff; keep the latest action disabled with an explanation. **[P]** Omit user/Saved; badges: import → Imported, merge → Updated, agent → Agent edit, changeset → Changed. Generation usage and its chat link stay on a line, as does branch-change context. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
+
+
 - **[D] Owner, 2026-11-04 (historyui diff headings):** “This just says before/after which isn't helpful. It communicates nothing. The title of each panel should say what state it refers to: for example Revision 1 / Revision 2 Or "Revision 1 / Current State"”. Previous-revision comparisons name the parent and selected revision, with “Empty” for a first revision; current-state comparisons name the selected revision and “Current state”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 
 

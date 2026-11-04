@@ -17,6 +17,8 @@ export function RevisionEntry({
   number,
   createdAt,
   title,
+  originLabel,
+  restore,
   message,
   current,
   selected,
@@ -27,6 +29,8 @@ export function RevisionEntry({
   createdAt: number
   /** What made it, in words (and a link to the reply that used it). */
   title: ReactNode
+  originLabel?: string | undefined
+  restore: ReactNode
   message: string | null
   /** The head: what the editor's fields hold when nothing changed since. */
   current: boolean
@@ -43,12 +47,13 @@ export function RevisionEntry({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold">{name}</span>
           {current && <Badge tone="accent">latest</Badge>}
+          {originLabel && <Badge>{originLabel}</Badge>}
         </div>
         <time dateTime={new Date(createdAt).toISOString()} className="text-xs text-muted">
           {when(createdAt)}
         </time>
       </div>
-      <div className="text-sm [overflow-wrap:anywhere]">{title}</div>
+      {title && <div className="text-sm [overflow-wrap:anywhere]">{title}</div>}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant={selected ? "secondary" : "ghost"}
@@ -61,6 +66,7 @@ export function RevisionEntry({
           <Icon name="history" />
           Compare
         </Button>
+        {restore}
         <Button
           variant="ghost"
           aria-label={message ? `Change the message of ${name}` : `Add a message to ${name}`}

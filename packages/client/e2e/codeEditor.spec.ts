@@ -127,16 +127,14 @@ test("changes propagate exactly, native undo works, and external replacements do
         )?.content
     )
     .toBe(pasted)
-  // History's Restore on the latest revision puts every field back to it, from outside the box.
+  // An entry restores directly, with the latest revision's action kept disabled.
+  await saveRevision(page)
   await page.getByRole("button", { name: "History", exact: true }).click()
   const history = page.getByRole("dialog", { name: "History", exact: true })
-  await history
-    .getByRole("list", { name: "Revisions" })
-    .getByRole("listitem")
-    .first()
-    .getByRole("button", { name: /^Revision \d+ / })
-    .click()
-  await history.getByRole("button", { name: "Restore", exact: true }).click()
+  const revisions = history.getByRole("list", { name: "Revisions" }).getByRole("listitem")
+  await expect(revisions.first().getByRole("button", { name: /^Restore to revision / })).toBeDisabled()
+  await expect(history.getByRole("tab")).toHaveCount(0)
+  await revisions.nth(1).getByRole("button", { name: "Restore to revision 2", exact: true }).click()
   await history.getByRole("button", { name: "Close", exact: true }).click()
   await expectTextBox(box, description)
   await expect(page.locator(".rp-line-added, .rp-line-modified, .rp-line-deleted")).toHaveCount(0)

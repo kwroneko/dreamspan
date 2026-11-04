@@ -1604,14 +1604,22 @@ for (const width of [1440, 390])
           writeFileSync(join(work, `revisions-${width}-${theme}.json`), JSON.stringify(findings, null, 2))
           console.log(`${surface}: ${violations.length} violations`)
         }
+        await expect(revisions.first().getByRole("button", { name: /^Restore to revision / })).toBeDisabled()
+        await expect(revisions.nth(1).getByRole("button", { name: /^Restore to revision / })).toBeEnabled()
+        await expect(dialog.getByText("Saved", { exact: true })).toHaveCount(0)
+        await expect(revisions.last().getByText("Imported", { exact: true })).toBeVisible()
         await audit("list")
+        await dialog.screenshot({
+          path: info.outputPath(`${kind}-actions-${width}-${theme}.png`),
+          animations: "disabled"
+        })
         const compare = revisions.nth(1).getByRole("button", { name: /^Revision \d+ / })
         const before = await compare.boundingBox()
         await compare.click()
         const after = await compare.boundingBox()
         expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1)
         expect(Math.abs(after!.x - before!.x)).toBeLessThanOrEqual(1)
-        await expect(dialog.getByRole("button", { name: "Restore", exact: true })).toBeEnabled()
+        await expect(revisions.nth(1).getByRole("button", { name: "Restore to revision 2", exact: true })).toBeEnabled()
         const openDiff = async (beforeName: string, afterName: string) => {
           const field = dialog
             .locator("details")
@@ -1636,7 +1644,7 @@ for (const width of [1440, 390])
           "aria-selected",
           "true"
         )
-        await expect(dialog.getByRole("button", { name: "Restore", exact: true })).toBeEnabled()
+        await expect(revisions.nth(1).getByRole("button", { name: "Restore to revision 2", exact: true })).toBeEnabled()
         await openDiff("Revision 2", "Current state")
         await audit("current-comparison")
         await dialog.screenshot({
