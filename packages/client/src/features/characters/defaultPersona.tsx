@@ -82,13 +82,15 @@ function DefaultPersonaMenu(context: CardSurfaceContext) {
       label={`Persona actions for ${context.label ?? "this card"}`}
       hint="Choose the persona for new chats."
       trigger={
-        <button
-          type="button"
-          aria-label={`Persona actions for ${context.label ?? "this card"}`}
-          className={iconButtonClass()}
-        >
-          <Icon name="more" />
-        </button>
+        <Tooltip label="Opens persona actions for this card.">
+          <button
+            type="button"
+            aria-label={`Persona actions for ${context.label ?? "this card"}`}
+            className={iconButtonClass()}
+          >
+            <Icon name="more" />
+          </button>
+        </Tooltip>
       }
     >
       <DefaultPersonaAction {...context} />

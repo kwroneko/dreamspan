@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The home screen's getting-started steps: connect a model, import characters, start a chat.
 // Each is ticked once done, and the steps stay until all three are, so a library imported
 // before any model was connected still says what's missing.
@@ -122,12 +123,14 @@ export function FirstRunSteps({ data }: { data: ShellLibrary }) {
               </div>
             </div>
             {step.action && (
-              <Link
-                to={step.action.to}
-                className={`${buttonClass(index === next ? "primary" : "secondary")} self-start sm:self-center`}
-              >
-                {step.action.label}
-              </Link>
+              <Tooltip label="Opens this setup step.">
+                <Link
+                  to={step.action.to}
+                  className={`${buttonClass(index === next ? "primary" : "secondary")} self-start sm:self-center`}
+                >
+                  {step.action.label}
+                </Link>
+              </Tooltip>
             )}
           </li>
         ))}

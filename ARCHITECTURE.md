@@ -533,6 +533,8 @@ Chat copy audit (2026-11-04): message, summary, queue, history, branch, image an
 
 Settings copy audit (2026-11-04): connection, model, key, account, network, pricing, global-regex and bin controls explain their actions. Pricing and global-regex introductions live in heading question-mark help; explanations keep technical terms and omit recovery instructions.
 
+Character and navigation copy audit (2026-11-04): card tiles, chat lists, sorting, persona actions, setup links and shell navigation use existing hover/focus explanations. Sort-menu descriptions use the shared menu explanation rather than permanent text under each label; redundant empty-chat guidance is removed. No labels changed.
+
 ### 3.11 Recycle bin
 
 Delete explanations use “Moves this <thing> to the bin, from which it can be restored later.” without additional text. Delete toasts say “<Thing> moved to the bin.” and retain the Undo and Open the bin actions. Cancel and Discard explanations name the action without recovery instructions.

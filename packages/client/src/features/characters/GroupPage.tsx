@@ -34,9 +34,11 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
   const rename = useAction()
   return (
     <div className="flex flex-col gap-5">
-      <Link to="/" className="self-start text-sm text-muted hover:text-text">
-        ← Characters
-      </Link>
+      <Tooltip label="Returns to Characters.">
+        <Link to="/" className="self-start text-sm text-muted hover:text-text">
+          ← Characters
+        </Link>
+      </Tooltip>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start">
         <span className="block aspect-[2/3] w-24 shrink-0 overflow-hidden rounded-xl">
           <GroupFaces members={group.members} />
@@ -50,9 +52,11 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
           </p>
           <p className="text-sm text-muted">{usageLine(group)}</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            <Link to="/chats/$chatId" params={{ chatId: group.latestChatId }} className={buttonClass("primary")}>
-              Continue the latest chat
-            </Link>
+            <Tooltip label="Opens this group’s latest chat.">
+              <Link to="/chats/$chatId" params={{ chatId: group.latestChatId }} className={buttonClass("primary")}>
+                Continue the latest chat
+              </Link>
+            </Tooltip>
             <Tooltip label="Opens a new chat with these characters, each greeting in turn. Nothing is saved until you send.">
               <Link to="/groups/$chatId/new" params={{ chatId: group.latestChatId }} className={buttonClass()}>
                 New chat
@@ -89,22 +93,24 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
           <ul aria-label="Characters in the group" className="flex flex-col gap-1">
             {group.members.map((member) => (
               <li key={member.entityId}>
-                <button
-                  type="button"
-                  onClick={() => openCharacter(member.entityId)}
-                  className="flex items-center gap-3 rounded-lg px-2 py-1.5 outline-none hover:bg-surface-raised/60 focus-visible:ring-2 focus-visible:ring-focus"
-                >
-                  <Avatar
-                    id={member.entityId}
-                    name={member.name}
-                    mediaId={member.avatarMediaId}
-                    crop={member.avatarCrop}
-                    size="lg"
-                  />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate font-medium">{member.name}</span>
-                  </span>
-                </button>
+                <Tooltip label="Opens this member’s card.">
+                  <button
+                    type="button"
+                    onClick={() => openCharacter(member.entityId)}
+                    className="flex items-center gap-3 rounded-lg px-2 py-1.5 outline-none hover:bg-surface-raised/60 focus-visible:ring-2 focus-visible:ring-focus"
+                  >
+                    <Avatar
+                      id={member.entityId}
+                      name={member.name}
+                      mediaId={member.avatarMediaId}
+                      crop={member.avatarCrop}
+                      size="lg"
+                    />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate font-medium">{member.name}</span>
+                    </span>
+                  </button>
+                </Tooltip>
               </li>
             ))}
           </ul>
@@ -145,9 +151,11 @@ export function GroupPage() {
     return describeCause(result.cause).tag === "NotFound" ? (
       <EmptyState title="This group isn't here any more">
         <p>Its chats may be in the bin, or this chat no longer has two or more characters.</p>
-        <Link to="/" className={buttonClass()}>
-          Characters
-        </Link>
+        <Tooltip label="Opens Characters.">
+          <Link to="/" className={buttonClass()}>
+            Characters
+          </Link>
+        </Tooltip>
       </EmptyState>
     ) : (
       <FailureView cause={result.cause} onRetry={refresh} />

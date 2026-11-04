@@ -1,3 +1,4 @@
+import { Tooltip } from "../ui/Tooltip.tsx"
 import { CenterHeaderHost, CenterHeaderFrame, centerHeaders } from "../ui/CenterHeader.tsx"
 import { defineSlot, SlotOutlet } from "../slots.tsx"
 export const appTools = defineSlot<Record<string, never>>("app.tools")
@@ -117,15 +118,17 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
         ]}
       />
       <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border px-2.5 pt-2 text-sm">
-        <Link
-          to="/settings/account"
-          title={`Signed in as ${session.user.displayName} (${session.user.role})`}
-          className="max-w-40 truncate text-muted hover:text-text"
-          onClick={onNavigate}
-        >
-          {/* Without accounts the one user is "local", which says nothing. */}
-          {session.via === "local" ? "Account" : session.user.displayName}
-        </Link>
+        <Tooltip label="Opens your account settings.">
+          <Link
+            to="/settings/account"
+            title={`Signed in as ${session.user.displayName} (${session.user.role})`}
+            className="max-w-40 truncate text-muted hover:text-text"
+            onClick={onNavigate}
+          >
+            {/* Without accounts the one user is "local", which says nothing. */}
+            {session.via === "local" ? "Account" : session.user.displayName}
+          </Link>
+        </Tooltip>
         <BrowserRecovery userId={session.user.id} />
         {session.via === "session" && <LogoutButton variant="ghost" />}
       </div>
@@ -140,9 +143,11 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 px-3 pb-3">
       <div className="-mx-3 mb-1 flex h-shell-header shrink-0 items-center gap-1 border-b border-border px-5 py-2">
-        <Link to="/" className="mr-auto truncate font-semibold" onClick={onNavigate}>
-          rp-harness
-        </Link>
+        <Tooltip label="Opens the home page.">
+          <Link to="/" className="mr-auto truncate font-semibold" onClick={onNavigate}>
+            rp-harness
+          </Link>
+        </Tooltip>
         <SlotOutlet slot={sidebarActions} props={{ onNavigate }} />
         <ImageControls />
         {!onNavigate && <SlotOutlet slot={sidebarToggle} props={{ place: "sidebar" }} />}
@@ -193,12 +198,14 @@ function PhoneBar() {
             </div>
             <Sidebar onNavigate={() => setOpen(false)} />
           </div>
-          <button
-            type="button"
-            aria-label="Close the menu"
-            className="flex-1 bg-overlay"
-            onClick={() => setOpen(false)}
-          />
+          <Tooltip label="Closes the navigation menu.">
+            <button
+              type="button"
+              aria-label="Close the menu"
+              className="flex-1 bg-overlay"
+              onClick={() => setOpen(false)}
+            />
+          </Tooltip>
         </div>
       )}
     </>
@@ -356,7 +363,7 @@ function AppShell() {
         <ErrorAlert
           error={error}
           actions={
-            <Button variant="ghost" onClick={retry}>
+            <Button hint="Retries loading this view." variant="ghost" onClick={retry}>
               Try again
             </Button>
           }

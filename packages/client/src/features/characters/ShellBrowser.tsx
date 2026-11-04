@@ -112,30 +112,32 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
   const open = useOpenFork(fork, true)
   return (
     <div className="tile-toggle-surface relative flex flex-col overflow-hidden rounded-lg border border-border bg-surface">
-      <button
-        type="button"
-        onClick={open}
-        data-layout-audit-ignore="inset: Whole group tile is the open control"
-        aria-label={`Open chat ${fork.chatName}`}
-        className="flex w-full flex-1 flex-col text-left"
-      >
-        <span className="aspect-[2/3] w-full">
-          <GroupFaces members={fork.cast} />
-        </span>
-        <span className="flex w-full min-w-0 flex-1 flex-col gap-1 p-2.5">
-          <span
-            className="line-clamp-2 text-sm font-medium text-ellipsis break-normal [overflow-wrap:normal]"
-            title={fork.chatName}
-          >
-            {fork.chatName}
+      <Tooltip label="Opens this chat.">
+        <button
+          type="button"
+          onClick={open}
+          data-layout-audit-ignore="inset: Whole group tile is the open control"
+          aria-label={`Open chat ${fork.chatName}`}
+          className="flex w-full flex-1 flex-col text-left"
+        >
+          <span className="aspect-[2/3] w-full">
+            <GroupFaces members={fork.cast} />
           </span>
-          {/* The faces show who; their names are in the tooltip. */}
-          <span className="text-xs text-muted" title={fork.cast.map((c) => c.label).join(", ")}>
-            {fork.cast.length} {fork.cast.length === 1 ? "member" : "members"}
+          <span className="flex w-full min-w-0 flex-1 flex-col gap-1 p-2.5">
+            <span
+              className="line-clamp-2 text-sm font-medium text-ellipsis break-normal [overflow-wrap:normal]"
+              title={fork.chatName}
+            >
+              {fork.chatName}
+            </span>
+            {/* The faces show who; their names are in the tooltip. */}
+            <span className="text-xs text-muted" title={fork.cast.map((c) => c.label).join(", ")}>
+              {fork.cast.length} {fork.cast.length === 1 ? "member" : "members"}
+            </span>
+            {fork.branches > 1 && <span className="mt-auto text-xs text-muted">{fork.branches} branches</span>}
           </span>
-          {fork.branches > 1 && <span className="mt-auto text-xs text-muted">{fork.branches} branches</span>}
-        </span>
-      </button>
+        </button>
+      </Tooltip>
       <span data-layout-overlay="Pin action sits over the group portrait" className="absolute right-2 top-2">
         <PinButton fork={fork} className="tile-toggle bg-surface" />
       </span>
@@ -426,9 +428,11 @@ export function ShowMore({ shown, total, onMore }: { shown: number; total: numbe
   const rest = total - shown
   if (rest <= 0) return null
   return (
-    <button type="button" onClick={onMore} className="mt-1 self-start px-2 py-1 text-xs text-accent">
-      Show {Math.min(rest, PAGE_ROWS).toLocaleString()} more of {rest.toLocaleString()}
-    </button>
+    <Tooltip label="Loads more chats.">
+      <button type="button" onClick={onMore} className="mt-1 self-start px-2 py-1 text-xs text-accent">
+        Show {Math.min(rest, PAGE_ROWS).toLocaleString()} more of {rest.toLocaleString()}
+      </button>
+    </Tooltip>
   )
 }
 
@@ -478,6 +482,13 @@ export function PinnedChats({
     <section aria-label="Pinned chats" className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Button
+          hint={
+            home
+              ? pinsCollapsed
+                ? "Click to show pinned chats."
+                : "Click to hide pinned chats."
+              : "Opens pinned chats."
+          }
           variant="ghost"
           aria-expanded={open}
           onClick={() =>

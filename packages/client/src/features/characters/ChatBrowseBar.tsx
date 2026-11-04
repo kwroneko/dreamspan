@@ -63,7 +63,12 @@ export function ChatBrowseBar({ browse, counts, onChange }: Props) {
           hint="Chooses how chats are ordered"
           align="start"
           trigger={
-            <Button variant="ghost" className="h-8 gap-1 px-2" aria-label={`Sort chats: ${SORTS[browse.sort].label}`}>
+            <Button
+              hint="Chooses how chats are sorted."
+              variant="ghost"
+              className="h-8 gap-1 px-2"
+              aria-label={`Sort chats: ${SORTS[browse.sort].label}`}
+            >
               {SORTS[browse.sort].label}
               <Icon name="down" />
             </Button>

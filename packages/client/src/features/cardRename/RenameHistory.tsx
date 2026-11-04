@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The question a change of a card's nickname asks (owner, 2026-11-01): where the name is
 // confirmed (`atConfirm`, the name header), or after a fork or a swap renamed what a chat uses.
 // "Replace <old> with <new> in the history: No / this chat / all N chats"; when the display
@@ -159,15 +160,17 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: C
               <ul aria-label="History diffs and undo" className="flex flex-col gap-2">
                 {done.targets.map((t) => (
                   <li key={t.forkId} className="min-w-0 [overflow-wrap:anywhere]">
-                    <Link
-                      to="/chats/$chatId"
-                      params={{ chatId: t.chatId }}
-                      search={{ fork: t.forkId, panel: "history" }}
-                      className={`${buttonClass("ghost")} h-auto! whitespace-normal!`}
-                      onClick={() => finish("replaced", true)}
-                    >
-                      History diff / undo: {t.label}
-                    </Link>
+                    <Tooltip label="Opens the applied history changes for this chat.">
+                      <Link
+                        to="/chats/$chatId"
+                        params={{ chatId: t.chatId }}
+                        search={{ fork: t.forkId, panel: "history" }}
+                        className={`${buttonClass("ghost")} h-auto! whitespace-normal!`}
+                        onClick={() => finish("replaced", true)}
+                      >
+                        History diff / undo: {t.label}
+                      </Link>
+                    </Tooltip>
                   </li>
                 ))}
               </ul>
