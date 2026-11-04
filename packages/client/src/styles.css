@@ -642,6 +642,57 @@ main:has(> [data-fill]) {
   }
 }
 
+/* Prompt rows respond to their list's width, including a resized side panel. */
+@container (width < 36rem) {
+  .prompt-row-header {
+    display: grid;
+    grid-template-columns: auto 2.5rem minmax(0, 1fr);
+  }
+  .prompt-row-header > [data-prompt-heading] {
+    min-width: 0;
+    display: contents;
+  }
+  .prompt-row-header [data-prompt-title-row] {
+    grid-column: 3;
+  }
+  .prompt-row-header [data-prompt-description],
+  .prompt-row-header [data-prompt-preview],
+  .prompt-row-header [data-prompt-column-preview] {
+    grid-column: 1 / -1;
+  }
+  .prompt-row-header [data-prompt-column-preview] {
+    display: block;
+  }
+  .prompt-row-header [data-prompt-inline-preview] {
+    display: none;
+  }
+  .prompt-row-header > [data-prompt-end],
+  .prompt-row-header > [data-prompt-info] {
+    grid-column: 1 / -1;
+    justify-self: end;
+    flex-wrap: wrap;
+    height: auto;
+    margin-top: 0.25rem;
+  }
+  .prompt-row-header [data-prompt-title-row] {
+    flex-wrap: wrap;
+  }
+  .prompt-row-header [data-prompt-title-row] > :first-child {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+  .prompt-row-header [data-prompt-title-row] .truncate {
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  .prompt-row-header [data-placeholder-source] {
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+}
+
 :root {
   --prompt-notes: oklch(43% 0.11 65);
 }

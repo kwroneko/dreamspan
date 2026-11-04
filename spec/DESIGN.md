@@ -240,6 +240,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 2.2 Personas, speakers and writers
 
+- **[D] Header counts order** (owner, 2026-11-04): “in the persona cluster, chats should come after tokens/permanent on that line, not before, because it's the only one that might be missing.” Owner correction (2026-11-04): “I mean character cluster”. The rule applies to the character tab’s card header (and personas shown there): “~tokens · ~permanent · N chats”, omitting the last separator when chats are absent. Supersedes the counts order in the four-row decision below. **Built; obsolete as an implementation requirement** (countsorder; ARCHITECTURE §14.6).
+
 - **[D]** (owner, 2026-11-04, personabtn follow-up): “The icon in the deactivated state can just not have a border/button styling. It becomes highlighted on hover and does give the cursor a pointer. It turns into a badge when enabled. That solves it, since we can align the two states differently.” Off is a bare icon with colour-only hover and pointer cursor; on uses the padded icon-and-Persona badge. The off icon and on box align with the text; both retain focus rings and explanations. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 - **[D]** (owner, 2026-11-04, personabtn follow-up): “Also I'm currently thinking that the button belongs above the chats/tokens line after all. But the chats/tokens line should be aligned with the foot of the picture, and the persona toggle in the middle of the space this leaves.” Keep name and nickname at the top, counts at the portrait bottom, and centre Persona between nickname and counts; retain at least 4 px gaps when space is short. Supersedes the smallfixes4 placement below counts and the earlier personabtn shared-edge geometry. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 - **[P]** (personabtn follow-up, 2026-11-04): stretch the panel text stack beside the portrait; let the Persona row absorb free height, with a centred 28 px control and a 16 px counts line below. Keep full-editor geometry unchanged. Implemented in ARCHITECTURE §12.
@@ -781,6 +783,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - a diff browser for every earlier revision
 
 ### 6.2a The prompt preset editor (owner, 2026-10-27)
+
+- **[D]** (owner, 2026-11-04): “This text is not very responsive”. Prompt rows give descriptions the content width without breaking words; titles take priority over secondary badges, counts and actions. Keep the wide layout. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
+- **[P]** (promptrows, 2026-11-04): below a 36rem list container, use a grid for the handle, switch and wrapping title; secondary items wrap onto a following line. Apply the shared rule to every prompt kind in both editors.
 
 - **[D]** (owner, 2026-11-04): “unique built-in prompts with fixed names that are already highlighted by their colour … shouldn't repeat their name in a coloured badge.” Keep badges for special prompts with customizable titles that are not otherwise highlighted. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
 - **[D]** (owner, 2026-11-04): “Rename it 'Notes from this chat' (if it actually means notes placed inside the history, say exactly that instead …). Link each listed note so the user can open it. Don't change how notes at depth > 1 are shown.” **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
