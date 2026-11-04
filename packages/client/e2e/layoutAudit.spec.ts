@@ -868,6 +868,8 @@ test.describe("synthetic library and every app surface", () => {
           const panel = await openPanel(page, cardName)
           const header = panel.locator("[data-card-header]")
           await expect(header.locator("[data-card-tokens]")).toBeVisible()
+          if (process.env.LAYOUT_AUDIT_HEADER_MINIMUM === "1" && width >= 1024)
+            await page.getByRole("separator", { name: "Resize chat panel", exact: true }).press("Home")
           for (const persona of [false, true]) {
             const toggle = header.getByRole("button", { name: "Persona", exact: true })
             if ((await toggle.getAttribute("aria-pressed")) !== String(persona)) await toggle.click()

@@ -1,4 +1,4 @@
-// Owner's four-row card header: no extra row may grow the stack past the portrait.
+// Four card header rows stay within the portrait at normal widths; identity controls may wrap at the panel minimum.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, test } from "@playwright/test"
@@ -46,7 +46,7 @@ test.beforeAll(async () => {
   )
 })
 
-async function structure(header: Locator, panel = true) {
+async function structure(header: Locator, panel = true, allowWrap = false) {
   expect(
     await header.evaluate((root) =>
       [...root.children].map((child) =>
@@ -73,8 +73,12 @@ async function structure(header: Locator, panel = true) {
     const stack = root.querySelector("[data-card-header-rows]")!
     return { header: box(root), portrait, stack: box(stack), rows: [...stack.children].map(box) }
   })
-  expect(geometry.header.height).toBeLessThanOrEqual(geometry.portrait.height + 1)
-  expect(geometry.stack.bottom).toBeLessThanOrEqual(geometry.portrait.bottom + 1)
+  if (allowWrap) {
+    expect(geometry.header.height).toBeCloseTo(Math.max(geometry.portrait.height, geometry.stack.height), 0)
+  } else {
+    expect(geometry.header.height).toBeLessThanOrEqual(geometry.portrait.height + 1)
+    expect(geometry.stack.bottom).toBeLessThanOrEqual(geometry.portrait.bottom + 1)
+  }
   expect(geometry.stack.y).toBeCloseTo(geometry.portrait.y, 0)
   for (const row of geometry.rows) {
     expect(row.x).toBeGreaterThanOrEqual(geometry.portrait.right)
@@ -237,7 +241,11 @@ test("the default persona badge shares the bottom row at the panel minimum", asy
       })
     )
     await expect(header.locator("[data-persona-badge]")).toHaveText("You")
-    await structure(header)
+    await structure(header, true, true)
+    for (const label of ["the display name", "the version"]) {
+      await header.getByRole("button", { name: `Rename ${label}`, exact: true }).click()
+      await header.getByRole("button", { name: "Cancel renaming", exact: true }).click()
+    }
     const bounds = (await row.boundingBox())!,
       button = (await toggle.boundingBox())!,
       label = (await badge.boundingBox())!

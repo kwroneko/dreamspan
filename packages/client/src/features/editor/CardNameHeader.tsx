@@ -248,8 +248,8 @@ export function CardNameHeader({
   // Each row fits its own text; the title pencil follows its last visible line.
   return (
     <>
-      <div data-card-header-row="identity" className="relative flex w-full min-w-0 items-center gap-1">
-        <div className="flex min-w-0 flex-1 items-center gap-1">
+      <div data-card-header-row="identity" className="relative flex w-full min-w-0 flex-wrap items-center gap-1">
+        <div className="flex min-w-[min(100%,calc(2*var(--card-name-min)+0.25rem))] flex-1 items-center gap-1 has-[[data-renaming]]:min-w-[min(100%,calc(4*var(--card-name-min)+0.75rem))]">
           <InlineRename
             value={name}
             label="the display name"
