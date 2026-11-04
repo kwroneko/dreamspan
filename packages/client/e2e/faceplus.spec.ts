@@ -1,5 +1,6 @@
 // Synthetic casts cover the sidebar's wide and stacked portrait layouts.
-import { expect, test } from "@playwright/test"
+import { writeFileSync } from "node:fs"
+import { expect, test, type Locator } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -56,22 +57,14 @@ for (const theme of ["light", "dark"] as const)
           .first()
         await expect(row).toBeVisible()
         const portraits = row.locator("[data-row-portraits]")
-        const compact = await row.evaluate((node) => {
-          const style = getComputedStyle(node)
-          return node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) < 265
-        })
-        const shown = !before && compact && chat.count > 2 ? 1 : Math.min(chat.count, 2)
+        const shown = Math.min(chat.count, 2)
         await expect(portraits.locator("[data-portrait]").filter({ visible: true })).toHaveCount(shown)
         if (!before) {
           const badge = portraits.locator("[data-portrait-overflow]").filter({ visible: true })
           if (chat.count > 2) await expect(badge).toHaveText(`+${chat.count - shown}`)
           else await expect(badge).toHaveCount(0)
           if (chat.count > 2) {
-            const tile = (await badge.boundingBox())!
-            const face = (await portraits.locator("[data-portrait]").first().boundingBox())!
-            expect(tile.width).toBe(face.width)
-            expect(tile.height).toBe(face.height)
-            expect(tile.x).toBeGreaterThanOrEqual(face.x + face.width)
+            await measure(portraits, info.outputPath(`geometry-${chat.count}.json`))
           }
           await portraits.hover()
           await expect(
@@ -95,12 +88,7 @@ for (const theme of ["light", "dark"] as const)
         if (!before) {
           await row.evaluate((node) => ((node as HTMLElement).style.width = "min(230px, 100%)"))
           await row.screenshot({ path: info.outputPath(`after-stacked-${chat.count}.png`) })
-          if (chat.count > 2) {
-            const tile = (await portraits.locator("[data-portrait-overflow]").filter({ visible: true }).boundingBox())!
-            const face = (await portraits.locator("[data-portrait]").first().boundingBox())!
-            expect(tile.width).toBe(face.width)
-            expect(tile.height).toBe(face.height)
-          }
+          await measure(portraits, info.outputPath(`geometry-stacked-${chat.count}.json`))
           await expectLayout(page, info, `stacked-cast-${chat.count}-${width}-${theme}`, {
             scope: `[data-fork-row]:has([data-chat-id="${chat.id}"])`
           })
@@ -117,30 +105,46 @@ for (const theme of ["light", "dark"] as const)
       }
       if (!before && width >= 1024) {
         await page.getByRole("separator", { name: "Resize sidebar", exact: true }).focus()
-        await page.keyboard.press("End")
-        for (const chat of chats) {
-          const row = navigation
-            .locator("[data-fork-row]")
-            .filter({ has: page.locator(`[data-chat-id="${chat.id}"]`) })
-            .first()
-          const portraits = row.locator("[data-row-portraits]")
-          await expect(portraits.locator("[data-portrait]").filter({ visible: true })).toHaveCount(
-            Math.min(chat.count, 2)
-          )
-          if (chat.count > 2)
-            await expect(portraits.locator("[data-portrait-overflow]").filter({ visible: true })).toHaveText(
-              `+${chat.count - 2}`
+        for (const mode of ["default", "wide"]) {
+          if (mode === "default") await page.getByRole("separator", { name: "Resize sidebar", exact: true }).dblclick()
+          else await page.keyboard.press("End")
+          for (const chat of chats) {
+            const row = navigation
+              .locator("[data-fork-row]")
+              .filter({ has: page.locator(`[data-chat-id="${chat.id}"]`) })
+              .first()
+            const portraits = row.locator("[data-row-portraits]")
+            await expect(portraits.locator("[data-portrait]").filter({ visible: true })).toHaveCount(
+              Math.min(chat.count, 2)
             )
-          await row.screenshot({ path: info.outputPath(`after-wide-${chat.count}.png`) })
-          await expectLayout(page, info, `wide-cast-${chat.count}-${width}-${theme}`, {
-            scope: `[data-fork-row]:has([data-chat-id="${chat.id}"])`
-          })
+            if (chat.count > 2)
+              await expect(portraits.locator("[data-portrait-overflow]").filter({ visible: true })).toHaveText(
+                `+${chat.count - 2}`
+              )
+            await measure(portraits, info.outputPath(`geometry-${mode}-${chat.count}.json`))
+            await row.screenshot({ path: info.outputPath(`after-${mode}-${chat.count}.png`) })
+            await expectLayout(page, info, `${mode}-cast-${chat.count}-${width}-${theme}`, {
+              scope: `[data-fork-row]:has([data-chat-id="${chat.id}"])`
+            })
+          }
         }
       }
-      await page.goto(`${server().url}/chats/${chats[3]!.id}`)
-      const header = page.locator("[data-chat-main] > header")
-      await expect(header.getByText("Harbour cast 6", { exact: true })).toBeVisible()
-      await header.screenshot({ path: info.outputPath(`${before ? "before" : "after"}-header.png`) })
+      if (width >= 1024) await page.getByRole("separator", { name: "Resize sidebar", exact: true }).dblclick()
+      for (const chat of chats) {
+        await page.goto(`${server().url}/chats/${chat.id}`)
+        const header = page.locator("[data-chat-main] > header")
+        await expect(header.getByText(`Harbour cast ${chat.count}`, { exact: true })).toBeVisible()
+        const geometry = await header.locator("[data-portrait]").evaluateAll((nodes) =>
+          nodes
+            .filter((node) => node.checkVisibility())
+            .map((node) => {
+              const box = node.getBoundingClientRect()
+              return { x: box.x, width: box.width, height: box.height }
+            })
+        )
+        writeFileSync(info.outputPath(`geometry-header-${chat.count}.json`), JSON.stringify(geometry, null, 2))
+        await header.screenshot({ path: info.outputPath(`${before ? "before" : "after"}-header-${chat.count}.png`) })
+      }
       if (!before) {
         await page.goto(`${server().url}/chats`)
         const stack = page.getByRole("main").getByLabel(`Characters: ${chats[3]!.names.join(", ")}`, { exact: true })
@@ -158,3 +162,41 @@ for (const theme of ["light", "dark"] as const)
         expect(Math.abs(control.top - controls[0]!.top)).toBeLessThan(1)
       }
     })
+
+// Measure exposed geometry, including the count's text rather than just its box.
+async function measure(group: Locator, path: string) {
+  const geometry = await group.evaluate((node) => {
+    const faces = [...node.querySelectorAll<HTMLElement>("[data-portrait]")].filter((face) => face.checkVisibility())
+    const portraits = faces.map((face) => {
+      const box = face.getBoundingClientRect()
+      return { x: box.x, right: box.right, width: box.width, visibleWidth: box.width }
+    })
+    const tile = node.querySelector<HTMLElement>("[data-portrait-overflow]")
+    if (!tile) return { portraits, count: null }
+    const box = tile.getBoundingClientRect()
+    const range = document.createRange()
+    range.selectNodeContents(tile.firstElementChild!)
+    const text = range.getBoundingClientRect()
+    const last = portraits.at(-1)!
+    return {
+      portraits,
+      count: {
+        width: box.width,
+        visibleWidth: box.right - last.right,
+        overlap: last.right - box.left,
+        textLeft: text.left,
+        textRight: text.right,
+        textWidth: text.width
+      }
+    }
+  })
+  for (let i = 1; i < geometry.portraits.length; i++)
+    expect(geometry.portraits[i]!.x).toBeGreaterThanOrEqual(geometry.portraits[i - 1]!.right)
+  if (geometry.count) {
+    expect(geometry.count.overlap).toBeGreaterThan(0)
+    expect(geometry.count.visibleWidth).toBeLessThan(geometry.portraits.at(-1)!.width)
+    expect(geometry.count.textLeft).toBeGreaterThanOrEqual(geometry.portraits.at(-1)!.right)
+    expect(geometry.count.textWidth + 3).toBeLessThanOrEqual(geometry.count.visibleWidth)
+  }
+  writeFileSync(path, JSON.stringify(geometry, null, 2))
+}

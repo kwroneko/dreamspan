@@ -234,10 +234,10 @@ export function ForkRow({
                 tabIndex={0}
                 aria-label={`Characters: ${fork.cast.map((c) => c.name).join(", ")}`}
                 data-row-portraits
-                data-layout-audit-ignore="overlap: Cast portraits intentionally overlap in compact chat rows"
+                data-layout-audit-ignore="overlap: The count tile sits partly behind the last fully visible portrait; gap: Portraits have a positive gap while the count tile intentionally overlaps the last portrait"
                 className="relative flex w-fit shrink-0 gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
-                {fork.cast.slice(0, 2).map((c, index) => (
+                {fork.cast.slice(0, 2).map((c) => (
                   <Avatar
                     key={c.entityId}
                     id={c.entityId}
@@ -245,14 +245,9 @@ export function ForkRow({
                     mediaId={c.avatarMediaId}
                     crop={c.avatarCrop}
                     size="md"
-                    className={index === 1 && fork.cast.length > 2 ? "@max-[16.5625rem]/fork-row:hidden" : ""}
                   />
                 ))}
-                <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow-wide" />
-                <PortraitOverflow
-                  remaining={fork.cast.length > 2 ? fork.cast.length - 1 : 0}
-                  className="fork-row-overflow-compact"
-                />
+                <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow" />
               </span>
             </Tooltip>
           )}

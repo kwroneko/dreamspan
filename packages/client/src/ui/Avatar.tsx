@@ -153,7 +153,7 @@ export function PortraitOverflow({
       {...props}
       className={`inline-flex shrink-0 items-center justify-center rounded-sm bg-surface-raised text-muted ${AVATAR_SIZES[size]} ${className}`}
     >
-      +{remaining}
+      <span>+{remaining}</span>
     </span>
   ) : null
 }

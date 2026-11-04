@@ -715,9 +715,8 @@ main:has(> [data-fill]) {
  * Outside the queried content box: 2 × 0.5rem row padding + 2 × 1px border.
  * Inside: 2 × 0.25rem open padding + 0.5rem text gap + 0.25rem action gap.
  * Wide pair: 9 + (2 + 0.125 + 2) + 0.5 + 0.5 + 0.25 + 2.1875 = 16.5625rem.
- * Stacked pair: 9 + (2 + 2/3) + 0.5 + 0.5 + 0.25 + 2.1875 = 15.104167rem.
- * Single: 9 + 2 + 0.5 + 0.5 + 0.25 + 2.1875 = 14.4375rem.
- * Offset the second by one third of a portrait; the first stays on top.
+ * Overflow adds only the count text and its inset behind the last full portrait.
+ * Reserve 1.25rem for that sliver before moving the pair above the text.
  */
 .fork-row {
   --fork-row-background: var(--surface);
@@ -726,30 +725,20 @@ main:has(> [data-fill]) {
 .fork-row:has([aria-current="page"]) {
   --fork-row-background: var(--surface-raised);
 }
-.fork-row-overflow-compact {
-  display: none;
+[data-row-portraits] > [data-portrait] {
+  position: relative;
+  z-index: 1;
 }
-@container fork-row (width < 16.5625rem) {
-  .fork-row-overflow-wide {
-    display: none;
-  }
-  .fork-row-overflow-compact {
-    display: inline-flex;
-  }
-  [data-row-portraits]:has(> :nth-child(2)) {
-    gap: 0;
-  }
-  [data-row-portraits]:has(> :nth-child(2)) > [data-portrait] {
-    box-shadow: 0 0 0 2px var(--fork-row-background);
-  }
-  [data-row-portraits]:has(> :nth-child(2)) > :first-child {
-    z-index: 1;
-  }
-  [data-row-portraits] > :nth-child(2):not([data-portrait-overflow]) {
-    margin-inline-start: calc(-2rem * 2 / 3);
-  }
+/* Only the count tile overlaps; every portrait remains fully visible. Content
+ * sizing lets larger counts grow their exposed sliver without hiding digits. */
+[data-row-portraits] > .fork-row-overflow {
+  width: auto;
+  min-width: 2rem;
+  margin-inline-start: calc(-1rem - 0.125rem);
+  padding-inline: 1rem 0.25rem;
+  box-shadow: 0 0 0 2px var(--fork-row-background);
 }
-@container fork-row (width < 15.104167rem) {
+@container fork-row (width < 17.8125rem) {
   .fork-row-open:has([data-row-portraits] > :nth-child(2)) {
     flex-direction: column;
     align-items: stretch;
@@ -759,10 +748,11 @@ main:has(> [data-fill]) {
     height: 2.25rem;
     font-size: 0.625rem;
   }
-  .fork-row-open:has([data-row-portraits] > :nth-child(2))
-    [data-row-portraits]
-    > :nth-child(2):not([data-portrait-overflow]) {
-    margin-inline-start: -1rem;
+  .fork-row-open:has([data-row-portraits] > :nth-child(2)) [data-row-portraits] > .fork-row-overflow {
+    width: auto;
+    min-width: 1.5rem;
+    margin-inline-start: calc(-0.5rem - 0.125rem);
+    padding-inline-start: 0.5rem;
   }
   .fork-row-open:has([data-row-portraits] > :nth-child(2)) [data-row-text] {
     gap: 0.25rem;
@@ -778,10 +768,6 @@ main:has(> [data-fill]) {
     align-items: center;
     gap: 0.5rem;
   }
-}
-/* A count is a separate portrait slot, including when the actual faces overlap. */
-[data-row-portraits]:has(> [data-portrait-overflow]) {
-  gap: 0.125rem;
 }
 @container fork-row (width < 14.4375rem) {
   .fork-row-open:has([data-row-portraits]) {
