@@ -302,7 +302,9 @@ test.describe("synthetic library and every app surface", () => {
           defaults: {
             model: { connection: connection.id, model: model.id },
             preset:
-              process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" || process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1"
+              process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ||
+              process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1" ||
+              process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1"
                 ? preset.id
                 : null
           }
@@ -480,6 +482,21 @@ test.describe("synthetic library and every app surface", () => {
             api.ChangeGenerationDefaults({ change: { lcm: { withPreset: "specific", preset: presetRef } } })
           )
           await go("settings-chats", "/settings/chats")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1") {
+          await page.goto(`${server.url}/library/${cardRef}`)
+          await expect(page.getByRole("button", { name: "About Description", exact: true })).toBeVisible()
+          await audit("card-definition", "[data-card-tabs] [role=tabpanel]")
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const card = await openPanel(page, cardName)
+          await expect(card.locator("[data-card-tokens]")).toBeVisible()
+          await audit("panel-card-header", "[data-card-header]")
+          await audit("panel-card-definition", "[data-card-tabs] [role=tabpanel]")
+          const preset = await openPanel(page, "Prompt preset")
+          await expect(preset.getByRole("list", { name: "Preset blocks" })).toBeVisible()
+          await expect(preset.locator("[data-note-slot]").first()).toBeVisible()
+          await audit("panel-preset-notes", "[data-note-slot]")
           return
         }
         if (process.env.LAYOUT_AUDIT_HELP_ONLY === "1") {

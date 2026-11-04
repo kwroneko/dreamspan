@@ -46,7 +46,7 @@ test.beforeAll(async () => {
   )
 })
 
-async function structure(header: Locator) {
+async function structure(header: Locator, panel = true) {
   expect(
     await header.evaluate((root) =>
       [...root.children].map((child) =>
@@ -63,7 +63,7 @@ async function structure(header: Locator) {
     await rows
       .locator(":scope > *")
       .evaluateAll((children) => children.map((row) => row.getAttribute("data-card-header-row")))
-  ).toEqual(["identity", "nickname", "persona", "usage"])
+  ).toEqual(panel ? ["identity", "nickname", "usage", "persona"] : ["identity", "nickname", "persona", "usage"])
   const geometry = await header.evaluate((root) => {
     const box = (element: Element) => {
       const b = element.getBoundingClientRect()
@@ -101,7 +101,7 @@ for (const width of [390, 1024, 1440])
           const scope = view === "full" ? page.getByRole("main") : await openPanel(page, card.name)
           const header = scope.locator("[data-card-header]")
           await expect(header.locator("[data-card-tokens]")).toBeVisible()
-          await structure(header)
+          await structure(header, view === "panel")
           const identity = header.locator('[data-card-header-row="identity"]')
           await expect(identity.getByRole("heading", { name: card.name, exact: true })).toBeVisible()
           await expect(identity.locator("[data-card-version]")).toHaveText(card.version || "Add a version")
@@ -147,6 +147,8 @@ for (const width of [390, 1024, 1440])
           const off = (await toggle.boundingBox())!
           await toggle.click()
           await expect(toggle).toHaveAttribute("aria-pressed", "true")
+          if (view === "panel") await expect(header.locator("[data-persona-badge]")).toHaveCount(0)
+          else await expect(header.locator("[data-persona-badge]")).toHaveText("Persona")
           await expect(toggle).toHaveAccessibleDescription(ON)
           await expect(toggle).toBeEnabled()
           await page.mouse.move(0, 0)
@@ -154,7 +156,7 @@ for (const width of [390, 1024, 1440])
           await expect(page.getByText(ON, { exact: true }).filter({ visible: true })).toBeVisible()
           await expect.poll(async () => (await toggle.boundingBox())!.width).toBeGreaterThan(off.width)
           await expect(toggle.locator("span").filter({ hasText: "Persona" })).toHaveCSS("opacity", "1")
-          await structure(header)
+          await structure(header, view === "panel")
           await expect(toggle).toBeEnabled()
           if (work) {
             mkdirSync(work, { recursive: true })
@@ -171,13 +173,13 @@ for (const width of [390, 1024, 1440])
           await expect(toggle).toHaveAttribute("aria-pressed", "false")
           await expect(toggle).toBeEnabled()
           await expect.poll(async () => (await toggle.boundingBox())!.width).toBe(off.width)
-          await structure(header)
+          await structure(header, view === "panel")
           await page.emulateMedia({ reducedMotion: "reduce" })
           if (work) await header.screenshot({ path: join(work, `header-${view}-${width}-${theme}-${index}.png`) })
         }
       })
 
-test("the default persona badge shares row three at the panel minimum", async ({ page }, info) => {
+test("the default persona badge shares the bottom row at the panel minimum", async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const card = cards[0]!
   await withCookie(server(), cookie, (api) =>
@@ -201,6 +203,15 @@ test("the default persona badge shares row three at the panel minimum", async ({
     const badge = row.locator("[data-default-persona]")
     await expect(toggle).toHaveAttribute("aria-pressed", "true")
     await expect(badge).toHaveText("Default")
+    await expect(header.locator("[data-persona-badge]")).toHaveCount(0)
+    await withCookie(server(), cookie, (api) =>
+      api.ChangeCast({
+        chatId: chat as never,
+        slotId: null,
+        change: { _tag: "Persona", entityId: card.entityId as never }
+      })
+    )
+    await expect(header.locator("[data-persona-badge]")).toHaveText("You")
     await structure(header)
     const bounds = (await row.boundingBox())!,
       button = (await toggle.boundingBox())!,

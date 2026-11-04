@@ -89,9 +89,7 @@ function ChatCharacterPanel({ session, view, entityId }: { session: ChatSession;
     <div className="flex flex-col gap-4">
       <CardHeader
         portrait={
-          <CardHeaderPortrait
-            badge={persona ? <PersonaBadge played portrait /> : card.persona ? <PersonaBadge portrait /> : undefined}
-          >
+          <CardHeaderPortrait badge={persona ? <PersonaBadge played portrait /> : undefined}>
             <Avatar
               id={entityId}
               name={card.name}
@@ -198,7 +196,7 @@ function CardPanel({
             id={card.entityId}
             shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
             {...(session === null ? {} : { onChanged: () => void session.rereadCast() })}
-            badge={persona ? <PersonaBadge played portrait /> : card.persona ? <PersonaBadge portrait /> : undefined}
+            badge={persona ? <PersonaBadge played portrait /> : undefined}
           />
         }
       >
@@ -210,7 +208,7 @@ function CardPanel({
               saveControls={<SaveRevision store={store} />}
               current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
             />
-            <CardTokensRow store={store} entityId={card.entityId} label={card.label} />
+            <CardTokensRow personaLast store={store} entityId={card.entityId} label={card.label} />
           </>
         ) : (
           <h2

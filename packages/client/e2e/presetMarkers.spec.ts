@@ -61,6 +61,7 @@ const setUp = async (page: Page, name: string) => {
         rp_harness: {
           notes: [
             note("n-depth", "Character's Note", { mode: "depth", depth: 2, role: "system" }),
+            note("n-zero", "At depth zero", { mode: "depth", depth: 0, role: "system" }),
             note("n-tail", "Weather now", { mode: "section", section: "tail_start" })
           ]
         }
@@ -160,6 +161,14 @@ const check = async (page: Page, root: Locator, name: string) => {
     await expect(points.nth(i)).toContainText(
       `Cache breakpoint · ${kind === "summary" ? "summaries" : kind === "pinned" ? "prefix" : kind}`
     )
+  const inside = root.locator('[data-note-slot="Notes inside the chat"]')
+  const after = root.locator('[data-note-slot="Notes after the newest message"]')
+  await inside.scrollIntoViewIfNeeded()
+  await inside.screenshot({ path: join(shots, `${name}-inside.png`) })
+  await after.scrollIntoViewIfNeeded()
+  await after.screenshot({ path: join(shots, `${name}-after.png`) })
+  await expect(after).toContainText("At depth zero (depth 0)")
+  await expect(inside).not.toContainText("At depth zero")
   await expect(root.locator('[data-note-slot="Notes inside the chat"]')).toContainText("Character's Note (depth 2)")
   await expect(root.locator('[data-prompt="synthetic-0"] [data-volatile-warning]')).toBeVisible()
   await expect(root.locator('[data-prompt="main"] [data-prompt-kind-tag]')).toHaveText("Main")

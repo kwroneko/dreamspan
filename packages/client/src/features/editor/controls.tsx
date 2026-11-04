@@ -26,7 +26,7 @@ import { type EditorStore, useDirty, useEditorKind, useEditorState, useHasHistor
  */
 function FieldLabel({ store, field, label }: { store?: EditorStore; field?: string; label: string }) {
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-2">
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
       <span>{label}</span>
       {store && field !== undefined && <DirtyBadge store={store} field={field} />}
     </span>

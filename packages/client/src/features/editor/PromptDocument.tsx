@@ -1040,7 +1040,8 @@ export function PromptDocument({
                   (p) => p.mode === "tail" || (p.mode === "depth" && p.depth === 0)
                 )}
               {reuseLine(entry.identifier)}
-              {entry.identifier === "chatHistory" && slot("Notes inside the chat", (p) => p.mode === "depth")}
+              {entry.identifier === "chatHistory" &&
+                slot("Notes inside the chat", (p) => p.mode === "depth" && p.depth > 0)}
             </>
           )
         }}

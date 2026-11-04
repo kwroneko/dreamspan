@@ -10,6 +10,8 @@
 
 # Design: requirements and decisions
 
+**Built 2026-11-04 (smallfixes4):** The inline field-help, depth-zero placement and side-panel Persona header decisions in §10.1, §6.2a and §2.2 are implemented and obsolete as implementation requirements; see ARCHITECTURE §5, §14.6 and §12.
+
 **Built 2026-11-03 (saveflow follow-up):** The four-row shared card header, expanding Persona toggle and strict title-row save placement in §2.2/§10.1 are implemented; earlier header placement entries are superseded. See ARCHITECTURE §12 and §14.6.
 
 **Built 2026-11-03 (saveflow):** The owner’s 2026-11-02 option B save-cluster placement, persistent buttons, exact explanations, tab indicators and field reverts in §10.1 are implemented and obsolete as implementation requirements; see ARCHITECTURE §14.6.
@@ -235,6 +237,9 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** (owner, 2026-11-02, groupgrid) "make the gaps between portraits equal horizontally and vertically, at every panel width, with any number of members." Portrait/card grids use one CSS `gap` for both axes. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a).
 
 ### 2.2 Personas, speakers and writers
+
+- **[D]** (owner, 2026-11-04): In the side panel character header, “the persona button needs to be at the bottom of this cluster”, below the chats/token counts. Remove the portrait's Persona badge here: “entirely redundant”; keep You and badges elsewhere. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
+
 - **[D]** (owner, 2026-11-03, personadefault) "we'll never automatically switch someone's persona for a chat once the chat started. It stays whatever the user selected." Changing the default never touches existing chats. "we do need a user-selected default for new chats." One account default persona, or none, starts new single and group chats only if the card is still a live persona. Picking another persona on the pending page affects only that chat. Persona lists/pickers and persona-card menus offer **Set as default persona** / **Clear default persona**, with a small **Default** badge. Hover: "New chats start with this persona. Existing chats keep theirs." / "New chats start with no persona." The pending chat's Playing as name adds **(default)** when selected. With no default, no persona; no first-folder-card fallback or browser-local last-persona setting. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 - **[D]** (owner, 2026-11-03, personadefault; **not built**) Preset and model "are universal settings": account-wide. A per-chat preset or model is "an exception, not the rule". The pickers opened from the existing chips get a switch row **Lock for this chat**, hover "This chat keeps this preset when you change it elsewhere." / "This chat keeps this model when you change it elsewhere." A locked chip shows a small lock icon as a state marker, not a button. Changing the selection in a locked chat changes only that chat's lock; elsewhere it changes the account setting. The picker states **This chat only** / **Every chat**. No separate lock buttons in the row: the owner did not want two more affordances there.
 - **[O]** (owner, 2026-11-03, personadefault; **not built**) Model and preset are "often, but not always, tied": presets are made with a model in mind. Whether/how to tie them remains open.
@@ -754,6 +759,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 
 ### 6.2a The prompt preset editor (owner, 2026-10-27)
 
+- **[D]** (owner, 2026-11-04): “It can't mean two things.” Depth 0 means after the last message; list a depth-0 note only under Notes after the newest message. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
+
+
 Notes replacing individual preset prompts, their links in both directions, and the proposed display and editing of a replaced prompt in a chat are specified in [§4.2](#42-notes-that-replace-prompts) (owner decisions and proposals, 2026-11-03; unbuilt). The full UI spec and cache-breakpoint display for these replacements remain open there.
 
 - **[D] Decided** (owner, 2026-11-02, P1–P2; preseteditor brief): headers have separate name, editing and view rows. The panel keeps its picker + New row, then name + pencil and an expand icon with “Opens this preset in the large editor”; the large editor uses name + pencil + preset badge and the corner ×. Editing has Add prompt, Add definitions block, the unchanged save cluster, Search and replace (pressed while open, its panel below), then History and Make a variant together in the large editor. Narrow editing labels collapse in order: Search and replace, Add definitions block, Add prompt. Groups have smaller internal gaps than the gaps between groups.
@@ -985,6 +993,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D]** (owner, 2026-11-04): Field help wrapping below the label is “obviously totally incorrect, broken and sloppy looking and it's a regression I didn't ask for.” The ? stays inline immediately after the label. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
+
 
 - **[D] Avatar initials fit their tile** (owner brief, 2026-11-02): “Make initials fit any tile size: scale the font with the tile (container units) and use at most 2 characters, so they never overflow.” **Built 2026-11-04 (groupinitials)**; obsolete as an implementation requirement. See ARCHITECTURE §14.5.
 

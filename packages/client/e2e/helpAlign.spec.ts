@@ -64,16 +64,33 @@ async function geometry(page: Page, text: string, help: Locator, name: string) {
   return measurements
 }
 
-for (const width of [390, 1440]) {
+for (const width of [390, 1024, 1440]) {
   test(`inline label help at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    const { chat, preset } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    const { chat, preset, card } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       Effect.gen(function* () {
         const chat = yield* api.CreateChat({ title: "Synthetic help alignment" })
         const preset = yield* api.CreatePreset({ label: `Help alignment ${width}` })
-        return { chat, preset }
+        const card = yield* api.CreateCard({ label: `Help card ${width}`, name: `Help card ${width}` })
+        yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+        return { chat, preset, card }
       })
+    )
+    await page.goto(`${server().url}/chats/${chat.id}`)
+    const cardPanel = await openPanel(page, `Help card ${width}`)
+    await geometry(
+      page,
+      "Description",
+      cardPanel.getByRole("button", { name: "About Description", exact: true }),
+      `card-panel-${width}`
+    )
+    await page.goto(`${server().url}/library/${card.id}`)
+    await geometry(
+      page,
+      "Description",
+      page.getByRole("button", { name: "About Description", exact: true }),
+      `card-full-${width}`
     )
     await page.goto(`${server().url}/chats/${chat.id}`)
     const tab = await openPanel(page, "Lorebooks")

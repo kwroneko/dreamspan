@@ -1,5 +1,5 @@
 // The shared four-row card header (owner, 2026-11-03): name/version/save, nickname,
-// Persona, then chats and token counts. Names retain their in-place rename questions.
+// Persona and chats/token counts (Persona last in the side panel). Names retain their rename questions.
 import { renameQuestion } from "@rp/shared/cardNames.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { cardTokenTexts, sumCardTokens } from "@rp/shared/cardTokens.ts"
@@ -123,13 +123,26 @@ function CardTokens({ store }: { store: EditorStore }) {
   )
 }
 
-/** The Persona control and the final, shared chats/token line. */
-export function CardTokensRow({ store, entityId, label }: { store: EditorStore; entityId: string; label: string }) {
+/** The shared Persona and chats/token rows; the side panel keeps Persona last. */
+export function CardTokensRow({
+  store,
+  entityId,
+  label,
+  personaLast = false
+}: {
+  store: EditorStore
+  entityId: string
+  label: string
+  personaLast?: boolean
+}) {
+  const persona = (
+    <div data-card-header-row="persona" className="flex h-7 min-w-0 items-center">
+      <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
+    </div>
+  )
   return (
     <>
-      <div data-card-header-row="persona" className="flex h-7 min-w-0 items-center">
-        <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
-      </div>
+      {!personaLast && persona}
       <div
         data-card-header-row="usage"
         className="flex min-w-0 max-w-full items-center gap-1 text-xs leading-4 text-muted [&>a]:shrink-0 [&>a+span]:before:mr-1 [&>a+span]:before:content-['·']"
@@ -137,6 +150,7 @@ export function CardTokensRow({ store, entityId, label }: { store: EditorStore; 
         <CardSurface placement="chats" entityId={entityId as EntityId} label={label} />
         <CardTokens store={store} />
       </div>
+      {personaLast && persona}
     </>
   )
 }
