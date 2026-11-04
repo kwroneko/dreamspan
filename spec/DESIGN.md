@@ -1209,6 +1209,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.3 Chat-wide edits
 
+- **[D]** (owner, 2026-11-04): "look in cluster has no spacing". Give the Searches panel's Look in toggles the same spacing as its other toggle/button rows. **Built (lookin); obsolete as an implementation requirement**; ARCHITECTURE §3.13. **[P], built:** retain the shared `Segmented` control and use the panel's existing 4 px button gap; the other button rows already have that gap.
+
 Implementation: fork independence unit 8 (ARCHITECTURE §3.13) builds message/swipe/summary search and replace, history diffs and undo, state changesets, and the rename-history RPCs. The proposed notes/card-override and cross-thread scope extensions remain unimplemented. The decided search panel and U18 card-name Save/fork rename offers are implemented (ARCHITECTURE §3.13); these portions are obsolete as proposals. No UI decision in this section blocks them.
 - **[D]** Large edits across a whole conversation, summaries included, such as search and replace to rename a character, and agentic editing to instructions.
 - **[P]** A **changeset** is one atomic batch of new versions across slots and summaries, with a title and one entry in the chat's history. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.13).
