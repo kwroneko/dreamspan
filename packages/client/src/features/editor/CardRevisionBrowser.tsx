@@ -2,6 +2,7 @@ import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { cardNames } from "@rp/shared/cardNames.ts"
 import { Effect } from "effect"
 import { checkCardNames } from "./checkCardNames.ts"
+import { useCardNameCheck } from "./cardNameCheck.ts"
 // Compare immutable revisions with their first parent or the live working document.
 import { type Doc, Revision } from "@rp/shared/library.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
@@ -212,7 +213,7 @@ function RevisionComparison({
       <div className="min-w-0">
         <Tabs
           wrap
-          label="Revision changes"
+          label="Revision comparison mode"
           value={mode}
           onValueChange={setMode}
           tabs={[
@@ -282,6 +283,26 @@ export function CardRevisionBrowser({
   const state = useEditorState(store)
   const head = state.snapshot!.ref.headRevisionId
   const [restoringId, setRestoringId] = useState<string | null>(null)
+  const [restoreDoc, setRestoreDoc] = useState<{ id: string; doc: Doc } | null>(null)
+  useEffect(() => {
+    if (!selected) return
+    let live = true
+    void store.revisionDoc(selected.id).then(
+      (doc) => {
+        if (live) setRestoreDoc({ id: selected.id, doc })
+      },
+      (error: AppError) => {
+        if (live) setError(error)
+      }
+    )
+    return () => {
+      live = false
+    }
+  }, [store, selected])
+  const selectedDoc = restoreDoc?.id === selected?.id ? restoreDoc?.doc : undefined
+  const names = cardNames(selectedDoc ?? {})
+  const nameCheck = useCardNameCheck(names.displayName, names.version, state.snapshot!.ref)
+  const clash = selectedDoc && state.snapshot!.ref.kind === "card" ? nameCheck : null
   useEffect(() => {
     let live = true
     const at = store.chatNote ? { chatNote: store.chatNote } : {}
@@ -355,14 +376,21 @@ export function CardRevisionBrowser({
               restore={
                 <Button
                   className="h-8 px-2"
-                  disabled={revision.id === head || restoringId !== null}
+                  disabled={
+                    revision.id === head ||
+                    restoringId !== null ||
+                    (selected?.id === revision.id && (!selectedDoc || clash !== null))
+                  }
+                  aria-label={selected?.id === revision.id && clash ? "Restore" : undefined}
                   focusableWhenDisabled
                   hint={
                     revision.id === head
                       ? "This is the latest revision"
                       : restoringId
                         ? "A revision is being restored"
-                        : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
+                        : selected?.id === revision.id && clash
+                          ? clash
+                          : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
                   }
                   onClick={() => void restore(revision)}
                 >
@@ -392,6 +420,11 @@ export function CardRevisionBrowser({
             />
             {selected?.id === revision.id && (
               <section aria-label={`Comparison of revision ${revision.number}`} className="min-w-0 pt-2">
+                {clash && (
+                  <p role="status" className="mb-2 text-sm text-muted">
+                    {clash}
+                  </p>
+                )}
                 <RevisionComparison key={selected.id} store={store} revision={selected} settingLines={settingLines} />
               </section>
             )}
