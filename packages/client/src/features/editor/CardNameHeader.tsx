@@ -135,8 +135,9 @@ export function CardTokensRow({
   label: string
   personaLast?: boolean
 }) {
+  // Preserve the button's hit area; its visible person stroke sits 10 px inside it.
   const persona = (
-    <div data-card-header-row="persona" className="flex h-7 min-w-0 items-center">
+    <div data-card-header-row="persona" className={`flex h-7 min-w-0 items-center ${personaLast ? "-ml-2.5" : ""}`}>
       <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
     </div>
   )
@@ -145,7 +146,7 @@ export function CardTokensRow({
       {!personaLast && persona}
       <div
         data-card-header-row="usage"
-        className="flex min-w-0 max-w-full items-center gap-1 text-xs leading-4 text-muted [&>a]:shrink-0 [&>a+span]:before:mr-1 [&>a+span]:before:content-['·']"
+        className={`flex min-w-0 max-w-full items-center gap-1 text-xs leading-4 text-muted [&>a]:shrink-0 [&>a+span]:before:mr-1 [&>a+span]:before:content-['·'] ${personaLast ? "min-h-7" : ""}`}
       >
         <CardSurface placement="chats" entityId={entityId as EntityId} label={label} />
         <CardTokens store={store} />

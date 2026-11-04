@@ -240,6 +240,10 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 2.2 Personas, speakers and writers
 
+- **[D]** (owner, 2026-11-04): Side-panel card header: “the spacing looks messed up again here”. Align the Persona icon's visible left edge with the text column and use consistent row spacing, preserving control placement, size and hit areas. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
+- **[P]** (headerspacing, 2026-11-04): give the side-panel counts row the same 28 px minimum height as nickname and Persona; retain 4 px row gaps and offset the Persona row by its icon's 10 px visual inset. The persona-card variant shares this layout; the group header uses a separate component.
+
+
 - **[D]** (owner, 2026-11-04): “The 'Full Editor' button is buried in the action list for the card. It's not an action.” Match the other sidebar editors' full-editor control and position. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
 - **[P]** (smallfixes5, 2026-11-04): render the existing registered `card.edit` contribution as an expand icon after Save in the card identity row; retain its menu presentation elsewhere.
 
