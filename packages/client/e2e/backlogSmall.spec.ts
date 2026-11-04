@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { NOTHING_TO_SAVE, expectSaveState, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { expectTextBox } from "./support/textbox.ts"
+import { expectTextBox, replaceEditorText } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "80", FAKE_GENERATOR_TOKENS: "80" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -52,7 +52,7 @@ for (const width of [1440, 390])
       const main = page.locator('[data-prompt="main"]')
       await expectOverridesForbidden(main)
       const content = `A synthetic instruction at ${width} in ${theme}.`
-      await main.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }).fill(content)
+      await replaceEditorText(main.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }), content)
       await saveRevision(page)
       await expectSaveState(page, NOTHING_TO_SAVE)
       await page.goto(`${server().url}/library/${preset.id}`)

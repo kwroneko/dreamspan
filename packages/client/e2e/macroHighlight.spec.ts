@@ -1,3 +1,4 @@
+import { replaceEditorText } from "./support/textbox.ts"
 import { readFileSync, writeFileSync } from "node:fs"
 import { expect, type Page, test } from "@playwright/test"
 import { layoutAudit } from "./support/layoutAudit.ts"
@@ -94,7 +95,7 @@ for (const width of [390, 1440]) {
       }
       page.on("dialog", (dialog) => dialog.accept())
       const typed = `Fresh text ${width} ${theme} {{char}}`
-      await editor.fill(typed)
+      await replaceEditorText(editor, typed)
       await page.unroute("**/healthz")
       await notice.getByRole("button", { name: "Reload", exact: true }).click()
       await expect(editor).toHaveText(typed)
