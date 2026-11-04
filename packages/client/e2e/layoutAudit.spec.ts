@@ -480,6 +480,17 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_INTERFACE_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          await openPanel(page, "Interface")
+          const tabs = page.getByRole("tablist", { name: "Chat panel", exact: true })
+          await expect(tabs.getByRole("tab", { name: "Interface", exact: true })).toBeVisible()
+          const bar = tabs.locator("../..")
+          await bar.evaluate((element) => element.setAttribute("data-interface-tabs-audit", ""))
+          await bar.screenshot({ path: join(work, `${width}-${theme}-interface-tabs.png`) })
+          await audit("interface-tab-bar", "[data-interface-tabs-audit]")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1") {
           await admin((api) => api.ChangeLcmSettings({ chatId, change: { withPreset: "specific", preset: presetRef } }))
           await page.goto(`${server.url}/chats/${chatId}`)
@@ -538,7 +549,7 @@ test.describe("synthetic library and every app surface", () => {
             "network",
             "costs",
             "chats",
-            "display",
+            "interface",
             "regex",
             "notifications",
             "account",
@@ -1097,8 +1108,8 @@ test.describe("synthetic library and every app surface", () => {
           await page.keyboard.press("Escape")
           await hideAppNavigation(page)
           await go("chat-before-display", `/chats/${chatId}`)
-          await openPanel(page, "Display")
-          await audit("panel-Display")
+          await openPanel(page, "Interface")
+          await audit("panel-Interface")
           return
         }
         if (process.env.LAYOUT_AUDIT_HEADER_ONLY === "1") {
@@ -1162,7 +1173,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Display",
+            "Interface",
             "Snippets",
             "History edits"
           ]
@@ -1230,7 +1241,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Display",
+            "Interface",
             "Snippets",
             "History edits"
           ]) {
@@ -1450,7 +1461,7 @@ test.describe("synthetic library and every app surface", () => {
         if (process.env.LAYOUT_AUDIT_FIXES_ONLY === "1") {
           await go("home-all", "/")
           await go("library", "/library")
-          await go("settings-display", "/settings/display")
+          await go("settings-interface", "/settings/interface")
           await go("card-editor", `/library/${cardRef}`)
           for (const name of ["Greetings", "Metadata", "Lorebook", "Notes", "Extra"]) {
             await page.getByRole("main").getByRole("tab", { name, exact: true }).first().click()
@@ -1517,7 +1528,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Display",
+            "Interface",
             "Snippets",
             "History edits"
           ]) {
@@ -1593,7 +1604,7 @@ test.describe("synthetic library and every app surface", () => {
             "network",
             "costs",
             "chats",
-            "display",
+            "interface",
             "regex",
             "notifications",
             "account",

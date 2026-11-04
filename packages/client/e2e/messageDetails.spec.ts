@@ -1,7 +1,7 @@
 // What a message says about itself (msgmeta, owner 2026-11-01): the model that wrote the
 // shown version, with its lab's mark, in the header, changing as the versions are stepped
 // through; the date and time; the number, generation time and tokens under the portrait, as
-// ST shows them; a reply generated here showing the same; and the Display settings hiding
+// ST shows them; a reply generated here showing the same; and the Interface settings hiding
 // each. At 1440 and 390, in both themes. Synthetic ST files only.
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -232,8 +232,8 @@ test("a message shows its model with its lab's mark, its date and time, and its 
   await expect(portrait(reply)).toHaveText(/#3\s*\d+\.\ds\s*6t/)
   await shoot(page, "04-generated-1440")
 
-  // The Display settings hide each detail, on every message.
-  await page.goto(`${server().url}/settings/display`)
+  // The Interface settings hide each detail, on every message.
+  await page.goto(`${server().url}/settings/interface`)
   const details = page.getByRole("group", { name: "Message details" })
   for (const name of ["Date and time", "Model icon", "Model name", "Message number", "Generation time", "Token count"])
     await expect(details.getByRole("switch", { name })).toBeChecked()

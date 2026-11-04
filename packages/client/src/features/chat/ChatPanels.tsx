@@ -337,9 +337,9 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const rememberedTab = remembered.userId === userId ? remembered.tab : rememberedPanel(userId)
   const explicit = useLocation({ select: (l) => l.state.chatPanel === true })
   const candidate = urlPanel ?? (!explicit && wide ? rememberedTab : null)
-  const panel = usePanelHere(candidate, view)
+  const panel = usePanelHere(candidate === "display" ? "interface" : candidate, view)
   usePlaceNotice(
-    urlPanel !== null && view.cast !== null && panel !== urlPanel
+    urlPanel !== null && urlPanel !== "display" && view.cast !== null && panel !== urlPanel
       ? "This panel is no longer available in this chat."
       : null
   )

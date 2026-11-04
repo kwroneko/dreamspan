@@ -1,3 +1,4 @@
+import { Navigate } from "@tanstack/react-router"
 import { routes } from "../../routes.tsx"
 import { lazy } from "react"
 import { messageRenderers } from "../../ui/Markdown.tsx"
@@ -19,13 +20,19 @@ export const registerDisplay = () => [
   routes.register({
     id: "settings.display",
     parent: "settings",
-    path: "display",
+    path: "interface",
     component: DisplaySettings,
     nav: {
-      label: "Display",
+      label: "Interface",
       order: 20,
       description: "How chats look and send: their width, what Enter does, and how messages show."
     }
+  }),
+  routes.register({
+    id: "settings.display-legacy",
+    parent: "settings",
+    path: "display",
+    component: () => <Navigate to="/settings/interface" search={(prev: Record<string, unknown>) => prev} replace />
   }),
   messageRenderers.register({ id: "markdown", order: 0, component: StMarkdown }),
   appTools.register({ id: "display.message-colors", order: 0, component: MessageColorPreferences }),
@@ -37,9 +44,10 @@ export const registerDisplay = () => [
   ...builtinDisplayScriptLists.map((list) => displayScriptLists.register(list)),
   chatSurfaceProviders.register({ id: "display.context", order: 15, component: DisplayProvider }),
   chatPanels.register({
-    id: "display",
-    label: "Display",
-    description: "How your chats look to you: Enter to send, colours, macros and display scripts.",
+    id: "interface",
+    matches: (value) => value === "interface" || value === "display",
+    label: "Interface",
+    description: "Change how chats look and send, including colours and what Enter does.",
     order: 85,
     icon: "type",
     component: DisplaySettings,

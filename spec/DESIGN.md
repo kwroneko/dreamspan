@@ -1,3 +1,5 @@
+**Built 2026-11-04 (interfacetab):** The Interface tab naming decision in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
+
 **Built 2026-11-04 (smallfixes5):** The card editor navigation (§2.2), prompt badges and linked history-note marker (§6.2a) are implemented and obsolete as implementation requirements; see ARCHITECTURE §14.6.
 
 **Built 2026-11-02 (stablebuttons):** The stable unavailable-control rule in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §5.
@@ -1030,6 +1032,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ### 10.1 Web app
 
 - **[D] (owner, 2026-11-04, headerswap)**: “these two buttons on the chat header should swap places: the sidepanel thing needs to be next tot he sidepanel”. The ⋯ menu precedes the side-panel toggle, leaving the toggle last beside the panel, including on phones and any center header with that toggle. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
+
+- **[D] Owner, 2026-11-04 (interfacetab):** “The Display tab should be renamed to "Interface"”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §12. **[P]** Use `/settings/interface` and `?panel=interface`, redirecting old links and preserving internal display identifiers.
 
 - **[D] (owner, 2026-11-04)**: “prompt preset main editor vs lorebook main editor vs main chat view. The latter has a clear top header that connects to the two columns, the former two do not. From now on I want all center-column views to have such a header.”
 - **[D] (owner, 2026-11-04)**: “Moreover: through the header, it must be possible to switch what specific document the center column editor is editing: so a selector for lorebooks and presets for each respective editor makes sense. Chats already have this in the form of the branch switcher.”
