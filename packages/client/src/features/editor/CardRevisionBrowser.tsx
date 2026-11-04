@@ -15,8 +15,8 @@ import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
-import { RadioGroup } from "../../ui/Choice.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
+import { Tabs } from "../../ui/Tabs.tsx"
 import type { Caller } from "./caller.ts"
 import { ValueDiff } from "./diff.tsx"
 import { changedFields, fieldLabel, type FieldChange } from "./fields.ts"
@@ -188,8 +188,31 @@ function RevisionComparison({
     else setError(result.error)
   }
   const current = useWorkingDoc(store)
-  const changes =
-    docs === null ? null : mode === "parent" ? changedFields(docs.parent, docs.doc) : changedFields(docs.doc, current)
+  const changes = docs === null ? null : changedFields(mode === "parent" ? docs.parent : current, docs.doc)
+  const comparison =
+    changes === null ? (
+      <p className="text-sm text-muted">Loading comparison…</p>
+    ) : changes.length === 0 ? (
+      <p className="text-sm text-muted">No fields differ.</p>
+    ) : (
+      <div aria-label="Revision changes" className="flex min-w-0 flex-col gap-2">
+        {changes.map((change) => (
+          <FieldComparison
+            key={JSON.stringify(change.path)}
+            label={fieldLabel(
+              state.snapshot!.ref.kind,
+              docs!.doc,
+              change.path,
+              mode === "parent" ? docs!.parent : current
+            )}
+            change={change}
+            doc={docs!.doc}
+            settingLines={settingLines}
+          />
+        ))}
+      </div>
+    )
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
@@ -219,52 +242,32 @@ function RevisionComparison({
         </div>
         <IconButton label="Close comparison" hint="Closes this revision's comparison" icon="close" onClick={onClose} />
       </div>
-      <Tooltip label="Chooses what to compare with this revision">
-        <div>
-          <RadioGroup
-            aria-label="Compare revision against"
-            value={mode}
-            onValueChange={setMode}
-            options={[
-              { value: "parent", label: "Parent revision" },
-              { value: "current", label: "As it is now" }
-            ]}
-          />
-        </div>
-      </Tooltip>
-      <p className="text-xs text-muted">
-        {mode === "parent"
-          ? revision.parents.length === 0
-            ? "First revision, compared with an empty document."
-            : "Before: first parent. After: selected revision."
-          : "Before: selected revision. After: the text as it is now, which replies use."}
-      </p>
       <ErrorAlert error={error} />
-      {changes === null ? (
-        <p className="text-sm text-muted">Loading comparison…</p>
-      ) : changes.length === 0 ? (
-        <p className="text-sm text-muted">No fields differ.</p>
-      ) : (
-        <div aria-label="Revision changes" className="flex min-w-0 flex-col gap-2">
-          {changes.map((change) => {
-            const label = fieldLabel(
-              state.snapshot!.ref.kind,
-              mode === "parent" ? docs!.doc : current,
-              change.path,
-              mode === "parent" ? docs!.parent : docs!.doc
-            )
-            return (
-              <FieldComparison
-                key={JSON.stringify(change.path)}
-                label={label}
-                change={change}
-                doc={mode === "parent" ? docs!.doc : current}
-                settingLines={settingLines}
-              />
-            )
-          })}
-        </div>
-      )}
+      <div className="min-w-0 border-t border-border pt-3">
+        <Tabs
+          wrap
+          label="Revision changes"
+          value={mode}
+          onValueChange={setMode}
+          tabs={[
+            {
+              value: "parent",
+              label: "Changes from previous revision",
+              description:
+                revision.parents.length === 0
+                  ? "Shows this first revision's changes from an empty document"
+                  : "Shows this revision's changes from the previous revision",
+              panel: comparison
+            },
+            {
+              value: "current",
+              label: "Changes from current state",
+              description: "Shows this revision's changes from the current text and settings",
+              panel: comparison
+            }
+          ]}
+        />
+      </div>
     </div>
   )
 }

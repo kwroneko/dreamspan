@@ -84,14 +84,27 @@ for (const width of [1440, 390])
       await expect(changes.first().locator(".cm-deletedChunk")).toContainText("The lamp burns.")
       await expectTextBox(changes.first().getByRole("textbox", { name: "Changes", exact: true }), newDescription)
     }
-    await history.getByRole("radio", { name: "As it is now" }).click()
+    await history.getByRole("tab", { name: "Changes from current state" }).click()
     await expect(changes).toHaveCount(1)
     await expect(changes.first()).toContainText("Description")
+    await changes.first().locator("summary").click()
+    await expectTextBox(
+      changes.first().getByRole("textbox", { name: width > 639 ? "After" : "Changes", exact: true }),
+      newDescription
+    )
+    if (width > 639)
+      await expectTextBox(
+        changes.first().getByRole("textbox", { name: "Before", exact: true }),
+        `${newDescription}\nA draft after saving.`
+      )
     await revisions
       .nth(1)
       .getByRole("button", { name: /^Revision \d+ / })
       .click()
-    await expect(history.getByRole("radio", { name: "Parent revision" })).toBeChecked()
+    await expect(history.getByRole("tab", { name: "Changes from previous revision" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
     await expect(changes).toHaveCount(2)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
   })

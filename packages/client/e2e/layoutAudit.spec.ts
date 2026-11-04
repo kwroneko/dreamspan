@@ -1613,6 +1613,26 @@ for (const width of [1440, 390])
         expect(Math.abs(after!.x - before!.x)).toBeLessThanOrEqual(1)
         await expect(dialog.getByRole("button", { name: "Restore", exact: true })).toBeEnabled()
         await audit("comparison")
+        await dialog.screenshot({ path: info.outputPath(`${kind}-tabs-${width}-${theme}.png`), animations: "disabled" })
+        await dialog.getByRole("tab", { name: "Changes from current state", exact: true }).click()
+        await expect(dialog.getByRole("tab", { name: "Changes from current state", exact: true })).toHaveAttribute(
+          "aria-selected",
+          "true"
+        )
+        await expect(dialog.getByRole("button", { name: "Restore", exact: true })).toBeEnabled()
+        await audit("current-comparison")
+        await revisions
+          .last()
+          .getByRole("button", { name: /^Revision \d+ / })
+          .click()
+        const firstTab = dialog.getByRole("tab", { name: "Changes from previous revision", exact: true })
+        await expect(firstTab).toHaveAttribute("aria-selected", "true")
+        await expect(dialog.getByText("Loading comparison…", { exact: true })).toHaveCount(0)
+        await firstTab.hover()
+        await expect(
+          page.getByText("Shows this first revision's changes from an empty document", { exact: true })
+        ).toBeVisible()
+        await audit("first-comparison")
         await dialog.getByRole("button", { name: "Close comparison", exact: true }).click()
         await revisions
           .first()

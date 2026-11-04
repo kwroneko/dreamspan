@@ -79,7 +79,7 @@ for (const width of [1440, 390])
         await expect(history.locator(".cm-editor")).toHaveCount(0)
         await change.locator("summary").click()
         await page.screenshot({ animations: "disabled", path: join(screens, `${kind}-history-${width}-${theme}.png`) })
-        await history.getByRole("radio", { name: "As it is now" }).click()
+        await history.getByRole("tab", { name: "Changes from current state" }).click()
         await expect(history.getByText("No fields differ.", { exact: true })).toBeVisible()
         await revisions
           .nth(1)

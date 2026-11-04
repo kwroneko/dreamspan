@@ -1031,6 +1031,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 - **[D] Owner, 2026-11-04 (viewertop trial):** “matching only the top viewer's header to the chat header's height. Stacked viewers below it keep the compact height.” “I wonder if it'd look bad to have them uneven. We can try it though”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.5a. **[P]** Reuse the shell-header height token only for the first side viewer; at narrow column widths its two control rows share that height.
 
+- **[D] Owner, 2026-11-04 (historyui follow-up):** “I would've never guessed that's what it does. It's a radio button, which is a form type control, under the restore button. I thought it somehow affected "restore". This is quite awful. Why not turn this into two tabs for the diff view? One is "Changes from previous revision" the other "Changes from current state" or something similar”. Use those two labels on shared diff tabs, with hover explanations and an empty-document comparison for the first revision; Restore is a separate revision action. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
+
 - **[D] Owner, 2026-11-04 (historyui):** “I want a redesign for the history UI. This looks sloppy.” **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6. **[P]** Keep all library revision surfaces on the shared browser: bordered entries, aligned metadata, labeled actions and comparisons directly below their entry, with Restore before the changed fields.
 
 
