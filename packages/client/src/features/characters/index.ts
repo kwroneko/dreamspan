@@ -4,7 +4,8 @@ import { routes } from "../../routes.tsx"
 import { CardPage } from "./CardPage.tsx"
 import { CharactersPage } from "./CharactersPage.tsx"
 import { GroupPage } from "./GroupPage.tsx"
-import { sidebarFoot } from "./homeSlots.ts"
+import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
+import { NewCharacterChat } from "./NewCharacterChat.tsx"
 import { OpenChatBranches } from "./ShellBrowser.tsx"
 import { homeSearch } from "./homeSearch.ts"
 import { cardContributions } from "../cardForks/surfaces.tsx"
@@ -15,6 +16,7 @@ import { castMemberNavigation } from "../chat/presentation.tsx"
 
 export const register = () => {
   registerDefaultPersona()
+  characterChatActions.register({ id: "characters.new-chat", order: 10, component: NewCharacterChat })
   cardContributions.register({
     id: "characters.chats-link",
     placement: "chats",

@@ -26,7 +26,7 @@ import { useSidebarBrowse } from "./useSidebarBrowse.ts"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
-import { sidebarFoot } from "./homeSlots.ts"
+import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
@@ -680,6 +680,9 @@ function Browser({ data }: { data: ShellLibrary }) {
         ) : (
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
           <div className="max-w-controls">
+            {kind === "character" && card && (
+              <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
+            )}
             {/* A chat's own pins are among its named and pinned branches. */}
             {kind !== "chat" && (
               <PinnedChats

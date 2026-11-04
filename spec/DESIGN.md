@@ -1046,6 +1046,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] New chat from a character’s chat list** (owner, 2026-11-04): “But how do I go from there to "new chat with this character"? "Start a chat" at the top header makes you find the character again.” On the proposed right-panel control: “That button intentionally doesn’t exist anymore”. Left panel only. **Built; obsolete as an implementation requirement** (charnewchat; ARCHITECTURE §12). **[P]** A list action row above one named character’s chats opens the existing pending chat with that character chosen; omit it from All chats, groups and branch scopes.
+
 - **[D] (owner, 2026-11-04, headerswap)**: “these two buttons on the chat header should swap places: the sidepanel thing needs to be next tot he sidepanel”. The ⋯ menu precedes the side-panel toggle, leaving the toggle last beside the panel, including on phones and any center header with that toggle. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
 
 - **[D] Owner, 2026-11-04 (navtilesport):** “This looks fine now, proceed with the other changes”. Port the approved Home / Library / Import / Settings / Bin tiles to master. “One issue. I'd like them to all be the same width.” **[P]** Use equal columns sized to fit the widest label, retaining balanced wrapping and the same width on incomplete rows. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §5.
