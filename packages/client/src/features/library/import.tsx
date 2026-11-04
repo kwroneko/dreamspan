@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // The import screen: the way to a SillyTavern folder's import, first as the main path, and
 // files picked or dropped, each uploaded in turn, with its report. With `?into=<ref>` it
 // updates that library entry from a new version of its file, and offers only that.
@@ -121,21 +122,23 @@ export function ImportPage() {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">{into ? "Update from a file" : "Import"}</h1>
-        <div className="flex flex-wrap gap-2">
-          {canGoBack ? (
-            // Wherever the user came from: the shell's Import link is on every screen.
-            <Button variant="ghost" onClick={() => router.history.back()}>
-              Back
-            </Button>
-          ) : (
-            <Link to="/library" className={buttonClass("ghost")}>
-              Back to the library
-            </Link>
-          )}
-        </div>
-      </header>
+      <CenterHeaderContent>
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold">{into ? "Update from a file" : "Import"}</h1>
+          <div className="flex flex-wrap gap-2">
+            {canGoBack ? (
+              // Wherever the user came from: the shell's Import link is on every screen.
+              <Button variant="ghost" onClick={() => router.history.back()}>
+                Back
+              </Button>
+            ) : (
+              <Link to="/library" className={buttonClass("ghost")}>
+                Back to the library
+              </Link>
+            )}
+          </div>
+        </header>
+      </CenterHeaderContent>
       <div className={into ? "flex flex-col" : "grid gap-6 md:grid-cols-2"}>
         {!into && (
           <Card className="flex flex-col">

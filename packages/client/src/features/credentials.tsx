@@ -461,6 +461,7 @@ function CredentialsPage() {
   return (
     <Card>
       <CardHeader
+        center
         title="Saved keys"
         about="Each key is sent only to the addresses you allow for it."
         actions={

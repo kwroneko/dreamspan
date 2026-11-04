@@ -3,8 +3,9 @@
 // keyboard, with live message, cast and tile previews. The image is never altered:
 // what's saved is the box, as fractions of the image. The editor feature registers it as
 // `portrait.cutout-chooser` (portraitParts.ts), so a plugin can replace it.
-import { type AvatarCrop, cropPixels, defaultCrop, PORTRAIT_RATIO, snapCrop } from "@rp/shared/media.ts"
+import { type AvatarCrop, cropPixels, defaultCrop, PORTRAIT_RATIO, snapCrop, WHOLE_PICTURE } from "@rp/shared/media.ts"
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useRef, useState } from "react"
+import { Segmented } from "./Segmented.tsx"
 import { Button } from "./Button.tsx"
 import { Dialog } from "./Dialog.tsx"
 import { AboutHint } from "./AboutHint.tsx"
@@ -16,51 +17,30 @@ import { Spinner } from "./Spinner.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 import { AVATAR_SIZES, initials } from "./Avatar.tsx"
 
-/** The box in the image's own pixels; its height is always its width ÷ 2:3. */
 interface Box {
   readonly left: number
   readonly top: number
   readonly width: number
+  readonly height: number
 }
 interface Size {
   readonly width: number
   readonly height: number
 }
-
-const heightOf = (box: Box) => box.width / PORTRAIT_RATIO
-/** The largest box the image holds, and the smallest worth choosing (a twentieth, at least 8 px). */
-const maxWidth = (image: Size) => Math.min(image.width, image.height * PORTRAIT_RATIO)
-const minWidth = (image: Size) => Math.min(maxWidth(image), Math.max(8, maxWidth(image) / 20))
-
-const clampBox = (box: Box, image: Size): Box => {
-  const width = Math.max(minWidth(image), Math.min(maxWidth(image), box.width))
-  return {
-    width,
-    left: Math.max(0, Math.min(image.width - width, box.left)),
-    top: Math.max(0, Math.min(image.height - width / PORTRAIT_RATIO, box.top))
-  }
-}
-
-const boxOf = (crop: AvatarCrop | null, image: Size): Box => {
-  const pixels = cropPixels(crop ?? defaultCrop(image.width, image.height), image.width, image.height)
-  return clampBox({ left: pixels.left, top: pixels.top, width: pixels.width }, image)
-}
-
+const heightOf = (box: Box) => box.height
 const cropOf = (box: Box, image: Size): AvatarCrop =>
   snapCrop({
     x: box.left / image.width,
     y: box.top / image.height,
     width: box.width / image.width,
-    height: heightOf(box) / image.height
+    height: box.height / image.height
   })
-
-/** Resized about its centre, by `factor`. */
-const scaled = (box: Box, factor: number, image: Size) => {
-  const width = Math.max(minWidth(image), Math.min(maxWidth(image), box.width * factor))
-  const centreX = box.left + box.width / 2
-  const centreY = box.top + heightOf(box) / 2
-  return clampBox({ width, left: centreX - width / 2, top: centreY - width / PORTRAIT_RATIO / 2 }, image)
-}
+const boxFrom = (crop: AvatarCrop, image: Size): Box => ({
+  left: crop.x * image.width,
+  top: crop.y * image.height,
+  width: crop.width * image.width,
+  height: crop.height * image.height
+})
 
 /** An image shown as a cutout of it in a 2:3 frame: the preview's portrait. */
 export const cutoutStyle = (crop: AvatarCrop): CSSProperties => ({
@@ -107,11 +87,99 @@ export function CutoutChooser({
   const images = useImagePrefs()
   const [image, setImage] = useState<Size | null>(null)
   const [failed, setFailed] = useState(false)
+  const [tab, setTab] = useState("picture")
+  const [preset, setPreset] = useState("free")
+  const [picture, setPicture] = useState<AvatarCrop>(initial?.picture ?? WHOLE_PICTURE)
+  const [portrait, setPortrait] = useState<AvatarCrop | null>(initial)
   const [box, setBox] = useState<Box | null>(null)
   const stage = useRef<HTMLDivElement>(null)
   const drag = useRef<Drag | null>(null)
 
   const crop = image && box ? cropOf(box, image) : null
+  const bounds = image ? boxFrom(tab === "picture" ? WHOLE_PICTURE : picture, image) : null
+  const ratio = tab === "portrait" || preset === "portrait" ? PORTRAIT_RATIO : preset === "square" ? 1 : null
+  const maxWidth = (size: Size) => {
+    const area = bounds ?? { width: size.width, height: size.height }
+    return ratio
+      ? Math.min(area.width, area.height * ratio)
+      : Math.min(area.width, area.height * (box ? box.width / box.height : size.width / size.height))
+  }
+  const minWidth = (size: Size) => Math.min(maxWidth(size), Math.max(1, maxWidth(size) / 20))
+  const clampBox = (chosen: Box, size: Size): Box => {
+    const area = bounds ?? { left: 0, top: 0, width: size.width, height: size.height }
+    const width = Math.max(1, Math.min(area.width, chosen.width))
+    const height = Math.max(1, Math.min(area.height, chosen.height))
+    return {
+      width,
+      height,
+      left: Math.max(area.left, Math.min(area.left + area.width - width, chosen.left)),
+      top: Math.max(area.top, Math.min(area.top + area.height - height, chosen.top))
+    }
+  }
+  const scaled = (chosen: Box, factor: number, size: Size): Box => {
+    const shape = ratio ?? chosen.width / chosen.height
+    const area = bounds ?? { width: size.width, height: size.height }
+    const width = Math.max(minWidth(size), Math.min(area.width, area.height * shape, chosen.width * factor))
+    const height = width / shape
+    return clampBox(
+      { width, height, left: chosen.left + (chosen.width - width) / 2, top: chosen.top + (chosen.height - height) / 2 },
+      size
+    )
+  }
+  const defaultPortrait = (cut: AvatarCrop, size: Size) => {
+    const inner = defaultCrop(cut.width * size.width, cut.height * size.height)
+    return {
+      x: cut.x + inner.x * cut.width,
+      y: cut.y + inner.y * cut.height,
+      width: inner.width * cut.width,
+      height: inner.height * cut.height
+    }
+  }
+  const switchTab = (next: string) => {
+    if (!image || !crop || next === tab) return
+    if (tab === "picture") {
+      setPicture(crop)
+      const kept =
+        portrait &&
+        portrait.x >= crop.x &&
+        portrait.y >= crop.y &&
+        portrait.x + portrait.width <= crop.x + crop.width &&
+        portrait.y + portrait.height <= crop.y + crop.height
+          ? portrait
+          : defaultPortrait(crop, image)
+      setPortrait(kept)
+      setBox(cropPixels(kept, image.width, image.height))
+    } else {
+      setPortrait(crop)
+      setBox(boxFrom(picture, image))
+    }
+    setTab(next)
+  }
+  const choosePreset = (next: string) => {
+    setPreset(next)
+    if (!box || !image || next === "free") return
+    const shape = next === "square" ? 1 : PORTRAIT_RATIO
+    const width = Math.min(box.width, box.height * shape)
+    const height = width / shape
+    setBox({ width, height, left: box.left + (box.width - width) / 2, top: box.top + (box.height - height) / 2 })
+  }
+  const save = () => {
+    if (!image || !crop) return
+    const cut = tab === "picture" ? crop : picture
+    const kept = tab === "portrait" ? crop : portrait
+    const chosen =
+      kept &&
+      kept.x >= cut.x &&
+      kept.y >= cut.y &&
+      kept.x + kept.width <= cut.x + cut.width &&
+      kept.y + kept.height <= cut.y + cut.height
+        ? kept
+        : defaultPortrait(cut, image)
+    onSave({
+      ...snapCrop({ x: chosen.x, y: chosen.y, width: chosen.width, height: chosen.height }),
+      ...(cut.x || cut.y || cut.width !== 1 || cut.height !== 1 ? { picture: snapCrop(cut) } : {})
+    })
+  }
 
   /** Screen pixels to the image's pixels, from the shown image's width. */
   const scale = () => {
@@ -135,9 +203,9 @@ export function CutoutChooser({
   const moveDrag = (event: PointerEvent<HTMLElement>) => {
     const current = drag.current
     if (!current || current.pointer !== event.pointerId || !image) return
-    const ratio = scale()
-    const dx = (event.clientX - current.startX) * ratio
-    const dy = (event.clientY - current.startY) * ratio
+    const screenScale = scale()
+    const dx = (event.clientX - current.startX) * screenScale
+    const dy = (event.clientY - current.startY) * screenScale
     const start = current.start
     if (current.corner === null) {
       setBox(clampBox({ ...start, left: start.left + dx, top: start.top + dy }, image))
@@ -150,22 +218,18 @@ export function CutoutChooser({
     const anchorY = south ? start.top : start.top + heightOf(start)
     const pointerX = (east ? start.left + start.width : start.left) + dx
     const pointerY = (south ? start.top + heightOf(start) : start.top) + dy
-    const room = Math.min(
-      east ? image.width - anchorX : anchorX,
-      (south ? image.height - anchorY : anchorY) * PORTRAIT_RATIO
-    )
-    const wanted = Math.max(
-      east ? pointerX - anchorX : anchorX - pointerX,
-      (south ? pointerY - anchorY : anchorY - pointerY) * PORTRAIT_RATIO
-    )
-    const width = Math.max(minWidth(image), Math.min(room, maxWidth(image), wanted))
+    const area = bounds!
+    const roomX = east ? area.left + area.width - anchorX : anchorX - area.left
+    const roomY = south ? area.top + area.height - anchorY : anchorY - area.top
+    let width = Math.max(1, Math.min(roomX, east ? pointerX - anchorX : anchorX - pointerX))
+    let height = Math.max(1, Math.min(roomY, south ? pointerY - anchorY : anchorY - pointerY))
+    if (ratio) {
+      width = Math.max(1, Math.min(roomX, roomY * ratio, Math.max(width, height * ratio)))
+      height = width / ratio
+    }
     setBox(
       clampBox(
-        {
-          width,
-          left: east ? anchorX : anchorX - width,
-          top: south ? anchorY : anchorY - width / PORTRAIT_RATIO
-        },
+        { width, height, left: east ? anchorX : anchorX - width, top: south ? anchorY : anchorY - height },
         image
       )
     )
@@ -211,6 +275,39 @@ export function CutoutChooser({
       initialFocus={() => stage.current}
       title={title}
     >
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented
+          label="Picture settings"
+          inlineDescription={false}
+          value={tab}
+          onValueChange={switchTab}
+          options={[
+            {
+              value: "picture",
+              label: "Picture",
+              description: "Click to choose the picture shown in large views and exports"
+            },
+            {
+              value: "portrait",
+              label: "Portrait",
+              description: "Click to choose the small portrait inside the picture"
+            }
+          ]}
+        />
+        {tab === "picture" && (
+          <Segmented
+            label="Crop shape"
+            inlineDescription={false}
+            value={preset}
+            onValueChange={choosePreset}
+            options={[
+              { value: "free", label: "Free", description: "Click to crop to any rectangular shape" },
+              { value: "portrait", label: "2:3", description: "Click to crop two wide by three high" },
+              { value: "square", label: "1:1", description: "Click to crop a square" }
+            ]}
+          />
+        )}
+      </div>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
         <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
           <div
@@ -227,7 +324,7 @@ export function CutoutChooser({
                 const node = event.currentTarget
                 const size = { width: node.naturalWidth, height: node.naturalHeight }
                 setImage(size)
-                setBox(boxOf(initial, size))
+                setBox(boxFrom(initial?.picture ?? WHOLE_PICTURE, size))
               }}
               onError={() => setFailed(true)}
               className="block max-h-[min(36dvh,36rem)] max-w-full bg-surface-raised object-contain sm:max-h-[min(60dvh,36rem)]"
@@ -241,7 +338,11 @@ export function CutoutChooser({
             {image && box && (
               <>
                 {/* The rest of the image, dimmed: four bands around the box. */}
-                <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+                <div
+                  aria-hidden="true"
+                  data-layout-overlay="The mask dims the original outside the selected cut"
+                  className="pointer-events-none absolute inset-0"
+                >
                   <div
                     className="absolute inset-x-0 top-0 bg-overlay"
                     style={{ height: percent(box.top, image.height) }}
@@ -277,6 +378,7 @@ export function CutoutChooser({
                     aria-valuemin={Math.round((minWidth(image) / maxWidth(image)) * 100)}
                     aria-valuemax={100}
                     data-cutout-box
+                    data-layout-overlay="The movable crop box marks the selected region over the original"
                     onKeyDown={onKey}
                     onPointerDown={(event) => startDrag(event, null)}
                     onPointerMove={moveDrag}
@@ -339,10 +441,24 @@ export function CutoutChooser({
             <Button
               variant="ghost"
               className="size-8 px-0!"
-              aria-label="Reset the cutout"
-              hint={image ? "Reset the cutout" : "The picture must load before resetting the cutout"}
+              aria-label={tab === "picture" ? "Reset to the original" : "Reset the cutout"}
+              hint={
+                image
+                  ? tab === "picture"
+                    ? "Reset to the original picture and its default portrait"
+                    : "Reset the portrait inside the picture"
+                  : "The picture must load before resetting the cutout"
+              }
               disabled={!image}
-              onClick={() => image && setBox(boxOf(null, image))}
+              onClick={() => {
+                if (!image) return
+                if (tab === "picture") {
+                  setPicture(WHOLE_PICTURE)
+                  setPortrait(null)
+                  setPreset("free")
+                  setBox(boxFrom(WHOLE_PICTURE, image))
+                } else setBox(boxFrom(defaultPortrait(picture, image), image))
+              }}
             >
               <Icon name="regenerate" size={16} />
             </Button>
@@ -357,19 +473,28 @@ export function CutoutChooser({
         <section aria-label="Previews" className="flex shrink-0 flex-col gap-2">
           <h3 className="text-sm font-medium">Previews</h3>
           <div className="flex items-start gap-4 sm:flex-col">
-            {(
-              [
-                ["Message", AVATAR_SIZES.chat],
-                ["Cast", AVATAR_SIZES.chip],
-                // The 8.5rem minimum library/home tile has a 1px border on each side.
-                ["Tile", "h-[201px] w-[134px]"]
-              ] as const
+            {(tab === "picture"
+              ? [
+                  ["Large view", "w-[134px]"],
+                  ["Export", "w-[96px]"]
+                ]
+              : [
+                  ["Message", AVATAR_SIZES.chat],
+                  ["Cast", AVATAR_SIZES.chip],
+                  // The 8.5rem minimum library/home tile has a 1px border on each side.
+                  ["Tile", "h-[201px] w-[134px]"]
+                ]
             ).map(([label, size]) => (
               <div key={label} className="flex flex-col items-start gap-1.5">
                 <span className="text-xs text-muted">{label}</span>
                 <span
                   data-cutout-preview={label}
                   className={`relative inline-flex shrink-0 overflow-hidden rounded-sm bg-surface-raised ${size}`}
+                  style={
+                    tab === "picture" && crop && image
+                      ? { aspectRatio: `${crop.width * image.width} / ${crop.height * image.height}` }
+                      : undefined
+                  }
                 >
                   {crop && <img src={src} alt="" draggable={false} style={cutoutStyle(crop)} />}
                   <span
@@ -425,13 +550,13 @@ export function CutoutChooser({
               Cancel
             </Button>
           </Tooltip>
-          <Tooltip label="Save the cutout for small portraits">
+          <Tooltip label="Save the picture and portrait cuts">
             <Button
               variant="primary"
               className="relative [&>svg]:absolute"
               pending={pending}
               disabled={!crop}
-              onClick={() => crop && onSave(crop)}
+              onClick={save}
             >
               <span className={pending ? "opacity-0" : undefined}>{saveLabel}</span>
             </Button>

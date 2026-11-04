@@ -74,7 +74,7 @@ async function structure(header: Locator, panel = true, allowWrap = false) {
     await rows
       .locator(":scope > *")
       .evaluateAll((children) => children.map((row) => row.getAttribute("data-card-header-row")))
-  ).toEqual(["identity", "nickname", "persona", "usage"])
+  ).toEqual(panel ? ["identity", "nickname", "persona", "usage"] : ["nickname", "persona", "usage"])
   const geometry = await header.evaluate((root) => {
     const box = (element: Element) => {
       const b = element.getBoundingClientRect()
@@ -152,7 +152,7 @@ for (const width of [390, 1024, 1440])
           const header = scope.locator("[data-card-header]")
           await expect(header.locator("[data-card-tokens]")).toBeVisible()
           await structure(header, view === "panel")
-          const identity = header.locator('[data-card-header-row="identity"]')
+          const identity = scope.locator('[data-card-header-row="identity"]')
           await expect(identity.getByRole("heading", { name: card.name, exact: true })).toBeVisible()
           await expect(identity.locator("[data-card-version]")).toHaveText(card.version || "Add a version")
           await expect(header.locator('[data-card-header-row="nickname"]')).toContainText(
@@ -167,10 +167,10 @@ for (const width of [390, 1024, 1440])
               ["the nickname", "In-chat nickname"]
             ] as const) {
               for (const action of ["Save the name", "Cancel renaming"]) {
-                await header.getByRole("button", { name: `Rename ${label}`, exact: true }).click()
-                const input = header.getByRole("textbox", { name: field, exact: true })
+                await scope.getByRole("button", { name: `Rename ${label}`, exact: true }).click()
+                const input = scope.getByRole("textbox", { name: field, exact: true })
                 await expect(input).toBeEditable()
-                await header.getByRole("button", { name: action, exact: true }).click()
+                await scope.getByRole("button", { name: action, exact: true }).click()
                 await expect(input).toHaveCount(0)
               }
             }

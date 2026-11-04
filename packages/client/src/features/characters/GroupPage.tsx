@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // A group's page (DESIGN §2.1; ST's group tile opened): who's in it, Continue (its latest
 // chat), New chat (`/groups/$chatId/new`, made on its first send), and every chat of the group, latest message first. A group is named by any of its
 // chats (`/groups/$chatId`); a group is the chats with the same name and characters
@@ -41,7 +42,9 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
           <GroupFaces members={group.members} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{group.name}</h1>
+          <CenterHeaderContent>
+            <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{group.name}</h1>
+          </CenterHeaderContent>
           <p className="text-sm text-muted">
             A group of {group.members.length}: the chats named “{group.name}” with these characters.
           </p>

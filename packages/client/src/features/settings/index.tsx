@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // Settings: its pages are the "settings" route's children, listed in groups. On a wide screen
 // the groups are a column beside the open page; on a phone /settings is the list and each page
 // opens on its own, with a way back to the list.
@@ -109,7 +110,11 @@ function SettingsLayout() {
     <div className="flex flex-col gap-4 md:flex-row md:gap-8">
       {atList && <ListTitle />}
       <div className={`md:sticky md:top-0 md:block md:w-48 md:shrink-0 md:self-start ${atList ? "" : "hidden"}`}>
-        <h1 className="mb-4 px-1 text-lg font-semibold md:hidden">Settings</h1>
+        {atList && (
+          <CenterHeaderContent>
+            <h1 className="text-base font-semibold">Settings</h1>
+          </CenterHeaderContent>
+        )}
         <SettingsNavigation />
       </div>
       <div className={`min-w-0 flex-1 ${atList ? "hidden md:block" : ""}`}>
@@ -122,7 +127,6 @@ function SettingsLayout() {
               <Icon name="back" />
               {inside ? open.nav!.label : "Settings"}
             </Link>
-            {!inside && <h1 className="px-1 text-lg font-semibold">{open.nav!.label}</h1>}
           </div>
         )}
         <Outlet />
@@ -144,7 +148,7 @@ export const register = () => {
     parent: "app",
     path: "/settings",
     component: SettingsLayout,
-    nav: { label: "Settings", order: 90 }
+    nav: { label: "Settings", icon: "sliders", description: "Change your account and app preferences.", order: 90 }
   })
   routes.register({ id: "settings.index", parent: "settings", path: "/", component: SettingsIndex })
   settingsGroups.register({

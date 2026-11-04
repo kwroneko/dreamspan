@@ -62,7 +62,8 @@ function usePortraitChange(store: EditorStore, call: Caller, onChanged?: () => v
     const { ref } = snapshot
     let failure: string | null = null
     if (target.file) {
-      const cut = chosen === null ? "" : `&crop=${cropKey(chosen)}`
+      const cut =
+        chosen === null ? "" : `&crop=${cropKey(chosen)}${chosen.picture ? `&picture=${cropKey(chosen.picture)}` : ""}`
       const response = await fetch(`/library/avatar?ref=${ref.id}&rowVersion=${ref.rowVersion}${cut}`, {
         method: "POST",
         headers: { "content-type": "application/octet-stream" },
@@ -169,7 +170,7 @@ function ViewablePortrait({
         type="button"
         aria-label={`View ${name}'s picture`}
         data-view-portrait
-        onClick={() => togglePortrait({ id, name, mediaId })}
+        onClick={() => togglePortrait({ id, name, mediaId, picture: crop?.picture })}
         className="relative inline-flex size-full shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         {avatar}
@@ -186,7 +187,7 @@ function PictureButton({ portrait }: { portrait: ReturnType<typeof usePortraitCh
       label="Picture"
       hint={
         portrait.mediaId !== null
-          ? "Picture: adjust the cutout small portraits show, or replace the picture"
+          ? "Picture: crop the picture and small portrait, or replace the picture"
           : `Picture: add one. ${PICTURE_HINT}`
       }
       data-picture-button
@@ -198,8 +199,7 @@ function PictureButton({ portrait }: { portrait: ReturnType<typeof usePortraitCh
 }
 
 /** What a new picture can be, and what happens to it: the explanation of every way to add one. */
-const PICTURE_HINT =
-  "PNG, JPEG, GIF or WebP, up to 16 MB. You then choose the part small portraits show; the whole image is kept."
+const PICTURE_HINT = "PNG, JPEG, GIF or WebP, up to 16 MB. Choose the picture and portrait cuts; the original is kept."
 
 /** A portrait that takes a dropped image file: `over` while one is dragged over it. */
 function useImageDrop(onFile: (file: File) => void, enabled: boolean) {

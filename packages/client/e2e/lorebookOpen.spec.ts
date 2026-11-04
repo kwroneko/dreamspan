@@ -125,7 +125,7 @@ for (const width of [1440, 390]) {
       await expect(editor.getByRole("textbox", { name: "Description", exact: true })).toHaveCount(0)
       await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
       if (shots) await page.screenshot({ path: `${shots}/lorebook-open-${book.split(" ")[0]}-${width}.png` })
-      await editor.getByRole("button", { name: "Back to the chat", exact: true }).click()
+      await editor.getByRole("button", { name: "Close", exact: true }).click()
       await expect(editor).toHaveCount(0)
     }
     // Picking the open book's name again closes it.

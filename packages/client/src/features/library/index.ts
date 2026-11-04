@@ -14,14 +14,19 @@ export const register = () => {
     parent: "app",
     path: "/library",
     component: LibraryPage,
-    nav: { label: "Library", order: 20 }
+    nav: {
+      label: "Library",
+      icon: "book",
+      description: "Browse characters, personas, lorebooks and presets.",
+      order: 20
+    }
   })
   routes.register({
     id: "library.import",
     parent: "app",
     path: "/import",
     component: ImportPage,
-    nav: { label: "Import", order: 30 }
+    nav: { label: "Import", icon: "download", description: "Import characters, chats and library items.", order: 30 }
   })
   routes.register({
     id: "library.st-import",

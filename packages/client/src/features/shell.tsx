@@ -1,3 +1,4 @@
+import { CenterHeaderHost, CenterHeaderFrame, centerHeaders } from "../ui/CenterHeader.tsx"
 import { defineSlot, SlotOutlet } from "../slots.tsx"
 export const appTools = defineSlot<Record<string, never>>("app.tools")
 /**
@@ -28,6 +29,7 @@ import { Button } from "../ui/Button.tsx"
 import { WindowClose } from "../ui/WindowClose.tsx"
 import { ImageControls } from "../ui/ImageControls.tsx"
 import { ResizeHandle, usePanelWidth } from "../ui/ResizeHandle.tsx"
+import { NavigationTiles } from "../ui/NavigationTiles.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Toasts } from "../ui/Toast.tsx"
 import { IconButton } from "../ui/Tooltip.tsx"
@@ -93,28 +95,27 @@ export function LogoutButton({ variant = "secondary" }: { variant?: "secondary" 
   )
 }
 
-const navLink =
-  "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-surface-raised hover:text-text data-[status=active]:bg-surface-raised data-[status=active]:text-text"
-
 /** Everything but the chats: the library, import, settings, the bin, the account. */
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const session = useSession()
   const isAdmin = session.user.role === "admin"
   return (
-    <nav aria-label="Main" className="flex flex-col gap-0.5">
-      <Link to="/" activeOptions={{ exact: true }} className={navLink} onClick={onNavigate}>
-        Characters
-      </Link>
-      {navEntries("app", isAdmin)
-        .filter((entry) => fullPath(entry) !== "/" && fullPath(entry) !== "/chats")
-        .map((entry) => (
-          <Link key={entry.id} to={fullPath(entry)} className={navLink} onClick={onNavigate}>
-            {entry.nav!.label}
-          </Link>
-        ))}
-      <Link to="/bin" className={navLink} onClick={onNavigate}>
-        Bin
-      </Link>
+    <nav aria-label="Main" className="flex shrink-0 flex-col gap-0.5">
+      <NavigationTiles
+        onNavigate={onNavigate}
+        items={[
+          { to: "/", label: "Home", icon: "home", description: "Open the home page." },
+          ...navEntries("app", isAdmin)
+            .filter((entry) => fullPath(entry) !== "/" && fullPath(entry) !== "/chats")
+            .map((entry) => ({
+              to: fullPath(entry),
+              label: entry.nav!.label,
+              icon: entry.nav!.icon ?? "panel",
+              description: entry.nav!.description ?? `Open ${entry.nav!.label}.`
+            })),
+          { to: "/bin", label: "Bin", icon: "trash", description: "Browse deleted items." }
+        ]}
+      />
       <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border px-2.5 pt-2 text-sm">
         <Link
           to="/settings/account"
@@ -170,15 +171,6 @@ function PhoneBar() {
     }
   })
   const { selection } = useShellNavigation()
-  // On a phone, an open chat's header takes this bar's place; its ← opens this menu (ChatHeader.tsx).
-  // A chat not made yet (a card's or a group's new chat) has the same header.
-  const inChat = useLocation({
-    select: (location) => /^\/(chats\/[^/]+|cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.test(location.pathname)
-  })
-  // On the desktop with the sidebar hidden, this bar brings it back (but not over a chat,
-  // whose own header has that button).
-  const [hidden] = useSidebarHidden()
-  const desktop = hidden && !inChat
   const pathname = `${href}/${selection}`
   const [openOn, setOpenOn] = useState<string | null>(null)
   const open = openOn === pathname
@@ -190,34 +182,6 @@ function PhoneBar() {
   }, [pathname])
   return (
     <>
-      <div
-        className={`flex items-center gap-2 border-b border-border bg-surface px-3 py-2 ${desktop ? "" : "lg:hidden"} ${inChat ? "max-sm:hidden" : ""}`}
-      >
-        <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
-        <button
-          type="button"
-          aria-label="Chats and menu"
-          aria-expanded={open}
-          onClick={() => setOpen(true)}
-          className="rounded-md px-2 py-1 text-lg leading-none hover:bg-surface-raised lg:hidden"
-        >
-          ☰
-        </button>
-        <Link to="/" className="font-semibold max-sm:hidden">
-          rp-harness
-        </Link>
-        <div className="ml-auto max-sm:order-2">
-          <ImageControls />
-        </div>
-        <nav aria-label="Screens" className="flex gap-1 max-sm:order-1">
-          <Link to="/" activeOptions={{ exact: true }} className={navLink}>
-            Characters
-          </Link>
-          <Link to="/chats" activeOptions={{ exact: true }} className={navLink}>
-            Chats
-          </Link>
-        </nav>
-      </div>
       {open && (
         <div
           data-layout-overlay="Mobile navigation drawer covers the page"
@@ -433,20 +397,41 @@ function AppShell() {
 function Main() {
   const pathname = useLocation({ select: (location) => location.pathname })
   const fill = /^\/(?:chats\/[^/]+|cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.test(pathname)
+  const page = (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-5xl px-4 py-6">
+        <Outlet />
+      </div>
+    </div>
+  )
   return (
-    <main id="content" className={`min-h-0 flex-1 ${fill ? "flex flex-col" : "overflow-y-auto"}`}>
+    <main id="content" className="flex min-h-0 flex-1 flex-col">
       {fill ? (
         <Outlet />
       ) : (
-        <div className="mx-auto w-full max-w-5xl px-4 py-6">
-          <Outlet />
-        </div>
+        <CenterHeaderHost
+          leading={
+            <>
+              <IconButton
+                label="Chats and menu"
+                hint="Opens the app menu."
+                icon="back"
+                className="lg:hidden"
+                onClick={openAppMenu}
+              />
+              <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
+            </>
+          }
+        >
+          {page}
+        </CenterHeaderHost>
       )}
     </main>
   )
 }
 
 export const register = () => {
+  centerHeaders.register({ id: "shell.center-header", order: 10, component: CenterHeaderFrame })
   routes.register({ id: "app", parent: "root", component: AppShell })
   sidebarToggle.register({ id: "sidebar-toggle", order: 10, component: SidebarToggle })
 }

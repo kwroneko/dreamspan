@@ -223,7 +223,7 @@ test("the chat width follows its slider live, saves on release, and follows the 
   await open(page, 3840, 2160, "light", chatId)
   const before = (await bounds(column(page))).width
   expect(Math.round(before)).toBe(CHAT_WIDTH.default)
-  const panel = await openPanel(page, "Display")
+  const panel = await openPanel(page, "Interface")
   const slider = panel.getByRole("slider", { name: "Chat width" })
   await expect(slider).toHaveAttribute("aria-valuetext", `${CHAT_WIDTH.default} px`)
   // With the side panel open, the column still has the account's width where there's room.
@@ -299,7 +299,7 @@ test("with the side panel open at 1440 the text keeps the column's width", async
   const { chatId } = await study("Study panel")
   await settled(chatId)
   await open(page, 1440, 900, "light", chatId)
-  await openPanel(page, "Display")
+  await openPanel(page, "Interface")
   const col = await bounds(column(page))
   const panelAt = await bounds(page.getByRole("complementary", { name: "Chat panel" }))
   expect(col.x + col.width).toBeLessThanOrEqual(panelAt.x)

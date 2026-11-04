@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useAtomRefresh } from "@effect/atom-react"
 import { CardSurface } from "../cardForks/surfaces.tsx"
@@ -228,7 +229,9 @@ function Page({ card, persona = false }: { card: CardUsage; persona?: boolean })
           shape="square"
         />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{card.label}</h1>
+          <CenterHeaderContent>
+            <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{card.label}</h1>
+          </CenterHeaderContent>
           {persona && <PersonaBadge />}
           <CardSurface placement="provenance" entityId={card.entityId} />
           {card.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{card.subtitle}</p>}

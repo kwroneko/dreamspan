@@ -8,7 +8,7 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useSession } from "../../session.ts"
 import { MAX_UPSCALE, type NaturalSize } from "../../ui/ImageViewer.tsx"
-import { mediaUrl } from "../../ui/mediaImage.ts"
+import { mediaUrl, pictureUrl } from "../../ui/mediaImage.ts"
 import { popupOpen } from "../../ui/openPopups.ts"
 import { type Portrait, PortraitView, usePortraitViewer } from "../../ui/Portrait.tsx"
 import type { StackEntry } from "../../ui/portraitStack.ts"
@@ -162,12 +162,12 @@ function Viewer({
     const probe = new Image()
     probe.onload = () => live && setShape({ width: probe.naturalWidth, height: probe.naturalHeight })
     // The thumbnail has the original's shape; its own size says nothing of the original's.
-    probe.src = mediaUrl(portrait.mediaId, 768)
+    probe.src = portrait.picture ? pictureUrl(portrait.mediaId, portrait.picture) : mediaUrl(portrait.mediaId, 768)
     return () => {
       live = false
     }
-  }, [portrait.mediaId])
-  const natural = useNatural(portrait.mediaId)
+  }, [portrait.mediaId, portrait.picture])
+  const natural = useNatural(portrait.mediaId === null ? null : pictureUrl(portrait.mediaId, portrait.picture))
   const box = size?.box ?? null
   const fitted = Math.round(
     box !== null && shape
@@ -221,17 +221,17 @@ function Viewer({
 }
 
 /** The original's own pixels, which bound how far fitting may enlarge it. */
-function useNatural(mediaId: string | null) {
+function useNatural(src: string | null) {
   const [natural, setNatural] = useState<NaturalSize | null>(null)
   useLayoutEffect(() => {
-    if (mediaId === null) return
+    if (src === null) return
     let live = true
     const probe = new Image()
     probe.onload = () => live && setNatural({ width: probe.naturalWidth, height: probe.naturalHeight })
-    probe.src = mediaUrl(mediaId)
+    probe.src = src
     return () => {
       live = false
     }
-  }, [mediaId])
+  }, [src])
   return natural
 }

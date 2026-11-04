@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useSearchHighlights } from "./searchHighlights.ts"
 // The shared four-row card header (owner, 2026-11-03): name/version/save, nickname,
 // Persona and chats/token counts (Persona last in the side panel). Names retain their rename questions.
@@ -10,7 +11,7 @@ import type { NoteEntry } from "@rp/shared/editorApi.ts"
 import { useSearch } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react"
+import { Fragment, type ReactNode, useMemo, useState, useSyncExternalStore } from "react"
 import { AppClient } from "../../rpc.ts"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useSession } from "../../session.ts"
@@ -170,7 +171,9 @@ export function CardNameHeader({
   current,
   heading = "h2",
   after,
-  saveControls
+  saveControls,
+  centerTitle,
+  centerAfter
 }: {
   store: EditorStore
   call: Caller
@@ -178,6 +181,8 @@ export function CardNameHeader({
   current?: RenameChat | undefined
   heading?: "h1" | "h2"
   after?: ReactNode
+  centerTitle?: ReactNode
+  centerAfter?: ReactNode
   saveControls?: ReactNode
 }) {
   const userId = useSession().user.id
@@ -248,70 +253,78 @@ export function CardNameHeader({
   }
 
   const Title = heading
+  const Identity = centerTitle ? CenterHeaderContent : Fragment
   // Each row fits its own text; the title pencil follows its last visible line.
   return (
     <>
-      <div data-card-header-row="identity" className="relative flex w-full min-w-0 flex-wrap items-center gap-1">
-        <div className="flex min-w-[min(100%,calc(2*var(--card-name-min)+0.25rem))] flex-1 items-center gap-1 has-[[data-renaming]]:min-w-[min(100%,calc(4*var(--card-name-min)+0.75rem))]">
-          <InlineRename
-            value={name}
-            label="the display name"
-            hint={DISPLAY_HINT}
-            fieldLabel="Display name"
-            goTo={nameMatch}
-            highlights={nameHighlights}
-            className="min-w-[var(--card-name-min)]! max-w-[min(60%,calc(100%_-_var(--card-name-min)_-_0.25rem))] shrink data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]! data-[renaming]:max-w-none"
-            onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
-          >
-            {/* The pencil beside the heading, not in it: the heading's name is the card's name. */}
-            <Tooltip label={DISPLAY_HINT}>
-              <Title
-                data-card-name
-                className={`min-w-0 truncate font-semibold ${heading === "h1" ? "text-2xl leading-8" : "text-lg leading-7"}`}
-              >
-                {name || "Unnamed card"}
-              </Title>
-            </Tooltip>
-          </InlineRename>
-          <InlineRename
-            value={version}
-            label="the version"
-            hint={VERSION_HINT}
-            fieldLabel="Version"
-            goTo={versionMatch}
-            highlights={versionHighlights}
-            allowEmpty
-            className="min-w-[var(--card-name-min)]! shrink text-xs text-muted data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]!"
-            onRename={async (next) => {
-              if (await clashes(name, next)) return false
-              write({ version: next })
-            }}
-          >
-            <Tooltip label={VERSION_HINT}>
-              {version ? (
-                <span data-card-version className="min-w-0 truncate text-xs text-muted">
-                  {version}
-                </span>
-              ) : (
-                <span data-card-version className="min-w-0 truncate text-xs text-muted/70">
-                  Add a version
-                </span>
-              )}
-            </Tooltip>
-          </InlineRename>
+      <Identity>
+        <div
+          data-card-header-row="identity"
+          className={`relative flex w-full min-w-0 items-center gap-1 ${centerTitle ? "[--card-name-min:1rem] max-sm:[&_[data-save-state]_button]:size-6!" : "flex-wrap"}`}
+        >
+          <div className="flex min-w-[min(100%,calc(2*var(--card-name-min)+0.25rem))] flex-1 items-center gap-1 has-[[data-renaming]]:min-w-[min(100%,calc(4*var(--card-name-min)+0.75rem))]">
+            <InlineRename
+              value={name}
+              label="the display name"
+              hint={DISPLAY_HINT}
+              fieldLabel="Display name"
+              goTo={nameMatch}
+              highlights={nameHighlights}
+              className="min-w-[var(--card-name-min)]! max-w-[min(60%,calc(100%_-_var(--card-name-min)_-_0.25rem))] shrink data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]! data-[renaming]:max-w-none"
+              onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
+            >
+              {/* The pencil beside the heading, not in it: the heading's name is the card's name. */}
+              <Tooltip label={DISPLAY_HINT}>
+                <Title
+                  aria-label={name || "Unnamed card"}
+                  data-card-name
+                  className={`min-w-0 truncate font-semibold ${heading === "h1" ? "text-2xl leading-8" : "text-lg leading-7"}`}
+                >
+                  {centerTitle ?? (name || "Unnamed card")}
+                </Title>
+              </Tooltip>
+            </InlineRename>
+            <InlineRename
+              value={version}
+              label="the version"
+              hint={VERSION_HINT}
+              fieldLabel="Version"
+              goTo={versionMatch}
+              highlights={versionHighlights}
+              allowEmpty
+              className="min-w-[var(--card-name-min)]! shrink text-xs text-muted data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]!"
+              onRename={async (next) => {
+                if (await clashes(name, next)) return false
+                write({ version: next })
+              }}
+            >
+              <Tooltip label={VERSION_HINT}>
+                {version ? (
+                  <span data-card-version className="min-w-0 truncate text-xs text-muted">
+                    {version}
+                  </span>
+                ) : (
+                  <span data-card-version className="min-w-0 truncate text-xs text-muted/70">
+                    Add a version
+                  </span>
+                )}
+              </Tooltip>
+            </InlineRename>
+          </div>
+          {after}
+          {saveControls}
+          {centerAfter}
+          {problem && (
+            <p
+              role="alert"
+              data-layout-overlay="Rename error below the identity row"
+              className="absolute top-full right-0 z-20 max-w-full bg-surface text-sm text-danger"
+            >
+              {problem}
+            </p>
+          )}
         </div>
-        {after}
-        {saveControls}
-        {problem && (
-          <p
-            role="alert"
-            data-layout-overlay="Rename error below the identity row"
-            className="absolute top-full right-0 z-20 max-w-full bg-surface text-sm text-danger"
-          >
-            {problem}
-          </p>
-        )}
-      </div>
+      </Identity>
       <div data-card-header-row="nickname" className="flex min-h-7 min-w-0 max-w-full items-center">
         <InlineRename
           value={nickname}

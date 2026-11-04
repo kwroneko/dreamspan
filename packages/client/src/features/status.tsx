@@ -43,7 +43,7 @@ function Status() {
           return (
             <>
               <Card>
-                <CardHeader title="Server" description={`Signed in as ${user.displayName} (${user.role}).`} />
+                <CardHeader center title="Server" description={`Signed in as ${user.displayName} (${user.role}).`} />
                 <p className="mb-3 flex items-start gap-2 text-sm">
                   <span
                     aria-hidden="true"

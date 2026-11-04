@@ -7,7 +7,8 @@ import { createContext, type ReactElement, type ReactNode, useContext, useState 
 import { initials } from "./Avatar.tsx"
 import { ImageViewer, MAX_ZOOM, type NaturalSize, type Zoom } from "./ImageViewer.tsx"
 import { useImagePrefs } from "./imagePrefs.ts"
-import { mediaUrl } from "./mediaImage.ts"
+import type { AvatarCrop } from "@rp/shared/media.ts"
+import { mediaUrl, pictureUrl } from "./mediaImage.ts"
 import { close, even, keepOnly, move, replace, show, split, type Stack, toggle } from "./portraitStack.ts"
 import { Segmented } from "./Segmented.tsx"
 import { ToolbarSlider } from "./Slider.tsx"
@@ -19,6 +20,7 @@ export interface Portrait {
   readonly id: string
   readonly name: string
   readonly mediaId: string | null
+  readonly picture?: AvatarCrop | undefined
 }
 interface PortraitViewer {
   /**
@@ -254,8 +256,10 @@ export function PortraitView({
       <div className="min-h-0 flex-1 p-2">
         {portrait.mediaId !== null ? (
           <ImageViewer
-            src={mediaUrl(portrait.mediaId)}
-            placeholder={mediaUrl(portrait.mediaId, 768)}
+            src={pictureUrl(portrait.mediaId, portrait.picture)}
+            placeholder={
+              portrait.picture ? pictureUrl(portrait.mediaId, portrait.picture) : mediaUrl(portrait.mediaId, 768)
+            }
             alt={`${portrait.name}'s full portrait`}
             zoom={visible ? zoom : "fit"}
             onZoom={(next) => visible && setZoom(next)}

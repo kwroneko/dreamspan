@@ -15,6 +15,7 @@ import { AsyncResult, Atom } from "effect/reactivity"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
+import { Button } from "../../ui/Button.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
@@ -214,9 +215,12 @@ export function useOpenCharacter() {
  * accessible name; `hint`, its tooltip; `state`, how it stands: `mark`, a badge over its
  * picture ("In chat"), `done` dims it and makes a click do nothing (it stays focusable, so its
  * tooltip can say why), `pending` while the pick is under way. A tile gets only its own status,
- * so a change re-renders only the tiles it changes.
+ * so a change re-renders only the tiles it changes. With `onOpen`, the tile opens the editor
+ * and a separate pick button carries the label, hint and disabled state.
  */
 export interface TilePick {
+  /** When supplied, the tile opens this editor and the pick becomes a separate button. */
+  readonly onOpen?: (card: ShellCard) => void
   readonly onPick: (card: ShellCard) => void
   readonly label: (card: ShellCard, status: string | undefined) => string
   readonly hint: (card: ShellCard, status: string | undefined) => ReactNode
@@ -295,19 +299,25 @@ function CharacterTile({
     <button
       type="button"
       onClick={() => {
+        if (pick?.onOpen) return pick.onOpen(card)
         if (!pick) return open(c.entityId)
         if (!state.done && !state.pending) pick.onPick(card)
       }}
       aria-label={
-        pick
+        pick && !pick.onOpen
           ? pick.label(card, status)
           : `Open ${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}${marked ? " (persona)" : ""}`
       }
-      {...(state.done || state.pending ? { "aria-disabled": true } : {})}
-      {...(state.pending ? { "aria-busy": true } : {})}
-      className={`group flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface text-left outline-none focus-visible:ring-2 focus-visible:ring-focus ${state.done || state.pending ? "cursor-default" : "hover:border-focus"}`}
+      data-layout-audit-ignore={
+        pick?.onOpen ? "inset: The open area fills the tile above its joined footer" : undefined
+      }
+      {...(!pick?.onOpen && (state.done || state.pending) ? { "aria-disabled": true } : {})}
+      {...(!pick?.onOpen && state.pending ? { "aria-busy": true } : {})}
+      className={`group flex min-w-0 flex-1 flex-col overflow-hidden ${pick?.onOpen ? "rounded-t-lg focus-visible:ring-inset" : "rounded-lg border border-border"} bg-surface text-left outline-none focus-visible:ring-2 focus-visible:ring-focus ${!pick?.onOpen && (state.done || state.pending) ? "cursor-default" : "hover:border-focus"}`}
     >
-      <span className={`relative aspect-[2/3] w-full overflow-hidden ${state.done ? "opacity-50" : ""}`}>
+      <span
+        className={`relative aspect-[2/3] w-full overflow-hidden ${!pick?.onOpen && state.done ? "opacity-50" : ""}`}
+      >
         <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="fill" />
         {marked && <PersonaBadge portrait />}
       </span>
@@ -316,7 +326,7 @@ function CharacterTile({
         <span className="truncate text-sm font-medium" {...(pick ? {} : { title: c.label })}>
           {c.label}
         </span>
-        {c.subtitle && <span className="truncate text-xs text-muted">{c.subtitle}</span>}
+        {!pick?.onOpen && c.subtitle && <span className="truncate text-xs text-muted">{c.subtitle}</span>}
         {/* The date a date sort orders by shares the last line, so tiles keep their height. */}
         <span className="mt-auto flex min-w-0 items-baseline justify-between gap-1.5 text-xs text-muted">
           <span className="shrink-0">{c.chats ? `${c.chats} ${c.chats === 1 ? "chat" : "chats"}` : "Never used"}</span>
@@ -326,8 +336,28 @@ function CharacterTile({
     </button>
   )
   return (
-    <div className="tile-toggle-surface relative flex min-w-0 flex-col">
-      {pick ? <Tooltip label={pick.hint(card, status)}>{button}</Tooltip> : button}
+    <div
+      className={`tile-toggle-surface relative flex min-w-0 flex-col ${pick?.onOpen ? "overflow-hidden rounded-lg border border-border bg-surface" : ""}`}
+    >
+      {pick ? (
+        <Tooltip label={pick.onOpen ? `Open ${c.label} in the full editor` : pick.hint(card, status)}>{button}</Tooltip>
+      ) : (
+        button
+      )}
+      {pick?.onOpen && (
+        <Button
+          data-layout-audit-ignore="inset: The footer joins the tile border edge to edge"
+          className="w-full rounded-none border-t border-border px-2 text-text focus-visible:ring-inset"
+          variant="ghost"
+          aria-label={pick.label(card, status)}
+          hint={pick.hint(card, status)}
+          disabled={state.done || state.pending}
+          focusableWhenDisabled
+          onClick={() => pick.onPick(card)}
+        >
+          {state.pending ? "Adding…" : state.done ? "In this chat" : "Add to chat"}
+        </Button>
+      )}
       <span data-layout-overlay="Favourite action sits over the portrait" className="absolute top-2 left-2">
         <FavouriteStar
           card={card}

@@ -1,3 +1,7 @@
+**Built 2026-11-04 (addchars):** The Add characters inspection, tile footer, grid inset and metadata decisions in §2.2 are implemented and obsolete as implementation requirements; see ARCHITECTURE §12.
+
+**Built 2026-11-04 (interfacetab):** The Interface tab naming decision in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
+
 **Built 2026-11-04 (smallfixes5):** The card editor navigation (§2.2), prompt badges and linked history-note marker (§6.2a) are implemented and obsolete as implementation requirements; see ARCHITECTURE §14.6.
 
 **Built 2026-11-02 (stablebuttons):** The stable unavailable-control rule in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §5.
@@ -240,6 +244,12 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 2.2 Personas, speakers and writers
 
+- **[D]** (owner, 2026-11-04): "The new add to chat button in add characters is approved." **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
+
+- **[D]** **Add-grid insets and metadata** (coordinator review, 2026-11-04): "The grid must sit inside the same horizontal insets as the Find by name field above it." "There is a large empty gap between the filter row and the grid; match the spacing used between the other rows." "Every tile shows a bare '1' line under the name, which says nothing to the user. Find what it is: drop it if it is a version or internal value, or label it if it is meaningful." **Built; obsolete as an implementation requirement** (ARCHITECTURE §12): the bare line is the character version and is omitted in this grid; search and grid align and use the same row gap.
+- **[D]** **Add belongs inside the tile** (owner, 2026-11-04): "This fails in a very basic way. The buttons are not part of the cards or connected to them. Nothing says what they control". The control is the tile's own footer inside its shared border and background, below the name/version/chats lines and separated by a divider. Labels are "Add to chat" and disabled "In this chat", with the unavailability explained on hover; the rest of the tile opens the editor. Supersedes the external-button placement and labels in the addchars [P] below. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
+- **[D]** **Inspect before adding** (owner, 2026-11-04): "Currently, this UI adds characters immediately when they're clicked. There's two issues with this: 1. it goes against what clicking on a character in such a grid does everywhere else, which is opening it 2. It makes it impossible to inspect a character you find first. I'm thinking that we need to add a control to each card that actually adds the character, and it should be very obvious, and also fit well in the layout. Clicking on a character would instead open it in the big editor". **Built; obsolete as an implementation requirement** (addchars; ARCHITECTURE §12).
+- **[P]** Implementation (addchars, 2026-11-04): reuse the chat's center-column editor and its existing Close control. Place a full-width "+ Add" control below each tile, replaced in place by disabled "In chat" for members and the selected persona; explain the action or unavailability on hover/focus. Keep portraits fully openable. Implemented in the replaceable `cast.add-characters` section; see ARCHITECTURE §12.
 - **[D]** (owner, 2026-11-04, focusring): “fix it. This should go without saying”. Centre keyboard focus evenly around the bare Persona icon and the enabled badge, preserving header layout and text alignment; check other bare icon buttons for the same offset. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 - **[P]** (focusring, 2026-11-04): draw the aligned off-state ring in a positioned pseudo-element centred on the icon; preserve the existing hit area and badge ring. Implemented in ARCHITECTURE §12.
 
@@ -1030,7 +1040,25 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] Owner, 2026-11-04 (navtilesport):** “This looks fine now, proceed with the other changes”. Port the approved Home / Library / Import / Settings / Bin tiles to master. “One issue. I'd like them to all be the same width.” **[P]** Use equal columns sized to fit the widest label, retaining balanced wrapping and the same width on incomplete rows. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §5.
+
+- **[D]** (owner, 2026-11-02, picturecrop): "Two non-destructive cuts stored as settings on the kept original: (1) Picture = free-shape crop (presets Free/2:3/1:1) used by large view, viewer and export (server renders the cut PNG, re-encodes, embeds card data); (2) Portrait = existing 2:3 cutout, chosen inside the cut picture, for small portraits. Defaults: picture = whole image. “Reset to the original”. Picture window gets a Picture | Portrait segmented switch at top; Picture tab previews: large view + export; Portrait tab: Message/Cast/Tile previews. Replace picture… → Picture → Portrait. ST imports unchanged (already cropped). Personas too." **Built; obsolete as an implementation requirement**; ARCHITECTURE §14.5c.
+- **[P]** (picturecrop, 2026-11-04): keep the Picture rectangle inside the existing image-bound `avatar_crop` settings object as optional `picture`; portrait coordinates stay relative to the original. Existing summary projections carry both cuts without changing the database baseline. Existing writer actions save both together. PNG export rebases the portrait to the rendered picture for round trips.
+
+- **[D] Owner, 2026-11-04 (interfacetab):** “The Display tab should be renamed to "Interface"”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §12. **[P]** Use `/settings/interface` and `?panel=interface`, redirecting old links and preserving internal display identifiers.
+
+- **[D] (owner, 2026-11-04)**: “prompt preset main editor vs lorebook main editor vs main chat view. The latter has a clear top header that connects to the two columns, the former two do not. From now on I want all center-column views to have such a header.”
+- **[D] (owner, 2026-11-04)**: “Moreover: through the header, it must be possible to switch what specific document the center column editor is editing: so a selector for lorebooks and presets for each respective editor makes sense. Chats already have this in the form of the branch switcher.”
+
+- **[P] (centerheader, 2026-11-04)**: Reuse the chat height token through one registered header frame; contribute title/actions from each view and navigate with shared same-kind selectors and existing draft guards.
+
+**Built (centerheader, 2026-11-04):** These decisions are implemented and obsolete as implementation requirements; see ARCHITECTURE §5 and §14.6.
+
 - **[D] Owner, 2026-11-04 (snippettitle):** “After renaming a snippet, its History dialog/label must show the new title”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
+
+- **[D] Owner, 2026-11-04 (navtiles Home and Library copy):** “The tool tip for library implies the library doesn't have characters but it literally opens on them. I think "characters" in this footer menu should probably become "home", it's the home page.” Rename the footer tile Home with a home icon; describe Library's actual contents, including characters. **[P]** Home: “Open the home page.” Library: “Browse characters, personas, lorebooks and presets.” **Built; obsolete as an implementation requirement**, see ARCHITECTURE §5.
+
+- **[D] Owner, 2026-11-04 (navtiles trial):** “turn it into a series of buttons/tabs with icon+text under, styled similarly to our right-sidebar tabs”; “on one row if space permits, but split into multiple rows (they all need to always be visible) responsively.” Initially trialled on `ui/next`; approved for master above. **[P]** Reuse panel-tool styling on route links, balance wrapping by measured label widths, and keep the account/recovery row below. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §5.
 
 - **[D] Owner, 2026-11-04 (historyport approval):** “The history UI is fine now.” Port the approved History redesign to master, retaining side-panel History access. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 

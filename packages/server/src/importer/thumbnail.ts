@@ -6,7 +6,7 @@ import { readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Effect } from "effect"
 import { isMediaPath } from "../db/media.ts"
-import { type AvatarCrop, cropKey, cropPixels, defaultCrop, MEDIA_WIDTHS } from "@rp/shared/media.ts"
+import { type AvatarCrop, picturePixels, cropKey, cropPixels, defaultCrop, MEDIA_WIDTHS } from "@rp/shared/media.ts"
 import { ThumbnailFailed } from "./ops.ts"
 
 sharp.concurrency(1)
@@ -111,9 +111,31 @@ const derive = async (dataDir: string, path: string, widths: ReadonlyArray<numbe
   return done
 }
 
+/** Re-encode the Picture cut on a format worker; the original stays untouched. */
+export const renderPicture = async (bytes: Uint8Array, crop: AvatarCrop) => {
+  const decoded = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS })
+    .rotate()
+    .raw()
+    .timeout({ seconds: 20 })
+    .toBuffer({ resolveWithObject: true })
+  return sharp(decoded.data, { raw: decoded.info })
+    .extract(picturePixels(crop, decoded.info.width, decoded.info.height))
+    .png()
+    .toBuffer()
+}
+
 export const thumbnail = (input: { dataDir: string; path: string; width: number; crop?: AvatarCrop | null }) =>
   Effect.tryPromise({
-    try: async () => (await derive(input.dataDir, input.path, [input.width], input.crop)).get(input.width)!,
+    try: async () => {
+      if (input.width !== 0)
+        return (await derive(input.dataDir, input.path, [input.width], input.crop)).get(input.width)!
+      if (!isMediaPath(input.path) || !input.crop) throw new Error("invalid picture")
+      const path = `${input.path}.picture-v1-${cropKey(input.crop)}.png`
+      const target = join(input.dataDir, path)
+      if (!(await exists(target)))
+        await write(target, await renderPicture(await readFile(join(input.dataDir, input.path)), input.crop))
+      return { path, original: false }
+    },
     catch: () => new ThumbnailFailed()
   })
 

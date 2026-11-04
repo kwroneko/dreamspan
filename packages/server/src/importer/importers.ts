@@ -177,7 +177,13 @@ const exportedCrop = (card: CardDoc, avatar: Uint8Array | null): CardDoc => {
   const { [OUR_EXTENSION]: _ours, ...others } = card.extensions
   const extensions = Object.keys(rest).length > 0 ? { ...others, [OUR_EXTENSION]: rest } : others
   const crop = Predicate.isObject(carried)
-    ? { x: carried.x, y: carried.y, width: carried.width, height: carried.height }
+    ? {
+        x: carried.x,
+        y: carried.y,
+        width: carried.width,
+        height: carried.height,
+        ...(carried.picture ? { picture: carried.picture } : {})
+      }
     : null
   const image = avatar === null ? null : describeImage(avatar)
   const sameImage =

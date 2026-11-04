@@ -74,7 +74,7 @@ async function checkStars(page: Page, scope: Locator, surface: "home" | "sidebar
     await tile.scrollIntoViewIfNeeded()
     await star.scrollIntoViewIfNeeded()
     await expect(tile.getByRole("button", { name: `Forks of ${name}`, exact: true })).toHaveCount(i % 4 >= 2 ? 1 : 0)
-    if (surface === "cast") await expect(tile.getByText("In chat", { exact: true })).toHaveCount(i < 4 ? 1 : 0)
+    if (surface === "cast") await expect(tile.getByText("In this chat", { exact: true })).toHaveCount(i < 4 ? 1 : 0)
     await page.mouse.move(0, 0)
     await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
     await expect(star).toHaveCSS("opacity", i % 2 ? "1" : "0")
