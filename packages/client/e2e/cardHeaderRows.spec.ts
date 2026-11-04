@@ -82,6 +82,25 @@ async function structure(header: Locator, panel = true) {
   }
   for (let i = 1; i < geometry.rows.length; i++)
     expect(geometry.rows[i]!.y - geometry.rows[i - 1]!.bottom).toBeCloseTo(4, 0)
+  if (panel) {
+    const rhythm = await header.evaluate((root) => {
+      const row = (name: string) => root.querySelector(`[data-card-header-row="${name}"]`)!.getBoundingClientRect()
+      const icon = root.querySelector<SVGSVGElement>('[data-card-header-row="persona"] button svg')!
+      const svg = icon.getBoundingClientRect()
+      // The person path starts at x=4 with a 2-unit round stroke in a 24-unit viewBox.
+      return {
+        left: svg.x + (3 / 24) * svg.width,
+        textLeft: row("nickname").x,
+        heights: [row("nickname").height, row("usage").height, row("persona").height]
+      }
+    })
+    expect(rhythm.left).toBeCloseTo(rhythm.textLeft, 0)
+    expect(rhythm.heights).toEqual([28, 28, 28])
+    const toggle = header.getByRole("button", { name: "Persona", exact: true })
+    const bounds = (await toggle.boundingBox())!
+    expect(bounds.height).toBe(28)
+    expect(bounds.width).toBe((await toggle.getAttribute("aria-pressed")) === "true" ? 88 : 32)
+  }
 }
 
 for (const width of [390, 1024, 1440])
@@ -128,7 +147,13 @@ for (const width of [390, 1024, 1440])
           const save = identity.getByRole("group", { name: "Save", exact: true })
           const at = (await save.boundingBox())!,
             row = (await identity.boundingBox())!
-          expect(row.x + row.width - at.x - at.width).toBeLessThanOrEqual(1)
+          const end =
+            view === "panel"
+              ? (await identity
+                  .getByRole("button", { name: `Open ${card.name} in the full editor`, exact: true })
+                  .boundingBox())!
+              : at
+          expect(row.x + row.width - end.x - end.width).toBeLessThanOrEqual(1)
           const usage = header.locator('[data-card-header-row="usage"]')
           await expect(usage.getByRole("link", { name: "1 chat", exact: true })).toBeVisible()
           await expect(usage.locator("[data-card-tokens]")).toContainText("permanent")
