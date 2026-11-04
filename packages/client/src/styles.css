@@ -753,16 +753,19 @@ main:has(> [data-fill]) {
   .fork-row-open:has([data-row-portraits] > :nth-child(2)) [data-row-portraits] > :nth-child(2) {
     margin-inline-start: -1rem;
   }
+  .fork-row-open:has([data-row-portraits] > :nth-child(2)) [data-row-text] {
+    gap: 0.25rem;
+  }
   .fork-row-open:has([data-row-portraits] > :nth-child(2)) [data-row-when] {
-    min-height: 2rem;
-    padding-inline-end: 2.5rem;
-    display: flex;
-    align-items: end;
+    margin-top: 0;
   }
   .fork-row-open:has([data-row-portraits] > :nth-child(2)) + [data-row-actions] {
     position: absolute;
-    inset-block: 0.5rem;
+    inset-block-start: 0.5rem;
     inset-inline-end: var(--row-action-inset, 0.5rem);
+    flex-direction: row-reverse;
+    align-items: center;
+    gap: 0.5rem;
   }
 }
 @container fork-row (width < 14.4375rem) {
@@ -775,16 +778,19 @@ main:has(> [data-fill]) {
     height: 2.25rem;
     font-size: 0.625rem;
   }
+  .fork-row-open:has([data-row-portraits]) [data-row-text] {
+    gap: 0.25rem;
+  }
   .fork-row-open:has([data-row-portraits]) [data-row-when] {
-    min-height: 2rem;
-    padding-inline-end: 2.5rem;
-    display: flex;
-    align-items: end;
+    margin-top: 0;
   }
   .fork-row-open:has([data-row-portraits]) + [data-row-actions] {
     position: absolute;
-    inset-block: 0.5rem;
+    inset-block-start: 0.5rem;
     inset-inline-end: var(--row-action-inset, 0.5rem);
+    flex-direction: row-reverse;
+    align-items: center;
+    gap: 0.5rem;
   }
 }
 /* Keep the name before the count. The filter's max-content minimum then makes

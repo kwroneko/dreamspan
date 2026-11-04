@@ -156,9 +156,14 @@ for (const [scene, panelWidth, viewport] of [
         expect(result.style).toEqual({ wrap: "normal", clamp: "2" })
         expect(result.pin.right).toBeCloseTo(result.row.right - 9, 0)
         expect(result.pin.top).toBeCloseTo(result.row.top + 13, 0)
-        expect(result.branches.right).toBeCloseTo(result.pin.right, 0)
-        expect(result.branches.bottom).toBeCloseTo(result.date.bottom, 0)
-        expect(result.pin.bottom).toBeLessThanOrEqual(result.branches.top)
+        if (narrow) {
+          expect(result.branches.right + 8).toBeCloseTo(result.pin.left, 0)
+          expect(result.branches.top).toBeCloseTo(result.pin.top, 0)
+        } else {
+          expect(result.branches.right).toBeCloseTo(result.pin.right, 0)
+          expect(result.branches.bottom).toBeCloseTo(result.date.bottom, 0)
+          expect(result.pin.bottom).toBeLessThanOrEqual(result.branches.top)
+        }
       }
     }
     const bar = panel.locator('[aria-label="Chat filters and sorting"]')

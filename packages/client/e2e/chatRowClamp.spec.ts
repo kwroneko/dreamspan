@@ -118,7 +118,9 @@ for (const width of [1440, 390])
             maxRowHeight:
               Math.max(
                 row.querySelector("[data-branches-button]") ? 72 : 48,
-                number(style.lineHeight) * 2 + metadataHeight
+                number(style.lineHeight) * 2 +
+                  metadataHeight +
+                  number(getComputedStyle(node.parentElement!).rowGap) * others.length
               ) +
               vertical(button) +
               vertical(row) +
@@ -142,7 +144,7 @@ for (const width of [1440, 390])
             if (!measurement.stacked) expect(accessory.left).toBeGreaterThanOrEqual(measurement.openRight)
             expect(
               Math.abs(
-                accessory.branches
+                accessory.branches && !measurement.stacked
                   ? accessory.bottom - measurement.dateBottom
                   : accessory.top - (measurement.stacked ? measurement.rowTop + 13 : measurement.titleTop)
               )
@@ -152,12 +154,18 @@ for (const width of [1440, 390])
           expect(accessory.height).toBe(accessory.portrait ? (measurement.stacked ? 36 : 48) : 32)
         }
         const actions = measurement.accessories.filter((accessory) => !accessory.portrait)
-        expect(measurement.railWidth).toBeCloseTo(Math.max(...actions.map((action) => action.width)), 0)
+        if (!measurement.stacked)
+          expect(measurement.railWidth).toBeCloseTo(Math.max(...actions.map((action) => action.width)), 0)
         if (actions.length === 2) {
           const pin = actions.find((action) => !action.branches)!
           const branches = actions.find((action) => action.branches)!
-          expect(pin.bottom).toBeLessThanOrEqual(branches.top)
-          expect(pin.right).toBeCloseTo(branches.right, 0)
+          if (measurement.stacked) {
+            expect(branches.right + 8).toBeCloseTo(pin.left, 0)
+            expect(branches.top).toBeCloseTo(pin.top, 0)
+          } else {
+            expect(pin.bottom).toBeLessThanOrEqual(branches.top)
+            expect(pin.right).toBeCloseTo(branches.right, 0)
+          }
         }
         await button.scrollIntoViewIfNeeded()
         await button.hover()
