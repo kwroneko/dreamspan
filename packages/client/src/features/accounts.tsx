@@ -61,7 +61,13 @@ function OwnPasswordForm() {
       </Field>
       <ErrorAlert error={action.error} title="The password wasn't changed" />
       <div>
-        <Button type="submit" variant="primary" pending={action.pending} disabled={nextEmpty}>
+        <Button
+          hint="Opens the password form."
+          type="submit"
+          variant="primary"
+          pending={action.pending}
+          disabled={nextEmpty}
+        >
           {session.via === "local" ? "Set password" : "Change password"}
         </Button>
       </div>
@@ -141,8 +147,16 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => v
         </Field>
         <ErrorAlert error={action.error} title="No user created" />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={handle === "" || passwordEmpty}>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Creates the user account."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={handle === "" || passwordEmpty}
+          >
             Create user
           </Button>
         </DialogActions>
@@ -176,8 +190,16 @@ function SetPasswordDialog({ user, onOpenChange }: { user: UserAccount; onOpenCh
         </Field>
         <ErrorAlert error={action.error} title="The password wasn't set" />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={passwordEmpty}>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Sets this user’s password."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={passwordEmpty}
+          >
             Set password
           </Button>
         </DialogActions>
@@ -228,7 +250,7 @@ function UserRow({ user, self }: { user: UserAccount; self: UserId }) {
                 Enable
               </Button>
             ) : (
-              <Button variant="ghost" onClick={() => setDialog("disable")}>
+              <Button hint="Disables this user’s account." variant="ghost" onClick={() => setDialog("disable")}>
                 Disable
               </Button>
             )}
@@ -266,7 +288,7 @@ function UsersPage() {
         about="There's no sign-up: an admin creates each account."
         actions={
           session.via === "proxy" ? undefined : (
-            <Button variant="primary" onClick={() => setCreating(true)}>
+            <Button hint="Opens a form to create a user." variant="primary" onClick={() => setCreating(true)}>
               New user
             </Button>
           )

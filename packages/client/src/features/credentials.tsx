@@ -76,8 +76,16 @@ export function AllowHostDialog({
         </Field>
         <ErrorAlert error={action.error} title="Not allowed" />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={keyEmpty || origin === null}>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Allows use of this credential."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={keyEmpty || origin === null}
+          >
             Allow
           </Button>
         </DialogActions>
@@ -214,6 +222,7 @@ function ReplaceKeyDialog({
               />
             </Field>
             <Button
+              hint="Adds this API key."
               disabled={typedOrigin === null}
               onClick={() => {
                 if (typedOrigin === null) return
@@ -234,8 +243,16 @@ function ReplaceKeyDialog({
         )}
         <ErrorAlert error={action.error} title="The key wasn't replaced" />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={keyEmpty}>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Replaces the saved API key."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={keyEmpty}
+          >
             {stranded.length > 0 && warned === strandedKey ? "Replace anyway" : "Replace key"}
           </Button>
         </DialogActions>
@@ -291,8 +308,11 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
         </Field>
         <ErrorAlert error={action.error} title="The key wasn't saved" />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
           <Button
+            hint="Saves the API key."
             type="submit"
             variant="primary"
             pending={action.pending}
@@ -333,8 +353,16 @@ function RenameDialog({ credential, onOpenChange }: { credential: Credential; on
         </Field>
         <ErrorAlert error={action.error} />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={name.trim() === ""}>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Saves the credential’s new name."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={name.trim() === ""}
+          >
             Rename
           </Button>
         </DialogActions>
@@ -379,7 +407,11 @@ function CredentialList({
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="ghost" onClick={() => setOpen({ dialog: "rename", credential })}>
+                <Button
+                  hint="Opens the credential’s name editor."
+                  variant="ghost"
+                  onClick={() => setOpen({ dialog: "rename", credential })}
+                >
                   Rename
                 </Button>
                 <Button

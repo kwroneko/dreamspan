@@ -1,3 +1,4 @@
+import { Tooltip } from "../ui/Tooltip.tsx"
 // The login page (ARCHITECTURE §4). It shows the form only when the server says a
 // session is required; otherwise it says why no login is needed.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
@@ -104,7 +105,13 @@ function LoginForm({ next, passwordChanged }: { next: string; passwordChanged: b
       <Field label="Password">
         <PasswordInput name="password" autoComplete="current-password" onEmptyChange={setPasswordEmpty} />
       </Field>
-      <Button type="submit" variant="primary" pending={pending} disabled={throttled || handle === "" || passwordEmpty}>
+      <Button
+        hint="Signs in with these credentials."
+        type="submit"
+        variant="primary"
+        pending={pending}
+        disabled={throttled || handle === "" || passwordEmpty}
+      >
         Log in
       </Button>
     </form>
@@ -135,9 +142,11 @@ function SignedIn({ session, next }: { session: Session; next: string }) {
         {text && <p className="mt-1 text-muted">{text}</p>}
       </Alert>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Link to={next} className={buttonClass("primary")}>
-          Continue
-        </Link>
+        <Tooltip label="Continues to the app.">
+          <Link to={next} className={buttonClass("primary")}>
+            Continue
+          </Link>
+        </Tooltip>
         {session.via === "session" && <LogoutButton />}
       </div>
     </div>
@@ -166,7 +175,7 @@ function LoginPage() {
               <ErrorAlert
                 error={error}
                 actions={
-                  <Button variant="ghost" onClick={retry}>
+                  <Button hint="Retries loading this view." variant="ghost" onClick={retry}>
                     Try again
                   </Button>
                 }

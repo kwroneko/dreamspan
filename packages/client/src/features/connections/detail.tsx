@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
@@ -203,6 +204,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
         />
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
+            hint="Saves the connection settings."
             type="submit"
             variant="primary"
             pending={action.pending}
@@ -211,7 +213,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
             Save
           </Button>
           {durable.text !== JSON.stringify(draftOf(connection)) && (
-            <Button variant="ghost" onClick={discard}>
+            <Button hint="Discards unsaved connection changes." variant="ghost" onClick={discard}>
               Discard changes
             </Button>
           )}
@@ -271,8 +273,11 @@ function SetKeyDialog({
         <AddressChanged from={opened} to={origin} />
         <ErrorAlert error={action.error} />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
           <Button
+            hint="Saves the API key for this connection."
             type="submit"
             variant="primary"
             pending={action.pending}
@@ -324,8 +329,16 @@ function UseSavedKeyDialog({
         </Field>
         <ErrorAlert error={action.error} />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={credentialId === null}>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Uses the selected API key for this connection."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={credentialId === null}
+          >
             Use this key
           </Button>
         </DialogActions>
@@ -531,6 +544,7 @@ function HeadersDialog({
               />
             </Field>
             <Button
+              hint="Removes this request header."
               variant="ghost"
               aria-label={`Remove header ${index + 1}`}
               onClick={() => setRows(rows.filter((other) => other.id !== row.id))}
@@ -541,6 +555,7 @@ function HeadersDialog({
         ))}
         <div>
           <Button
+            hint="Adds an empty request header."
             variant="ghost"
             onClick={() =>
               setRows([...rows, { id: Math.max(-1, ...rows.map((row) => row.id)) + 1, name: "", valueFor: null }])
@@ -552,8 +567,16 @@ function HeadersDialog({
         <AddressChanged from={opened} to={origin} />
         <ErrorAlert error={action.error} />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={missingValue}>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Saves the request headers."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={missingValue}
+          >
             {filled.length === 0 ? "Remove all headers" : "Save headers"}
           </Button>
         </DialogActions>
@@ -572,7 +595,7 @@ export function HeadersSection({ connection, kinds }: ConnectionSectionProps) {
         title="Custom headers"
         about="For gateways and proxies that need them: sent with every request."
         actions={
-          <Button onClick={() => setOpen(true)}>
+          <Button hint="Opens the request header editor." onClick={() => setOpen(true)}>
             {connection.headerNames.length > 0 ? "Replace headers" : "Add headers"}
           </Button>
         }
@@ -662,7 +685,13 @@ export function RouteSection({ connection }: ConnectionSectionProps) {
         )}
         <ErrorAlert error={action.error} title="The route wasn't changed" />
         <div>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={mode === null || needsUrl}>
+          <Button
+            hint="Saves this connection’s route."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={mode === null || needsUrl}
+          >
             Save route
           </Button>
         </div>
@@ -686,6 +715,7 @@ export function TestSection({ connection }: ConnectionSectionProps) {
         about="See whether the connection works and which models it offers."
         actions={
           <Button
+            hint="Checks this connection and lists available models."
             pending={action.pending}
             onClick={async () => {
               setResult(null)
@@ -719,7 +749,7 @@ export function DeleteSection({ connection }: ConnectionSectionProps) {
         title="Delete the connection"
         about="Moves this connection to the bin, from which it can be restored later."
         actions={
-          <Button variant="danger" onClick={() => setOpen(true)}>
+          <Button hint="Moves this connection to the bin." variant="danger" onClick={() => setOpen(true)}>
             Delete
           </Button>
         }
@@ -756,9 +786,11 @@ export function ConnectionPage() {
         ) : (
           <EmptyState title="This connection doesn't exist">
             <p>It may have been deleted.</p>
-            <Link to="/settings/connections" className="text-accent underline-offset-4 hover:underline">
-              All connections
-            </Link>
+            <Tooltip label="Opens the connections list.">
+              <Link to="/settings/connections" className="text-accent underline-offset-4 hover:underline">
+                All connections
+              </Link>
+            </Tooltip>
           </EmptyState>
         )
       }}
@@ -773,9 +805,11 @@ function ConnectionView(props: ConnectionSectionProps) {
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         {/* On a phone the settings layout has the way back above the page. */}
-        <Link to="/settings/connections" className="hidden self-start text-sm text-muted hover:text-text md:block">
-          ← Connections
-        </Link>
+        <Tooltip label="Returns to Connections.">
+          <Link to="/settings/connections" className="hidden self-start text-sm text-muted hover:text-text md:block">
+            ← Connections
+          </Link>
+        </Tooltip>
         <CenterHeaderContent>
           <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{connection.name}</h1>
         </CenterHeaderContent>

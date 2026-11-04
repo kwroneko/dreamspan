@@ -531,6 +531,8 @@ Library copy audit (2026-11-04): creation, transfer, search, history, update, sh
 
 Chat copy audit (2026-11-04): message, summary, queue, history, branch, image and panel actions use the existing explanations. Action hints omit promises about retained text; redundant names-in-prompts, branch-name and summary-request introductions are removed. Lorebook hints name the book and its scope. Labels and actions are unchanged.
 
+Settings copy audit (2026-11-04): connection, model, key, account, network, pricing, global-regex and bin controls explain their actions. Pricing and global-regex introductions live in heading question-mark help; explanations keep technical terms and omit recovery instructions.
+
 ### 3.11 Recycle bin
 
 Delete explanations use “Moves this <thing> to the bin, from which it can be restored later.” without additional text. Delete toasts say “<Thing> moved to the bin.” and retain the Undo and Open the bin actions. Cancel and Discard explanations name the action without recovery instructions.

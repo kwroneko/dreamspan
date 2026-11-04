@@ -69,11 +69,6 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
         void save()
       }}
     >
-      <p className="text-sm text-muted">
-        Global scripts run in every chat, before the preset's and the character's. Unless it's set to change only what's
-        shown or only the prompt sent, a script rewrites messages as they're saved; you can still see and restore a
-        message's original text.
-      </p>
       <UserDraftStatus draft={durable} history />
       {values.revision !== saved.revision && (
         <Alert tone="warning" title="The global scripts changed in another tab or device">
@@ -163,7 +158,7 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
           >
             Add a script
           </Button>
-          <Button type="submit" variant="primary" pending={action.pending}>
+          <Button hint="Saves the global regex scripts." type="submit" variant="primary" pending={action.pending}>
             Save the scripts
           </Button>
           <Button
@@ -195,7 +190,11 @@ export function GlobalRegexPage() {
   useTitle("Regex scripts")
   return (
     <Card>
-      <CardHeader center title="Global regex scripts" />
+      <CardHeader
+        center
+        title="Global regex scripts"
+        about="Runs scripts in every chat, before preset and character scripts. Scripts rewrite saved messages unless restricted to display or prompt text."
+      />
       <AsyncView atom={globalRegexAtom}>{(saved) => <GlobalRegexForm saved={saved} />}</AsyncView>
     </Card>
   )

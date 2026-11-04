@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
@@ -564,7 +565,9 @@ export function ModelSettingsEditor({
         />
       </Field>
       <details>
-        <summary className="cursor-pointer text-sm text-muted">Advanced capabilities</summary>
+        <Tooltip label="Shows advanced model capabilities.">
+          <summary className="cursor-pointer text-sm text-muted">Advanced capabilities</summary>
+        </Tooltip>
         <Field
           label="Capability overrides (JSON)"
           about='For example: {"maxImages":8,"midChatSystem":true,"cacheTtlS":300,"cacheBreakpoints":"explicit","compat":{"supportsSystemRole":false}}. For settings shown above, use those controls instead.'
@@ -737,8 +740,16 @@ function AddModelDialog({
         </Field>
         <ErrorAlert error={action.error} title="Not added" />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={key.trim() === ""}>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Adds this model to the connection."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={key.trim() === ""}
+          >
             Add model
           </Button>
         </DialogActions>
@@ -787,7 +798,12 @@ function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionPr
         <ErrorAlert error={hide.error} />
       </div>
       <div className="flex shrink-0 gap-2">
-        <Button variant="ghost" onClick={() => setEditing(true)} aria-label={`Edit ${model.key}`}>
+        <Button
+          hint="Opens this model’s settings."
+          variant="ghost"
+          onClick={() => setEditing(true)}
+          aria-label={`Edit ${model.key}`}
+        >
           Edit
         </Button>
         <Button

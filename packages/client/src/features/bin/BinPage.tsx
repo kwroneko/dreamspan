@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The recycle bin (DESIGN §6.2): what the user deleted, newest first, to restore where it was
 // or delete for good (the one place that asks first), and the text recovered from drafts.
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
@@ -127,14 +128,16 @@ function RestoredLink({ item }: { item: BinItem }) {
   return (
     <span className="text-sm text-success">
       Restored.{" "}
-      <Link
-        to="/chats/$chatId"
-        params={{ chatId }}
-        search={slotId === null ? {} : { slot: slotId }}
-        className="text-accent underline-offset-4 hover:underline"
-      >
-        Open it
-      </Link>
+      <Tooltip label="Opens the item’s original location.">
+        <Link
+          to="/chats/$chatId"
+          params={{ chatId }}
+          search={slotId === null ? {} : { slot: slotId }}
+          className="text-accent underline-offset-4 hover:underline"
+        >
+          Open it
+        </Link>
+      </Tooltip>
     </span>
   )
 }
@@ -189,7 +192,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
           </Button>
           <Button
             variant="ghost"
-            hint="Erases it so it can’t be restored. You see what it affects and confirm first."
+            hint="Permanently deletes this item after confirmation."
             onClick={() => {
               setExpectedForkIds(null)
               setConfirming(true)
@@ -258,7 +261,7 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
         <Button
           variant="ghost"
           disabled={!end}
-          hint="Deletes everything in this list for good, after you confirm. Recovered text stays."
+          hint="Permanently deletes every item in this list after confirmation."
           onClick={() => {
             setExpectedForkIds(null)
             setEmptying(shown.map((item) => item.id))
@@ -274,7 +277,7 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
         ))}
       </ul>
       {!end && (
-        <Button className="self-start" pending={action.pending} onClick={loadMore}>
+        <Button hint="Loads more deleted items." className="self-start" pending={action.pending} onClick={loadMore}>
           Load more
         </Button>
       )}
@@ -351,11 +354,12 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
             }
           }}
           title={`Recovered from ${source}`}
-          description="Copy any text you want to keep. This doesn’t restore it to its original place."
+          description="View and copy this recovered text."
         >
           <Textarea textActions aria-label="Recovered text" readOnly rows={10} value={full} />
           <DialogActions>
             <Button
+              hint="Copies this recovered text."
               variant="primary"
               onClick={async () => {
                 await navigator.clipboard.writeText(full).then(
@@ -421,7 +425,7 @@ function RecoveredTexts({ first }: { first: ReadonlyArray<RecoveredText> }) {
         ))}
       </ul>
       {!end && (
-        <Button className="self-start" pending={action.pending} onClick={loadMore}>
+        <Button hint="Loads more recovered text." className="self-start" pending={action.pending} onClick={loadMore}>
           Load more
         </Button>
       )}
