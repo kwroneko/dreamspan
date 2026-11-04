@@ -136,9 +136,13 @@ export function CardTokensRow({
   label: string
   personaLast?: boolean
 }) {
-  // Preserve the button's hit area; its visible person stroke sits 10 px inside it.
+  // The panel button owns its aligned box; no part extends into the portrait gutter.
   const persona = (
-    <div data-card-header-row="persona" className={`flex h-7 min-w-0 items-center ${personaLast ? "-ml-2.5" : ""}`}>
+    <div
+      data-card-header-row="persona"
+      data-persona-align-start={personaLast || undefined}
+      className="flex h-7 min-w-0 items-center"
+    >
       <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
     </div>
   )

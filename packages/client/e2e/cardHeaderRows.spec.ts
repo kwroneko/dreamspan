@@ -1,5 +1,5 @@
 // Four card header rows stay within the portrait at normal widths; identity controls may wrap at the panel minimum.
-import { mkdirSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -94,11 +94,13 @@ async function structure(header: Locator, panel = true, allowWrap = false) {
       // The person path starts at x=4 with a 2-unit round stroke in a 24-unit viewBox.
       return {
         left: svg.x + (3 / 24) * svg.width,
+        boxLeft: icon.parentElement!.getBoundingClientRect().x,
         textLeft: row("nickname").x,
         heights: [row("nickname").height, row("usage").height, row("persona").height]
       }
     })
     expect(rhythm.left).toBeCloseTo(rhythm.textLeft, 0)
+    expect(rhythm.boxLeft).toBeCloseTo(rhythm.textLeft, 0)
     expect(rhythm.heights).toEqual([28, 28, 28])
     const toggle = header.getByRole("button", { name: "Persona", exact: true })
     const bounds = (await toggle.boundingBox())!
@@ -173,11 +175,56 @@ for (const width of [390, 1024, 1440])
             await expect(toggle).toHaveCSS("transition-duration", "0.15s")
             await expect(toggle).toHaveCSS("transition-property", /width/)
           }
+          const captureStates = async (persona: boolean) => {
+            if (!work || view !== "panel" || index !== 0 || width === 1024) return
+            mkdirSync(work, { recursive: true })
+            for (const state of ["rest", "hover", "focus"]) {
+              await toggle.evaluate((el) => el.blur())
+              await page.mouse.move(0, 0)
+              if (state === "hover") await toggle.hover()
+              if (state === "focus") {
+                await toggle.focus()
+                await page.keyboard.press("Tab")
+                await page.keyboard.press("Shift+Tab")
+                await expect(toggle).toBeFocused()
+                expect(await toggle.evaluate((el) => el.matches(":focus-visible"))).toBe(true)
+                await expect(toggle).toHaveCSS("--tw-ring-inset", "inset")
+                await expect(toggle).toHaveCSS("--tw-ring-offset-width", "0px")
+              }
+              await structure(header)
+              const measured = await header.evaluate((root) => {
+                const row = (name: string) =>
+                  root.querySelector(`[data-card-header-row="${name}"]`)!.getBoundingClientRect()
+                const button = root.querySelector<HTMLButtonElement>('[data-card-header-row="persona"] button')!
+                const svg = button.querySelector("svg")!.getBoundingClientRect()
+                return {
+                  nameLeft: row("identity").x,
+                  nicknameLeft: row("nickname").x,
+                  countsLeft: row("usage").x,
+                  boxLeft: button.getBoundingClientRect().x,
+                  iconLeft: svg.x + (svg.width * 3) / 24,
+                  focusShadow: getComputedStyle(button).boxShadow,
+                  gaps: [
+                    row("nickname").top - row("identity").bottom,
+                    row("usage").top - row("nickname").bottom,
+                    row("persona").top - row("usage").bottom
+                  ]
+                }
+              })
+              const file = join(work, `states-${width}-${theme}-${persona ? "persona" : "character"}-${state}`)
+              writeFileSync(`${file}.json`, JSON.stringify(measured, null, 2))
+              await header.screenshot({ path: `${file}.png` })
+            }
+            await toggle.evaluate((el) => el.blur())
+            await page.mouse.move(0, 0)
+          }
+          await captureStates(false)
           const off = (await toggle.boundingBox())!
           await toggle.click()
           await expect(toggle).toHaveAttribute("aria-pressed", "true")
           if (view === "panel") await expect(header.locator("[data-persona-badge]")).toHaveCount(0)
           else await expect(header.locator("[data-persona-badge]")).toHaveText("Persona")
+          await captureStates(true)
           await expect(toggle).toHaveAccessibleDescription(ON)
           await expect(toggle).toBeEnabled()
           await page.mouse.move(0, 0)
