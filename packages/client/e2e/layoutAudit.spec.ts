@@ -1583,6 +1583,7 @@ for (const width of [1440, 390])
       const findings: unknown[] = []
       const gaps: unknown[] = []
       const geometry: unknown[] = []
+      const rowHeights: unknown[] = []
       for (const kind of ["note", "card"] as const) {
         const id = process.env[kind === "note" ? "LAYOUT_AUDIT_REVISION_NOTE" : "LAYOUT_AUDIT_REVISION_CARD"]
         expect(id).toBeTruthy()
@@ -1633,10 +1634,13 @@ for (const width of [1440, 390])
         await expect(revisions.nth(1).getByRole("button", { name: /^Restore to revision / })).toBeEnabled()
         await expect(dialog.getByText("Saved", { exact: true })).toHaveCount(0)
         await expect(revisions.last().getByText("Imported", { exact: true })).toBeVisible()
-        const actions = revisions.nth(1).getByRole("button")
+        const actions = revisions
+          .nth(1)
+          .getByRole("group", { name: "Revision 2 actions", exact: true })
+          .getByRole("button")
         await expect(actions.nth(0)).toHaveText("Restore to revision 2")
         await expect(actions.nth(1)).toHaveText("Compare")
-        const message = await revisions.nth(1).locator("p").first().boundingBox()
+        const message = await revisions.nth(1).locator("[data-revision-message-row]").boundingBox()
         const restoreBox = await actions.nth(0).boundingBox()
         expect(message!.y + message!.height).toBeLessThanOrEqual(restoreBox!.y)
         await measurePadding("list")
@@ -1645,6 +1649,59 @@ for (const width of [1440, 390])
           path: info.outputPath(`${kind}-actions-${width}-${theme}.png`),
           animations: "disabled"
         })
+        const measureRow = async (index: number, state: string) => {
+          const height = await revisions
+            .nth(index)
+            .locator("[data-revision-message-row]")
+            .evaluate((el) => el.getBoundingClientRect().height)
+          rowHeights.push({ kind, state, height })
+          writeFileSync(join(work, `message-rows-${width}-${theme}.json`), JSON.stringify(rowHeights, null, 2))
+          expect(height).toBe(32)
+        }
+        for (const [index, state] of [
+          [2, "none"],
+          [1, "short"],
+          [0, "long-collapsed"]
+        ] as const) {
+          await measureRow(index, state)
+          await revisions.nth(index).screenshot({
+            path: info.outputPath(`${kind}-message-${state}-${width}-${theme}.png`),
+            animations: "disabled"
+          })
+        }
+        await revisions.last().getByRole("button", { name: "Add message to Revision 1", exact: true }).click()
+        await measureRow(2, "empty-editing")
+        await revisions.last().screenshot({
+          path: info.outputPath(`${kind}-message-empty-editing-${width}-${theme}.png`),
+          animations: "disabled"
+        })
+        await dialog.getByRole("textbox", { name: "Message of Revision 1", exact: true }).press("Escape")
+        const longText = revisions.first().locator("span.truncate")
+        const fullMessage = await longText.innerText()
+        await longText.hover()
+        await expect(
+          page.locator('[data-layout-overlay="Tooltip floats above the page"]').getByText(fullMessage, { exact: true })
+        ).toBeVisible()
+        await page.mouse.move(0, 0)
+        await revisions.first().getByRole("button", { name: "Expand message of Revision 3", exact: true }).click()
+        await expect(
+          revisions.first().getByRole("region", { name: "Full message of Revision 3", exact: true })
+        ).toHaveText(fullMessage)
+        await measureRow(0, "long-expanded")
+        await audit("message-expanded")
+        await revisions.first().screenshot({
+          path: info.outputPath(`${kind}-message-long-expanded-${width}-${theme}.png`),
+          animations: "disabled"
+        })
+        await revisions.first().getByRole("button", { name: "Collapse message of Revision 3", exact: true }).click()
+        await revisions.first().getByRole("button", { name: "Edit message of Revision 3", exact: true }).click()
+        await measureRow(0, "editing")
+        await audit("message-inline-edit")
+        await revisions.first().screenshot({
+          path: info.outputPath(`${kind}-message-editing-${width}-${theme}.png`),
+          animations: "disabled"
+        })
+        await dialog.getByRole("textbox", { name: "Message of Revision 3", exact: true }).press("Escape")
         const compare = revisions.nth(1).getByRole("button", { name: /^Revision \d+ / })
         const before = await compare.boundingBox()
         await compare.click()
@@ -1753,7 +1810,7 @@ for (const width of [1440, 390])
         await latestCompare.click()
         await revisions
           .first()
-          .getByRole("button", { name: /^Change the message/ })
+          .getByRole("button", { name: /^Edit message of/ })
           .click()
         await expect(dialog.getByRole("textbox", { name: /^Message of Revision/ })).toBeVisible()
         await audit("message")

@@ -18,7 +18,12 @@ export function InlineRename({
   fieldLabel,
   goTo,
   highlights = [],
-  lastLine = false
+  lastLine = false,
+  editLabel,
+  saveLabel = "Save the name",
+  cancelLabel = "Cancel renaming",
+  maxLength,
+  onEditingChange
 }: {
   /** The name as it is, what the field starts with. */
   value: string
@@ -42,9 +47,15 @@ export function InlineRename({
   highlights?: ReadonlyArray<HighlightRange>
   /** Position the pencil after the last visible line of [data-inline-rename-text]. */
   lastLine?: boolean
+  editLabel?: string
+  saveLabel?: string
+  cancelLabel?: string
+  maxLength?: number
+  onEditingChange?: (editing: boolean) => void
 }) {
   // Mounted by a Go to (a prompt opened at a match in its name): already renaming.
   const [typed, setTyped] = useState<string | null>(() => (goTo ? value : null))
+  useEffect(() => onEditingChange?.(typed !== null), [typed, onEditingChange])
   const input = useRef<HTMLInputElement>(null)
   const display = useRef<HTMLSpanElement>(null)
   useLayoutEffect(() => {
@@ -117,7 +128,7 @@ export function InlineRename({
       >
         {children ?? <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>}
         <IconButton
-          label={`Rename ${label}`}
+          label={editLabel ?? `Rename ${label}`}
           hint={hint}
           icon="edit"
           data-layout-overlay={
@@ -135,6 +146,7 @@ export function InlineRename({
           aria-label={fieldLabel ?? `New name for ${label}`}
           ref={input}
           value={typed}
+          maxLength={maxLength}
           autoFocus
           onFocus={(event) => {
             if (!goTo) event.currentTarget.select()
@@ -154,13 +166,18 @@ export function InlineRename({
         />
       </SearchHighlights>
       <IconButton
-        label="Save the name"
-        hint="Save the name (Enter)"
+        label={saveLabel}
+        hint={`${saveLabel} (Enter)`}
         icon="check"
         disabled={pending || (!allowEmpty && typed.trim() === "")}
         onClick={() => void save()}
       />
-      <IconButton label="Cancel renaming" hint="Cancel (Escape)" icon="close" onClick={() => setTyped(null)} />
+      <IconButton
+        label={cancelLabel}
+        hint={cancelLabel === "Cancel renaming" ? "Cancel (Escape)" : `${cancelLabel} (Escape)`}
+        icon="close"
+        onClick={() => setTyped(null)}
+      />
     </span>
   )
 }

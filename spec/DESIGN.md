@@ -1021,6 +1021,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] Owner, 2026-11-04 (historyui inline messages):** “Move edit/add message to the row with the message text, and make it work like the title edit buttons, where the message turns into the edit box inline. Make sure that with or without message, the height of that row is the same. Messages that would span two rows, when rendered, get truncated with ellipsis. Hovering over them shows the full message in a popover, clicking the ellipsis also expands the message text into potentially multiple lines.” Use the shared pencil rename flow with Enter/Escape and confirm/cancel, a fixed-height message row, a full-text hover preview and an ellipsis toggle to expand/collapse the full message. **[P]** Keep a 32 px control strip and show expanded text below it so the ellipsis stays stationary. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
+
+
 - **[D] Owner, 2026-11-04 (historyui message and insets):** “1. The message has to be moved to above the button cluster, because we can't have it be randomly in between compare and the panel it opens. 2. Padding between the modal edges and the stuff inside the modal is uneven 3. see screenshot: no fields differ should get a bit more padding so its position matches where an accordion's text would be.” Put the revision message below the name/badges and above the actions; Compare's panel follows its action row. History has equal visible insets on all four edges, including when scrolling. “No fields differ.” starts at the same left offset as an accordion title. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 
 
