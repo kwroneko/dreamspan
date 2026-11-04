@@ -93,6 +93,15 @@ for (const width of [390, 1440])
       const editor = lore.getByRole("region", { name: `Lorebook ${book.label}`, exact: true })
       await capture(editor, "library-book")
       if (!process.env.PARITY_BEFORE) {
+        await expect(
+          editor.getByRole("navigation", { name: "Variants" }).getByRole("link", { name: "Waters variant" })
+        ).toBeVisible()
+        await editor.getByRole("button", { name: "Make a variant", exact: true }).click()
+        const variantDialog = page.getByRole("dialog", { name: "Make a variant", exact: true })
+        await expect(variantDialog.getByRole("textbox", { name: "Library label", exact: true })).toHaveValue(
+          "Waters (variant)"
+        )
+        await variantDialog.getByRole("button", { name: "Cancel", exact: true }).click()
         await editor.getByText("Book settings", { exact: false }).click()
         await editor.getByRole("textbox", { name: "Lorebook description", exact: true }).fill("Side-panel description")
         await capture(editor.locator("details").first(), "library-settings")

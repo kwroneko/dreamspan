@@ -15,6 +15,7 @@ import { ErrorAlert } from "../../actions.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
+import { RefVariants } from "./RefVariants.tsx"
 import { BookSettings } from "./LorebookForm.tsx"
 import { LorebookTable } from "./LorebookTable.tsx"
 import { RefName } from "./RefDialogs.tsx"
@@ -121,6 +122,7 @@ export function LorebookPanelEditor({
             <RecoveredNotice store={store} />
           </>
         )}
+        {root.length === 0 && <RefVariants store={store} />}
         {book && <BookSettings store={store} root={root} entries={book.entries.length} />}
         {book ? (
           <LorebookTable

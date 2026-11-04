@@ -1,3 +1,4 @@
+import { RefVariants } from "./RefVariants.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { DocumentSwitcher } from "./DocumentSwitcher.tsx"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
@@ -370,29 +371,7 @@ export function Editor({
               usedBy(usedByChats)
             )}
           </p>
-          {ref.kind !== "card" && variants.length > 1 && (
-            <nav aria-label="Variants" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-              <span className="text-muted">Variants:</span>
-              {variants.map((variant) =>
-                variant.id === ref.id ? (
-                  <span key={variant.id} aria-current="page" className="font-medium">
-                    {variant.label}
-                    {ref.kind !== "card" && variant.subtitle ? ` · ${variant.subtitle}` : ""}
-                  </span>
-                ) : (
-                  <Link
-                    key={variant.id}
-                    to="/library/$refId"
-                    params={{ refId: variant.id }}
-                    className="text-accent underline-offset-4 hover:underline"
-                  >
-                    {variant.label}
-                    {ref.kind !== "card" && variant.subtitle ? ` · ${variant.subtitle}` : ""}
-                  </Link>
-                )
-              )}
-            </nav>
-          )}
+          <RefVariants store={store} />
         </header>
 
         <div
