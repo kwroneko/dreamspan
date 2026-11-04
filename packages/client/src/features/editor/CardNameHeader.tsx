@@ -260,7 +260,7 @@ export function CardNameHeader({
       <Identity>
         <div
           data-card-header-row="identity"
-          className={`relative flex w-full min-w-0 items-center gap-1 ${centerTitle ? "[--card-name-min:1rem] max-sm:[&_[data-save-state]_button]:size-6!" : "flex-wrap"}`}
+          className={`relative flex w-full min-w-0 items-center gap-1 ${centerTitle ? "[--card-name-min:1rem] max-sm:[&_[data-save-state]_button]:size-6!" : ""}`}
         >
           <div className="flex min-w-[min(100%,calc(2*var(--card-name-min)+0.25rem))] flex-1 items-center gap-1 has-[[data-renaming]]:min-w-[min(100%,calc(4*var(--card-name-min)+0.75rem))]">
             <InlineRename

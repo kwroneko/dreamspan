@@ -119,15 +119,15 @@ const measure = async (panel: Locator) => {
 }
 
 /** The three rename controls share the owner's four-row header. */
-const expectInlineNames = async (scope: Locator) => {
+const expectInlineNames = async (scope: Locator, full = false) => {
   const header = scope.locator("[data-card-header]")
   const stack = header.locator("[data-card-header-rows]")
   expect(
     await stack.locator(":scope > *").evaluateAll((rows) => rows.map((row) => row.getAttribute("data-card-header-row")))
-  ).toEqual(["identity", "nickname", "persona", "usage"])
+  ).toEqual(full ? ["nickname", "persona", "usage"] : ["identity", "nickname", "persona", "usage"])
   for (const name of ["the display name", "the version", "the nickname"])
-    await expect(header.getByRole("button", { name: `Rename ${name}`, exact: true })).toBeVisible()
-  const geometry = await header.evaluate((element) => {
+    await expect(scope.getByRole("button", { name: `Rename ${name}`, exact: true })).toBeVisible()
+  const geometry = await scope.evaluate((element) => {
     const rect = (selector: string) => element.querySelector(selector)!.getBoundingClientRect()
     const portrait = rect("[data-card-header-portrait]")
     const stack = rect("[data-card-header-rows]")
@@ -140,7 +140,7 @@ const expectInlineNames = async (scope: Locator) => {
       nameMid: name.top + name.height / 2,
       versionMid: version.top + version.height / 2,
       usageBottom: usage.bottom,
-      headerBottom: element.getBoundingClientRect().bottom
+      headerBottom: rect("[data-card-header]").bottom
     }
   })
   expect.soft(geometry.bottom).toBeLessThanOrEqual(geometry.portraitBottom + 1)
@@ -245,13 +245,14 @@ test("the full editor's header is the same", async ({ page }) => {
         await page.mouse.move(0, 0)
         await page.waitForTimeout(300)
         await shoot(page, `editor-${width}-${scheme}-${name.split(" ")[0]!.toLowerCase()}`)
-        const { header: whole, portrait, save, first } = await measure(page.locator("main"))
-        expect.soft(Math.abs(portrait.y - first.y), `${name}: identity top`).toBeLessThanOrEqual(1)
-        expect
-          .soft(Math.abs(first.y + first.height / 2 - save.y - save.height / 2), `${name}: save centred in row one`)
-          .toBeLessThanOrEqual(1)
-        expect.soft(whole.x + whole.width - save.x - save.width, `${name}: save right`).toBeLessThanOrEqual(48)
-        await expectInlineNames(page.locator("main"))
+        // DESIGN §10.1 centerheader (2026-11-04): identity and save actions now
+        // occupy the column header; the remaining rows stay beside the portrait.
+        const center = page.locator("main [data-center-header]")
+        const identity = await box(center.locator('[data-card-header-row="identity"]'))
+        const save = await box(center.getByRole("group", { name: "Save", exact: true }))
+        expect.soft(Math.abs(identity.y + identity.height / 2 - save.y - save.height / 2)).toBeLessThanOrEqual(1)
+        expect.soft(identity.x + identity.width - save.x - save.width).toBeLessThanOrEqual(48)
+        await expectInlineNames(page.locator("main"), true)
         // The same Picture button over it as in a character tab, with or without a picture.
         const over = page.locator("[data-card-header-portrait]")
         await expect(over.getByRole("button", { name: "Picture", exact: true })).toHaveCount(1)

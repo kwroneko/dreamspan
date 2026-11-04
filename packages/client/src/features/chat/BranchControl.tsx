@@ -317,7 +317,7 @@ export function BranchControl(props: BranchControlProps) {
           type="button"
           aria-label={`Branch: ${label}, ${place}: switch branch`}
           onClick={() => setOpen(true)}
-          className="inline-flex h-8 max-w-32 min-w-0 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+          className="inline-flex h-8 max-w-32 min-w-7 shrink! items-center gap-1 rounded-md px-1.5 text-sm text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
         >
           <Icon name="branch" size={16} />
           <span className="truncate">{label}</span>

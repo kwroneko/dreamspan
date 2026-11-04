@@ -72,6 +72,13 @@ for (const width of [1440, 1024, 390])
         } else if (!process.env.HEADERALIGN_BEFORE) {
           const c = await geometry(centre)
           expect(c.height).toBe(65)
+          // DESIGN §10.1 headerswap: the panel toggle stays at the right edge,
+          // including short titles with spare room in the action row.
+          const toggle = await centre.getByRole("button", { name: "Chat panel", exact: true }).boundingBox()
+          const edge = await centre.evaluate(
+            (el) => el.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(el).paddingRight)
+          )
+          expect(Math.abs(edge - toggle!.x - toggle!.width)).toBeLessThanOrEqual(1)
           expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
         }
         const work = process.env.HEADERALIGN_WORK
