@@ -1979,6 +1979,8 @@ Fresh ST folder imports classify `user/images/<folder>/<image>` and process them
 
 ### 14.6 The editors in the client
 
+Snippet History reads its button label and dialog title from the live editor title, including a rename before saving a revision. Note History also uses the live title; card, persona, lorebook and preset revision dialogs use the fixed title “History”.
+
 **Responsive prompt rows** (promptrows, 2026-11-04): below a 36rem list container, `PromptDocument` headers use a grid that keeps the handle and switch beside a wrapping title and puts secondary items on a following line. Placeholder descriptions and prompt previews use the full content width; descriptions wrap only between words. The same rule covers built-in, custom, marker and definitions rows in the panel and large editor; wide layouts retain their existing flex arrangement. `LAYOUT_AUDIT_PROMPTROWS_ONLY=1` audits both lists, including the panel minimum, and captures list crops.
 
 Side-panel History access (cardhistory, 2026-11-04): card and persona panels, compact lorebooks (including a card's embedded book), and the Prompt preset panel render `editor.panel.actions` beside Search and replace. The registered `editor.panel.history` action opens the existing `RevisionsDialog` with the same editor store and caller, preserving unsaved edits and the revision restore flow. Notes retain History in their action menu; snippets retain their registered History control. The buttons open the shared redesigned dialog described below.

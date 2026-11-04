@@ -6,12 +6,16 @@ import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { RevisionsDialog } from "../editor/RevisionsDialog.tsx"
+import { useEditorState, useText } from "../editor/store.ts"
 import type { SnippetWorkspace } from "./workspace.ts"
 
 export function SnippetHistory({ store, item }: { store: SnippetWorkspace; item: Snippet }) {
   const [open, setOpen] = useState(false)
   const call = useCaller()
-  const name = item.title || "Untitled snippet"
+  const editor = store.store(item.ref.id)
+  const loaded = useEditorState(editor).snapshot !== null
+  const typedTitle = useText(editor, ["title"])
+  const name = (loaded ? typedTitle : item.title) || "Untitled snippet"
   return (
     <>
       <Button
@@ -24,14 +28,7 @@ export function SnippetHistory({ store, item }: { store: SnippetWorkspace; item:
         <Icon name="history" />
         History
       </Button>
-      {open && (
-        <RevisionsDialog
-          store={store.store(item.ref.id)}
-          call={call}
-          title={`History: ${name}`}
-          onClose={() => setOpen(false)}
-        />
-      )}
+      {open && <RevisionsDialog store={editor} call={call} title={`History: ${name}`} onClose={() => setOpen(false)} />}
     </>
   )
 }
