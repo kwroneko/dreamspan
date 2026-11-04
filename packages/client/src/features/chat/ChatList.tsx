@@ -80,9 +80,7 @@ function Row({
   const speaker = summary?.last?.speaker
     ? summary.cast.find((card) => card.entityId === summary.last!.speaker)?.name
     : null
-  const others = characters
-    .filter((card) => card.name !== name.name || card.subtitle)
-    .map((card) => `${card.name}${card.subtitle ? ` · ${card.subtitle}` : ""}`)
+  const others = characters.filter((card) => card.name !== name.name).map((card) => card.name)
   return (
     <li className="tile-toggle-surface group relative">
       <Link

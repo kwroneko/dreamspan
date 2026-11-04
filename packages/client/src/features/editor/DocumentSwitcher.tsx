@@ -32,7 +32,7 @@ export function DocumentSwitcher({
     (AsyncResult.isSuccess(result)
       ? result.value.map((ref) => ({
           value: ref.id,
-          label: ref.subtitle ? `${ref.label} · ${ref.subtitle}` : ref.label
+          label: ref.kind !== "card" && ref.subtitle ? `${ref.label} · ${ref.subtitle}` : ref.label
         }))
       : [])
   let subject: string = suppliedSubject ?? kind

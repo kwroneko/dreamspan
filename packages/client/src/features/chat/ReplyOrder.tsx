@@ -105,7 +105,7 @@ export function PendingReplyFrom({ pending }: { pending: PendingChat }) {
         <Select
           items={repliers.map(({ card }) => ({
             value: card.entityId as string,
-            label: `${card.name}${card.subtitle ? ` · ${card.subtitle}` : ""}`
+            label: card.name
           }))}
           value={value}
           onValueChange={(id) => pending.setReplier(id as EntityId)}

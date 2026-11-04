@@ -293,9 +293,15 @@ export function ChatSidePanel({
         </div>
       )
   )
+  // The modal belongs to the main landmark; only the covered chat content is hidden.
   if (!wide)
     return (
-      <Sheet open onOpenChange={(open) => !open && onClose()} title={title}>
+      <Sheet
+        open
+        onOpenChange={(open) => !open && onClose()}
+        title={title}
+        container={document.getElementById("content")}
+      >
         <div className="flex min-h-0 flex-1 flex-col">
           {nav}
           {panels}

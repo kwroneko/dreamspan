@@ -253,8 +253,7 @@ function CardVersionDialog({ session, card, onClose }: { session: ChatSession; c
               }}
             >
               {depth > 0 ? "↳ " : ""}
-              {member.label || "Deleted card"}
-              {member.subtitle && ` · ${member.subtitle}`} · {member.chats} {member.chats === 1 ? "chat" : "chats"}
+              {member.label || "Deleted card"}· {member.chats} {member.chats === 1 ? "chat" : "chats"}
               {member.entityId === card.entityId ? " · in use" : member.state !== "live" ? ` · ${member.state}` : ""}
             </Button>
           </li>

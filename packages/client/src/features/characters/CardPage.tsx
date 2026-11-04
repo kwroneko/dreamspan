@@ -234,7 +234,6 @@ function Page({ card, persona = false }: { card: CardUsage; persona?: boolean })
           </CenterHeaderContent>
           {persona && <PersonaBadge />}
           <CardSurface placement="provenance" entityId={card.entityId} />
-          {card.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{card.subtitle}</p>}
           {card.modelName && card.modelName !== card.label && (
             <p className="text-sm text-muted">
               Model sees <span className="font-medium text-text">{card.modelName}</span>

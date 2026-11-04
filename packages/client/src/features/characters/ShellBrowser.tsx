@@ -26,7 +26,7 @@ import { useSidebarBrowse } from "./useSidebarBrowse.ts"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
-import { sidebarFoot } from "./homeSlots.ts"
+import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
@@ -129,11 +129,8 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
           >
             {fork.chatName}
           </span>
-          {/* The faces show who; the names with their versions are in the tooltip. */}
-          <span
-            className="text-xs text-muted"
-            title={fork.cast.map((c) => `${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`).join(", ")}
-          >
+          {/* The faces show who; their names are in the tooltip. */}
+          <span className="text-xs text-muted" title={fork.cast.map((c) => c.label).join(", ")}>
             {fork.cast.length} {fork.cast.length === 1 ? "member" : "members"}
           </span>
           {fork.branches > 1 && <span className="mt-auto text-xs text-muted">{fork.branches} branches</span>}
@@ -534,9 +531,7 @@ function Browser({ data }: { data: ShellLibrary }) {
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const card = [...data.cards, ...data.personas].find((c) => c.card.entityId === scope.entity)
-  const cardLabel = card
-    ? `${card.card.label}${card.card.subtitle ? ` · ${card.card.subtitle}` : ""}`
-    : "Character not found"
+  const cardLabel = card ? card.card.label : "Character not found"
   const needle = search.trim().toLowerCase()
   const kind = scope.chat ? "chat" : scope.entity ? "character" : "all"
   const sections = SECTIONS[kind]
@@ -685,6 +680,9 @@ function Browser({ data }: { data: ShellLibrary }) {
         ) : (
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
           <div className="max-w-controls">
+            {kind === "character" && card && (
+              <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
+            )}
             {/* A chat's own pins are among its named and pinned branches. */}
             {kind !== "chat" && (
               <PinnedChats

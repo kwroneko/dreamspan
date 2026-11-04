@@ -175,13 +175,14 @@ const compareItems = (sort: Sort, reversed: boolean) => (a: Item, b: Item) => {
 const matches = (needle: string, ...texts: ReadonlyArray<string | undefined>) =>
   texts.some((text) => text?.toLowerCase().includes(needle))
 
-/** What an item says under its name: its version, then how it's used. */
+/** What an item says under its name: how it's used, plus non-card subtitles. */
 function Meta({ item }: { item: Item }) {
   const usage = item.usage ? usageLine(item.usage) : (item.detail ?? null)
+  const subtitle = item.entry.kind === "card" ? "" : item.entry.subtitle
   return (
     <>
-      {item.entry.subtitle && <span>{item.entry.subtitle}</span>}
-      {item.entry.subtitle && usage && " · "}
+      {subtitle && <span>{subtitle}</span>}
+      {subtitle && usage && " · "}
       {usage}
     </>
   )

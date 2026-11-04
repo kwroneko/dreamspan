@@ -36,22 +36,22 @@ for (const width of [1440, 390]) {
       if (screens) await page.screenshot({ path: join(screens, `${name}-${width}.png`) })
     }
     await page.goto(server().url)
-    // The shell's home tiles name each card with its version (unit E's grid).
-    await expect(page.getByRole("button", { name: "Open Aria Vance · 1", exact: true }).first()).toBeVisible()
+    // Browsing hides bare versions; the editor keeps the labelled version field.
+    await expect(page.getByRole("button", { name: "Open Aria Vance", exact: true }).first()).toBeVisible()
     await shoot("grid")
     const groups = await admin((api) => api.ListChatGroups())
     const group = groups[0]!
     await page.goto(`${server().url}/groups/${group.latestChatId}`)
     const members = page.getByRole("list", { name: "Characters in the group" })
     for (const member of group.members) {
-      if (member.subtitle) await expect(members).toContainText(member.subtitle)
+      await expect(members).toContainText(member.label)
     }
     await shoot("group-members")
     const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
     const aria = refs.find((ref) => ref.label === "Aria Vance")!
     await page.goto(`${server().url}/cards/${aria.entityId}`)
     await expect(page.getByRole("heading", { name: "Aria Vance", exact: true })).toBeVisible()
-    await expect(page.locator("main header:not([data-center-header])")).toContainText("1")
+    await expect(page.locator("main header:not([data-center-header])").getByText("1", { exact: true })).toHaveCount(0)
     await shoot("card")
     await page.goto(`${server().url}/library/${aria.id}`)
     // The names in the header, each renamed in place (no identity section).
@@ -159,9 +159,7 @@ for (const width of [1440, 390]) {
         .getByRole("group", { name: "Left panel", exact: true })
         .getByRole("button", { name: "Characters", exact: true })
         .click()
-      await expect(
-        sidebar.getByRole("button", { name: `Open Aria revised ${width} · revised-${width}`, exact: true })
-      ).toBeVisible()
+      await expect(sidebar.getByRole("button", { name: `Open Aria revised ${width}`, exact: true })).toBeVisible()
     }
     await shoot("sidebar-save")
     await page.getByRole("button", { name: "History", exact: true }).click()

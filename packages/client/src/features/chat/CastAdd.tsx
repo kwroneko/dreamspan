@@ -87,7 +87,7 @@ const labelOf = (name: string, status: string | undefined) =>
     : status === "in"
       ? `${name}: in this chat`
       : `Add ${name} to this chat`
-const fullName = (c: ShellCard) => `${c.card.label}${c.card.subtitle ? ` · ${c.card.subtitle}` : ""}`
+const fullName = (c: ShellCard) => c.card.label
 /** Tiles shown at first, and added by each Show more: hundreds of tiles at once are slow to make. */
 const PAGE = 60
 

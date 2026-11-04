@@ -84,9 +84,9 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
   await expect(crumbs(page)).toHaveCount(0)
-  await page.getByRole("main").getByRole("button", { name: "Open Wren · main", exact: true }).click()
+  await page.getByRole("main").getByRole("button", { name: "Open Wren", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${chatId}`))
-  await expect(crumbs(page)).toContainText("Wren · main")
+  await expect(crumbs(page)).toContainText("Wren")
   const chatPath = path(page)
 
   // Home from the main navigation: the crumbs go, and come back with the URL.
@@ -97,27 +97,27 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
   await expect(page).toHaveURL(`${server().url}/`)
   await expect(crumbs(page)).toHaveCount(0)
   await page.goBack()
-  await expect(crumbs(page)).toContainText("Wren · main")
+  await expect(crumbs(page)).toContainText("Wren")
   await page.goForward()
   await expect(crumbs(page)).toHaveCount(0)
   await page.goBack()
-  await expect(crumbs(page)).toContainText("Wren · main")
+  await expect(crumbs(page)).toContainText("Wren")
   await page.reload()
-  await expect(crumbs(page)).toContainText("Wren · main")
+  await expect(crumbs(page)).toContainText("Wren")
   const scoped = page.url()
   await page.goto(scoped)
-  await expect(crumbs(page)).toContainText("Wren · main")
+  await expect(crumbs(page)).toContainText("Wren")
 
   // A pick in the character's list keeps the list where it is.
   await sidebar(page).getByRole("button", { name: "Open chat Lamp story" }).first().click()
-  await expect(crumbs(page)).toContainText("Wren · main")
+  await expect(crumbs(page)).toContainText("Wren")
 
   // The root shows all chats; the chat in the middle stays.
   await crumbs(page).getByRole("button", { name: "All chats", exact: true }).click()
   await expect(crumbs(page)).toHaveCount(0)
   expect(path(page)).toBe(chatPath)
   await page.goBack()
-  await expect(crumbs(page)).toContainText("Wren · main")
+  await expect(crumbs(page)).toContainText("Wren")
 
   // The chat's forks are listed from the branch menu, the chat in the crumbs.
   await page.getByRole("button", { name: /switch branch/ }).click()

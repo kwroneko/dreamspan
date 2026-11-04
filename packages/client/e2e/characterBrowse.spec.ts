@@ -1,5 +1,5 @@
 // The characters' filter, sort and favourites (owner, 2026-11-01), one set of parts in every
-// place that lists characters: the home grid, the left panel's grid and Start a chat. Each
+// place that lists characters: the home grid, the left panel's grid. Each
 // filter shows its count; the sort turns round and a date sort's date ends each tile's last
 // line; a star marks a favourite without opening the card; ST's `fav` comes in with an import
 // until the user sets the star here. Every card is synthetic.
@@ -184,29 +184,7 @@ for (const width of [1440, 390]) {
     await panel.getByRole("combobox", { name: "Show" }).click()
     await page.getByRole("option", { name: "All · 4" }).click()
 
-    // Start a chat: the same, without Groups.
-    await panel.getByRole("button", { name: "Start a chat", exact: true }).click()
-    const dialog = page.getByRole("dialog", { name: "Start a chat with…" })
-    await dialog.getByRole("combobox", { name: "Show" }).click()
-    await expect(page.getByRole("option")).toHaveText([
-      "All · 4",
-      "With chats · 2",
-      "Never used · 2",
-      "Favourites · 2",
-      "Personas · 0"
-    ])
-    await page.getByRole("option", { name: "Never used · 2" }).click()
-    await expect(dialog).toBeVisible()
-    const rows = dialog.getByRole("list", { name: "Characters" }).getByRole("link")
-    await expect
-      .poll(async () => (await rows.locator("span[title]").allTextContents()).sort())
-      .toEqual(["Bram", "Dora"])
-    await dialog.getByRole("button", { name: "Sort by: Recent" }).click()
-    await page.getByRole("menuitemcheckbox", { name: /^Created/ }).click()
-    await expect(dialog.locator("[data-sort-date]")).toHaveCount(2)
-    await expect(dialog.getByRole("button", { name: "Remove Dora from favourites", exact: true })).toBeVisible()
-    await shoot(page, `characters-start-${width}`)
-    await page.keyboard.press("Escape")
+    await expect(panel.getByRole("button", { name: "Start a chat", exact: true })).toHaveCount(0)
 
     await unstarBram()
   })

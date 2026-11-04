@@ -1,7 +1,7 @@
 // What lists characters, in one set of parts: the filter (All, With chats, Never used,
 // Favourites, Personas, Groups, each with its count), Include personas, the sort with its direction, the date a date sort
-// orders by, the favourite star and the grid of tiles. The home grid, the left panel's grid and
-// Start a chat use them; each place keeps its own sort and direction (`useCardBrowse(place)`),
+// orders by, the favourite star and the grid of tiles. The home grid and the left panel's
+// grid use them; each place keeps its own sort and direction (`useCardBrowse(place)`),
 // remembered per account in this browser, since a narrow panel and the home page are used
 // differently. Home overlays this memory with its URL state (`useHomeBrowse`); elsewhere
 // the filter starts at All on each visit.
