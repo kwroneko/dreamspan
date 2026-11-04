@@ -226,7 +226,7 @@ function CardPanel({
                 }
                 current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
               />
-              <CardTokensRow personaLast store={store} entityId={card.entityId} label={card.label} />
+              <CardTokensRow panel store={store} entityId={card.entityId} label={card.label} />
             </>
           ) : (
             <h2

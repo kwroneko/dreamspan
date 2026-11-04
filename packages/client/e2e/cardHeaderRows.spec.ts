@@ -63,7 +63,7 @@ async function structure(header: Locator, panel = true, allowWrap = false) {
     await rows
       .locator(":scope > *")
       .evaluateAll((children) => children.map((row) => row.getAttribute("data-card-header-row")))
-  ).toEqual(panel ? ["identity", "nickname", "usage", "persona"] : ["identity", "nickname", "persona", "usage"])
+  ).toEqual(["identity", "nickname", "persona", "usage"])
   const geometry = await header.evaluate((root) => {
     const box = (element: Element) => {
       const b = element.getBoundingClientRect()
@@ -99,11 +99,25 @@ async function structure(header: Locator, panel = true, allowWrap = false) {
         heights: [row("nickname").height, row("usage").height, row("persona").height]
       }
     })
-    expect(rhythm.left).toBeCloseTo(rhythm.textLeft, 0)
+    expect(rhythm.left).toBeCloseTo(
+      rhythm.textLeft +
+        ((await header.getByRole("button", { name: "Persona", exact: true }).getAttribute("aria-pressed")) === "true"
+          ? 10
+          : 0),
+      0
+    )
     expect(rhythm.boxLeft).toBeCloseTo(rhythm.textLeft, 0)
-    expect(rhythm.heights).toEqual([28, 28, 28])
+    expect(rhythm.heights[0]).toBe(28)
+    expect(rhythm.heights[1]).toBe(16)
+    expect(rhythm.heights[2]).toBeGreaterThanOrEqual(28)
     const toggle = header.getByRole("button", { name: "Persona", exact: true })
     const bounds = (await toggle.boundingBox())!
+    const nickname = (await header.locator('[data-card-header-row="nickname"]').boundingBox())!
+    const counts = (await header.locator('[data-card-header-row="usage"]').boundingBox())!
+    expect(bounds.y - nickname.y - nickname.height).toBeGreaterThanOrEqual(4)
+    expect(counts.y - bounds.y - bounds.height).toBeGreaterThanOrEqual(4)
+    expect(bounds.y + bounds.height / 2).toBeCloseTo((nickname.y + nickname.height + counts.y) / 2, 0)
+    if (!allowWrap) expect(counts.y + counts.height).toBeCloseTo(geometry.portrait.bottom, 0)
     expect(bounds.height).toBe(28)
     expect(bounds.width).toBe((await toggle.getAttribute("aria-pressed")) === "true" ? 88 : 32)
   }
@@ -176,7 +190,7 @@ for (const width of [390, 1024, 1440])
             await expect(toggle).toHaveCSS("transition-property", /width/)
           }
           const captureStates = async (persona: boolean) => {
-            if (!work || view !== "panel" || index !== 0 || width === 1024) return
+            if (!work || view !== "panel" || index !== 0) return
             mkdirSync(work, { recursive: true })
             for (const state of ["rest", "hover", "focus"]) {
               await toggle.evaluate((el) => el.blur())
@@ -191,6 +205,8 @@ for (const width of [390, 1024, 1440])
                 await expect(toggle).toHaveCSS("--tw-ring-inset", "inset")
                 await expect(toggle).toHaveCSS("--tw-ring-offset-width", "0px")
               }
+              if (!persona) await expect(toggle).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
+              await expect(toggle).toHaveCSS("cursor", "pointer")
               await structure(header)
               const measured = await header.evaluate((root) => {
                 const row = (name: string) =>
@@ -204,10 +220,16 @@ for (const width of [390, 1024, 1440])
                   boxLeft: button.getBoundingClientRect().x,
                   iconLeft: svg.x + (svg.width * 3) / 24,
                   focusShadow: getComputedStyle(button).boxShadow,
+                  portraitBottom: root.querySelector("[data-card-header-portrait]")!.getBoundingClientRect().bottom,
+                  countsBottom: row("usage").bottom,
+                  availableCentre: (row("nickname").bottom + row("usage").top) / 2,
+                  toggleCentre: button.getBoundingClientRect().top + button.getBoundingClientRect().height / 2,
+                  background: getComputedStyle(button).backgroundColor,
+                  cursor: getComputedStyle(button).cursor,
                   gaps: [
                     row("nickname").top - row("identity").bottom,
-                    row("usage").top - row("nickname").bottom,
-                    row("persona").top - row("usage").bottom
+                    row("persona").top - row("nickname").bottom,
+                    row("usage").top - row("persona").bottom
                   ]
                 }
               })
@@ -289,6 +311,25 @@ test("the default persona badge shares the bottom row at the panel minimum", asy
     )
     await expect(header.locator("[data-persona-badge]")).toHaveText("You")
     await structure(header, true, true)
+    if (work) {
+      mkdirSync(work, { recursive: true })
+      const measured = await header.evaluate((root) => {
+        const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect()
+        const portrait = box("[data-card-header-portrait]")
+        const nickname = box('[data-card-header-row="nickname"]')
+        const counts = box('[data-card-header-row="usage"]')
+        const toggle = box('[data-card-header-row="persona"] button')
+        return {
+          portraitBottom: portrait.bottom,
+          countsBottom: counts.bottom,
+          toggleCentre: toggle.top + toggle.height / 2,
+          availableCentre: (nickname.bottom + counts.top) / 2,
+          gaps: [toggle.top - nickname.bottom, counts.top - toggle.bottom]
+        }
+      })
+      writeFileSync(join(work, "minimum-measurements.json"), JSON.stringify(measured, null, 2))
+    }
+
     for (const label of ["the display name", "the version"]) {
       await header.getByRole("button", { name: `Rename ${label}`, exact: true }).click()
       await header.getByRole("button", { name: "Cancel renaming", exact: true }).click()

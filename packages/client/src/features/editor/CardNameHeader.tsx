@@ -124,39 +124,38 @@ function CardTokens({ store }: { store: EditorStore }) {
   )
 }
 
-/** The shared Persona and chats/token rows; the side panel keeps Persona last. */
+/** The shared Persona and chats/token rows; the side panel centres Persona above the bottom counts. */
 export function CardTokensRow({
   store,
   entityId,
   label,
-  personaLast = false
+  panel = false
 }: {
   store: EditorStore
   entityId: string
   label: string
-  personaLast?: boolean
+  panel?: boolean
 }) {
   // The panel button owns its aligned box; no part extends into the portrait gutter.
   const persona = (
     <div
       data-card-header-row="persona"
-      data-persona-align-start={personaLast || undefined}
-      className="flex h-7 min-w-0 items-center"
+      data-persona-align-start={panel || undefined}
+      className={`flex min-h-7 min-w-0 items-center ${panel ? "flex-1" : "h-7"}`}
     >
       <CardSurface placement="header" entityId={entityId as EntityId} label={label} />
     </div>
   )
   return (
     <>
-      {!personaLast && persona}
+      {persona}
       <div
         data-card-header-row="usage"
-        className={`flex min-w-0 max-w-full items-center gap-1 text-xs leading-4 text-muted [&>a]:shrink-0 [&>a+span]:before:mr-1 [&>a+span]:before:content-['·'] ${personaLast ? "min-h-7" : ""}`}
+        className={`flex min-w-0 max-w-full items-center gap-1 text-xs leading-4 text-muted [&>a]:shrink-0 [&>a+span]:before:mr-1 [&>a+span]:before:content-['·']`}
       >
         <CardSurface placement="chats" entityId={entityId as EntityId} label={label} />
         <CardTokens store={store} />
       </div>
-      {personaLast && persona}
     </>
   )
 }
@@ -349,7 +348,7 @@ export function CardHeader({ portrait, children }: { portrait: ReactNode; childr
       {portrait}
       <div
         data-card-header-rows
-        className="flex min-w-0 flex-1 flex-col gap-1 [--card-name-min:2rem] @max-[25rem]/card-header:[--card-name-min:1.625rem] @max-[18rem]/card-header:[--card-name-min:1.375rem] @max-[25rem]/card-header:[&_[data-card-header-row=identity]_button]:size-6! @max-[25rem]/card-header:[&_[data-card-header-row=identity]_[role=group]]:gap-0.5 @max-[18rem]/card-header:[&_[data-card-header-row=identity]_button]:size-5! @max-[18rem]/card-header:[&_[data-card-header-row=identity]_[role=group]]:gap-0.5"
+        className="flex min-w-0 flex-1 flex-col gap-1 has-[[data-persona-align-start]]:self-stretch [--card-name-min:2rem] @max-[25rem]/card-header:[--card-name-min:1.625rem] @max-[18rem]/card-header:[--card-name-min:1.375rem] @max-[25rem]/card-header:[&_[data-card-header-row=identity]_button]:size-6! @max-[25rem]/card-header:[&_[data-card-header-row=identity]_[role=group]]:gap-0.5 @max-[18rem]/card-header:[&_[data-card-header-row=identity]_button]:size-5! @max-[18rem]/card-header:[&_[data-card-header-row=identity]_[role=group]]:gap-0.5"
       >
         {children}
       </div>

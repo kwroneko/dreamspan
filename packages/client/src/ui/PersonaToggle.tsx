@@ -23,10 +23,10 @@ export function PersonaToggle({
           ? "Remove the persona mark: this becomes a regular card again."
           : "Mark this card as a persona: a card you play as, listed under Personas."
       }
-      className={`h-7! justify-start gap-0! overflow-hidden px-2! [[data-persona-align-start]_&]:px-0! [[data-persona-align-start]_&]:focus-visible:ring-inset [[data-persona-align-start]_&]:focus-visible:ring-offset-0! text-xs transition-[width,background-color,color]! duration-150 motion-reduce:transition-none! ${pressed ? "w-22 bg-accent/10 text-accent!" : "w-8 text-muted"}`}
+      className={`h-7! justify-start gap-0! overflow-hidden px-2! [[data-persona-align-start]_&]:focus-visible:ring-inset [[data-persona-align-start]_&]:focus-visible:ring-offset-0! [[data-persona-align-start]_&]:cursor-pointer text-xs transition-[width,background-color,color]! duration-150 motion-reduce:transition-none! ${pressed ? "w-22 bg-accent/10 text-accent!" : "w-8 text-muted [[data-persona-align-start]_&]:px-0! [[data-persona-align-start]_&]:bg-transparent! [[data-persona-align-start]_&]:hover:text-accent!"}`}
       onClick={() => onPressedChange(!pressed)}
     >
-      <Icon name="person" className="[[data-persona-align-start]_&]:-translate-x-0.5" />
+      <Icon name="person" className={pressed ? "" : "[[data-persona-align-start]_&]:-translate-x-0.5"} />
       <span aria-hidden={!pressed} className={`ml-1.5 ${pressed ? "opacity-100" : "opacity-0"}`}>
         Persona
       </span>
