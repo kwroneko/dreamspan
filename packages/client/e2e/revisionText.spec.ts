@@ -46,7 +46,12 @@ for (const width of [1440, 390])
           exact: true
         })
         await expectTextBox(box, before)
-        await box.fill(after)
+        // Select through the editor so replacement uses CodeMirror's document
+        // selection rather than fill()'s DOM selection.
+        await box.focus()
+        await box.press("ControlOrMeta+a")
+        await page.keyboard.insertText(after)
+        await expectTextBox(box, after)
         // Save asks nothing; what it saved is in History's comparison below.
         await saveRevision(page)
         await expect(page.getByRole("dialog")).toHaveCount(0)
