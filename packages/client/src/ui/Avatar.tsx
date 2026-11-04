@@ -151,7 +151,7 @@ export function PortraitOverflow({
       data-portrait-overflow
       aria-hidden={props["aria-label"] ? undefined : true}
       {...props}
-      className={`inline-flex shrink-0 items-center justify-center rounded-sm bg-surface-raised text-muted ${AVATAR_SIZES[size]} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-sm border border-border bg-surface-raised text-muted ${AVATAR_SIZES[size]} ${className}`}
     >
       <span>+{remaining}</span>
     </span>
