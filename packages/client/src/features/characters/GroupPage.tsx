@@ -103,7 +103,6 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
                   />
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-medium">{member.name}</span>
-                    {member.subtitle && <span className="truncate text-xs text-muted">{member.subtitle}</span>}
                   </span>
                 </button>
               </li>

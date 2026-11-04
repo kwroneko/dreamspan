@@ -42,7 +42,8 @@ export const availableItemActions = (context: LibraryItemContext, snapshot = lib
   [...snapshot.entries].sort((a, b) => a.order - b.order).filter((action) => action.available?.(context) !== false)
 
 /** "Aria Vance · v2", what tells two items with one name apart. */
-export const itemName = (entry: LibraryRef) => (entry.subtitle ? `${entry.label} · ${entry.subtitle}` : entry.label)
+export const itemName = (entry: LibraryRef) =>
+  entry.kind !== "card" && entry.subtitle ? `${entry.label} · ${entry.subtitle}` : entry.label
 
 type Open = { readonly from: "library" | "card"; readonly id: string }
 

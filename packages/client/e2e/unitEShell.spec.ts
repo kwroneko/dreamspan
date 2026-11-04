@@ -58,7 +58,7 @@ for (const width of [1440, 390]) {
     await page
       .getByRole("main")
       .getByRole("button", {
-        name: `Open ${character.card.label}${character.card.subtitle ? ` · ${character.card.subtitle}` : ""}`,
+        name: `Open ${character.card.label}`,
         exact: true
       })
       .click()
@@ -98,7 +98,7 @@ for (const width of [1440, 390]) {
     expect(new URL(page.url()).pathname).toBe(before)
     await page
       .getByRole("button", {
-        name: `Open ${character.card.label}${character.card.subtitle ? ` · ${character.card.subtitle}` : ""}`,
+        name: `Open ${character.card.label}`,
         exact: true
       })
       .click()
@@ -269,7 +269,7 @@ for (const width of [1440, 390]) {
       await page
         .getByRole("main")
         .getByRole("button", {
-          name: `Open ${unused.card.label}${unused.card.subtitle ? ` · ${unused.card.subtitle}` : ""}`,
+          name: `Open ${unused.card.label}`,
           exact: true
         })
         .click()

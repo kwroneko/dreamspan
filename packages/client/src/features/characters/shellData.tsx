@@ -23,7 +23,7 @@ import type { CardSort } from "./cardRecency.ts"
 
 /** A fork row with its cast's cards, which the wire names once in `people`. */
 export type ShellFork = Omit<ShellForkRow, "cast"> & { readonly cast: ReadonlyArray<CastCard> }
-/** The shell's cards (GetShellCards): home, the grids, Start a chat and the card pages read them. */
+/** The shell's cards (GetShellCards): home, the grids and the card pages read them. */
 export type ShellLibrary = ShellCards
 
 const SHELL_KEYS = ["chats", "library", "pins", "favourites"]
@@ -303,11 +303,7 @@ function CharacterTile({
         if (!pick) return open(c.entityId)
         if (!state.done && !state.pending) pick.onPick(card)
       }}
-      aria-label={
-        pick && !pick.onOpen
-          ? pick.label(card, status)
-          : `Open ${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}${marked ? " (persona)" : ""}`
-      }
+      aria-label={pick && !pick.onOpen ? pick.label(card, status) : `Open ${c.label}${marked ? " (persona)" : ""}`}
       data-layout-audit-ignore={
         pick?.onOpen ? "inset: The open area fills the tile above its joined footer" : undefined
       }
@@ -326,7 +322,6 @@ function CharacterTile({
         <span className="truncate text-sm font-medium" {...(pick ? {} : { title: c.label })}>
           {c.label}
         </span>
-        {!pick?.onOpen && c.subtitle && <span className="truncate text-xs text-muted">{c.subtitle}</span>}
         {/* The date a date sort orders by shares the last line, so tiles keep their height. */}
         <span className="mt-auto flex min-w-0 items-baseline justify-between gap-1.5 text-xs text-muted">
           <span className="shrink-0">{c.chats ? `${c.chats} ${c.chats === 1 ? "chat" : "chats"}` : "Never used"}</span>

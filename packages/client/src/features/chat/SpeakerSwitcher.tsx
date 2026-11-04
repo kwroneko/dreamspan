@@ -140,7 +140,6 @@ function CardOptions({
               />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate">{card.name}</span>
-                {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
               </span>
               {/* Played as the persona, a character card joins the chat; a persona takes the
                   place of the one played until now, so it isn't said to add anyone. */}
@@ -200,7 +199,6 @@ function SectionRow({
       <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="md" />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="[overflow-wrap:anywhere]">{card.name}</span>
-        {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
       </span>
       {(played || card.persona) && <PersonaBadge played={played} />}
       <CardSurface placement="persona-badge" entityId={card.entityId} />

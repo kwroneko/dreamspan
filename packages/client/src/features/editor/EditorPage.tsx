@@ -377,7 +377,7 @@ export function Editor({
                 variant.id === ref.id ? (
                   <span key={variant.id} aria-current="page" className="font-medium">
                     {variant.label}
-                    {variant.subtitle ? ` · ${variant.subtitle}` : ""}
+                    {ref.kind !== "card" && variant.subtitle ? ` · ${variant.subtitle}` : ""}
                   </span>
                 ) : (
                   <Link
@@ -387,7 +387,7 @@ export function Editor({
                     className="text-accent underline-offset-4 hover:underline"
                   >
                     {variant.label}
-                    {variant.subtitle ? ` · ${variant.subtitle}` : ""}
+                    {ref.kind !== "card" && variant.subtitle ? ` · ${variant.subtitle}` : ""}
                   </Link>
                 )
               )}

@@ -1,7 +1,6 @@
 // The home page and sidebar after an ST import (UI audit, 2026-10-31): Recent orders the
 // characters by their chats' imported dates, in both grids; group tiles count their members
-// and lay out three faces with no empty slot; the sidebar's Start a chat searches the
-// characters, recent first; the header's image toggle is an icon; the open chat is marked.
+// and lay out three faces with no empty slot; the sidebar's Characters grid opens unused characters; the header's image toggle is an icon; the open chat is marked.
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
@@ -124,30 +123,19 @@ test("a group tile counts its members and shows three faces with no empty slot",
 })
 
 for (const width of [1440, 390]) {
-  test(`${width}: Start a chat finds a character, recent first, and opens a new chat with it`, async ({ page }) => {
+  test(`${width}: Characters replaces the header picker and opens an unused character`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(server().url)
     if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
     const panel = width === 390 ? page.locator(".fixed.inset-0") : sidebar(page)
-    // The header holds the action and an icon image toggle, no "Images: shown" text.
+    await expect(panel.getByRole("button", { name: "Start a chat", exact: true })).toHaveCount(0)
     await expect(panel.getByRole("button", { name: "Blur all images" })).toHaveText("")
-    await expect(panel.getByRole("button", { name: "Unsaved text", exact: true })).toBeVisible()
-    await panel.getByRole("button", { name: "Start a chat", exact: true }).click()
-    const dialog = page.getByRole("dialog", { name: "Start a chat with…" })
-    const list = dialog.getByRole("list", { name: "Characters" }).getByRole("link")
-    await expect(list.first()).toBeVisible()
-    const names = await list.locator("span[title]").allTextContents()
-    expect(names.slice(3)).toEqual(["Bob", "Alice", "Cara"])
-    await expect(list.last()).toContainText("Never used")
-    await expect(dialog.getByLabel("Find a character")).toBeFocused()
-    await dialog.getByLabel("Find a character").fill("ali")
-    await expect(list).toHaveCount(1)
-    await page.keyboard.press("Enter")
+    await panel.getByRole("group", { name: "Left panel", exact: true }).getByText("Characters").click()
+    await panel.getByLabel("Find a character").fill("Cara")
+    await panel.getByRole("button", { name: "Open Cara", exact: true }).click()
     await expect(page).toHaveURL(/\/cards\/[^/]+\/chat\?/)
-    await expect(dialog).toHaveCount(0)
-    await expect(page.getByRole("main")).toContainText("Alice waves.")
-    // The sheet closes on the pick, as on any other.
+    await expect(page.getByRole("main")).toContainText("Cara waves.")
     if (width === 390) await expect(page.getByRole("button", { name: "Close the menu" })).toHaveCount(0)
   })
 }
