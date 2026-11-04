@@ -1634,6 +1634,9 @@ for (const width of [1440, 390])
         await expect(revisions.nth(1).getByRole("button", { name: /^Restore to revision / })).toBeEnabled()
         await expect(dialog.getByText("Saved", { exact: true })).toHaveCount(0)
         await expect(revisions.last().getByText("Imported", { exact: true })).toBeVisible()
+        await expect(
+          revisions.last().getByRole("button", { name: "Add message to Revision 1", exact: true })
+        ).toHaveText("Add message")
         const actions = revisions
           .nth(1)
           .getByRole("group", { name: "Revision 2 actions", exact: true })
@@ -1643,6 +1646,14 @@ for (const width of [1440, 390])
         const message = await revisions.nth(1).locator("[data-revision-message-row]").boundingBox()
         const restoreBox = await actions.nth(0).boundingBox()
         expect(message!.y + message!.height).toBeLessThanOrEqual(restoreBox!.y)
+        if (kind === "card") {
+          const titleGap = await page
+            .locator("[data-card-name]")
+            .first()
+            .evaluate((el) => Number.parseFloat(getComputedStyle(el.parentElement!).columnGap))
+          expect(titleGap).toBe(2)
+          geometry.push({ kind, state: "title-pencil-gap", titleGap })
+        }
         await measurePadding("list")
         await audit("list")
         await dialog.screenshot({
@@ -1650,13 +1661,33 @@ for (const width of [1440, 390])
           animations: "disabled"
         })
         const measureRow = async (index: number, state: string) => {
-          const height = await revisions
+          const metrics = await revisions
             .nth(index)
             .locator("[data-revision-message-row]")
-            .evaluate((el) => el.getBoundingClientRect().height)
-          rowHeights.push({ kind, state, height })
+            .evaluate((el) => {
+              const field = el.querySelector("input")
+              const text = el.querySelector(".truncate")
+              const buttons = [...el.querySelectorAll("button")]
+              const rect = (node: Element) => node.getBoundingClientRect()
+              return {
+                height: rect(el).height,
+                ...(text ? { textPencilGap: rect(buttons[0]!).left - rect(text).right } : {}),
+                ...(field
+                  ? {
+                      inputConfirmGap: rect(buttons[0]!).left - rect(field).right,
+                      confirmCancelGap: rect(buttons[1]!).left - rect(buttons[0]!).right
+                    }
+                  : {})
+              }
+            })
+          rowHeights.push({ kind, state, ...metrics })
           writeFileSync(join(work, `message-rows-${width}-${theme}.json`), JSON.stringify(rowHeights, null, 2))
-          expect(height).toBe(32)
+          expect(metrics.height).toBe(32)
+          if (metrics.textPencilGap !== undefined) expect(metrics.textPencilGap).toBe(2)
+          if (metrics.inputConfirmGap !== undefined) {
+            expect(metrics.inputConfirmGap).toBe(4)
+            expect(metrics.confirmCancelGap).toBe(4)
+          }
         }
         for (const [index, state] of [
           [2, "none"],

@@ -25,6 +25,7 @@ export function RevisionMessage({
           label={`message of ${name}`}
           fieldLabel={`Message of ${name}`}
           editLabel={message ? `Edit message of ${name}` : `Add message to ${name}`}
+          editText={message ? undefined : "Add message"}
           hint={message ? "Edits this revision's message" : "Adds a message saying what changed"}
           saveLabel="Save message"
           cancelLabel="Cancel editing message"

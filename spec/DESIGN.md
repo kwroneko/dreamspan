@@ -1021,6 +1021,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] Owner, 2026-11-04 (historyui add and editor controls):** “The add message button had its style changed and now has no message anymore, which is not what I asked. The message can remain removed from the edit one because it's redundant. But the add message one needs the text and should be styled like before, height equivalence notwithstanding, moreover, the spacing between the text and the pencil to edit it is zero”. On editor controls: “Why do the x and tick buttons go all the way there”. Restore the original ghost-style pencil-and-text Add message button for empty messages; keep Edit icon-only with the shared title-pencil gap. Confirm/cancel belong directly after the input, using the shared inline editor’s gap. Preserve equal row heights. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
+
+
 - **[D] Owner, 2026-11-04 (historyui inline messages):** “Move edit/add message to the row with the message text, and make it work like the title edit buttons, where the message turns into the edit box inline. Make sure that with or without message, the height of that row is the same. Messages that would span two rows, when rendered, get truncated with ellipsis. Hovering over them shows the full message in a popover, clicking the ellipsis also expands the message text into potentially multiple lines.” Use the shared pencil rename flow with Enter/Escape and confirm/cancel, a fixed-height message row, a full-text hover preview and an ellipsis toggle to expand/collapse the full message. **[P]** Keep a 32 px control strip and show expanded text below it so the ellipsis stays stationary. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 
 
