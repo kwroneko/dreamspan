@@ -272,6 +272,7 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   /** The chat-wide model and preset; the context assembler reads these. */
   model: Schema.NullOr(Schema.Struct({ connection: ConnectionId, model: ModelId })),
   preset: Schema.NullOr(RefId),
+  presetLocked: Schema.optional(Schema.Boolean),
   lorebooks: Schema.Array(RefId),
   /** Cards whose own lorebook this chat has turned off. */
   cardLorebooksOff: Schema.Array(EntityId),
@@ -318,7 +319,7 @@ export const CastChange = Schema.Union([
    */
   Schema.TaggedStruct("Persona", { entityId: EntityId }),
   Schema.TaggedStruct("Model", { connection: ConnectionId, model: ModelId }),
-  Schema.TaggedStruct("Preset", { ref: RefId }),
+  Schema.TaggedStruct("Preset", { ref: Schema.NullOr(RefId) }),
   /** The chat's own model or preset taken off (`model.unbind`, `preset.unbind`): it uses the default again. */
   Schema.TaggedStruct("DefaultModel", {}),
   Schema.TaggedStruct("DefaultPreset", {}),

@@ -491,6 +491,7 @@ function HistorySearchPair({
             <span className="text-xs text-muted">Look in:</span>
             <Segmented
               label="Look in"
+              className="gap-1"
               multiple
               value={(["messages", "swipes", "summaries"] as const).filter((key) => search[key])}
               onValueChange={(value) =>

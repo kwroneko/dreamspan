@@ -273,7 +273,7 @@ function CostPage() {
   useTitle("Costs")
   return (
     <Card>
-      <CardHeader title="Costs" />
+      <CardHeader center title="Costs" />
       <AsyncView atom={settingsAtom}>
         {(settings) => (
           <AsyncView atom={connectionsAtom}>

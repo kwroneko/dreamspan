@@ -859,10 +859,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return count
       }),
 
-    model: () =>
+    model: (binding) =>
       Effect.gen(function* () {
-        const chosen = settings.modelOverride ?? (yield* defaults).model
-        if (!settings.modelOverride) chosenModel = chosen === null ? null : { ...chosen, scope: "user" }
+        const chosen = settings.modelOverride ?? binding ?? (yield* defaults).model
+        if (!settings.modelOverride)
+          chosenModel = chosen === null ? null : { ...chosen, scope: binding ? "chat" : "user" }
         if (chosen === null) return null
         const [connection] = yield* sql<ConnectionRow>`
           SELECT ${sql.literal(connectionColumns)} FROM ${sql.literal(connectionFrom)}
@@ -945,9 +946,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             if (found) return found
           }
         }
-        const user = (yield* defaults).preset
+        const user = chain.chat ? (chain.chat.ref ?? null) : (yield* defaults).preset
         if (user !== null) {
-          const found = yield* presetFrom(user, "user")
+          const found = yield* presetFrom(user, chain.chat ? "chat" : "user")
           if (found)
             return {
               ...found,

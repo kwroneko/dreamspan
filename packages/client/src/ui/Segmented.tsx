@@ -10,6 +10,7 @@ export function Segmented<Value extends string>(
   props: {
     label: string
     wrap?: boolean
+    className?: string
     /** Compact toolbars keep explanations on hover and focus, without a second line. */
     inlineDescription?: boolean
     options: ReadonlyArray<{ readonly value: Value; readonly label: ReactNode; readonly description?: string }>
@@ -26,7 +27,7 @@ export function Segmented<Value extends string>(
       }
   )
 ) {
-  const { label, wrap = false, inlineDescription = true, options, value, multiple = false } = props
+  const { label, wrap = false, inlineDescription = true, className = "", options, value, multiple = false } = props
   const isChosen = (item: Value) => (Array.isArray(value) ? value.includes(item) : value === item)
   const id = useId()
   const described = options.some((option) => option.description)
@@ -36,7 +37,7 @@ export function Segmented<Value extends string>(
       data-layout-audit-ignore="inset: Joined segments share a single outer border"
       role="group"
       aria-label={label}
-      className={`inline-flex w-fit rounded-md border border-border bg-surface p-0.5 ${wrap ? "max-w-full flex-wrap" : "shrink-0"}`}
+      className={`inline-flex w-fit rounded-md border border-border bg-surface p-0.5 ${wrap ? "max-w-full flex-wrap" : "shrink-0"} ${className}`}
     >
       {options.map((option, index) => {
         const button = (

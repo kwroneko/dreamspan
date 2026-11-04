@@ -74,7 +74,7 @@ describe("separate ST preset import surfaces", () => {
 })
 
 it.live(
-  "assembly uses model settings globally, ignores old chat bindings, and applies a connection lock only on switching connections",
+  "assembly uses chat locks before account settings and applies a connection lock only on switching connections",
   () =>
     Effect.gen(function* () {
       const writer = yield* Database.Writer
@@ -180,6 +180,21 @@ it.live(
           versionId: null,
           scope: null,
           data: data as never
+        })
+      const locked = yield* build()
+      assert.strictEqual(locked.inputs.model?.key, "b")
+      assert.strictEqual(locked.inputs.preset.ref, second.ref.id)
+      assert.strictEqual(locked.request.samplers.temperature, DEFAULT_SAMPLERS.temperature)
+      assert.strictEqual((yield* reader.GetGenerationDefaults({ userId })).preset, first.ref.id)
+      assert.strictEqual((yield* reader.GetGenerationDefaults({ userId })).model?.model, modelA.id)
+      for (const key of ["model.unbind", "preset.unbind"] as const)
+        yield* writer.AddStateEvent({
+          userId,
+          chatId: chat.id,
+          slotId: null,
+          versionId: null,
+          scope: null,
+          data: { key, value: {} }
         })
       const assembled = yield* build()
       assert.strictEqual(assembled.request.samplers.temperature, 0.23)

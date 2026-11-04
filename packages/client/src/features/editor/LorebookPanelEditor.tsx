@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { SlotOutlet } from "../../slots.tsx"
 import { panelEditorActions } from "./panelActions.tsx"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
@@ -27,13 +28,28 @@ import { type EditorStore, useEditorState, useLeaveGuard, useText, useValue } fr
  * and its document's `name` takes it too (exports carry it); a card's own book's is the
  * `character_book.name` field of the card.
  */
-export function BookName({ store, root, fallback }: { store: EditorStore; root: FieldPath; fallback: string }) {
+export function BookName({
+  store,
+  root,
+  fallback,
+  children
+}: {
+  store: EditorStore
+  root: FieldPath
+  fallback: string
+  children?: ReactNode
+}) {
   const typed = useText(store, [...root, "name"])?.trim()
-  if (root.length === 0) return <RefName store={store} onRenamed={(label) => store.setText(["name"], label)} />
+  if (root.length === 0)
+    return (
+      <RefName store={store} onRenamed={(label) => store.setText(["name"], label)}>
+        {children}
+      </RefName>
+    )
   const shown = typed || fallback
   return (
     <InlineRename value={typed ?? ""} label={shown} onRename={(next) => store.setText([...root, "name"], next)}>
-      <span className="min-w-0 [overflow-wrap:anywhere]">{shown}</span>
+      {children ?? <span className="min-w-0 [overflow-wrap:anywhere]">{shown}</span>}
     </InlineRename>
   )
 }

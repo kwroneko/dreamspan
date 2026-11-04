@@ -1,3 +1,6 @@
+import { Fragment } from "react"
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
+import { DocumentSwitcher } from "./DocumentSwitcher.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 // A list of notes as blocks (owner, 2026-11-01), the shape a preset's prompts have (ui/Block):
 // each note's header is always shown, its switch, its name renamed in place, and under it where
@@ -8,7 +11,7 @@ import type { BinItem } from "@rp/shared/bin.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { textField } from "@rp/shared/editing.ts"
 import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
-import type { Doc, LibraryRef } from "@rp/shared/library.ts"
+import type { Doc, LibraryRef, RefId } from "@rp/shared/library.ts"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
@@ -103,7 +106,8 @@ export function NoteBlock({
   /** Told after it was saved as a shared note, unlinked from one, or its shared note restored. */
   onRelinked?: (() => void) | undefined
   /** Shown in the large editor over the chat, with a way back. */
-  large?: { readonly onClose: () => void } | undefined
+  large?:
+    { readonly onClose: () => void; readonly choices?: ReadonlyArray<{ value: RefId; label: string }> } | undefined
   /** Just added: once it has read its note, it scrolls into view and flashes. */
   reveal?: boolean | undefined
   onRevealed?: (() => void) | undefined
@@ -229,9 +233,12 @@ export function NoteBlock({
       {title}
     </span>
   )
+  const HeaderRow = large ? CenterHeaderContent : Fragment
   const toggle = large ? (
     <Tooltip label={<span className="[overflow-wrap:anywhere]">{title}</span>} enabled={titleTruncated}>
-      <h2 className="min-w-0 truncate px-1 text-base font-semibold">{name}</h2>
+      <h2 aria-label={title} className="min-w-0 truncate text-base font-semibold">
+        <DocumentSwitcher refId={ref.id} label={title} kind="note" focus={NOTE_FOCUS} items={large?.choices} />
+      </h2>
     </Tooltip>
   ) : (
     <Tooltip
@@ -296,106 +303,108 @@ export function NoteBlock({
     <li>
       <Block ref={box} aria-label={`Note ${title}`} className="bg-canvas">
         <BlockHeader className="@container/note-header block!">
-          <div data-note-title-row className="flex min-w-0 items-center gap-1">
-            {/* The note's switch leads the header, as before, so nothing moves when opening
+          <HeaderRow>
+            <div data-note-title-row className="flex w-full min-w-0 items-center gap-1">
+              {/* The note's switch leads the header, as before, so nothing moves when opening
               the note adds its save cluster at the end (owner, 2026-11-03). */}
-            {entry.control && (
-              <span className="flex h-8 w-10 shrink-0 items-center justify-center">{entry.control}</span>
-            )}
-            {loaded ? (
-              <InlineRename
-                value={typedTitle}
-                label={title}
-                hint="Renames this note"
-                allowEmpty
-                // The pencil on the title's line, centred with it and with the header's buttons.
-                className="min-w-0 flex-1 gap-1!"
-                onRename={(next) => {
-                  store.setText(["title"], next)
-                  void store.save(textField(["title"]))
-                }}
-              >
-                {toggle}
-              </InlineRename>
-            ) : (
-              <span className="flex min-w-0 flex-1">{toggle}</span>
-            )}
-            {/* The open note's save cluster, its settings and ⋯, together at the end with even
-              gaps (DESIGN §10.1); the settings button stays put when opening the note adds Save. */}
-            <span data-note-controls className="ml-auto flex shrink-0 items-center gap-1">
-              {open && loaded && (
-                <span
-                  data-note-save
-                  className="inline-flex h-8 items-center @max-[22rem]/note-header:[&_[data-save-state]_button]:h-6! @max-[22rem]/note-header:[&_[data-save-state]_button]:w-6!"
-                >
-                  <SaveRevision store={store} />
-                </span>
+              {entry.control && (
+                <span className="flex h-8 w-10 shrink-0 items-center justify-center">{entry.control}</span>
               )}
-              <BlockOptionsToggle
-                open={open && settingsShown}
-                onToggle={toggleSettings}
-                label={`Settings of ${title}`}
-                hint={
-                  open && settingsShown
-                    ? "Click to hide this note's settings."
-                    : open
-                      ? "Click to show this note's settings: position, depth, role and when it applies."
-                      : "Click to open this note with its settings: position, depth, role and when it applies."
-                }
-              />
-              <Menu
-                label={`Actions for ${title}`}
-                hint={
-                  workspace && !large
-                    ? "More: Large editor, History, Save as shared note, Delete"
-                    : "More: History, Save as shared note, Delete"
-                }
-                trigger={<BlockMenuButton label={`Actions for ${title}`} />}
-              >
-                {workspace && !large && (
-                  <MenuItem
-                    icon="expand"
-                    description="Opens this note in the main column, where it stays open while the side panel changes."
-                    onClick={() => workspace.open(ref.id, NOTE_FOCUS)}
-                  >
-                    Large editor
-                  </MenuItem>
-                )}
-                <MenuItem
-                  icon="history"
-                  disabled={!loaded}
-                  description="Shows this note's saved revisions and what changed in each."
-                  onClick={() => setHistory(true)}
+              {loaded ? (
+                <InlineRename
+                  value={typedTitle}
+                  label={title}
+                  hint="Renames this note"
+                  allowEmpty
+                  // The pencil on the title's line, centred with it and with the header's buttons.
+                  className="min-w-0 flex-1 gap-1!"
+                  onRename={(next) => {
+                    store.setText(["title"], next)
+                    void store.save(textField(["title"]))
+                  }}
                 >
-                  History
-                </MenuItem>
-                {!linked && (
-                  <MenuItem
-                    icon="link"
-                    disabled={!loaded}
-                    description="Turns this note's text into a shared note that other chats and cards can use too."
-                    onClick={() => void relink("share")}
+                  {toggle}
+                </InlineRename>
+              ) : (
+                <span className="flex min-w-0 flex-1">{toggle}</span>
+              )}
+              {/* The open note's save cluster, its settings and ⋯, together at the end with even
+              gaps (DESIGN §10.1); the settings button stays put when opening the note adds Save. */}
+              <span data-note-controls className="ml-auto flex shrink-0 items-center gap-1">
+                {open && loaded && (
+                  <span
+                    data-note-save
+                    className="inline-flex h-8 items-center @max-[22rem]/note-header:[&_[data-save-state]_button]:h-6! @max-[22rem]/note-header:[&_[data-save-state]_button]:w-6!"
                   >
-                    Save as shared note
-                  </MenuItem>
+                    <SaveRevision store={store} />
+                  </span>
                 )}
-                {entry.onDeleted && (
-                  <>
-                    <MenuSeparator />
+                <BlockOptionsToggle
+                  open={open && settingsShown}
+                  onToggle={toggleSettings}
+                  label={`Settings of ${title}`}
+                  hint={
+                    open && settingsShown
+                      ? "Click to hide this note's settings."
+                      : open
+                        ? "Click to show this note's settings: position, depth, role and when it applies."
+                        : "Click to open this note with its settings: position, depth, role and when it applies."
+                  }
+                />
+                <Menu
+                  label={`Actions for ${title}`}
+                  hint={
+                    workspace && !large
+                      ? "More: Large editor, History, Save as shared note, Delete"
+                      : "More: History, Save as shared note, Delete"
+                  }
+                  trigger={<BlockMenuButton label={`Actions for ${title}`} />}
+                >
+                  {workspace && !large && (
                     <MenuItem
-                      icon="trash"
-                      tone="danger"
-                      description="Moves this note to the bin, from which it can be restored later."
-                      onClick={() => void remove()}
+                      icon="expand"
+                      description="Opens this note in the main column, where it stays open while the side panel changes."
+                      onClick={() => workspace.open(ref.id, NOTE_FOCUS)}
                     >
-                      Delete the note
+                      Large editor
                     </MenuItem>
-                  </>
-                )}
-              </Menu>
-              {large && <WindowClose onClick={large.onClose} />}
-            </span>
-          </div>
+                  )}
+                  <MenuItem
+                    icon="history"
+                    disabled={!loaded}
+                    description="Shows this note's saved revisions and what changed in each."
+                    onClick={() => setHistory(true)}
+                  >
+                    History
+                  </MenuItem>
+                  {!linked && (
+                    <MenuItem
+                      icon="link"
+                      disabled={!loaded}
+                      description="Turns this note's text into a shared note that other chats and cards can use too."
+                      onClick={() => void relink("share")}
+                    >
+                      Save as shared note
+                    </MenuItem>
+                  )}
+                  {entry.onDeleted && (
+                    <>
+                      <MenuSeparator />
+                      <MenuItem
+                        icon="trash"
+                        tone="danger"
+                        description="Moves this note to the bin, from which it can be restored later."
+                        onClick={() => void remove()}
+                      >
+                        Delete the note
+                      </MenuItem>
+                    </>
+                  )}
+                </Menu>
+                {large && <WindowClose onClick={large.onClose} />}
+              </span>
+            </div>
+          </HeaderRow>
           {status}
         </BlockHeader>
         {entry.detail}

@@ -310,7 +310,7 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 })
     await page.goto(`${server().url}/settings/display?from=legacy`)
     await expect(page).toHaveURL(/\/settings\/interface\?from=legacy$/)
-    if (width === 390) await expect(page.getByRole("heading", { name: "Interface", exact: true })).toBeVisible()
+    if (width === 390) await expect(page.getByRole("group", { name: "Enter sends", exact: true })).toBeVisible()
     else
       await expect(page.getByRole("link", { name: "Interface", exact: true })).toHaveAttribute("aria-current", "page")
     await page.goto(`${server().url}/chats/${chat}?panel=display`)
