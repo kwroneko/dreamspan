@@ -240,6 +240,7 @@ export function Composer({
   const { busy, error } = useSyncExternalStore(workspace.subscribe, workspace.snapshot)
   const {
     text: draftText,
+    guidance: draftGuidance,
     ready: textReady,
     restored,
     conflict,
@@ -259,7 +260,8 @@ export function Composer({
   // as they're asked for: a new version reuses its reply's own, except the reply edited here.
   const viewPrefs = useViewPrefs()
   const submitHint = composerSubmitHint(viewPrefs.prefs.enterSends)
-  const guidance = choice.guidance || editing !== null
+  const mode = choice.draftId === draftId ? choice.guidance : draftGuidance
+  const guidance = mode || editing !== null
   const choicesReady =
     choice.loaded &&
     choice.draftId === draftId &&
@@ -273,7 +275,11 @@ export function Composer({
           editor,
           () => {
             const current = choices.snapshot()
-            return current.loaded && current.draftId === draft.draftIdFor(session.snapshot().forkId) && current.guidance
+            const opened = draft.snapshot()
+            return (
+              draft.draftIdFor(session.snapshot().forkId) !== null &&
+              (current.draftId === opened.draftId ? current.guidance : opened.guidance)
+            )
           },
           () => draft.snapshot().text
         )
@@ -284,7 +290,7 @@ export function Composer({
   const [impersonationNotice, setImpersonationNotice] = useState(false)
   // The speaker and the reply picked here or with "Write as" in the Cast tab, kept on the
   // server with this tip's draft (speaker.ts). Nothing is sent until they're read.
-  useEffect(() => choices.bind(draftId), [choices, draftId])
+  useEffect(() => choices.bind(draftId, draftGuidance), [choices, draftId, draftGuidance])
   const turnEntries = useComposerTurn(session, view, cast)
   // Revising an existing reply needs its slot/fork, not the new turn's speaker choice or
   // reply order. Waiting for those reads would disable the visible button while Enter works.
@@ -553,7 +559,7 @@ export function Composer({
     onRecent: setPicked,
     guidance,
     // While a reply's guidance is edited, the box is guidance whatever the toggle says.
-    prefsReady: viewPrefs.ready && choicesReady && editing === null,
+    prefsReady: viewPrefs.ready && textReady && editing === null,
     changeGuidance: (next) => {
       void choices.change({ guidance: next }).then((result) => setError(result.ok ? null : result.error))
     },
@@ -598,9 +604,6 @@ export function Composer({
   return (
     <div
       ref={composerRef}
-      style={{
-        visibility: editing !== null || (choicesReady && textReady) ? undefined : "hidden"
-      }}
       className="@container chat-column flex flex-col gap-1.5 border-t border-border pt-2 pb-2 max-sm:px-2"
     >
       {/* Sent while a reply is written, posting after it: between the messages and the box. */}

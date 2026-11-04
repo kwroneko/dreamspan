@@ -156,6 +156,7 @@ const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | nu
     id: row.id,
     key: { targetKind: row.target_kind, targetId: row.target_id, field: row.field },
     content: row.content,
+    ...(row.target_kind === "composer" ? { guidance: row.guidance === 1 } : {}),
     ...imageFields(row.images_json),
     status: row.status,
     baseRevision: row.base_revision,
@@ -1095,7 +1096,7 @@ export const makeDraftStore = (
       if (from !== null && here === null)
         yield* sql`UPDATE drafts SET speaker_entity_id = ${from.speaker_entity_id},
           reply_from_entity_id = ${from.reply_from_entity_id}, guidance = ${from.guidance} WHERE id = ${opened.id}`
-      return toDraft(opened, recovered)
+      return toDraft(from !== null && here === null ? { ...opened, guidance: from.guidance } : opened, recovered)
     })
 
   const choiceOf = (row: DraftRow) =>

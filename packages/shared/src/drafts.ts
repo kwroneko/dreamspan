@@ -97,6 +97,8 @@ export class Draft extends Schema.Class<Draft>("Draft")({
   id: Schema.String,
   key: DraftKey,
   content: Schema.String,
+  /** Composer mode, delivered with its text so opening never waits for a choice read. */
+  guidance: Schema.optionalKey(Schema.Boolean),
   /** Message editor attachments; absent means the source version's set. */
   images: Schema.optionalKey(MessageImages),
   status: DraftStatus,

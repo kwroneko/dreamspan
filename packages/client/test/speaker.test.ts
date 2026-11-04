@@ -107,3 +107,12 @@ it("applies guidance immediately, saves rapid switches in order, and keeps anoth
   expect(rows.get("one")!.guidance).toBe(true)
   expect(store.snapshot()).toMatchObject({ draftId: "two", loaded: true, guidance: false })
 })
+
+it("shows the mode delivered with the draft while the separate speaker read is still pending", async () => {
+  const { store, rows } = fixture()
+  rows.set("one", choice("one", "Ana", true))
+  store.bind("one", true)
+  expect(store.snapshot()).toMatchObject({ draftId: "one", guidance: true, loaded: false })
+  await vi.waitFor(() => expect(store.snapshot().loaded).toBe(true))
+  expect(store.snapshot().guidance).toBe(true)
+})

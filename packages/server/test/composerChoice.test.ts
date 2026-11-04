@@ -79,12 +79,14 @@ describe("the composer's choice", () => {
       )
       const moved = yield* api.OpenComposer({ chatId: chat.id, forkId: sent.chat.currentForkId })
       assert.strictEqual(moved.id, draft.id)
+      assert.isTrue(moved.guidance)
       assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: moved.id })).speakerEntityId, bo)
 
       // A fork from before the first message starts speaking as the composer it came from.
       const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: null, atSlotId: null })
       const branch = yield* api.OpenComposer({ chatId: chat.id, forkId: fork.id, copyFrom: moved.id })
       assert.notStrictEqual(branch.id, moved.id)
+      assert.isTrue(branch.guidance)
       assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).speakerEntityId, bo)
       assert.strictEqual(
         (yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).replyFromEntityId,
@@ -99,7 +101,7 @@ describe("the composer's choice", () => {
         guidance: false,
         replyFromEntityId: null
       })
-      yield* api.OpenComposer({ chatId: chat.id, forkId: fork.id, copyFrom: moved.id })
+      assert.isFalse((yield* api.OpenComposer({ chatId: chat.id, forkId: fork.id, copyFrom: moved.id })).guidance)
       assert.strictEqual((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).speakerEntityId, ana)
       assert.strictEqual(
         (yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).replyFromEntityId,

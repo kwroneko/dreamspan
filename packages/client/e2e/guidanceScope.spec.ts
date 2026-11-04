@@ -23,6 +23,7 @@ for (const width of [1440, 390])
             first: { _tag: "Send", content: "A shared synthetic opening.", speakerEntityId: null },
             guidance: true
           })
+          expect(a.composer.guidance).toBe(true)
           const first = a.chat.currentForkId
           yield* api.SendMessage({
             chatId: a.chat.id,
@@ -40,6 +41,7 @@ for (const width of [1440, 390])
           })
           const source = yield* api.OpenComposer({ chatId: a.chat.id, forkId: first })
           const copy = yield* api.OpenComposer({ chatId: a.chat.id, forkId: fork.id, copyFrom: source.id })
+          expect(copy.guidance).toBe(true)
           expect((yield* api.GetComposerChoice({ chatId: a.chat.id, draftId: copy.id })).guidance).toBe(true)
           yield* api.SetComposerChoice({ chatId: a.chat.id, draftId: copy.id, guidance: false })
           const b = yield* api.CreateChat({ title: "Another synthetic chat" })
@@ -71,14 +73,18 @@ for (const width of [1440, 390])
       // A fresh socket installs the interception; subsequent branch switches stay in the app.
       await page.reload()
       await expect.poll(() => held.length).toBeGreaterThan(0)
-      await expect(box).toBeHidden()
+      await expect(box).toBeVisible()
+      await expect(box).toBeEditable()
+      await expect(toggle).toBeChecked()
       hold = false
       for (const release of held.splice(0)) release()
       await expect(toggle).toBeChecked()
       hold = true
       await page.getByRole("button", { name: "Next branch" }).click()
       await expect.poll(() => held.length).toBeGreaterThan(0)
-      await expect(box).toBeHidden()
+      await expect(box).toBeVisible()
+      await expect(box).toBeEditable()
+      await expect(toggle).not.toBeChecked()
       hold = false
       for (const release of held.splice(0)) release()
       await expect(toggle).not.toBeChecked()

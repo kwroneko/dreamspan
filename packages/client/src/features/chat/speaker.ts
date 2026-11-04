@@ -67,10 +67,10 @@ class ComposerChoices {
   }
 
   /** The composer shows `draftId` now (null while it goes to another tip). */
-  bind(draftId: string | null) {
+  bind(draftId: string | null, guidance = false) {
     if (draftId === this.state.draftId) return
     this.reads++
-    this.setState({ draftId, loaded: false, saving: false, speaker: null, replyFrom: null, guidance: false })
+    this.setState({ draftId, loaded: false, saving: false, speaker: null, replyFrom: null, guidance })
     if (draftId !== null) void this.read()
   }
 
@@ -127,7 +127,7 @@ class ComposerChoices {
   /** Keeps the choice on the server, which tells the chat's other tabs. */
   async change(change: Change): Promise<Outcome<unknown>> {
     const { draftId } = this.state
-    if (draftId === null || !this.state.loaded) {
+    if (draftId === null || (!this.state.loaded && change.guidance === undefined)) {
       if (change.speaker !== undefined) this.early = change.speaker
       return { ok: true, value: null }
     }

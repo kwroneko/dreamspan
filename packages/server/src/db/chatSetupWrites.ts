@@ -1,4 +1,4 @@
-import { composerKey } from "@rp/shared/drafts.ts"
+import { composerKey, Draft } from "@rp/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
 import { makeShellWriteHandlers } from "./shellWrites.ts"
@@ -406,7 +406,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             speakerEntityId: first.speakerEntityId,
             guidance: guidance ?? false
           })
-          return { ...added, composer }
+          return { ...added, composer: new Draft({ ...composer, guidance: guidance ?? false }) }
         }).pipe(transaction("StartChat")),
 
       SendOrQueue: ({
