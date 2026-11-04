@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { selectablePresets } from "../pickers/presetList.ts"
@@ -775,7 +776,9 @@ function ConnectionView(props: ConnectionSectionProps) {
         <Link to="/settings/connections" className="hidden self-start text-sm text-muted hover:text-text md:block">
           ← Connections
         </Link>
-        <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{connection.name}</h1>
+        <CenterHeaderContent>
+          <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{connection.name}</h1>
+        </CenterHeaderContent>
         <p className="text-sm text-muted [overflow-wrap:anywhere]">
           {kinds.find((kind) => kind.id === connection.kind)?.label ?? connection.kind} ·{" "}
           {effectiveBaseUrl(connection, kinds)}

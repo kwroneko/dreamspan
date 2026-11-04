@@ -18,7 +18,7 @@ test("beside the page: the groups, the first page at /settings, and a link lands
   const nav = page.getByRole("navigation", { name: "Settings" })
   for (const [group, pages] of [
     ["Models", ["Connections", "Keys", "Costs", "Network"]],
-    ["Chatting", ["Chats", "Display", "Regex scripts", "Notifications"]],
+    ["Chatting", ["Chats", "Interface", "Regex scripts", "Notifications"]],
     ["Account", ["Account", "Users"]],
     ["Admin", ["Server status"]]
   ] as const) {

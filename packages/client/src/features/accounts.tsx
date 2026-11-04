@@ -75,7 +75,7 @@ function AccountPage() {
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <CardHeader title="Account" actions={session.via === "session" ? <LogoutButton /> : undefined} />
+        <CardHeader center title="Account" actions={session.via === "session" ? <LogoutButton /> : undefined} />
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
           <dt className="text-muted">Name</dt>
           <dd>{session.user.displayName}</dd>
@@ -261,6 +261,7 @@ function UsersPage() {
   return (
     <Card>
       <CardHeader
+        center
         title="Users"
         about="There's no sign-up: an admin creates each account."
         actions={

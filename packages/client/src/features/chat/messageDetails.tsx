@@ -3,7 +3,7 @@
 // (time first, the date when it isn't today) and the model that wrote it, with its lab's
 // mark; under the portrait, its number, the generation time and the tokens (versionMetrics.tsx).
 // Each is a registered detail (spec/PLUGINS.md §8) with a place, a name and a description, so a
-// plugin adds, replaces or disables one, and the Display settings list a switch for every
+// plugin adds, replaces or disables one, and the Interface settings list a switch for every
 // detail registered, defaulting to shown (ST's Chat Timestamps, Model Icons, Message IDs,
 // Message Timer and Message Token Count). The choices are the account's (`messageDetails`).
 import type { PathEntry } from "@rp/shared/chat.ts"
@@ -30,7 +30,7 @@ export interface MessageDetail {
   /** In the header after the name, or in the column under the portrait. */
   readonly place: "header" | "portrait"
   readonly order: number
-  /** Its switch in the Display settings, and what it shows. */
+  /** Its switch in the Interface settings, and what it shows. */
   readonly label: string
   readonly description: string
   /** Renders nothing where the message has no such detail. */

@@ -245,13 +245,13 @@ test("library: kind, search, filter, sort, direction and view reload, with histo
 test("settings: section path survives reload and Back/Forward", async ({ page }) => {
   await page.goto(`${server().url}/settings/chats`)
   await expect(page.getByRole("heading", { name: "Chats", exact: true })).toBeVisible()
-  await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Display", exact: true }).click()
+  await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Interface", exact: true }).click()
   await reload(page)
-  await expect(page).toHaveURL(/\/settings\/display$/)
+  await expect(page).toHaveURL(/\/settings\/interface$/)
   await page.goBack()
   await expect(page).toHaveURL(/\/settings\/chats$/)
   await page.goForward()
-  await expect(page).toHaveURL(/\/settings\/display$/)
+  await expect(page).toHaveURL(/\/settings\/interface$/)
 })
 
 test("import: target and missing selected folder job restore with an explanation", async ({ page }) => {
@@ -304,3 +304,22 @@ test("chat: branch, message link and reading offset restore; missing branch fall
   ).toBeVisible()
   await expect(page.locator("article[data-slot]").last()).toBeVisible()
 })
+
+for (const width of [1440, 390]) {
+  test(`Interface links preserve legacy addresses at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`${server().url}/settings/display?from=legacy`)
+    await expect(page).toHaveURL(/\/settings\/interface\?from=legacy$/)
+    if (width === 390) await expect(page.getByRole("group", { name: "Enter sends", exact: true })).toBeVisible()
+    else
+      await expect(page.getByRole("link", { name: "Interface", exact: true })).toHaveAttribute("aria-current", "page")
+    await page.goto(`${server().url}/chats/${chat}?panel=display`)
+    await expect(page.getByRole("tabpanel", { name: "Interface", exact: true })).toBeVisible()
+    await expect(page).toHaveURL(/panel=interface/)
+    const tab = page.getByRole("tab", { name: "Interface", exact: true })
+    await expect(tab).toHaveAttribute("aria-selected", "true")
+    await expect(page.getByRole("tab", { name: "Display", exact: true })).toHaveCount(0)
+    await reload(page)
+    await expect(page.getByRole("tabpanel", { name: "Interface", exact: true })).toBeVisible()
+  })
+}

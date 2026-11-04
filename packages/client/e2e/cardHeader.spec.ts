@@ -228,7 +228,7 @@ test("the picture's controls are over it, and reached by keyboard", async ({ pag
   // It keeps its explanation.
   await picture.hover()
   await expect(
-    page.getByText("Picture: adjust the cutout small portraits show, or replace the picture", { exact: true })
+    page.getByText("Picture: crop the picture and small portrait, or replace the picture", { exact: true })
   ).toBeVisible()
 })
 

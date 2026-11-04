@@ -1,3 +1,5 @@
+**Built 2026-11-04 (interfacetab):** The Interface tab naming decision in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
+
 **Built 2026-11-04 (smallfixes5):** The card editor navigation (§2.2), prompt badges and linked history-note marker (§6.2a) are implemented and obsolete as implementation requirements; see ARCHITECTURE §14.6.
 
 **Built 2026-11-02 (stablebuttons):** The stable unavailable-control rule in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §5.
@@ -1030,6 +1032,18 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ### 10.1 Web app
 
 - **[D] Owner, 2026-11-04 (navtilesport):** “This looks fine now, proceed with the other changes”. Port the approved Home / Library / Import / Settings / Bin tiles to master. “One issue. I'd like them to all be the same width.” **[P]** Use equal columns sized to fit the widest label, retaining balanced wrapping and the same width on incomplete rows. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §5.
+
+- **[D]** (owner, 2026-11-02, picturecrop): "Two non-destructive cuts stored as settings on the kept original: (1) Picture = free-shape crop (presets Free/2:3/1:1) used by large view, viewer and export (server renders the cut PNG, re-encodes, embeds card data); (2) Portrait = existing 2:3 cutout, chosen inside the cut picture, for small portraits. Defaults: picture = whole image. “Reset to the original”. Picture window gets a Picture | Portrait segmented switch at top; Picture tab previews: large view + export; Portrait tab: Message/Cast/Tile previews. Replace picture… → Picture → Portrait. ST imports unchanged (already cropped). Personas too." **Built; obsolete as an implementation requirement**; ARCHITECTURE §14.5c.
+- **[P]** (picturecrop, 2026-11-04): keep the Picture rectangle inside the existing image-bound `avatar_crop` settings object as optional `picture`; portrait coordinates stay relative to the original. Existing summary projections carry both cuts without changing the database baseline. Existing writer actions save both together. PNG export rebases the portrait to the rendered picture for round trips.
+
+- **[D] Owner, 2026-11-04 (interfacetab):** “The Display tab should be renamed to "Interface"”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §12. **[P]** Use `/settings/interface` and `?panel=interface`, redirecting old links and preserving internal display identifiers.
+
+- **[D] (owner, 2026-11-04)**: “prompt preset main editor vs lorebook main editor vs main chat view. The latter has a clear top header that connects to the two columns, the former two do not. From now on I want all center-column views to have such a header.”
+- **[D] (owner, 2026-11-04)**: “Moreover: through the header, it must be possible to switch what specific document the center column editor is editing: so a selector for lorebooks and presets for each respective editor makes sense. Chats already have this in the form of the branch switcher.”
+
+- **[P] (centerheader, 2026-11-04)**: Reuse the chat height token through one registered header frame; contribute title/actions from each view and navigate with shared same-kind selectors and existing draft guards.
+
+**Built (centerheader, 2026-11-04):** These decisions are implemented and obsolete as implementation requirements; see ARCHITECTURE §5 and §14.6.
 
 - **[D] Owner, 2026-11-04 (snippettitle):** “After renaming a snippet, its History dialog/label must show the new title”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 

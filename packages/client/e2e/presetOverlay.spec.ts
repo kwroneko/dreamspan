@@ -8,7 +8,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
-import { NOTHING_TO_SAVE, UNSAVED, expectSaveState, saveButton } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, UNSAVED, expectSaveState } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
@@ -122,7 +122,7 @@ for (const [width, height] of [
       await scroll.evaluate((e) => {
         e.scrollTop = e.scrollHeight / 2
       })
-      const bar = saveButton(overlay).locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      const bar = overlay.locator("[data-preset-scroll] .sticky").first()
       const above = await bar.evaluate((element) => {
         const box = element.getBoundingClientRect()
         const scroller = element.closest("[data-preset-scroll]")!
@@ -212,7 +212,7 @@ for (const width of [1440, 390])
           )
         )
         .toBe("narrate")
-      const bar = saveButton(overlay).locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      const bar = overlay.locator("[data-preset-scroll] .sticky").first()
       await expect
         .poll(
           async () => (await main.boundingBox())!.y - ((await bar.boundingBox())!.y + (await bar.boundingBox())!.height)
@@ -237,7 +237,7 @@ for (const width of [1440, 390])
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
-    test(`Close and preset identity stay in the toolbar (${width}px ${theme})`, async ({ page }) => {
+    test(`Close and preset identity stay in the header (${width}px ${theme})`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
@@ -249,7 +249,7 @@ for (const width of [1440, 390])
         e.scrollTop = e.scrollHeight
       })
       const close = overlay.getByRole("button", { name: "Close", exact: true })
-      const bar = close.locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      const bar = close.locator("xpath=ancestor::header[@data-center-header][1]")
       await expect(bar.getByText(name, { exact: true })).toBeVisible()
       await expectSaveState(bar, NOTHING_TO_SAVE)
       const box = (await close.boundingBox())!
@@ -289,7 +289,7 @@ for (const width of [1440, 390])
       await expect(marker).toBeFocused()
       await expect(marker.locator("mark")).toHaveText("History")
       await page.screenshot({ path: join(shots, `marker-navigation-${width}-${theme}.png`) })
-      const bar = saveButton(overlay).locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      const bar = overlay.locator("[data-preset-scroll] .sticky").first()
       await expect
         .poll(
           async () =>
@@ -352,7 +352,7 @@ test("Find reveals an offscreen range inside a long prompt", async ({ page }) =>
   await overlay.getByRole("button", { name: "Find", exact: true }).click()
   await overlay.getByRole("button", { name: "Go to Prompt “Main Prompt”: Content", exact: true }).click()
   await expect(main).toBeFocused()
-  const bar = saveButton(overlay).locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+  const bar = overlay.locator("[data-preset-scroll] .sticky").first()
   await expect
     .poll(async () => {
       const selected = await main.evaluate((e) => {

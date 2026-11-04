@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 // The library: every card, lorebook and preset, found by name and opened from here. Each
@@ -538,15 +539,15 @@ export function LibraryPage() {
   )
   return (
     <div className="flex flex-col gap-5">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Library</h1>
-        <div className="flex flex-wrap gap-2">
-          <SlotOutlet slot={libraryActions} props={{}} />
-          <Link to="/import" className={buttonClass("primary")}>
-            Import files
-          </Link>
-        </div>
-      </header>
+      <CenterHeaderContent>
+        <h1 className="text-base font-semibold">Library</h1>
+      </CenterHeaderContent>
+      <div className="flex flex-wrap gap-2">
+        <SlotOutlet slot={libraryActions} props={{}} />
+        <Link to="/import" className={buttonClass("primary")}>
+          Import files
+        </Link>
+      </div>
       <AsyncView atom={libraryAtom} loading="Loading the library…">
         {(lists) => {
           const cards = new Map(lists.castCards.map((card) => [card.entityId, card]))

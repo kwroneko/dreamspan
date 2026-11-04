@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 // The chats as a page (DESIGN §2.1): the sidebar's list, full width, for phones, where the
 // sidebar is folded away. Chats with characters start from the character grid; this page
@@ -58,12 +59,14 @@ export function ChatsPage() {
   useEffect(() => refresh(), [refresh])
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h1 className="text-xl font-semibold">Chats</h1>
-        <Link to="/" className="text-sm text-accent hover:underline">
-          New chat with a character
-        </Link>
-      </div>
+      <CenterHeaderContent>
+        <div className="flex w-full min-w-0 items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold">Chats</h1>
+          <Link to="/" className="text-sm text-accent hover:underline">
+            New chat with a character
+          </Link>
+        </div>
+      </CenterHeaderContent>
       <ChatList />
       <Card>
         <CardHeader title="A chat without characters" about="Characters can join later, from the composer." />

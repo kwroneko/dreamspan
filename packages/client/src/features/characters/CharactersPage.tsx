@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
 import { AsyncView } from "../../actions.tsx"
@@ -88,7 +89,9 @@ export function CharactersPage() {
   useTitle("Characters")
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">Characters</h1>
+      <CenterHeaderContent>
+        <h1 className="text-xl font-semibold">Characters</h1>
+      </CenterHeaderContent>
       <AsyncView atom={shellAtom} loading="Loading characters…">
         {(data) => <Home data={data} />}
       </AsyncView>
