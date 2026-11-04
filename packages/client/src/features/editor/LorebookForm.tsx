@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The lorebook document's form (DATA-MODEL §3.3), shared by the card's embedded book and the
 // standalone lorebook editor: the book's settings, and its entries as a table (LorebookTable)
 // whose rows open to every field of the entry here. Every edit is a field draft in the owning
@@ -16,10 +17,12 @@ import { type EditorStore, useValue } from "./store.ts"
 function BookSettings({ store, root, entries }: { store: EditorStore; root: FieldPath; entries: number }) {
   return (
     <details className="group rounded-lg border border-border p-3">
-      <summary className="cursor-pointer text-sm font-medium">
-        Book settings{" "}
-        <span className="hidden font-normal text-muted sm:inline">· description, scan depth, budget, recursion</span>
-      </summary>
+      <Tooltip label="Shows the lorebook’s activation settings.">
+        <summary className="cursor-pointer text-sm font-medium">
+          Book settings{" "}
+          <span className="hidden font-normal text-muted sm:inline">· description, scan depth, budget, recursion</span>
+        </summary>
+      </Tooltip>
       <div className="mt-3 flex flex-col gap-4">
         {/* A library lorebook is renamed by the pencil beside its name, which sets this too. */}
         {root.length > 0 && <TextField store={store} path={[...root, "name"]} label="Lorebook name" />}
@@ -77,7 +80,9 @@ export function LorebookForm({ store, root, absent }: { store: EditorStore; root
     return (
       <div className="flex min-w-0 flex-col items-start gap-3">
         <p className="text-sm text-muted">{absent}</p>
-        <Button onClick={() => setAdded(addEntry(store, root, book))}>Add entry</Button>
+        <Button hint="Adds an empty entry to this lorebook." onClick={() => setAdded(addEntry(store, root, book))}>
+          Add entry
+        </Button>
       </div>
     )
   }

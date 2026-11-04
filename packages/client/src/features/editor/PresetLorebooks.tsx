@@ -76,13 +76,13 @@ export function PresetLorebooks({
                       variant="ghost"
                       className="h-8 shrink-0 px-2"
                       aria-label={`Open ${name}`}
-                      hint="Opens the book's editor. It's the library's book: a change there reaches every chat and preset using it."
+                      hint="Opens the shared lorebook editor. Changes affect every chat and preset using this book."
                       onClick={() => onOpen(ref.id)}
                     >
                       Open
                     </Button>
                   ) : (
-                    <Tooltip label="Opens the book's page. It's the library's book: a change there reaches every chat and preset using it.">
+                    <Tooltip label="Opens the shared lorebook page. Changes affect every chat and preset using this book.">
                       <Link
                         to="/library/$refId"
                         params={{ refId: ref.id }}

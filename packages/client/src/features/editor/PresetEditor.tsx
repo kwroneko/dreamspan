@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The preset editor (DESIGN §1.2, §6): the prompt list in order, with enable switches and
 // drag to reorder; each prompt's role, position and depth; prefill text;
 // and the regex scripts, which run only once the user allows them (ARCHITECTURE.md §9).
@@ -153,7 +154,9 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
       <Card>
         <CardHeader title="Utility prompts" />
         <details>
-          <summary className="cursor-pointer text-sm text-muted">Show the {UTILITY.length} utility prompts</summary>
+          <Tooltip label="Shows the preset’s utility prompts.">
+            <summary className="cursor-pointer text-sm text-muted">Show the {UTILITY.length} utility prompts</summary>
+          </Tooltip>
           <div className="mt-3 flex flex-col gap-3">
             {UTILITY.map(([key, label]) => (
               <TextField key={key} store={store} path={["utility_prompts", key]} label={label} rows={3} />

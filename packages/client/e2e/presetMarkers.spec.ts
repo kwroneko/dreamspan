@@ -146,7 +146,7 @@ const theme = async (page: Page, width: number, scheme: "light" | "dark") => {
 }
 
 const CACHE_EXPLANATION =
-  "Prompt cache breakpoint: everything above it is cached between replies. Editing a prompt above it invalidates the cache from that prompt down. Not every provider supports caching."
+  "Marks a prompt cache breakpoint. Editing a prompt above the breakpoint invalidates the cache from that prompt onward."
 
 const check = async (page: Page, root: Locator, name: string) => {
   const points = root.locator("[data-cache-breakpoint]")

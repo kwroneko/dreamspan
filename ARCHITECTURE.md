@@ -525,6 +525,8 @@ The streaming above covers private `user_field` workspaces (authored settings, n
 
 Copy audit (2026-11-04): shared confirmation, history, navigation and disclosure controls use existing Button hints and Tooltip explanations on hover and focus. Segmented choices retain their descriptions and fall back to the selection action; disclosures without custom help explain the next expand or collapse action.
 
+Preset and lorebook copy audit (2026-11-04): editor controls and entry menus have hover/focus explanations; preset help names the cache prefix and cache breakpoints directly. Utility-prompt and lorebook-settings disclosures explain their contents. Labels and actions are unchanged.
+
 ### 3.11 Recycle bin
 
 Delete explanations use “Moves this <thing> to the bin, from which it can be restored later.” without additional text. Delete toasts say “<Thing> moved to the bin.” and retain the Undo and Open the bin actions. Cancel and Discard explanations briefly name the cancelled action and where the typed text is kept; the bin’s “Recovered text” section is named when needed to distinguish it from “Deleted”.
