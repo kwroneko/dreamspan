@@ -342,3 +342,32 @@ test("the name explanations and nickname field use the owner's wording", async (
   await expect(header.getByRole("textbox", { name: "In-chat nickname", exact: true })).toHaveValue("")
   await header.getByRole("button", { name: "Cancel renaming" }).click()
 })
+
+// The card uses the same header navigation control as the other panel editors.
+test("the card's large editor control follows Save in the header", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const name of [PLAIN, PERSONA]) {
+      const panel = await open(page, name)
+      const header = panel.locator("[data-card-header]")
+      const expand = header.getByRole("button", { name: `Open ${name} in the full editor`, exact: true })
+      await expect(expand).toBeVisible()
+      await expect(expand.locator("svg")).toBeVisible()
+      await expect(expand).toHaveText("")
+      await expect(panel.getByRole("button", { name: `Open ${name} in the full editor`, exact: true })).toHaveCount(1)
+      const save = await box(header.getByRole("group", { name: "Save", exact: true }))
+      const control = await box(expand)
+      expect(control.x).toBeGreaterThanOrEqual(save.x + save.width)
+      expect(Math.abs(control.y + control.height / 2 - save.y - save.height / 2)).toBeLessThanOrEqual(1)
+      await shoot(
+        width === 390 ? page : page.getByRole("complementary", { name: "Chat panel" }),
+        `editor-control-${width}-${name}`
+      )
+      await expand.hover()
+      await expect(page.getByText("Opens this card in the large editor.", { exact: true })).toBeVisible()
+      await expand.click()
+      await expect(page.getByRole("dialog", { name: "Card editor", exact: true })).toBeVisible()
+    }
+  }
+})

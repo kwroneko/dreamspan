@@ -1,3 +1,5 @@
+**Built 2026-11-04 (smallfixes5):** The card editor navigation (§2.2), prompt badges and linked history-note marker (§6.2a) are implemented and obsolete as implementation requirements; see ARCHITECTURE §14.6.
+
 **Built 2026-11-02 (stablebuttons):** The stable unavailable-control rule in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §5.
 **Built 2026-11-03 (newnoteopen):** The new-note expansion decision in §4.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
 **Built 2026-11-03 (lorebookfix2):** The field-help placement, always-visible Strategy and position, and quiet export-only header decisions in §1.3 are implemented and obsolete as implementation requirements; see ARCHITECTURE §14.6.
@@ -237,6 +239,9 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** (owner, 2026-11-02, groupgrid) "make the gaps between portraits equal horizontally and vertically, at every panel width, with any number of members." Portrait/card grids use one CSS `gap` for both axes. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a).
 
 ### 2.2 Personas, speakers and writers
+
+- **[D]** (owner, 2026-11-04): “The 'Full Editor' button is buried in the action list for the card. It's not an action.” Match the other sidebar editors' full-editor control and position. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
+- **[P]** (smallfixes5, 2026-11-04): render the existing registered `card.edit` contribution as an expand icon after Save in the card identity row; retain its menu presentation elsewhere.
 
 - **[D]** (owner, 2026-11-04): In the side panel character header, “the persona button needs to be at the bottom of this cluster”, below the chats/token counts. Remove the portrait's Persona badge here: “entirely redundant”; keep You and badges elsewhere. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 
@@ -758,6 +763,10 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - a diff browser for every earlier revision
 
 ### 6.2a The prompt preset editor (owner, 2026-10-27)
+
+- **[D]** (owner, 2026-11-04): “unique built-in prompts with fixed names that are already highlighted by their colour … shouldn't repeat their name in a coloured badge.” Keep badges for special prompts with customizable titles that are not otherwise highlighted. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
+- **[D]** (owner, 2026-11-04): “Rename it 'Notes from this chat' (if it actually means notes placed inside the history, say exactly that instead …). Link each listed note so the user can open it. Don't change how notes at depth > 1 are shown.” **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
+- **[P]** (smallfixes5, 2026-11-04): keep kind badges for Main, Post-history, Auxiliary and Enhance definitions; omit placeholder, custom and unknown-kind badges. The positive-depth marker becomes “Notes in the chat history”; every listed note title opens its existing large editor, keeping depth and due annotations.
 
 - **[D]** (owner, 2026-11-04): “It can't mean two things.” Depth 0 means after the last message; list a depth-0 note only under Notes after the newest message. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
 

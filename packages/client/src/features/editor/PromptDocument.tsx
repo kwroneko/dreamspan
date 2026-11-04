@@ -1,5 +1,7 @@
 import { createPortal } from "react-dom"
 import { SearchDialog } from "./SearchDialog.tsx"
+import { usePresetWorkspace } from "./PresetWorkspace.tsx"
+import { NOTE_FOCUS } from "./workspaceViews.ts"
 import { presetScopes } from "./searchScopes.ts"
 import {
   PlaceholderSource,
@@ -838,20 +840,11 @@ export function PromptDocument({
       </Tooltip>
     </div>
   )
+  const workspace = usePresetWorkspace()
   const slot = (label: string, predicate: (p: PresetContext["notes"][number]["placement"]) => boolean) => {
-    const notes = context
-      ? context.notes
-          .filter((n) => predicate(n.placement))
-          .map(
-            (n) =>
-              n.title +
-              (n.placement.mode === "depth" ? ` (depth ${n.placement.depth})` : "") +
-              (n.due === false ? " (not due this turn)" : "")
-          )
-          .join(", ")
-      : ""
+    const notes = context?.notes.filter((n) => predicate(n.placement)) ?? []
     // Only the places that hold a note show (owner, 2026-11-02: quiet when empty), in both layouts.
-    if (notes === "") return null
+    if (notes.length === 0) return null
     // A row like the prompts' (dashed: it stands for what fills it), its icon in their handle's column.
     return (
       <Block
@@ -871,7 +864,36 @@ export function PromptDocument({
           <PlaceholderSource
             identifier="notes"
             heading={label}
-            source={notes}
+            source={notes.map((note, index) => (
+              <span key={note.ref}>
+                {index > 0 && ", "}
+                <Tooltip label={`Opens ${note.title} in the large editor.`}>
+                  <Link
+                    to="/library/$refId"
+                    params={{ refId: note.ref }}
+                    search={{ focus: NOTE_FOCUS }}
+                    className="underline underline-offset-2"
+                    onClick={(event) => {
+                      if (
+                        !workspace ||
+                        event.button !== 0 ||
+                        event.metaKey ||
+                        event.ctrlKey ||
+                        event.shiftKey ||
+                        event.altKey
+                      )
+                        return
+                      event.preventDefault()
+                      workspace.open(note.ref, NOTE_FOCUS)
+                    }}
+                  >
+                    {note.title}
+                  </Link>
+                </Tooltip>
+                {note.placement.mode === "depth" && ` (depth ${note.placement.depth})`}
+                {note.due === false && " (not due this turn)"}
+              </span>
+            ))}
             about="Each request inserts the active notes at this placement; this text isn't from the preset and can't be edited here. Edit the notes in the chat's Notes tab or the card's Notes tab. Their placement and conditions decide where and when they are sent."
           />
         </span>
@@ -1041,7 +1063,7 @@ export function PromptDocument({
                 )}
               {reuseLine(entry.identifier)}
               {entry.identifier === "chatHistory" &&
-                slot("Notes inside the chat", (p) => p.mode === "depth" && p.depth > 0)}
+                slot("Notes in the chat history", (p) => p.mode === "depth" && p.depth > 0)}
             </>
           )
         }}

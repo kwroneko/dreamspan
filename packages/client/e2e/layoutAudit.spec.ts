@@ -304,7 +304,8 @@ test.describe("synthetic library and every app surface", () => {
             preset:
               process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1" ||
-              process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1"
+              process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1" ||
+              process.env.LAYOUT_AUDIT_SMALLFIXES5_ONLY === "1"
                 ? preset.id
                 : null
           }
@@ -482,6 +483,19 @@ test.describe("synthetic library and every app surface", () => {
             api.ChangeGenerationDefaults({ change: { lcm: { withPreset: "specific", preset: presetRef } } })
           )
           await go("settings-chats", "/settings/chats")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_SMALLFIXES5_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const card = await openPanel(page, cardName)
+          await expect(card.locator("[data-card-tokens]")).toBeVisible()
+          await audit("panel-card-header", "[data-card-header]")
+          const preset = await openPanel(page, "Prompt preset")
+          await expect(preset.getByRole("list", { name: "Preset blocks" })).toBeVisible()
+          await audit("panel-preset", '[aria-label="Preset blocks"], [aria-label="Prompt order"]')
+          await preset.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
+          await expect(page.getByRole("dialog", { name: "Preset editor", exact: true })).toBeVisible()
+          await audit("large-preset", '[aria-label="Preset blocks"], [aria-label="Prompt order"]')
           return
         }
         if (process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1") {

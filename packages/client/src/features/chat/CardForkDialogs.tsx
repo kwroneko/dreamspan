@@ -9,6 +9,7 @@ import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { MenuAction } from "../../ui/Menu.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -27,31 +28,32 @@ export interface ChatCardActionProps {
   session: ChatSession | null
   card: CastCard
   info: ChatCardInfo | undefined
+  /** Navigation in the panel header; menus retain their text action. */
+  presentation?: "header" | undefined
   /** The card the user plays here (the persona's tab): actions for a character in the chat leave it out. */
   persona?: boolean | undefined
 }
 
 /** The full card editor, over the chat (the chat stays as it was); without the workspace, its page. */
-export function EditChatCard({ session, card, info }: ChatCardActionProps) {
+export function EditChatCard({ session, card, info, presentation }: ChatCardActionProps) {
   const navigate = useNavigate()
   const workspace = usePresetWorkspace()
-  return (
-    <MenuAction
-      variant="ghost"
-      className="h-8! px-2!"
-      aria-label={`Open ${card.name} in the full editor`}
-      hint="Edit every field of the card, over the chat."
-      disabled={!info}
-      onClick={() => {
-        if (!info) return
-        if (workspace) return workspace.open(info.refId)
-        void navigate({
-          to: "/library/$refId",
-          params: { refId: info.refId },
-          ...(session === null ? {} : { search: { renameChat: session.id, renameFork: session.snapshot().forkId } })
-        })
-      }}
-    >
+  const open = () => {
+    if (!info) return
+    if (workspace) return workspace.open(info.refId)
+    void navigate({
+      to: "/library/$refId",
+      params: { refId: info.refId },
+      ...(session === null ? {} : { search: { renameChat: session.id, renameFork: session.snapshot().forkId } })
+    })
+  }
+  const label = `Open ${card.name} in the full editor`
+  const hint =
+    presentation === "header" ? "Opens this card in the large editor." : "Edit every field of the card, over the chat."
+  return presentation === "header" ? (
+    <IconButton label={label} hint={hint} icon="expand" disabled={!info} onClick={open} />
+  ) : (
+    <MenuAction variant="ghost" className="h-8! px-2!" aria-label={label} hint={hint} disabled={!info} onClick={open}>
       Full editor
     </MenuAction>
   )

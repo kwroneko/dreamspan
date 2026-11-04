@@ -1970,6 +1970,8 @@ Fresh ST folder imports classify `user/images/<folder>/<image>` and process them
 
 ### 14.6 The editors in the client
 
+**Sidebar navigation, prompt badges and note links (smallfixes5, 2026-11-04).** The card panel renders the replaceable `card.edit` contribution after Save in the identity row as the shared expand IconButton, excluding it from the panel action list; cast menus retain their existing presentation. Prompt kind badges identify only the editable Main, Post-history, Auxiliary and Enhance definitions slots, whose titles can change. Tinted placeholders (World Info before/after, Definitions, Description, Personality, Scenario, Persona, Examples, Chat history, Newest message and Summaries), custom prompts and unknown kinds have no kind badge. The positive-depth note marker reads “Notes in the chat history”; depth-zero placement and all depth/due annotations stay unchanged. Each listed title links to the existing note editor, opening over the chat when a workspace is present. The reader's existing preset-context projection includes each note's owned upstream ref; no database operations run on the main thread. Targeted coverage lives in `presetMarkers.spec.ts` and `cardHeader.spec.ts`; `LAYOUT_AUDIT_SMALLFIXES5_ONLY=1` audits the card header and both preset surfaces.
+
 **Depth-zero note placement** (smallfixes4, 2026-11-04). `PromptDocument` lists depth 0 only under Notes after the newest message; Notes inside the chat accepts positive depths. `e2e/presetMarkers.spec.ts` checks both destinations in the panel and large editor.
 
 

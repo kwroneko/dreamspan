@@ -161,7 +161,7 @@ const check = async (page: Page, root: Locator, name: string) => {
     await expect(points.nth(i)).toContainText(
       `Cache breakpoint · ${kind === "summary" ? "summaries" : kind === "pinned" ? "prefix" : kind}`
     )
-  const inside = root.locator('[data-note-slot="Notes inside the chat"]')
+  const inside = root.locator('[data-note-slot="Notes in the chat history"]')
   const after = root.locator('[data-note-slot="Notes after the newest message"]')
   await inside.scrollIntoViewIfNeeded()
   await inside.screenshot({ path: join(shots, `${name}-inside.png`) })
@@ -169,7 +169,7 @@ const check = async (page: Page, root: Locator, name: string) => {
   await after.screenshot({ path: join(shots, `${name}-after.png`) })
   await expect(after).toContainText("At depth zero (depth 0)")
   await expect(inside).not.toContainText("At depth zero")
-  await expect(root.locator('[data-note-slot="Notes inside the chat"]')).toContainText("Character's Note (depth 2)")
+  await expect(root.locator('[data-note-slot="Notes in the chat history"]')).toContainText("Character's Note (depth 2)")
   await expect(root.locator('[data-prompt="synthetic-0"] [data-volatile-warning]')).toBeVisible()
   await expect(root.locator('[data-prompt="main"] [data-prompt-kind-tag]')).toHaveText("Main")
   await expect(root.locator('[data-prompt="chatHistory"]')).toHaveAttribute("data-prompt-type", "history")
@@ -185,9 +185,32 @@ const check = async (page: Page, root: Locator, name: string) => {
     await expect(line).toHaveCSS("font-style", "italic")
     await expect(line).toHaveClass(/text-muted/)
   }
-  const noteSource = root.locator('[data-note-slot="Notes inside the chat"] [data-placeholder-source]')
+  const noteSource = root.locator('[data-note-slot="Notes in the chat history"] [data-placeholder-source]')
   await expect(noteSource).toHaveText("Character's Note (depth 2)")
   await expect(noteSource).toHaveCSS("font-style", "italic")
+  for (const id of [
+    "worldInfoBefore",
+    "worldInfoAfter",
+    "charDescription",
+    "charPersonality",
+    "scenario",
+    "personaDescription",
+    "dialogueExamples",
+    "chatHistory",
+    "newestMessage",
+    "summaries"
+  ])
+    await expect(root.locator(`[data-prompt="${id}"] [data-prompt-kind-tag]`)).toHaveCount(0)
+  for (const [id, label] of [
+    ["main", "Main"],
+    ["jailbreak", "Post-history"],
+    ["nsfw", "Auxiliary"],
+    ["enhanceDefinitions", "Enhance definitions"]
+  ])
+    await expect(root.locator(`[data-prompt="${id}"] [data-prompt-kind-tag]`)).toHaveText(label!)
+  const noteLink = noteSource.getByRole("link", { name: "Character's Note", exact: true })
+  await expect(noteLink).toHaveAttribute("href", /\/library\/.+focus=note/)
+
   for (const [id, label, explanation] of [
     ["charDescription", "Description", "Edit Description in each character's card, Definition tab."],
     ["chatHistory", "Chat history", "Edit the messages in the chat."],
@@ -275,6 +298,12 @@ for (const width of [390, 1440, 1920])
       await expect(overlay.locator("[data-cache-breakpoint]")).toHaveCount(cacheAfter.length)
       await header(overlay)
       await check(page, overlay, `large-${width}-${scheme}`)
+      await overlay.getByRole("link", { name: "Character's Note", exact: true }).click()
+      const noteEditor = page.getByRole("dialog", { name: "Note editor", exact: true })
+      await expect(noteEditor).toBeVisible()
+      await expect(noteEditor.getByRole("textbox", { name: "Text of Character's Note", exact: true })).toContainText(
+        "Character's Note text."
+      )
     })
 
 /**
