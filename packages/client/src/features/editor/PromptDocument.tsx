@@ -423,11 +423,6 @@ function PromptBlock({
         )}
         {!landmark && <PromptKindTag prompt={prompt} />}
       </span>
-      <PlaceholderSource
-        identifier={prompt.identifier}
-        heading={kind?.label ?? prompt.name}
-        byDefinitions={byDefinitions}
-      />
     </span>
   ) : (
     <BlockToggle
@@ -442,7 +437,11 @@ function PromptBlock({
         column &&
         collapsed &&
         !label.derived &&
-        first !== "" && <span className="block max-w-full truncate text-xs text-muted">{first}</span>
+        first !== "" && (
+          <span data-prompt-inline-preview className="block max-w-full truncate text-xs text-muted">
+            {first}
+          </span>
+        )
       }
     />
   )
@@ -534,16 +533,30 @@ function PromptBlock({
       data-prompt-type={landmark ? "history" : prompt.marker ? "placeholder" : kind ? "builtin" : "custom"}
       className={`scroll-mt-[var(--preset-toolbar-height,1rem)] ${landmark ? "prompt-history" : prompt.marker ? "prompt-placeholder" : column ? "bg-canvas" : ""}`}
     >
-      <BlockHeader className={column ? "flex-nowrap" : "prompt-document-header flex-wrap"}>
+      <BlockHeader className={`prompt-row-header ${column ? "flex-nowrap" : "prompt-document-header flex-wrap"}`}>
         {handle}
         <span className="flex h-8 w-10 shrink-0 items-center justify-center">{sendSwitch}</span>
-        <div className={column ? "min-w-7 flex-1" : "min-w-0 flex-1"}>
+        <div data-prompt-heading className={column ? "min-w-7 flex-1" : "min-w-0 flex-1"}>
           <div data-prompt-title-row className="flex min-w-0 items-center gap-1">
             {named}
             {!column && !prompt.marker && <PromptKindTag prompt={prompt} />}
             {!column && optionsToggle}
             {!column && menu}
           </div>
+          {column && collapsed && !prompt.marker && !label.derived && first !== "" && (
+            <div data-prompt-column-preview className="hidden px-1 text-xs text-muted">
+              {first}
+            </div>
+          )}
+          {prompt.marker && (
+            <div data-prompt-description className="px-1 pb-1">
+              <PlaceholderSource
+                identifier={prompt.identifier}
+                heading={kind?.label ?? prompt.name}
+                byDefinitions={byDefinitions}
+              />
+            </div>
+          )}
           {!column && !prompt.marker && !label.derived && first !== "" && (
             <div data-prompt-preview className="mt-0.5 truncate px-1 text-xs text-muted">
               {first}

@@ -304,6 +304,7 @@ test.describe("synthetic library and every app surface", () => {
             preset:
               process.env.LAYOUT_AUDIT_CARDHISTORY_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ||
+              process.env.LAYOUT_AUDIT_PROMPTROWS_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SEARCHREPLACE_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1" ||
@@ -874,6 +875,77 @@ test.describe("synthetic library and every app surface", () => {
           await inspect(page.getByRole("dialog", { name: "Lorebook editor", exact: true }), "lorebook-large")
           await page.goto(`${server.url}/library/${bookRef}`)
           await inspect(page.getByRole("main"), "lorebook-page")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_PROMPTROWS_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const panel = await openPanel(page, "Prompt preset")
+          const inspectRows = async (root: Locator, surface: string) => {
+            const list = root.getByRole("list", { name: /^(Preset blocks|Prompt order)$/ })
+            await expect(list).toBeVisible({ timeout: 60000 })
+            await list.evaluate((element) => {
+              for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+                if (/(auto|scroll)/.test(getComputedStyle(parent).overflowY)) parent.scrollTop = 0
+              }
+            })
+            await page.mouse.move(0, 0)
+            const box = (await list.boundingBox())!
+            const viewport = page.viewportSize()!
+            await page.screenshot({
+              path: join(work, `${width}-${theme}-${surface}.png`),
+              clip: {
+                x: Math.max(0, box.x),
+                y: Math.max(0, box.y),
+                width: Math.min(box.width, viewport.width - Math.max(0, box.x)),
+                height: Math.min(650, viewport.height - Math.max(0, box.y))
+              }
+            })
+            await root.evaluate((element) => element.setAttribute("data-promptrows-audit", ""))
+            await audit(
+              surface,
+              '[data-promptrows-audit] [aria-label="Preset blocks"], [data-promptrows-audit] [aria-label="Prompt order"]'
+            )
+            await root.evaluate((element) => element.removeAttribute("data-promptrows-audit"))
+            if (box.width < 576) {
+              const rows = await list.locator(".prompt-row-header").evaluateAll((headers) =>
+                headers.map((header) => {
+                  const title = header.querySelector("[data-prompt-title-row]")!
+                  const end = header.querySelector("[data-prompt-end], [data-prompt-info]")
+                  const source = header.querySelector("[data-placeholder-source]")
+                  const detail = header.querySelector(
+                    "[data-prompt-description], [data-prompt-column-preview], [data-prompt-preview]"
+                  )
+                  return {
+                    fullWidth:
+                      !detail || detail.getBoundingClientRect().width >= header.getBoundingClientRect().width - 24,
+                    separate: !end || end.getBoundingClientRect().top >= title.getBoundingClientRect().bottom,
+                    words: !source || getComputedStyle(source).overflowWrap === "normal"
+                  }
+                })
+              )
+              expect(rows.length).toBeGreaterThan(0)
+              expect(rows.every((row) => row.separate && row.words && row.fullWidth)).toBe(true)
+            }
+          }
+          await inspectRows(panel, "promptrows-panel")
+          if (width >= 1024) {
+            await page.getByRole("separator", { name: "Resize chat panel", exact: true }).press("Home")
+            await inspectRows(panel, "promptrows-minimum")
+          }
+          const add = panel.getByRole("button", { name: "Add definitions block", exact: true })
+          if (await add.isEnabled()) await add.click()
+          await expect(panel.locator('[data-prompt="charDefinitions"]')).toBeVisible()
+          const unsaved = page.getByRole("region", { name: "Unsaved changes" })
+          if (await unsaved.isVisible()) {
+            await panel
+              .getByRole("group", { name: "Save", exact: true })
+              .getByRole("button", { name: "Save", exact: true })
+              .click()
+            await expect(unsaved).toHaveCount(0)
+          }
+          await inspectRows(panel, "promptrows-definitions")
+          await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
+          await inspectRows(page.getByRole("dialog", { name: "Preset editor", exact: true }), "promptrows-large")
           return
         }
         if (process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1") {
