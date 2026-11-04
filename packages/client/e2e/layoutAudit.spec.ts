@@ -1581,6 +1581,7 @@ for (const width of [1440, 390])
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       const findings: unknown[] = []
+      const gaps: unknown[] = []
       for (const kind of ["note", "card"] as const) {
         const id = process.env[kind === "note" ? "LAYOUT_AUDIT_REVISION_NOTE" : "LAYOUT_AUDIT_REVISION_CARD"]
         expect(id).toBeTruthy()
@@ -1637,8 +1638,25 @@ for (const width of [1440, 390])
           }
         }
         await openDiff("Revision 1", "Revision 2")
-        const tabsRow = dialog.getByRole("tablist", { name: "Revision changes", exact: true }).locator("..")
-        await expect(tabsRow.getByRole("button", { name: "Close comparison", exact: true })).toBeVisible()
+        await expect(dialog.getByRole("button", { name: "Close comparison", exact: true })).toHaveCount(0)
+        await expect(compare).toHaveAttribute("aria-pressed", "true")
+        await expect(compare).toHaveAccessibleDescription("Click to hide this revision's comparison")
+        const measureGaps = async (state: string) => {
+          const measured = await dialog
+            .getByRole("tablist", { name: "Revision changes", exact: true })
+            .evaluate((list) => {
+              const section = list.closest('section[aria-label^="Comparison of revision"]')!
+              const previous = section.previousElementSibling!.getBoundingClientRect()
+              const tabs = list.getBoundingClientRect()
+              const field = section.querySelector("details")!.getBoundingClientRect()
+              return { above: tabs.top - previous.bottom, below: field.top - tabs.bottom }
+            })
+          expect(measured.above).toBeCloseTo(8, 1)
+          expect(measured.below).toBeCloseTo(8, 1)
+          gaps.push({ kind, state, ...measured })
+          writeFileSync(join(work, `gaps-${width}-${theme}.json`), JSON.stringify(gaps, null, 2))
+        }
+        await measureGaps("previous")
         await audit("comparison")
         await dialog.screenshot({
           path: info.outputPath(`${kind}-previous-${width}-${theme}.png`),
@@ -1651,6 +1669,7 @@ for (const width of [1440, 390])
         )
         await expect(revisions.nth(1).getByRole("button", { name: "Restore to revision 2", exact: true })).toBeEnabled()
         await openDiff("Revision 2", "Current state")
+        await measureGaps("current")
         await audit("current-comparison")
         await dialog.screenshot({
           path: info.outputPath(`${kind}-current-${width}-${theme}.png`),
@@ -1668,12 +1687,17 @@ for (const width of [1440, 390])
           page.getByText("Shows this first revision's changes from an empty document", { exact: true })
         ).toBeVisible()
         await openDiff("Empty", "Revision 1")
+        await measureGaps("first")
         await audit("first-comparison")
         await dialog.screenshot({
           path: info.outputPath(`${kind}-empty-${width}-${theme}.png`),
           animations: "disabled"
         })
-        await dialog.getByRole("button", { name: "Close comparison", exact: true }).click()
+        const firstCompare = revisions.last().getByRole("button", { name: /^Revision \d+ / })
+        await firstCompare.click()
+        await expect(firstCompare).toHaveAttribute("aria-pressed", "false")
+        await expect(firstCompare).toHaveAccessibleDescription("Click to compare this revision")
+        await expect(dialog.getByRole("tablist")).toHaveCount(0)
         await revisions
           .first()
           .getByRole("button", { name: /^Change the message/ })

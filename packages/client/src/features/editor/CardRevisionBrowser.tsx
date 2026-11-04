@@ -14,7 +14,6 @@ import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import type { Caller } from "./caller.ts"
 import { ValueDiff } from "./diff.tsx"
@@ -141,12 +140,10 @@ const originBadges: Partial<Record<Revision["origin"], string>> = {
 function RevisionComparison({
   store,
   revision,
-  settingLines,
-  onClose
+  settingLines
 }: {
   store: EditorStore
   revision: Revision
-  onClose: () => void
   settingLines?: SettingLines | undefined
 }) {
   const [mode, setMode] = useState<"parent" | "current">("parent")
@@ -211,14 +208,6 @@ function RevisionComparison({
         <Tabs
           wrap
           label="Revision changes"
-          end={
-            <IconButton
-              label="Close comparison"
-              hint="Closes this revision's comparison"
-              icon="close"
-              onClick={onClose}
-            />
-          }
           value={mode}
           onValueChange={setMode}
           tabs={[
@@ -397,17 +386,8 @@ export function CardRevisionBrowser({
               }}
             />
             {selected?.id === revision.id && (
-              <section
-                aria-label={`Comparison of revision ${revision.number}`}
-                className="relative mt-3 min-w-0 border-t border-border pt-3"
-              >
-                <RevisionComparison
-                  key={selected.id}
-                  store={store}
-                  revision={selected}
-                  onClose={() => setSelected(null)}
-                  settingLines={settingLines}
-                />
+              <section aria-label={`Comparison of revision ${revision.number}`} className="min-w-0 pt-2">
+                <RevisionComparison key={selected.id} store={store} revision={selected} settingLines={settingLines} />
               </section>
             )}
           </li>

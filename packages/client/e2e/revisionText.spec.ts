@@ -83,7 +83,10 @@ for (const width of [1440, 390])
         await page.screenshot({ animations: "disabled", path: join(screens, `${kind}-history-${width}-${theme}.png`) })
         await history.getByRole("tab", { name: "Changes from current state" }).click()
         await expect(history.getByText("No fields differ.", { exact: true })).toBeVisible()
-        await history.getByRole("button", { name: "Close comparison", exact: true }).click()
+        await revisions
+          .first()
+          .getByRole("button", { name: /^Revision \d+ / })
+          .click()
         await expect(history.getByRole("tab")).toHaveCount(0)
         await expect(revisions.first().getByRole("button", { name: /^Restore to revision / })).toBeDisabled()
         await revisions
