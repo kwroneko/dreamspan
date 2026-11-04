@@ -301,16 +301,9 @@ for (const target of ["book", "entry"] as const)
     const field = (await admin((api) => api.OpenEditor({ refId: card.id }))).drafts.find((d) => d.content === text)!.key
       .field
     if (target === "book") {
-      await page.getByRole("button", { name: "History", exact: true }).click()
-      const history = page.getByRole("dialog", { name: "History", exact: true })
-      await history
-        .getByRole("list", { name: "Revisions" })
-        .getByRole("listitem")
-        .first()
-        .getByRole("button", { name: /^Revision \d+ / })
-        .click()
-      await history.getByRole("button", { name: "Restore", exact: true }).click()
-      await history.getByRole("button", { name: "Close", exact: true }).click()
+      // DESIGN §10.1 historyui: the latest revision's Restore stays disabled.
+      // The save cluster's Revert restores that saved content, including structural drafts.
+      await page.getByRole("button", { name: "Revert", exact: true }).click()
     } else {
       await page.getByRole("button", { name: "More for Untitled entry", exact: true }).click()
       await page.getByRole("menuitem", { name: "Delete" }).click()

@@ -9,7 +9,7 @@ import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { expectTextBox, textBoxValue } from "./support/textbox.ts"
+import { expectTextBox, replaceEditorText, textBoxValue } from "./support/textbox.ts"
 import { editHistoryTexts, saveCluster, saveRevision } from "./support/saveRevision.ts"
 
 const server = serverPerFile(withAdmin)
@@ -112,7 +112,11 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
                 : "Lorebooks"
           await page.goto(`${server().url}/chats/${data.chat.id}${large ? `?editor=${data[kind].id}` : ""}`)
           let scope: Locator
-          if (large) scope = page.locator('[data-testid="preset-scroll"]')
+          if (large)
+            scope = page.getByRole("dialog", {
+              name: kind === "card" ? "Card editor" : kind === "preset" ? "Preset editor" : "Lorebook editor",
+              exact: true
+            })
           else {
             scope = await openPanel(page, tabName)
             if (kind === "book")
@@ -135,7 +139,10 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
           await expect(field).toBeVisible()
           await crop(page, scope, `${kind}-${large ? "large" : "panel"}-${width}-${theme}`)
           const cluster = saveCluster(scope)
-          const header = cluster.locator("xpath=ancestor::*[@data-editor-header][1]")
+          // DESIGN §10.1 centerheader: large-editor actions sit above the scroll area.
+          const header = large
+            ? scope.locator("[data-center-header]")
+            : cluster.locator("xpath=ancestor::*[@data-editor-header][1]")
           await expect(header).toHaveCount(1)
           if (kind !== "card" && !large) {
             const expand = header.getByRole("button", {
@@ -156,7 +163,9 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
           const position = await cluster.boundingBox()
           const bounds = await header.boundingBox()
           expect(position!.x + position!.width).toBeGreaterThan(bounds!.x + bounds!.width - 100)
-          expect(Math.abs(position!.y - bounds!.y)).toBeLessThanOrEqual(4)
+          if (large)
+            expect(Math.abs(position!.y + position!.height / 2 - bounds!.y - bounds!.height / 2)).toBeLessThanOrEqual(1)
+          else expect(Math.abs(position!.y - bounds!.y)).toBeLessThanOrEqual(4)
           for (const name of ["Save", "Save with message…", "Revert"]) {
             await expect(cluster.getByRole("button", { name, exact: true })).toBeDisabled()
             await expect(cluster.getByRole("button", { name, exact: true })).toHaveAccessibleDescription(
@@ -181,7 +190,7 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
           ).toBeVisible()
           await page.mouse.move(0, 0)
           const original = await textBoxValue(field)
-          await field.fill(`${original}\nChanged for saveflow.`)
+          await replaceEditorText(field, `${original}\nChanged for saveflow.`)
           for (const [name, hint] of [
             ["Save", "Save a revision: a version of this you can go back to from History."],
             ["Save with message…", "Save a revision with a note saying what changed."],
@@ -214,7 +223,7 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
             await expectTextBox(field, original)
           }
           await expect(frame.getByRole("button", { name: "Revert to last revision", exact: true })).toBeDisabled()
-          await field.fill(`${original}\nA saved change.`)
+          await replaceEditorText(field, `${original}\nA saved change.`)
           await saveRevision(scope)
           await expect(cluster.getByRole("status")).toHaveText("Revision saved.")
           if (kind === "card") await expect(dot).toHaveCount(0)
@@ -246,15 +255,20 @@ for (const kind of ["card", "preset", "book"] as const)
     await page.setViewportSize({ width: 1440, height: 1000 })
     const data = await seed(page, `unvisited-${kind}`)
     await page.goto(`${server().url}/chats/${data.chat.id}?panel=chat&editor=${data[kind].id}`)
-    const scope = page.locator('[data-testid="preset-scroll"]')
+    const scope = page.getByRole("dialog", {
+      name: kind === "card" ? "Card editor" : kind === "preset" ? "Preset editor" : "Lorebook editor",
+      exact: true
+    })
     if (kind === "book") await scope.getByRole("button", { name: "Open Harbour", exact: true }).click()
-    await scope
-      .getByRole("textbox", {
-        name: kind === "card" ? "Description" : kind === "preset" ? "Prompt: Main Prompt" : "Entry content",
-        exact: true
-      })
-      .first()
-      .fill("Changed in the large editor.")
+    await replaceEditorText(
+      scope
+        .getByRole("textbox", {
+          name: kind === "card" ? "Description" : kind === "preset" ? "Prompt: Main Prompt" : "Entry content",
+          exact: true
+        })
+        .first(),
+      "Changed in the large editor."
+    )
     const name = kind === "card" ? "Wren unvisited-card" : kind === "preset" ? "Prompt preset" : "Lorebooks"
     const tab = page.getByRole("tab", { name, exact: true })
     if (await tab.isVisible()) await expect(tab.locator("[data-unsaved-dot]")).toBeVisible()

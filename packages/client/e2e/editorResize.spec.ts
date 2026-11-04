@@ -1,3 +1,4 @@
+import { replaceEditorText } from "./support/textbox.ts"
 // The large editor must survive the breakpoint that turns the chat panel into a modal
 // phone sheet. All fixtures are synthetic; the lorebook has forty entries expanded.
 import { readFileSync } from "node:fs"
@@ -131,7 +132,7 @@ for (const kind of ["lorebook", "preset", "card"] as const) {
       ).toBe(40)
     }
     await resizeAndUse(page, editor, async () => {
-      await field.fill("Edited after resizing.")
+      await replaceEditorText(field, "Edited after resizing.")
       await expect(field).toHaveText("Edited after resizing.")
       if (kind === "lorebook") {
         await editor.getByRole("searchbox", { name: "Filter by titles, keys and content" }).fill("place0")
@@ -139,7 +140,7 @@ for (const kind of ["lorebook", "preset", "card"] as const) {
       }
     })
     // Closing the editor returns to a usable chat, with no invisible modal trapping focus.
-    await editor.getByRole("button", { name: kind === "preset" ? "Close" : "Back to the chat", exact: true }).click()
+    await editor.getByRole("button", { name: "Close", exact: true }).click()
     await expect(editor).toHaveCount(0)
     await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeEditable()
     await page.getByRole("textbox", { name: "Message", exact: true }).fill("The chat still works.")

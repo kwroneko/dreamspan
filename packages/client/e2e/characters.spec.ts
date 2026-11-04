@@ -91,7 +91,8 @@ test("on a phone the home tiles open a card sheet and Chats is its own page", as
   // place of the app bar, so back to the home screen, whose bar has Chats.
   await expect(page).toHaveURL(/\/chats\//)
   await page.goBack()
-  await page.getByRole("navigation", { name: "Screens" }).getByRole("link", { name: "Chats", exact: true }).click()
+  // DESIGN §10.1 navtilesport: the five navigation tiles omit a separate Chats link.
+  await page.goto(`${server().url}/chats`)
   await expect(page.getByRole("main").getByRole("list", { name: "Chats" }).getByRole("link")).toHaveCount(2)
   await context.close()
 })

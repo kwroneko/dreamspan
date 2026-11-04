@@ -7,8 +7,6 @@ export const appTools = defineSlot<Record<string, never>>("app.tools")
  * user should see wherever they are (a running import, say). Empty, it takes no room.
  */
 export const appBanners = defineSlot<Record<string, never>>("app.banners")
-/** Actions in the sidebar's header row; `onNavigate` closes the phone sheet. */
-export const sidebarActions = defineSlot<{ onNavigate: (() => void) | undefined }>("shell.sidebar.actions")
 /**
  * The desktop sidebar's hide and show buttons: at the end of its header row while it shows
  * (`sidebar`), at the start of the page's header while it's hidden (`header`: the chat's,
@@ -148,7 +146,6 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             rp-harness
           </Link>
         </Tooltip>
-        <SlotOutlet slot={sidebarActions} props={{ onNavigate }} />
         <ImageControls />
         {!onNavigate && <SlotOutlet slot={sidebarToggle} props={{ place: "sidebar" }} />}
       </div>

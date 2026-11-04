@@ -82,7 +82,7 @@ for (const width of [1440, 390]) {
     const overlay = page.getByRole("dialog", { name: "Lorebook editor" })
     await expect(overlay.getByRole("list", { name: "Entries" })).toBeVisible()
     // A lorebook isn't a preset: its way out says where it goes.
-    await page.getByRole("button", { name: "Back to the chat", exact: true }).click()
+    await page.getByRole("button", { name: "Close", exact: true }).click()
     await expect(overlay).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
     await page.goto(`${server().url}/library/${ref.id}`)

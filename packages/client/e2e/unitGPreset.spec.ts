@@ -1,3 +1,4 @@
+import { replaceEditorText } from "./support/textbox.ts"
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -175,12 +176,14 @@ for (const width of [1440, 390])
       const editor = page.getByRole("main")
       await expect(editor).toContainText("no chat open")
       await shoot("library-document")
-      await editor
-        .getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
-        .fill(`Keep continuity in vivid prose ${width} ${theme}.`)
-      await editor
-        .getByRole("textbox", { name: "Prompt: Post-History Instructions", exact: true })
-        .fill(`Keep continuity ${width} ${theme}.`)
+      await replaceEditorText(
+        editor.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }),
+        `Keep continuity in vivid prose ${width} ${theme}.`
+      )
+      await replaceEditorText(
+        editor.getByRole("textbox", { name: "Prompt: Post-History Instructions", exact: true }),
+        `Keep continuity ${width} ${theme}.`
+      )
       await editor.getByRole("button", { name: "Search and replace", exact: true }).click()
       await editor.getByRole("textbox", { name: "Find", exact: true }).fill("continuity")
       await editor.getByRole("textbox", { name: "Replace with", exact: true }).fill("coherence")
@@ -205,10 +208,14 @@ for (const width of [1440, 390])
         .getByRole("button", { name: /^Revision \d+ / })
         .first()
         .click()
-      await expect(revisions.getByLabel("Revision changes")).toContainText("Main Prompt")
-      await expect(revisions.getByLabel("Revision changes")).toContainText("Post-History Instructions")
+      await expect(revisions.locator('div[aria-label="Revision changes"]:not([role="tablist"])')).toContainText(
+        "Main Prompt"
+      )
+      await expect(revisions.locator('div[aria-label="Revision changes"]:not([role="tablist"])')).toContainText(
+        "Post-History Instructions"
+      )
       await revisions.locator("summary").first().click()
-      await expect(revisions.getByLabel("Revision changes")).toBeVisible()
+      await expect(revisions.locator('div[aria-label="Revision changes"]:not([role="tablist"])')).toBeVisible()
       await shoot("revisions")
     })
   }
@@ -249,7 +256,7 @@ test("text typed in the overlay is live in the panel too, and the overlay's Save
   await openPresetAt(page, panel, "Main Prompt")
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
-  await main.fill("An hour of careful prompt work.")
+  await replaceEditorText(main, "An hour of careful prompt work.")
   await expectSaveState(overlay, UNSAVED)
   await overlay.getByRole("button", { name: "Close", exact: true }).first().click()
   // No bar holds typed text; the tab's Save says there's something to save.

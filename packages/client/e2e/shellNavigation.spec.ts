@@ -48,7 +48,9 @@ const sidebar = (page: Page) => page.getByRole("complementary").first()
 const crumbs = (page: Page) => sidebar(page).getByRole("navigation", { name: "Chat breadcrumbs" })
 const path = (page: Page) => new URL(page.url()).pathname
 
-test("the sidebar lists chats without a link between them, under a switch the size of its labels", async ({ page }) => {
+test("the sidebar lists chats without a link between them, under a switch that fills its narrow row", async ({
+  page
+}) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
@@ -56,7 +58,9 @@ test("the sidebar lists chats without a link between them, under a switch the si
   await expect(sidebar(page).getByRole("button", { name: "Forks", exact: true })).toHaveCount(0)
   const left = await sidebar(page).getByRole("group", { name: "Left panel", exact: true }).boundingBox()
   const find = await sidebar(page).getByLabel("Find a chat").boundingBox()
-  expect(left!.width).toBeLessThan(find!.width * 0.75)
+  // DESIGN §10.1 left-panel name filter (2026-11-04): fill the row when stacked.
+  expect(Math.abs(left!.width - find!.width)).toBeLessThanOrEqual(1)
+  expect(find!.y).toBeGreaterThanOrEqual(left!.y + left!.height)
 })
 
 test("home tiles in a row are one height, their last lines aligned", async ({ page }) => {
@@ -86,7 +90,10 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
   const chatPath = path(page)
 
   // Home from the main navigation: the crumbs go, and come back with the URL.
-  await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name: "Home" }).click()
+  await page
+    .getByRole("navigation", { name: "Main", exact: true })
+    .getByRole("link", { name: "Home", exact: true })
+    .click()
   await expect(page).toHaveURL(`${server().url}/`)
   await expect(crumbs(page)).toHaveCount(0)
   await page.goBack()
