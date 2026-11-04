@@ -1,3 +1,4 @@
+import { centerHeaderTests } from "./support/centerHeaders.ts"
 // Run before UI approval: LAYOUT_AUDIT=1 PLAYWRIGHT_WORKERS=1 npx playwright test -c
 // packages/client/playwright.config.ts e2e/layoutAudit.spec.ts --project=chromium
 // LAYOUT_AUDIT_ST_FOLDER can point to an existing SYNTHETIC fixture only.
@@ -17,6 +18,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel, openSummarySettings } from "./support/panel.ts"
 import { showAppNavigation, hideAppNavigation } from "./support/appMenu.ts"
 import { level1 } from "./support/summaries.ts"
+import { modelChip, presetChip } from "./support/strip.ts"
 import { portraitPng } from "./support/portrait.ts"
 import { writeScaleFolder } from "./support/stScaleFolder.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
@@ -157,6 +159,7 @@ async function sampleScrollEnds(page: Page, check: (suffix: string) => Promise<v
 }
 
 test.describe("synthetic library and every app surface", () => {
+  test.skip(!!process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY, "Focused center headers")
   test.describe.configure({ mode: "default" })
 
   let server: TestServer
@@ -499,6 +502,17 @@ test.describe("synthetic library and every app surface", () => {
           }
           return
         }
+        if (process.env.LAYOUT_AUDIT_INTERFACE_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          await openPanel(page, "Interface")
+          const tabs = page.getByRole("tablist", { name: "Chat panel", exact: true })
+          await expect(tabs.getByRole("tab", { name: "Interface", exact: true })).toBeVisible()
+          const bar = tabs.locator("../..")
+          await bar.evaluate((element) => element.setAttribute("data-interface-tabs-audit", ""))
+          await bar.screenshot({ path: join(work, `${width}-${theme}-interface-tabs.png`) })
+          await audit("interface-tab-bar", "[data-interface-tabs-audit]")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1") {
           await admin((api) => api.ChangeLcmSettings({ chatId, change: { withPreset: "specific", preset: presetRef } }))
           await page.goto(`${server.url}/chats/${chatId}`)
@@ -557,7 +571,7 @@ test.describe("synthetic library and every app surface", () => {
             "network",
             "costs",
             "chats",
-            "display",
+            "interface",
             "regex",
             "notifications",
             "account",
@@ -1072,6 +1086,25 @@ test.describe("synthetic library and every app surface", () => {
           await audit("panel-Cast")
           return
         }
+        if (process.env.LAYOUT_AUDIT_LOCKCHAT_ONLY === "1") {
+          await go("lockchat-chips", `/chats/${chatId}`)
+          await audit("lockchat-chips", '[role="group"][aria-label="Next reply"]')
+          for (const [kind, chip] of [
+            ["preset", presetChip],
+            ["model", modelChip]
+          ] as const) {
+            await chip(page).click()
+            const toggle = page.getByRole("switch", { name: "Lock for this chat" })
+            await expect(toggle).toBeVisible()
+            await audit(`lockchat-${kind}-picker`, '[role="dialog"]')
+            await toggle.click()
+            await expect(page.getByText("This chat only", { exact: true })).toBeVisible()
+            await audit(`lockchat-${kind}-locked-picker`, '[role="dialog"]')
+            await page.keyboard.press("Escape")
+          }
+          await audit("lockchat-locked-chips", '[role="group"][aria-label="Next reply"]')
+          return
+        }
         if (process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1") {
           await go("group-chat-header", `/chats/${chatId}`)
           const cast = await openPanel(page, "Cast")
@@ -1097,8 +1130,8 @@ test.describe("synthetic library and every app surface", () => {
           await page.keyboard.press("Escape")
           await hideAppNavigation(page)
           await go("chat-before-display", `/chats/${chatId}`)
-          await openPanel(page, "Display")
-          await audit("panel-Display")
+          await openPanel(page, "Interface")
+          await audit("panel-Interface")
           return
         }
         if (process.env.LAYOUT_AUDIT_HEADER_ONLY === "1") {
@@ -1125,6 +1158,25 @@ test.describe("synthetic library and every app surface", () => {
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, "Snippets")
           await audit("panel-Snippets")
+          const snippet = page.getByRole("region", { name: "Snippet Harbour details", exact: true })
+          await snippet.getByRole("button", { name: "Rename Harbour details", exact: true }).click()
+          await snippet
+            .getByRole("textbox", { name: "New name for Harbour details", exact: true })
+            .fill("Harbour revisions")
+          await page.keyboard.press("Enter")
+          const renamed = page.getByRole("region", { name: "Snippet Harbour revisions", exact: true })
+          const expand = renamed.getByRole("button", { name: "Expand Harbour revisions", exact: true })
+          if (await expand.count()) await expand.click()
+          await renamed.getByRole("button", { name: "History of Harbour revisions", exact: true }).click()
+          await expect(page.getByRole("dialog", { name: "History: Harbour revisions", exact: true })).toBeVisible()
+          await audit("dialog-snippet-History", '[role="dialog"]')
+          // The synthetic chat is shared by the viewport/theme profiles.
+          await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click()
+          await renamed.getByRole("button", { name: "Rename Harbour revisions", exact: true }).click()
+          await renamed
+            .getByRole("textbox", { name: "New name for Harbour revisions", exact: true })
+            .fill("Harbour details")
+          await page.keyboard.press("Enter")
           return
         }
         if (process.env.LAYOUT_AUDIT_CASTGAP_ONLY === "1") {
@@ -1143,7 +1195,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Display",
+            "Interface",
             "Snippets",
             "History edits"
           ]
@@ -1211,7 +1263,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Display",
+            "Interface",
             "Snippets",
             "History edits"
           ]) {
@@ -1431,7 +1483,7 @@ test.describe("synthetic library and every app surface", () => {
         if (process.env.LAYOUT_AUDIT_FIXES_ONLY === "1") {
           await go("home-all", "/")
           await go("library", "/library")
-          await go("settings-display", "/settings/display")
+          await go("settings-interface", "/settings/interface")
           await go("card-editor", `/library/${cardRef}`)
           for (const name of ["Greetings", "Metadata", "Lorebook", "Notes", "Extra"]) {
             await page.getByRole("main").getByRole("tab", { name, exact: true }).first().click()
@@ -1498,7 +1550,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Display",
+            "Interface",
             "Snippets",
             "History edits"
           ]) {
@@ -1574,7 +1626,7 @@ test.describe("synthetic library and every app surface", () => {
             "network",
             "costs",
             "chats",
-            "display",
+            "interface",
             "regex",
             "notifications",
             "account",
@@ -1631,6 +1683,7 @@ test.describe("synthetic library and every app surface", () => {
 for (const width of [390, 1440])
   for (const theme of ["light", "dark"] as const)
     test(`new version notice ${width} ${theme}`, async ({ page }, info) => {
+      test.skip(!!process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY, "Focused center headers")
       const server = await startServer(withAdmin)
       try {
         await page.setViewportSize({ width, height: 900 })
@@ -1666,8 +1719,10 @@ for (const width of [390, 1440])
       }
     })
 
+if (process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY) centerHeaderTests()
 // Fresh synthetic revisions exercise the production dialog without a development instance.
 test.describe("revision dialogs", () => {
+  test.skip(!!process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY, "Focused center headers")
   let server: TestServer
   let cookie: string
   test.beforeAll(async () => {

@@ -51,7 +51,11 @@ export function PresetTabPicker({ session }: { session: ChatSession | null }) {
             side="bottom"
             triggerClassName={dropdown}
             triggerLabel={`Prompt preset for the next reply: ${label}. Change it`}
-            hint="Change the prompt preset every chat's next reply uses, as the composer's preset chip does"
+            hint={
+              selection.lock?.locked
+                ? "Change the preset for this chat only"
+                : "Change the preset for every chat without a lock"
+            }
             trigger={<Trigger text={selection.current?.archivedAt != null ? `${label} (archived)` : label} />}
           />
         )}
@@ -81,7 +85,11 @@ export function ModelTabPicker({ session }: { session: ChatSession | null }) {
           side="bottom"
           triggerClassName={dropdown}
           triggerLabel={current ? `Model for the next reply: ${current.label}. Change it` : "Choose a model"}
-          hint="Change the model every chat's next reply uses, as the composer's model chip does"
+          hint={
+            selection.lock?.locked
+              ? "Change the model for this chat only"
+              : "Change the model for every chat without a lock"
+          }
           trigger={<Trigger text={text} muted={current === undefined} />}
         />
       )}

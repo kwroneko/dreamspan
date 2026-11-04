@@ -1,3 +1,5 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
+import { DocumentSwitcher } from "./DocumentSwitcher.tsx"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useCast } from "../chat/cast.ts"
@@ -232,21 +234,23 @@ export function Editor({
         : bookOnly
           ? lorebookScopes(CARD_BOOK)
           : undefined
-  /** A preset's editor over the chat: its name lives in the sticky bar instead of a heading. */
-  const overPreset = onClose !== undefined && ref.kind === "preset"
   /** The entry's name, renamed in place (a card's name is its own field), and what kind it is. */
   const title = (size: string) => (
-    <div className={`flex min-w-0 items-center gap-2 ${ref.kind === "preset" ? "" : "flex-wrap"}`}>
-      <h1 className={`min-w-0 ${size} font-semibold [overflow-wrap:anywhere]`}>
+    <div className="flex w-full min-w-0 items-center gap-2">
+      <h1 aria-label={bookOnly ? bookTitle : ref.label} className={`min-w-0 flex-1 ${size} font-semibold`}>
         {bookOnly ? (
-          <BookName store={store} root={CARD_BOOK} fallback={`${ref.label}'s lorebook`} />
+          <BookName store={store} root={CARD_BOOK} fallback={`${ref.label}'s lorebook`}>
+            <DocumentSwitcher refId={ref.id} label={bookTitle} kind="lorebook" />
+          </BookName>
         ) : ref.kind === "card" ? (
           ref.label
         ) : ref.kind === "lorebook" ? (
-          <BookName store={store} root={[]} fallback={ref.label} />
+          <BookName store={store} root={[]} fallback={ref.label}>
+            <DocumentSwitcher refId={ref.id} label={ref.label} kind={ref.kind} />
+          </BookName>
         ) : (
           <RefName store={store}>
-            {ref.kind === "preset" ? <span className="block min-w-0 truncate">{ref.label}</span> : undefined}
+            <DocumentSwitcher refId={ref.id} label={ref.label} kind={ref.kind} />
           </RefName>
         )}
       </h1>
@@ -263,7 +267,11 @@ export function Editor({
   return (
     <SearchNavigation value={searchMatch}>
       <div ref={root} className="flex flex-col gap-6">
-        <header className={overPreset && variants.length <= 1 && !ref.subtitle ? "hidden" : "flex flex-col gap-1"}>
+        <header
+          className={
+            onClose && ref.kind === "preset" && variants.length <= 1 && !ref.subtitle ? "hidden" : "flex flex-col gap-1"
+          }
+        >
           {onClose ? null : ref.chatId !== null ? (
             <span className="text-sm">
               <OverrideChat chatId={ref.chatId} prefix="← Back to " />
@@ -273,8 +281,8 @@ export function Editor({
               ← Library
             </Link>
           )}
-          {/* Over a chat, a preset's name is in the sticky bar, once. A card's names are renamed
-              in place, each with its own question (CardNameHeader). */}
+          {/* Identity and document actions go to the column header. A card's names retain
+              their rename questions (CardNameHeader). */}
           {ref.kind === "card" && !bookOnly ? (
             <CardHeader
               portrait={
@@ -305,17 +313,20 @@ export function Editor({
                 call={call}
                 current={current}
                 heading="h1"
+                centerTitle={<DocumentSwitcher refId={ref.id} label={workingName || ref.label} kind="card" />}
+                centerAfter={onClose && <WindowClose onClick={onClose} />}
                 after={<CardFavourite entityId={ref.entityId} />}
               />
               <CardTokensRow store={store} entityId={ref.entityId} label={ref.label} />
             </CardHeader>
           ) : (
-            !overPreset && (
-              <div data-editor-header className="flex min-w-0 items-start justify-between gap-2">
-                {title("text-2xl")}
+            <CenterHeaderContent>
+              <div data-editor-header className="flex w-full min-w-0 items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">{title("text-base")}</div>
                 <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
+                {onClose && <WindowClose onClick={onClose} />}
               </div>
-            )
+            </CenterHeaderContent>
           )}
           {ref.kind === "card" && !bookOnly && <CardSurface placement="provenance" entityId={ref.entityId} />}
           {ref.subtitle && ref.kind !== "card" && !bookOnly && (
@@ -391,27 +402,6 @@ export function Editor({
           data-layout-overlay="Sticky editor toolbar covers scrolled document content"
           className="sticky top-[calc(var(--scroll-pad,0px)*-1)] z-10 flex flex-col gap-2 border-b border-border bg-canvas/95 py-2 backdrop-blur"
         >
-          {onClose &&
-            (ref.kind === "preset" ? (
-              <div data-editor-header className="flex min-w-0 items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">{title("text-base")}</div>
-                <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
-                <WindowClose onClick={onClose} />
-              </div>
-            ) : (
-              // A card's name is the heading just above: the bar keeps only the way back.
-              <div>
-                <Button
-                  variant="ghost"
-                  className="h-8 gap-1.5 px-2"
-                  hint="Closes the editor and returns to the chat."
-                  onClick={onClose}
-                >
-                  <Icon name="back" />
-                  Back to the chat
-                </Button>
-              </div>
-            ))}
           {ref.kind === "preset" ? (
             <div ref={setPresetToolbar} />
           ) : (

@@ -1,3 +1,4 @@
+import { ChatLock } from "./PickerParts.tsx"
 // The prompt preset picker (the owner, 2026-11-01): the composer's preset chip and the Prompt
 // preset tab open this same list. A filter; Name, Modified, Used or Archived; each preset with
 // when it was edited under its name; an archive button on each row (un-archive in Archived)
@@ -79,8 +80,8 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
             ? "In use for summaries"
             : "Use this preset for summaries"
           : inUse
-            ? "In use for the next reply in every chat"
-            : "Use it for the next reply in every chat",
+            ? `In use for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`
+            : `Use this preset for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`,
         ...presetTimes(ref)
       ]),
       action: archivedRow
@@ -110,8 +111,8 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
             detail: "built in",
             tooltip: lines([
               value === BUILTIN
-                ? "In use for the next reply in every chat"
-                : "Use the built-in default preset for the next reply in every chat",
+                ? `In use for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`
+                : `Use the built-in default preset for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`,
               "Built in: it can't be edited or archived"
             ])
           }
@@ -122,6 +123,7 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
   const archivedCount = new Set([...archived, ...live].filter(isArchived).map((ref) => ref.id)).size
   return (
     <>
+      <ChatLock lock={selection.lock} kind="preset" />
       <PickerSearch
         label="Find a prompt preset"
         placeholder="Find by name"

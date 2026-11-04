@@ -127,7 +127,7 @@ describe("chat groups", () => {
     120_000
   )
 
-  it.live("compatibility model/preset changes update account settings without chat bindings", () =>
+  it.live("model/preset locks keep chat selections separate from account settings and unlock to the account", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const mira = yield* card(api, "Mira", { name: "Mira", first_mes: "Hello." })
@@ -162,6 +162,19 @@ describe("chat groups", () => {
         origin: "user",
         sourcePath: null
       })
+      // DESIGN §2.2 [D] (owner, 2026-11-03, personadefault): a locked
+      // selection changes only this chat; unlocking follows the account again.
+      const accountModel = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "account-model",
+        overrides: {}
+      })
+      const accountPreset = yield* api.CreatePreset({ label: "Account preset" })
+      yield* api.ChangeGenerationDefaults({
+        change: { model: { connection: connection.id, model: accountModel.id }, preset: accountPreset.id }
+      })
+      const defaults = yield* api.GetGenerationDefaults()
+      const next = () => api.GetNextContext({ chatId, leafSlotId: at })
       yield* api.ChangeCast({
         chatId,
         slotId: at,
@@ -172,19 +185,35 @@ describe("chat groups", () => {
         slotId: at,
         change: { _tag: "Preset", ref: preset.ref.id }
       })
-      assert.isNull(bound.model)
-      assert.isNull(bound.preset)
-      const defaults = yield* api.GetGenerationDefaults()
-      assert.strictEqual(defaults.model?.model, model.id)
-      assert.strictEqual(defaults.preset, preset.ref.id)
+      assert.deepStrictEqual(bound.model, { connection: connection.id, model: model.id })
+      assert.strictEqual(bound.preset, preset.ref.id)
+      assert.isTrue(bound.presetLocked)
+      assert.deepStrictEqual(yield* api.GetGenerationDefaults(), defaults)
+      const locked = yield* next()
+      assert.strictEqual(locked.model?.model, model.id)
+      assert.strictEqual(locked.preset?.ref, preset.ref.id)
 
+      // Changing the account selection leaves both locks in place.
+      yield* api.ChangeGenerationDefaults({ change: { preset: null } })
+      const stillLocked = yield* next()
+      assert.strictEqual(stillLocked.model?.model, model.id)
+      assert.strictEqual(stillLocked.preset?.ref, preset.ref.id)
+      const currentDefaults = yield* api.GetGenerationDefaults()
       yield* api.ChangeCast({ chatId, slotId: at, change: { _tag: "DefaultModel" } })
       const cleared = yield* api.ChangeCast({ chatId, slotId: at, change: { _tag: "DefaultPreset" } })
       assert.isNull(cleared.model)
       assert.isNull(cleared.preset)
-      // No model or preset events were written, at any position.
+      assert.isFalse(cleared.presetLocked)
+      assert.deepStrictEqual(yield* api.GetGenerationDefaults(), currentDefaults)
+      const following = yield* next()
+      assert.strictEqual(following.model?.model, accountModel.id)
+      assert.isNull(following.preset?.ref)
+      assert.isTrue(following.budget?.builtinPreset)
+      // Locks are positional; the state before the locked position is unchanged.
       const before = yield* api.GetCast({ chatId, slotId: null })
       assert.isNull(before.model)
+      assert.isNull(before.preset)
+      assert.isFalse(before.presetLocked)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 })

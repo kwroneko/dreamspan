@@ -436,7 +436,7 @@ export function BinPage() {
   const [tab, setTab] = usePlaceParam("section", "deleted", ["deleted", "recovered"])
   return (
     <Card>
-      <CardHeader title="Bin" />
+      <CardHeader center title="Bin" />
       <Tabs
         label="Bin sections"
         value={tab}

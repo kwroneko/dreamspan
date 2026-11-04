@@ -6,7 +6,7 @@ import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { LibraryRef, RefId } from "@rp/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { allOf, useAction } from "../../actions.tsx"
 import { onLibraryChange } from "../../libraryChanges.ts"
 import type { ChatSession } from "../chat/session.ts"
@@ -23,6 +23,7 @@ export interface PresetSelection {
   /** Summary pickers choose only library refs and describe their own use. */
   readonly usage?: "summary" | undefined
   /** False until the account's choice and both lists are read. */
+  readonly lock?: { readonly locked: boolean; readonly disabled: boolean; readonly change: (locked: boolean) => void }
   readonly loaded: boolean
   /** `BUILTIN` or the chosen ref's id. */
   readonly value: string
@@ -51,7 +52,9 @@ export function usePresetSelection(session: ChatSession | null): PresetSelection
   useRefreshOnContext(session, livePresets)
   useRefreshOnContext(session, archivedPresets)
   const lists = AsyncResult.isSuccess(presets) ? presets.value : null
-  const chosen = AsyncResult.isSuccess(defaults) ? defaults.value.preset : undefined
+  const view = useSyncExternalStore(session?.subscribe ?? (() => () => {}), session?.snapshot ?? (() => null))
+  const locked = view?.cast?.presetLocked ?? false
+  const chosen = locked ? view!.cast!.preset : AsyncResult.isSuccess(defaults) ? defaults.value.preset : undefined
   const live = lists?.live ?? []
   const archived = lists?.archived ?? []
   const found =
@@ -61,22 +64,31 @@ export function usePresetSelection(session: ChatSession | null): PresetSelection
   const [seen, setSeen] = useState<LibraryRef | null>(null)
   if (found !== null && found !== seen) setSeen(found)
   const current = found ?? (seen !== null && seen.id === chosen ? seen : null)
-  const loaded = lists !== null && chosen !== undefined
+  const loaded = lists !== null && chosen !== undefined && (!session || view?.cast != null)
   return {
+    ...(session
+      ? {
+          lock: {
+            locked,
+            disabled: chosen === undefined,
+            change: (on: boolean) => {
+              if (on && chosen !== undefined) void session.changeCast({ _tag: "Preset", ref: chosen })
+              else if (!on) void session.changeCast({ _tag: "DefaultPreset" })
+            }
+          }
+        }
+      : {}),
     loaded,
     value: chosen ?? BUILTIN,
     current,
     label: !loaded ? null : chosen === null ? BUILTIN_PRESET_LABEL : (current?.label ?? null),
     live,
     archived,
-    choose: (value) =>
-      action
-        .run(
-          (client) =>
-            client("ChangeGenerationDefaults", { change: { preset: value === BUILTIN ? null : (value as RefId) } }),
-          ["settings"]
-        )
-        .then((result) => result.ok),
+    choose: async (value) => {
+      const preset = value === BUILTIN ? null : (value as RefId)
+      if (locked && session) return (await session.changeCast({ _tag: "Preset", ref: preset })).ok
+      return (await action.run((client) => client("ChangeGenerationDefaults", { change: { preset } }), ["settings"])).ok
+    },
     setArchived: (ref, next) =>
       action
         .run((client) => client("SetRefArchived", { refId: ref.id, archived: next }), ["library"])
