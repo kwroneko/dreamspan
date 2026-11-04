@@ -268,16 +268,8 @@ test("putting a card back to its latest revision keeps the typed text in the fie
   await expect
     .poll(() => admin((api) => api.OpenEditor({ refId: card.id })).then((x) => x.drafts[0]?.content))
     .toBe("N5 REVERT RECOVERY 857194")
-  await page.getByRole("button", { name: "History", exact: true }).click()
-  const history = page.getByRole("dialog", { name: "History", exact: true })
-  await history
-    .getByRole("list", { name: "Revisions" })
-    .getByRole("listitem")
-    .first()
-    .getByRole("button", { name: /^Revision \d+ / })
-    .click()
-  await history.getByRole("button", { name: "Restore", exact: true }).click()
-  await history.getByRole("button", { name: "Close", exact: true }).click()
+  // DESIGN §10.1 historyui keeps the latest Restore disabled; Revert restores its content.
+  await page.getByRole("button", { name: "Revert", exact: true }).click()
   await expectTextBox(box, "")
   const texts = await admin((api) => editHistoryTexts(api, card.id, textField(["description"])))
   expect(texts).toContain("N5 REVERT RECOVERY 857194")
