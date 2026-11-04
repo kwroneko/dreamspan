@@ -34,7 +34,6 @@ for (const width of [1440, 1024, 390])
       test.setTimeout(120_000)
       const chatId = await withCookie(server(), cookie, (api) =>
         Effect.gen(function* () {
-          yield* api.SetDisplayPrefs({ prefs: { guidance: false } })
           const speaker = (yield* api.CreateCard({ label: `${longName} ${width} ${theme}`, name: longName })).entityId
           const recent = (yield* api.CreateCard({ label: `Mira ${width} ${theme}`, name: "Mira" })).entityId
           const chat = yield* api.CreateChat({ title: "The expedition — synthetic spacing fixture" })

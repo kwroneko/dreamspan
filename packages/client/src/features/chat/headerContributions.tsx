@@ -1,5 +1,6 @@
+import { composerChoice } from "./speaker.ts"
 // The chat header's built-in parts, each a registration a plugin can override or disable:
-// its buttons (the pin, the side panel, ⋯) in `chatHeaderActions`, and the chat-level commands of
+// its buttons (the pin, ⋯, the side panel) in `chatHeaderActions`, and the chat-level commands of
 // its ⋯ menu in `chatCommands` (Rename, Branches…, New chat with this cast, Export, Delete
 // chat; Keyboard shortcuts lists the commands that have keys). What they render loads with
 // the chat (headerParts.tsx, chatExport.tsx), not with the app.
@@ -33,8 +34,8 @@ const ExportChatDialog = deferred<ChatCommandDialogProps>(() =>
 
 export const registerChatHeader = () => [
   chatHeaderActions.register({ id: "chat.pin", order: 10, component: part("HeaderPin") }),
-  chatHeaderActions.register({ id: "chat.panel", order: 20, component: part("HeaderPanel") }),
-  chatHeaderActions.register({ id: "chat.menu", order: 30, component: part("HeaderMenu") }),
+  chatHeaderActions.register({ id: "chat.menu", order: 20, component: part("HeaderMenu") }),
+  chatHeaderActions.register({ id: "chat.panel", order: 30, component: part("HeaderPanel") }),
   // A chat not made yet has no pin (no branch to pin) and no ⋯ (its commands need a saved chat).
   pendingChatHeaderActions.register({ id: "chat.panel", order: 20, component: PendingPanel }),
   chatCommands.register({
@@ -63,9 +64,11 @@ export const registerChatHeader = () => [
     available: ({ view, navigate }) => navigate !== undefined && castCharacters(view).length > 0,
     run: ({ session, view, navigate }) => {
       const cast = castCharacters(view)
+      const search = { guidance: composerChoice(session).snapshot().guidance ? "on" : "off" }
       // One character: a new chat with its card; several: with the group, every member greeting.
-      if (cast.length === 1) void navigate?.({ to: "/cards/$entityId/chat", params: { entityId: cast[0]!.entityId } })
-      else void navigate?.({ to: "/groups/$chatId/new", params: { chatId: session.id } })
+      if (cast.length === 1)
+        void navigate?.({ to: "/cards/$entityId/chat", params: { entityId: cast[0]!.entityId }, search })
+      else void navigate?.({ to: "/groups/$chatId/new", params: { chatId: session.id }, search })
     }
   }),
   chatCommands.register({

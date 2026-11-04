@@ -1,6 +1,5 @@
-// Who the composer speaks as, picked in its switcher or with "Write as" in the Cast tab, and
-// who replies to its next send, picked at the composer (DESIGN §2.2). Both are kept on the
-// server with the composer's draft (`ComposerChoice`), one per branch tip, so a reload,
+// The composer’s Guidance mode, speaker and next-reply pick (DESIGN §2.2), kept on the
+// server with the composer’s draft (`ComposerChoice`), one per fork, so a reload,
 // another tab or another device finds the same choice, never a reset to the first card
 // (ST-GRIPES D8). A change made in any tab is published to every tab of the chat.
 //
@@ -16,19 +15,27 @@ export interface ChoiceState {
   /** Whether the choice for `draftId` has been read: until then, nothing is sent. */
   readonly loaded: boolean
   readonly saving: boolean
+  readonly guidance: boolean
   /** The card picked to speak as; null: none picked, so the composer's default. */
   readonly speaker: EntityId | null
   /** Who replies to the next send, picked for that one reply; null: the next in turn. */
   readonly replyFrom: EntityId | null
 }
 
-type Change = { readonly speaker?: EntityId | null; readonly replyFrom?: EntityId | null }
+type Change = { readonly guidance?: boolean; readonly speaker?: EntityId | null; readonly replyFrom?: EntityId | null }
 
 /** How long a choice that couldn't be read waits before it's read again. */
 const RETRY_MS = 2000
 
 class ComposerChoices {
-  private state: ChoiceState = { draftId: null, loaded: false, saving: false, speaker: null, replyFrom: null }
+  private state: ChoiceState = {
+    draftId: null,
+    loaded: false,
+    saving: false,
+    speaker: null,
+    replyFrom: null,
+    guidance: false
+  }
   private readonly listeners = new Set<() => void>()
   /** Bumped by each read and change, so an older read's answer is dropped. */
   private reads = 0
@@ -60,10 +67,10 @@ class ComposerChoices {
   }
 
   /** The composer shows `draftId` now (null while it goes to another tip). */
-  bind(draftId: string | null) {
+  bind(draftId: string | null, guidance = false) {
     if (draftId === this.state.draftId) return
     this.reads++
-    this.setState({ draftId, loaded: false, saving: false, speaker: null, replyFrom: null })
+    this.setState({ draftId, loaded: false, saving: false, speaker: null, replyFrom: null, guidance })
     if (draftId !== null) void this.read()
   }
 
@@ -87,7 +94,8 @@ class ComposerChoices {
       loaded: true,
       saving: false,
       speaker: choice?.speakerEntityId ?? null,
-      replyFrom: choice?.replyFromEntityId ?? null
+      replyFrom: choice?.replyFromEntityId ?? null,
+      guidance: choice?.guidance ?? false
     })
     if (this.early !== null) {
       const speaker = this.early
@@ -104,7 +112,8 @@ class ComposerChoices {
       loaded: true,
       saving: false,
       speaker: choice.speakerEntityId,
-      replyFrom: choice.replyFromEntityId
+      replyFrom: choice.replyFromEntityId,
+      guidance: choice.guidance
     })
   }
 
@@ -118,13 +127,17 @@ class ComposerChoices {
   /** Keeps the choice on the server, which tells the chat's other tabs. */
   async change(change: Change): Promise<Outcome<unknown>> {
     const { draftId } = this.state
-    if (draftId === null || !this.state.loaded) {
+    if (draftId === null || (!this.state.loaded && change.guidance === undefined)) {
       if (change.speaker !== undefined) this.early = change.speaker
       return { ok: true, value: null }
     }
     this.reads++
     this.writing++
-    this.setState({ ...this.state, saving: true })
+    this.setState({
+      ...this.state,
+      saving: this.state.saving || change.guidance === undefined,
+      guidance: change.guidance ?? this.state.guidance
+    })
     // Rapid picks leave in click order. Keep the acknowledged choice visible and block a
     // send until it is saved, so a failed pick can't produce a wrong-persona message.
     const request = this.writes.then(() =>
@@ -132,6 +145,7 @@ class ComposerChoices {
         client("SetComposerChoice", {
           chatId: this.session.id,
           draftId,
+          ...(change.guidance === undefined ? {} : { guidance: change.guidance }),
           ...(change.speaker === undefined ? {} : { speakerEntityId: change.speaker }),
           ...(change.replyFrom === undefined ? {} : { replyFromEntityId: change.replyFrom })
         })

@@ -19,12 +19,13 @@ export class TextTooLong extends Schema.TaggedError<TextTooLong>()("TextTooLong"
 const Errors = [NotFound, ServerError] as const
 
 /**
- * Who a composer speaks as, and who replies to its next send (DESIGN §2.2), kept with its
- * draft on the server: they move with the draft to the next tip, so a reload, another tab
- * or another device finds the same speaker, never a reset to the first card (ST-GRIPES D8).
+ * The composer’s Guidance mode, speaker and next-reply pick (DESIGN §2.2), kept with its
+ * draft per chat and fork. A reload or another device finds the same choices.
  */
 export class ComposerChoice extends Schema.Class<ComposerChoice>("ComposerChoice")({
   draftId: Schema.String,
+  /** Whether this composer’s text directs the model instead of sending a message. */
+  guidance: Schema.Boolean,
   /** The card picked to speak as; null until one is, when the composer picks its default. */
   speakerEntityId: Schema.NullOr(EntityId),
   /** Who replies to the next send, picked for that one reply; null: the next in turn. */
@@ -133,6 +134,7 @@ export class ComposerApi extends RpcGroup.make(
     payload: {
       chatId: ChatId,
       draftId: Schema.String,
+      guidance: Schema.optionalKey(Schema.Boolean),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       /** Consume a one-reply pick only if it still names this card. */

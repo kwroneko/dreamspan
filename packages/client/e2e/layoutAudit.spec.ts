@@ -560,6 +560,33 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_GUIDANCE_ONLY === "1") {
+          const scope = '.chat-column:has([data-testid="composer"])'
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const toggle = page.getByRole("switch", { name: "Guidance", exact: true })
+          await expect(toggle).toBeEnabled()
+          if (await toggle.isChecked()) await toggle.click()
+          await expect(toggle).not.toBeChecked()
+          await audit("composer-message", scope)
+          await toggle.click()
+          await expect(toggle).toBeChecked()
+          await audit("composer-guidance", scope)
+          await page.goto(`${server.url}/cards/${cardId}/chat`)
+          await expect(toggle).toBeEnabled()
+          await audit("pending-message", scope)
+          await toggle.click()
+          await expect(toggle).toBeChecked()
+          await audit("pending-guidance", scope)
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_ADDCHARS_ONLY === "1") {
+          await go("addchars-chat", `/chats/${chatId}`)
+          await openPanel(page, "Cast")
+          const add = page.getByRole("button", { name: "Add characters", exact: true })
+          if ((await add.getAttribute("aria-expanded")) !== "true") await add.click()
+          await audit("addchars-grid", '[aria-label="Characters"]')
+          return
+        }
         if (process.env.LAYOUT_AUDIT_PICTURECROP_ONLY === "1") {
           await page.goto(`${server.url}/chats/${chatId}`)
           const card = await openPanel(page, cardName)

@@ -44,6 +44,7 @@ const RETRY_MS = 2000
 
 export interface ComposerState {
   readonly text: string
+  readonly guidance: boolean
   /** The fork's text is loaded, so the box takes input. */
   readonly ready: boolean
   /** A replay displaced text saved elsewhere; kept until acknowledged or switched. */
@@ -101,6 +102,7 @@ export class ComposerDraft {
   private readonly listeners = new Set<() => void>()
   private state: ComposerState = {
     text: "",
+    guidance: false,
     ready: false,
     restored: false,
     conflict: null,
@@ -138,7 +140,7 @@ export class ComposerDraft {
   private emit() {
     const { text, ready, restored, conflict, recovered, error } = this
     const draftId = ready ? (this.base?.id ?? null) : null
-    this.state = { text, ready, restored, conflict, recovered, error, draftId }
+    this.state = { text, guidance: this.base?.guidance ?? false, ready, restored, conflict, recovered, error, draftId }
     for (const listener of this.listeners) listener()
   }
 

@@ -295,7 +295,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => reader.GetCardForChat({ userId: id, entityId })).pipe(internal("GetCardForChat")),
 
     // Once the chat is written, a first reply starts even if the caller has gone.
-    StartChat: ({ cards, persona, greeting, first, frozen, greeters, title }) =>
+    StartChat: ({ guidance, cards, persona, greeting, first, frozen, greeters, title }) =>
       Effect.gen(function* () {
         if (first._tag === "Generate" && Option.isNone(generator)) {
           return yield* new GenerationUnavailable({
@@ -347,6 +347,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           })
         )
         const result = yield* writer.StartChat({
+          guidance: guidance ?? false,
           userId: id,
           cards,
           persona,

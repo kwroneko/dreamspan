@@ -20,6 +20,7 @@ export interface PendingState {
   readonly fallbackNote: string
   /** Who answers the first message the user sends; null: the first character. */
   readonly replier: EntityId | null
+  readonly guidance: boolean
 }
 
 /** A group the new chat is of: its name and the chat that names it. */
@@ -50,7 +51,8 @@ export class PendingChat {
     greeters: ReadonlyArray<CardForChat>,
     group: PendingGroup | null,
     call: Caller,
-    defaultPersona: EntityId | null = null
+    defaultPersona: EntityId | null = null,
+    guidance = false
   ) {
     this.cards = cards
     this.group = group
@@ -66,7 +68,8 @@ export class PendingChat {
         group === null ? 0 : (options[Math.floor(Math.random() * Math.max(1, options.length))]?.index ?? 0)
       ),
       fallbackNote: "",
-      replier: null
+      replier: null,
+      guidance
     }
   }
 

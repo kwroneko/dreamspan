@@ -1,3 +1,4 @@
+import { setGuidance } from "./support/composer.ts"
 // Guidance on swipes (DESIGN §2.2, owner 2026-10-29): Edit on a reply's guidance puts it in
 // the composer under a bar; each submit is a new version of that reply with the box's text,
 // which stays; ✕ gives back the draft typed before, which a reload also shows.
@@ -93,7 +94,6 @@ const settled = async (slotId: SlotId, count: number) =>
 for (const width of [1440, 390]) {
   for (const theme of ["light", "dark"] as const) {
     test(`edit → submit → edit → submit → ✕ gives back the draft (${width}px, ${theme})`, async ({ page }) => {
-      await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
       const { chatId, slotId } = await harbor()
       await settled(slotId, 1)
       await page.setViewportSize({ width, height: 844 })
@@ -200,7 +200,6 @@ for (const width of [1440, 390]) {
         else upstream.send(data)
       })
     })
-    await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
     const { chatId, slotId } = await harbor()
     await settled(slotId, 1)
     await page.setViewportSize({ width, height: 844 })
@@ -219,8 +218,8 @@ for (const width of [1440, 390]) {
   test(`live swipes, New version with guidance…, deletion and chat navigation preserve the draft (${width}px)`, async ({
     page
   }) => {
-    await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: true } }))
     const { chatId, slotId } = await harbor()
+    await rpc((api) => setGuidance(api, chatId, true))
     await settled(slotId, 1)
     const second = await rpc((api) =>
       api.Generate({ chatId, parentSlotId: slotId, branch: false, direction: "A different reply's guidance." })
@@ -266,7 +265,7 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "New version with this guidance" }).click()
     await expect(bar(page)).toBeVisible()
     await showAppNavigation(page)
-    await page.getByRole("link", { name: "Characters", exact: true }).filter({ visible: true }).first().click()
+    await page.getByRole("link", { name: "Home", exact: true }).filter({ visible: true }).first().click()
     await page.goBack()
     await expect(bar(page)).toHaveCount(0)
     await expect(box(page)).toHaveValue(draft)

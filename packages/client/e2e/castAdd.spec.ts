@@ -1,6 +1,6 @@
 // The Cast tab's Add characters (owner, 2026-11-01; ST's group "Add Members"): under the cast,
 // collapsed until opened and remembered so, the left panel's character grid with its filter,
-// sort and search; a click on a tile adds that character, several in a row, and who's in the
+// sort and search; tiles open the full editor, separate Add controls join characters, and who's in the
 // chat is marked and can't be added again. At a desktop's width and a phone's, in both themes.
 // Every card is made up.
 import { mkdirSync } from "node:fs"
@@ -66,7 +66,7 @@ const tileLabels = (page: Page) =>
     .getByRole("button", { name: /^Add .* to this chat$|: in this chat$|: you play them here$/ })
     .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")).sort())
 
-for (const width of [1440, 390]) {
+for (const width of [1440, 1024, 390]) {
   test(`${width}: Add characters, collapsed at first; filter, search, add two, the cast marked`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     // Each width adds its own two, never used until it does, whatever the other width added.
@@ -82,22 +82,72 @@ for (const width of [1440, 390]) {
     await expect(section(page).getByRole("searchbox")).toHaveCount(0)
     if (width === 1440) {
       await toggle(page).hover()
-      await expect(page.getByText(/^Shows your characters, to add to this chat/)).toBeVisible()
+      await expect(page.getByText("Click to show characters to add to this chat", { exact: true })).toBeVisible()
     }
     await shoot(page, `castadd-collapsed-${width}`)
     await toggle(page).click()
     await expect(toggle(page)).toHaveAttribute("aria-expanded", "true")
 
-    // Mira is in the chat: marked, and a click adds nothing.
+    // The grid shares the field's insets and the same gap as the controls above.
+    const geometry = await section(page).evaluate((el) => {
+      const field = el.querySelector("input")!.getBoundingClientRect()
+      const grid = el.querySelector('[aria-label="Characters"]')!.getBoundingClientRect()
+      const controls = el.querySelector(
+        '[data-layout-overlay="Add characters controls stay over the grid while it scrolls"]'
+      )!
+      const filters = controls.lastElementChild!.getBoundingClientRect()
+      return {
+        left: grid.left - field.left,
+        right: grid.right - field.right,
+        above: filters.top - field.bottom,
+        below: grid.top - filters.bottom
+      }
+    })
+    expect(Math.abs(geometry.left)).toBeLessThan(1)
+    expect(Math.abs(geometry.right)).toBeLessThan(1)
+    expect(geometry.below).toBe(8)
+    expect(geometry.below).toBe(geometry.above)
+
+    // Every tile opens the full center editor, including a character already in the chat.
+    const originalUrl = new URL(page.url())
+    if (width === 390) originalUrl.searchParams.delete("panel")
+    await section(page).getByRole("button", { name: "Open Mira", exact: true }).click()
+    const editor = page.getByRole("dialog", { name: "Card editor", exact: true })
+    await expect(editor).toBeVisible()
+    await expect(page).toHaveURL(/editor=/)
+    await editor.getByRole("button", { name: "Close", exact: true }).click()
+    await expect(editor).toHaveCount(0)
+    await expect(page).toHaveURL(originalUrl.toString())
+    if (width === 390) await openPanel(page, "Cast")
+    await expect(members(page).getByRole("listitem")).toHaveCount(1)
+
+    // Mira's separate Add target stays disabled; her tile remains openable.
     const mira = section(page).getByRole("button", { name: "Mira: in this chat", exact: true })
     await expect(mira).toHaveAttribute("aria-disabled", "true")
-    await expect(section(page).getByLabel("Characters", { exact: true })).toContainText("In chat")
+    await expect(mira).toHaveText("In this chat")
+    const tile = mira.locator("xpath=ancestor::div[contains(@class, 'tile-toggle-surface')]")
+    const openTile = tile.getByRole("button", { name: "Open Mira", exact: true })
+    const [outerBox, openBox, footerBox] = await Promise.all([
+      tile.boundingBox(),
+      openTile.boundingBox(),
+      mira.boundingBox()
+    ])
+    expect(outerBox).not.toBeNull()
+    expect(openBox).not.toBeNull()
+    expect(footerBox).not.toBeNull()
+    expect(Math.abs(footerBox!.x - outerBox!.x - 1)).toBeLessThan(1)
+    expect(Math.abs(footerBox!.width - outerBox!.width + 2)).toBeLessThan(1)
+    expect(Math.abs(footerBox!.y - openBox!.y - openBox!.height)).toBeLessThan(1)
+    expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(outerBox!.y + outerBox!.height)
+    await expect(mira).toHaveCSS("border-top-width", "1px")
+    await expect(section(page).getByLabel("Characters", { exact: true })).toContainText("In this chat")
     if (width === 1440) {
       await mira.hover()
-      await expect(page.getByText("Mira is already in this chat", { exact: true })).toBeVisible()
+      await expect(
+        page.getByText("Mira is already in this chat", { exact: true }).filter({ visible: true })
+      ).toBeVisible()
     }
-    // aria-disabled: Playwright won't click it unless forced; a person can, and nothing happens.
-    await mira.click({ force: true })
+
     await expect(members(page).getByRole("listitem")).toHaveCount(1)
     // Ana and Bo are in the persona folder: not among All's characters, but under Personas,
     // which lists only personas and so marks none, Bo who is played in this chat included.
@@ -125,13 +175,26 @@ for (const width of [1440, 390]) {
     await expect.poll(() => tileLabels(page)).toEqual([`Add ${two} to this chat`])
     await search.fill("")
 
+    await section(page)
+      .getByRole("button", { name: `Open ${one}`, exact: true })
+      .focus()
+    await page.keyboard.press("Enter")
+    await expect(editor).toBeVisible()
+    await editor.getByRole("button", { name: "Close", exact: true }).click()
+    if (width === 390) await openPanel(page, "Cast")
+    await expect(members(page).getByRole("listitem")).toHaveCount(1)
+
+    await expect(section(page).getByRole("button", { name: `Add ${one} to this chat`, exact: true })).toHaveText(
+      "Add to chat"
+    )
+
     // Two in a row, the grid staying open: each joins, and is marked.
     await section(page)
       .getByRole("button", { name: `Add ${one} to this chat`, exact: true })
       .click()
     await section(page)
       .getByRole("button", { name: `Add ${two} to this chat`, exact: true })
-      .click()
+      .press("Enter")
     await expect(members(page).getByRole("listitem")).toHaveCount(3)
     await expect(members(page)).toContainText(one)
     await expect(members(page)).toContainText(two)
