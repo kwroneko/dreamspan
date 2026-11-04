@@ -1612,15 +1612,37 @@ for (const width of [1440, 390])
         expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1)
         expect(Math.abs(after!.x - before!.x)).toBeLessThanOrEqual(1)
         await expect(dialog.getByRole("button", { name: "Restore", exact: true })).toBeEnabled()
+        const openDiff = async (beforeName: string, afterName: string) => {
+          const field = dialog
+            .locator("details")
+            .filter({ has: page.locator("summary", { hasText: kind === "note" ? /^Content$/ : /^Description$/ }) })
+          await field.locator("summary").click()
+          if (width > 639) {
+            await expect(field.getByRole("textbox", { name: beforeName, exact: true })).toBeVisible()
+            await expect(field.getByRole("textbox", { name: afterName, exact: true })).toBeVisible()
+          } else {
+            await expect(field.getByRole("textbox", { name: "Changes", exact: true })).toBeVisible()
+            await expect(field.getByText(`${beforeName} (−) → ${afterName} (+)`, { exact: true })).toBeVisible()
+          }
+        }
+        await openDiff("Revision 1", "Revision 2")
         await audit("comparison")
-        await dialog.screenshot({ path: info.outputPath(`${kind}-tabs-${width}-${theme}.png`), animations: "disabled" })
+        await dialog.screenshot({
+          path: info.outputPath(`${kind}-previous-${width}-${theme}.png`),
+          animations: "disabled"
+        })
         await dialog.getByRole("tab", { name: "Changes from current state", exact: true }).click()
         await expect(dialog.getByRole("tab", { name: "Changes from current state", exact: true })).toHaveAttribute(
           "aria-selected",
           "true"
         )
         await expect(dialog.getByRole("button", { name: "Restore", exact: true })).toBeEnabled()
+        await openDiff("Revision 2", "Current state")
         await audit("current-comparison")
+        await dialog.screenshot({
+          path: info.outputPath(`${kind}-current-${width}-${theme}.png`),
+          animations: "disabled"
+        })
         await revisions
           .last()
           .getByRole("button", { name: /^Revision \d+ / })
@@ -1632,7 +1654,12 @@ for (const width of [1440, 390])
         await expect(
           page.getByText("Shows this first revision's changes from an empty document", { exact: true })
         ).toBeVisible()
+        await openDiff("Empty", "Revision 1")
         await audit("first-comparison")
+        await dialog.screenshot({
+          path: info.outputPath(`${kind}-empty-${width}-${theme}.png`),
+          animations: "disabled"
+        })
         await dialog.getByRole("button", { name: "Close comparison", exact: true }).click()
         await revisions
           .first()

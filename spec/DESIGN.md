@@ -1021,6 +1021,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] Owner, 2026-11-04 (historyui diff headings):** “This just says before/after which isn't helpful. It communicates nothing. The title of each panel should say what state it refers to: for example Revision 1 / Revision 2 Or "Revision 1 / Current State"”. Previous-revision comparisons name the parent and selected revision, with “Empty” for a first revision; current-state comparisons name the selected revision and “Current state”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
+
+
 **[D] 2026-11-04 (owner):** "I just realized I can't find a way to see a card's past revisions"; "side-panel editors must have full parity with the large editors (they are the mobile editors)." Built: History access for card/persona, lorebook and preset panels; obsolete as an implementation requirement, see ARCHITECTURE §14.6.
 
 **[P] 2026-11-04:** Place History beside Search and replace through a replaceable panel action slot; retain the existing note and snippet History actions.

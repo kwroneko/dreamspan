@@ -78,8 +78,8 @@ for (const width of [1440, 390])
     await history.getByText("Description", { exact: true }).click()
     await expect(history.locator(".cm-editor").first()).toBeVisible()
     if (width > 639) {
-      await expectTextBox(changes.first().getByRole("textbox", { name: "Before", exact: true }), description)
-      await expectTextBox(changes.first().getByRole("textbox", { name: "After", exact: true }), newDescription)
+      await expectTextBox(changes.first().getByRole("textbox", { name: "Revision 2", exact: true }), description)
+      await expectTextBox(changes.first().getByRole("textbox", { name: "Revision 3", exact: true }), newDescription)
     } else {
       await expect(changes.first().locator(".cm-deletedChunk")).toContainText("The lamp burns.")
       await expectTextBox(changes.first().getByRole("textbox", { name: "Changes", exact: true }), newDescription)
@@ -89,14 +89,11 @@ for (const width of [1440, 390])
     await expect(changes.first()).toContainText("Description")
     await changes.first().locator("summary").click()
     await expectTextBox(
-      changes.first().getByRole("textbox", { name: width > 639 ? "After" : "Changes", exact: true }),
-      newDescription
+      changes.first().getByRole("textbox", { name: width > 639 ? "Current state" : "Changes", exact: true }),
+      `${newDescription}\nA draft after saving.`
     )
     if (width > 639)
-      await expectTextBox(
-        changes.first().getByRole("textbox", { name: "Before", exact: true }),
-        `${newDescription}\nA draft after saving.`
-      )
+      await expectTextBox(changes.first().getByRole("textbox", { name: "Revision 3", exact: true }), newDescription)
     await revisions
       .nth(1)
       .getByRole("button", { name: /^Revision \d+ / })

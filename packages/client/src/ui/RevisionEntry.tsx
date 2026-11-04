@@ -11,6 +11,8 @@ import { IconButton } from "./Tooltip.tsx"
 
 const when = (at: number) => new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
 
+export const revisionName = (number: number | undefined) => (number === undefined ? "Revision" : `Revision ${number}`)
+
 export function RevisionEntry({
   number,
   createdAt,
@@ -34,7 +36,7 @@ export function RevisionEntry({
   onMessage: (message: string) => Promise<boolean>
 }) {
   const [editing, setEditing] = useState(false)
-  const name = number === undefined ? "Revision" : `Revision ${number}`
+  const name = revisionName(number)
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">

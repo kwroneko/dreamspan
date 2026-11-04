@@ -64,16 +64,18 @@ for (const width of [1440, 390])
           .first()
           .getByRole("button", { name: /^Revision \d+ / })
           .click()
+        const selectedName = await revisions.first().locator("span.font-semibold").innerText()
+        const parentName = await revisions.nth(1).locator("span.font-semibold").innerText()
         const change = history.locator("details").first()
         await expect(change).toBeVisible()
         // Closed fields must not allocate merge editors for the whole revision.
         await expect(history.locator(".cm-editor")).toHaveCount(0)
         await change.locator("summary").click()
         await expectTextBox(
-          change.getByRole("textbox", { name: width > 639 ? "After" : "Changes", exact: true }),
+          change.getByRole("textbox", { name: width > 639 ? selectedName : "Changes", exact: true }),
           after
         )
-        if (width > 639) await expectTextBox(change.getByRole("textbox", { name: "Before", exact: true }), before)
+        if (width > 639) await expectTextBox(change.getByRole("textbox", { name: parentName, exact: true }), before)
         else await expect(change.locator(".cm-deletedChunk").first()).toContainText("burns")
         await change.locator("summary").click()
         await expect(history.locator(".cm-editor")).toHaveCount(0)

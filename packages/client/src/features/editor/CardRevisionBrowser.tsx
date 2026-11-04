@@ -9,7 +9,7 @@ import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import { Link } from "@tanstack/react-router"
 import { readableChatTitle } from "../chat/chatTitle.ts"
 import { ReadableDiff, readableLines } from "../../ui/ReadableDiff.tsx"
-import { RevisionEntry } from "../../ui/RevisionEntry.tsx"
+import { RevisionEntry, revisionName } from "../../ui/RevisionEntry.tsx"
 import { promptLabel } from "./promptLabel.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -52,10 +52,14 @@ function FieldComparison({
   label,
   change,
   doc,
-  settingLines
+  settingLines,
+  beforeLabel,
+  afterLabel
 }: {
   label: string
   change: FieldChange
+  beforeLabel: string
+  afterLabel: string
   doc: Doc
   settingLines?: SettingLines | undefined
 }) {
@@ -77,7 +81,13 @@ function FieldComparison({
       {open && (
         <div className="mt-2">
           {text ? (
-            <ValueDiff before={change.before} after={change.after} rich />
+            <ValueDiff
+              before={change.before}
+              after={change.after}
+              beforeLabel={beforeLabel}
+              afterLabel={afterLabel}
+              rich
+            />
           ) : (
             <ReadableDiff before={change.before} after={change.after} {...(lines ? { lines } : {})} />
           )}
@@ -188,7 +198,17 @@ function RevisionComparison({
     else setError(result.error)
   }
   const current = useWorkingDoc(store)
-  const changes = docs === null ? null : changedFields(mode === "parent" ? docs.parent : current, docs.doc)
+  const before = mode === "parent" ? docs?.parent : docs?.doc
+  const after = mode === "parent" ? docs?.doc : current
+  const selectedName = revisionName(revision.number)
+  const beforeLabel =
+    mode === "current"
+      ? selectedName
+      : revision.parents.length === 0
+        ? "Empty"
+        : revisionName(revision.number === undefined ? undefined : revision.number - 1)
+  const afterLabel = mode === "parent" ? selectedName : "Current state"
+  const changes = docs === null ? null : changedFields(before!, after!)
   const comparison =
     changes === null ? (
       <p className="text-sm text-muted">Loading comparison…</p>
@@ -199,14 +219,11 @@ function RevisionComparison({
         {changes.map((change) => (
           <FieldComparison
             key={JSON.stringify(change.path)}
-            label={fieldLabel(
-              state.snapshot!.ref.kind,
-              docs!.doc,
-              change.path,
-              mode === "parent" ? docs!.parent : current
-            )}
+            label={fieldLabel(state.snapshot!.ref.kind, after!, change.path, before!)}
             change={change}
-            doc={docs!.doc}
+            doc={after!}
+            beforeLabel={beforeLabel}
+            afterLabel={afterLabel}
             settingLines={settingLines}
           />
         ))}

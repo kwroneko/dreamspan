@@ -13,10 +13,33 @@ const asText = (value: unknown) =>
 
 const cut = (text: string) => (text.length <= SHOWN ? text : `${text.slice(0, SHOWN)}… (${text.length - SHOWN} more)`)
 
-export function ValueDiff({ before, after, rich = false }: { before: unknown; after: unknown; rich?: boolean }) {
+export function ValueDiff({
+  before,
+  after,
+  rich = false,
+  beforeLabel = "Before",
+  afterLabel = "After"
+}: {
+  before: unknown
+  after: unknown
+  rich?: boolean
+  beforeLabel?: string
+  afterLabel?: string
+}) {
   const a = asText(before)
   const b = asText(after)
-  if (rich) return <RevisionDiff before={a} after={b} />
+  if (rich)
+    return (
+      <RevisionDiff
+        before={a}
+        after={b}
+        beforeLabel={beforeLabel}
+        afterLabel={afterLabel}
+        unifiedLabel={
+          beforeLabel === "Before" && afterLabel === "After" ? undefined : `${beforeLabel} (−) → ${afterLabel} (+)`
+        }
+      />
+    )
   const patch = diffPatch(a, b)
   const prefix = a.slice(Math.max(0, patch.start - CONTEXT), patch.start)
   const end = patch.start + patch.removed.length
