@@ -3,6 +3,7 @@
 // a muted line under its name and an optional icon button beside it that acts on the row
 // without choosing it or closing the popover.
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
+import { Switch } from "../../ui/Choice.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
@@ -73,7 +74,7 @@ export function PickerPopover({
       {...(triggerClassName === undefined ? {} : { triggerClassName })}
     >
       {children({ focusRef, focus, onChosen: close })}
-      {footer && <div className="flex shrink-0 flex-col border-t border-border pt-1">{footer(close)}</div>}
+      {footer && <div className="flex shrink-0 flex-col border-t border-border pt-2">{footer(close)}</div>}
     </Popover>
   )
 }
@@ -244,5 +245,33 @@ export function PickerFooterButton({
         {children}
       </button>
     </Tooltip>
+  )
+}
+
+export function ChatLock({
+  lock,
+  kind
+}: {
+  lock: { readonly locked: boolean; readonly disabled: boolean; readonly change: (locked: boolean) => void } | undefined
+  kind: "preset" | "model"
+}) {
+  if (!lock) return null
+  return (
+    <div className="flex flex-col gap-1 border-b border-border pb-2">
+      <Switch
+        compact
+        checked={lock.locked}
+        disabled={lock.disabled}
+        onCheckedChange={lock.change}
+        hint={
+          lock.disabled
+            ? `Choose a ${kind} before locking this chat.`
+            : `This chat keeps this ${kind} when you change it elsewhere.`
+        }
+      >
+        Lock for this chat
+      </Switch>
+      <p className="text-xs text-muted">{lock.locked ? "This chat only" : "Every chat"}</p>
+    </div>
   )
 }
