@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { setSearchHighlights } from "./searchHighlights.ts"
 // Search and replace across an editor's text fields, as plain text or a regular expression
 // (DESIGN §6.2, §5.3). Replacing edits each field through its draft, like typing would.
@@ -256,13 +257,15 @@ export function SearchDialog({
               return (
                 <li key={index} className="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 flex-col text-sm">
-                    <button
-                      type="button"
-                      onClick={reveal}
-                      className="text-left font-medium text-accent underline-offset-4 hover:underline focus-visible:outline-focus [overflow-wrap:anywhere]"
-                    >
-                      {field.label}
-                    </button>
+                    <Tooltip label="Opens the matching field.">
+                      <button
+                        type="button"
+                        onClick={reveal}
+                        className="text-left font-medium text-accent underline-offset-4 hover:underline focus-visible:outline-focus [overflow-wrap:anywhere]"
+                      >
+                        {field.label}
+                      </button>
+                    </Tooltip>
                     <span className="text-muted [overflow-wrap:anywhere]">
                       {match.at > AROUND && "…"}
                       {text.slice(Math.max(0, match.at - AROUND), match.at)}

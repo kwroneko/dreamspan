@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
@@ -223,13 +224,17 @@ function OpenLink({
       }
     : { title: itemName(entry), className }
   return entry.kind === "card" ? (
-    <Link to="/cards/$entityId" params={{ entityId: entry.entityId }} {...props}>
-      {children}
-    </Link>
+    <Tooltip label={`Opens ${entry.label}’s card.`}>
+      <Link to="/cards/$entityId" params={{ entityId: entry.entityId }} {...props}>
+        {children}
+      </Link>
+    </Tooltip>
   ) : (
-    <Link to="/library/$refId" params={{ refId: entry.id }} {...props}>
-      {children}
-    </Link>
+    <Tooltip label={`Opens ${entry.label}’s editor.`}>
+      <Link to="/library/$refId" params={{ refId: entry.id }} {...props}>
+        {children}
+      </Link>
+    </Tooltip>
   )
 }
 const nameLink =
@@ -410,9 +415,11 @@ function Section({
   if (all.length === 0 && archived.length === 0)
     return (
       <EmptyState title={`No ${noun} yet`}>
-        <Link to="/import" className="text-accent">
-          Import files to add some.
-        </Link>
+        <Tooltip label="Opens file import.">
+          <Link to="/import" className="text-accent">
+            Import files to add some.
+          </Link>
+        </Tooltip>
       </EmptyState>
     )
   return (
@@ -513,13 +520,8 @@ function Section({
       </div>
       {items.length === 0 ? (
         <EmptyState title={needle ? `No ${noun} match “${search.trim()}”` : `No ${noun} here`}>
-          {!needle && presets && presetView === "archived" && (
-            <p className="text-sm text-muted">
-              Archive a preset with its box button to hide it from the lists; nothing is deleted.
-            </p>
-          )}
           {needle && (
-            <Button variant="ghost" onClick={() => setSearch("")}>
+            <Button hint="Clears the library search." variant="ghost" onClick={() => setSearch("")}>
               Clear the search
             </Button>
           )}
@@ -545,9 +547,11 @@ export function LibraryPage() {
       </CenterHeaderContent>
       <div className="flex flex-wrap gap-2">
         <SlotOutlet slot={libraryActions} props={{}} />
-        <Link to="/import" className={buttonClass("primary")}>
-          Import files
-        </Link>
+        <Tooltip label="Opens file import.">
+          <Link to="/import" className={buttonClass("primary")}>
+            Import files
+          </Link>
+        </Tooltip>
       </div>
       <AsyncView atom={libraryAtom} loading="Loading the library…">
         {(lists) => {

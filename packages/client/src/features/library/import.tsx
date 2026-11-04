@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // The import screen: the way to a SillyTavern folder's import, first as the main path, and
 // files picked or dropped, each uploaded in turn, with its report. With `?into=<ref>` it
@@ -128,13 +129,15 @@ export function ImportPage() {
           <div className="flex flex-wrap gap-2">
             {canGoBack ? (
               // Wherever the user came from: the shell's Import link is on every screen.
-              <Button variant="ghost" onClick={() => router.history.back()}>
+              <Button hint="Returns to file selection." variant="ghost" onClick={() => router.history.back()}>
                 Back
               </Button>
             ) : (
-              <Link to="/library" className={buttonClass("ghost")}>
-                Back to the library
-              </Link>
+              <Tooltip label="Returns to the library.">
+                <Link to="/library" className={buttonClass("ghost")}>
+                  Back to the library
+                </Link>
+              </Tooltip>
             )}
           </div>
         </header>
@@ -146,9 +149,11 @@ export function ImportPage() {
               title="Import a SillyTavern folder"
               about="Import characters, personas, chats, groups, lorebooks and chat-completion presets from SillyTavern. Re-import to add new and changed content."
             />
-            <Link to="/import/st" className={`${buttonClass("primary")} mt-auto self-start`}>
-              Choose the folder
-            </Link>
+            <Tooltip label="Opens the SillyTavern folder importer.">
+              <Link to="/import/st" className={`${buttonClass("primary")} mt-auto self-start`}>
+                Choose the folder
+              </Link>
+            </Tooltip>
           </Card>
         )}
         <Card className="flex flex-col">

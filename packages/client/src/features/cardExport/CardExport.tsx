@@ -58,7 +58,11 @@ export function ExportMenu({
       label={`Export ${label} as`}
       hint={hint}
       trigger={
-        <Button variant={compact ? "ghost" : "secondary"} className={compact ? "h-8! px-2!" : ""}>
+        <Button
+          hint="Opens card export options."
+          variant={compact ? "ghost" : "secondary"}
+          className={compact ? "h-8! px-2!" : ""}
+        >
           Export…
           <Icon name="down" />
         </Button>

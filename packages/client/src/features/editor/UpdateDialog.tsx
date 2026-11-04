@@ -116,9 +116,12 @@ export function UpdateDialog({ store, call, onClose }: { store: EditorStore; cal
         </>
       )}
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button hint="Closes this dialog without applying changes." onClick={onClose}>
+          Cancel
+        </Button>
         {preview !== null && (
           <Button
+            hint="Applies the selected source changes."
             variant="primary"
             pending={pending}
             onClick={() => void (conflicts.length > 0 ? resolve(preview) : apply())}

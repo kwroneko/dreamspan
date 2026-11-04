@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { mapEditingOrigin, editingOrigin, reconcileDeletedFields, reconcileForm } from "@rp/shared/draftDeletions.ts"
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
@@ -640,6 +641,7 @@ export function UserDraftUndo({ draft }: { draft: UserDraft }) {
       align="end"
     >
       <Button
+        hint="Reverts the latest field change."
         disabled={!draft.ready}
         onClick={() => {
           draft.undo()
@@ -662,20 +664,22 @@ export function UserDraftUndo({ draft }: { draft: UserDraft }) {
         <ul aria-label="Field undo history" className="-mx-1 flex min-h-0 flex-col overflow-auto">
           {draft.history.map((entry) => (
             <li key={entry.seq}>
-              <button
-                type="button"
-                className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-                onClick={() => {
-                  draft.restore(entry.seq)
-                  setOpen(false)
-                }}
-              >
-                <span>
-                  {entry.kind === "initial" ? "Starting text" : new Date(entry.at).toLocaleString()}{" "}
-                  <span className="text-muted">· {entry.length} characters</span>
-                </span>
-                {entry.inserted && <span className="line-clamp-1 text-xs text-muted">{entry.inserted}</span>}
-              </button>
+              <Tooltip label="Loads this earlier field text.">
+                <button
+                  type="button"
+                  className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+                  onClick={() => {
+                    draft.restore(entry.seq)
+                    setOpen(false)
+                  }}
+                >
+                  <span>
+                    {entry.kind === "initial" ? "Starting text" : new Date(entry.at).toLocaleString()}{" "}
+                    <span className="text-muted">· {entry.length} characters</span>
+                  </span>
+                  {entry.inserted && <span className="line-clamp-1 text-xs text-muted">{entry.inserted}</span>}
+                </button>
+              </Tooltip>
             </li>
           ))}
         </ul>
@@ -709,7 +713,9 @@ export function UserDraftNotices({ draft }: { draft: UserDraft }) {
             <>
               <span>Another device saved a different draft. Your unsaved text is still here.</span>
               <details>
-                <summary>Preview the other device's text</summary>
+                <Tooltip label="Previews the other saved edit.">
+                  <summary>Preview the other device's text</summary>
+                </Tooltip>
                 <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words">{draft.remote.content}</pre>
               </details>
             </>
@@ -720,10 +726,10 @@ export function UserDraftNotices({ draft }: { draft: UserDraft }) {
             </span>
           )}
           <div className="flex flex-wrap gap-2">
-            <Button variant="ghost" onClick={draft.loadRemote}>
+            <Button hint="Loads the latest text saved on the server." variant="ghost" onClick={draft.loadRemote}>
               {draft.remote.status === "active" ? "Load the other device's text" : "Reload saved value"}
             </Button>
-            <Button variant="ghost" onClick={draft.keepLocal}>
+            <Button hint="Keeps the text currently in this field." variant="ghost" onClick={draft.keepLocal}>
               Keep my text
             </Button>
           </div>
@@ -733,11 +739,14 @@ export function UserDraftNotices({ draft }: { draft: UserDraft }) {
         <div role="status" className="flex w-full flex-col gap-2">
           <span>Another edit from {new Date(draft.displaced.at).toLocaleString()} is kept in field undo history.</span>
           <details>
-            <summary>Preview the other edit</summary>
+            <Tooltip label="Previews the other saved edit.">
+              <summary>Preview the other edit</summary>
+            </Tooltip>
             <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words">{draft.displaced.content}</pre>
           </details>
           <div className="flex flex-wrap gap-2">
             <Button
+              hint="Loads the other edit into this field."
               variant="ghost"
               onClick={() => {
                 draft.setText(draft.displaced!.content)
@@ -746,7 +755,7 @@ export function UserDraftNotices({ draft }: { draft: UserDraft }) {
             >
               Use the other edit
             </Button>
-            <Button variant="ghost" onClick={draft.acknowledge}>
+            <Button hint="Keeps the edit currently in this field." variant="ghost" onClick={draft.acknowledge}>
               Keep this edit
             </Button>
           </div>

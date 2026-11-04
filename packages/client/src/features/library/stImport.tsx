@@ -947,6 +947,7 @@ function JobsSection({ opened, open }: StImportSectionProps) {
                   <Menu
                     trigger={
                       <Button
+                        hint="Opens actions for this folder import."
                         variant="ghost"
                         className="h-8! w-8 px-0!"
                         aria-label={`Import actions: ${when(job.startedAt)}`}

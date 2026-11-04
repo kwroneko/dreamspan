@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { cardNames } from "@rp/shared/cardNames.ts"
 import { Effect } from "effect"
@@ -72,13 +73,15 @@ function FieldComparison({
       className="min-w-0 rounded-md border border-border p-2"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary
-        className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium [overflow-wrap:anywhere] [&::-webkit-details-marker]:hidden"
-        title={`Show or hide changes to ${label}`}
-      >
-        <Icon name={open ? "down" : "right"} size={16} className="shrink-0" />
-        <span>{label}</span>
-      </summary>
+      <Tooltip label="Shows the changes to this field.">
+        <summary
+          className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium [overflow-wrap:anywhere] [&::-webkit-details-marker]:hidden"
+          title={`Show or hide changes to ${label}`}
+        >
+          <Icon name={open ? "down" : "right"} size={16} className="shrink-0" />
+          <span>{label}</span>
+        </summary>
+      </Tooltip>
       {open && (
         <div className="mt-2">
           {text ? (
@@ -112,15 +115,17 @@ function RevisionTitle({ revision }: { revision: Revision }) {
     return (
       <>
         {use.summary ? "Used by a summary" : "Used by a reply"} ·{" "}
-        <Link
-          to="/chats/$chatId"
-          params={{ chatId: use.chatId }}
-          search={use.forkId ? { fork: use.forkId, slot: use.slotId } : { slot: use.slotId }}
-          className="text-accent underline-offset-4 hover:underline"
-          title="Opens the chat at the reply that used this revision"
-        >
-          {use.chatTitle ? readableChatTitle(use.chatTitle) : "a chat"}
-        </Link>{" "}
+        <Tooltip label="Opens the chat using this revision.">
+          <Link
+            to="/chats/$chatId"
+            params={{ chatId: use.chatId }}
+            search={use.forkId ? { fork: use.forkId, slot: use.slotId } : { slot: use.slotId }}
+            className="text-accent underline-offset-4 hover:underline"
+            title="Opens the chat at the reply that used this revision"
+          >
+            {use.chatTitle ? readableChatTitle(use.chatTitle) : "a chat"}
+          </Link>
+        </Tooltip>{" "}
         · {use.summary ? `messages ${use.summary.from}–${use.summary.to}` : `message ${use.message}`}
         {where && <span className="block text-muted">{where}</span>}
       </>
