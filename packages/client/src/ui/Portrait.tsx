@@ -158,12 +158,14 @@ export function PortraitView({
   title,
   toggle,
   close,
+  alignToChatHeader = false,
   header = (node) => node
 }: {
   portrait: Portrait
   title: (name: string) => ReactNode
   toggle?: ReactNode
   close: ReactNode
+  alignToChatHeader?: boolean
   header?: (node: ReactElement) => ReactNode
 }) {
   const { mode } = useImagePrefs()
@@ -178,14 +180,14 @@ export function PortraitView({
       {header(
         <div
           data-portrait-toolbar
-          className="flex min-h-14 flex-wrap items-center gap-x-3 border-b border-border px-3 @max-[22rem]:pt-2"
+          className={`flex flex-wrap items-center gap-x-3 border-b border-border px-3 ${alignToChatHeader ? "h-shell-header" : "min-h-14 @max-[22rem]:pt-2"}`}
         >
           {title(portrait.name)}
           {visible && scale && (
             // Narrower than its row (a narrow column), the zoom takes a row of its own under the name.
             <div
               data-zoom-controls
-              className="flex h-14 items-center gap-3 @max-[22rem]:order-last @max-[22rem]:w-full"
+              className={`flex h-14 items-center gap-3 @max-[22rem]:order-last @max-[22rem]:w-full ${alignToChatHeader ? "@max-[22rem]:h-8" : ""}`}
             >
               <div data-zoom-group className="flex min-w-0 items-center gap-1 @max-[22rem]:flex-1">
                 <ToolbarSlider
