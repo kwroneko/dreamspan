@@ -18,7 +18,7 @@ import { RadioGroup } from "../../ui/Choice.tsx"
 import { Fieldset, Input } from "../../ui/Field.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { NameDialog } from "./NameDialog.tsx"
-import { Avatar } from "../../ui/Avatar.tsx"
+import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip, TooltipProvider } from "../../ui/Tooltip.tsx"
@@ -415,16 +415,15 @@ function ChatHeaderFrame({
                     .join(", ")}
                   side="bottom"
                 >
-                  <span
+                  <PortraitOverflow
+                    remaining={characters.length - 4}
                     tabIndex={0}
                     aria-label={`Other characters: ${characters
                       .slice(4)
                       .map((c) => c.label)
                       .join(", ")}`}
-                    className="inline-flex h-12 w-8 shrink-0 items-center justify-center rounded-sm bg-surface-raised text-xs text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                  >
-                    +{characters.length - 4}
-                  </span>
+                    className="outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  />
                 </Tooltip>
               )}
             </div>

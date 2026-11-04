@@ -3,7 +3,7 @@ import { Tooltip } from "./Tooltip.tsx"
 // id, so the same card always looks the same. A stack shows a chat's cast together.
 
 import type { AvatarCrop } from "@rp/shared/media.ts"
-import type { CSSProperties } from "react"
+import type { ComponentProps, CSSProperties } from "react"
 import { PortraitFrame, useOpenPortrait } from "./Portrait.tsx"
 import { useMediaWidth } from "./mediaImage.ts"
 import { portraitUrl } from "./portraitParts.ts"
@@ -139,14 +139,19 @@ interface Face {
   readonly crop?: AvatarCrop | null | undefined
 }
 
-/** Overlays the last portrait without changing the group's width or neighbouring controls. */
-export function PortraitCount({ remaining }: { remaining: number }) {
+/** The header's overflow tile, scaled to match its adjacent portraits. */
+export function PortraitOverflow({
+  remaining,
+  size = "md",
+  className = "",
+  ...props
+}: { remaining: number; size?: AvatarSize } & Omit<ComponentProps<"span">, "children">) {
   return remaining > 0 ? (
     <span
-      data-portrait-count
-      data-layout-overlay="Remaining-character count covers the last portrait"
-      aria-hidden="true"
-      className="absolute right-0 bottom-0 z-10 rounded-sm border border-border bg-surface text-[0.625rem] leading-4 font-semibold text-text px-1 shadow-sm"
+      data-portrait-overflow
+      aria-hidden={props["aria-label"] ? undefined : true}
+      {...props}
+      className={`inline-flex shrink-0 items-center justify-center rounded-sm bg-surface-raised text-muted ${AVATAR_SIZES[size]} ${className}`}
     >
       +{remaining}
     </span>
@@ -182,7 +187,7 @@ export function AvatarStack({
             preview={preview}
           />
         ))}
-        <PortraitCount remaining={faces.length - shown.length} />
+        <PortraitOverflow remaining={faces.length - shown.length} size={size} />
       </span>
     </Tooltip>
   )

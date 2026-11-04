@@ -9,7 +9,7 @@ import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, FailureView, useAction } from "../../actions.tsx"
-import { Avatar, PortraitCount } from "../../ui/Avatar.tsx"
+import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"
 import { useSession } from "../../session.ts"
 import { rememberedPanel } from "../chat/ChatPanels.tsx"
 import { useWide } from "../chat/ChatPanels.tsx"
@@ -237,7 +237,7 @@ export function ForkRow({
                 data-layout-audit-ignore="overlap: Cast portraits intentionally overlap in compact chat rows"
                 className="relative flex w-fit shrink-0 gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
-                {fork.cast.slice(0, 2).map((c) => (
+                {fork.cast.slice(0, 2).map((c, index) => (
                   <Avatar
                     key={c.entityId}
                     id={c.entityId}
@@ -245,9 +245,14 @@ export function ForkRow({
                     mediaId={c.avatarMediaId}
                     crop={c.avatarCrop}
                     size="md"
+                    className={index === 1 && fork.cast.length > 2 ? "@max-[16.5625rem]/fork-row:hidden" : ""}
                   />
                 ))}
-                <PortraitCount remaining={fork.cast.length - 2} />
+                <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow-wide" />
+                <PortraitOverflow
+                  remaining={fork.cast.length > 2 ? fork.cast.length - 1 : 0}
+                  className="fork-row-overflow-compact"
+                />
               </span>
             </Tooltip>
           )}

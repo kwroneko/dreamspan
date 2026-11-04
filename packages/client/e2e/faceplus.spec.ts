@@ -56,11 +56,23 @@ for (const theme of ["light", "dark"] as const)
           .first()
         await expect(row).toBeVisible()
         const portraits = row.locator("[data-row-portraits]")
-        await expect(portraits.locator("[data-portrait]")).toHaveCount(Math.min(chat.count, 2))
+        const compact = await row.evaluate((node) => {
+          const style = getComputedStyle(node)
+          return node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) < 265
+        })
+        const shown = !before && compact && chat.count > 2 ? 1 : Math.min(chat.count, 2)
+        await expect(portraits.locator("[data-portrait]").filter({ visible: true })).toHaveCount(shown)
         if (!before) {
-          const badge = portraits.locator("[data-portrait-count]")
-          if (chat.count > 2) await expect(badge).toHaveText(`+${chat.count - 2}`)
+          const badge = portraits.locator("[data-portrait-overflow]").filter({ visible: true })
+          if (chat.count > 2) await expect(badge).toHaveText(`+${chat.count - shown}`)
           else await expect(badge).toHaveCount(0)
+          if (chat.count > 2) {
+            const tile = (await badge.boundingBox())!
+            const face = (await portraits.locator("[data-portrait]").first().boundingBox())!
+            expect(tile.width).toBe(face.width)
+            expect(tile.height).toBe(face.height)
+            expect(tile.x).toBeGreaterThanOrEqual(face.x + face.width)
+          }
           await portraits.hover()
           await expect(
             page
@@ -80,6 +92,20 @@ for (const theme of ["light", "dark"] as const)
           })
         }
         await row.screenshot({ path: info.outputPath(`${before ? "before" : "after"}-${chat.count}.png`) })
+        if (!before) {
+          await row.evaluate((node) => ((node as HTMLElement).style.width = "min(230px, 100%)"))
+          await row.screenshot({ path: info.outputPath(`after-stacked-${chat.count}.png`) })
+          if (chat.count > 2) {
+            const tile = (await portraits.locator("[data-portrait-overflow]").filter({ visible: true }).boundingBox())!
+            const face = (await portraits.locator("[data-portrait]").first().boundingBox())!
+            expect(tile.width).toBe(face.width)
+            expect(tile.height).toBe(face.height)
+          }
+          await expectLayout(page, info, `stacked-cast-${chat.count}-${width}-${theme}`, {
+            scope: `[data-fork-row]:has([data-chat-id="${chat.id}"])`
+          })
+          await row.evaluate((node) => ((node as HTMLElement).style.width = ""))
+        }
         if (chat.count >= 2)
           controls.push(
             await row.evaluate((node) => {
@@ -88,6 +114,44 @@ for (const theme of ["light", "dark"] as const)
               return { right: row.right - controls.right, top: controls.top - row.top }
             })
           )
+      }
+      if (!before && width >= 1024) {
+        await page.getByRole("separator", { name: "Resize sidebar", exact: true }).focus()
+        await page.keyboard.press("End")
+        for (const chat of chats) {
+          const row = navigation
+            .locator("[data-fork-row]")
+            .filter({ has: page.locator(`[data-chat-id="${chat.id}"]`) })
+            .first()
+          const portraits = row.locator("[data-row-portraits]")
+          await expect(portraits.locator("[data-portrait]").filter({ visible: true })).toHaveCount(
+            Math.min(chat.count, 2)
+          )
+          if (chat.count > 2)
+            await expect(portraits.locator("[data-portrait-overflow]").filter({ visible: true })).toHaveText(
+              `+${chat.count - 2}`
+            )
+          await row.screenshot({ path: info.outputPath(`after-wide-${chat.count}.png`) })
+          await expectLayout(page, info, `wide-cast-${chat.count}-${width}-${theme}`, {
+            scope: `[data-fork-row]:has([data-chat-id="${chat.id}"])`
+          })
+        }
+      }
+      await page.goto(`${server().url}/chats/${chats[3]!.id}`)
+      const header = page.locator("[data-chat-main] > header")
+      await expect(header.getByText("Harbour cast 6", { exact: true })).toBeVisible()
+      await header.screenshot({ path: info.outputPath(`${before ? "before" : "after"}-header.png`) })
+      if (!before) {
+        await page.goto(`${server().url}/chats`)
+        const stack = page.getByRole("main").getByLabel(`Characters: ${chats[3]!.names.join(", ")}`, { exact: true })
+        await expect(stack.locator("[data-portrait]")).toHaveCount(3)
+        await expect(stack.locator("[data-portrait-overflow]")).toHaveText("+3")
+        const tile = (await stack.locator("[data-portrait-overflow]").boundingBox())!
+        const face = (await stack.locator("[data-portrait]").last().boundingBox())!
+        expect(tile.width).toBe(face.width)
+        expect(tile.height).toBe(face.height)
+        expect(tile.x).toBeGreaterThanOrEqual(face.x + face.width)
+        await stack.screenshot({ path: info.outputPath("after-chat-list.png") })
       }
       for (const control of controls) {
         expect(Math.abs(control.right - controls[0]!.right)).toBeLessThan(1)
