@@ -1,5 +1,6 @@
+import { panelEditorActions } from "../editor/panelActions.tsx"
 import { lazy, Suspense } from "react"
-import { cardContributions, type CardMenuProps, type CardSurfaceContext } from "./surfaces.tsx"
+import { PanelCardForks, cardContributions, type CardMenuProps, type CardSurfaceContext } from "./surfaces.tsx"
 
 const Command = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.ForkCommand })))
 const MenuEntry = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.ForkMenuItem })))
@@ -8,7 +9,9 @@ const Provenance = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ defaul
 const ForkBadge = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.ForkBadge })))
 const FamilySection = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.FamilySection })))
 export const register = () => {
-  const disposers = []
+  const disposers = [
+    panelEditorActions.register({ id: "card-forks.panel-actions", order: 30, component: PanelCardForks })
+  ]
   for (const [order, command] of (["fork", "family", "compare", "parent", "unlink"] as const).entries())
     disposers.push(
       cardContributions.register({

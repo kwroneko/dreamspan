@@ -1,5 +1,9 @@
+import { Menu } from "../../ui/Menu.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { Tooltip, iconButtonClass } from "../../ui/Tooltip.tsx"
+import { useEditorState } from "../editor/store.ts"
 // Card extension points shared by library, editor and character surfaces.
-import { useSyncExternalStore, type ComponentType } from "react"
+import { useState, useSyncExternalStore, type ComponentType } from "react"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { EditorStore } from "../editor/store.ts"
 import { makeRegistry } from "../../registry.ts"
@@ -51,4 +55,36 @@ export function CardSurface({
     .filter((entry) => overflow === undefined || (entry.overflow ?? false) === overflow)
     .sort((a, b) => a.order - b.order)
     .map((entry) => (entry.component ? <entry.component key={entry.id} {...context} /> : null))
+}
+
+/** The registered card menu actions and their dialogs, hosted beside compact-editor History. */
+export function PanelCardForks({ store }: { store: EditorStore }) {
+  const ref = useEditorState(store).snapshot?.ref
+  const entries = cardMenuEntries(useCardContributions())
+  const [open, setOpen] = useState<string | null>(null)
+  if (ref?.kind !== "card") return null
+  const props = (id: string) => ({
+    entityId: ref.entityId,
+    store,
+    openDialog: () => setOpen(id),
+    closeDialog: () => setOpen(null)
+  })
+  const selected = entries.find((entry) => entry.id === open)
+  return (
+    <>
+      <Menu
+        label="Card fork actions"
+        trigger={
+          <Tooltip label="Shows actions to fork this card and manage its family.">
+            <button type="button" aria-label="Card fork actions" className={iconButtonClass()}>
+              <Icon name="more" />
+            </button>
+          </Tooltip>
+        }
+      >
+        {entries.map((entry) => (entry.menu ? <entry.menu key={entry.id} {...props(entry.id)} /> : null))}
+      </Menu>
+      {selected?.dialog && <selected.dialog {...props(selected.id)} />}
+    </>
+  )
 }
