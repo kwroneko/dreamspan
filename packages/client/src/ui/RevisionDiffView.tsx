@@ -13,13 +13,15 @@ export default function RevisionDiffView({
   after,
   sideBySide = false,
   beforeLabel = "Before",
-  afterLabel = "After"
+  afterLabel = "After",
+  unifiedLabel = "Removed (−) and added (+)"
 }: {
   before: string
   after: string
   sideBySide?: boolean
   beforeLabel?: string
   afterLabel?: string
+  unifiedLabel?: string | undefined
 }) {
   const host = useRef<HTMLDivElement>(null)
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 639px)").matches)
@@ -74,7 +76,7 @@ export default function RevisionDiffView({
         aria-hidden="true"
       >
         {narrow && !sideBySide ? (
-          <span className="col-span-2">Removed (−) and added (+)</span>
+          <span className="col-span-2 [overflow-wrap:anywhere]">{unifiedLabel}</span>
         ) : (
           <>
             <span>{beforeLabel}</span>

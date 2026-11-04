@@ -69,6 +69,36 @@ for (const width of [1440, 390])
     const revisions = history.getByRole("list", { name: "Revisions" }).getByRole("listitem")
     await expect(revisions).toHaveCount(3)
     await expect(revisions.first()).toContainText("Night watch")
+    const messageRow = revisions.first().locator("[data-revision-message-row]")
+    const editMessage = revisions.first().getByRole("button", { name: "Edit message of Revision 3", exact: true })
+    await editMessage.click()
+    const messageBox = history.getByRole("textbox", { name: "Message of Revision 3", exact: true })
+    await messageBox.fill("Cancelled message")
+    await messageBox.press("Escape")
+    await expect(messageRow).toContainText("Night watch")
+    const longMessage =
+      "The lantern keeper records the harbor meeting and the travelers' promise to return after the evening bell. ".repeat(
+        4
+      )
+    await editMessage.click()
+    await messageBox.fill(longMessage)
+    await messageBox.press("Enter")
+    await expect(messageBox).toHaveCount(0)
+    expect((await messageRow.boundingBox())!.height).toBe(32)
+    await revisions.first().getByRole("button", { name: "Expand message of Revision 3", exact: true }).click()
+    await expect(revisions.first().getByRole("region", { name: "Full message of Revision 3", exact: true })).toHaveText(
+      longMessage.trim()
+    )
+    await editMessage.click()
+    await messageBox.fill("Another cancelled message")
+    await history.getByRole("button", { name: "Cancel editing message", exact: true }).click()
+    await revisions.first().getByRole("button", { name: "Collapse message of Revision 3", exact: true }).click()
+    await editMessage.click()
+    await messageBox.fill("Night watch")
+    await history.getByRole("button", { name: "Save message", exact: true }).click()
+    await expect(messageBox).toHaveCount(0)
+    expect((await messageRow.boundingBox())!.height).toBe(32)
+
     await revisions
       .first()
       .getByRole("button", { name: /^Revision \d+ / })
@@ -78,20 +108,30 @@ for (const width of [1440, 390])
     await history.getByText("Description", { exact: true }).click()
     await expect(history.locator(".cm-editor").first()).toBeVisible()
     if (width > 639) {
-      await expectTextBox(changes.first().getByRole("textbox", { name: "Before", exact: true }), description)
-      await expectTextBox(changes.first().getByRole("textbox", { name: "After", exact: true }), newDescription)
+      await expectTextBox(changes.first().getByRole("textbox", { name: "Revision 2", exact: true }), description)
+      await expectTextBox(changes.first().getByRole("textbox", { name: "Revision 3", exact: true }), newDescription)
     } else {
       await expect(changes.first().locator(".cm-deletedChunk")).toContainText("The lamp burns.")
       await expectTextBox(changes.first().getByRole("textbox", { name: "Changes", exact: true }), newDescription)
     }
-    await history.getByRole("radio", { name: "As it is now" }).click()
+    await history.getByRole("tab", { name: "Changes from current state" }).click()
     await expect(changes).toHaveCount(1)
     await expect(changes.first()).toContainText("Description")
+    await changes.first().locator("summary").click()
+    await expectTextBox(
+      changes.first().getByRole("textbox", { name: width > 639 ? "Current state" : "Changes", exact: true }),
+      `${newDescription}\nA draft after saving.`
+    )
+    if (width > 639)
+      await expectTextBox(changes.first().getByRole("textbox", { name: "Revision 3", exact: true }), newDescription)
     await revisions
       .nth(1)
       .getByRole("button", { name: /^Revision \d+ / })
       .click()
-    await expect(history.getByRole("radio", { name: "Parent revision" })).toBeChecked()
+    await expect(history.getByRole("tab", { name: "Changes from previous revision" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
     await expect(changes).toHaveCount(2)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
   })
@@ -117,16 +157,14 @@ test("changes propagate exactly, native undo works, and external replacements do
         )?.content
     )
     .toBe(pasted)
-  // History's Restore on the latest revision puts every field back to it, from outside the box.
+  // An entry restores directly, with the latest revision's action kept disabled.
+  await saveRevision(page)
   await page.getByRole("button", { name: "History", exact: true }).click()
   const history = page.getByRole("dialog", { name: "History", exact: true })
-  await history
-    .getByRole("list", { name: "Revisions" })
-    .getByRole("listitem")
-    .first()
-    .getByRole("button", { name: /^Revision \d+ / })
-    .click()
-  await history.getByRole("button", { name: "Restore", exact: true }).click()
+  const revisions = history.getByRole("list", { name: "Revisions" }).getByRole("listitem")
+  await expect(revisions.first().getByRole("button", { name: /^Restore to revision / })).toBeDisabled()
+  await expect(history.getByRole("tab")).toHaveCount(0)
+  await revisions.nth(1).getByRole("button", { name: "Restore to revision 2", exact: true }).click()
   await history.getByRole("button", { name: "Close", exact: true }).click()
   await expectTextBox(box, description)
   await expect(page.locator(".rp-line-added, .rp-line-modified, .rp-line-deleted")).toHaveCount(0)

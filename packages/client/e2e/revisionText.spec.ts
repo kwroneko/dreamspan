@@ -64,28 +64,39 @@ for (const width of [1440, 390])
           .first()
           .getByRole("button", { name: /^Revision \d+ / })
           .click()
+        const selectedName = await revisions.first().locator("span.font-semibold").innerText()
+        const parentName = await revisions.nth(1).locator("span.font-semibold").innerText()
         const change = history.locator("details").first()
         await expect(change).toBeVisible()
         // Closed fields must not allocate merge editors for the whole revision.
         await expect(history.locator(".cm-editor")).toHaveCount(0)
         await change.locator("summary").click()
         await expectTextBox(
-          change.getByRole("textbox", { name: width > 639 ? "After" : "Changes", exact: true }),
+          change.getByRole("textbox", { name: width > 639 ? selectedName : "Changes", exact: true }),
           after
         )
-        if (width > 639) await expectTextBox(change.getByRole("textbox", { name: "Before", exact: true }), before)
+        if (width > 639) await expectTextBox(change.getByRole("textbox", { name: parentName, exact: true }), before)
         else await expect(change.locator(".cm-deletedChunk").first()).toContainText("burns")
         await change.locator("summary").click()
         await expect(history.locator(".cm-editor")).toHaveCount(0)
         await change.locator("summary").click()
         await page.screenshot({ animations: "disabled", path: join(screens, `${kind}-history-${width}-${theme}.png`) })
-        await history.getByRole("radio", { name: "As it is now" }).click()
-        await expect(history.getByText("No fields differ.", { exact: true })).toBeVisible()
+        await history.getByRole("tab", { name: "Changes from current state" }).click()
+        await expect(
+          history
+            .getByRole("tabpanel", { name: "Changes from current state", exact: true })
+            .getByText("No fields differ.", { exact: true })
+        ).toBeVisible()
         await revisions
-          .nth(1)
+          .first()
           .getByRole("button", { name: /^Revision \d+ / })
           .click()
-        await history.getByRole("button", { name: "Restore", exact: true }).click()
+        await expect(history.getByRole("tab")).toHaveCount(0)
+        await expect(revisions.first().getByRole("button", { name: /^Restore to revision / })).toBeDisabled()
+        await revisions
+          .nth(1)
+          .getByRole("button", { name: `Restore to ${parentName.toLowerCase()}`, exact: true })
+          .click()
         await history.getByRole("button", { name: "Close", exact: true }).click()
         await expectTextBox(box, before)
         await page.reload()

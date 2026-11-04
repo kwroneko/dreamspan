@@ -143,7 +143,9 @@ for (const width of [1440, 390]) {
     await save(page)
     // History's comparison names the entry by its title.
     const history = await latestChanges(page)
-    await expect(history.getByLabel("Revision changes")).toContainText("Entry “Harbour”")
+    await expect(history.getByRole("tabpanel", { name: "Changes from previous revision", exact: true })).toContainText(
+      "Entry “Harbour”"
+    )
     await history.getByRole("button", { name: "Close", exact: true }).click()
     const book = async () => (await admin((api) => api.OpenEditor({ refId: ref.id }))).doc as unknown as LorebookDoc
     expect((await book()).entries[0]).toMatchObject({
@@ -395,7 +397,9 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   // the fields as the table does.
   await save(page)
   const history = await latestChanges(page)
-  const labels = history.getByLabel("Revision changes").locator("summary")
+  const labels = history
+    .getByRole("tabpanel", { name: "Changes from previous revision", exact: true })
+    .locator("summary")
   await expect
     .poll(() => labels.allTextContents())
     .toEqual(

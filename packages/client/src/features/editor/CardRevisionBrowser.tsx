@@ -1,7 +1,6 @@
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { cardNames } from "@rp/shared/cardNames.ts"
 import { Effect } from "effect"
-import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"
 // Compare immutable revisions with their first parent or the live working document.
 import { type Doc, Revision } from "@rp/shared/library.ts"
@@ -9,13 +8,14 @@ import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import { Link } from "@tanstack/react-router"
 import { readableChatTitle } from "../chat/chatTitle.ts"
 import { ReadableDiff, readableLines } from "../../ui/ReadableDiff.tsx"
-import { RevisionEntry } from "../../ui/RevisionEntry.tsx"
+import { RevisionEntry, revisionName } from "../../ui/RevisionEntry.tsx"
 import { promptLabel } from "./promptLabel.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { RadioGroup } from "../../ui/Choice.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { Tabs } from "../../ui/Tabs.tsx"
 import type { Caller } from "./caller.ts"
 import { ValueDiff } from "./diff.tsx"
 import { changedFields, fieldLabel, type FieldChange } from "./fields.ts"
@@ -51,10 +51,14 @@ function FieldComparison({
   label,
   change,
   doc,
-  settingLines
+  settingLines,
+  beforeLabel,
+  afterLabel
 }: {
   label: string
   change: FieldChange
+  beforeLabel: string
+  afterLabel: string
   doc: Doc
   settingLines?: SettingLines | undefined
 }) {
@@ -67,11 +71,23 @@ function FieldComparison({
       className="min-w-0 rounded-md border border-border p-2"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]">{label}</summary>
+      <summary
+        className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium [overflow-wrap:anywhere] [&::-webkit-details-marker]:hidden"
+        title={`Show or hide changes to ${label}`}
+      >
+        <Icon name={open ? "down" : "right"} size={16} className="shrink-0" />
+        <span>{label}</span>
+      </summary>
       {open && (
         <div className="mt-2">
           {text ? (
-            <ValueDiff before={change.before} after={change.after} rich />
+            <ValueDiff
+              before={change.before}
+              after={change.after}
+              beforeLabel={beforeLabel}
+              afterLabel={afterLabel}
+              rich
+            />
           ) : (
             <ReadableDiff before={change.before} after={change.after} {...(lines ? { lines } : {})} />
           )}
@@ -81,7 +97,7 @@ function FieldComparison({
   )
 }
 
-/** What made a revision, in words: the reply that used its text (linked), a Save, an import. */
+/** Linked usage and branch context stay on lines; ordinary origins are header badges. */
 function RevisionTitle({ revision }: { revision: Revision }) {
   const use = revision.usedBy
   // A chat's own note: where the change took effect (owner, 2026-11-01).
@@ -100,6 +116,7 @@ function RevisionTitle({ revision }: { revision: Revision }) {
           params={{ chatId: use.chatId }}
           search={use.forkId ? { fork: use.forkId, slot: use.slotId } : { slot: use.slotId }}
           className="text-accent underline-offset-4 hover:underline"
+          title="Opens the chat at the reply that used this revision"
         >
           {use.chatTitle ? readableChatTitle(use.chatTitle) : "a chat"}
         </Link>{" "}
@@ -107,30 +124,27 @@ function RevisionTitle({ revision }: { revision: Revision }) {
         {where && <span className="block text-muted">{where}</span>}
       </>
     )
-  const origins: Record<Revision["origin"], string> = {
-    user: "Saved",
-    generation: "Used by a reply",
-    import: "Imported",
-    merge: "Took an update",
-    agent: "Changed by the agent",
-    changeset: "Changed"
-  }
   return (
     <>
-      {origins[revision.origin]}
+      {revision.origin === "generation" && "Used by a reply"}
       {where && <span className="block text-muted">{where}</span>}
     </>
   )
 }
 
+const originBadges: Partial<Record<Revision["origin"], string>> = {
+  import: "Imported",
+  merge: "Updated",
+  agent: "Agent edit",
+  changeset: "Changed"
+}
+
 function RevisionComparison({
   store,
-  call,
   revision,
   settingLines
 }: {
   store: EditorStore
-  call: Caller
   revision: Revision
   settingLines?: SettingLines | undefined
 }) {
@@ -156,95 +170,70 @@ function RevisionComparison({
       live = false
     }
   }, [store, revision])
-  const names = cardNames(docs?.doc ?? {})
-  const nameCheck = useCardNameCheck(names.displayName, names.version, state.snapshot!.ref)
-  const clash = state.snapshot!.ref.kind === "card" ? nameCheck : null
-  const restore = async () => {
-    if (!docs || clash) return
-    const result = await call(
-      (client) =>
-        Effect.gen(function* () {
-          if (state.snapshot!.ref.kind === "card")
-            yield* checkCardNames(client, names.displayName, names.version, state.snapshot!.ref)
-          return yield* client("RestoreRevision", {
-            refId: store.refId,
-            revisionId: revision.id,
-            expectedRowVersion: state.snapshot!.ref.rowVersion,
-            ...(store.chatNote ? { chatNote: store.chatNote } : {})
-          })
-        }),
-      ["library"]
-    )
-    if (result.ok) await store.refresh()
-    else setError(result.error)
-  }
   const current = useWorkingDoc(store)
-  const changes =
-    docs === null ? null : mode === "parent" ? changedFields(docs.parent, docs.doc) : changedFields(docs.doc, current)
+  const before = mode === "parent" ? docs?.parent : docs?.doc
+  const after = mode === "parent" ? docs?.doc : current
+  const selectedName = revisionName(revision.number)
+  const beforeLabel =
+    mode === "current"
+      ? selectedName
+      : revision.parents.length === 0
+        ? "Empty"
+        : revisionName(revision.number === undefined ? undefined : revision.number - 1)
+  const afterLabel = mode === "parent" ? selectedName : "Current state"
+  const changes = docs === null ? null : changedFields(before!, after!)
+  const comparison =
+    changes === null ? (
+      <p className="text-sm text-muted">Loading comparison…</p>
+    ) : changes.length === 0 ? (
+      <p className="flex items-center gap-1 border border-transparent p-2 text-sm text-muted">
+        <span aria-hidden="true" className="size-4 shrink-0" />
+        <span>No fields differ.</span>
+      </p>
+    ) : (
+      <div aria-label="Revision changes" className="flex min-w-0 flex-col gap-2">
+        {changes.map((change) => (
+          <FieldComparison
+            key={JSON.stringify(change.path)}
+            label={fieldLabel(state.snapshot!.ref.kind, after!, change.path, before!)}
+            change={change}
+            doc={after!}
+            beforeLabel={beforeLabel}
+            afterLabel={afterLabel}
+            settingLines={settingLines}
+          />
+        ))}
+      </div>
+    )
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <RadioGroup
-        aria-label="Compare revision against"
-        value={mode}
-        onValueChange={setMode}
-        options={[
-          { value: "parent", label: "Parent revision" },
-          { value: "current", label: "As it is now" }
-        ]}
-      />
-      <p className="text-xs text-muted">
-        {mode === "parent"
-          ? revision.parents.length === 0
-            ? "First revision, compared with an empty document."
-            : "Before: first parent. After: selected revision."
-          : "Before: selected revision. After: the text as it is now, which replies use."}
-      </p>
       <ErrorAlert error={error} />
-      {changes === null ? (
-        <p className="text-sm text-muted">Loading comparison…</p>
-      ) : changes.length === 0 ? (
-        <p className="text-sm text-muted">No fields differ.</p>
-      ) : (
-        <div aria-label="Revision changes" className="flex min-w-0 flex-col gap-2">
-          {changes.map((change) => {
-            const label = fieldLabel(
-              state.snapshot!.ref.kind,
-              mode === "parent" ? docs!.doc : current,
-              change.path,
-              mode === "parent" ? docs!.parent : docs!.doc
-            )
-            return (
-              <FieldComparison
-                key={JSON.stringify(change.path)}
-                label={label}
-                change={change}
-                doc={mode === "parent" ? docs!.doc : current}
-                settingLines={settingLines}
-              />
-            )
-          })}
-        </div>
-      )}
-      {(revision.id !== state.snapshot!.ref.headRevisionId || state.dirty > 0) && (
-        <div>
-          <Button
-            disabled={!docs || clash !== null}
-            hint={
-              revision.id === state.snapshot!.ref.headRevisionId
-                ? "Puts every field back to this revision. What you typed since stays in each field's edit history."
-                : "Saves this revision's content as a new revision, and the fields take it. Nothing in between is lost."
+      <div className="min-w-0">
+        <Tabs
+          wrap
+          label="Revision changes"
+          value={mode}
+          onValueChange={setMode}
+          tabs={[
+            {
+              value: "parent",
+              label: "Changes from previous revision",
+              description:
+                revision.parents.length === 0
+                  ? "Shows this first revision's changes from an empty document"
+                  : "Shows this revision's changes from the previous revision",
+              panel: comparison
+            },
+            {
+              value: "current",
+              label: "Changes from current state",
+              description: "Shows this revision's changes from the current text and settings",
+              panel: comparison
             }
-            onClick={() => void restore()}
-          >
-            Restore
-          </Button>
-          {docs && clash && (
-            <p role="status" className="text-sm text-muted">
-              {clash}
-            </p>
-          )}
-        </div>
-      )}
+          ]}
+        />
+      </div>
     </div>
   )
 }
@@ -290,7 +279,9 @@ export function CardRevisionBrowser({
       live = false
     }
   }, [selectedId, selected, loaded, hasMore, revisions, store, call])
-  const head = useEditorState(store).snapshot!.ref.headRevisionId
+  const state = useEditorState(store)
+  const head = state.snapshot!.ref.headRevisionId
+  const [restoringId, setRestoringId] = useState<string | null>(null)
   useEffect(() => {
     let live = true
     const at = store.chatNote ? { chatNote: store.chatNote } : {}
@@ -315,20 +306,73 @@ export function CardRevisionBrowser({
     if (result.ok) setRevisions([...revisions, ...result.value])
     else setError(result.error)
   }
+  const restore = async (revision: Revision) => {
+    if (restoringId || revision.id === head) return
+    setRestoringId(revision.id)
+    try {
+      const doc = await store.revisionDoc(revision.id)
+      const names = cardNames(doc)
+      const result = await call(
+        (client) =>
+          Effect.gen(function* () {
+            if (state.snapshot!.ref.kind === "card")
+              yield* checkCardNames(client, names.displayName, names.version, state.snapshot!.ref)
+            return yield* client("RestoreRevision", {
+              refId: store.refId,
+              revisionId: revision.id,
+              expectedRowVersion: state.snapshot!.ref.rowVersion,
+              ...(store.chatNote ? { chatNote: store.chatNote } : {})
+            })
+          }),
+        ["library"]
+      )
+      if (result.ok) await store.refresh()
+      else setError(result.error)
+    } catch (error) {
+      setError(error as AppError)
+    } finally {
+      setRestoringId(null)
+    }
+  }
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <ErrorAlert error={error} />
-      <ol aria-label="Revisions" className="flex flex-col divide-y divide-border">
+      <ol aria-label="Revisions" className="flex min-w-0 flex-col gap-3">
         {revisions.map((revision) => (
-          <li key={revision.id} className="py-2">
+          <li
+            key={revision.id}
+            className={`min-w-0 rounded-lg border bg-surface-raised p-3 ${selected?.id === revision.id ? "border-accent" : "border-border"}`}
+          >
             <RevisionEntry
               number={revision.number}
               createdAt={revision.createdAt}
-              title={<RevisionTitle revision={revision} />}
+              title={
+                revision.origin === "generation" || revision.changedAt?.length ? (
+                  <RevisionTitle revision={revision} />
+                ) : null
+              }
+              originLabel={originBadges[revision.origin]}
+              restore={
+                <Button
+                  className="h-8 px-2"
+                  disabled={revision.id === head || restoringId !== null}
+                  focusableWhenDisabled
+                  hint={
+                    revision.id === head
+                      ? "This is the latest revision"
+                      : restoringId
+                        ? "A revision is being restored"
+                        : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
+                  }
+                  onClick={() => void restore(revision)}
+                >
+                  Restore to {revisionName(revision.number).toLowerCase()}
+                </Button>
+              }
               message={revision.message}
               current={revision.id === head}
               selected={selected?.id === revision.id}
-              onSelect={() => setSelected(revision)}
+              onSelect={() => setSelected(selected?.id === revision.id ? null : revision)}
               onMessage={async (message) => {
                 const result = await call(
                   (client) => client("SetRevisionMessage", { refId: store.refId, revisionId: revision.id, message }),
@@ -346,22 +390,18 @@ export function CardRevisionBrowser({
                 return true
               }}
             />
+            {selected?.id === revision.id && (
+              <section aria-label={`Comparison of revision ${revision.number}`} className="min-w-0 pt-2">
+                <RevisionComparison key={selected.id} store={store} revision={selected} settingLines={settingLines} />
+              </section>
+            )}
           </li>
         ))}
       </ol>
       {(revisions.at(-1)?.parents.length ?? 0) > 0 && (
-        <Button pending={pending} onClick={() => void more()}>
+        <Button pending={pending} hint="Loads earlier revisions" onClick={() => void more()}>
           Earlier revisions
         </Button>
-      )}
-      {selected !== null && (
-        <RevisionComparison
-          key={selected.id}
-          store={store}
-          call={call}
-          revision={selected}
-          settingLines={settingLines}
-        />
       )}
     </div>
   )

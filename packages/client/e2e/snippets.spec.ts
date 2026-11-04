@@ -74,6 +74,32 @@ for (const width of [1440, 390])
       await saveRevision(block)
       expect(await admin((api) => api.ListRevisions({ refId, limit: 10 }))).toHaveLength(2)
 
+      await block.getByRole("button", { name: /^History of / }).click()
+      const history = page.getByRole("dialog", { name: /^History: / })
+      const revisions = history.getByRole("list", { name: "Revisions" }).getByRole("listitem")
+      await expect(revisions).toHaveCount(2)
+      await expect(revisions.first().getByRole("button", { name: "Restore to revision 2", exact: true })).toBeDisabled()
+      await revisions
+        .first()
+        .getByRole("button", { name: /^Revision 2 / })
+        .click()
+      const change = history.locator("details").filter({ has: page.locator("summary", { hasText: /^Content$/ }) })
+      await change.locator("summary").click()
+      await expectTextBox(
+        change.getByRole("textbox", {
+          name: width > 639 ? "Revision 2" : "Changes",
+          exact: true
+        }),
+        "A lighthouse above the quiet harbour."
+      )
+      await history.getByRole("tab", { name: "Changes from current state", exact: true }).click()
+      await expect(
+        history
+          .getByRole("tabpanel", { name: "Changes from current state", exact: true })
+          .getByText("No fields differ.", { exact: true })
+      ).toBeVisible()
+      await history.getByRole("button", { name: "Close", exact: true }).click()
+
       // Copy, one click.
       await block.getByRole("button", { name: "Copy Harbour details" }).click()
       await expect(page.getByText("Snippet copied").or(page.getByText(/Couldn't copy the snippet/))).toBeVisible()

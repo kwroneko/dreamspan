@@ -9,6 +9,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { ChatId, EntityId, VersionId } from "@rp/shared/chat.ts"
 import { findStRoots } from "@rp/shared/stFolder.ts"
+import { textField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { layoutAudit, expectLayout } from "./support/layoutAudit.ts"
 import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
@@ -306,6 +307,7 @@ test.describe("synthetic library and every app surface", () => {
             preset:
               process.env.LAYOUT_AUDIT_CARDHISTORY_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ||
+              process.env.LAYOUT_AUDIT_PROMPTROWS_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SEARCHREPLACE_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1" ||
@@ -876,6 +878,77 @@ test.describe("synthetic library and every app surface", () => {
           await inspect(page.getByRole("dialog", { name: "Lorebook editor", exact: true }), "lorebook-large")
           await page.goto(`${server.url}/library/${bookRef}`)
           await inspect(page.getByRole("main"), "lorebook-page")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_PROMPTROWS_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const panel = await openPanel(page, "Prompt preset")
+          const inspectRows = async (root: Locator, surface: string) => {
+            const list = root.getByRole("list", { name: /^(Preset blocks|Prompt order)$/ })
+            await expect(list).toBeVisible({ timeout: 60000 })
+            await list.evaluate((element) => {
+              for (let parent: Element | null = element; parent; parent = parent.parentElement) {
+                if (/(auto|scroll)/.test(getComputedStyle(parent).overflowY)) parent.scrollTop = 0
+              }
+            })
+            await page.mouse.move(0, 0)
+            const box = (await list.boundingBox())!
+            const viewport = page.viewportSize()!
+            await page.screenshot({
+              path: join(work, `${width}-${theme}-${surface}.png`),
+              clip: {
+                x: Math.max(0, box.x),
+                y: Math.max(0, box.y),
+                width: Math.min(box.width, viewport.width - Math.max(0, box.x)),
+                height: Math.min(650, viewport.height - Math.max(0, box.y))
+              }
+            })
+            await root.evaluate((element) => element.setAttribute("data-promptrows-audit", ""))
+            await audit(
+              surface,
+              '[data-promptrows-audit] [aria-label="Preset blocks"], [data-promptrows-audit] [aria-label="Prompt order"]'
+            )
+            await root.evaluate((element) => element.removeAttribute("data-promptrows-audit"))
+            if (box.width < 576) {
+              const rows = await list.locator(".prompt-row-header").evaluateAll((headers) =>
+                headers.map((header) => {
+                  const title = header.querySelector("[data-prompt-title-row]")!
+                  const end = header.querySelector("[data-prompt-end], [data-prompt-info]")
+                  const source = header.querySelector("[data-placeholder-source]")
+                  const detail = header.querySelector(
+                    "[data-prompt-description], [data-prompt-column-preview], [data-prompt-preview]"
+                  )
+                  return {
+                    fullWidth:
+                      !detail || detail.getBoundingClientRect().width >= header.getBoundingClientRect().width - 24,
+                    separate: !end || end.getBoundingClientRect().top >= title.getBoundingClientRect().bottom,
+                    words: !source || getComputedStyle(source).overflowWrap === "normal"
+                  }
+                })
+              )
+              expect(rows.length).toBeGreaterThan(0)
+              expect(rows.every((row) => row.separate && row.words && row.fullWidth)).toBe(true)
+            }
+          }
+          await inspectRows(panel, "promptrows-panel")
+          if (width >= 1024) {
+            await page.getByRole("separator", { name: "Resize chat panel", exact: true }).press("Home")
+            await inspectRows(panel, "promptrows-minimum")
+          }
+          const add = panel.getByRole("button", { name: "Add definitions block", exact: true })
+          if (await add.isEnabled()) await add.click()
+          await expect(panel.locator('[data-prompt="charDefinitions"]')).toBeVisible()
+          const unsaved = page.getByRole("region", { name: "Unsaved changes" })
+          if (await unsaved.isVisible()) {
+            await panel
+              .getByRole("group", { name: "Save", exact: true })
+              .getByRole("button", { name: "Save", exact: true })
+              .click()
+            await expect(unsaved).toHaveCount(0)
+          }
+          await inspectRows(panel, "promptrows-definitions")
+          await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
+          await inspectRows(page.getByRole("dialog", { name: "Preset editor", exact: true }), "promptrows-large")
           return
         }
         if (process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1") {
@@ -1575,3 +1648,326 @@ for (const width of [390, 1440])
     })
 
 if (process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY) centerHeaderTests()
+// Fresh synthetic revisions exercise the production dialog without a development instance.
+test.describe("revision dialogs", () => {
+  test.skip(!!process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY, "Focused center headers")
+  let server: TestServer
+  let cookie: string
+  test.beforeAll(async () => {
+    server = await startServer(withAdmin)
+    cookie = await loginCookie(server, ADMIN.handle, ADMIN.password)
+  })
+  test.afterAll(async () => {
+    await server?.stop()
+  })
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const)
+      test(`revision dialogs ${width} ${theme}`, async ({ page }, info) => {
+        const url = server.url
+        await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+        await page.setViewportSize({ width, height: 960 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        const findings: unknown[] = []
+        const gaps: unknown[] = []
+        const geometry: unknown[] = []
+        const rowHeights: unknown[] = []
+        for (const kind of ["note", "card"] as const) {
+          const id = await withCookie(server, cookie, (api) =>
+            Effect.gen(function* () {
+              const ref =
+                kind === "note"
+                  ? yield* api.CreateSharedNote({ title: `Audit note ${width} ${theme}`, content: "A quiet harbor." })
+                  : yield* api.CreateCard({
+                      label: `Audit card ${width} ${theme}`,
+                      name: `Audit card ${width} ${theme}`
+                    })
+              for (const [index, message] of [
+                "Establish the harbor scene",
+                "The lantern keeper records the harbor meeting and the travelers' promise to return after the evening bell. "
+                  .repeat(4)
+                  .trim()
+              ].entries()) {
+                const opened = yield* api.OpenEditor({ refId: ref.id })
+                const field = textField([kind === "note" ? "content" : "description"])
+                const draft = yield* api.SaveEditorDraft({
+                  refId: ref.id,
+                  field,
+                  content: `The harbor scene, revision ${index + 2}.`,
+                  draftId: null,
+                  expectedRowVersion: null,
+                  expectedSession: null,
+                  baseRevisionId: opened.ref.headRevisionId
+                })
+                yield* api.CommitEditorDrafts({
+                  refId: ref.id,
+                  expectedRowVersion: opened.ref.rowVersion,
+                  fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+                  message
+                })
+              }
+              return ref.id
+            })
+          )
+          await page.goto(`${url}/library/${id}`)
+          await page.getByRole("button", { name: "History", exact: true }).click()
+          const dialog = page.getByRole("dialog")
+          const revisions = dialog.getByRole("list", { name: "Revisions" }).getByRole("listitem")
+          await expect(revisions).toHaveCount(3)
+          const audit = async (state: string) => {
+            await page.mouse.move(0, 0)
+            const surface = `${kind}-${state}-${width}-${theme}`
+            const violations = await expectLayout(page, info, surface, { scope: '[role="dialog"]' })
+            findings.push({ surface, violations })
+            mkdirSync(work, { recursive: true })
+            writeFileSync(join(work, `revisions-${width}-${theme}.json`), JSON.stringify(findings, null, 2))
+            console.log(`${surface}: ${violations.length} violations`)
+          }
+          const measurePadding = async (state: string) => {
+            const padding = await dialog.evaluate((el) => {
+              const scroll = el.querySelector<HTMLElement>("[data-dialog-scroll]")!
+              const content = el.querySelector<HTMLElement>("[data-dialog-content]")!
+              const original = scroll.scrollTop
+              scroll.scrollTop = 0
+              const outer = el.getBoundingClientRect(),
+                inner = content.getBoundingClientRect()
+              scroll.scrollTop = scroll.scrollHeight
+              const bottom = outer.bottom - content.getBoundingClientRect().bottom
+              scroll.scrollTop = original
+              return {
+                left: inner.left - outer.left,
+                right: outer.right - inner.right,
+                top: inner.top - outer.top,
+                bottom
+              }
+            })
+            geometry.push({ kind, state, padding })
+            mkdirSync(work, { recursive: true })
+            writeFileSync(join(work, `geometry-${width}-${theme}.json`), JSON.stringify(geometry, null, 2))
+            for (const value of Object.values(padding)) expect(value).toBeCloseTo(21, 1)
+          }
+          await expect(revisions.first().getByRole("button", { name: /^Restore to revision / })).toBeDisabled()
+          await expect(revisions.nth(1).getByRole("button", { name: /^Restore to revision / })).toBeEnabled()
+          await expect(dialog.getByText("Saved", { exact: true })).toHaveCount(0)
+          await expect(
+            revisions.last().getByRole("button", { name: "Add message to Revision 1", exact: true })
+          ).toHaveText("Add message")
+          const actions = revisions
+            .nth(1)
+            .getByRole("group", { name: "Revision 2 actions", exact: true })
+            .getByRole("button")
+          await expect(actions.nth(0)).toHaveText("Restore to revision 2")
+          await expect(actions.nth(1)).toHaveText("Compare")
+          const message = await revisions.nth(1).locator("[data-revision-message-row]").boundingBox()
+          const restoreBox = await actions.nth(0).boundingBox()
+          expect(message!.y + message!.height).toBeLessThanOrEqual(restoreBox!.y)
+          if (kind === "card") {
+            const titleGap = await page
+              .locator("[data-card-name]")
+              .first()
+              .evaluate((el) => Number.parseFloat(getComputedStyle(el.parentElement!).columnGap))
+            expect(titleGap).toBe(2)
+            geometry.push({ kind, state: "title-pencil-gap", titleGap })
+          }
+          await measurePadding("list")
+          await audit("list")
+          await dialog.screenshot({
+            path: info.outputPath(`${kind}-actions-${width}-${theme}.png`),
+            animations: "disabled"
+          })
+          const measureRow = async (index: number, state: string) => {
+            const metrics = await revisions
+              .nth(index)
+              .locator("[data-revision-message-row]")
+              .evaluate((el) => {
+                const field = el.querySelector("input")
+                const text = el.querySelector(".truncate")
+                const buttons = [...el.querySelectorAll("button")]
+                const rect = (node: Element) => node.getBoundingClientRect()
+                return {
+                  height: rect(el).height,
+                  ...(text ? { textPencilGap: rect(buttons[0]!).left - rect(text).right } : {}),
+                  ...(field
+                    ? {
+                        inputConfirmGap: rect(buttons[0]!).left - rect(field).right,
+                        confirmCancelGap: rect(buttons[1]!).left - rect(buttons[0]!).right
+                      }
+                    : {})
+                }
+              })
+            rowHeights.push({ kind, state, ...metrics })
+            writeFileSync(join(work, `message-rows-${width}-${theme}.json`), JSON.stringify(rowHeights, null, 2))
+            expect(metrics.height).toBe(32)
+            if (metrics.textPencilGap !== undefined) expect(metrics.textPencilGap).toBe(2)
+            if (metrics.inputConfirmGap !== undefined) {
+              expect(metrics.inputConfirmGap).toBe(4)
+              expect(metrics.confirmCancelGap).toBe(4)
+            }
+          }
+          for (const [index, state] of [
+            [2, "none"],
+            [1, "short"],
+            [0, "long-collapsed"]
+          ] as const) {
+            await measureRow(index, state)
+            await revisions.nth(index).screenshot({
+              path: info.outputPath(`${kind}-message-${state}-${width}-${theme}.png`),
+              animations: "disabled"
+            })
+          }
+          await revisions.last().getByRole("button", { name: "Add message to Revision 1", exact: true }).click()
+          await measureRow(2, "empty-editing")
+          await revisions.last().screenshot({
+            path: info.outputPath(`${kind}-message-empty-editing-${width}-${theme}.png`),
+            animations: "disabled"
+          })
+          await dialog.getByRole("textbox", { name: "Message of Revision 1", exact: true }).press("Escape")
+          const longText = revisions.first().locator("span.truncate")
+          const fullMessage = await longText.innerText()
+          await longText.hover()
+          await expect(
+            page
+              .locator('[data-layout-overlay="Tooltip floats above the page"]')
+              .getByText(fullMessage, { exact: true })
+          ).toBeVisible()
+          await page.mouse.move(0, 0)
+          await revisions.first().getByRole("button", { name: "Expand message of Revision 3", exact: true }).click()
+          await expect(
+            revisions.first().getByRole("region", { name: "Full message of Revision 3", exact: true })
+          ).toHaveText(fullMessage)
+          await measureRow(0, "long-expanded")
+          await audit("message-expanded")
+          await revisions.first().screenshot({
+            path: info.outputPath(`${kind}-message-long-expanded-${width}-${theme}.png`),
+            animations: "disabled"
+          })
+          await revisions.first().getByRole("button", { name: "Collapse message of Revision 3", exact: true }).click()
+          await revisions.first().getByRole("button", { name: "Edit message of Revision 3", exact: true }).click()
+          await measureRow(0, "editing")
+          await audit("message-inline-edit")
+          await revisions.first().screenshot({
+            path: info.outputPath(`${kind}-message-editing-${width}-${theme}.png`),
+            animations: "disabled"
+          })
+          await dialog.getByRole("textbox", { name: "Message of Revision 3", exact: true }).press("Escape")
+          const compare = revisions.nth(1).getByRole("button", { name: /^Revision \d+ / })
+          const before = await compare.boundingBox()
+          await compare.click()
+          const after = await compare.boundingBox()
+          expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1)
+          expect(Math.abs(after!.x - before!.x)).toBeLessThanOrEqual(1)
+          await expect(
+            revisions.nth(1).getByRole("button", { name: "Restore to revision 2", exact: true })
+          ).toBeEnabled()
+          const openDiff = async (beforeName: string, afterName: string) => {
+            const field = dialog
+              .locator("details")
+              .filter({ has: page.locator("summary", { hasText: kind === "note" ? /^Content$/ : /^Description$/ }) })
+            await field.locator("summary").click()
+            if (width > 639) {
+              await expect(field.getByRole("textbox", { name: beforeName, exact: true })).toBeVisible()
+              await expect(field.getByRole("textbox", { name: afterName, exact: true })).toBeVisible()
+            } else {
+              await expect(field.getByRole("textbox", { name: "Changes", exact: true })).toBeVisible()
+              await expect(field.getByText(`${beforeName} (−) → ${afterName} (+)`, { exact: true })).toBeVisible()
+            }
+          }
+          await openDiff("Revision 1", "Revision 2")
+          await expect(dialog.getByRole("button", { name: "Close comparison", exact: true })).toHaveCount(0)
+          await expect(compare).toHaveAttribute("aria-pressed", "true")
+          await expect(compare).toHaveAccessibleDescription("Click to hide this revision's comparison")
+          const measureGaps = async (state: string) => {
+            const measured = await dialog
+              .getByRole("tablist", { name: "Revision changes", exact: true })
+              .evaluate((list) => {
+                const section = list.closest('section[aria-label^="Comparison of revision"]')!
+                const previous = section.previousElementSibling!.getBoundingClientRect()
+                const tabs = list.getBoundingClientRect()
+                const field = section.querySelector("details")!.getBoundingClientRect()
+                return { above: tabs.top - previous.bottom, below: field.top - tabs.bottom }
+              })
+            expect(measured.above).toBeCloseTo(8, 1)
+            expect(measured.below).toBeCloseTo(8, 1)
+            gaps.push({ kind, state, ...measured })
+            writeFileSync(join(work, `gaps-${width}-${theme}.json`), JSON.stringify(gaps, null, 2))
+          }
+          await measureGaps("previous")
+          await measurePadding("comparison")
+          await audit("comparison")
+          await dialog.screenshot({
+            path: info.outputPath(`${kind}-previous-${width}-${theme}.png`),
+            animations: "disabled"
+          })
+          await dialog.getByRole("tab", { name: "Changes from current state", exact: true }).click()
+          await expect(dialog.getByRole("tab", { name: "Changes from current state", exact: true })).toHaveAttribute(
+            "aria-selected",
+            "true"
+          )
+          await expect(
+            revisions.nth(1).getByRole("button", { name: "Restore to revision 2", exact: true })
+          ).toBeEnabled()
+          await openDiff("Revision 2", "Current state")
+          await measureGaps("current")
+          await measurePadding("current-comparison")
+          await audit("current-comparison")
+          await dialog.screenshot({
+            path: info.outputPath(`${kind}-current-${width}-${theme}.png`),
+            animations: "disabled"
+          })
+          await revisions
+            .last()
+            .getByRole("button", { name: /^Revision \d+ / })
+            .click()
+          const firstTab = dialog.getByRole("tab", { name: "Changes from previous revision", exact: true })
+          await expect(firstTab).toHaveAttribute("aria-selected", "true")
+          await expect(dialog.getByText("Loading comparison…", { exact: true })).toHaveCount(0)
+          await firstTab.hover()
+          await expect(
+            page.getByText("Shows this first revision's changes from an empty document", { exact: true })
+          ).toBeVisible()
+          await openDiff("Empty", "Revision 1")
+          await measureGaps("first")
+          await measurePadding("first-comparison")
+          await audit("first-comparison")
+          await dialog.screenshot({
+            path: info.outputPath(`${kind}-empty-${width}-${theme}.png`),
+            animations: "disabled"
+          })
+          const firstCompare = revisions.last().getByRole("button", { name: /^Revision \d+ / })
+          await firstCompare.click()
+          await expect(firstCompare).toHaveAttribute("aria-pressed", "false")
+          await expect(firstCompare).toHaveAccessibleDescription("Click to compare this revision")
+          await expect(dialog.getByRole("tablist")).toHaveCount(0)
+          const latestCompare = revisions.first().getByRole("button", { name: /^Revision \d+ / })
+          await latestCompare.click()
+          await openDiff("Revision 2", "Revision 3")
+          const fieldTitle = dialog.locator("details summary span").first()
+          const titleOffset = await fieldTitle.evaluate(
+            (el) => el.getBoundingClientRect().left - el.closest('[role="tabpanel"]')!.getBoundingClientRect().left
+          )
+          await dialog.getByRole("tab", { name: "Changes from current state", exact: true }).click()
+          const empty = dialog
+            .getByRole("tabpanel", { name: "Changes from current state", exact: true })
+            .getByText("No fields differ.", { exact: true })
+          await expect(empty).toBeVisible()
+          const emptyOffset = await empty.evaluate(
+            (el) => el.getBoundingClientRect().left - el.closest('[role="tabpanel"]')!.getBoundingClientRect().left
+          )
+          geometry.push({ kind, state: "no-fields", titleOffset, emptyOffset })
+          expect(emptyOffset).toBeCloseTo(titleOffset, 1)
+          await measurePadding("no-fields")
+          await audit("no-fields")
+          await dialog.screenshot({
+            path: info.outputPath(`${kind}-no-fields-${width}-${theme}.png`),
+            animations: "disabled"
+          })
+          await latestCompare.click()
+          await revisions
+            .first()
+            .getByRole("button", { name: /^Edit message of/ })
+            .click()
+          await expect(dialog.getByRole("textbox", { name: /^Message of Revision/ })).toBeVisible()
+          await audit("message")
+        }
+      })
+})
