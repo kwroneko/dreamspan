@@ -560,6 +560,18 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_NOSTARTCHAT_ONLY === "1") {
+          await go("nostartchat-home", "/?side=characters")
+          await audit("nostartchat-home-grid", 'main [aria-label="Characters"]')
+          await showAppNavigation(page)
+          const navigation = width < 1024 ? ".fixed.inset-0" : "aside"
+          await audit("nostartchat-sidebar", navigation)
+          await hideAppNavigation(page)
+          await go("nostartchat-library", "/library")
+          await expect(page.getByRole("list", { name: "Cards", exact: true })).toBeVisible()
+          await audit("nostartchat-library-list", 'main [aria-label="Cards"]')
+          return
+        }
         if (process.env.LAYOUT_AUDIT_ADDCHARS_ONLY === "1") {
           await go("addchars-chat", `/chats/${chatId}`)
           await openPanel(page, "Cast")
@@ -684,7 +696,7 @@ test.describe("synthetic library and every app surface", () => {
           await go("default-library-list", "/library?show=personas")
           await page
             .getByRole("button", {
-              name: `More actions for ${persona.ref.label}${persona.ref.subtitle ? ` · ${persona.ref.subtitle}` : ""}`,
+              name: `More actions for ${persona.ref.label}`,
               exact: true
             })
             .click()
@@ -700,12 +712,6 @@ test.describe("synthetic library and every app surface", () => {
           await leftShow.click()
           await page.getByRole("option", { name: /^Personas/ }).click()
           await audit("default-sidebar")
-          await page.getByRole("button", { name: "Start a chat", exact: true }).click()
-          const start = page.getByRole("dialog", { name: "Start a chat with…" })
-          await start.getByRole("combobox", { name: "Show" }).click()
-          await page.getByRole("option", { name: /^Personas/ }).click()
-          await audit("default-start-picker")
-          await page.keyboard.press("Escape")
           await hideAppNavigation(page)
           await go("default-card", `/cards/${persona.card.entityId}`)
           await go("default-editor", `/library/${persona.ref.id}`)
@@ -778,12 +784,6 @@ test.describe("synthetic library and every app surface", () => {
             .getByRole("button", { name: "Characters", exact: true })
             .click()
           await audit("persona-sidebar-mixed")
-          await page.getByRole("button", { name: "Start a chat", exact: true }).click()
-          const start = page.getByRole("dialog", { name: "Start a chat with…" })
-          await start.getByRole("combobox", { name: "Show" }).click()
-          await page.getByRole("option", { name: /^Personas/ }).click()
-          await audit("persona-start-chat")
-          await page.keyboard.press("Escape")
           await hideAppNavigation(page)
           await go("persona-library-list", "/library?show=personas")
           await go("persona-library-grid", "/library?show=personas&view=grid")
@@ -1150,9 +1150,6 @@ test.describe("synthetic library and every app surface", () => {
           await go("home-before-picker", "/")
           await showAppNavigation(page)
           if (width < 1024) await audit("dialog-navigation-drawer")
-          await page.getByRole("button", { name: "Start a chat", exact: true }).click()
-          await expect(page.getByRole("dialog", { name: "Start a chat with…", exact: true })).toBeVisible()
-          await audit("dialog-start-chat-popover")
           return
         }
         if (process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1") {
@@ -1602,9 +1599,6 @@ test.describe("synthetic library and every app surface", () => {
             .click()
           await audit(`sidebar-${name}`)
         }
-        await page.getByRole("button", { name: "Start a chat", exact: true }).click()
-        await audit("dialog-start-chat")
-        await page.keyboard.press("Escape")
         await hideAppNavigation(page)
         for (const [scope, query] of [
           ["all", ""],

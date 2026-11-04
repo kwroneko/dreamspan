@@ -1,4 +1,4 @@
-// How characters sort: the home grid, the left panel's grid and Start a chat share these.
+// How characters sort: the home grid, the left panel's grid share these.
 // "Recent" is the shell read's `ShellCard.recentAt` (db/shellReads.ts): the latest activity in
 // any of the card's chats, imported dates included, as ST sorts by date_last_chat; null while it
 // has none. "Created" is `createdAt` (author creation, else earliest arrival evidence);

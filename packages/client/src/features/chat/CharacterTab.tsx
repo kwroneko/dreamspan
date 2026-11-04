@@ -113,11 +113,6 @@ function ChatCharacterPanel({ session, view, entityId }: { session: ChatSession;
         >
           {card.label}
         </h2>
-        {card.subtitle && (
-          <p data-card-header-row className="col-span-full truncate text-sm text-muted">
-            {card.subtitle}
-          </p>
-        )}
       </CardHeader>
       {card.inBin && <p className="text-sm text-muted">This card is in the bin: restore it to edit it.</p>}
       {AsyncResult.isFailure(result) && (

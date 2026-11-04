@@ -4,8 +4,6 @@ import { routes } from "../../routes.tsx"
 import { CardPage } from "./CardPage.tsx"
 import { CharactersPage } from "./CharactersPage.tsx"
 import { GroupPage } from "./GroupPage.tsx"
-import { sidebarActions } from "../shell.tsx"
-import { StartChatPicker } from "./StartChatPicker.tsx"
 import { sidebarFoot } from "./homeSlots.ts"
 import { OpenChatBranches } from "./ShellBrowser.tsx"
 import { homeSearch } from "./homeSearch.ts"
@@ -33,8 +31,6 @@ export const register = () => {
     component: PersonaFolderSwitch
   })
   registerCharacterPanels()
-  // The sidebar's "Start a chat with…" search, beside the app's name.
-  sidebarActions.register({ id: "start-chat", order: 10, component: StartChatPicker })
   // The open chat's branches at the left panel's foot, below whatever it lists.
   sidebarFoot.register({ id: "open-chat-branches", order: 10, component: OpenChatBranches })
   // The home screen: the character grid (DESIGN §2.1).

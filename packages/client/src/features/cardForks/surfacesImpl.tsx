@@ -25,8 +25,7 @@ import { EditorStore } from "../editor/store.ts"
 import type { CardMenuProps, CardSurfaceContext } from "./surfaces.tsx"
 
 const familyQuery = (entityId: EntityId) => AppClient.query("CardFamily", { entityId }, { reactivityKeys: ["library"] })
-const name = (member: FamilyMember) =>
-  `${member.label || "Deleted card"}${member.subtitle ? ` · ${member.subtitle}` : ""}`
+const name = (member: FamilyMember) => member.label || "Deleted card"
 function MemberLink({ member }: { member: FamilyMember }) {
   return (
     <>
@@ -416,7 +415,6 @@ function ParentDialog({ entityId, onClose }: { entityId: EntityId; onClose: () =
                     }
                   >
                     {card.label}
-                    {card.subtitle && ` · ${card.subtitle}`}
                   </Button>
                 </li>
               ))}

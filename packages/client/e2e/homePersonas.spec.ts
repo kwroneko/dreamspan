@@ -4,7 +4,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { openPanel, closePanel } from "./support/panel.ts"
-import { showAppNavigation } from "./support/appMenu.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -112,13 +111,6 @@ for (const width of [1440, 390]) {
         page.getByText("In the persona folder: a card you can play in chats.", { exact: true })
       ).toBeVisible()
     }
-    await showAppNavigation(page)
-    await page.getByRole("button", { name: "Start a chat", exact: true }).click()
-    const start = page.getByRole("dialog", { name: "Start a chat with…" })
-    await start.getByRole("combobox", { name: "Show" }).click()
-    await page.getByRole("option", { name: /^Personas/ }).click()
-    await expect(start.locator("[data-persona-badge]")).toHaveCount(0)
-
     const chat = await admin((api) =>
       Effect.gen(function* () {
         const chat = yield* api.CreateChat({ title: "Badge context" })

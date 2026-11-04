@@ -85,7 +85,6 @@ function Member({
   session,
   card,
   info,
-  version,
   muted,
   writing,
   onChange,
@@ -95,8 +94,6 @@ function Member({
   session: ChatSession
   card: CastCard
   info: ChatCard | undefined
-  /** Its version, shown only to tell it from another of the same name. */
-  version: string
   muted: boolean
   /** The model is writing their turn at the end of the chat. */
   writing: boolean
@@ -129,7 +126,6 @@ function Member({
         >
           {name}
         </button>
-        {version && <span className="max-w-full truncate text-xs text-muted">{version}</span>}
         {(writing || muted || card.inBin) && (
           <span className="flex flex-wrap items-center gap-1">
             {writing && <Badge tone="success">writing…</Badge>}
@@ -233,8 +229,6 @@ export function CastTab({ session }: { session: ChatSession }) {
   // The characters: everyone in the chat but who you play (PHASE1 26, 27).
   const characters = participants.filter((id) => !playedByMe.includes(id))
   const muted = cast?.absent.filter((id) => characters.includes(id)).length ?? 0
-  const sameName = (card: CastCard) =>
-    characters.filter((id) => id !== card.entityId && view.cards.get(id)?.name === card.name).length > 0
   /**
    * Who `{{user}}` is from here on (DESIGN §2.2): one persona, in one write. A card not in the
    * chat joins; a persona-folder card played until now leaves, since it isn't one of the characters.
@@ -284,7 +278,6 @@ export function CastTab({ session }: { session: ChatSession }) {
                   session={session}
                   card={card}
                   info={info.get(id)}
-                  version={sameName(card) ? (card.subtitle ?? "") : ""}
                   muted={cast.absent.includes(id)}
                   writing={writing === id}
                   onChange={(next) => void change(next)}
@@ -314,13 +307,11 @@ export function CastTab({ session }: { session: ChatSession }) {
 function PendingMember({
   card,
   info,
-  version,
   removable,
   onRemove
 }: {
   card: CastCard
   info: ChatCardInfo | undefined
-  version: string
   /** Whether they can be left out: the chat keeps one character at least. */
   removable: boolean
   onRemove: () => void
@@ -340,7 +331,6 @@ function PendingMember({
         >
           {name}
         </button>
-        {version && <span className="max-w-full truncate text-xs text-muted">{version}</span>}
       </div>
       <Menu trigger={<IconButton icon="more" label={`More for ${name}`} />} label={name} keepMounted>
         <MenuItem
@@ -375,8 +365,6 @@ export function PendingCastTab({ pending }: { pending: PendingChat }) {
   const playing = pending.playing(state)
   const defaultPersona = useDefaultPersona()
   const characters = state.greeters.map((item) => item.card).filter((card) => card.entityId !== state.persona)
-  const sameName = (card: CastCard) =>
-    characters.some((other) => other.entityId !== card.entityId && other.name === card.name)
   return (
     <div className="flex flex-col gap-4">
       <You card={playing ?? undefined} isDefault={playing !== null && playing.entityId === defaultPersona}>
@@ -398,7 +386,6 @@ export function PendingCastTab({ pending }: { pending: PendingChat }) {
                 key={card.entityId}
                 card={card}
                 info={infoOf(card.entityId)}
-                version={sameName(card) ? (card.subtitle ?? "") : ""}
                 removable={characters.length > 1}
                 onRemove={() => pending.remove(card.entityId)}
               />
