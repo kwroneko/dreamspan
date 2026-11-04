@@ -12,6 +12,13 @@ const BOOK: ReadonlyArray<string> = []
 const count = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 
 /**
+ * A lorebook's line: the chats it was added to. The presets that send it are listed just below
+ * it (`LorebookUse`).
+ */
+export const addedTo = (chats: number) =>
+  chats === 0 ? "Not added to any chat yet." : chats === 1 ? "Added to 1 chat." : `Added to ${chats} chats.`
+
+/**
  * Registered standalone lorebook section: how many entries it has, and the prompt presets that
  * send it (as saved), each a link to its editor. The chats it was added to are the editor's
  * header line.

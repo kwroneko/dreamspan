@@ -93,6 +93,8 @@ for (const width of [390, 1440])
       const editor = lore.getByRole("region", { name: `Lorebook ${book.label}`, exact: true })
       await capture(editor, "library-book")
       if (!process.env.PARITY_BEFORE) {
+        await expect(editor.getByText("Added to 1 chat.", { exact: true })).toBeVisible()
+        await expect(editor.getByRole("region", { name: "Where it's used" })).toContainText("1 entry")
         await expect(
           editor.getByRole("navigation", { name: "Variants" }).getByRole("link", { name: "Waters variant" })
         ).toBeVisible()

@@ -1,3 +1,4 @@
+import { addedTo } from "./StandaloneLorebook.tsx"
 import { RefVariants } from "./RefVariants.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { DocumentSwitcher } from "./DocumentSwitcher.tsx"
@@ -70,13 +71,6 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 /** How many chats use it. */
 const usedBy = (chats: number) =>
   chats === 0 ? "No chat uses it yet." : chats === 1 ? "Used by 1 chat." : `Used by ${chats} chats.`
-
-/**
- * A lorebook's line: the chats it was added to. The presets that send it are listed just below
- * it (`LorebookUse`).
- */
-const addedTo = (chats: number) =>
-  chats === 0 ? "Not added to any chat yet." : chats === 1 ? "Added to 1 chat." : `Added to ${chats} chats.`
 
 /**
  * What saving did to the refs that follow this one, or null when it did nothing more than save:

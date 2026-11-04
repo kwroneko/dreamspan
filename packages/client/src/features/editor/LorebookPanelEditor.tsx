@@ -1,3 +1,6 @@
+import { lorebookEditorSections } from "./cardSections.ts"
+import { useCaller } from "./caller.ts"
+import { addedTo } from "./StandaloneLorebook.tsx"
 import type { ReactNode } from "react"
 import { SlotOutlet } from "../../slots.tsx"
 import { panelEditorActions } from "./panelActions.tsx"
@@ -77,6 +80,7 @@ export function LorebookPanelEditor({
   /** The book in the large editor over the chat. */
   onOpenLarge?: () => void
 }) {
+  const call = useCaller()
   const state = useEditorState(store)
   const book = useValue<LorebookDoc | undefined>(store, root)
   const [searching, setSearching] = useState(false)
@@ -122,7 +126,13 @@ export function LorebookPanelEditor({
             <RecoveredNotice store={store} />
           </>
         )}
-        {root.length === 0 && <RefVariants store={store} />}
+        {root.length === 0 && (
+          <>
+            <RefVariants store={store} />
+            <p className="text-sm text-muted">{addedTo(state.snapshot.usedByChats)}</p>
+            <SlotOutlet slot={lorebookEditorSections} only="lorebook.use" props={{ store, call }} />
+          </>
+        )}
         {book && <BookSettings store={store} root={root} entries={book.entries.length} />}
         {book ? (
           <LorebookTable

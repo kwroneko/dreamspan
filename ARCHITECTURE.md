@@ -2602,3 +2602,4 @@ Summary preset tests (summarypreset, 2026-11-03): shared resolution covers all t
 
 Compact lorebook settings (parity, 2026-11-04): `LorebookPanelEditor` shares `BookSettings` with the full `LorebookForm`, for library and card-owned books. Settings columns follow the editor's width, including at 390 px.
 Compact lorebook variants (parity, 2026-11-04): the registered `PanelVariant` opens the full editor's `ForkDialog`; both editors share `RefVariants` navigation. The compact toolbar uses explained icons at narrow widths.
+Compact lorebook usage (parity, 2026-11-04): library books render the existing registered `lorebook.use` section and the full editor's shared chat-count sentence beneath their title and variants.
