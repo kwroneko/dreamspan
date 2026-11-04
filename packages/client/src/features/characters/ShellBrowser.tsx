@@ -590,15 +590,27 @@ function Browser({ data }: { data: ShellLibrary }) {
   const none = !forks.loading && sections.every(([id]) => forks.section(id).total === 0)
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <Segmented
-        label="Left panel"
-        value={grid ? "characters" : "chats"}
-        onValueChange={(v) => setGrid(v === "characters")}
-        options={[
-          { value: "chats", label: "Chats" },
-          { value: "characters", label: "Characters" }
-        ]}
-      />
+      <div className="@container/leftsearch max-w-controls">
+        <div className="grid items-center gap-2 @min-[26rem]/leftsearch:grid-cols-[11rem_minmax(14rem,1fr)]">
+          <Segmented
+            label="Left panel"
+            className="w-full! [&>button]:min-w-0 [&>button]:flex-1 [&>button]:basis-0 [&>button]:justify-center"
+            value={grid ? "characters" : "chats"}
+            onValueChange={(v) => setGrid(v === "characters")}
+            options={[
+              { value: "chats", label: "Chats" },
+              { value: "characters", label: "Characters" }
+            ]}
+          />
+          <Input
+            aria-label={grid ? "Find a character" : "Find a chat"}
+            placeholder="Find by name"
+            className="min-w-0"
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+          />
+        </div>
+      </div>
       {!grid && (scope.entity || scope.chat) && (
         <nav aria-label="Chat breadcrumbs" className="flex min-w-0 items-center gap-1 text-sm">
           <Tooltip label="Back to the list of all your chats.">
@@ -644,13 +656,6 @@ function Browser({ data }: { data: ShellLibrary }) {
           )}
         </nav>
       )}
-      <Input
-        aria-label={grid ? "Find a character" : "Find a chat"}
-        placeholder="Find by name"
-        className="max-w-controls"
-        value={search}
-        onChange={(e) => setSearch(e.currentTarget.value)}
-      />
       {!grid && kind !== "chat" && (
         <SlotOutlet
           slot={sidebarChatBrowse}
