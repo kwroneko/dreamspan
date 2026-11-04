@@ -108,6 +108,23 @@ for (const width of [390, 1024, 1440])
           await expect(header.locator('[data-card-header-row="nickname"]')).toContainText(
             card.nickname || "Add an in-chat nickname"
           )
+          if (width === 390 && index === 0) {
+            // The active rename needs room for its input and both buttons, even beside
+            // the favourite and revision controls. A covered Cancel used to time out.
+            for (const [label, field] of [
+              ["the display name", "Display name"],
+              ["the version", "Version"],
+              ["the nickname", "In-chat nickname"]
+            ] as const) {
+              for (const action of ["Save the name", "Cancel renaming"]) {
+                await header.getByRole("button", { name: `Rename ${label}`, exact: true }).click()
+                const input = header.getByRole("textbox", { name: field, exact: true })
+                await expect(input).toBeEditable()
+                await header.getByRole("button", { name: action, exact: true }).click()
+                await expect(input).toHaveCount(0)
+              }
+            }
+          }
           const save = identity.getByRole("group", { name: "Save", exact: true })
           const at = (await save.boundingBox())!,
             row = (await identity.boundingBox())!

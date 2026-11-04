@@ -72,7 +72,7 @@ for (const width of [1440, 390])
       await shot(page, `idle-${width}-${theme}`)
       if (!before) {
         await reveal(page, tile, off, open)
-        await expect(page.getByText("Add to favourites", { exact: true })).toBeVisible()
+        await expect(page.getByText("Click to add to favourites", { exact: true })).toBeVisible()
       }
       await off.blur()
       await tile.hover()
