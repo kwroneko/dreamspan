@@ -1,6 +1,7 @@
 import { Tooltip } from "../ui/Tooltip.tsx"
 import { CenterHeaderHost, CenterHeaderFrame, centerHeaders } from "../ui/CenterHeader.tsx"
 import { defineSlot, SlotOutlet } from "../slots.tsx"
+export const navigationNotices = defineSlot<Record<string, never>>("shell.navigation.notices")
 export const appTools = defineSlot<Record<string, never>>("app.tools")
 /**
  * Lines across the top of every screen, above the page and below the phone bar: what the
@@ -100,6 +101,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const isAdmin = session.user.role === "admin"
   return (
     <nav aria-label="Main" className="flex shrink-0 flex-col gap-0.5">
+      <SlotOutlet slot={navigationNotices} props={{}} />
       <NavigationTiles
         onNavigate={onNavigate}
         items={[
@@ -115,21 +117,6 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           { to: "/bin", label: "Bin", icon: "trash", description: "Browse deleted items." }
         ]}
       />
-      <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border px-2.5 pt-2 text-sm">
-        <Tooltip label="Opens your account settings.">
-          <Link
-            to="/settings/account"
-            title={`Signed in as ${session.user.displayName} (${session.user.role})`}
-            className="max-w-40 truncate text-muted hover:text-text"
-            onClick={onNavigate}
-          >
-            {/* Without accounts the one user is "local", which says nothing. */}
-            {session.via === "local" ? "Account" : session.user.displayName}
-          </Link>
-        </Tooltip>
-        <BrowserRecovery userId={session.user.id} />
-        {session.via === "session" && <LogoutButton variant="ghost" />}
-      </div>
     </nav>
   )
 }

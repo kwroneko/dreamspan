@@ -6,7 +6,8 @@ import { registerUserDraftNotices } from "./userDraft.tsx"
 import { libraryActions } from "../library/slots.ts"
 import { NewCardButton } from "./NewCard.tsx"
 import { NewPresetButton } from "./NewPreset.tsx"
-import { appTools } from "../shell.tsx"
+import { BrowserRecoveryWarning } from "./BrowserRecovery.tsx"
+import { appTools, navigationNotices } from "../shell.tsx"
 import { CardSavedHost } from "./CardSavedHost.tsx"
 import { CARD_LOREBOOK_SECTION, cardEditorSections, lorebookEditorSections } from "./cardSections.ts"
 import { EmbeddedLorebook } from "./EmbeddedLorebook.tsx"
@@ -50,6 +51,7 @@ function LazyEditorPage() {
 }
 
 export const register = () => {
+  navigationNotices.register({ id: "editor.browser-recovery", order: 10, component: BrowserRecoveryWarning })
   panelEditorActions.register({ id: "editor.panel.history", order: 10, component: PanelHistory })
   panelEditorActions.register({ id: "editor.panel.variant", order: 20, component: PanelVariant })
   editorExtensions.register({

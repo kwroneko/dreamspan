@@ -1,3 +1,4 @@
+import { logoutFromSettings } from "./support/appMenu.ts"
 import type { Page } from "@playwright/test"
 import type { Copy } from "../src/features/editor/backup.ts"
 import { expect, test } from "@playwright/test"
@@ -41,6 +42,7 @@ const put = (page: Page, copy: Copy) =>
           t.objectStore("copies").put(copy)
           t.oncomplete = () => {
             d.close()
+            window.dispatchEvent(new Event("rp-browser-copies"))
             resolve()
           }
         }
@@ -60,10 +62,10 @@ test("refused live typing: logout retains it; explicit deletion permits logout; 
   const text = "UNACKNOWLEDGED-" + "z".repeat(1_000_001)
   await page.getByRole("textbox", { name: /^Description/ }).fill(text)
   await expect.poll(async () => (await copies(page)).map((x) => x.content)).toContain(text)
-  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out", exact: true }).click()
+  await logoutFromSettings(page)
   const recovery = page.getByRole("dialog", { name: "Text kept in this browser", exact: true })
   await expect(recovery.getByRole("textbox", { name: "Recovery text" })).toHaveValue(text)
-  await expect(page).toHaveURL(/\/library\//)
+  await expect(page).toHaveURL(/\/settings\//)
   await recovery.getByRole("button", { name: "Delete this copy" }).click()
   await page
     .getByRole("alertdialog", { name: "Delete this browser copy?" })
@@ -72,12 +74,11 @@ test("refused live typing: logout retains it; explicit deletion permits logout; 
   await expect.poll(() => copies(page)).toEqual([])
   await recovery.getByRole("button", { name: "Keep copies" }).click()
   page.on("dialog", (d) => d.accept())
-  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out", exact: true }).click()
+  await logoutFromSettings(page)
   await expect(page).toHaveURL(/\/login/)
   await apiLogin(page.request, server(), "final-reader", "reader-password-2")
   await page.goto(server().url)
-  await page.getByRole("button", { name: "Unsaved text", exact: true }).click()
-  await expect(page.getByText("No unsaved browser copies.", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: /unsaved texts?$/ })).toHaveCount(0)
   expect(await copies(page)).toEqual([])
 })
 
@@ -118,11 +119,9 @@ test("expired A session retains its unsaved copy through B login and B logout", 
   await page.request.post(`${server().url}/auth/logout`)
   await apiLogin(page.request, server(), "expiry-reader", "reader-password-2")
   await page.goto(server().url)
-  await page.getByRole("button", { name: "Unsaved text", exact: true }).click()
-  await expect(page.getByText("No unsaved browser copies.", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: /unsaved texts?$/ })).toHaveCount(0)
   expect((await copies(page)).map((x) => x.content)).toEqual([text])
-  await page.getByRole("button", { name: "Keep copies", exact: true }).click()
-  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out", exact: true }).click()
+  await logoutFromSettings(page)
   await expect(page).toHaveURL(/\/login/)
   expect((await copies(page)).map((x) => x.content)).toEqual([text])
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -209,10 +208,7 @@ for (const action of ["retry", "logout", "logout retry", "logout unsaved"] as co
             }
           }
         })
-        await page
-          .getByRole("navigation", { name: "Main" })
-          .getByRole("button", { name: "Log out", exact: true })
-          .click()
+        await logoutFromSettings(page)
         const recovery = page.getByRole("dialog", { name: "Text kept in this browser", exact: true })
         await expect(recovery.locator('a[href="/bin?section=recovered"]')).toBeVisible()
         await expect(recovery.getByRole("textbox", { name: "Recovery text" })).toHaveValue(content)
@@ -225,20 +221,20 @@ for (const action of ["retry", "logout", "logout retry", "logout unsaved"] as co
       }
       if (action === "logout retry") {
         await page.route("**/auth/logout", (route) => route.fulfill({ status: 503 }), { times: 1 })
-        await page
-          .getByRole("navigation", { name: "Main" })
-          .getByRole("button", { name: "Log out", exact: true })
-          .click()
+        await logoutFromSettings(page)
         await expect(page.getByRole("alert")).toContainText("couldn't log you out")
         await expect(page.locator('a[href="/bin?section=recovered"]')).toBeVisible()
       }
-      await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out", exact: true }).click()
+      await logoutFromSettings(page)
       await expect(page).toHaveURL(/\/login/)
       await expect(page.locator('a[href="/bin?section=recovered"]')).toBeVisible()
       await page.reload()
       await expect(page.locator('a[href="/bin?section=recovered"]')).toBeVisible()
     } else {
-      await page.getByRole("button", { name: "Unsaved text", exact: true }).click()
+      await page
+        .getByRole("button", { name: /^\d+ unsaved texts?$/ })
+        .filter({ visible: true })
+        .click()
       const recovery = page.getByRole("dialog", { name: "Text kept in this browser", exact: true })
       await expect(recovery.getByRole("textbox", { name: "Recovery text" })).toHaveValue(text)
       await recovery.getByRole("button", { name: "Retry saving", exact: true }).click()
@@ -247,8 +243,7 @@ for (const action of ["retry", "logout", "logout retry", "logout unsaved"] as co
       await recovery.getByRole("button", { name: "Retry saving", exact: true }).click()
       await expect(recovery.locator('a[href="/bin?section=recovered"]')).toHaveCount(1)
       await recovery.getByRole("button", { name: "Keep copies", exact: true }).click()
-      await page.getByRole("button", { name: "Unsaved text", exact: true }).click()
-      await expect(recovery.locator('a[href="/bin?section=recovered"]')).toHaveCount(1)
+      await expect(page.getByRole("button", { name: /^\d+ unsaved texts?$/ })).toHaveCount(0)
     }
     expect(
       (await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))).some((x) => x.content === text)
@@ -276,4 +271,55 @@ test("putting a card back to its latest revision keeps the typed text in the fie
   await page.getByRole("button", { name: "Edit history of Description", exact: true }).click()
   const states = page.getByRole("dialog", { name: "Edit history: Description" })
   await expect(states.getByLabel("Text of the state")).toHaveText("N5 REVERT RECOVERY 857194")
+})
+
+test("the recovery warning counts additions, deletions and saved copies without reload", async ({ page }) => {
+  const { me, card } = await admin((api) =>
+    Effect.gen(function* () {
+      return {
+        me: yield* api.Whoami(),
+        card: yield* api.CreateCard({ label: "Count recovery", name: "Count recovery" })
+      }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(server().url)
+  const warning = page.getByRole("button", { name: /^\d+ unsaved texts?$/ })
+  await expect(warning).toHaveCount(0)
+  for (const [index, field] of ["description", "personality"].entries()) {
+    const content = `Synthetic copy ${index + 1}`
+    await put(page, {
+      key: crypto.randomUUID(),
+      userId: me.id,
+      refId: card.id,
+      field: textField([field]),
+      content,
+      at: Date.now(),
+      ancestors: [],
+      save: {
+        kind: "editor",
+        payload: {
+          refId: card.id,
+          field: textField([field]),
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevisionId: card.headRevisionId,
+          content
+        }
+      }
+    })
+    await expect(warning).toHaveText(`${index + 1} unsaved ${index === 0 ? "text" : "texts"}`)
+  }
+  await warning.click()
+  const dialog = page.getByRole("dialog", { name: "Text kept in this browser", exact: true })
+  await dialog.getByRole("button", { name: "Delete this copy" }).first().click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete copy", exact: true }).click()
+  await dialog.getByRole("button", { name: "Keep copies" }).click()
+  await expect(warning).toHaveText("1 unsaved text")
+  await warning.click()
+  await dialog.getByRole("button", { name: "Retry saving" }).click()
+  await expect(dialog.getByText("No unsaved browser copies.", { exact: true })).toBeVisible()
+  await dialog.getByRole("button", { name: "Keep copies" }).click()
+  await expect(warning).toHaveCount(0)
 })

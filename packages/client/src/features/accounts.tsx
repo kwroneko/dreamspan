@@ -79,7 +79,7 @@ function AccountPage() {
   useTitle("Account")
   const session = useSession()
   return (
-    <div className="flex flex-col gap-4">
+    <div data-account-page className="flex flex-col gap-4">
       <Card>
         <CardHeader center title="Account" actions={session.via === "session" ? <LogoutButton /> : undefined} />
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">

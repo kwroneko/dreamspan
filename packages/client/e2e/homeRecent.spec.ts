@@ -131,6 +131,7 @@ for (const width of [1440, 390]) {
     const panel = width === 390 ? page.locator(".fixed.inset-0") : sidebar(page)
     await expect(panel.getByRole("button", { name: "Start a chat", exact: true })).toHaveCount(0)
     await expect(panel.getByRole("button", { name: "Blur all images" })).toHaveText("")
+    await expect(panel.getByRole("button", { name: /unsaved texts?$/ })).toHaveCount(0)
     await panel.getByRole("group", { name: "Left panel", exact: true }).getByText("Characters").click()
     await panel.getByLabel("Find a character").fill("Cara")
     await panel.getByRole("button", { name: "Open Cara", exact: true }).click()

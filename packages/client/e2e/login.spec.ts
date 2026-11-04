@@ -1,3 +1,4 @@
+import { logoutFromSettings } from "./support/appMenu.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
@@ -9,7 +10,7 @@ test.describe("no passwords set", () => {
   test("the local admin goes straight in, and the login page says no login is needed", async ({ page }) => {
     await page.goto(server().url)
     await expect(page.getByRole("heading", { name: "Characters" })).toBeVisible()
-    await expect(page.getByTitle("Signed in as local (admin)")).toBeVisible()
+    await expect(page.getByRole("navigation", { name: "Main", exact: true })).toBeVisible()
     await expect(page.getByRole("button", { name: "Log out" })).toHaveCount(0)
 
     await page.goto(`${server().url}/login`)
@@ -35,7 +36,7 @@ test.describe("login required", () => {
     await page.getByLabel("Password").press("Enter")
     await expect(page).toHaveURL(`${server().url}/settings/account`)
 
-    await page.getByRole("button", { name: "Log out" }).first().click()
+    await logoutFromSettings(page)
     await expect(page).toHaveURL(`${server().url}/login`)
     await page.goto(server().url)
     await expect(page).toHaveURL(/\/login/)
@@ -61,7 +62,7 @@ test.describe("login required", () => {
       await page.getByLabel("Handle").fill(ADMIN.handle)
       await page.getByLabel("Password").fill(ADMIN.password)
       await page.getByRole("button", { name: "Log in" }).click()
-      await expect(page.getByTitle("Signed in as admin (admin)"), JSON.stringify(next)).toBeVisible()
+      await expect(page.getByRole("navigation", { name: "Main", exact: true }), JSON.stringify(next)).toBeVisible()
       expect(new URL(page.url()).origin, JSON.stringify(next)).toBe(server().url)
     }
   })
@@ -70,10 +71,8 @@ test.describe("login required", () => {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/settings/account`)
     await page.route("**/auth/logout", (route) => route.fulfill({ status: 500, body: "" }))
-    await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out" }).click()
-    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("alert")).toContainText(
-      "couldn't log you out (500)"
-    )
+    await logoutFromSettings(page)
+    await expect(page.locator("[data-account-page]").getByRole("alert")).toContainText("couldn't log you out (500)")
     await expect(page).toHaveURL(`${server().url}/settings/account`)
   })
 
@@ -86,7 +85,7 @@ test.describe("login required", () => {
     await dora.getByLabel("Handle").fill("dora")
     await dora.getByLabel("Password").fill("dora-password-1")
     await dora.getByRole("button", { name: "Log in" }).click()
-    await expect(dora.getByTitle("Signed in as Dora (user)")).toBeVisible()
+    await expect(dora.getByRole("navigation", { name: "Main", exact: true })).toBeVisible()
 
     await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       Effect.gen(function* () {

@@ -1,3 +1,4 @@
+import { logoutFromSettings } from "./support/appMenu.ts"
 // The paged chat list agrees with the server after a delete or an Undo, whichever page the
 // chat was on; and a first message kept in this browser for a chat not made yet doesn't hold
 // up logout (it waits for the next login). Since the independent shell (8e20190) the paged
@@ -80,7 +81,7 @@ test("an unsent first message doesn't hold up logout, and is there after the nex
   const text = "Typed before logging out, never sent"
   await page.goto(`${server().url}/cards/${made.entityId}/chat`)
   await page.getByRole("textbox", { name: "Message", exact: true }).fill(text)
-  await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "Log out", exact: true }).click()
+  await logoutFromSettings(page)
   await expect(page).toHaveURL(/\/login/)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/cards/${made.entityId}/chat`)

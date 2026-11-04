@@ -1,3 +1,4 @@
+import { logoutFromSettings } from "./support/appMenu.ts"
 import { closeNoteBlock, noteBlock, noteSettings, noteText } from "./support/notes.ts"
 import { expectTextBox } from "./support/textbox.ts"
 // The card and preset editors (ARCHITECTURE.md §14) in a real browser against the real
@@ -622,7 +623,7 @@ test("text kept in this browser is saved before logout and survives another user
   await open(page, refId)
   const copy = { userId: me.id, refId, field: textField(["description"]), content: "Unsent.", at: Date.now() }
   await leaveCopy(page, copy)
-  await page.getByRole("button", { name: "Log out" }).first().click()
+  await logoutFromSettings(page)
   await expect(page).toHaveURL(/\/login/)
   expect(await storedCopies(page)).toEqual([])
 

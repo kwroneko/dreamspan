@@ -14,3 +14,20 @@ export const hideAppNavigation = async (page: Page) => {
   const close = page.getByRole("button", { name: "Close the menu", exact: true })
   if (await close.isVisible()) await close.click()
 }
+
+/** Log out through the Account card, including while an editor has unsaved text. */
+export const logoutFromSettings = async (page: Page) => {
+  if (!(await page.locator("[data-account-page]").isVisible())) {
+    await showAppNavigation(page)
+    await page
+      .getByRole("navigation", { name: "Main", exact: true })
+      .filter({ visible: true })
+      .getByRole("link", { name: "Settings", exact: true })
+      .click()
+    await page
+      .getByRole("navigation", { name: "Settings", exact: true })
+      .getByRole("link", { name: "Account", exact: true })
+      .click()
+  }
+  await page.locator("[data-account-page]").getByRole("button", { name: "Log out", exact: true }).click()
+}

@@ -107,6 +107,99 @@ for (const theme of ["light", "dark"] as const)
     }
   })
 
+// Counted warning above the navigation, in both themes and screen sizes.
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`footer recovery: ${width} ${theme}`, async ({ page }, info) => {
+      const server = await startServer()
+      try {
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.goto(server.url)
+        await expect(page.getByRole("heading", { name: "Characters", exact: true })).toBeVisible()
+        await showAppNavigation(page)
+        const nav = page.getByRole("navigation", { name: "Main", exact: true }).filter({ visible: true })
+        const warning = nav.getByRole("button", { name: /^\d+ unsaved texts?$/ })
+        await expect(warning).toHaveCount(0)
+        await expect(nav.getByRole("link", { name: "Account", exact: true })).toHaveCount(0)
+        await expectLayout(page, info, `footer-empty-${width}-${theme}`, { scope: 'nav[aria-label="Main"]' })
+        const column = width === 390 ? page.locator(".fixed.inset-0") : page.getByRole("complementary").first()
+        await column.screenshot({ path: info.outputPath(`left-empty-${width}-${theme}.png`) })
+        const user = await withCookie(server, "", (api) => api.Whoami())
+        await page.evaluate(async (userId) => {
+          const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const request = indexedDB.open("rp-editor-copies", 1)
+            request.onsuccess = () => resolve(request.result)
+            request.onerror = () => reject(request.error)
+          })
+          await new Promise<void>((resolve) => {
+            const tx = db.transaction("copies", "readwrite")
+            for (const key of ["footer-one", "footer-two"])
+              tx.objectStore("copies").put({
+                key,
+                userId,
+                refId: "synthetic",
+                field: "description",
+                content: "Synthetic unsaved text",
+                at: Date.now(),
+                ancestors: [],
+                save: { kind: "setting", payload: { content: "Synthetic unsaved text" } }
+              })
+            tx.oncomplete = () => resolve()
+          })
+          db.close()
+          window.dispatchEvent(new Event("rp-browser-copies"))
+        }, user.id)
+        await expect(warning).toHaveText("2 unsaved texts")
+        const tiles = nav.locator("a").first()
+        expect((await warning.boundingBox())!.y).toBeLessThan((await tiles.boundingBox())!.y)
+        await expectLayout(page, info, `footer-copies-${width}-${theme}`, { scope: 'nav[aria-label="Main"]' })
+        await column.screenshot({ path: info.outputPath(`left-copies-${width}-${theme}.png`) })
+      } finally {
+        await server.stop()
+      }
+    })
+
+// Account-card logout and the absence of the removed Settings account header.
+for (const password of [false, true]) {
+  test.describe(`settings account layout ${password ? "session" : "local"}`, () => {
+    let accountServer: TestServer
+    test.beforeAll(async () => {
+      accountServer = await startServer(password ? withAdmin : {})
+    })
+    test.afterAll(async () => {
+      await accountServer?.stop()
+    })
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const)
+        test(`${width} ${theme}`, async ({ page }, info) => {
+          await page.setViewportSize({ width, height: 900 })
+          await page.emulateMedia({ colorScheme: theme })
+          if (password) await apiLogin(page.request, accountServer, ADMIN.handle, ADMIN.password)
+          await page.goto(`${accountServer.url}/settings/account`)
+          const account = page.locator("[data-account-page]")
+          await expect(account.getByText("Name", { exact: true })).toBeVisible()
+          await expect(page.getByRole("region", { name: "Signed-in account", exact: true })).toHaveCount(0)
+          await expect(account.getByRole("button", { name: "Log out", exact: true })).toHaveCount(password ? 1 : 0)
+          if (width === 1440) {
+            const nav = await page.getByRole("navigation", { name: "Settings", exact: true }).boundingBox()
+            const content = await account.boundingBox()
+            expect(Math.abs(nav!.y - content!.y)).toBeLessThan(1)
+          }
+          await expectLayout(page, info, `account-${password ? "session" : "local"}-${width}-${theme}`, {
+            scope: "[data-account-page]"
+          })
+          await account
+            .locator("../..")
+            .screenshot({ path: info.outputPath(`account-${password ? "session" : "local"}-${width}-${theme}.png`) })
+          if (password) {
+            await account.getByRole("button", { name: "Log out", exact: true }).click()
+            await expect(page).toHaveURL(`${accountServer.url}/login`)
+          }
+        })
+  })
+}
+
 // Deliberately broken fixtures prove each rule reports measured defects, and the
 // exceptions don't hide defects inside an overlay. No app CSS or fixed snapshots.
 test("the detector catches geometry defects and respects documented intent", async ({ page }) => {

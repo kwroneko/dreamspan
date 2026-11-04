@@ -1,9 +1,11 @@
 // Browser copies survive unavailable targets and expired sessions. The user can inspect,
 // retry, or explicitly delete each one; account partitioning limits this view to its owner.
+import { useSession } from "../../session.ts"
 import { useEffect, useState } from "react"
+import { Icon } from "../../ui/Icon.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { copiesOfUser, type Copy, dropCopy, flushCopies, pendingOf } from "./backup.ts"
+import { copiesOfUser, type Copy, dropCopy, flushCopies, pendingOf, subscribeCopies } from "./backup.ts"
 
 import { dropTypedBackup } from "./typedBackup.ts"
 
@@ -22,11 +24,13 @@ export function RecoveryNotice() {
 export function BrowserRecovery({
   userId,
   initiallyOpen = false,
-  initiallyRecovered = 0
+  initiallyRecovered = 0,
+  warning = false
 }: {
   userId: string
   initiallyOpen?: boolean
   initiallyRecovered?: number
+  warning?: boolean
 }) {
   const [open, setOpen] = useState(initiallyOpen)
   const [copies, setCopies] = useState<ReadonlyArray<Copy>>([])
@@ -34,21 +38,42 @@ export function BrowserRecovery({
   const [pending, setPending] = useState(false)
   const [recovered, setRecovered] = useState(initiallyRecovered)
   useEffect(() => {
-    if (initiallyOpen) void copiesOfUser(userId).then(setCopies)
-  }, [initiallyOpen, userId])
+    let active = true
+    let version = 0
+    const refresh = () => {
+      const current = ++version
+      void copiesOfUser(userId).then((next) => {
+        if (active && current === version) setCopies(next)
+      })
+    }
+    const unsubscribe = subscribeCopies(refresh)
+    refresh()
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [userId])
   const read = async () => setCopies(await copiesOfUser(userId))
   return (
     <>
-      <Button
-        variant="ghost"
-        hint="Text typed in this browser that hasn't reached the server yet."
-        onClick={async () => {
-          await read()
-          setOpen(true)
-        }}
-      >
-        Unsaved text
-      </Button>
+      {(!warning || copies.length > 0) && (
+        <Button
+          variant="ghost"
+          className={
+            warning
+              ? "mb-2 w-full border border-warning/50 bg-warning/5 text-warning hover:bg-warning/10 hover:text-warning"
+              : ""
+          }
+          hint="Text typed in this browser that hasn't reached the server yet."
+          onClick={async () => {
+            await read()
+            setOpen(true)
+          }}
+        >
+          {warning && <Icon name="alert" />}
+          {warning ? `${copies.length} unsaved ${copies.length === 1 ? "text" : "texts"}` : "Unsaved text"}
+        </Button>
+      )}
       <Dialog
         open={open}
         onOpenChange={(next) => {
@@ -138,4 +163,9 @@ export function BrowserRecovery({
       />
     </>
   )
+}
+
+/** The shell's conditional recovery notice; the dialog remains mounted when the last copy leaves. */
+export function BrowserRecoveryWarning() {
+  return <BrowserRecovery userId={useSession().user.id} warning />
 }

@@ -1,3 +1,4 @@
+import { logoutFromSettings } from "./support/appMenu.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
@@ -237,7 +238,7 @@ test("another user never sees someone's connections", async ({ browser }) => {
   // In the same tab: Alice logs out and Bob logs in. Nothing of hers is left behind.
   await alice.goto(`${server().url}/settings/connections`)
   await expect(alice.getByText("Alice's private gateway")).toBeVisible()
-  await alice.getByRole("button", { name: "Log out" }).click()
+  await logoutFromSettings(alice)
   await alice.getByLabel("Handle", { exact: true }).fill("bob")
   await alice.getByLabel("Password", { exact: true }).fill("bob-password-1")
   await alice.getByRole("button", { name: "Log in" }).click()

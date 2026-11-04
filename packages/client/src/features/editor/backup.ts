@@ -70,13 +70,45 @@ const database = () => {
   return opened
 }
 
+// Completed IndexedDB mutations refresh recovery counts here and in other tabs.
+const copiesChanged = "rp-browser-copies"
+let copiesChannel: BroadcastChannel | null = null
+const channel = () => {
+  if (copiesChannel === null && typeof BroadcastChannel !== "undefined") {
+    try {
+      copiesChannel = new BroadcastChannel(copiesChanged)
+      copiesChannel.onmessage = () => window.dispatchEvent(new Event(copiesChanged))
+    } catch {
+      /* Recovery still updates within this tab when broadcasting is unavailable. */
+    }
+  }
+  return copiesChannel
+}
+const notifyCopies = () => {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new Event(copiesChanged))
+  channel()?.postMessage(null)
+}
+export const subscribeCopies = (listener: () => void) => {
+  channel()
+  window.addEventListener(copiesChanged, listener)
+  window.addEventListener("focus", listener)
+  return () => {
+    window.removeEventListener(copiesChanged, listener)
+    window.removeEventListener("focus", listener)
+  }
+}
+
 const run = async (mode: IDBTransactionMode, apply: (store: IDBObjectStore) => void) => {
   const db = await database()
   if (db === null) return
   await new Promise<void>((resolve) => {
     try {
       const transaction = db.transaction(STORE, mode)
-      transaction.oncomplete = () => resolve()
+      transaction.oncomplete = () => {
+        if (mode === "readwrite") notifyCopies()
+        resolve()
+      }
       transaction.onerror = () => resolve()
       transaction.onabort = () => resolve()
       apply(transaction.objectStore(STORE))

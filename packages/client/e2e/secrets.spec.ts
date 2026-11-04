@@ -45,7 +45,7 @@ test("keys, header values and passwords never reach an attribute, and closing a 
   await page.getByLabel("Password", { exact: true }).fill(ADMIN.password)
   expect(await markup(page)).not.toContain(ADMIN.password)
   await page.getByRole("button", { name: "Log in" }).click()
-  await expect(page.getByTitle("Signed in as admin (admin)")).toBeVisible()
+  await expect(page.getByRole("navigation", { name: "Main", exact: true })).toBeVisible()
 
   await page.goto(`${server().url}/settings/connections/new`)
   await page.getByLabel("Name", { exact: true }).fill("Secrets")
