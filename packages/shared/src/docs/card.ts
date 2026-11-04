@@ -58,7 +58,7 @@ export const CardDoc = Schema.Struct({
   /** Set by the importer once the avatar is stored; parsers leave it null. */
   avatar_media_id: Schema.NullOr(Schema.String),
   /**
-   * The avatar's cutout, the 2:3 part every small portrait shows (ARCHITECTURE.md §14.5c), for
+   * The avatar's cuts: the optional Picture rectangle and the 2:3 part small portraits show (ARCHITECTURE.md §14.5c), for
    * the image it names. Absent, or for another image: the default. Changed only with the avatar
    * (SetCardAvatar) or by SetCardAvatarCrop, never by a draft.
    */

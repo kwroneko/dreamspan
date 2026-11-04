@@ -144,7 +144,7 @@ function Pending({
 }) {
   const action = useAction()
   const navigate = useNavigate()
-  const navigationSearch = useSearch({ strict: false }) as { panel?: string; character?: string }
+  const navigationSearch = useSearch({ strict: false }) as { panel?: string; character?: string; guidance?: string }
   const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
   const view = pending.view()
   const { greeters, picks, persona, fallbackNote } = state
@@ -202,7 +202,8 @@ function Pending({
   // The guidance toggle, as in the chat's composer (DESIGN §2.2).
   const viewPrefs = useViewPrefs()
   const { compact: phone, ref: composerRef } = useCompactComposer()
-  const guidance = viewPrefs.prefs.guidance
+  const guidance = state.guidance
+  const setGuidance = (guidance: boolean) => pending.change((state) => ({ ...state, guidance }))
   const repliers = greeters.filter((item) => item.card.entityId !== persona)
   const replyId = (repliers.find((item) => item.card.entityId === state.replier) ?? repliers[0] ?? card).card.entityId
   const castCards = view.cast?.cards ?? []
@@ -259,6 +260,7 @@ function Pending({
       (client) =>
         Effect.gen(function* () {
           const started = yield* client("StartChat", {
+            guidance,
             // The greeting card leads; a group's chat has all its characters, under its name.
             cards: greeters.map((greeter) => greeter.card.entityId),
             persona: personaId,
@@ -352,7 +354,7 @@ function Pending({
     submitHint: composerSubmitHint(viewPrefs.prefs.enterSends),
     guidance,
     prefsReady: viewPrefs.ready,
-    changeGuidance: (next) => void viewPrefs.change({ guidance: next }),
+    changeGuidance: setGuidance,
     busy: action.pending,
     hasText: text.trim() !== "",
     start,
@@ -521,8 +523,17 @@ function PendingFor({
   group: { name: string; chatId: ChatId; members: ReadonlyArray<string> } | null
 }) {
   const call = useCaller()
+  const search = useSearch({ strict: false }) as { guidance?: string }
   const [pending] = useState(
-    () => new PendingChat(cards, greeters, group && { name: group.name, chatId: group.chatId }, call, defaultPersona)
+    () =>
+      new PendingChat(
+        cards,
+        greeters,
+        group && { name: group.name, chatId: group.chatId },
+        call,
+        defaultPersona,
+        search.guidance === "on"
+      )
   )
   return <Pending pending={pending} card={card} groupMembers={group?.members ?? null} />
 }

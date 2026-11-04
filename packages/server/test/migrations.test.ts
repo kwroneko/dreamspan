@@ -34,7 +34,7 @@ describe("0001_baseline", () => {
   it.effect("matches the recorded baseline schema and seeds nothing", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord({ "0001_baseline": migrations["0001_baseline"] }) })
       const master = yield* sql<Entry>`SELECT type, name, tbl_name, sql FROM sqlite_master
         WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name <> 'effect_sql_migrations'`
       const made = master
@@ -75,3 +75,52 @@ describe("the migrator", () => {
     }).pipe(Effect.provide(layer()))
   )
 })
+
+it.effect("migrates existing composer switches from each account and removes only that preference", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord({ "0001_baseline": migrations["0001_baseline"] }) })
+    for (const id of ["on", "off", "unset"])
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${id}, ${id}, ${id}, 'user', 0)`
+    for (const [id, guidance] of [
+      ["on", true],
+      ["off", false]
+    ] as const)
+      yield* sql`INSERT INTO user_prefs (user_id, key, value_json)
+        VALUES (${id}, 'display', ${JSON.stringify({ guidance, reasoning: "collapsed" })})`
+    for (const [id, owner, kind] of [
+      ["a", "on", "composer"],
+      ["b", "on", "composer"],
+      ["c", "off", "composer"],
+      ["d", "unset", "composer"],
+      ["e", "on", "scratchpad"]
+    ])
+      yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, updated_at)
+        VALUES (${id!}, ${owner!}, ${kind!}, ${id!}, 'Synthetic draft', 0)`
+    yield* Effect.scoped(Layer.build(Migrations))
+    const rows = yield* sql<{
+      id: string
+      guidance: number
+      content: string
+    }>`SELECT id, guidance, content FROM drafts ORDER BY id`
+    assert.deepStrictEqual(
+      rows.map((row) => [row.id, row.guidance]),
+      [
+        ["a", 1],
+        ["b", 1],
+        ["c", 0],
+        ["d", 0],
+        ["e", 0]
+      ]
+    )
+    assert.isTrue(rows.every((row) => row.content === "Synthetic draft"))
+    const prefs = yield* sql<{ value_json: string }>`SELECT value_json FROM user_prefs ORDER BY user_id`
+    assert.deepStrictEqual(
+      prefs.map((row) => JSON.parse(row.value_json)),
+      [{ reasoning: "collapsed" }, { reasoning: "collapsed" }]
+    )
+    yield* Effect.scoped(Layer.build(Migrations))
+    const [again] = yield* sql<{ guidance: number }>`SELECT guidance FROM drafts WHERE id = 'a'`
+    assert.strictEqual(again!.guidance, 1)
+  }).pipe(Effect.provide(layer()))
+)

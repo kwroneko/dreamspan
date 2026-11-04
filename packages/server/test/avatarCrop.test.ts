@@ -180,6 +180,78 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect("Picture cuts render in the viewer and PNG export, round-trip data and keep the original", () =>
+    Effect.gen(function* () {
+      const image = yield* Effect.promise(() => paint(600, 600, (x) => (x < 300 ? RED : BLUE)))
+      const card = yield* newCard(image, "&crop=5000_0_5000_7500&picture=5000_0_5000_10000", "Picture crop")
+      const opened = yield* card.api.OpenEditor({ refId: card.ref.id })
+      assert.deepStrictEqual(opened.doc.avatar_crop, {
+        media_id: card.mediaId,
+        x: 0.5,
+        y: 0,
+        width: 0.5,
+        height: 0.75,
+        picture: { x: 0.5, y: 0, width: 0.5, height: 1 }
+      })
+      const list = yield* card.api.ListCards()
+      assert.deepStrictEqual(list.find((c) => c.entityId === card.ref.entityId)?.avatarCrop?.picture, {
+        x: 0.5,
+        y: 0,
+        width: 0.5,
+        height: 1
+      })
+      const original = yield* bytesOf(yield* get(card.mediaId, ""))
+      assert.deepStrictEqual(original, image)
+      const viewer = yield* get(card.mediaId, "&picture=5000_0_5000_10000")
+      assert.strictEqual(viewer.headers.get("content-type"), "image/png")
+      const rendered = yield* look(yield* bytesOf(viewer))
+      assert.deepStrictEqual([rendered.width, rendered.height], [300, 600])
+      near(rendered.mean, BLUE)
+      assert.strictEqual((yield* get(card.mediaId, "&picture=5000_0_5000_10000", bob)).status, 404)
+      assert.strictEqual((yield* get(card.mediaId, "&picture=9000_0_5000_10000")).status, 400)
+      const exported = yield* post("/library/export", { refId: card.ref.id, format: "card-png" }, alice)
+      assert.strictEqual(exported.status, 200)
+      const bytes = new Uint8Array(yield* Effect.promise(() => exported.arrayBuffer()))
+      const parsed = yield* importCard(bytes)
+      assert.strictEqual(parsed.card.name, "Picture crop")
+      const meta = yield* Effect.promise(() => sharp(Buffer.from(parsed.avatar!.bytes)).metadata())
+      assert.deepStrictEqual([meta.width, meta.height], [300, 600])
+      assert.deepStrictEqual((parsed.card.extensions.rp_harness as { avatar_crop: unknown }).avatar_crop, {
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 0.75,
+        image_width: 300,
+        image_height: 600
+      })
+      const url = yield* base
+      const imported = yield* Effect.promise(() =>
+        fetch(`${url}/library/import?name=picture-crop.png`, {
+          method: "POST",
+          headers: { ...alice, "content-type": "application/octet-stream" },
+          body: bytes
+        })
+      )
+      assert.strictEqual(imported.status, 200)
+      const back = Schema.decodeUnknownSync(ImportResult)(yield* Effect.promise(() => imported.json()))
+      const reopened = yield* card.api.OpenEditor({ refId: back.library!.ref.id })
+      assert.deepStrictEqual(reopened.doc.avatar_crop, {
+        media_id: reopened.doc.avatar_media_id,
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 0.75
+      })
+      const reset = yield* card.api.SetCardAvatarCrop({
+        refId: card.ref.id,
+        expectedRowVersion: opened.ref.rowVersion,
+        crop: null
+      })
+      assert.strictEqual((yield* card.api.OpenEditor({ refId: card.ref.id })).doc.avatar_crop, undefined)
+      assert.isAbove(reset.ref.rowVersion, opened.ref.rowVersion)
+    })
+  )
+
   it.effect("our PNG export holds the whole image and the cutout, which our import keeps; ST's cards have none", () =>
     Effect.gen(function* () {
       const image = yield* Effect.promise(() => paint(600, 600, (x) => (x < 300 ? RED : BLUE)))

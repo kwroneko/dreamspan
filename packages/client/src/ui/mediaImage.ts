@@ -1,6 +1,6 @@
 // Measure the actual CSS box, including grid/collage cells and resizable panels. No
 // initial guessed URL: the first request uses rendered width × the screen's density.
-import { mediaWidth } from "@rp/shared/media.ts"
+import { cropKey, type AvatarCrop, mediaWidth } from "@rp/shared/media.ts"
 import { useCallback, useState } from "react"
 
 export const mediaUrl = (id: string, width?: number) =>
@@ -25,3 +25,6 @@ export function useMediaWidth() {
   }, [])
   return { ref, width }
 }
+
+export const pictureUrl = (id: string, picture?: AvatarCrop | undefined) =>
+  `${mediaUrl(id)}${picture ? `&picture=${cropKey(picture)}` : ""}`

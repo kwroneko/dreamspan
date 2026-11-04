@@ -18,7 +18,7 @@ import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -40,6 +40,7 @@ import type { PendingChat } from "./pendingChat.ts"
 import { usePendingCardInfo } from "./pendingCardInfo.ts"
 import { chatCardActions } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
+import { composerChoice } from "./speaker.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export function CharacterTab({ session, view, tab }: PanelProps) {
@@ -140,13 +141,13 @@ function useCardStore(refId: RefId) {
 }
 
 /** "New chat with <name>": only them, from their greeting (owner, 2026-11-01: a button, not under More). */
-function NewChat({ card }: { card: CastCard }) {
+function NewChat({ card, guidance }: { card: CastCard; guidance: boolean }) {
   return (
     <Tooltip label="Start a chat with only them, at their greeting.">
       <Link
         to="/cards/$entityId/chat"
         params={{ entityId: card.entityId }}
-        search={{ panel: `card:${card.entityId}` }}
+        search={{ panel: `card:${card.entityId}`, guidance: guidance ? "on" : "off" }}
         className={`${buttonClass("ghost")} h-8! px-2!`}
       >
         New chat with {card.name}
@@ -172,6 +173,8 @@ function CardPanel({
   /** The card you play: saving changes it wherever you play it. */
   persona: boolean
 }) {
+  const choices = session === null ? pending : composerChoice(session)
+  const guidance = useSyncExternalStore(choices!.subscribe, () => choices!.snapshot().guidance)
   const store = useCardStore(info.refId)
   const workspace = usePresetWorkspace()
   const call = useCaller()
@@ -238,7 +241,7 @@ function CardPanel({
           )}
         </CardHeader>
         <div className="-mx-2 flex flex-wrap items-center gap-x-1">
-          {!persona && !alone && <NewChat card={card} />}
+          {!persona && !alone && <NewChat card={card} guidance={guidance} />}
           <SlotOutlet slot={chatCardActions} except={["card.edit"]} props={{ session, card, info, persona }} />
         </div>
         {state.loadError && <ErrorAlert error={state.loadError} />}

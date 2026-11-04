@@ -15,7 +15,6 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
 test.use({ reducedMotion: "reduce" })
 test.beforeEach(async () => {
   if (process.env.STABLE_BUTTONS_AUDIT) test.setTimeout(180_000)
-  await admin((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
 })
 
 // Positions relative to the containing strip exclude scrolling when the editor gains focus.

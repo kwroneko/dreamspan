@@ -59,7 +59,8 @@ export class Formats extends Context.Service<
     readonly thumbnail: (input: {
       readonly dataDir: string
       readonly path: string
-      readonly width: (typeof MEDIA_WIDTHS)[number]
+      /** Zero renders a full-resolution Picture PNG; other widths make portrait thumbnails. */
+      readonly width: 0 | (typeof MEDIA_WIDTHS)[number]
       /** A portrait's cutout (§14.5c): null for the default; absent, the whole image. */
       readonly crop?: AvatarCrop | null
     }) => Effect.Effect<ThumbnailResult, ThumbnailFailed | FormatWorkerFailed>

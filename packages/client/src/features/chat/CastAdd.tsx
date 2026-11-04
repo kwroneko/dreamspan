@@ -1,19 +1,17 @@
 // The Cast tab's Add characters section (owner, 2026-11-01; ST's group "Add Members" list):
 // under the cast, collapsed until opened (remembered per account in this browser), the same
 // character grid as the left panel's Characters, with its filter (with Include personas),
-// sort and direction and the search. A click on a tile adds that character to the chat from the leaf shown on, on this
-// branch (`ChangeCast` `Join`, as the cast's other changes); the grid stays open, so several
-// can be added in a row. Who's already in the chat is marked, and a click on them does nothing.
+// sort and direction and the search. Tiles open the full editor; their separate Add control
+// joins the character at the viewed leaf. Existing members keep a disabled In chat control.
 // It's the `cast.add-characters` entry of `castSections`, so a plugin can replace or remove it.
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { Cast } from "@rp/shared/chatSetupApi.ts"
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AsyncView } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
-import { Spinner } from "../../ui/Spinner.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { browseCards, mixesPersonas, useCardBrowse } from "../characters/cardBrowse.tsx"
 import { CardBrowseBar } from "../characters/CardBrowseBar.tsx"
@@ -25,6 +23,7 @@ import {
   type TilePick,
   type TileState
 } from "../characters/shellData.tsx"
+import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { readCastAddOpen, subscribeCastAdd, takeCastAddRequest, writeCastAddOpen } from "./castAddState.ts"
 import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession, Outcome } from "./session.ts"
@@ -60,18 +59,7 @@ const pendingTarget = (pending: PendingChat): CastAddTarget => ({
 
 type ShellCard = ShellLibrary["cards"][number]
 
-/** A badge over a tile's picture. */
-function Mark({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "accent" }) {
-  return (
-    <span
-      className={`inline-flex h-5 max-w-full items-center gap-1 truncate rounded-full border bg-surface/90 px-1.5 text-xs font-medium ${tone === "accent" ? "border-accent/50 text-accent" : "border-border text-text"}`}
-    >
-      {children}
-    </span>
-  )
-}
-
-/** What happened to the last add: said under the search, so it's seen while the grid scrolls. */
+/** What happened to the last add: below the grid, without moving its controls. */
 type Said = { readonly tone: "done" | "failed"; readonly text: string }
 
 /**
@@ -80,30 +68,10 @@ type Said = { readonly tone: "done" | "failed"; readonly text: string }
  */
 type Status = "adding" | "you" | "in"
 
-const stateOf = (status: string | undefined): TileState =>
-  status === "adding"
-    ? {
-        pending: true,
-        mark: (
-          <Mark tone="accent">
-            <Spinner className="size-3" />
-            Adding
-          </Mark>
-        )
-      }
-    : status === "you"
-      ? { done: true, mark: <Mark>In chat</Mark> }
-      : status === "in"
-        ? {
-            done: true,
-            mark: (
-              <Mark>
-                <Icon name="check" size={12} />
-                In chat
-              </Mark>
-            )
-          }
-        : {}
+const stateOf = (status: string | undefined): TileState => ({
+  pending: status === "adding",
+  done: status === "you" || status === "in"
+})
 const hintOf = (target: CastAddTarget, name: string, status: string | undefined) =>
   status === "you"
     ? `You play ${name} in this chat: they're your persona`
@@ -133,6 +101,7 @@ function AddGrid({
   /** Moves the focus to the search when it changes (an outside request to add). */
   focusSearch: number
 }) {
+  const workspace = usePresetWorkspace()
   const cast = useSyncExternalStore(target.subscribe, target.cast)
   const [search, setSearch] = useState("")
   // Its own filter and sort, apart from the left panel's (cardBrowse.tsx).
@@ -174,6 +143,7 @@ function AddGrid({
     ...adding.map((id) => [id, "adding"] as const)
   ])
   const pick: TilePick = {
+    onOpen: (c) => workspace?.open(c.card.refId),
     onPick: (c) => add(c.card.entityId, c.card.label),
     label: (c, s) => labelOf(fullName(c), s),
     hint: (c, s) => hintOf(target, c.card.label, s),
@@ -186,11 +156,11 @@ function AddGrid({
   const found = browseCards(browsable(data), browse, search)
   const cards = found.slice(0, count)
   return (
-    <div className="flex flex-col gap-2">
-      {/* Kept in view while the grid scrolls under it, with what the last add did. */}
+    <div className="flex flex-col gap-2 px-1">
+      {/* Kept in view while the grid scrolls under it. */}
       <div
         data-layout-overlay="Add characters controls stay over the grid while it scrolls"
-        className="sticky -top-4 z-10 -mx-1 flex flex-col gap-2 bg-surface p-2"
+        className="sticky top-0 z-10 flex flex-col gap-2 bg-surface"
       >
         <Tooltip label="Shows the characters whose name or version has this in it">
           <Input
@@ -204,9 +174,6 @@ function AddGrid({
           />
         </Tooltip>
         <CardBrowseBar data={data} browse={browse} onChange={setBrowse} includePersonas />
-        <p role="status" className={`min-h-4 text-xs ${said?.tone === "failed" ? "text-danger" : "text-muted"}`}>
-          {said?.text ?? ""}
-        </p>
       </div>
       <CharacterGrid
         cards={cards}
@@ -214,7 +181,7 @@ function AddGrid({
         markPersonas={mixesPersonas(browse)}
         pick={pick}
         status={status}
-        // Three small tiles a row on a phone, more as the panel widens.
+        // More columns as the panel widens, inside the search field’s insets.
         className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-2 @3xl:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
       >
         {cards.length === 0 && (
@@ -227,6 +194,12 @@ function AddGrid({
           </p>
         )}
       </CharacterGrid>
+      <p
+        role="status"
+        className={said ? `text-xs ${said.tone === "failed" ? "text-danger" : "text-muted"}` : "sr-only"}
+      >
+        {said?.text ?? ""}
+      </p>
       {found.length > count && (
         <Button
           variant="ghost"
@@ -281,13 +254,7 @@ function CastAdd({ target }: { target: CastAddTarget }) {
   return (
     <section ref={section} aria-labelledby={`${id}-title`} className="flex flex-col gap-2 border-t border-border pt-3">
       <h2 className="text-sm font-semibold">
-        <Tooltip
-          label={
-            open
-              ? "Hides your characters"
-              : "Shows your characters, to add to this chat: a click adds one, and you can add several"
-          }
-        >
+        <Tooltip label={open ? "Click to hide characters to add" : "Click to show characters to add to this chat"}>
           <button
             type="button"
             id={`${id}-title`}

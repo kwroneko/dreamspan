@@ -154,7 +154,7 @@ for (const [width, height] of [
     test(`the composer fills the chat column; banner and queue sit on the box (${width}px ${theme})`, async ({
       page
     }) => {
-      await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default, guidance: false } }))
+      await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
       const { chatId } = await study(`Study ${width} ${theme}`)
       await settled(chatId)
       await open(page, width, height, theme, chatId)
@@ -209,7 +209,7 @@ test("the chat width follows its slider live, saves on release, and follows the 
   // A chat made and settled, two browsers at 3840 px and a reload: 55-75 s alone at a load of
   // 90-120, so the 60 s default timed it out at whichever step it had reached.
   test.setTimeout(180_000)
-  await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default, guidance: false } }))
+  await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
   const { chatId } = await study("Study slider")
   await settled(chatId)
   const writes: Array<string> = []
@@ -295,7 +295,7 @@ test("the chat width follows its slider live, saves on release, and follows the 
 })
 
 test("with the side panel open at 1440 the text keeps the column's width", async ({ page }) => {
-  await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default, guidance: false } }))
+  await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
   const { chatId } = await study("Study panel")
   await settled(chatId)
   await open(page, 1440, 900, "light", chatId)
@@ -315,7 +315,7 @@ test("with the side panel open at 1440 the text keeps the column's width", async
 // its icon in its middle, at 1x and 2x.
 for (const scale of [1, 2])
   test(`the composer's and the strip's icons sit in the middle of their chips (${scale}x)`, async ({ browser }) => {
-    await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default, guidance: false } }))
+    await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
     const { chatId } = await study(`Study icons ${scale}x`)
     await settled(chatId)
     // A third card, so the strip has Next and ▶ Reply now.

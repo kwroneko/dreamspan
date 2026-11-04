@@ -28,7 +28,7 @@ test("guidance editing waits for Enter sends, then obeys Never", async ({ page }
         yield* api.SetGenerationDefaults({
           defaults: { model: { connection: connection.id, model: model.id }, preset: null }
         })
-        yield* api.SetDisplayPrefs({ prefs: { enterSends: "never", guidance: false } })
+        yield* api.SetDisplayPrefs({ prefs: { enterSends: "never" } })
         const chat = yield* api.CreateChat({ title: "Preference readiness" })
         const reply = yield* api.Generate({
           chatId: chat.id,

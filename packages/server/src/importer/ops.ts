@@ -234,7 +234,7 @@ export class FormatOps extends RpcGroup.make(
     payload: {
       dataDir: Schema.String,
       path: Schema.String,
-      width: Schema.Literals(MEDIA_WIDTHS),
+      width: Schema.Literals([0, ...MEDIA_WIDTHS]),
       crop: Schema.optionalKey(Schema.NullOr(AvatarCrop))
     },
     success: ThumbnailResult,

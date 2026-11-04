@@ -791,6 +791,7 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       draftId: Schema.String,
+      guidance: Schema.optionalKey(Schema.Boolean),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       /** Consume a one-reply pick only if it still names this card. */
@@ -1622,6 +1623,7 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("StartChat", {
     payload: {
+      guidance: Schema.optionalKey(Schema.Boolean),
       userId: UserId,
       cards: Schema.Array(EntityId),
       persona: Schema.NullOr(EntityId),
@@ -2207,7 +2209,7 @@ export class WriteOps extends RpcGroup.make(
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
-  /** The card's avatar's cutout, chosen again without a new image; null: back to the default. */
+  /** The card's Picture and Portrait cuts, chosen together; null resets both to the original/default. */
   Rpc.make("SetCardAvatarCrop", {
     payload: { userId: UserId, refId: RefId, expectedRowVersion: Schema.Int, crop: Schema.NullOr(AvatarCrop) },
     success: RefChange,
