@@ -323,12 +323,14 @@ export function MenuLinkItem({
 
 /** An on/off switch in a menu, ticked when on. */
 export function MenuCheckboxItem({
+  icon,
   checked,
   onCheckedChange,
   disabled,
   description,
   children
 }: {
+  icon?: IconName
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   disabled?: boolean
@@ -345,10 +347,18 @@ export function MenuCheckboxItem({
       {...explanation.describedBy}
       className={itemClass("default")}
     >
-      <BaseMenu.CheckboxItemIndicator keepMounted className="menu-mark inline-flex w-4 justify-center text-accent">
-        {checked ? <Icon name="check" /> : null}
-      </BaseMenu.CheckboxItemIndicator>
+      {icon && <Icon name={icon} className="menu-mark text-muted" />}
+      {!icon && (
+        <BaseMenu.CheckboxItemIndicator keepMounted className="menu-mark inline-flex w-4 justify-center text-accent">
+          {checked ? <Icon name="check" /> : null}
+        </BaseMenu.CheckboxItemIndicator>
+      )}
       <ItemText parts={explanation.parts}>{children}</ItemText>
+      {icon && checked && (
+        <BaseMenu.CheckboxItemIndicator className="inline-flex text-accent">
+          <Icon name="check" />
+        </BaseMenu.CheckboxItemIndicator>
+      )}
     </BaseMenu.CheckboxItem>
   )
 }

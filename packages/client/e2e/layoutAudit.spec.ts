@@ -1070,6 +1070,24 @@ test.describe("synthetic library and every app surface", () => {
           await audit("cast-add-personas")
           return
         }
+        if (process.env.LAYOUT_AUDIT_VIEWER_HEADER_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const card = await openPanel(page, cardName)
+          await card
+            .getByRole("button", { name: /^View .*'s picture$/ })
+            .first()
+            .click()
+          const header = page.locator("[data-portrait-column] [data-viewer-header]").first()
+          await expect(header).toBeVisible()
+          await header.screenshot({ path: join(work, `${width}-${theme}-viewer-header.png`) })
+          await audit("viewer-header", "[data-portrait-column] [data-viewer-header]")
+          await header.getByRole("button", { name: "Viewer options", exact: true }).click()
+          await page
+            .getByRole("menu", { name: "Viewer options", exact: true })
+            .screenshot({ path: join(work, `${width}-${theme}-viewer-menu.png`) })
+          await audit("viewer-menu", '[role="menu"]')
+          return
+        }
         if (process.env.LAYOUT_AUDIT_ICON_TOGGLES_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           const versions = page.getByRole("button", { name: /choose a version$/ }).last()
