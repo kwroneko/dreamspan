@@ -95,9 +95,6 @@ export function LogoutButton({ variant = "secondary" }: { variant?: "secondary" 
   )
 }
 
-const navLink =
-  "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-surface-raised hover:text-text data-[status=active]:bg-surface-raised data-[status=active]:text-text"
-
 /** Everything but the chats: the library, import, settings, the bin, the account. */
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const session = useSession()
