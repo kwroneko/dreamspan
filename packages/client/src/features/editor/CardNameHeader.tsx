@@ -151,10 +151,10 @@ export function CardTokensRow({
       {persona}
       <div
         data-card-header-row="usage"
-        className={`flex min-w-0 max-w-full items-center gap-1 text-xs leading-4 text-muted [&>a]:shrink-0 [&>a+span]:before:mr-1 [&>a+span]:before:content-['·']`}
+        className={`flex min-w-0 max-w-full items-center gap-1 text-xs leading-4 text-muted [&>a]:shrink-0 [&>span:has(+a)]:after:ml-1 [&>span:has(+a)]:after:content-['·']`}
       >
-        <CardSurface placement="chats" entityId={entityId as EntityId} label={label} />
         <CardTokens store={store} />
+        <CardSurface placement="chats" entityId={entityId as EntityId} label={label} />
       </div>
     </>
   )
