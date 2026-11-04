@@ -279,7 +279,7 @@ test("the side viewer: wheel zoom at the cursor, drag pan within bounds, slider,
     [fit, "Fit: show all of the picture"],
     [actual, "100%: one pixel of the picture to one pixel of the screen"],
     [percent, /^Shown at \d+% of its own size, 1024 × 1536 pixels$/],
-    [single, "Choose whether opening an image keeps other images open."],
+    [single, "Move this image or choose whether other images stay open."],
     [close, "Close the portrait"]
   ] as const) {
     await control.hover()
