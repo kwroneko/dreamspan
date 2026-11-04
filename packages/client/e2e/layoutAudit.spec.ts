@@ -36,6 +36,77 @@ test.use({
   launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"], args: ["--disable-features=OverlayScrollbar"] }
 })
 
+// Focused navigation checks use a fresh, synthetic local server.
+for (const theme of ["light", "dark"] as const)
+  test(`navigation tiles: ${theme}`, async ({ page }, info) => {
+    const server = await startServer()
+    try {
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.goto(server.url)
+      const navigation = page.getByRole("navigation", { name: "Main", exact: true }).filter({ visible: true })
+      await expect(navigation).toBeVisible()
+      const measurements = []
+      for (const size of ["minimum", "default", "maximum", "phone"] as const) {
+        if (size === "phone") {
+          await page.setViewportSize({ width: 390, height: 900 })
+          await showAppNavigation(page)
+        } else {
+          const grip = page.getByRole("separator", { name: "Resize sidebar", exact: true })
+          if (size === "default") await grip.dblclick()
+          else {
+            await grip.focus()
+            await page.keyboard.press(size === "minimum" ? "Home" : "End")
+          }
+        }
+        const links = navigation.locator("a").filter({ has: page.locator("svg") })
+        await expect(links).toHaveCount(5)
+        for (const link of await links.all()) await expect(link).toBeInViewport()
+        await expect
+          .poll(async () => {
+            const boxes = await links.evaluateAll((elements) => elements.map((el) => el.getBoundingClientRect()))
+            const counts = new Map<number, number>()
+            for (const box of boxes) counts.set(box.y, (counts.get(box.y) ?? 0) + 1)
+            return [...counts.values()].sort().join(",")
+          })
+          .toBe(size === "minimum" ? "2,3" : "5")
+        await expectLayout(page, info, `navtiles-${size}-${theme}`, { scope: 'nav[aria-label="Main"]' })
+        const box = await navigation.boundingBox()
+        const widths = await links.evaluateAll((elements) => elements.map((el) => el.getBoundingClientRect().width))
+        expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(0.1)
+        const clipped = await links.evaluateAll((elements) => elements.some((el) => el.scrollWidth > el.clientWidth))
+        expect(clipped).toBe(false)
+        measurements.push({ size, theme, ...box, widths })
+        await navigation.screenshot({ path: info.outputPath(`navtiles-${size}-${theme}.png`) })
+      }
+      writeFileSync(info.outputPath("tile-widths.json"), JSON.stringify(measurements, null, 2))
+      await info.attach("tile widths", {
+        body: JSON.stringify(measurements, null, 2),
+        contentType: "application/json"
+      })
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await hideAppNavigation(page)
+      for (const [label, explanation] of [
+        ["Library", "Browse characters, personas, lorebooks and presets."],
+        ["Import", "Import characters, chats and library items."],
+        ["Settings", "Change your account and app preferences."],
+        ["Bin", "Browse deleted items."],
+        ["Home", "Open the home page."]
+      ]) {
+        const link = navigation.getByRole("link", { name: label!, exact: true })
+        await link.click()
+        await expect(link).toHaveAttribute("data-status", "active")
+        await expect(navigation.locator('a[data-status="active"]').filter({ has: page.locator("svg") })).toHaveCount(1)
+        await page.mouse.move(0, 0)
+        await link.hover()
+        await expect(page.getByText(explanation!, { exact: true })).toBeVisible()
+        await page.mouse.move(0, 0)
+      }
+    } finally {
+      await server.stop()
+    }
+  })
+
 // Deliberately broken fixtures prove each rule reports measured defects, and the
 // exceptions don't hide defects inside an overlay. No app CSS or fixed snapshots.
 test("the detector catches geometry defects and respects documented intent", async ({ page }) => {
@@ -367,6 +438,15 @@ test.describe("synthetic library and every app surface", () => {
       })
     )
     ;({ chatId, cardId, cardRef, presetRef, bookRef, replyId, connectionId, cardName } = seeded)
+    if (process.env.LAYOUT_AUDIT_PICTURECROP_ONLY === "1") {
+      const ref = await admin((api) => api.OpenEditor({ refId: cardRef }))
+      const response = await fetch(`${server.url}/library/avatar?ref=${cardRef}&rowVersion=${ref.ref.rowVersion}`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/octet-stream" },
+        body: portraitPng()
+      })
+      expect(response.ok).toBe(true)
+    }
     // Populate the shared Extra-tab gallery for its grid audit, at both panel widths.
     for (const [index, name] of ["Alternative coat", "Happy", "Harbor", "Evening"].entries()) {
       const ref = await admin((api) => api.OpenEditor({ refId: cardRef }))
@@ -488,6 +568,30 @@ test.describe("synthetic library and every app surface", () => {
           await audit("addchars-grid", '[aria-label="Characters"]')
           return
         }
+        if (process.env.LAYOUT_AUDIT_PICTURECROP_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const card = await openPanel(page, cardName)
+          await card.getByRole("button", { name: "Picture", exact: true }).click()
+          await expect(page.locator("[data-cutout-box]")).toBeVisible()
+          const dialog = page.getByRole("dialog")
+          for (const tab of ["Picture", "Portrait"]) {
+            await dialog.getByRole("button", { name: tab, exact: true }).click()
+            await audit(`dialog-picture-${tab.toLowerCase()}`, '[role="dialog"]')
+            await dialog.screenshot({ path: join(work, `${width}-${theme}-${tab.toLowerCase()}.png`) })
+          }
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_INTERFACE_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          await openPanel(page, "Interface")
+          const tabs = page.getByRole("tablist", { name: "Chat panel", exact: true })
+          await expect(tabs.getByRole("tab", { name: "Interface", exact: true })).toBeVisible()
+          const bar = tabs.locator("../..")
+          await bar.evaluate((element) => element.setAttribute("data-interface-tabs-audit", ""))
+          await bar.screenshot({ path: join(work, `${width}-${theme}-interface-tabs.png`) })
+          await audit("interface-tab-bar", "[data-interface-tabs-audit]")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1") {
           await admin((api) => api.ChangeLcmSettings({ chatId, change: { withPreset: "specific", preset: presetRef } }))
           await page.goto(`${server.url}/chats/${chatId}`)
@@ -546,7 +650,7 @@ test.describe("synthetic library and every app surface", () => {
             "network",
             "costs",
             "chats",
-            "display",
+            "interface",
             "regex",
             "notifications",
             "account",
@@ -1105,8 +1209,8 @@ test.describe("synthetic library and every app surface", () => {
           await page.keyboard.press("Escape")
           await hideAppNavigation(page)
           await go("chat-before-display", `/chats/${chatId}`)
-          await openPanel(page, "Display")
-          await audit("panel-Display")
+          await openPanel(page, "Interface")
+          await audit("panel-Interface")
           return
         }
         if (process.env.LAYOUT_AUDIT_HEADER_ONLY === "1") {
@@ -1170,7 +1274,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Display",
+            "Interface",
             "Snippets",
             "History edits"
           ]
@@ -1238,7 +1342,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Display",
+            "Interface",
             "Snippets",
             "History edits"
           ]) {
@@ -1458,7 +1562,7 @@ test.describe("synthetic library and every app surface", () => {
         if (process.env.LAYOUT_AUDIT_FIXES_ONLY === "1") {
           await go("home-all", "/")
           await go("library", "/library")
-          await go("settings-display", "/settings/display")
+          await go("settings-interface", "/settings/interface")
           await go("card-editor", `/library/${cardRef}`)
           for (const name of ["Greetings", "Metadata", "Lorebook", "Notes", "Extra"]) {
             await page.getByRole("main").getByRole("tab", { name, exact: true }).first().click()
@@ -1525,7 +1629,7 @@ test.describe("synthetic library and every app surface", () => {
             "Notes",
             "Lorebooks",
             "Summaries",
-            "Display",
+            "Interface",
             "Snippets",
             "History edits"
           ]) {
@@ -1601,7 +1705,7 @@ test.describe("synthetic library and every app surface", () => {
             "network",
             "costs",
             "chats",
-            "display",
+            "interface",
             "regex",
             "notifications",
             "account",

@@ -159,7 +159,7 @@ test("Enter sends is visible, persists and controls saved and pending composers"
   test.setTimeout(120_000)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chat = await setup()
-  await page.goto(`${server().url}/settings/display`)
+  await page.goto(`${server().url}/settings/interface`)
   await page.getByRole("radio", { name: /^Never/ }).click()
   await expect.poll(async () => (await admin((api) => api.GetDisplayPrefs({}))).enterSends).toBe("never")
   await page.reload()
@@ -178,7 +178,7 @@ test("Enter sends is visible, persists and controls saved and pending composers"
     await expect(page.getByRole("article").filter({ hasText: "first line" })).toBeVisible()
     await expect(page.getByTestId("composer")).toHaveValue("")
   }
-  await page.goto(`${server().url}/settings/display`)
+  await page.goto(`${server().url}/settings/interface`)
   await page.getByRole("radio", { name: /^Automatic/ }).click()
 })
 
@@ -303,7 +303,7 @@ test("composer and Enter sends display at desktop and phone widths in both theme
       await page.getByTestId("composer").fill("We should leave before the watch changes.\nThere is still time.")
       await page.screenshot({ path: `${process.env.RP_SCREENS}/composer-${width}-${theme}.png` })
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-      await page.goto(`${server().url}/settings/display`)
+      await page.goto(`${server().url}/settings/interface`)
       await expect(page.getByRole("radio", { name: /^Never/ })).toBeChecked()
       await page.screenshot({ path: `${process.env.RP_SCREENS}/enter-sends-${width}-${theme}.png` })
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)

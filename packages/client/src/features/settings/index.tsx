@@ -148,7 +148,7 @@ export const register = () => {
     parent: "app",
     path: "/settings",
     component: SettingsLayout,
-    nav: { label: "Settings", order: 90 }
+    nav: { label: "Settings", icon: "sliders", description: "Change your account and app preferences.", order: 90 }
   })
   routes.register({ id: "settings.index", parent: "settings", path: "/", component: SettingsIndex })
   settingsGroups.register({

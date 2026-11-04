@@ -14,7 +14,8 @@ import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { type ExportInput, ExportRefused } from "./ops.ts"
 import { describeImage } from "./images.ts"
-import { avatarCropOf } from "@rp/shared/media.ts"
+import { renderPicture } from "./thumbnail.ts"
+import { avatarCropOf, snapCrop, WHOLE_PICTURE } from "@rp/shared/media.ts"
 
 /** A 1×1 PNG for a card without an avatar, since a PNG card needs an image to live in. */
 const PLACEHOLDER_PNG = Buffer.from(
@@ -144,15 +145,41 @@ const builtins: ReadonlyArray<Exporter> = [
     extension: "png",
     media: "avatar",
     description: "A PNG of its avatar with the card inside, as most apps share cards. Embedded assets stay out.",
-    write: cardWriter((card, input) =>
+    write: cardWriter((originalCard, input) =>
       Effect.gen(function* () {
-        if (input.avatar && input.avatar.mime !== "image/png") {
-          const type = (EXTENSIONS[input.avatar.mime] ?? "non-PNG").toUpperCase()
-          return yield* new ExportRefused({
-            message: `This card's avatar is a ${type} image, which a PNG card can't hold. Export it as CHARX, which keeps the image, or as JSON.`
-          })
+        let card = originalCard
+        const crop = avatarCropOf(card.avatar_media_id, card.avatar_crop)
+        const picture = crop?.picture ?? WHOLE_PICTURE
+        const image = input.avatar
+          ? yield* Effect.tryPromise({
+              try: () => renderPicture(input.avatar!.bytes, picture),
+              catch: () => new ExportRefused({ message: "The picture couldn't be rendered as PNG." })
+            })
+          : PLACEHOLDER_PNG
+        if (crop) {
+          const ours = card.extensions[OUR_EXTENSION]
+          const size = describeImage(image)
+          card = {
+            ...card,
+            extensions: {
+              ...card.extensions,
+              [OUR_EXTENSION]: {
+                ...(Predicate.isObject(ours) ? ours : {}),
+                avatar_crop: {
+                  ...snapCrop({
+                    x: Math.max(0, (crop.x - picture.x) / picture.width),
+                    y: Math.max(0, (crop.y - picture.y) / picture.height),
+                    width: crop.width / picture.width,
+                    height: crop.height / picture.height
+                  }),
+                  image_width: size.width,
+                  image_height: size.height
+                }
+              }
+            }
+          }
         }
-        return yield* exportCardPng(card, input.avatar?.bytes ?? PLACEHOLDER_PNG).pipe(
+        return yield* exportCardPng(card, image).pipe(
           Effect.mapError(() => new ExportRefused({ message: "The card's avatar isn't a valid PNG." }))
         )
       })
