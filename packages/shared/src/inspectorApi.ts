@@ -7,6 +7,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, ContextIssue, ForkId, SlotId, VersionId } from "./chat.ts"
 import { NotFound, ServerError } from "./errors.ts"
 import { LlmRequestId, RequestStatus, UsageSource } from "./usage.ts"
+import { RefId } from "./library.ts"
 import { ScriptRef } from "./regexScripts.ts"
 
 /** Historical activation decisions; keyword text is scrubbed with the sent request. */
@@ -395,7 +396,7 @@ export const PresetContext = Schema.Struct({
     )
   ),
   notes: Schema.Array(
-    Schema.Struct({ title: Schema.String, placement: Placement, due: Schema.optionalKey(Schema.Boolean) })
+    Schema.Struct({ ref: RefId, title: Schema.String, placement: Placement, due: Schema.optionalKey(Schema.Boolean) })
   ),
   /**
    * What `{{summary}}` fills in for this chat (DESIGN §8 [P]): the prompts of the preset that hold

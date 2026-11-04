@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { utilityMacros } from "@rp/shared/macros/builtins/utility.ts"
 import { parse, type Node } from "@rp/shared/macros/parse.ts"
 import type { PresetPrompt } from "@rp/shared/docs/preset.ts"
@@ -118,7 +119,7 @@ export function PlaceholderSource({
   identifier: string
   byDefinitions?: boolean
   heading?: string
-  source?: string
+  source?: ReactNode
   about?: string
 }) {
   const kind = promptKind({ identifier, marker: true } as PresetPrompt)
@@ -136,7 +137,7 @@ export function PlaceholderSource({
 
 export function PromptKindTag({ prompt }: { prompt: PresetPrompt }) {
   const kind = promptKind(prompt)
-  if (!kind) return null
+  if (!kind || prompt.marker || !slots[prompt.identifier]) return null
   return (
     <Tooltip label={kind.hint}>
       <span

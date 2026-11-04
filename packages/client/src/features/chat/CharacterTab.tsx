@@ -8,7 +8,7 @@ import { useChatCards } from "./chatCards.ts"
 // store and field histories (ARCHITECTURE §14.6), each long field openable large over the
 // chat. At the top, the portrait beside the names renamed in place and the token counts
 // (`CardHeader`; "You" is a badge on the persona's portrait), then
-// the card's actions as buttons: New chat with them, Full editor, Fork for this chat, Export…
+// the card's actions as buttons: New chat with them, Fork for this chat, Export…
 // and what else is registered (`chatCardActions`). The persona's tab is the same card editor
 // (DESIGN §2.2: a persona is a card). Card data and actions stay in their
 // feature; the panel host only sees its descriptor.
@@ -37,7 +37,8 @@ import type { ChatCardInfo } from "./CardForkDialogs.tsx"
 import type { PanelProps, PendingPanelProps } from "./panels.tsx"
 import type { PendingChat } from "./pendingChat.ts"
 import { usePendingCardInfo } from "./pendingCardInfo.ts"
-import { ChatCardActions } from "./presentation.tsx"
+import { chatCardActions } from "./presentation.tsx"
+import { SlotOutlet } from "../../slots.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export function CharacterTab({ session, view, tab }: PanelProps) {
@@ -212,7 +213,16 @@ function CardPanel({
               <CardNameHeader
                 store={store}
                 call={call}
-                saveControls={<SaveRevision store={store} />}
+                saveControls={
+                  <>
+                    <SaveRevision store={store} />
+                    <SlotOutlet
+                      slot={chatCardActions}
+                      only="card.edit"
+                      props={{ session, card, info, persona, presentation: "header" }}
+                    />
+                  </>
+                }
                 current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
               />
               <CardTokensRow personaLast store={store} entityId={card.entityId} label={card.label} />
@@ -228,7 +238,7 @@ function CardPanel({
         </CardHeader>
         <div className="-mx-2 flex flex-wrap items-center gap-x-1">
           {!persona && !alone && <NewChat card={card} />}
-          <ChatCardActions session={session} card={card} info={info} persona={persona} />
+          <SlotOutlet slot={chatCardActions} except={["card.edit"]} props={{ session, card, info, persona }} />
         </div>
         {state.loadError && <ErrorAlert error={state.loadError} />}
         {!state.snapshot && !state.loadError && <p className="text-sm text-muted">Loading the card…</p>}

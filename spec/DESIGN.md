@@ -1,3 +1,5 @@
+**Built 2026-11-04 (smallfixes5):** The card editor navigation (§2.2), prompt badges and linked history-note marker (§6.2a) are implemented and obsolete as implementation requirements; see ARCHITECTURE §14.6.
+
 **Built 2026-11-02 (stablebuttons):** The stable unavailable-control rule in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §5.
 **Built 2026-11-03 (newnoteopen):** The new-note expansion decision in §4.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
 **Built 2026-11-03 (lorebookfix2):** The field-help placement, always-visible Strategy and position, and quiet export-only header decisions in §1.3 are implemented and obsolete as implementation requirements; see ARCHITECTURE §14.6.
@@ -237,6 +239,9 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** (owner, 2026-11-02, groupgrid) "make the gaps between portraits equal horizontally and vertically, at every panel width, with any number of members." Portrait/card grids use one CSS `gap` for both axes. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a).
 
 ### 2.2 Personas, speakers and writers
+
+- **[D]** (owner, 2026-11-04): “The 'Full Editor' button is buried in the action list for the card. It's not an action.” Match the other sidebar editors' full-editor control and position. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
+- **[P]** (smallfixes5, 2026-11-04): render the existing registered `card.edit` contribution as an expand icon after Save in the card identity row; retain its menu presentation elsewhere.
 
 - **[D]** (owner, 2026-11-04): In the side panel character header, “the persona button needs to be at the bottom of this cluster”, below the chats/token counts. Remove the portrait's Persona badge here: “entirely redundant”; keep You and badges elsewhere. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 
@@ -763,6 +768,10 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 
 ### 6.2a The prompt preset editor (owner, 2026-10-27)
 
+- **[D]** (owner, 2026-11-04): “unique built-in prompts with fixed names that are already highlighted by their colour … shouldn't repeat their name in a coloured badge.” Keep badges for special prompts with customizable titles that are not otherwise highlighted. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
+- **[D]** (owner, 2026-11-04): “Rename it 'Notes from this chat' (if it actually means notes placed inside the history, say exactly that instead …). Link each listed note so the user can open it. Don't change how notes at depth > 1 are shown.” **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
+- **[P]** (smallfixes5, 2026-11-04): keep kind badges for Main, Post-history, Auxiliary and Enhance definitions; omit placeholder, custom and unknown-kind badges. The positive-depth marker becomes “Notes in the chat history”; every listed note title opens its existing large editor, keeping depth and due annotations.
+
 - **[D]** (owner, 2026-11-04): “It can't mean two things.” Depth 0 means after the last message; list a depth-0 note only under Notes after the newest message. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
 
 
@@ -1114,7 +1123,10 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 - **[P]** (savecluster, 2026-11-02) How: the cluster joins the row of the surface's own toolbar, Save on the left of a list's toolbar and at the end of an actions row: the Prompt preset tab's Expand all row (Save left, the list's buttons right), a panel lorebook's entries toolbar (the same), the character tab's row of card tabs (Definition, Greetings… left, Save right; that row now stays in sight while scrolling, as Save's own row did: the actions row above wraps to three rows on a phone, too tall to keep in sight), an open note's header (between its name and its ⋯ menu), and a snippet's row beside All chats. The library page and the large preset editor already have Save in their sticky toolbar with Search and History, so they keep it there. When a row is too narrow, the toolbar's buttons wrap under it; there is no row with Save alone.
 - **[P]** (savecluster, 2026-11-02) The library page's "Saved a revision." notice is gone, Save's tick says it; the notice stays only when a save did more (variants that took the change or have conflicts, text moved to the bin). The page's own "Keeping your changes…" line goes with the state line: typing is kept as it's typed, and a failure to keep it still shows its alert. No save shortcut exists to show in Save's explanation.
 
-- **[D] Viewer stack order and options** (owner, 2026-11-03, gallery brief): “The whole image header is the drag handle”; “dragging reorders the stack live”; “newly opened images go on top.” The column has fixed height and does not scroll. Right-click or long-press the header for Move up, Move down, Move to top and Close; focused-header shortcuts are displayed beside the moves. Header explanation: “Drag to reorder · right-click for more”. Replace the keep-one toggle with a ⋯ menu containing the checkable “Keep one image open” setting. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a). Supersedes the earlier scrolling minimum and dedicated keep-one button proposals.
+- **[D] Viewer stack order and options** (owner, 2026-11-03, gallery brief; corrected 2026-11-04): “The whole image header is the drag handle”; “newly opened images go on top.” The column has fixed height and does not scroll. The previous live-reordering and right-click/long-press menu wording was not the owner's request and is superseded by the decisions below. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a).
+  - **[D]** (owner, 2026-11-04): “Dragging them seems broken now. It's twitchy/glitchy, and moves them right away instead of on-release, which would let you preview where they'd fall like before.” Dragging previews the destination with a drop indicator, keeping viewers stationary until release. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a).
+  - **[D]** (owner, 2026-11-04): “Move up/down/top were supposed to go into the three dot menu. They're somehow in a right-click context menu that was never meant to be built.” Remove the custom header context menu, including long-press, restore the browser menu, put Move up, Move down and Move to top in ⋯, and correct the “right-click for more” explanation. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a).
+  - **[D]** (owner, 2026-11-04): “The three dot menu doesn't have the icon we had for Keep one image open, *and* it's misaligned with an empty space in its place.” Reuse the old keep-one toggle's icon in the menu's icon column, without an empty gap. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a).
 - **[P]** (gallery, 2026-11-03): Alt+↑/Alt+↓ move one place and Alt+Home moves to the top; order follows the viewer's existing URL state and height weights stay with each image. **Built** (ARCHITECTURE §14.5a).
 
 ### 10.2 Rendering

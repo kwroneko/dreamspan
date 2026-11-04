@@ -255,8 +255,13 @@ describe("context assembly from the database", () => {
       assert.includeDeepMembers(
         [...context.notes],
         [
-          { title: "Continuity", placement: { mode: "section", section: "tail_end" }, due: true },
-          { title: "Empty active note", placement: { mode: "section", section: "tail_start" }, due: true }
+          { ref: note.ref.id, title: "Continuity", placement: { mode: "section", section: "tail_end" }, due: true },
+          {
+            ref: empty.ref.id,
+            title: "Empty active note",
+            placement: { mode: "section", section: "tail_start" },
+            due: true
+          }
         ]
       )
       assert.deepEqual(context.cacheAfter, [])

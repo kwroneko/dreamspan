@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
+import type { RefId } from "@rp/shared/library.ts"
 import type { Placement } from "@rp/shared/docs/note.ts"
 import type { ContextSnapshot, Piece } from "../assembler/types.ts"
 import { estimateTokens } from "../assembler/st.ts"
@@ -63,14 +64,16 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
     const rows = revisions.length
       ? yield* sql<{
           id: string
+          ref: RefId
           name: string | null
           title: string | null
           placement: string | null
           card: string | null
         }>`
-    SELECT v.id, json_extract(v.doc_json, '$.name') AS name, json_extract(v.doc_json, '$.title') AS title,
+    SELECT v.id, r.id AS ref, json_extract(v.doc_json, '$.name') AS name, json_extract(v.doc_json, '$.title') AS title,
       json_extract(v.doc_json, '$.placement') AS placement, json_extract(v.doc_json, '$.owner.card') AS card
     FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
+    JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
     WHERE v.id IN ${sql.in(revisions)} AND e.owner_user_id = ${userId}`
       : []
     const names = new Map(rows.map((r) => [r.id, r.name]))
@@ -111,6 +114,7 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
         r.title !== null && r.placement !== null
           ? [
               {
+                ref: r.ref,
                 title: r.title || "Untitled note",
                 placement: slotOf(JSON.parse(r.placement) as Placement, r.card !== null),
                 due: activeNotes.get(r.id) ?? true

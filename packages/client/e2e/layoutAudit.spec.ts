@@ -305,7 +305,8 @@ test.describe("synthetic library and every app surface", () => {
               process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SEARCHREPLACE_ONLY === "1" ||
-              process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1"
+              process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1" ||
+              process.env.LAYOUT_AUDIT_SMALLFIXES5_ONLY === "1"
                 ? preset.id
                 : null
           }
@@ -483,6 +484,19 @@ test.describe("synthetic library and every app surface", () => {
             api.ChangeGenerationDefaults({ change: { lcm: { withPreset: "specific", preset: presetRef } } })
           )
           await go("settings-chats", "/settings/chats")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_SMALLFIXES5_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const card = await openPanel(page, cardName)
+          await expect(card.locator("[data-card-tokens]")).toBeVisible()
+          await audit("panel-card-header", "[data-card-header]")
+          const preset = await openPanel(page, "Prompt preset")
+          await expect(preset.getByRole("list", { name: "Preset blocks" })).toBeVisible()
+          await audit("panel-preset", '[aria-label="Preset blocks"], [aria-label="Prompt order"]')
+          await preset.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
+          await expect(page.getByRole("dialog", { name: "Preset editor", exact: true })).toBeVisible()
+          await audit("large-preset", '[aria-label="Preset blocks"], [aria-label="Prompt order"]')
           return
         }
         if (process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1") {
@@ -1098,6 +1112,24 @@ test.describe("synthetic library and every app surface", () => {
           await expect(toggle(section)).toHaveAttribute("aria-pressed", "true")
           await expect(toggle(section).locator("svg path")).toHaveCount(2)
           await audit("cast-add-personas")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_VIEWER_HEADER_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const card = await openPanel(page, cardName)
+          await card
+            .getByRole("button", { name: /^View .*'s picture$/ })
+            .first()
+            .click()
+          const header = page.locator("[data-portrait-column] [data-viewer-header]").first()
+          await expect(header).toBeVisible()
+          await header.screenshot({ path: join(work, `${width}-${theme}-viewer-header.png`) })
+          await audit("viewer-header", "[data-portrait-column] [data-viewer-header]")
+          await header.getByRole("button", { name: "Viewer options", exact: true }).click()
+          await page
+            .getByRole("menu", { name: "Viewer options", exact: true })
+            .screenshot({ path: join(work, `${width}-${theme}-viewer-menu.png`) })
+          await audit("viewer-menu", '[role="menu"]')
           return
         }
         if (process.env.LAYOUT_AUDIT_ICON_TOGGLES_ONLY === "1") {

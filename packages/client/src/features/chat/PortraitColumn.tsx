@@ -13,7 +13,7 @@ import { popupOpen } from "../../ui/openPopups.ts"
 import { type Portrait, PortraitView, usePortraitViewer } from "../../ui/Portrait.tsx"
 import type { StackEntry } from "../../ui/portraitStack.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
-import { ViewerHeader } from "../../ui/ViewerHeader.tsx"
+import { ViewerHeader, ViewerMoves } from "../../ui/ViewerHeader.tsx"
 import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 
@@ -197,11 +197,13 @@ function Viewer({
               <IconButton
                 label="Viewer options"
                 icon="more"
-                hint="Choose whether opening an image keeps other images open."
+                hint="Move this image or choose whether other images stay open."
               />
             }
           >
+            <ViewerMoves portrait={portrait} />
             <MenuCheckboxItem
+              icon="one-image"
               checked={viewer.single}
               onCheckedChange={(on) => viewer.setSingle(on, portrait.id)}
               description={viewer.single ? SINGLE_ON : SINGLE_OFF}
