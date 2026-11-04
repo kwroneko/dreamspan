@@ -188,6 +188,7 @@ function Viewer({
     >
       <PortraitView
         portrait={portrait}
+        alignToChatHeader={first}
         header={(node) => <ViewerHeader portrait={portrait}>{node}</ViewerHeader>}
         title={(name) => <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</h2>}
         toggle={

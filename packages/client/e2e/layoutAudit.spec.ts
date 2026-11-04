@@ -863,6 +863,23 @@ test.describe("synthetic library and every app surface", () => {
           await audit("preset-large")
           return
         }
+        if (process.env.LAYOUT_AUDIT_HEADERSPACING_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const panel = await openPanel(page, cardName)
+          const header = panel.locator("[data-card-header]")
+          await expect(header.locator("[data-card-tokens]")).toBeVisible()
+          for (const persona of [false, true]) {
+            const toggle = header.getByRole("button", { name: "Persona", exact: true })
+            if ((await toggle.getAttribute("aria-pressed")) !== String(persona)) await toggle.click()
+            await expect(toggle).toHaveAttribute("aria-pressed", String(persona))
+            await page.mouse.move(0, 0)
+            await header.screenshot({
+              path: join(work, `header-${width}-${theme}-${persona ? "persona" : "character"}.png`)
+            })
+            await audit(`panel-${persona ? "persona" : "character"}-header`, "[data-card-header]")
+          }
+          return
+        }
         if (process.env.LAYOUT_AUDIT_CARD_HEADERS_ONLY === "1") {
           await page.goto(`${server.url}/library/${cardRef}`)
           await expect(page.locator("[data-card-tokens]")).toBeVisible()

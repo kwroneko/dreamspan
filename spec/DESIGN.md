@@ -240,6 +240,10 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 2.2 Personas, speakers and writers
 
+- **[D]** (owner, 2026-11-04): Side-panel card header: “the spacing looks messed up again here”. Align the Persona icon's visible left edge with the text column and use consistent row spacing, preserving control placement, size and hit areas. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
+- **[P]** (headerspacing, 2026-11-04): give the side-panel counts row the same 28 px minimum height as nickname and Persona; retain 4 px row gaps and offset the Persona row by its icon's 10 px visual inset. The persona-card variant shares this layout; the group header uses a separate component.
+
+
 - **[D]** (owner, 2026-11-04): “The 'Full Editor' button is buried in the action list for the card. It's not an action.” Match the other sidebar editors' full-editor control and position. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
 - **[P]** (smallfixes5, 2026-11-04): render the existing registered `card.edit` contribution as an expand icon after Save in the card identity row; retain its menu presentation elsewhere.
 
@@ -1008,6 +1012,10 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ### 10.1 Web app
 
 - **[D]** (owner, 2026-11-04, castgap): “Why is there so much space above the cast row of the sidebar tabs?” Match the spacing above and below the Cast row. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §12. **[P]** Reduce the host strip’s top padding to match its existing 4px bottom inset.
+
+- **[D] Owner, 2026-11-04 (viewertop approval):** “The header size change does look slightly off, but it's better than not having it, and I think it won't bother most users. We're keeping it”. Keep the top side viewer's header aligned with the chat header; lower viewers retain compact headers. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.5a.
+
+- **[D] Owner, 2026-11-04 (viewertop trial):** “matching only the top viewer's header to the chat header's height. Stacked viewers below it keep the compact height.” “I wonder if it'd look bad to have them uneven. We can try it though”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.5a. **[P]** Reuse the shell-header height token only for the first side viewer; at narrow column widths its two control rows share that height.
 
 - **[D]** (owner, 2026-11-04): Field help wrapping below the label is “obviously totally incorrect, broken and sloppy looking and it's a regression I didn't ask for.” The ? stays inline immediately after the label. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
 
