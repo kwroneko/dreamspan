@@ -116,7 +116,7 @@ function Row({
           </span>
           {/* What tells two chats of the same cast apart, on a line of its own so it's never cut off. */}
           <span data-chat-meta className="text-xs text-muted">
-            <span className="whitespace-nowrap">started {formatDay(name.started ?? new Date(chat.createdAt))}</span>
+            <span>started {formatDay(name.started ?? new Date(chat.createdAt))}</span>
             {summary && (
               <>
                 {" · "}

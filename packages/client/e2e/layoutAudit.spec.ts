@@ -111,6 +111,7 @@ test("the detector catches geometry defects and respects documented intent", asy
 
 const work = process.env.LAYOUT_AUDIT_WORK ?? mkdtempSync(join(tmpdir(), "rp-layout-audit-"))
 const selected = new RegExp(process.env.LAYOUT_AUDIT_SURFACES ?? ".*")
+const avatarStackNames = ["Double Capitals", "Other 1", "Other 3", "Wide WWW", "ß ß", "Hidden Willow"]
 // Surfaces to keep a whole-window screenshot of, for before-and-after evidence (shots/ in the work folder).
 const shots = process.env.LAYOUT_AUDIT_SHOTS ? new RegExp(process.env.LAYOUT_AUDIT_SHOTS) : null
 
@@ -269,8 +270,7 @@ test.describe("synthetic library and every app surface", () => {
     if (process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1") {
       await admin((api) =>
         Effect.gen(function* () {
-          for (const name of ["Iris", "Echo", "Nova", "Sky Keeper", "Hidden Rowan", "Hidden Willow"])
-            yield* api.CreateCard({ label: name, name })
+          for (const name of avatarStackNames) yield* api.CreateCard({ label: name, name })
         })
       )
     }
@@ -281,7 +281,7 @@ test.describe("synthetic library and every app surface", () => {
         const b = cards.find((c) => c.entityId !== a.entityId)!
         const overflowCards =
           process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1"
-            ? (yield* api.ListCards()).filter((card) => !card.persona).slice(0, 6)
+            ? (yield* api.ListCards()).filter((card) => avatarStackNames.includes(card.name))
             : []
         const preset = (yield* api.ListLibrary({ kind: "preset" }))[0]!
         const book = (yield* api.ListLibrary({ kind: "lorebook" }))[0]!
@@ -853,6 +853,7 @@ test.describe("synthetic library and every app surface", () => {
         }
         if (process.env.LAYOUT_AUDIT_AVATAR_STACKS_ONLY === "1") {
           await go("home-groups", "/?show=groups")
+          await go("group-page", `/groups/${chatId}`)
           await go("library-rows", "/library")
           await go("chat-list", "/chats")
           await go("group-chat-header", `/chats/${chatId}`)

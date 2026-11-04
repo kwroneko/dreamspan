@@ -15,11 +15,15 @@ const TINTS = [
 ]
 
 export const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .filter((word) => word !== "")
+  [
+    ...name
+      .split(/\s+/)
+      .filter((word) => word !== "")
+      .slice(0, 2)
+      .map((word) => [...word][0]!.toUpperCase())
+      .join("")
+  ]
     .slice(0, 2)
-    .map((word) => [...word][0]!.toUpperCase())
     .join("") || "?"
 
 const tint = (id: string) => {
@@ -97,7 +101,7 @@ export function Avatar({
       <span
         aria-hidden="true"
         {...(mediaId !== null ? { "data-image-fallback": true } : {})}
-        className={`size-full items-center justify-center font-semibold select-none ${mediaId !== null ? "bg-surface-raised text-muted" : `inline-flex ${tint(id)}`}`}
+        className={`size-full items-center justify-center text-[40cqi] leading-none font-semibold select-none ${mediaId !== null ? "bg-surface-raised text-muted" : `inline-flex ${tint(id)}`}`}
       >
         {initials(name)}
       </span>
@@ -116,11 +120,11 @@ export function Avatar({
         open({ id, name, mediaId })
       }}
     >
-      <PortraitFrame className="size-full">{content}</PortraitFrame>
+      <PortraitFrame className="@container size-full">{content}</PortraitFrame>
     </button>
   ) : (
     <span ref={ref} data-portrait className={box}>
-      <PortraitFrame className="size-full">{content}</PortraitFrame>
+      <PortraitFrame className="@container size-full">{content}</PortraitFrame>
     </span>
   )
 }
