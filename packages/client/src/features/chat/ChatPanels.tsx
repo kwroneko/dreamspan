@@ -236,7 +236,7 @@ export function ChatSidePanel({
           moreLabel="More tools"
         />
       </div>
-      <div className="border-b border-border px-2 pt-4">
+      <div className="border-b border-border px-2 pt-1">
         <SubjectTabs
           tabs={cast.map((t) => ({
             value: t.value,

@@ -1310,6 +1310,8 @@ The parsers are synchronous and take up to about a second on a hostile file (§8
 
 Card identity overflow (identityoverlap, 2026-11-04): `CardNameHeader` reserves the combined minimum width of the name/version pencils and their gap. Its identity row wraps when necessary, retaining normal-width placement and whole rename controls; text still truncates. While renaming, the group reserves room for Save and Cancel as well. `cardHeaderRows.spec.ts` retains the normal-width portrait-height checks and permits wrapping only in its minimum-panel case, where both pencils and Cancel are exercised. The focused header audit supports `LAYOUT_AUDIT_HEADER_MINIMUM=1` to resize the desktop panel to its minimum before sampling character/persona headers.
 
+**Cast navigation spacing** (castgap, 2026-11-04; DESIGN §10.1). `ChatSidePanel` gives the subject strip 4px top padding, matching `SubjectTabs`’ existing 4px bottom padding. Previously the host added 16px above it. The tools row and shared subject component are unchanged. `LAYOUT_AUDIT_CASTGAP_ONLY=1` audits both navigation rows across all tools and character tabs, measures the 12px reduction against the previous spacing, and captures before/after crops.
+
 **Side-panel card header spacing** (headerspacing, 2026-11-04; DESIGN §2.2). `CardTokensRow` with `personaLast` gives the counts row a 28 px minimum height, matching the nickname and Persona rows with the shared 4 px gaps. Its Persona row offsets the unchanged button by 10 px so the person icon's visible stroke aligns with the text column. Character and persona cards share this layout; the group header is separate.
 
 

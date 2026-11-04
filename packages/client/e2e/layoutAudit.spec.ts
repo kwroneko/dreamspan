@@ -996,6 +996,80 @@ test.describe("synthetic library and every app surface", () => {
           await audit("panel-Snippets")
           return
         }
+        if (process.env.LAYOUT_AUDIT_CASTGAP_ONLY === "1") {
+          await go("group-chat", `/chats/${chatId}`)
+          await openPanel(page, "This chat")
+          const subjects = page.getByRole("tablist", { name: "Characters", exact: true })
+          const strip = subjects.locator("xpath=../../..")
+          const nav = strip.locator("..")
+          const scope = "[data-castgap-audit]"
+          await nav.evaluate((el) => el.setAttribute("data-castgap-audit", ""))
+          const names = [
+            "This chat",
+            "Cast",
+            "Model",
+            "Prompt preset",
+            "Notes",
+            "Lorebooks",
+            "Summaries",
+            "Display",
+            "Snippets",
+            "History edits"
+          ]
+          const characters = await subjects
+            .getByRole("tab")
+            .evaluateAll((tabs) => tabs.slice(1).map((tab) => tab.getAttribute("title")!))
+          const measurements = []
+          for (const name of [...names, ...characters]) {
+            if (characters.includes(name)) await subjects.getByTitle(name, { exact: true }).click()
+            else await openPanel(page, name)
+            await expect(
+              page
+                .getByRole("tabpanel")
+                .filter({ visible: true })
+                .getByText(/^(Loading|Still loading)/)
+            ).toHaveCount(0)
+            await expect(page.getByRole("tabpanel").filter({ visible: true }).first()).toBeVisible()
+            const geometry = () =>
+              nav.evaluate((el) => {
+                const tools = el.children[0]!.getBoundingClientRect()
+                const row = el.children[1]!
+                const tabs = row.querySelector('[role="tablist"]')!
+                const chip = tabs.firstElementChild!.getBoundingClientRect()
+                const box = row.getBoundingClientRect()
+                const panel = [...el.parentElement!.children]
+                  .find((child) => child.matches('[role="tabpanel"]') && child.getBoundingClientRect().height > 0)!
+                  .getBoundingClientRect()
+                const rect = (r: DOMRect) => ({ x: r.x, y: r.y, width: r.width, height: r.height })
+                return {
+                  tools: rect(tools),
+                  chip: rect(chip),
+                  panel: rect(panel),
+                  above: chip.top - tools.bottom,
+                  below: box.bottom - 1 - chip.bottom
+                }
+              })
+            await strip.evaluate((el) => {
+              ;(el as HTMLElement).style.paddingTop = "16px"
+            })
+            const before = await geometry()
+            if (name === "This chat") await nav.screenshot({ path: join(work, `${width}-${theme}-before.png`) })
+            await strip.evaluate((el) => {
+              ;(el as HTMLElement).style.removeProperty("padding-top")
+            })
+            const after = await geometry()
+            expect(after.above).toBe(4)
+            expect(after.below).toBe(4)
+            expect(after.tools).toEqual(before.tools)
+            expect(after.chip).toEqual({ ...before.chip, y: before.chip.y - 12 })
+            expect(after.panel).toEqual({ ...before.panel, y: before.panel.y - 12, height: before.panel.height + 12 })
+            if (name === "This chat") await nav.screenshot({ path: join(work, `${width}-${theme}-after.png`) })
+            measurements.push({ name, before, after })
+            await audit(`castgap-${name}`, scope)
+          }
+          writeFileSync(join(work, `geometry-${width}-${theme}.json`), JSON.stringify(measurements, null, 2))
+          return
+        }
         if (process.env.LAYOUT_AUDIT_PANELS_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           for (const name of [
