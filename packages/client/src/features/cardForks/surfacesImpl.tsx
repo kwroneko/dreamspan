@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { libraryListAtom } from "../library/queries.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -30,13 +31,15 @@ function MemberLink({ member }: { member: FamilyMember }) {
   return (
     <>
       {member.refId && ["live", "archived"].includes(member.state) ? (
-        <Link
-          to="/library/$refId"
-          params={{ refId: member.refId }}
-          className="text-accent hover:underline [overflow-wrap:anywhere]"
-        >
-          {name(member)}
-        </Link>
+        <Tooltip label="Opens this card’s editor.">
+          <Link
+            to="/library/$refId"
+            params={{ refId: member.refId }}
+            className="text-accent hover:underline [overflow-wrap:anywhere]"
+          >
+            {name(member)}
+          </Link>
+        </Tooltip>
       ) : (
         <span>{name(member)}</span>
       )}
@@ -149,9 +152,11 @@ export function Provenance({ entityId }: CardSurfaceContext) {
 function ChatLink({ chatId }: { chatId: NonNullable<FamilyMember["forkedInChatId"]> }) {
   const result = useAtomValue(useMemo(() => AppClient.query("GetChat", { chatId }), [chatId]))
   return (
-    <Link to="/chats/$chatId" params={{ chatId }} className="text-accent hover:underline">
-      {AsyncResult.isSuccess(result) ? result.value.title || "Untitled chat" : "the chat"}
-    </Link>
+    <Tooltip label="Opens this chat.">
+      <Link to="/chats/$chatId" params={{ chatId }} className="text-accent hover:underline">
+        {AsyncResult.isSuccess(result) ? result.value.title || "Untitled chat" : "the chat"}
+      </Link>
+    </Tooltip>
   )
 }
 /**
@@ -169,15 +174,17 @@ export function ForkBadge({ entityId, label }: CardSurfaceContext) {
   return (
     <>
       {/* A badge that opens the family tree: shaped like the other badges beside it. */}
-      <button
-        type="button"
-        className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs font-medium whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-        onClick={() => setOpen(true)}
-        aria-label={label === undefined ? "Forks of this card" : `Forks of ${label}`}
-      >
-        <Icon name="branch" size={12} />
-        {children ? `${children} ${children === 1 ? "fork" : "forks"}` : "Fork"}
-      </button>
+      <Tooltip label="Lists this card’s forks.">
+        <button
+          type="button"
+          className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs font-medium whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+          onClick={() => setOpen(true)}
+          aria-label={label === undefined ? "Forks of this card" : `Forks of ${label}`}
+        >
+          <Icon name="branch" size={12} />
+          {children ? `${children} ${children === 1 ? "fork" : "forks"}` : "Fork"}
+        </button>
+      </Tooltip>
       {open && <FamilyDialog entityId={entityId} onClose={() => setOpen(false)} />}
     </>
   )
@@ -356,7 +363,9 @@ function ForkFromMenu({ entityId, store, onClose }: CardSurfaceContext & { onClo
     <Dialog open onOpenChange={(open) => !open && onClose()} title="Fork card">
       {loaded?.loadError ? <ErrorAlert error={loaded.loadError} /> : <p className="text-muted">Loading the card…</p>}
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button hint="Closes this dialog without applying changes." onClick={onClose}>
+          Cancel
+        </Button>
       </DialogActions>
     </Dialog>
   )
@@ -404,6 +413,7 @@ function ParentDialog({ entityId, onClose }: { entityId: EntityId; onClose: () =
               {candidates.map((card) => (
                 <li key={card.id}>
                   <Button
+                    hint="Selects this card as the fork source."
                     className="h-auto! min-h-11 whitespace-normal! text-left"
                     disabled={action.pending}
                     onClick={() =>
@@ -425,7 +435,7 @@ function ParentDialog({ entityId, onClose }: { entityId: EntityId; onClose: () =
       </AsyncView>
       <ErrorAlert error={action.error} />
       <DialogActions>
-        <Button disabled={action.pending} onClick={onClose}>
+        <Button hint="Closes this dialog without applying changes." disabled={action.pending} onClick={onClose}>
           Cancel
         </Button>
       </DialogActions>
@@ -443,7 +453,7 @@ function CompareDialog({ family, member, onClose }: { family: CardFamily; member
       open
       onOpenChange={(open) => !open && onClose()}
       title={member.parentEntityId ? "Compare with parent" : "Compare with family"}
-      description="Compare the last saved versions; drafts are left out. Removed text is from the selected card, added text from this card."
+      description="Compares the cards’ saved revisions. Removed text is from the selected card; added text is from this card."
     >
       <Field label="Compare this card with">
         <Select

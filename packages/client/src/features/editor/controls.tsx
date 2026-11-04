@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { SearchHighlights } from "../../ui/SearchHighlights.tsx"
 import { useSearchHighlights } from "./searchHighlights.ts"
 // Form controls bound to an editor's fields: each reads its own field from the store and
@@ -576,10 +577,12 @@ export function RecoveredNotice({ store }: { store: EditorStore }) {
       </p>
       {/* Under the text, so a narrow panel keeps the sentence readable. */}
       <div className="mt-1 flex flex-wrap gap-2">
-        <Link to="/bin" search={{ section: "recovered" }} className={buttonClass("ghost")}>
-          Open the bin
-        </Link>
-        <Button variant="ghost" onClick={() => store.dismissRecovered()}>
+        <Tooltip label="Opens the bin.">
+          <Link to="/bin" search={{ section: "recovered" }} className={buttonClass("ghost")}>
+            Open the bin
+          </Link>
+        </Tooltip>
+        <Button hint="Dismisses this notice." variant="ghost" onClick={() => store.dismissRecovered()}>
           Dismiss
         </Button>
       </div>

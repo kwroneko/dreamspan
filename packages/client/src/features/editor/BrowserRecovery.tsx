@@ -94,7 +94,7 @@ export function BrowserRecovery({
                   value={copy.content}
                   className="max-h-64 min-h-24 rounded-md border border-border bg-surface p-2"
                 />
-                <Button variant="danger" onClick={() => setDeleting(copy)}>
+                <Button hint="Deletes this browser’s saved copy." variant="danger" onClick={() => setDeleting(copy)}>
                   Delete this copy
                 </Button>
               </div>
@@ -102,7 +102,9 @@ export function BrowserRecovery({
           })
         )}
         <DialogActions>
-          <Button onClick={() => setOpen(false)}>Keep copies</Button>
+          <Button hint="Closes this dialog and keeps the saved copies." onClick={() => setOpen(false)}>
+            Keep copies
+          </Button>
           <Button
             pending={pending}
             hint="Sends each copy to the server again. Those that arrive leave this list."

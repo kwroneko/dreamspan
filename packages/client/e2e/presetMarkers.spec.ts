@@ -146,7 +146,7 @@ const theme = async (page: Page, width: number, scheme: "light" | "dark") => {
 }
 
 const CACHE_EXPLANATION =
-  "Prompt cache breakpoint: everything above it is cached between replies. Editing a prompt above it invalidates the cache from that prompt down. Not every provider supports caching."
+  "Marks a prompt cache breakpoint. Editing a prompt above the breakpoint invalidates the cache from that prompt onward."
 
 const check = async (page: Page, root: Locator, name: string) => {
   const points = root.locator("[data-cache-breakpoint]")
@@ -450,14 +450,15 @@ for (const width of [390, 1440, 1920])
       await expect(main.getByLabel("Role", { exact: true })).toBeVisible()
       await auto.uncheck()
       const search = root.getByRole("button", { name: "Search and replace", exact: true })
-      const idleSearch = await search.evaluate((element) => getComputedStyle(element).backgroundColor)
+      // DESIGN §1.3/§10.1 requires a visible pressed state; the shared secondary
+      // button retains its background and adds a ring while pressed.
+      const idleSearch = await search.evaluate((element) => getComputedStyle(element).boxShadow)
       await search.click()
       await expect(search).toHaveAttribute("aria-pressed", "true")
-      await expect
-        .poll(() => search.evaluate((element) => getComputedStyle(element).backgroundColor))
-        .not.toBe(idleSearch)
+      await expect.poll(() => search.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe(idleSearch)
       await search.click()
       await expect(search).toHaveAttribute("aria-pressed", "false")
+      await expect.poll(() => search.evaluate((element) => getComputedStyle(element).boxShadow)).toBe(idleSearch)
       await root.getByRole("button", { name: "Collapse all", exact: true }).click()
       if (process.env.LAYOUT_AUDIT) await expectLayout(page, info, root === panel ? "preset-panel" : "preset-large")
       await root.screenshot({ path: join(shots, `header-${root === panel ? "panel" : "large"}-${width}.png`) })

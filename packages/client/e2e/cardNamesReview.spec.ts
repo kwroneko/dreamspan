@@ -125,16 +125,20 @@ test("three name drafts and diffs work, but history must refuse a colliding rest
     .first()
     .getByRole("button", { name: /^Revision \d+ / })
     .click()
-  const diff = history.getByLabel("Revision changes", { exact: true })
+  const diff = history.locator('div[aria-label="Revision changes"]:not([role="tablist"])')
   for (const label of ["Display name", "In-chat nickname", "Version (shown as subtitle)", "Description"])
     await expect(diff).toContainText(label)
   await revisions
     .last()
     .getByRole("button", { name: /^Revision \d+ / })
     .click()
-  const restore = history.getByRole("button", { name: "Restore", exact: true })
-  await expect(restore).toBeDisabled()
-  await expect(history.getByRole("status")).toContainText("Another card is already called History original · 1")
+  // DESIGN §10.1 historyui: Restore is an entry action; name validation runs on activation.
+  const restore = revisions.last().getByRole("button", { name: "Restore to revision 1", exact: true })
+  await restore.click()
+  await expect(history.getByRole("alert")).toContainText("Another card is already called History original · 1")
+  await expect(revisions).toHaveCount(2)
+  await history.getByRole("button", { name: "Close", exact: true }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "History renamed", exact: true })).toBeVisible()
 })
 
 test("submission rechecks names even without a tab notification", async ({ page }) => {

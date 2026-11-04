@@ -97,10 +97,12 @@ function OverrideChat({ chatId, prefix = "" }: { chatId: ChatId; prefix?: string
   const result = useAtomValue(useMemo(() => AppClient.query("GetChat", { chatId }), [chatId]))
   const name = AsyncResult.isSuccess(result) ? chatName(result.value.title, [], result.value.createdAt) : null
   return (
-    <Link to="/chats/$chatId" params={{ chatId }} className="text-accent underline-offset-4 hover:underline">
-      {prefix}
-      {name ? `${name.name}${name.started ? ` (started ${formatDay(name.started)})` : ""}` : "the chat"}
-    </Link>
+    <Tooltip label="Returns to the chat.">
+      <Link to="/chats/$chatId" params={{ chatId }} className="text-accent underline-offset-4 hover:underline">
+        {prefix}
+        {name ? `${name.name}${name.started ? ` (started ${formatDay(name.started)})` : ""}` : "the chat"}
+      </Link>
+    </Tooltip>
   )
 }
 
@@ -189,9 +191,11 @@ export function Editor({
       <Alert tone="warning">
         <p>
           This item was deleted or never existed ·{" "}
-          <Link to="/library" className="text-accent underline-offset-4 hover:underline">
-            Library
-          </Link>
+          <Tooltip label="Opens the library.">
+            <Link to="/library" className="text-accent underline-offset-4 hover:underline">
+              Library
+            </Link>
+          </Tooltip>
         </p>
       </Alert>
     )
@@ -200,7 +204,7 @@ export function Editor({
       <ErrorAlert
         error={state.loadError}
         actions={
-          <Button variant="ghost" onClick={() => void store.load()}>
+          <Button hint="Retries loading this view." variant="ghost" onClick={() => void store.load()}>
             Try again
           </Button>
         }
@@ -265,9 +269,11 @@ export function Editor({
               <OverrideChat chatId={ref.chatId} prefix="← Back to " />
             </span>
           ) : (
-            <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
-              ← Library
-            </Link>
+            <Tooltip label="Returns to the library.">
+              <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
+                ← Library
+              </Link>
+            </Tooltip>
           )}
           {/* Identity and document actions go to the column header. A card's names retain
               their rename questions (CardNameHeader). */}
@@ -325,16 +331,18 @@ export function Editor({
               // The book is part of the card's document: saved, versioned and exported with it.
               <>
                 {ref.label}'s own lorebook.{" "}
-                <button
-                  type="button"
-                  className="text-accent underline-offset-4 hover:underline"
-                  onClick={() => {
-                    setBookView(false)
-                    setCardTab(CARD_TAB_LOREBOOK)
-                  }}
-                >
-                  Show the whole card
-                </button>
+                <Tooltip label="Shows every card field.">
+                  <button
+                    type="button"
+                    className="text-accent underline-offset-4 hover:underline"
+                    onClick={() => {
+                      setBookView(false)
+                      setCardTab(CARD_TAB_LOREBOOK)
+                    }}
+                  >
+                    Show the whole card
+                  </button>
+                </Tooltip>
               </>
             ) : ref.kind === "preset" ? null : ref.chatId !== null ? (
               // A chat override (DESIGN §4): this chat's own version of the entry.
@@ -454,7 +462,7 @@ export function Editor({
           <Alert
             tone="success"
             actions={
-              <Button variant="ghost" onClick={() => setNotice(null)}>
+              <Button hint="Dismisses this notice." variant="ghost" onClick={() => setNotice(null)}>
                 Dismiss
               </Button>
             }
@@ -470,7 +478,11 @@ export function Editor({
                 ? "A newer version of the file was imported"
                 : "What this variant follows changed"
             }
-            actions={<Button onClick={() => setOpen("update")}>Review the update</Button>}
+            actions={
+              <Button hint="Opens the source update for review." onClick={() => setOpen("update")}>
+                Review the update
+              </Button>
+            }
           >
             <p>It isn't in this {KINDS[ref.kind]} yet.</p>
           </Alert>

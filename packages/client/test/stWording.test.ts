@@ -22,6 +22,7 @@ const INTEROP_FILES = new Set([
 const INTEROP_STRINGS = new Set([
   "features/chat/headerContributions.tsx\tDownloads the branch shown as a SillyTavern chat file or plain text.",
   "features/characters/CharactersPage.tsx\tImport from SillyTavern",
+  "features/characters/CharactersPage.tsx\tOpens the SillyTavern importer.",
   "features/firstRun/FirstRunSteps.tsx\tImport from SillyTavern"
 ])
 

@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
@@ -73,9 +74,11 @@ function Home({ data }: { data: ShellLibrary }) {
               ) : browse.filter === "personas" && !needle ? (
                 <p>Cards you play as are kept here. In the library, a card’s menu adds it.</p>
               ) : (
-                <Link to="/import/st" className="text-accent">
-                  Import from SillyTavern
-                </Link>
+                <Tooltip label="Opens the SillyTavern importer.">
+                  <Link to="/import/st" className="text-accent">
+                    Import from SillyTavern
+                  </Link>
+                </Tooltip>
               )}
             </EmptyState>
           )}

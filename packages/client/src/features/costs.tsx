@@ -81,11 +81,6 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
         if (ok) setMessage("Saved. New requests use these prices; past costs stay as recorded.")
       }}
     >
-      <p className="text-sm text-muted">
-        Prices per million tokens. The model must match exactly. Optional conditions narrow the match; connection
-        conditions take precedence, then upstream, then provider. The last rule breaks ties. Currency is a label;
-        nothing is converted.
-      </p>
       <UserDraftStatus draft={durable} history />
       {values.revision !== settings.revision && (
         <Alert>
@@ -112,6 +107,7 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
             <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <h2 className="min-w-0 font-semibold [overflow-wrap:anywhere]">{rule.name || "New formula"}</h2>
               <Button
+                hint="Removes this pricing formula."
                 variant="ghost"
                 className="shrink-0"
                 onClick={() => edit(values.rules.filter((_, i) => i !== index))}
@@ -202,7 +198,11 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
                     update(index, { tiers: rule.tiers.map((t, i) => (i === ti ? { ...t, rates } : t)) })
                   }
                 />
-                <Button variant="ghost" onClick={() => update(index, { tiers: rule.tiers.filter((_, i) => i !== ti) })}>
+                <Button
+                  hint="Removes this pricing tier."
+                  variant="ghost"
+                  onClick={() => update(index, { tiers: rule.tiers.filter((_, i) => i !== ti) })}
+                >
                   Remove tier
                 </Button>
               </fieldset>
@@ -246,10 +246,11 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
           >
             Add formula
           </Button>
-          <Button type="submit" variant="primary" pending={action.pending}>
+          <Button hint="Saves your pricing rules." type="submit" variant="primary" pending={action.pending}>
             Save pricing
           </Button>
           <Button
+            hint="Discards unsaved pricing changes."
             variant="ghost"
             onClick={() => {
               void durable.discard()
@@ -262,10 +263,6 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
       </fieldset>
       <ErrorAlert error={action.error} title="Pricing wasn't saved" />
       {message && <Alert>{message}</Alert>}
-      <p className="text-sm text-muted">
-        Summaries never spend past their cap: each request counts at the most it could cost, and an unknown price or
-        mixed currencies pause capped work.
-      </p>
     </form>
   )
 }
@@ -273,7 +270,11 @@ function CostPage() {
   useTitle("Costs")
   return (
     <Card>
-      <CardHeader center title="Costs" />
+      <CardHeader
+        center
+        title="Costs"
+        about="Sets prices per million tokens for exact model IDs. Connection rules take precedence over upstream and provider rules; the last matching rule breaks ties."
+      />
       <AsyncView atom={settingsAtom}>
         {(settings) => (
           <AsyncView atom={connectionsAtom}>

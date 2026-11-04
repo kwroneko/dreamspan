@@ -160,7 +160,7 @@ export function FailureView({
     <ErrorAlert
       error={error}
       actions={
-        <Button variant="ghost" onClick={onRetry}>
+        <Button hint="Retries the failed request." variant="ghost" onClick={onRetry}>
           Try again
         </Button>
       }

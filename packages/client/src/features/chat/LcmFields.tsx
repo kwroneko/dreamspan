@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The summarization settings (DESIGN §8), shared by the side panel's This chat tab (a chat's own,
 // each falling back to the account default) and Settings → Chats (the account default for new
 // chats, each falling back to the built-in). Each field is one write: a number when it's left or
@@ -488,7 +489,9 @@ export function LcmFields({
         {errorFor("when") && <p className="text-sm text-danger">{errorFor("when")}</p>}
       </Fieldset>
       <details className="group">
-        <summary className="cursor-pointer text-sm font-medium text-text">Advanced</summary>
+        <Tooltip label="Shows chunk size and summary length settings.">
+          <summary className="cursor-pointer text-sm font-medium text-text">Advanced</summary>
+        </Tooltip>
         <div className="mt-3 flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <TokensInput

@@ -669,6 +669,7 @@ function ChatSurface({
                     <span className="hidden sm:inline">The oldest messages aren&rsquo;t sent: summaries are off.</span>
                   </span>
                   <Button
+                    hint="Opens summary settings for this chat."
                     variant="ghost"
                     className="h-7 shrink-0 px-2 text-accent"
                     title="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."

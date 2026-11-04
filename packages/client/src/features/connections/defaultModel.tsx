@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The top of a connection's page: which model new chats use. A connection just created here
 // fetches its model list at once, and when the account has no default model yet its first
 // model becomes the default (ST's Connect picks one the same way).
@@ -18,9 +19,11 @@ import type { ConnectionSectionProps } from "./detail.tsx"
 const modelName = (model: Model) => resolveModel(model.key, model.upstream, model.overrides).name.value
 
 const change = (
-  <Link to="/settings/chats" className="font-medium text-accent underline-offset-4 hover:underline">
-    Change
-  </Link>
+  <Tooltip label="Opens the default model picker.">
+    <Link to="/settings/chats" className="font-medium text-accent underline-offset-4 hover:underline">
+      Change
+    </Link>
+  </Tooltip>
 )
 
 export function DefaultModelSection({ connection }: ConnectionSectionProps) {

@@ -430,7 +430,7 @@ function ChatHeaderFrame({
             </div>
           )
         )}
-        <div className="flex min-w-24 flex-1 flex-col">
+        <div className="flex min-w-24 flex-1 flex-col @max-[40rem]/header:max-w-[calc(100%_-_9rem)] @max-[40rem]/header:flex-none">
           <div className="flex min-w-0 items-center gap-2">{title}</div>
           {about !== null && (
             <p className="truncate text-xs text-muted" title={about}>
@@ -439,7 +439,11 @@ function ChatHeaderFrame({
           )}
         </div>
         {/* Only the branch control shrinks, cutting its name short; the buttons keep their size. */}
-        {actions && <div className="flex min-w-0 items-center gap-0.5 *:shrink-0 sm:gap-1">{actions}</div>}
+        {actions && (
+          <div className="flex min-w-0 items-center justify-end gap-0.5 *:shrink-0 @max-[40rem]/header:flex-1 sm:gap-1">
+            {actions}
+          </div>
+        )}
       </CenterHeader>
     </TooltipProvider>
   )

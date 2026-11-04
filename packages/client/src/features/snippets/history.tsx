@@ -22,7 +22,7 @@ export function SnippetHistory({ store, item }: { store: SnippetWorkspace; item:
         variant="ghost"
         className="h-8 px-2"
         aria-label={`History of ${name}`}
-        hint="Its revisions, what changed in each, and restoring one. Typing alone makes none: Save does."
+        hint="Shows this snippet’s saved revisions for comparison or selection."
         onClick={() => setOpen(true)}
       >
         <Icon name="history" />

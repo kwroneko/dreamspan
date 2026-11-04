@@ -14,7 +14,7 @@ export function ReuseLine({ kind, alone }: { kind: Reuse; alone: boolean }) {
       icon="history"
       label="Above this line: reused by every reply"
       title={REUSE_TITLE}
-      explanation="The model's provider keeps what's above this line from one reply to the next and reuses it, so replies cost less and start sooner. It's reused only while it stays exactly the same: changing a prompt above this line makes the next reply send everything from that prompt down in full, once. Prompts that rarely change belong up here. Not every provider reuses text."
+      explanation="Marks the stable cache prefix. Changing a prompt invalidates the cache from that prompt onward."
     />
   ) : (
     <SectionLine
@@ -23,9 +23,7 @@ export function ReuseLine({ kind, alone }: { kind: Reuse; alone: boolean }) {
       icon="history"
       label="Above this line: reused until old messages drop out"
       title={REUSE_TITLE}
-      explanation={`The next reply reuses what's above this line too, so it costs less and starts sooner. When the chat outgrows the context and its oldest messages drop out or are summarized, ${
-        alone ? "everything above this line" : "what's between the two lines"
-      } is sent again in full, once. Changing a prompt above this line does the same. Not every provider reuses text.`}
+      explanation={`Marks the ${alone ? "cache prefix" : "cached history"}. Moving the history window invalidates this prefix.`}
     />
   )
 }
@@ -36,7 +34,7 @@ export const AfterChatLine = () => (
     icon="continue"
     label="After the chat: sent last"
     title="Sent after the chat"
-    explanation="What's below this line comes after the chat's newest message, just before the model writes its reply, so it weighs most on the reply. It's sent in full with every reply, which makes this the place for text that changes often."
+    explanation="Marks prompts sent after the chat history. These prompts are outside the cached prefix."
   />
 )
 
@@ -63,7 +61,7 @@ export const placeReuseLines = (
 }
 
 const CACHE_EXPLANATION =
-  "Prompt cache breakpoint: everything above it is cached between replies. Editing a prompt above it invalidates the cache from that prompt down. Not every provider supports caching."
+  "Marks a prompt cache breakpoint. Editing a prompt above the breakpoint invalidates the cache from that prompt onward."
 
 export function CacheBreakpointLine({ kind }: { kind: Reason }) {
   const qualifier = kind === "summary" ? "summaries" : kind === "pinned" ? "prefix" : kind

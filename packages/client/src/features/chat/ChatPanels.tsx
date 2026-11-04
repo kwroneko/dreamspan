@@ -125,6 +125,7 @@ export function PanelToggles({
   if (!wide || open !== null)
     return (
       <Button
+        hint={open === null ? "Click to show the chat panel." : "Click to hide the chat panel."}
         variant="ghost"
         aria-expanded={open !== null}
         title={

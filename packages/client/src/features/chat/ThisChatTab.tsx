@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -76,6 +77,7 @@ function Instruction({
       />
       <div className="flex flex-wrap items-center gap-2">
         <Button
+          hint="Saves this chat’s summarization instruction."
           disabled={disabled || text === saved || text.trim() === ""}
           pending={pending}
           onClick={() =>
@@ -152,13 +154,15 @@ function useLcmSettings(session: ChatSession) {
 function PanelLink({ panel, children }: { panel: string; children: ReactNode }) {
   const show = useShowPanel()
   return (
-    <button
-      type="button"
-      className={`${link} outline-none focus-visible:ring-2 focus-visible:ring-focus`}
-      onClick={() => show(panel)}
-    >
-      {children}
-    </button>
+    <Tooltip label="Opens the related chat settings panel.">
+      <button
+        type="button"
+        className={`${link} outline-none focus-visible:ring-2 focus-visible:ring-focus`}
+        onClick={() => show(panel)}
+      >
+        {children}
+      </button>
+    </Tooltip>
   )
 }
 

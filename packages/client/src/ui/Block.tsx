@@ -98,7 +98,7 @@ export function BlockMenuButton({
   ...props
 }: { label: string } & Omit<ComponentProps<typeof Button>, "children">) {
   return (
-    <Button variant="ghost" className="size-8! shrink-0 px-0!" aria-label={label} {...props}>
+    <Button hint={label} variant="ghost" className="size-8! shrink-0 px-0!" aria-label={label} {...props}>
       <Icon name="more" />
     </Button>
   )

@@ -131,14 +131,16 @@ export function ClampedText({ text, lines = 6, children }: { text: string; lines
         {children ?? text}
       </div>
       {(cut || all) && (
-        <button
-          type="button"
-          aria-expanded={all}
-          onClick={() => setAll(!all)}
-          className="rounded-sm text-xs text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          {all ? "Show less" : "Show all"}
-        </button>
+        <Tooltip label={all ? "Click to collapse the summary text." : "Click to show the full summary text."}>
+          <button
+            type="button"
+            aria-expanded={all}
+            onClick={() => setAll(!all)}
+            className="rounded-sm text-xs text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {all ? "Show less" : "Show all"}
+          </button>
+        </Tooltip>
       )}
     </div>
   )

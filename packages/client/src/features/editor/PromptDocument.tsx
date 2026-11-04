@@ -170,24 +170,28 @@ function OverrideNote({
       {override?.status === "replaced" ? (
         <>
           Replaced in this chat by{" "}
-          <Link
-            to="/cards/$entityId"
-            params={{ entityId: override.card }}
-            className="text-accent underline-offset-4 hover:underline"
-          >
-            {override.name}
-          </Link>
+          <Tooltip label="Opens the card supplying this override.">
+            <Link
+              to="/cards/$entityId"
+              params={{ entityId: override.card }}
+              className="text-accent underline-offset-4 hover:underline"
+            >
+              {override.name}
+            </Link>
+          </Tooltip>
           's {entry.identifier === "main" ? "system prompt" : "post-history instructions"}
         </>
       ) : override?.status === "forbidden" ? (
         <>
-          <Link
-            to="/cards/$entityId"
-            params={{ entityId: override.card }}
-            className="text-accent underline-offset-4 hover:underline"
-          >
-            {override.name}
-          </Link>{" "}
+          <Tooltip label="Opens the card supplying this override.">
+            <Link
+              to="/cards/$entityId"
+              params={{ entityId: override.card }}
+              className="text-accent underline-offset-4 hover:underline"
+            >
+              {override.name}
+            </Link>
+          </Tooltip>{" "}
           has {entry.identifier === "main" ? "a system prompt" : "post-history instructions"}; this prompt forbids it
         </>
       ) : null}
@@ -430,7 +434,7 @@ function PromptBlock({
       onToggle={toggle}
       label={name}
       name={<span className="block truncate">{name}</span>}
-      hint={collapsed ? "Show the prompt's text" : "Hide the prompt's text"}
+      hint={collapsed ? "Click to show the prompt’s text" : "Click to hide the prompt’s text"}
       derived={label.derived}
       dim={!entry.enabled}
       detail={
@@ -974,7 +978,7 @@ export function PromptDocument({
         <Button
           variant="ghost"
           className="h-8! shrink-0 px-2!"
-          hint={anyOpen ? "Fold every prompt to its header." : "Show every prompt's text."}
+          hint={anyOpen ? "Click to fold every prompt." : "Click to show every prompt’s text."}
           onClick={() => {
             setOpened({ all: !anyOpen, except: new Set() })
             if (!anyOpen && autoOptions) setOptions({ all: true, except: new Set() })
@@ -1164,9 +1168,11 @@ export function PresetWarnings({ store, onGoTo }: { store: EditorStore; onGoTo: 
         <div role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
           The end-of-request text for a direction doesn&apos;t contain {"{{direction}}"}: a direction you give
           won&apos;t be sent.{" "}
-          <button type="button" className={link} onClick={jump}>
-            Go to the text
-          </button>
+          <Tooltip label="Scrolls to this prompt’s text.">
+            <button type="button" className={link} onClick={jump}>
+              Go to the text
+            </button>
+          </Tooltip>
         </div>
       )}
       {neverSent.map((prompt) => (
@@ -1177,9 +1183,11 @@ export function PresetWarnings({ store, onGoTo }: { store: EditorStore; onGoTo: 
             .map((t) => t.label)
             .join(", ")}
           , and the two never meet. In an export, it&apos;s switched off.{" "}
-          <button type="button" className={link} onClick={() => onGoTo(prompt.identifier)}>
-            Go to the prompt
-          </button>
+          <Tooltip label="Scrolls to this prompt’s header.">
+            <button type="button" className={link} onClick={() => onGoTo(prompt.identifier)}>
+              Go to the prompt
+            </button>
+          </Tooltip>
         </div>
       ))}
     </div>

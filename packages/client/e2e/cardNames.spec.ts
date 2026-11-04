@@ -51,7 +51,7 @@ for (const width of [1440, 390]) {
     const aria = refs.find((ref) => ref.label === "Aria Vance")!
     await page.goto(`${server().url}/cards/${aria.entityId}`)
     await expect(page.getByRole("heading", { name: "Aria Vance", exact: true })).toBeVisible()
-    await expect(page.locator("main header").getByText("1", { exact: true })).toHaveCount(0)
+    await expect(page.locator("main header:not([data-center-header])").getByText("1", { exact: true })).toHaveCount(0)
     await shoot("card")
     await page.goto(`${server().url}/library/${aria.id}`)
     // The names in the header, each renamed in place (no identity section).
@@ -170,9 +170,12 @@ for (const width of [1440, 390]) {
       .last()
       .getByRole("button", { name: /^Revision \d+ / })
       .click()
-    await expect(history.getByRole("status")).toContainText("Another card is already called Aria Vance · 1")
-    await expect(history.getByRole("button", { name: "Restore", exact: true })).toBeDisabled()
-    await history.getByRole("status").scrollIntoViewIfNeeded()
+    // DESIGN §10.1 historyui: each entry restores directly and reports a refused name check.
+    const revisionCount = await history.getByRole("list", { name: "Revisions" }).getByRole("listitem").count()
+    await history.getByRole("button", { name: "Restore to revision 1", exact: true }).click()
+    await expect(history.getByRole("alert")).toContainText("Another card is already called Aria Vance · 1")
+    await expect(history.getByRole("list", { name: "Revisions" }).getByRole("listitem")).toHaveCount(revisionCount)
+    await history.getByRole("alert").scrollIntoViewIfNeeded()
     await shoot("history-clash")
     // Restore the synthetic fixture for the next viewport through the storage-compatible API.
     await admin((api) =>

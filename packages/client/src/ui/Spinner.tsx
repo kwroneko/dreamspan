@@ -48,6 +48,7 @@ export function Loading({ label = "Loading…", onRetry }: { label?: string | un
           title="This is taking longer than it should"
           actions={
             <Button
+              hint="Retries loading this view."
               variant="ghost"
               onClick={() => {
                 setSlow(false)

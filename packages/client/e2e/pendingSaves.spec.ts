@@ -1,3 +1,4 @@
+import { replaceEditorText } from "./support/textbox.ts"
 import { expectTextBox } from "./support/textbox.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { textField } from "@rp/shared/editing.ts"
@@ -94,7 +95,7 @@ for (const kind of ["card", "preset"] as const) {
       })
     await expectTextBox(box(), "hello")
     await offlineBeacon(page)
-    await box().fill("hello A")
+    await replaceEditorText(box(), "hello A")
     await expect.poll(async () => (await copies(page)).map(text)).toContain("hello A")
     await admin((api) =>
       api.SaveEditorDraft({

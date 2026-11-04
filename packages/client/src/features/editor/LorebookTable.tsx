@@ -242,23 +242,26 @@ function RowActions({
   const [mounted, setMounted] = useState(false)
   const label = `More for ${context.title}`
   const button = (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      className={iconButtonClass()}
-      onClick={() => setMounted(true)}
-    >
-      <Icon name="more" />
-    </button>
+    <Tooltip label="Opens actions for this lorebook entry.">
+      <button
+        type="button"
+        aria-label={label}
+        title={label}
+        className={iconButtonClass()}
+        onClick={() => setMounted(true)}
+      >
+        <Icon name="more" />
+      </button>
+    </Tooltip>
   )
   if (!mounted) return button
   return (
     <Menu
+      hint="Opens actions for this lorebook entry."
       label={`Actions for ${context.title}`}
       defaultOpen
       onOpenChange={(open) => !open && setMounted(false)}
-      trigger={<button type="button" aria-label={label} title={label} className={iconButtonClass()} />}
+      trigger={<button type="button" aria-label={label} className={iconButtonClass()} />}
     >
       {actions.map((action, index) => (
         <span key={action.id} className="contents">
@@ -898,9 +901,11 @@ export function LorebookTable(props: {
         label="All entries"
         hint="Enable or disable every entry."
         trigger={
-          <button type="button" aria-label="More for all entries" className={`${iconButtonClass()} size-7!`}>
-            <Icon name="more" />
-          </button>
+          <Tooltip label="Opens actions for all lorebook entries.">
+            <button type="button" aria-label="More for all entries" className={`${iconButtonClass()} size-7!`}>
+              <Icon name="more" />
+            </button>
+          </Tooltip>
         }
       >
         <MenuItem

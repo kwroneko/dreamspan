@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // ST folder imports as the server keeps them (ARCHITECTURE.md §13): the user's import jobs in
 // one query with its own reactivity key, refreshed when the server says one changed
 // (StImportChanged, at most about once a second per job), and the shell's line saying an
@@ -128,13 +129,15 @@ export function StImportIndicator() {
       {running && (
         <ProgressBar className="hidden h-1.5 w-32 shrink-0 sm:block" max={100} value={percent} label="Imported" />
       )}
-      <Link
-        to="/import/st"
-        search={{ job: job.id }}
-        className="ml-auto shrink-0 rounded-md px-2 py-0.5 text-accent underline-offset-4 hover:underline"
-      >
-        {running ? "View" : "Open"}
-      </Link>
+      <Tooltip label="Opens this folder import’s progress and results.">
+        <Link
+          to="/import/st"
+          search={{ job: job.id }}
+          className="ml-auto shrink-0 rounded-md px-2 py-0.5 text-accent underline-offset-4 hover:underline"
+        >
+          {running ? "View" : "Open"}
+        </Link>
+      </Tooltip>
     </div>
   )
 }

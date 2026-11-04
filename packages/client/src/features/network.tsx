@@ -116,11 +116,18 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
       <ErrorAlert error={action.error} title="Not saved" />
       {saved && draft === null && <Alert tone="success">Saved.</Alert>}
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Button type="submit" variant="primary" pending={action.pending} disabled={draft === null}>
+        <Button
+          hint="Saves the network settings."
+          type="submit"
+          variant="primary"
+          pending={action.pending}
+          disabled={draft === null}
+        >
           Save
         </Button>
         {draft !== null && (
           <Button
+            hint="Discards unsaved network changes."
             variant="ghost"
             onClick={() => {
               setDraft(null)

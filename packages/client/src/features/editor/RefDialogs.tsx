@@ -148,10 +148,16 @@ export function ForkDialog({
         )}
         <ErrorAlert error={action.error ?? store.saveError} />
         <DialogActions>
-          <Button onClick={onClose} disabled={pending}>
+          <Button hint="Closes this dialog without applying changes." onClick={onClose} disabled={pending}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" pending={pending} disabled={label.trim() === "" || clash !== null}>
+          <Button
+            hint="Creates a separate copy for editing."
+            type="submit"
+            variant="primary"
+            pending={pending}
+            disabled={label.trim() === "" || clash !== null}
+          >
             {ref.kind === "card" ? "Fork card" : "Make the variant"}
           </Button>
         </DialogActions>

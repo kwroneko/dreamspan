@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // Account selections: the strip's model and preset chips, and their side panel tabs.
 import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@rp/shared/generation.ts"
 import type { Model } from "@rp/shared/providers.ts"
@@ -189,9 +190,11 @@ export function GenerationSettingsPanel({
     ) : (
       <p className="text-sm text-muted">
         {BUILTIN_PRESET_LABEL} is the built-in prompt preset. Import a prompt preset from the{" "}
-        <Link to="/import" className="text-accent">
-          Import page
-        </Link>{" "}
+        <Tooltip label="Opens the import page.">
+          <Link to="/import" className="text-accent">
+            Import page
+          </Link>
+        </Tooltip>{" "}
         to edit your own.
       </p>
     )

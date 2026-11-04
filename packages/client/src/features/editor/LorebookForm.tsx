@@ -84,7 +84,9 @@ export function LorebookForm({ store, root, absent }: { store: EditorStore; root
     return (
       <div className="flex min-w-0 flex-col items-start gap-3">
         <p className="text-sm text-muted">{absent}</p>
-        <Button onClick={() => setAdded(addEntry(store, root, book))}>Add entry</Button>
+        <Button hint="Adds an empty entry to this lorebook." onClick={() => setAdded(addEntry(store, root, book))}>
+          Add entry
+        </Button>
       </div>
     )
   }

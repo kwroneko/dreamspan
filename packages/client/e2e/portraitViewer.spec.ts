@@ -187,7 +187,7 @@ test("header portrait clicks toggle open then closed, shared with messages, the 
   await twice(
     metadata.getByRole("region", { name: "Picture" }).getByRole("button", { name: "View Tall's picture", exact: true })
   )
-  await editor.getByRole("button", { name: "Back to the chat", exact: true }).click()
+  await editor.getByRole("button", { name: "Close", exact: true }).click()
 
   // A pending greeting uses the stock avatar toggle too, before a chat has been saved.
   await page.goto(`${server().url}/cards/${refs.Tall!.entityId}/chat?panel=card:${refs.Tall!.entityId}`)

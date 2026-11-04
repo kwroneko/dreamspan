@@ -14,28 +14,32 @@ const compact = "h-8! px-2.5!"
 
 function ChatAction({ entry, description }: LibraryItemProps) {
   const link = (
-    <Link
-      to="/cards/$entityId/chat"
-      params={{ entityId: entry.entityId }}
-      aria-label={`Start a chat with ${entry.label}`}
-      className={`${buttonClass("primary")} ${compact}`}
-    >
-      Chat
-    </Link>
+    <Tooltip label={description ?? "Starts a chat with this card."}>
+      <Link
+        to="/cards/$entityId/chat"
+        params={{ entityId: entry.entityId }}
+        aria-label={`Start a chat with ${entry.label}`}
+        className={`${buttonClass("primary")} ${compact}`}
+      >
+        Chat
+      </Link>
+    </Tooltip>
   )
-  return description ? <Tooltip label={description}>{link}</Tooltip> : link
+  return link
 }
 
 function EditAction({ entry }: LibraryItemProps) {
   return (
-    <Link
-      to="/library/$refId"
-      params={{ refId: entry.id }}
-      aria-label={`Edit ${entry.label}`}
-      className={`${buttonClass("secondary")} ${compact}`}
-    >
-      Edit
-    </Link>
+    <Tooltip label="Opens this item’s editor.">
+      <Link
+        to="/library/$refId"
+        params={{ refId: entry.id }}
+        aria-label={`Edit ${entry.label}`}
+        className={`${buttonClass("secondary")} ${compact}`}
+      >
+        Edit
+      </Link>
+    </Tooltip>
   )
 }
 
@@ -58,7 +62,11 @@ function UpdateItem({ entry, description }: LibraryItemProps) {
     <MenuLinkItem
       icon="regenerate"
       description={description}
-      render={<Link to="/import" search={{ into: entry.id }} />}
+      render={
+        <Tooltip label="Opens this chat.">
+          <Link to="/import" search={{ into: entry.id }} />
+        </Tooltip>
+      }
     >
       Update from file…
     </MenuLinkItem>

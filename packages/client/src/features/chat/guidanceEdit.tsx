@@ -169,7 +169,7 @@ export const registerGuidanceEdit = () => [
     describe: viewOf(({ session, entry }) => ({
       label: "New version with guidance…",
       icon: "guidance",
-      hint: "Guide a new version of this reply from the composer; this one stays.",
+      hint: "Guide a new version of this reply from the composer.",
       onSelect: () => editGuidance(session, entry)
     }))
   }),

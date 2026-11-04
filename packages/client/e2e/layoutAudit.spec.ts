@@ -663,6 +663,20 @@ test.describe("synthetic library and every app surface", () => {
           await audit("panel-preset-notes", "[data-note-slot]")
           return
         }
+        if (process.env.LAYOUT_AUDIT_COPY_ONLY === "1") {
+          await go("home-copy", "/")
+          await go("library-copy", "/library")
+          await go("card-copy", `/cards/${cardId}`)
+          await go("card-editor-copy", `/library/${cardRef}`)
+          await go("preset-editor-copy", `/library/${presetRef}`)
+          await go("chat-copy", `/chats/${chatId}`)
+          for (const tab of ["This chat", "Lorebooks", "Notes", "Summaries", "History edits"]) {
+            await openPanel(page, tab)
+            await audit(`panel-${tab}-copy`)
+          }
+          for (const section of ["costs", "regex"]) await go(`settings-${section}-copy`, `/settings/${section}`)
+          return
+        }
         if (process.env.LAYOUT_AUDIT_HELP_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, "Lorebooks")

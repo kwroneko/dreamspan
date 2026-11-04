@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The per-field conflict picker (DESIGN §4): for each field both sides changed, keep one
 // side, or edit the text into what it should be.
 import { type FieldPath, withValues } from "@rp/shared/editing.ts"
@@ -85,7 +86,9 @@ export function ConflictPicker({
       </div>
       {conflict.base !== undefined && (
         <details className="text-sm">
-          <summary className="cursor-pointer text-muted">How each side changed it</summary>
+          <Tooltip label="Compares each edit with the original text.">
+            <summary className="cursor-pointer text-muted">How each side changed it</summary>
+          </Tooltip>
           <div className="mt-2 flex flex-col gap-2">
             <span className="text-xs text-muted">{mineLabel}</span>
             <ValueDiff before={conflict.base} after={conflict.mine} />

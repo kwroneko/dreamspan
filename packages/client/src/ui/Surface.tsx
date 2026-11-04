@@ -158,6 +158,7 @@ export function Disclosure({
   lazy?: boolean
 }) {
   const [opened, setOpened] = useState(defaultOpen)
+  const [expanded, setExpanded] = useState(defaultOpen)
   const summary = (
     <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-sm font-medium text-muted outline-none select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
       <svg
@@ -181,9 +182,19 @@ export function Disclosure({
     <details
       open={defaultOpen}
       className={`group ${className}`}
-      onToggle={lazy ? (event) => event.currentTarget.open && setOpened(true) : undefined}
+      onToggle={(event) => {
+        setExpanded(event.currentTarget.open)
+        if (lazy && event.currentTarget.open) setOpened(true)
+      }}
     >
-      {hint ? <Tooltip label={hint}>{summary}</Tooltip> : summary}
+      <Tooltip
+        label={
+          hint ??
+          `Click to ${expanded ? "collapse" : "expand"} ${typeof title === "string" ? title.toLowerCase() : "this section"}.`
+        }
+      >
+        {summary}
+      </Tooltip>
       <div className="flex flex-col gap-4 pt-3 pb-1 pl-5">{!lazy || opened ? children : null}</div>
     </details>
   )

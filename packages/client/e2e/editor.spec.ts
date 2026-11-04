@@ -237,7 +237,11 @@ test("an earlier revision restores as a new one", async ({ page }) => {
     .getByRole("button", { name: /^Revision \d+ / })
     .click()
   await page.getByRole("dialog").getByRole("tab", { name: "Changes from current state" }).click()
-  await page.getByRole("dialog").getByText("Scenario", { exact: true }).click()
+  await page
+    .getByRole("dialog")
+    .getByRole("tabpanel", { name: "Changes from current state", exact: true })
+    .getByText("Scenario", { exact: true })
+    .click()
   await expectTextBox(page.getByRole("dialog").getByRole("textbox", { name: "Revision 2", exact: true }), "A storm.")
   await expectTextBox(
     page.getByRole("dialog").getByRole("textbox", { name: "Current state", exact: true }),

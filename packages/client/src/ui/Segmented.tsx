@@ -60,12 +60,10 @@ export function Segmented<Value extends string>(
             {option.label}
           </button>
         )
-        return option.description ? (
-          <Tooltip key={option.value} label={option.description}>
+        return (
+          <Tooltip key={option.value} label={option.description ?? `Selects ${option.label}.`}>
             {button}
           </Tooltip>
-        ) : (
-          button
         )
       })}
     </div>

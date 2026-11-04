@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { PresetWorkspace, PresetOverlayHost } from "../editor/PresetWorkspace.tsx"
@@ -134,9 +135,11 @@ function ChatDefaultsContent() {
               models.length === 0 ? (
                 <>
                   Add a connection with models first, in{" "}
-                  <Link to="/settings/connections" className="text-accent underline-offset-4 hover:underline">
-                    Connections
-                  </Link>
+                  <Tooltip label="Opens Connections.">
+                    <Link to="/settings/connections" className="text-accent underline-offset-4 hover:underline">
+                      Connections
+                    </Link>
+                  </Tooltip>
                   .
                 </>
               ) : undefined
@@ -265,7 +268,11 @@ export function SummaryDefaults({
         </Field>
         <UserDraftNotices draft={instructionDraft} />
         <div className="flex flex-wrap items-center gap-3">
-          <Button disabled={!defaults || pending || !unsaved} onClick={() => void saveTail()}>
+          <Button
+            hint="Saves the default summarization instruction."
+            disabled={!defaults || pending || !unsaved}
+            onClick={() => void saveTail()}
+          >
             Save summarization instruction
           </Button>
           {saved && !unsaved ? (

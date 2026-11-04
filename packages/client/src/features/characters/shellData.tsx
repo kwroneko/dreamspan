@@ -334,11 +334,17 @@ function CharacterTile({
     <div
       className={`tile-toggle-surface relative flex min-w-0 flex-col ${pick?.onOpen ? "overflow-hidden rounded-lg border border-border bg-surface" : ""}`}
     >
-      {pick ? (
-        <Tooltip label={pick.onOpen ? `Open ${c.label} in the full editor` : pick.hint(card, status)}>{button}</Tooltip>
-      ) : (
-        button
-      )}
+      <Tooltip
+        label={
+          pick
+            ? pick.onOpen
+              ? `Open ${c.label} in the full editor`
+              : pick.hint(card, status)
+            : `Opens ${c.label}’s card.`
+        }
+      >
+        {button}
+      </Tooltip>
       {pick?.onOpen && (
         <Button
           data-layout-audit-ignore="inset: The footer joins the tile border edge to edge"

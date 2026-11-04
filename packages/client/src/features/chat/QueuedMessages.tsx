@@ -76,6 +76,7 @@ function QueueEditor({
       <div className="flex flex-wrap gap-2">
         {queued ? (
           <Button
+            hint="Saves changes to this queued message."
             variant="primary"
             disabled={view.loading}
             onClick={async () => {
@@ -100,6 +101,7 @@ function QueueEditor({
           </Button>
         ) : (
           <Button
+            hint="Copies this queued message into the composer."
             onClick={async () => {
               const submitted = await editor.ready()
               if (submitted.draft === null) return
@@ -111,13 +113,11 @@ function QueueEditor({
             Copy to composer
           </Button>
         )}
-        <Button
-          onClick={() => void cancel()}
-          hint="Closes this without updating the queue. What you typed is kept in the bin, under Recovered text."
-        >
+        <Button onClick={() => void cancel()} hint="Closes the editor without updating the queued message.">
           Cancel
         </Button>
         <Button
+          hint="Opens earlier text of this queued edit."
           variant="ghost"
           onClick={async () => {
             const result = await editor.history()
@@ -133,6 +133,7 @@ function QueueEditor({
           {states.length <= 1 && <p className="text-sm text-muted">Nothing earlier yet.</p>}
           {states.slice(1).map((state) => (
             <Button
+              hint="Loads this earlier queued message text."
               key={state.seq}
               variant="ghost"
               onClick={async () => {
@@ -251,6 +252,7 @@ function Withdraw({
   return (
     <>
       <Button
+        hint="Removes this message from the queue."
         variant="ghost"
         onClick={async () => {
           const result = await session.withdrawQueued(queued)

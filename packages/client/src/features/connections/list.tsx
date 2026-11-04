@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useUserDraft, UserDraftNotices } from "../editor/userDraft.tsx"
 import { StSettingsImporter } from "./StSettingsImport.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
@@ -32,9 +33,11 @@ export function ConnectionsPage() {
             >
               Import connection settings
             </Button>
-            <Link to="/settings/connections/new" className={buttonClass("primary")}>
-              New connection
-            </Link>
+            <Tooltip label="Opens a form to create a connection.">
+              <Link to="/settings/connections/new" className={buttonClass("primary")}>
+                New connection
+              </Link>
+            </Tooltip>
           </>
         }
       />
@@ -89,13 +92,15 @@ export function ConnectionsPage() {
               {connections.map((connection) => (
                 <li key={connection.id} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      to="/settings/connections/$connectionId"
-                      params={{ connectionId: connection.id }}
-                      className="font-medium text-accent underline-offset-4 hover:underline"
-                    >
-                      {connection.name}
-                    </Link>
+                    <Tooltip label="Opens this connection’s settings.">
+                      <Link
+                        to="/settings/connections/$connectionId"
+                        params={{ connectionId: connection.id }}
+                        className="font-medium text-accent underline-offset-4 hover:underline"
+                      >
+                        {connection.name}
+                      </Link>
+                    </Tooltip>
                     {connection.hasKey ? (
                       <Badge>key •••• {connection.keyHint || "set"}</Badge>
                     ) : (
@@ -253,16 +258,18 @@ function NewConnectionForm({
             </Field>
           )}
           {credentials.length > 0 && (
-            <button
-              type="button"
-              className="self-start text-sm text-accent underline-offset-4 hover:underline"
-              onClick={() => {
-                setKeyMode(keyMode === "typed" ? "saved" : "typed")
-                setKeyEmpty(true)
-              }}
-            >
-              {keyMode === "typed" ? "Use a saved key instead" : "Enter a new key instead"}
-            </button>
+            <Tooltip label={keyMode === "typed" ? "Click to choose a saved key." : "Click to enter a new key."}>
+              <button
+                type="button"
+                className="self-start text-sm text-accent underline-offset-4 hover:underline"
+                onClick={() => {
+                  setKeyMode(keyMode === "typed" ? "saved" : "typed")
+                  setKeyEmpty(true)
+                }}
+              >
+                {keyMode === "typed" ? "Use a saved key instead" : "Enter a new key instead"}
+              </button>
+            </Tooltip>
           )}
         </div>
         <Field
@@ -274,12 +281,14 @@ function NewConnectionForm({
         </Field>
         <ErrorAlert error={action.error} title="The connection wasn't created" />
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button type="submit" variant="primary" pending={action.pending}>
+          <Button hint="Creates the connection." type="submit" variant="primary" pending={action.pending}>
             Create connection
           </Button>
-          <Link to="/settings/connections" className={buttonClass("ghost")}>
-            Cancel
-          </Link>
+          <Tooltip label="Returns to Connections without creating a connection.">
+            <Link to="/settings/connections" className={buttonClass("ghost")}>
+              Cancel
+            </Link>
+          </Tooltip>
         </div>
       </form>
     </Card>

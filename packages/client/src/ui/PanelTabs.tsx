@@ -151,6 +151,7 @@ export function ToolTabs({
           </BaseTabs.Root>
           {hidden.length > 0 && (
             <Menu
+              hint={`Shows more ${label.toLowerCase()} tabs.`}
               label={`More of the ${label.toLowerCase()}`}
               trigger={
                 <button

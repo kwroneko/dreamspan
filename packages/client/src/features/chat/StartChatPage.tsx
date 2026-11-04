@@ -502,7 +502,7 @@ function Pending({
 
 function RetryButton({ onRetry }: { onRetry: () => void }) {
   return (
-    <Button variant="ghost" onClick={onRetry}>
+    <Button hint="Retries loading this view." variant="ghost" onClick={onRetry}>
       Try again
     </Button>
   )

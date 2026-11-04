@@ -1,3 +1,4 @@
+import { Tooltip } from "./Tooltip.tsx"
 // A list the user reorders: drag an item's handle with a mouse, finger or pen, or focus the
 // handle and press the up and down arrows. The handle keeps its focus as its item moves. Held
 // near the top or bottom of the list's scrolling container, a drag scrolls it.
@@ -89,66 +90,68 @@ export function SortableList<Item>({
   const handleFor = (item: Item, index: number) => {
     const key = itemKey(item)
     return (
-      <button
-        type="button"
-        ref={(element) => {
-          if (element) handles.current.set(key, element)
-          else handles.current.delete(key)
-        }}
-        onClick={() => onSelect?.(item)}
-        aria-label={`Move ${itemLabel(item)}`}
-        data-layout-audit-ignore={namesAsHandles ? "inset: Named drag handle is the whole outline row" : undefined}
-        aria-describedby={hint}
-        className={`${namesAsHandles ? "w-full gap-2 px-1 text-left text-xs" : "size-8"} flex min-h-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing`}
-        onKeyDown={(event) => {
-          const to = event.key === "ArrowUp" ? index - 1 : event.key === "ArrowDown" ? index + 1 : null
-          if (to === null || to < 0 || to >= items.length) return
-          event.preventDefault()
-          onMove(index, to)
-          // Moving a row in the document takes the focus from it: the moved handle gets it back.
-          requestAnimationFrame(() => handles.current.get(key)?.focus())
-        }}
-        onPointerDown={(event) => {
-          if (event.button !== 0) return
-          event.currentTarget.setPointerCapture(event.pointerId)
-          pointer.current = {
-            y: event.clientY,
-            from: event.clientY,
-            scroller: scrollerOf(event.currentTarget)
-          }
-          setDrag({ from: index, to: index })
-        }}
-        onPointerMove={(event) => {
-          if (pointer.current) pointer.current.y = event.clientY
-          if (drag !== null) setDrag({ ...drag, to: target(event.clientY) })
-        }}
-        onPointerUp={() => {
-          if (drag === null) return
-          // Dropping below itself counts the gap it leaves.
-          const to = drag.to > drag.from ? drag.to - 1 : drag.to
-          pointer.current = null
-          setDrag(null)
-          if (to !== drag.from) onMove(drag.from, to)
-        }}
-        onPointerCancel={() => {
-          pointer.current = null
-          setDrag(null)
-        }}
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <circle cx="5.5" cy="3.5" r="1.25" />
-          <circle cx="10.5" cy="3.5" r="1.25" />
-          <circle cx="5.5" cy="8" r="1.25" />
-          <circle cx="10.5" cy="8" r="1.25" />
-          <circle cx="5.5" cy="12.5" r="1.25" />
-          <circle cx="10.5" cy="12.5" r="1.25" />
-        </svg>
-        {namesAsHandles && (
-          <span className="min-w-0 flex-1 truncate" title={itemLabel(item)}>
-            {itemLabel(item)}
-          </span>
-        )}
-      </button>
+      <Tooltip label="Moves this item within the list.">
+        <button
+          type="button"
+          ref={(element) => {
+            if (element) handles.current.set(key, element)
+            else handles.current.delete(key)
+          }}
+          onClick={() => onSelect?.(item)}
+          aria-label={`Move ${itemLabel(item)}`}
+          data-layout-audit-ignore={namesAsHandles ? "inset: Named drag handle is the whole outline row" : undefined}
+          aria-describedby={hint}
+          className={`${namesAsHandles ? "w-full gap-2 px-1 text-left text-xs" : "size-8"} flex min-h-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing`}
+          onKeyDown={(event) => {
+            const to = event.key === "ArrowUp" ? index - 1 : event.key === "ArrowDown" ? index + 1 : null
+            if (to === null || to < 0 || to >= items.length) return
+            event.preventDefault()
+            onMove(index, to)
+            // Moving a row in the document takes the focus from it: the moved handle gets it back.
+            requestAnimationFrame(() => handles.current.get(key)?.focus())
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return
+            event.currentTarget.setPointerCapture(event.pointerId)
+            pointer.current = {
+              y: event.clientY,
+              from: event.clientY,
+              scroller: scrollerOf(event.currentTarget)
+            }
+            setDrag({ from: index, to: index })
+          }}
+          onPointerMove={(event) => {
+            if (pointer.current) pointer.current.y = event.clientY
+            if (drag !== null) setDrag({ ...drag, to: target(event.clientY) })
+          }}
+          onPointerUp={() => {
+            if (drag === null) return
+            // Dropping below itself counts the gap it leaves.
+            const to = drag.to > drag.from ? drag.to - 1 : drag.to
+            pointer.current = null
+            setDrag(null)
+            if (to !== drag.from) onMove(drag.from, to)
+          }}
+          onPointerCancel={() => {
+            pointer.current = null
+            setDrag(null)
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <circle cx="5.5" cy="3.5" r="1.25" />
+            <circle cx="10.5" cy="3.5" r="1.25" />
+            <circle cx="5.5" cy="8" r="1.25" />
+            <circle cx="10.5" cy="8" r="1.25" />
+            <circle cx="5.5" cy="12.5" r="1.25" />
+            <circle cx="10.5" cy="12.5" r="1.25" />
+          </svg>
+          {namesAsHandles && (
+            <span className="min-w-0 flex-1 truncate" title={itemLabel(item)}>
+              {itemLabel(item)}
+            </span>
+          )}
+        </button>
+      </Tooltip>
     )
   }
 

@@ -17,3 +17,12 @@ export const textBoxValue = (box: Locator) =>
 export const expectTextBox = async (box: Locator, value: string) => {
   await expect.poll(() => textBoxValue(box)).toBe(value)
 }
+
+/** Replace the complete editor document through its own keyboard selection,
+ * including text virtualized out of the DOM.
+ */
+export const replaceEditorText = async (box: Locator, value: string) => {
+  await box.focus()
+  await box.press("ControlOrMeta+a")
+  await box.page().keyboard.insertText(value)
+}

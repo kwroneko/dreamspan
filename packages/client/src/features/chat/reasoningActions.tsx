@@ -30,13 +30,15 @@ export const registerReasoningActions = () => [
     id: "reasoning.copy",
     order: 10,
     component: ({ text, kind }) => (
-      <button
-        type="button"
-        className={actionClass}
-        onClick={() => void copy(text, kind === "reasoning" ? "Reasoning" : "Thinking")}
-      >
-        {kind === "reasoning" ? "Copy reasoning" : "Copy thinking"}
-      </button>
+      <Tooltip label="Copies the displayed thinking text.">
+        <button
+          type="button"
+          className={actionClass}
+          onClick={() => void copy(text, kind === "reasoning" ? "Reasoning" : "Thinking")}
+        >
+          {kind === "reasoning" ? "Copy reasoning" : "Copy thinking"}
+        </button>
+      </Tooltip>
     )
   }),
   reasoningActions.register({

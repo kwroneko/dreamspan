@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // In the composer when neither the chat nor the account names a model: the send would
 // fail, so say so and offer the choice right there.
 import { useAtomValue } from "@effect/atom-react"
@@ -28,30 +29,34 @@ function ChooseModel() {
       {models.length === 0 ? (
         <p className="text-sm text-muted">
           No models yet.{" "}
-          <Link to="/settings/connections/new" className={link}>
-            Connect one
-          </Link>
+          <Tooltip label="Opens Connections to add a model provider.">
+            <Link to="/settings/connections/new" className={link}>
+              Connect one
+            </Link>
+          </Tooltip>
           .
         </p>
       ) : (
         <ul aria-label="Models" className="-mx-1 flex min-h-0 flex-col overflow-auto">
           {models.map((model) => (
             <li key={model.value}>
-              <button
-                type="button"
-                className="w-full rounded-md px-2 py-1.5 text-left text-sm outline-none [overflow-wrap:anywhere] hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-                onClick={() =>
-                  void action
-                    .run(
-                      (client) =>
-                        client("ChangeGenerationDefaults", { change: { model: parseModelValue(model.value) } }),
-                      ["settings"]
-                    )
-                    .then((result) => result.ok && setOpen(false))
-                }
-              >
-                {model.label}
-              </button>
+              <Tooltip label="Selects this model as your default.">
+                <button
+                  type="button"
+                  className="w-full rounded-md px-2 py-1.5 text-left text-sm outline-none [overflow-wrap:anywhere] hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+                  onClick={() =>
+                    void action
+                      .run(
+                        (client) =>
+                          client("ChangeGenerationDefaults", { change: { model: parseModelValue(model.value) } }),
+                        ["settings"]
+                      )
+                      .then((result) => result.ok && setOpen(false))
+                  }
+                >
+                  {model.label}
+                </button>
+              </Tooltip>
             </li>
           ))}
         </ul>

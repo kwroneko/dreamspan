@@ -383,8 +383,12 @@ export function SharedBanner({
         title="Its shared note is in the bin"
         actions={
           <>
-            <Button onClick={onRestore}>Restore</Button>
-            <Button onClick={onUnlink}>Unlink</Button>
+            <Button hint="Restores the shared note." onClick={onRestore}>
+              Restore
+            </Button>
+            <Button hint="Replaces the shared link with a local copy." onClick={onUnlink}>
+              Unlink
+            </Button>
           </>
         }
       >
@@ -402,13 +406,18 @@ export function SharedBanner({
       actions={
         <>
           {chatNote && openSnippet ? (
-            <Button onClick={() => openSnippet.run({ text: "", source: "note", refId: note.ref.id })}>
+            <Button
+              hint="Opens the shared note’s editor."
+              onClick={() => openSnippet.run({ text: "", source: "note", refId: note.ref.id })}
+            >
               {openSnippet.label}
             </Button>
           ) : (
-            <Link to="/library/$refId" params={{ refId: note.ref.id }} className={buttonClass()}>
-              Open shared note
-            </Link>
+            <Tooltip label="Opens the shared note’s editor.">
+              <Link to="/library/$refId" params={{ refId: note.ref.id }} className={buttonClass()}>
+                Open shared note
+              </Link>
+            </Tooltip>
           )}
           {workspace && (
             <Button
@@ -418,7 +427,9 @@ export function SharedBanner({
               Large editor
             </Button>
           )}
-          <Button onClick={onUnlink}>Unlink</Button>
+          <Button hint="Replaces the shared link with a local copy." onClick={onUnlink}>
+            Unlink
+          </Button>
         </>
       }
     >
@@ -526,14 +537,16 @@ export function NoteFields({
         {owner.shared !== "global" && (
           <p className="text-sm text-muted">
             A snippet of one chat, in every branch of it.{" "}
-            <Link
-              to="/chats/$chatId"
-              params={{ chatId: owner.shared }}
-              search={{ panel: "snippets" }}
-              className="text-accent underline-offset-4 hover:underline"
-            >
-              Open it in that chat's Snippets
-            </Link>
+            <Tooltip label="Opens the snippet in its chat.">
+              <Link
+                to="/chats/$chatId"
+                params={{ chatId: owner.shared }}
+                search={{ panel: "snippets" }}
+                className="text-accent underline-offset-4 hover:underline"
+              >
+                Open it in that chat's Snippets
+              </Link>
+            </Tooltip>
           </p>
         )}
         <TextField store={store} path={["title"]} label="Name" />
@@ -631,7 +644,7 @@ export function SharedNotePicker({
       open={open}
       onOpenChange={onOpenChange}
       title="Pick a shared note"
-      description="The note shows the shared note's text, and edits to it change it everywhere it's used."
+      description="Uses the shared note’s text. Edits affect every use of the shared note."
     >
       <Field label="Filter by name">
         <Input value={query} autoFocus placeholder="Name" onChange={(event) => setQuery(event.currentTarget.value)} />
@@ -649,25 +662,29 @@ export function SharedNotePicker({
         <ul aria-label="Shared notes" className="flex max-h-80 flex-col gap-1 overflow-y-auto">
           {notes.map((note) => (
             <li key={note.ref.id}>
-              <button
-                type="button"
-                onClick={() => onPick(note)}
-                className="flex w-full min-w-0 flex-col gap-0.5 rounded-md border border-border px-3 py-2 text-left outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                <span className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium">{note.title || "Untitled"}</span>
-                  <span className="shrink-0 text-xs text-muted">
-                    {note.usedBy === 0 ? "unused" : `used in ${note.usedBy}`}
+              <Tooltip label="Selects this shared note.">
+                <button
+                  type="button"
+                  onClick={() => onPick(note)}
+                  className="flex w-full min-w-0 flex-col gap-0.5 rounded-md border border-border px-3 py-2 text-left outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium">{note.title || "Untitled"}</span>
+                    <span className="shrink-0 text-xs text-muted">
+                      {note.usedBy === 0 ? "unused" : `used in ${note.usedBy}`}
+                    </span>
                   </span>
-                </span>
-                <span className="line-clamp-2 text-sm text-muted">{note.excerpt || "Empty."}</span>
-              </button>
+                  <span className="line-clamp-2 text-sm text-muted">{note.excerpt || "Empty."}</span>
+                </button>
+              </Tooltip>
             </li>
           ))}
         </ul>
       )}
       <DialogActions>
-        <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+        <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+          Cancel
+        </Button>
       </DialogActions>
     </Dialog>
   )

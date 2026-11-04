@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The next-reply strip above the composer's box: small chips for what the next reply uses (the
 // model, the prompt preset, the cache, who replies), each opening a popover of full-width rows,
 // the same popover at every width, so a long name is never cut to "Local …".
@@ -69,9 +70,11 @@ export function StripRow({ scroll, children }: { scroll: boolean; children: Reac
 /** A chip whose value isn't known yet: "…", disabled, never a placeholder that flashes first. */
 export function LoadingChip({ label }: { label: string }) {
   return (
-    <button type="button" disabled aria-label={`${label}: loading`} className={chipClass()}>
-      …
-    </button>
+    <Tooltip label="Waits for the available choices to load.">
+      <button type="button" disabled aria-label={`${label}: loading`} className={chipClass()}>
+        …
+      </button>
+    </Tooltip>
   )
 }
 
@@ -88,13 +91,15 @@ export function ChipText({ children }: { children: ReactNode }) {
 /** A full-width row in a strip popover, for the action under the choices ("Model settings…"). */
 export function PopoverRow({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-accent outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-    >
-      {children}
-    </button>
+    <Tooltip label="Opens the related settings.">
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex w-full shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-accent outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        {children}
+      </button>
+    </Tooltip>
   )
 }
 
@@ -174,27 +179,29 @@ export function ChoiceChip<Value>({
         {shown.map((choice) => {
           const checked = Object.is(choice.value, value)
           return (
-            <button
-              key={String(choice.value)}
-              type="button"
-              role="radio"
-              aria-checked={checked}
-              aria-label={choice.label}
-              {...(choice.detail ? { "aria-description": choice.detail } : {})}
-              onClick={() => {
-                close()
-                if (!checked) onChoose(choice.value)
-              }}
-              className="grid w-full shrink-0 grid-cols-[1rem_1fr] items-start gap-x-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus aria-checked:font-medium"
-            >
-              <span className="pt-0.5 text-accent">{checked && <Icon name="check" size={14} />}</span>
-              <span className="min-w-0 [overflow-wrap:anywhere]">{choice.label}</span>
-              {choice.detail && (
-                <span className="col-start-2 text-xs font-normal text-muted [overflow-wrap:anywhere]">
-                  {choice.detail}
-                </span>
-              )}
-            </button>
+            <Tooltip label="Selects this option for the next reply.">
+              <button
+                key={String(choice.value)}
+                type="button"
+                role="radio"
+                aria-checked={checked}
+                aria-label={choice.label}
+                {...(choice.detail ? { "aria-description": choice.detail } : {})}
+                onClick={() => {
+                  close()
+                  if (!checked) onChoose(choice.value)
+                }}
+                className="grid w-full shrink-0 grid-cols-[1rem_1fr] items-start gap-x-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus aria-checked:font-medium"
+              >
+                <span className="pt-0.5 text-accent">{checked && <Icon name="check" size={14} />}</span>
+                <span className="min-w-0 [overflow-wrap:anywhere]">{choice.label}</span>
+                {choice.detail && (
+                  <span className="col-start-2 text-xs font-normal text-muted [overflow-wrap:anywhere]">
+                    {choice.detail}
+                  </span>
+                )}
+              </button>
+            </Tooltip>
           )
         })}
       </div>

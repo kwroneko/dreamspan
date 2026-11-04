@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // A replay displaced text saved elsewhere. Switching is an explicit, undoable restore; a field
 // with no history to undo it from offers none, and its other text goes to
 // the recovered texts when the edit ends, as every displaced text does (ARCHITECTURE §3.10).
@@ -28,12 +29,15 @@ export function ReplayNotice({
           : "Text saved elsewhere is kept in the bin, under Recovered text, when you save or cancel this browser's text."}
       </p>
       <details>
-        <summary className="cursor-pointer">View the other text</summary>
+        <Tooltip label="Previews the text saved on another device.">
+          <summary className="cursor-pointer">View the other text</summary>
+        </Tooltip>
         <pre className="max-h-48 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]">{conflict.content}</pre>
       </details>
       <div className="flex flex-wrap gap-2">
         {switchText && (
           <Button
+            hint="Loads the other saved text into this field."
             disabled={busy}
             onClick={() => {
               setBusy(true)
@@ -43,7 +47,7 @@ export function ReplayNotice({
             Use the other text
           </Button>
         )}
-        <Button variant="ghost" disabled={busy} onClick={acknowledge}>
+        <Button hint="Keeps this browser’s text in this field." variant="ghost" disabled={busy} onClick={acknowledge}>
           Keep this browser's text
         </Button>
       </div>

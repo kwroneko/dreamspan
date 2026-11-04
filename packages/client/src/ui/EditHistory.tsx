@@ -1,3 +1,4 @@
+import { Tooltip } from "./Tooltip.tsx"
 // A text box's edit history (owner, 2026-11-01), apart from revision History: every state the box
 // had, from any device or session, browsable with its text. Picking one puts it in the box as a
 // new latest state, so the text there now stays in the list: no travelling back, no branches, no
@@ -145,7 +146,7 @@ function EditHistoryDialog({
       open
       onOpenChange={(next) => !next && onClose()}
       title={`Edit history: ${label}`}
-      description="Every state this text had, newest first, from any device or session. Putting one back makes it the newest state; the text there now stays in this list. Revisions are in History."
+      description="Select earlier text to preview or use in the editor."
     >
       {error && <Alert tone="danger">{error}</Alert>}
       {states === null && error === null && <p className="text-sm text-muted">Loading…</p>}
@@ -155,17 +156,19 @@ function EditHistoryDialog({
             <ol aria-label="Earlier states" className="flex max-h-[40dvh] flex-col overflow-y-auto sm:max-h-[55dvh]">
               {states.map((state, index) => (
                 <li key={state.seq}>
-                  <button
-                    type="button"
-                    aria-pressed={selected?.seq === state.seq}
-                    onClick={() => setSelected(state)}
-                    className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised"
-                  >
-                    <span className="font-medium">{index === 0 ? `Latest · ${when(state.at)}` : when(state.at)}</span>
-                    <span className="text-xs text-muted">
-                      {kindLabel[state.kind]} · {state.length} characters
-                    </span>
-                  </button>
+                  <Tooltip label="Previews this earlier text.">
+                    <button
+                      type="button"
+                      aria-pressed={selected?.seq === state.seq}
+                      onClick={() => setSelected(state)}
+                      className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised"
+                    >
+                      <span className="font-medium">{index === 0 ? `Latest · ${when(state.at)}` : when(state.at)}</span>
+                      <span className="text-xs text-muted">
+                        {kindLabel[state.kind]} · {state.length} characters
+                      </span>
+                    </button>
+                  </Tooltip>
                 </li>
               ))}
             </ol>
@@ -197,7 +200,7 @@ function EditHistoryDialog({
           variant="primary"
           pending={pending}
           disabled={selected === null || text === null || selected.seq === states?.[0]?.seq}
-          hint="Puts this text in the box as its newest state. The text there now stays in this list."
+          hint="Loads the selected text into the editor."
           onClick={() => void put()}
         >
           Put this text in the box

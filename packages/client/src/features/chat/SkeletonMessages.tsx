@@ -27,6 +27,7 @@ export function SkeletonMessages({ onRetry }: { onRetry: () => void }) {
           title="This is taking longer than it should"
           actions={
             <Button
+              hint="Retries loading this view."
               variant="ghost"
               onClick={() => {
                 setSlow(false)

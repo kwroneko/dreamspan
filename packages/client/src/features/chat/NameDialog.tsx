@@ -111,10 +111,10 @@ function NameForm({
       {children}
       <ErrorAlert error={error} />
       <DialogActions>
-        <Button type="button" onClick={onCancel}>
+        <Button hint="Closes this dialog without applying changes." type="button" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" variant="primary" pending={pending}>
+        <Button hint="Saves the new name." type="submit" variant="primary" pending={pending}>
           {saveLabel}
         </Button>
       </DialogActions>

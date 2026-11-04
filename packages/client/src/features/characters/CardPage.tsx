@@ -68,15 +68,17 @@ function Folded({ title, children }: { title: string; children: string }) {
         {children}
       </p>
       {(long || open) && (
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          className="self-start rounded text-sm text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          {open ? "Show less" : "Show more"}
-          <span className="sr-only"> of {title.toLowerCase()}</span>
-        </button>
+        <Tooltip label={open ? "Click to collapse the field text." : "Click to show the full field text."}>
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+            className="self-start rounded text-sm text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {open ? "Show less" : "Show more"}
+            <span className="sr-only"> of {title.toLowerCase()}</span>
+          </button>
+        </Tooltip>
       )}
     </section>
   )
@@ -181,7 +183,7 @@ function CharacterChats({ card }: { card: CardUsage }) {
           </ul>
           {!total && <p className="text-sm text-muted">No chat's title or characters have “{search}”.</p>}
           {rows.length < total && (
-            <Button variant="ghost" onClick={() => setLimit((n) => n + 50)}>
+            <Button hint="Loads more chats for this card." variant="ghost" onClick={() => setLimit((n) => n + 50)}>
               Load more
             </Button>
           )}
@@ -191,13 +193,7 @@ function CharacterChats({ card }: { card: CardUsage }) {
   )
 }
 function Chats({ card }: { card: CardUsage }) {
-  return card.chats === 0 ? (
-    <EmptyState title="No chats yet">
-      <p>New chat shows its greeting; nothing is saved until you send the first message.</p>
-    </EmptyState>
-  ) : (
-    <CharacterChats card={card} />
-  )
+  return card.chats === 0 ? <EmptyState title="No chats yet" /> : <CharacterChats card={card} />
 }
 
 function Page({ card, persona = false }: { card: CardUsage; persona?: boolean }) {
@@ -215,9 +211,11 @@ function Page({ card, persona = false }: { card: CardUsage; persona?: boolean })
   const used = card.chats > 0
   return (
     <div className="flex flex-col gap-5">
-      <Link to="/" className="self-start text-sm text-muted hover:text-text">
-        ← Characters
-      </Link>
+      <Tooltip label="Returns to Characters.">
+        <Link to="/" className="self-start text-sm text-muted hover:text-text">
+          ← Characters
+        </Link>
+      </Tooltip>
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start">
         <Avatar
           id={card.entityId}
@@ -299,9 +297,11 @@ export function CardPage() {
         ) : (
           <EmptyState title="This card isn't available">
             <p>The library lists your cards, including personas.</p>
-            <Link to="/library" className={buttonClass()}>
-              Open the library
-            </Link>
+            <Tooltip label="Opens the library.">
+              <Link to="/library" className={buttonClass()}>
+                Open the library
+              </Link>
+            </Tooltip>
           </EmptyState>
         )
       }}

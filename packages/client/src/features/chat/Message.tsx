@@ -314,8 +314,8 @@ function Editor({
           onClick={onCancel}
           hint={
             draft.target._tag === "Write"
-              ? "Closes this without adding a version. What you typed is kept in the bin, under Recovered text."
-              : "Closes this without saving. Your text stays in the message’s edit history."
+              ? "Closes the editor without adding a message version."
+              : "Closes the message editor without saving."
           }
         >
           <Icon name="close" />
@@ -873,9 +873,12 @@ export const Message = memo(function Message({
         {version.context !== null && version.context.issues.length > 0 && (
           // What the user should know about the context it was generated from (ARCHITECTURE §15).
           <details className="text-xs text-warning">
-            <summary className="cursor-pointer">
-              {version.context.issues.length === 1 ? "1 note" : `${version.context.issues.length} notes`} on its context
-            </summary>
+            <Tooltip label="Shows context warnings for this reply.">
+              <summary className="cursor-pointer">
+                {version.context.issues.length === 1 ? "1 note" : `${version.context.issues.length} notes`} on its
+                context
+              </summary>
+            </Tooltip>
             <ul className="mt-1 list-disc pl-5">
               {version.context.issues.map((issue, i) => (
                 <li key={i}>{issue.message}</li>

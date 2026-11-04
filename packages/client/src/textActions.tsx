@@ -160,44 +160,52 @@ function ActionButton({ action, context }: { action: TextAction; context: TextAc
   })
   const disabled = !action.available(context)
   const trigger = (
-    <button
-      ref={button}
-      type="button"
-      data-text-action={action.id}
-      aria-disabled={disabled || undefined}
-      aria-label={action.label}
-      aria-description={
+    <Tooltip
+      label={
         disabled
           ? (action.unavailable?.(context) ?? "This action is unavailable for this text.")
           : describe(action, context)
       }
-      // The editor keeps its focus and selection.
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => {
-        if (!disabled && action.run(context) === "choose" && Choices) choose()
-      }}
-      // A context menu on a button, not over text: the browser's own stays over text.
-      onContextMenu={
-        Choices && !disabled
-          ? (e) => {
-              e.preventDefault()
-              choose()
-            }
-          : undefined
-      }
-      className={`aria-disabled:opacity-40 inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-md text-xs text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus max-sm:h-8 ${
-        action.icon ? "w-6 max-sm:w-8" : "px-2"
-      }`}
     >
-      {action.icon ? (
-        <Icon name={action.icon} size={14} />
-      ) : (
-        <>
-          <span className={action.shortLabel ? "max-sm:hidden" : ""}>{action.label}</span>
-          {action.shortLabel && <span className="sm:hidden">{action.shortLabel}</span>}
-        </>
-      )}
-    </button>
+      <button
+        ref={button}
+        type="button"
+        data-text-action={action.id}
+        aria-disabled={disabled || undefined}
+        aria-label={action.label}
+        aria-description={
+          disabled
+            ? (action.unavailable?.(context) ?? "This action is unavailable for this text.")
+            : describe(action, context)
+        }
+        // The editor keeps its focus and selection.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          if (!disabled && action.run(context) === "choose" && Choices) choose()
+        }}
+        // A context menu on a button, not over text: the browser's own stays over text.
+        onContextMenu={
+          Choices && !disabled
+            ? (e) => {
+                e.preventDefault()
+                choose()
+              }
+            : undefined
+        }
+        className={`aria-disabled:opacity-40 inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-md text-xs text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus max-sm:h-8 ${
+          action.icon ? "w-6 max-sm:w-8" : "px-2"
+        }`}
+      >
+        {action.icon ? (
+          <Icon name={action.icon} size={14} />
+        ) : (
+          <>
+            <span className={action.shortLabel ? "max-sm:hidden" : ""}>{action.label}</span>
+            {action.shortLabel && <span className="sm:hidden">{action.shortLabel}</span>}
+          </>
+        )}
+      </button>
+    </Tooltip>
   )
   const hint = disabled ? (
     (action.unavailable?.(context) ?? "This action is unavailable for this text.")

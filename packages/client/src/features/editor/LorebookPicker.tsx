@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // A search over the library's lorebooks, to add one to a chat or attach one to a preset.
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
@@ -46,9 +47,11 @@ export function LorebookPicker({
       {lorebooks.length === 0 ? (
         <p className="text-sm text-muted">
           Every lorebook in the library is here already, or there are none:{" "}
-          <Link to="/library" className="text-accent hover:underline">
-            import one in the library
-          </Link>
+          <Tooltip label="Opens lorebook import.">
+            <Link to="/library" className="text-accent hover:underline">
+              import one in the library
+            </Link>
+          </Tooltip>
           .
         </p>
       ) : shown.length === 0 ? (
@@ -57,14 +60,16 @@ export function LorebookPicker({
         <ul aria-label="Lorebooks to add" className="flex max-h-72 flex-col overflow-y-auto p-2">
           {shown.map((ref) => (
             <li key={ref.id}>
-              <button
-                type="button"
-                className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-                onClick={() => onPick(ref)}
-              >
-                <span className="font-medium">{ref.label}</span>
-                {ref.subtitle && <span className="text-xs text-muted">{ref.subtitle}</span>}
-              </button>
+              <Tooltip label="Adds this lorebook to the current list.">
+                <button
+                  type="button"
+                  className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                  onClick={() => onPick(ref)}
+                >
+                  <span className="font-medium">{ref.label}</span>
+                  {ref.subtitle && <span className="text-xs text-muted">{ref.subtitle}</span>}
+                </button>
+              </Tooltip>
             </li>
           ))}
         </ul>

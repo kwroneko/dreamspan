@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { composerWorkspace } from "./composerWorkspace.ts"
 import { ComposerControls, invokeComposerControl, type ComposerControlContext } from "./composerControls.tsx"
 // The composer (DESIGN §2.2): who's speaking, always visible, with a switcher and the
@@ -170,25 +171,27 @@ function History({ draft, disabled = false }: { draft: ComposerDraft; disabled?:
         <ul className="flex min-h-0 flex-col overflow-y-auto">
           {states.slice(1).map((state) => (
             <li key={state.seq}>
-              <button
-                type="button"
-                onClick={() => void restore(state.seq)}
-                className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                <span>
-                  {new Date(state.at).toLocaleTimeString(undefined, { timeStyle: "short" })} ·{" "}
-                  {state.length === 1 ? "1 character" : `${state.length} characters`}
-                </span>
-                {state.kind !== "initial" && (
-                  <span className="w-full truncate text-xs text-muted">
-                    {state.removed && state.inserted
-                      ? `then “${state.removed}” became “${state.inserted}”`
-                      : state.removed
-                        ? `then “${state.removed}” was removed`
-                        : `then “${state.inserted}” was typed`}
+              <Tooltip label="Loads this earlier composer text.">
+                <button
+                  type="button"
+                  onClick={() => void restore(state.seq)}
+                  className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <span>
+                    {new Date(state.at).toLocaleTimeString(undefined, { timeStyle: "short" })} ·{" "}
+                    {state.length === 1 ? "1 character" : `${state.length} characters`}
                   </span>
-                )}
-              </button>
+                  {state.kind !== "initial" && (
+                    <span className="w-full truncate text-xs text-muted">
+                      {state.removed && state.inserted
+                        ? `then “${state.removed}” became “${state.inserted}”`
+                        : state.removed
+                          ? `then “${state.removed}” was removed`
+                          : `then “${state.inserted}” was typed`}
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
             </li>
           ))}
         </ul>
@@ -628,9 +631,11 @@ export function Composer({
             {recovered && (
               <p role="status" className="text-sm text-muted">
                 Earlier composer text is kept in the{" "}
-                <Link to="/bin" search={{ section: "recovered" }}>
-                  bin, under Recovered text
-                </Link>
+                <Tooltip label="Opens recovered text in the bin.">
+                  <Link to="/bin" search={{ section: "recovered" }}>
+                    bin, under Recovered text
+                  </Link>
+                </Tooltip>
                 .
               </p>
             )}
@@ -689,6 +694,7 @@ export function Composer({
             preset, set their condition to “When writing as a character”.
           </span>
           <Button
+            hint="Opens the active prompt preset."
             variant="ghost"
             onClick={() => {
               setImpersonationNotice(false)
@@ -697,7 +703,7 @@ export function Composer({
           >
             Open the preset
           </Button>
-          <Button variant="ghost" onClick={() => setImpersonationNotice(false)}>
+          <Button hint="Dismisses this notice." variant="ghost" onClick={() => setImpersonationNotice(false)}>
             Dismiss
           </Button>
         </div>

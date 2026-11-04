@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // "Import a new version…" of a card (ARCHITECTURE.md §11.1; owner, 2026-11-01: "Cards
 // participate in chats, so it can make sense to replace them with a new version wholesale
 // everywhere"). Pick a file, see what it changes and what the card keeps, then Replace: the
@@ -44,7 +45,9 @@ const isText = (value: unknown) => value === undefined || typeof value === "stri
 function Change({ change, open }: { change: FieldChange & { label: string }; open: boolean }) {
   return (
     <details open={open} className="min-w-0 rounded-md border border-border p-2">
-      <summary className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]">{change.label}</summary>
+      <Tooltip label="Shows the imported changes to this field.">
+        <summary className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]">{change.label}</summary>
+      </Tooltip>
       <div className="mt-2">
         {isText(change.before) && isText(change.after) ? (
           <ValueDiff before={change.before} after={change.after} />

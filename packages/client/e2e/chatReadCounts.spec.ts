@@ -220,7 +220,7 @@ test("chat navigation shares reads and still refreshes after writes", async ({ p
     })
     await page
       .getByRole("dialog", { name: "Lorebook editor", exact: true })
-      .getByRole("button", { name: "Back to the chat", exact: true })
+      .getByRole("button", { name: "Close", exact: true })
       .click()
   }
   // Both lists are already mounted: a write must invalidate the shared library query.

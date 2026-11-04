@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The lorebook table's default columns, sort orders and row actions (lorebookTable.ts), as
 // SillyTavern's World Info editor has them: strategy, position, depth, order and trigger %
 // inline, and duplicate, copy or move to another book, and delete in a row's menu.
@@ -228,24 +229,32 @@ function ToAnotherBook({ store, path, entry, title, onClose, move }: LorebookAct
         <ul aria-label="Lorebooks" className="flex max-h-72 flex-col overflow-y-auto p-2">
           {shown.map((ref) => (
             <li key={ref.id}>
-              <button
-                type="button"
-                aria-pressed={target?.id === ref.id}
-                onClick={() => setTarget(ref)}
-                className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:font-medium aria-pressed:ring-1 aria-pressed:ring-accent"
-              >
-                {ref.label}
-                {ref.subtitle && <span className="text-xs text-muted">{ref.subtitle}</span>}
-              </button>
+              <Tooltip label="Selects this destination lorebook.">
+                <button
+                  type="button"
+                  aria-pressed={target?.id === ref.id}
+                  onClick={() => setTarget(ref)}
+                  className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:font-medium aria-pressed:ring-1 aria-pressed:ring-accent"
+                >
+                  {ref.label}
+                  {ref.subtitle && <span className="text-xs text-muted">{ref.subtitle}</span>}
+                </button>
+              </Tooltip>
             </li>
           ))}
         </ul>
       )}
       <DialogActions>
-        <Button variant="ghost" onClick={onClose}>
+        <Button hint="Closes this dialog without applying changes." variant="ghost" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="primary" disabled={target === null} pending={pending} onClick={() => void go()}>
+        <Button
+          hint="Applies the selected transfer to the destination lorebook."
+          variant="primary"
+          disabled={target === null}
+          pending={pending}
+          onClick={() => void go()}
+        >
           {target ? `${verb} to ${target.label}` : verb}
         </Button>
       </DialogActions>

@@ -105,25 +105,29 @@ function SourceTitle({
     <span className="flex min-w-0 flex-col gap-0.5">
       <span className="font-medium break-words text-text">
         {source.slotId ? (
-          <Link
-            to="/chats/$chatId"
-            params={{ chatId }}
-            search={{ ...viewed, slot: source.slotId }}
-            className="text-accent underline-offset-2 hover:underline"
-          >
-            {label}
-          </Link>
+          <Tooltip label="Opens this context source.">
+            <Link
+              to="/chats/$chatId"
+              params={{ chatId }}
+              search={{ ...viewed, slot: source.slotId }}
+              className="text-accent underline-offset-2 hover:underline"
+            >
+              {label}
+            </Link>
+          </Tooltip>
         ) : source.ref ? (
-          <Link
-            to="/library/$refId"
-            params={{ refId: source.ref }}
-            // An entry's link opens its book: a card's own opens the card on it (a standalone
-            // lorebook ignores the focus).
-            search={source.kind === "lorebook" ? { focus: CARD_LOREBOOK_FOCUS } : {}}
-            className="text-accent underline-offset-2 hover:underline"
-          >
-            {label}
-          </Link>
+          <Tooltip label="Opens this context source.">
+            <Link
+              to="/library/$refId"
+              params={{ refId: source.ref }}
+              // An entry's link opens its book: a card's own opens the card on it (a standalone
+              // lorebook ignores the focus).
+              search={source.kind === "lorebook" ? { focus: CARD_LOREBOOK_FOCUS } : {}}
+              className="text-accent underline-offset-2 hover:underline"
+            >
+              {label}
+            </Link>
+          </Tooltip>
         ) : (
           label
         )}
@@ -357,49 +361,51 @@ function Message({
         className="overflow-hidden rounded-lg border-2 border-border bg-surface"
         onToggle={(event) => setOpen(event.currentTarget.open)}
       >
-        <summary className="flex cursor-pointer flex-col gap-1.5 px-3 py-2 font-sans">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-            <span className="text-muted tabular-nums">#{index + 1}</span>
-            <span className="rounded bg-surface-raised px-1.5 py-0.5 text-xs font-semibold tracking-wide uppercase">
-              {roleLabel[message.role]}
+        <Tooltip label="Shows the messages in this context turn.">
+          <summary className="flex cursor-pointer flex-col gap-1.5 px-3 py-2 font-sans">
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <span className="text-muted tabular-nums">#{index + 1}</span>
+              <span className="rounded bg-surface-raised px-1.5 py-0.5 text-xs font-semibold tracking-wide uppercase">
+                {roleLabel[message.role]}
+              </span>
+              {message.name && <span className="text-muted">({message.name})</span>}
+              {message.prefill && (
+                <Badge>
+                  {message.prefill.protocol === "deepseek_prefix"
+                    ? "DeepSeek prefix: true"
+                    : "Forced tool schema prefill"}
+                </Badge>
+              )}
+              <span className="text-muted tabular-nums">~{counted(message.tokens, "token")}</span>
             </span>
-            {message.name && <span className="text-muted">({message.name})</span>}
-            {message.prefill && (
-              <Badge>
-                {message.prefill.protocol === "deepseek_prefix"
-                  ? "DeepSeek prefix: true"
-                  : "Forced tool schema prefill"}
-              </Badge>
-            )}
-            <span className="text-muted tabular-nums">~{counted(message.tokens, "token")}</span>
-          </span>
-          {message.images && (
-            <span className="flex flex-wrap gap-x-3 gap-y-1">
-              {message.images.map((image, i) => (
-                <ImageEstimate key={i} image={image} index={i} />
-              ))}
-            </span>
-          )}
-          {!open && (
-            <>
-              <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                {sources.map((source) => (
-                  <span key={source.id} className="flex flex-col gap-0.5">
-                    <span className="break-words text-muted">
-                      {source.label}
-                      {source.version !== undefined && `, version ${source.version}`}
-                    </span>
-                    {source.activation && (
-                      <span className="break-words text-muted">{activationText(source.activation)}</span>
-                    )}
-                    <ScriptsNote source={source} />
-                  </span>
+            {message.images && (
+              <span className="flex flex-wrap gap-x-3 gap-y-1">
+                {message.images.map((image, i) => (
+                  <ImageEstimate key={i} image={image} index={i} />
                 ))}
               </span>
-              <span className="line-clamp-2 font-mono text-[13px] break-words text-muted">{preview}</span>
-            </>
-          )}
-        </summary>
+            )}
+            {!open && (
+              <>
+                <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                  {sources.map((source) => (
+                    <span key={source.id} className="flex flex-col gap-0.5">
+                      <span className="break-words text-muted">
+                        {source.label}
+                        {source.version !== undefined && `, version ${source.version}`}
+                      </span>
+                      {source.activation && (
+                        <span className="break-words text-muted">{activationText(source.activation)}</span>
+                      )}
+                      <ScriptsNote source={source} />
+                    </span>
+                  ))}
+                </span>
+                <span className="line-clamp-2 font-mono text-[13px] break-words text-muted">{preview}</span>
+              </>
+            )}
+          </summary>
+        </Tooltip>
         {message.prefill?.schema && (
           <pre className="overflow-x-auto border-t border-border px-3 py-2 text-xs" aria-label="Prefill schema">
             {message.prefill.schema}
@@ -604,7 +610,11 @@ function Messages({ run }: { run: RunContext }) {
   const reuseAlone = ![...reuse.values()].includes("every")
   return (
     <>
-      <Button className="self-start" onClick={() => setExpanded(everyOpen ? new Set() : all())}>
+      <Button
+        hint={everyOpen ? "Click to collapse every context turn." : "Click to expand every context turn."}
+        className="self-start"
+        onClick={() => setExpanded(everyOpen ? new Set() : all())}
+      >
         {everyOpen ? "Collapse every turn" : "Expand every turn"}
       </Button>
       <div ref={parent} role="list" className="h-[75vh] overflow-y-auto">
@@ -735,14 +745,16 @@ export function ContextPage() {
             <Navigate to="/chats/$chatId/context/$versionId" params={{ chatId: run.chatId, versionId }} replace />
           ) : (
             <ViewedFork.Provider value={viewed}>
-              <Link
-                to="/chats/$chatId"
-                params={{ chatId: run.chatId }}
-                search={{ ...viewed, slot: run.slotId }}
-                className="text-sm text-muted hover:text-text"
-              >
-                ← Back to the reply
-              </Link>
+              <Tooltip label="Returns to the reply.">
+                <Link
+                  to="/chats/$chatId"
+                  params={{ chatId: run.chatId }}
+                  search={{ ...viewed, slot: run.slotId }}
+                  className="text-sm text-muted hover:text-text"
+                >
+                  ← Back to the reply
+                </Link>
+              </Tooltip>
               <Inspector run={run} />
             </ViewedFork.Provider>
           )

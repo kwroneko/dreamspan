@@ -120,13 +120,15 @@ function SettingsLayout() {
       <div className={`min-w-0 flex-1 ${atList ? "hidden md:block" : ""}`}>
         {open && (
           <div className="mb-4 flex flex-col items-start gap-1 md:hidden">
-            <Link
-              to={inside ? fullPath(open) : "/settings"}
-              className="-ml-1 inline-flex items-center gap-1.5 rounded-md px-1 py-1 text-sm text-muted hover:text-text"
-            >
-              <Icon name="back" />
-              {inside ? open.nav!.label : "Settings"}
-            </Link>
+            <Tooltip label="Returns to the settings list.">
+              <Link
+                to={inside ? fullPath(open) : "/settings"}
+                className="-ml-1 inline-flex items-center gap-1.5 rounded-md px-1 py-1 text-sm text-muted hover:text-text"
+              >
+                <Icon name="back" />
+                {inside ? open.nav!.label : "Settings"}
+              </Link>
+            </Tooltip>
           </div>
         )}
         <Outlet />

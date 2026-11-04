@@ -265,7 +265,7 @@ for (const width of [1440, 390])
     await overlay.getByRole("button", { name: "More actions", exact: true }).click()
     await shoot(page, `full-editor-more-${width}`)
     await page.keyboard.press("Escape")
-    await overlay.getByRole("button", { name: "Back to the chat", exact: true }).click()
+    await overlay.getByRole("button", { name: "Close", exact: true }).click()
     await expect(overlay).toHaveCount(0)
     // The same chat and fork; on a phone the sheet closed as the editor opened, as for a preset.
     expect(new URL(page.url()).pathname).toBe(new URL(url).pathname)

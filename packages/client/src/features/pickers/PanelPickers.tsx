@@ -27,9 +27,11 @@ function Trigger({ text, muted = false }: { text: string; muted?: boolean }) {
 
 function Loading({ label }: { label: string }) {
   return (
-    <button type="button" disabled aria-label={`${label}: loading`} className={dropdown}>
-      <Trigger text="…" muted />
-    </button>
+    <Tooltip label="Waits for the available choices to load.">
+      <button type="button" disabled aria-label={`${label}: loading`} className={dropdown}>
+        <Trigger text="…" muted />
+      </button>
+    </Tooltip>
   )
 }
 

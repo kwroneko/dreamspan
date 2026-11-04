@@ -58,8 +58,16 @@ export function NewPresetDialog({
         </Field>
         <ErrorAlert error={action.error} />
         <DialogActions>
-          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={!label.trim()}>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Creates the prompt preset."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={!label.trim()}
+          >
             Create
           </Button>
         </DialogActions>

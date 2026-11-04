@@ -289,6 +289,7 @@ export function CardSortControl({
     <div className={`flex shrink-0 items-center gap-1 ${className}`}>
       {compact ? (
         <Menu
+          hint="Chooses how cards are sorted."
           label={label}
           align="start"
           trigger={
@@ -299,11 +300,13 @@ export function CardSortControl({
           }
         >
           {SORTS.map((s) => (
-            <MenuCheckboxItem key={s} checked={s === sort} onCheckedChange={() => onChange({ sort: s })}>
-              <span className="flex flex-col">
-                <span>{SORT_LABELS[s].label}</span>
-                <span className="text-xs text-muted">{SORT_LABELS[s].hint}</span>
-              </span>
+            <MenuCheckboxItem
+              description={SORT_LABELS[s].hint}
+              key={s}
+              checked={s === sort}
+              onCheckedChange={() => onChange({ sort: s })}
+            >
+              {SORT_LABELS[s].label}
             </MenuCheckboxItem>
           ))}
         </Menu>

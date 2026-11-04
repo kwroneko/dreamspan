@@ -43,7 +43,9 @@ export function NewCardButton() {
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>New card</Button>
+      <Button hint="Opens a form to create a card." onClick={() => setOpen(true)}>
+        New card
+      </Button>
       <Dialog open={open} onOpenChange={setOpen} title="New card">
         <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
           <UserDraftStatus draft={durable} />
@@ -67,8 +69,11 @@ export function NewCardButton() {
           )}
           <ErrorAlert error={action.error} />
           <DialogActions>
-            <Button onClick={() => setOpen(false)}>Cancel</Button>
+            <Button hint="Closes this dialog without applying changes." onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
             <Button
+              hint="Creates the card."
               type="submit"
               variant="primary"
               pending={action.pending}

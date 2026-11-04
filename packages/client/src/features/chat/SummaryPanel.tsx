@@ -137,6 +137,7 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
         <>
           <Problem error={comparisonError} />
           <Button
+            hint="Retries saving the summary draft."
             onClick={() => {
               setComparisonError(null)
               setComparisonAttempt((attempt) => attempt + 1)
@@ -158,7 +159,7 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
             Undo
           </Button>
         </Tooltip>
-        <Tooltip label="Closes this without saving. What you typed is kept in the bin, under Recovered text.">
+        <Tooltip label="Discards the summary edit.">
           <Button
             onClick={() => void finish(() => store.discard())}
             pending={pending}
@@ -429,7 +430,7 @@ function SummaryRow({
               {summary.revisionCount > 1 && (
                 <MenuItem
                   icon="history"
-                  description="Its earlier texts, to compare or use instead."
+                  description="Shows this summary’s revisions for comparison or selection."
                   aria-label={`Revisions of the summary of ${range.toLowerCase()}`}
                   onClick={() => setMode(mode === "revisions" ? "view" : "revisions")}
                 >

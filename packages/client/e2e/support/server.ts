@@ -7,6 +7,8 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { type APIRequestContext, test } from "@playwright/test"
 
+import { serverReadyModule } from "./serverReady.ts"
+
 const root = resolve(import.meta.dirname, "../../../..")
 
 export interface TestServer {
@@ -31,8 +33,12 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
   const dataDir = mkdtempSync(join(tmpdir(), "rp-browser-"))
   const serverPort = nextPort()
   const entry = env.FAKE_GENERATOR_TPS === undefined ? "packages/server/src/main.ts" : "packages/server/src/dev/main.ts"
-  const launch = () =>
-    spawn(process.execPath, ["--no-wasm-code-gc", entry], {
+  let listening = false
+  let launchId = 0
+  const launch = () => {
+    listening = false
+    const id = ++launchId
+    const child = spawn(process.execPath, ["--import", serverReadyModule, "--no-wasm-code-gc", entry], {
       cwd: root,
       env: {
         ...process.env,
@@ -46,8 +52,22 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
         CLIENT_DIST: join(root, "packages/client/dist"),
         ...env
       },
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
     })
+    child.on("message", (message) => {
+      if (
+        id === launchId &&
+        typeof message === "object" &&
+        message !== null &&
+        "_tag" in message &&
+        message._tag === "BrowserServerListening" &&
+        "port" in message &&
+        message.port === serverPort
+      )
+        listening = true
+    })
+    return child
+  }
   let child = launch()
   // A worker torn down after a timeout skips afterAll: the server mustn't outlive it.
   const orphaned = () => {
@@ -77,10 +97,12 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
     const deadline = Date.now() + 90_000
     while (Date.now() < deadline) {
       if (child.exitCode !== null || child.signalCode !== null) return false
-      const ok = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) }).then(
-        (response) => response.ok,
-        () => false
-      )
+      const ok =
+        listening &&
+        (await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(1000) }).then(
+          (response) => response.ok,
+          () => false
+        ))
       if (ok) return true
       await new Promise((done) => setTimeout(done, 100))
     }

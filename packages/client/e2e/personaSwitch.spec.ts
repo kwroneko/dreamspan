@@ -1,3 +1,4 @@
+import { showAppNavigation } from "./support/appMenu.ts"
 // The Persona switch (owner, 2026-11-02): in a card's header, in the chat panel's character tab
 // and the full editor, and on its page, it puts the card in the persona folder or takes it out,
 // and the lists follow at once, without a reload. And Add characters' Include personas: off by
@@ -50,8 +51,9 @@ const personaSwitch = (scope: Locator | Page) => scope.getByRole("button", { nam
 
 /** The home page's Personas tab, reached in the app (no reload), and its tiles. */
 const homePersonas = async (page: Page) => {
-  // The left panel's link on a wide screen, the top bar's on a phone.
-  await page.getByRole("link", { name: "Characters", exact: true }).filter({ visible: true }).first().click()
+  // DESIGN §10.1 navtilesport: Home replaces the Characters navigation link.
+  await showAppNavigation(page)
+  await page.getByRole("link", { name: "Home", exact: true }).filter({ visible: true }).first().click()
   const main = page.getByRole("main")
   await main.getByRole("group", { name: "Show", exact: true }).getByRole("button", { name: "Personas" }).click()
   return main

@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The regex script form (ST's regex extension), shared by every list that holds scripts: a
 // preset's and a card's (bound to their editor's draft store) and the account's global list
 // (a local draft saved with SetGlobalRegex). Same fields and layout everywhere; only the
@@ -343,7 +344,9 @@ function TryIt({ script }: { script: RegexScript }) {
   const shown = sample !== "" && script.find_regex !== "" && result?.sample === sample ? result.value : null
   return (
     <details className="group rounded-md border border-border">
-      <summary className="cursor-pointer px-3 py-2 text-sm font-medium select-none">Try it</summary>
+      <Tooltip label="Opens a scratch area to try this script.">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium select-none">Try it</summary>
+      </Tooltip>
       <div className="flex flex-col gap-2 border-t border-border p-3">
         <Field
           label="Sample text"
@@ -444,7 +447,13 @@ export function ScriptItem({
             <Badge>{script.disabled ? "off" : effectBadge(script)}</Badge>
           </span>
         </div>
-        <Button variant="ghost" aria-expanded={open} aria-label={`Edit ${name}`} onClick={() => onOpenChange(!open)}>
+        <Button
+          hint="Opens this regex script for editing."
+          variant="ghost"
+          aria-expanded={open}
+          aria-label={`Edit ${name}`}
+          onClick={() => onOpenChange(!open)}
+        >
           {open ? "Close" : "Edit"}
         </Button>
       </div>
@@ -556,7 +565,11 @@ export function DocumentRegexScripts({
             tone="warning"
             title="These scripts don't run until you allow them"
             actions={
-              <Button variant="primary" onClick={() => setConfirming(true)}>
+              <Button
+                hint="Allows these imported scripts to run."
+                variant="primary"
+                onClick={() => setConfirming(true)}
+              >
                 Allow them
               </Button>
             }
