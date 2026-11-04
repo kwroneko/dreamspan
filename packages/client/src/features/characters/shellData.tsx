@@ -15,7 +15,6 @@ import { AsyncResult, Atom } from "effect/reactivity"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
-import { useWide } from "../chat/ChatPanels.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
@@ -173,7 +172,6 @@ export function useShellNavigation() {
 }
 
 export function useOpenCharacter() {
-  const wide = useWide()
   const navigation = useShellNavigation()
   const result = useAtomValue(shellAtom)
   const navigate = useNavigate()
@@ -206,7 +204,7 @@ export function useOpenCharacter() {
       void navigate({
         to: "/cards/$entityId/chat",
         params: { entityId: entity },
-        search: { ...sidebarCleared, character: entity, panel: wide ? panel : undefined }
+        search: { ...sidebarCleared, character: entity, panel }
       })
   }
 }

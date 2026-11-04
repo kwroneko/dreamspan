@@ -9,19 +9,22 @@ export function Sheet({
   open,
   onOpenChange,
   title,
+  container,
   children
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Its heading, beside the close button. */
   title: ReactNode
+  /** Keep a sheet within the landmark it belongs to. */
+  container?: HTMLElement | null | undefined
   /** Fills the rest of the height; it scrolls itself. */
   children: ReactNode
 }) {
   const closeRef = useRef<HTMLButtonElement>(null)
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
-      <BaseDialog.Portal>
+      <BaseDialog.Portal container={container}>
         <BaseDialog.Popup
           data-layout-overlay="Modal sheet covers the page"
           initialFocus={closeRef}

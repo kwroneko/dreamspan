@@ -41,7 +41,6 @@ import { usePendingCardInfo } from "./pendingCardInfo.ts"
 import { chatCardActions } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { composerChoice } from "./speaker.ts"
-import { useWide } from "./ChatPanels.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export function CharacterTab({ session, view, tab }: PanelProps) {
@@ -138,13 +137,12 @@ function useCardStore(refId: RefId) {
 
 /** "New chat with <name>": only them, from their greeting (owner, 2026-11-01: a button, not under More). */
 function NewChat({ card, guidance }: { card: CastCard; guidance: boolean }) {
-  const wide = useWide()
   return (
     <Tooltip label="Start a chat with only them, at their greeting.">
       <Link
         to="/cards/$entityId/chat"
         params={{ entityId: card.entityId }}
-        search={{ panel: wide ? `card:${card.entityId}` : undefined, guidance: guidance ? "on" : "off" }}
+        search={{ panel: `card:${card.entityId}`, guidance: guidance ? "on" : "off" }}
         className={`${buttonClass("ghost")} h-8! px-2!`}
       >
         New chat with {card.name}
