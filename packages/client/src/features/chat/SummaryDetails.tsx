@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import type { LcmSummary, SummaryDetails as Details } from "@rp/shared/lcm.ts"
 import { Link, useParams } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
@@ -169,7 +170,9 @@ function SummaryRequestPage() {
   }, [summaryId])
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-      <h1 className="text-lg font-semibold">Summary request inspector</h1>
+      <CenterHeaderContent>
+        <h1 className="text-lg font-semibold">Summary request inspector</h1>
+      </CenterHeaderContent>
       {error && <Alert tone="danger">{error}</Alert>}
       {details && (
         <>

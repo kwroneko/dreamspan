@@ -1,3 +1,6 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
+import { DocumentSwitcher } from "../editor/DocumentSwitcher.tsx"
+import { SNIPPET_FOCUS } from "../editor/workspaceViews.ts"
 // A snippet in the large editor (owner, 2026-11-02): open in the chat's centre column while the
 // side panel shows other text, to paste or send into it. It edits through the workspace's store
 // for the snippet, the one its block in Snippets uses, so both show the same text, the same
@@ -77,30 +80,41 @@ export function SnippetLarge({
           ← Library
         </Link>
       )}
-      <header className="flex min-w-0 items-start gap-2">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <InlineRename
-            value={typedTitle}
-            label={title}
-            className="min-w-0"
-            onRename={(next) => {
-              store.setText(["title"], next)
-              void store.save(textField(["title"]))
-            }}
-          >
-            <h1 className="min-w-0 text-xl font-semibold [overflow-wrap:anywhere]">{title}</h1>
-          </InlineRename>
-          {item && <p className="text-sm text-muted">{item.global ? "All chats" : "This chat"}</p>}
-        </div>
-        <IconButton
-          label={`Copy ${title}`}
-          hint="Copies its text, to paste anywhere"
-          icon="copy"
-          disabled={content === ""}
-          onClick={() => void copy(content, "Snippet")}
-        />
-        {onClose && <WindowClose onClick={onClose} />}
-      </header>
+      <CenterHeaderContent>
+        <header className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <InlineRename
+              value={typedTitle}
+              label={title}
+              className="min-w-0"
+              onRename={(next) => {
+                store.setText(["title"], next)
+                void store.save(textField(["title"]))
+              }}
+            >
+              <h1 aria-label={title} className="min-w-0 text-xl font-semibold [overflow-wrap:anywhere]">
+                <DocumentSwitcher
+                  refId={refId}
+                  label={title}
+                  kind="note"
+                  subject="snippet"
+                  focus={SNIPPET_FOCUS}
+                  items={state.items.map((item) => ({ value: item.ref.id, label: item.title || item.ref.label }))}
+                />
+              </h1>
+            </InlineRename>
+          </div>
+          <IconButton
+            label={`Copy ${title}`}
+            hint="Copies its text, to paste anywhere"
+            icon="copy"
+            disabled={content === ""}
+            onClick={() => void copy(content, "Snippet")}
+          />
+          <SaveRevision store={store} />
+          {onClose && <WindowClose onClick={onClose} />}
+        </header>
+      </CenterHeaderContent>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         {item && (
           <Switch
@@ -118,7 +132,6 @@ export function SnippetLarge({
             All chats
           </Switch>
         )}
-        <SaveRevision store={store} />
         {item && (
           <span className="flex flex-wrap items-center gap-1">
             <SlotOutlet slot={snippetTools} props={{ store: workspace, item }} />

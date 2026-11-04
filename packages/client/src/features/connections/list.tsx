@@ -22,6 +22,7 @@ export function ConnectionsPage() {
   return (
     <Card>
       <CardHeader
+        center
         title="Connections"
         actions={
           <>
@@ -201,7 +202,7 @@ function NewConnectionForm({
   const sentTo = origin ? `It's sent only to ${origin} and never shown again.` : "It's never shown again."
   return (
     <Card>
-      <CardHeader inline title="New connection" />
+      <CardHeader center inline title="New connection" />
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <UserDraftNotices draft={durable} />
         <Field label="Provider">

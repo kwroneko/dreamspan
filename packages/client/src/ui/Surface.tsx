@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "./CenterHeader.tsx"
 // Layout and status pieces with no behavior of their own: cards, badges, callouts and
 // empty states, and sections opened on demand.
 import { type ReactNode, useState } from "react"
@@ -20,14 +21,29 @@ export function CardHeader({
   description,
   about,
   actions,
-  inline = false
+  inline = false,
+  center = false
 }: {
   title: ReactNode
   description?: ReactNode
   about?: ReactNode
   actions?: ReactNode
   inline?: boolean
+  center?: boolean
 }) {
+  if (center)
+    return (
+      <>
+        <CenterHeaderContent>
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+            <h1 className="min-w-0 truncate text-base font-semibold">{title}</h1>
+            {about && <AboutHint heading={typeof title === "string" ? title : "this page"}>{about}</AboutHint>}
+          </div>
+        </CenterHeaderContent>
+        {actions && <div className="mb-4 flex flex-wrap gap-2">{actions}</div>}
+        {description && <p className="mb-4 text-sm text-muted">{description}</p>}
+      </>
+    )
   return (
     <div
       className={`mb-4 flex gap-3 ${inline ? "flex-row items-start justify-between" : "flex-col sm:flex-row sm:items-start sm:justify-between"}`}

@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // Importing a SillyTavern data folder (DESIGN §1.4, ARCHITECTURE.md §13). The page lists the
 // user's imports, running and past, each opening to its report, and starts one: a folder
 // named by its path is imported by the server as a job that goes on whatever this tab does;
@@ -996,14 +997,16 @@ export function StImportPage() {
     void navigate({ to: "/import/st", search: importId === null ? {} : { job: importId } })
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Import ST data</h1>
-        <Tooltip label="Opens the other import options.">
-          <Link to="/import" className={buttonClass("ghost")}>
-            Back to Import
-          </Link>
-        </Tooltip>
-      </header>
+      <CenterHeaderContent>
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold">Import ST data</h1>
+          <Tooltip label="Opens the other import options.">
+            <Link to="/import" className={buttonClass("ghost")}>
+              Back to Import
+            </Link>
+          </Tooltip>
+        </header>
+      </CenterHeaderContent>
       <SlotOutlet slot={stImportSections} props={{ opened, open }} />
     </div>
   )
