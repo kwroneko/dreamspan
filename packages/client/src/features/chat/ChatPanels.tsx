@@ -5,7 +5,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router"
 import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
-import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
@@ -216,15 +215,6 @@ export function ChatSidePanel({
   const all = usePanelTabs(content.view, tab)
   const tools = all.filter((t) => (t.descriptor.placement ?? "tools") === "tools")
   const cast = all.filter((t) => t.descriptor.placement === "cast")
-  // While a portrait is shown, a character's chip opens theirs too, as a click on their portrait
-  // would (on top of the others, or in place of them with one kept at a time); a chip never
-  // closes one, since its click is first the tab's.
-  const portraits = usePortraitViewer()
-  const pick = (value: PanelTab) => {
-    const avatar = cast.find((t) => t.value === value)?.avatar
-    if (portraits && portraits.shown.length > 0 && avatar) portraits.show(avatar)
-    onTab(value)
-  }
   const nav = (
     <div className="flex shrink-0 flex-col">
       <div className="flex h-shell-header shrink-0 items-center border-b border-border px-2 py-2 *:min-w-0 *:flex-1">
@@ -257,7 +247,7 @@ export function ChatSidePanel({
             note: t.note
           }))}
           value={tab}
-          onValueChange={pick}
+          onValueChange={onTab}
           label="Characters"
         />
         {cast.length === 0 && <div className="h-0.5" />}
