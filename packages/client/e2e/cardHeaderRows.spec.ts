@@ -201,9 +201,9 @@ for (const width of [390, 1024, 1440])
             await expect(toggle).toHaveCSS("transition-property", /width/)
           }
           const captureStates = async (persona: boolean) => {
-            if (!work || view !== "panel" || index !== 0) return
-            mkdirSync(work, { recursive: true })
-            for (const state of ["rest", "hover", "focus"]) {
+            if (view !== "panel" || index !== 0) return
+            if (work) mkdirSync(work, { recursive: true })
+            for (const state of work ? ["rest", "hover", "focus"] : ["focus"]) {
               await toggle.evaluate((el) => el.blur())
               await page.mouse.move(0, 0)
               if (state === "hover") await toggle.hover()
@@ -215,6 +215,30 @@ for (const width of [390, 1024, 1440])
                 expect(await toggle.evaluate((el) => el.matches(":focus-visible"))).toBe(true)
                 await expect(toggle).toHaveCSS("--tw-ring-inset", "inset")
                 await expect(toggle).toHaveCSS("--tw-ring-offset-width", "0px")
+                if (!persona) {
+                  const ring = await toggle.evaluate((button) => {
+                    const bounds = button.getBoundingClientRect()
+                    const icon = button.querySelector("svg")!.getBoundingClientRect()
+                    const style = getComputedStyle(button, "::before")
+                    const x = bounds.x + parseFloat(style.left)
+                    const y = bounds.y + parseFloat(style.top)
+                    return {
+                      centreX: x + parseFloat(style.width) / 2,
+                      centreY: y + parseFloat(style.height) / 2,
+                      iconX: icon.x + icon.width / 2,
+                      iconY: icon.y + icon.height / 2,
+                      shadow: style.boxShadow,
+                      overflow: getComputedStyle(button).overflow
+                    }
+                  })
+                  expect(ring.centreX).toBeCloseTo(ring.iconX, 1)
+                  expect(ring.centreY).toBeCloseTo(ring.iconY, 1)
+                  expect(ring.shadow).toContain("inset")
+                  expect(ring.shadow).not.toBe("none")
+                  expect(ring.overflow).toBe("visible")
+                } else {
+                  expect(await toggle.evaluate((button) => getComputedStyle(button).boxShadow)).toContain("inset")
+                }
               }
               if (!persona) await expect(toggle).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
               await expect(toggle).toHaveCSS("cursor", "pointer")
@@ -244,6 +268,7 @@ for (const width of [390, 1024, 1440])
                   ]
                 }
               })
+              if (!work) continue
               const file = join(work, `states-${width}-${theme}-${persona ? "persona" : "character"}-${state}`)
               writeFileSync(`${file}.json`, JSON.stringify(measured, null, 2))
               await header.screenshot({ path: `${file}.png` })

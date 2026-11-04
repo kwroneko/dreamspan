@@ -240,6 +240,9 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 2.2 Personas, speakers and writers
 
+- **[D]** (owner, 2026-11-04, focusring): “fix it. This should go without saying”. Centre keyboard focus evenly around the bare Persona icon and the enabled badge, preserving header layout and text alignment; check other bare icon buttons for the same offset. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
+- **[P]** (focusring, 2026-11-04): draw the aligned off-state ring in a positioned pseudo-element centred on the icon; preserve the existing hit area and badge ring. Implemented in ARCHITECTURE §12.
+
 - **[D] Header counts order** (owner, 2026-11-04): “in the persona cluster, chats should come after tokens/permanent on that line, not before, because it's the only one that might be missing.” Owner correction (2026-11-04): “I mean character cluster”. The rule applies to the character tab’s card header (and personas shown there): “~tokens · ~permanent · N chats”, omitting the last separator when chats are absent. Supersedes the counts order in the four-row decision below. **Built; obsolete as an implementation requirement** (countsorder; ARCHITECTURE §14.6).
 
 - **[D]** (owner, 2026-11-04, personabtn follow-up): “The icon in the deactivated state can just not have a border/button styling. It becomes highlighted on hover and does give the cursor a pointer. It turns into a badge when enabled. That solves it, since we can align the two states differently.” Off is a bare icon with colour-only hover and pointer cursor; on uses the padded icon-and-Persona badge. The off icon and on box align with the text; both retain focus rings and explanations. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
