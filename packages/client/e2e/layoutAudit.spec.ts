@@ -1582,6 +1582,7 @@ for (const width of [1440, 390])
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       const findings: unknown[] = []
       const gaps: unknown[] = []
+      const geometry: unknown[] = []
       for (const kind of ["note", "card"] as const) {
         const id = process.env[kind === "note" ? "LAYOUT_AUDIT_REVISION_NOTE" : "LAYOUT_AUDIT_REVISION_CARD"]
         expect(id).toBeTruthy()
@@ -1605,6 +1606,29 @@ for (const width of [1440, 390])
           writeFileSync(join(work, `revisions-${width}-${theme}.json`), JSON.stringify(findings, null, 2))
           console.log(`${surface}: ${violations.length} violations`)
         }
+        const measurePadding = async (state: string) => {
+          const padding = await dialog.evaluate((el) => {
+            const scroll = el.querySelector<HTMLElement>("[data-dialog-scroll]")!
+            const content = el.querySelector<HTMLElement>("[data-dialog-content]")!
+            const original = scroll.scrollTop
+            scroll.scrollTop = 0
+            const outer = el.getBoundingClientRect(),
+              inner = content.getBoundingClientRect()
+            scroll.scrollTop = scroll.scrollHeight
+            const bottom = outer.bottom - content.getBoundingClientRect().bottom
+            scroll.scrollTop = original
+            return {
+              left: inner.left - outer.left,
+              right: outer.right - inner.right,
+              top: inner.top - outer.top,
+              bottom
+            }
+          })
+          geometry.push({ kind, state, padding })
+          mkdirSync(work, { recursive: true })
+          writeFileSync(join(work, `geometry-${width}-${theme}.json`), JSON.stringify(geometry, null, 2))
+          for (const value of Object.values(padding)) expect(value).toBeCloseTo(21, 1)
+        }
         await expect(revisions.first().getByRole("button", { name: /^Restore to revision / })).toBeDisabled()
         await expect(revisions.nth(1).getByRole("button", { name: /^Restore to revision / })).toBeEnabled()
         await expect(dialog.getByText("Saved", { exact: true })).toHaveCount(0)
@@ -1612,6 +1636,10 @@ for (const width of [1440, 390])
         const actions = revisions.nth(1).getByRole("button")
         await expect(actions.nth(0)).toHaveText("Restore to revision 2")
         await expect(actions.nth(1)).toHaveText("Compare")
+        const message = await revisions.nth(1).locator("p").first().boundingBox()
+        const restoreBox = await actions.nth(0).boundingBox()
+        expect(message!.y + message!.height).toBeLessThanOrEqual(restoreBox!.y)
+        await measurePadding("list")
         await audit("list")
         await dialog.screenshot({
           path: info.outputPath(`${kind}-actions-${width}-${theme}.png`),
@@ -1657,6 +1685,7 @@ for (const width of [1440, 390])
           writeFileSync(join(work, `gaps-${width}-${theme}.json`), JSON.stringify(gaps, null, 2))
         }
         await measureGaps("previous")
+        await measurePadding("comparison")
         await audit("comparison")
         await dialog.screenshot({
           path: info.outputPath(`${kind}-previous-${width}-${theme}.png`),
@@ -1670,6 +1699,7 @@ for (const width of [1440, 390])
         await expect(revisions.nth(1).getByRole("button", { name: "Restore to revision 2", exact: true })).toBeEnabled()
         await openDiff("Revision 2", "Current state")
         await measureGaps("current")
+        await measurePadding("current-comparison")
         await audit("current-comparison")
         await dialog.screenshot({
           path: info.outputPath(`${kind}-current-${width}-${theme}.png`),
@@ -1688,6 +1718,7 @@ for (const width of [1440, 390])
         ).toBeVisible()
         await openDiff("Empty", "Revision 1")
         await measureGaps("first")
+        await measurePadding("first-comparison")
         await audit("first-comparison")
         await dialog.screenshot({
           path: info.outputPath(`${kind}-empty-${width}-${theme}.png`),
@@ -1698,6 +1729,28 @@ for (const width of [1440, 390])
         await expect(firstCompare).toHaveAttribute("aria-pressed", "false")
         await expect(firstCompare).toHaveAccessibleDescription("Click to compare this revision")
         await expect(dialog.getByRole("tablist")).toHaveCount(0)
+        const latestCompare = revisions.first().getByRole("button", { name: /^Revision \d+ / })
+        await latestCompare.click()
+        await openDiff("Revision 2", "Revision 3")
+        const fieldTitle = dialog.locator("details summary span").first()
+        const titleOffset = await fieldTitle.evaluate(
+          (el) => el.getBoundingClientRect().left - el.closest('[role="tabpanel"]')!.getBoundingClientRect().left
+        )
+        await dialog.getByRole("tab", { name: "Changes from current state", exact: true }).click()
+        const empty = dialog.getByText("No fields differ.", { exact: true })
+        await expect(empty).toBeVisible()
+        const emptyOffset = await empty.evaluate(
+          (el) => el.getBoundingClientRect().left - el.closest('[role="tabpanel"]')!.getBoundingClientRect().left
+        )
+        geometry.push({ kind, state: "no-fields", titleOffset, emptyOffset })
+        expect(emptyOffset).toBeCloseTo(titleOffset, 1)
+        await measurePadding("no-fields")
+        await audit("no-fields")
+        await dialog.screenshot({
+          path: info.outputPath(`${kind}-no-fields-${width}-${theme}.png`),
+          animations: "disabled"
+        })
+        await latestCompare.click()
         await revisions
           .first()
           .getByRole("button", { name: /^Change the message/ })

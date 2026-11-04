@@ -53,6 +53,7 @@ export function RevisionEntry({
           {when(createdAt)}
         </time>
       </div>
+      {message && <p className="text-sm [overflow-wrap:anywhere]">“{message}”</p>}
       {title && <div className="text-sm [overflow-wrap:anywhere]">{title}</div>}
       <div className="flex flex-wrap items-center gap-2">
         {restore}
@@ -85,7 +86,6 @@ export function RevisionEntry({
           {message ? "Edit message" : "Add message"}
         </Button>
       </div>
-      {message && <p className="text-sm [overflow-wrap:anywhere]">“{message}”</p>}
       {editing && (
         <div className="relative rounded-md border border-border bg-surface p-3 pt-10">
           <IconButton

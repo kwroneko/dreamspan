@@ -23,6 +23,7 @@ export function RevisionsDialog({
     <Dialog
       wide
       placement="top"
+      insetScroll
       open
       onOpenChange={(open) => !open && onClose()}
       title={title}

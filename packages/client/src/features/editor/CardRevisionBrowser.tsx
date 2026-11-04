@@ -14,6 +14,7 @@ import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import type { Caller } from "./caller.ts"
 import { ValueDiff } from "./diff.tsx"
@@ -71,10 +72,11 @@ function FieldComparison({
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary
-        className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]"
+        className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium [overflow-wrap:anywhere] [&::-webkit-details-marker]:hidden"
         title={`Show or hide changes to ${label}`}
       >
-        {label}
+        <Icon name={open ? "down" : "right"} size={16} className="shrink-0" />
+        <span>{label}</span>
       </summary>
       {open && (
         <div className="mt-2">
@@ -184,7 +186,10 @@ function RevisionComparison({
     changes === null ? (
       <p className="text-sm text-muted">Loading comparison…</p>
     ) : changes.length === 0 ? (
-      <p className="text-sm text-muted">No fields differ.</p>
+      <p className="flex items-center gap-1 border border-transparent p-2 text-sm text-muted">
+        <span aria-hidden="true" className="size-4 shrink-0" />
+        <span>No fields differ.</span>
+      </p>
     ) : (
       <div aria-label="Revision changes" className="flex min-w-0 flex-col gap-2">
         {changes.map((change) => (
