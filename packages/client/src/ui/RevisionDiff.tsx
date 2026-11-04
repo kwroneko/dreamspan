@@ -26,13 +26,15 @@ export function RevisionDiff({
   after,
   sideBySide = false,
   beforeLabel = "Before",
-  afterLabel = "After"
+  afterLabel = "After",
+  unifiedLabel
 }: {
   before: string
   after: string
   sideBySide?: boolean
   beforeLabel?: string
   afterLabel?: string
+  unifiedLabel?: string | undefined
 }) {
   return (
     <Suspense
@@ -42,7 +44,14 @@ export function RevisionDiff({
         </p>
       }
     >
-      <Diff before={before} after={after} sideBySide={sideBySide} beforeLabel={beforeLabel} afterLabel={afterLabel} />
+      <Diff
+        before={before}
+        after={after}
+        sideBySide={sideBySide}
+        beforeLabel={beforeLabel}
+        afterLabel={afterLabel}
+        unifiedLabel={unifiedLabel}
+      />
     </Suspense>
   )
 }

@@ -17,6 +17,8 @@ export function Dialog({
   title,
   description,
   wide = false,
+  placement = "center",
+  insetScroll = false,
   finalFocus,
   initialFocus,
   children
@@ -27,6 +29,10 @@ export function Dialog({
   description?: ReactNode
   /** Room for two columns side by side on a wide screen. */
   wide?: boolean
+  /** Top placement keeps inline expansions from moving their trigger. */
+  placement?: "center" | "top"
+  /** Keep the scrollbar inside the padding, with equal visible content insets. */
+  insetScroll?: boolean
   /** Override focus restoration when an action navigates outside the dialog. */
   finalFocus?: (() => boolean) | undefined
   /** The element to focus on open, such as the field a link opened the dialog at. */
@@ -50,6 +56,18 @@ export function Dialog({
     )
     return controls.find((element) => !element.hasAttribute("data-about-hint")) ?? true
   }
+  const body = (
+    <>
+      <div className="flex shrink-0 items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-1 [overflow-wrap:anywhere]">
+          <BaseDialog.Title className="text-base font-semibold">{title}</BaseDialog.Title>
+          {description && <BaseDialog.Description className="text-sm text-muted">{description}</BaseDialog.Description>}
+        </div>
+        <WindowClose onClick={() => onOpenChange(false)} />
+      </div>
+      {children}
+    </>
+  )
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal>
@@ -59,18 +77,17 @@ export function Dialog({
           ref={content}
           finalFocus={finalFocus}
           initialFocus={focusOnOpen}
-          className={wide ? `${popup} sm:max-w-5xl` : popup}
+          className={`${popup} ${wide ? "sm:max-w-5xl" : ""} ${placement === "top" ? "top-4! translate-y-0! [scrollbar-gutter:stable]" : ""} ${insetScroll ? "overflow-y-hidden! [scrollbar-gutter:auto]! [container-type:inline-size]" : ""}`}
         >
-          <div className="flex shrink-0 items-start gap-3">
-            <div className="flex min-w-0 flex-1 flex-col gap-1 [overflow-wrap:anywhere]">
-              <BaseDialog.Title className="text-base font-semibold">{title}</BaseDialog.Title>
-              {description && (
-                <BaseDialog.Description className="text-sm text-muted">{description}</BaseDialog.Description>
-              )}
+          {insetScroll ? (
+            <div className="-my-5 -mr-5 min-h-0 overflow-y-auto py-5 [scrollbar-gutter:stable]" data-dialog-scroll>
+              <div className="flex w-[100cqw] flex-col gap-4" data-dialog-content>
+                {body}
+              </div>
             </div>
-            <WindowClose onClick={() => onOpenChange(false)} />
-          </div>
-          {children}
+          ) : (
+            body
+          )}
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>

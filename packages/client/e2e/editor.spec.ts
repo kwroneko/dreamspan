@@ -129,17 +129,19 @@ test("a new card's fields save as a revision with a message, and survive a reloa
   await expect(revisions).toHaveCount(2)
   await expect(revisions.first()).toContainText("First pass")
   await expect(revisions.first()).toContainText("latest")
-  await expect(revisions.first()).toContainText("Saved")
+  await expect(revisions.first().getByText("Saved", { exact: true })).toHaveCount(0)
   // What the save changed, in History's comparison with its parent: both fields, the text as typed.
   await revisions
     .first()
     .getByRole("button", { name: /^Revision 2 / })
     .click()
-  const changes = page.getByRole("dialog").getByLabel("Revision changes")
+  const changes = page
+    .getByRole("dialog")
+    .getByRole("tabpanel", { name: "Changes from previous revision", exact: true })
   await expect(changes.locator("summary")).toHaveText(["Description", "Scenario"])
   await changes.getByText("Description", { exact: true }).click()
   await expectTextBox(
-    changes.getByRole("textbox", { name: "After", exact: true }).first(),
+    changes.getByRole("textbox", { name: "Revision 2", exact: true }).first(),
     "A lighthouse keeper who talks to gulls."
   )
 })
@@ -234,11 +236,14 @@ test("an earlier revision restores as a new one", async ({ page }) => {
     .nth(1)
     .getByRole("button", { name: /^Revision \d+ / })
     .click()
-  await page.getByRole("dialog").getByRole("radio", { name: "As it is now" }).click()
+  await page.getByRole("dialog").getByRole("tab", { name: "Changes from current state" }).click()
   await page.getByRole("dialog").getByText("Scenario", { exact: true }).click()
-  await expectTextBox(page.getByRole("dialog").getByRole("textbox", { name: "Before", exact: true }), "A storm.")
-  await expectTextBox(page.getByRole("dialog").getByRole("textbox", { name: "After", exact: true }), "A calm sea.")
-  await page.getByRole("dialog").getByRole("button", { name: "Restore", exact: true }).click()
+  await expectTextBox(page.getByRole("dialog").getByRole("textbox", { name: "Revision 2", exact: true }), "A storm.")
+  await expectTextBox(
+    page.getByRole("dialog").getByRole("textbox", { name: "Current state", exact: true }),
+    "A calm sea."
+  )
+  await page.getByRole("dialog").getByRole("button", { name: "Restore to revision 2", exact: true }).click()
   await expect(revisions).toHaveCount(4)
   await expect(revisions.first()).toContainText("Restored the revision of")
   await page.getByRole("button", { name: "Close" }).click()
