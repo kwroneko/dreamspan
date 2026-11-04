@@ -1,6 +1,7 @@
 import { lazy, type ReactNode, Suspense } from "react"
 
 export interface CodeEditorProps {
+  highlights?: ReadonlyArray<{ readonly at: number; readonly length: number }> | undefined
   value: string
   /** Text at the revision this draft was typed against. */
   base: string

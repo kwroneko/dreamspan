@@ -1,3 +1,5 @@
+import { useSearchHighlights } from "./searchHighlights.ts"
+import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 import { createPortal } from "react-dom"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { presetScopes } from "./searchScopes.ts"
@@ -342,6 +344,7 @@ function PromptBlock({
   const content = useText(store, [...path, "content"])
   const label = prompt.marker ? { text: typed || prompt.name, derived: false } : promptLabel(typed, content)
   const name = label.text
+  const nameHighlights = useSearchHighlights(store, namePath)
   const nameMatch = useSearchMatch(namePath)
   const marker = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -450,6 +453,7 @@ function PromptBlock({
       label={name}
       // Search and replace's Go to a match in the name: its field opens with the match selected.
       goTo={nameMatch}
+      highlights={nameHighlights}
       allowEmpty
       className="min-w-14 max-w-md"
       onRename={(next) => {
@@ -906,18 +910,13 @@ export function PromptDocument({
     <div data-preset-layout={layout} className="preset-toolbar @container flex min-w-0 flex-col gap-2">
       <div data-preset-edit-row className="preset-edit-row flex items-center gap-2">
         {addButtons}
-        <Button
+        <SearchReplaceButton
           ref={searchButton}
-          aria-controls={searchId}
-          className="preset-search h-8! shrink-0 px-2! aria-pressed:border-accent aria-pressed:bg-accent/10 aria-pressed:text-accent"
-          aria-label="Search and replace"
-          aria-pressed={searching}
-          hint={searching ? "Click to close search and replace" : "Click to open search and replace"}
+          controls={searchId}
+          open={searching}
+          className="preset-search"
           onClick={() => setSearching(!searching)}
-        >
-          <Icon name="search" />
-          <span>Search and replace</span>
-        </Button>
+        />
         {toolbarEnd && <div className="preset-toolbar-end flex shrink-0 items-center gap-1">{toolbarEnd}</div>}
       </div>
       {searching && (

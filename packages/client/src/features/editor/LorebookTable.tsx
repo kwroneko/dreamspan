@@ -1,3 +1,5 @@
+import { SearchHighlights } from "../../ui/SearchHighlights.tsx"
+import { useSearchHighlights } from "./searchHighlights.ts"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // A lorebook's entries as a table, as SillyTavern's World Info editor shows them: one row per
 // entry with its switch, title and keys, and the registered columns (strategy, position,
@@ -115,6 +117,7 @@ function TitleCell({
 }: LorebookEntryContext & { uid: number; idPrefix: string; open: boolean; onKeys: () => void; badges?: ReactNode }) {
   const titlePath = [...path, "comment"]
   const text = useText(store, titlePath)
+  const highlights = useSearchHighlights(store, titlePath)
   const match = useSearchMatch(titlePath)
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -133,16 +136,18 @@ function TitleCell({
       : "No keys · never matched"
   return (
     <div className="flex min-w-0 flex-col">
-      <Input
-        ref={input}
-        id={`${idPrefix}-title-${uid}`}
-        aria-label={`Title of ${title}`}
-        placeholder="Untitled entry"
-        className="h-8! px-2! font-medium"
-        value={text}
-        onChange={(event) => store.setText(titlePath, event.currentTarget.value)}
-        onBlur={() => void store.save(JSON.stringify(titlePath))}
-      />
+      <SearchHighlights value={text} ranges={highlights}>
+        <Input
+          ref={input}
+          id={`${idPrefix}-title-${uid}`}
+          aria-label={`Title of ${title}`}
+          placeholder="Untitled entry"
+          className="h-8! px-2! font-medium"
+          value={text}
+          onChange={(event) => store.setText(titlePath, event.currentTarget.value)}
+          onBlur={() => void store.save(JSON.stringify(titlePath))}
+        />
+      </SearchHighlights>
       {open ? (
         <KeysLine
           store={store}

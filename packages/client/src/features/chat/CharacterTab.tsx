@@ -1,3 +1,6 @@
+import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
+import { SearchDialog } from "../editor/SearchDialog.tsx"
+import { SearchNavigation, type SearchMatch } from "../editor/searchNavigation.ts"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useChatCards } from "./chatCards.ts"
 // A character's tab in the chat's panel, as ST's character panel: every field the full editor
@@ -186,70 +189,95 @@ function CardPanel({
   const alone =
     pending !== null &&
     view.cast?.participants.every((id) => id === card.entityId || view.cast?.playedByMe.includes(id))
+  const [searching, setSearching] = useState(false)
+  const [searchMatch, setSearchMatch] = useState<SearchMatch | null>(null)
+  const searchButton = useRef<HTMLButtonElement>(null)
   return (
-    <div className="flex flex-col gap-4">
-      <CardHeader
-        portrait={
-          <TabPortrait
-            store={store}
-            call={call}
-            id={card.entityId}
-            shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
-            {...(session === null ? {} : { onChanged: () => void session.rereadCast() })}
-            badge={persona ? <PersonaBadge played portrait /> : undefined}
-          />
-        }
-      >
-        {state.snapshot ? (
-          <>
-            <CardNameHeader
+    <SearchNavigation value={searchMatch}>
+      <div className="flex flex-col gap-4">
+        <CardHeader
+          portrait={
+            <TabPortrait
               store={store}
               call={call}
-              saveControls={<SaveRevision store={store} />}
-              current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
+              id={card.entityId}
+              shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
+              {...(session === null ? {} : { onChanged: () => void session.rereadCast() })}
+              badge={persona ? <PersonaBadge played portrait /> : undefined}
             />
-            <CardTokensRow personaLast store={store} entityId={card.entityId} label={card.label} />
+          }
+        >
+          {state.snapshot ? (
+            <>
+              <CardNameHeader
+                store={store}
+                call={call}
+                saveControls={<SaveRevision store={store} />}
+                current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
+              />
+              <CardTokensRow personaLast store={store} entityId={card.entityId} label={card.label} />
+            </>
+          ) : (
+            <h2
+              data-card-header-row
+              className="col-span-full line-clamp-2 text-lg leading-7 font-semibold [overflow-wrap:anywhere]"
+            >
+              {card.label}
+            </h2>
+          )}
+        </CardHeader>
+        <div className="-mx-2 flex flex-wrap items-center gap-x-1">
+          {!persona && !alone && <NewChat card={card} />}
+          <ChatCardActions session={session} card={card} info={info} persona={persona} />
+        </div>
+        {state.loadError && <ErrorAlert error={state.loadError} />}
+        {!state.snapshot && !state.loadError && <p className="text-sm text-muted">Loading the card…</p>}
+        {state.snapshot && (
+          <>
+            {/* Only where editing wouldn't reach this chat (DESIGN §6.2, §10.1). */}
+            {info.binding === "revision" && (
+              <p className="text-sm">
+                This chat uses an earlier version of {card.name}: editing changes the card, not what this chat uses.
+              </p>
+            )}
+            {info.binding === "revision" && info.definition && (
+              <ChatDefinition name={card.name} info={{ ...info, definition: info.definition }} />
+            )}
+            {state.saveError && (
+              <ErrorAlert
+                error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
+              />
+            )}
+            <div>
+              <SearchReplaceButton
+                ref={searchButton}
+                open={searching}
+                controls="card-panel-search"
+                onClick={() => setSearching(!searching)}
+              />
+            </div>
+            {searching && (
+              <SearchDialog
+                store={store}
+                inline
+                idPrefix="card-panel-search"
+                onReveal={setSearchMatch}
+                onClose={() => {
+                  setSearching(false)
+                  searchButton.current?.focus()
+                }}
+              />
+            )}
+            <RecoveredNotice store={store} />
+            <CardEditor
+              store={store}
+              call={call}
+              layout="panel"
+              onOpenBook={workspace ? () => workspace.open(info.refId, CARD_LOREBOOK_FOCUS) : undefined}
+            />
           </>
-        ) : (
-          <h2
-            data-card-header-row
-            className="col-span-full line-clamp-2 text-lg leading-7 font-semibold [overflow-wrap:anywhere]"
-          >
-            {card.label}
-          </h2>
         )}
-      </CardHeader>
-      <div className="-mx-2 flex flex-wrap items-center gap-x-1">
-        {!persona && !alone && <NewChat card={card} />}
-        <ChatCardActions session={session} card={card} info={info} persona={persona} />
       </div>
-      {state.loadError && <ErrorAlert error={state.loadError} />}
-      {!state.snapshot && !state.loadError && <p className="text-sm text-muted">Loading the card…</p>}
-      {state.snapshot && (
-        <>
-          {/* Only where editing wouldn't reach this chat (DESIGN §6.2, §10.1). */}
-          {info.binding === "revision" && (
-            <p className="text-sm">
-              This chat uses an earlier version of {card.name}: editing changes the card, not what this chat uses.
-            </p>
-          )}
-          {info.binding === "revision" && info.definition && (
-            <ChatDefinition name={card.name} info={{ ...info, definition: info.definition }} />
-          )}
-          {state.saveError && (
-            <ErrorAlert
-              error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
-            />
-          )}
-          <RecoveredNotice store={store} />
-          <CardEditor
-            store={store}
-            call={call}
-            layout="panel"
-            onOpenBook={workspace ? () => workspace.open(info.refId, CARD_LOREBOOK_FOCUS) : undefined}
-          />
-        </>
-      )}
-    </div>
+    </SearchNavigation>
   )
 }

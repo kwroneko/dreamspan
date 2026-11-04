@@ -1,3 +1,4 @@
+import { useSearchHighlights } from "./searchHighlights.ts"
 // The shared four-row card header (owner, 2026-11-03): name/version/save, nickname,
 // Persona and chats/token counts (Persona last in the side panel). Names retain their rename questions.
 import { renameQuestion } from "@rp/shared/cardNames.ts"
@@ -183,6 +184,9 @@ export function CardNameHeader({
   const url = useSearch({ strict: false }) as { renameChat?: unknown; renameFork?: unknown }
   const [problem, setProblem] = useState<string | null>(null)
   // Search's Go to a match in a name opens its field with the match selected.
+  const nameHighlights = useSearchHighlights(store, ["name"])
+  const nicknameHighlights = useSearchHighlights(store, ["nickname"])
+  const versionHighlights = useSearchHighlights(store, ["character_version"])
   const nameMatch = useSearchMatch(["name"])
   const versionMatch = useSearchMatch(["character_version"])
   const nicknameMatch = useSearchMatch(["nickname"])
@@ -251,6 +255,7 @@ export function CardNameHeader({
             hint={DISPLAY_HINT}
             fieldLabel="Display name"
             goTo={nameMatch}
+            highlights={nameHighlights}
             className="min-w-[var(--card-name-min)]! max-w-[min(60%,calc(100%_-_var(--card-name-min)_-_0.25rem))] shrink data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]! data-[renaming]:max-w-none"
             onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
           >
@@ -270,6 +275,7 @@ export function CardNameHeader({
             hint={VERSION_HINT}
             fieldLabel="Version"
             goTo={versionMatch}
+            highlights={versionHighlights}
             allowEmpty
             className="min-w-[var(--card-name-min)]! shrink text-xs text-muted data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]!"
             onRename={async (next) => {
@@ -309,6 +315,7 @@ export function CardNameHeader({
           hint={NICKNAME_HINT}
           fieldLabel="In-chat nickname"
           goTo={nicknameMatch}
+          highlights={nicknameHighlights}
           allowEmpty
           className="w-fit max-w-full text-sm"
           onRename={(next) => rename({ name, nickname: next })}

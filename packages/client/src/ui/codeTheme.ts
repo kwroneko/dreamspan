@@ -63,6 +63,7 @@ export const proseTheme = EditorView.theme({
   "&.cm-merge-a .cm-changedLine, .cm-deletedChunk": {
     backgroundColor: "color-mix(in oklch, var(--danger) 10%, transparent)"
   },
+  ".rp-search-match": { backgroundColor: "color-mix(in oklch, var(--warning) 30%, transparent)" },
   ".cm-insertedLine, .cm-deletedLine": { background: "none", textDecoration: "none" },
   "&.cm-merge-b .cm-changedText": {
     background: "color-mix(in oklch, var(--success) 22%, transparent)",

@@ -1,3 +1,5 @@
+import { SearchHighlights } from "../../ui/SearchHighlights.tsx"
+import { useSearchHighlights } from "./searchHighlights.ts"
 import { FieldRevert, linesText } from "./FieldRevert.tsx"
 // Everything a lorebook entry holds, as the table's opened row shows it (LorebookTable.tsx):
 // its text, then its settings form (lorebookSettings.ts). Every edit is a field draft.
@@ -79,28 +81,31 @@ export function Keys({
   const target = useRef<HTMLTextAreaElement>(null)
   const keys = useValue<ReadonlyArray<string>>(store, path) ?? EMPTY_KEYS
   const field = valueField(path)
+  const highlights = useSearchHighlights(store, path, keys)
   useKeysReveal(target, path, keys)
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <Field label={label} about={description}>
-        <Textarea
-          ref={target}
-          rows={Math.min(4, Math.max(1, keys.length))}
-          className="min-h-9!"
-          value={keys.join("\n")}
-          tools={
-            <FieldRevert
-              store={store}
-              path={path}
-              value={keys.join("\n")}
-              field={field}
-              format={linesText}
-              onChange={(value) => store.setValue(path, splitKeys(value))}
-            />
-          }
-          onChange={(event) => store.setValue(path, splitKeys(event.currentTarget.value))}
-          onBlur={() => void store.save(field)}
-        />
+        <SearchHighlights value={keys.join("\n")} ranges={highlights}>
+          <Textarea
+            ref={target}
+            rows={Math.min(4, Math.max(1, keys.length))}
+            className="min-h-9!"
+            value={keys.join("\n")}
+            tools={
+              <FieldRevert
+                store={store}
+                path={path}
+                value={keys.join("\n")}
+                field={field}
+                format={linesText}
+                onChange={(value) => store.setValue(path, splitKeys(value))}
+              />
+            }
+            onChange={(event) => store.setValue(path, splitKeys(event.currentTarget.value))}
+            onBlur={() => void store.save(field)}
+          />
+        </SearchHighlights>
       </Field>
       <FieldTools store={store} field={field} label={label} />
     </div>
@@ -133,6 +138,7 @@ export function KeysLine({
   const target = useRef<HTMLTextAreaElement>(null)
   const keys = useValue<ReadonlyArray<string>>(store, path) ?? EMPTY_KEYS
   const field = valueField(path)
+  const highlights = useSearchHighlights(store, path, keys)
   useKeysReveal(target, path, keys)
   return (
     <div className="flex min-w-0 items-start gap-1" data-entry-keys>
@@ -152,38 +158,40 @@ export function KeysLine({
           {badges}
         </div>
         <div onFocus={onFocus} onBlur={onBlur} className={focused ? "" : "not-focus-within:sr-only"}>
-          <Textarea
-            ref={target}
-            id={id}
-            aria-label="Primary keys"
-            placeholder="One key per line"
-            rows={Math.max(1, keys.length)}
-            spellCheck={false}
-            className="min-h-8! resize-none field-sizing-content"
-            textActions={false}
-            value={keys.join("\n")}
-            tools={
-              <FieldRevert
-                store={store}
-                path={path}
-                value={keys.join("\n")}
-                field={field}
-                format={linesText}
-                onChange={(value) => store.setValue(path, splitKeys(value))}
-              />
-            }
-            onChange={(event) => store.setValue(path, splitKeys(event.currentTarget.value))}
-            onBlur={() => {
-              void store.save(field)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault()
-                event.stopPropagation()
-                event.currentTarget.blur()
+          <SearchHighlights value={keys.join("\n")} ranges={highlights}>
+            <Textarea
+              ref={target}
+              id={id}
+              aria-label="Primary keys"
+              placeholder="One key per line"
+              rows={Math.max(1, keys.length)}
+              spellCheck={false}
+              className="min-h-8! resize-none field-sizing-content"
+              textActions={false}
+              value={keys.join("\n")}
+              tools={
+                <FieldRevert
+                  store={store}
+                  path={path}
+                  value={keys.join("\n")}
+                  field={field}
+                  format={linesText}
+                  onChange={(value) => store.setValue(path, splitKeys(value))}
+                />
               }
-            }}
-          />
+              onChange={(event) => store.setValue(path, splitKeys(event.currentTarget.value))}
+              onBlur={() => {
+                void store.save(field)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  event.currentTarget.blur()
+                }
+              }}
+            />
+          </SearchHighlights>
         </div>
         <FieldTools store={store} field={field} label="Primary keys" />
       </div>

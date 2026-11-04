@@ -304,6 +304,7 @@ test.describe("synthetic library and every app surface", () => {
             preset:
               process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1" ||
+              process.env.LAYOUT_AUDIT_SEARCHREPLACE_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SMALLFIXES4_ONLY === "1"
                 ? preset.id
                 : null
@@ -711,6 +712,35 @@ test.describe("synthetic library and every app surface", () => {
           await openPanel(page, "Cast")
           await page.getByRole("button", { name: `More for ${cardName}`, exact: true }).click()
           await formats("menu-pending-cast-export", true)
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_SEARCHREPLACE_ONLY === "1") {
+          const bookLabel = (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).find(
+            (ref) => ref.id === bookRef
+          )!.label
+          for (const kind of ["card", "preset", "lorebook"] as const) {
+            for (const surface of ["panel", "large"] as const) {
+              await page.goto(
+                `${server.url}/chats/${chatId}${surface === "large" ? `?editor=${kind === "card" ? cardRef : kind === "preset" ? presetRef : bookRef}` : ""}`
+              )
+              let editor =
+                surface === "large"
+                  ? page.locator('[data-testid="preset-scroll"]')
+                  : await openPanel(
+                      page,
+                      kind === "card" ? cardName : kind === "preset" ? "Prompt preset" : "Lorebooks"
+                    )
+              if (kind === "lorebook" && surface === "panel") {
+                await editor.getByRole("button").filter({ hasText: bookLabel }).first().click()
+                editor = editor.getByRole("region", { name: `Lorebook ${bookLabel}`, exact: true })
+              }
+              await editor.getByRole("button", { name: "Search and replace", exact: true }).click()
+              const search = editor.getByRole("region", { name: "Search and replace", exact: true })
+              await expect(search).toBeVisible()
+              await editor.evaluate((element) => element.setAttribute("data-searchreplace-audit", ""))
+              await audit(`searchreplace-${kind}-${surface}`, "[data-searchreplace-audit]")
+            }
+          }
           return
         }
         if (process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1") {

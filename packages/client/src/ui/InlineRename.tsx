@@ -1,3 +1,4 @@
+import { SearchHighlights, type HighlightRange } from "./SearchHighlights.tsx"
 // A name with a pencil beside it: the pencil turns the name into a field with Save and Cancel
 // beside it; Enter saves, Escape cancels. The usual way to rename one thing in place.
 // `lastLine` keeps the pencil after the last visible line of a clamped heading.
@@ -16,6 +17,7 @@ export function InlineRename({
   hint = "Rename",
   fieldLabel,
   goTo,
+  highlights = [],
   lastLine = false
 }: {
   /** The name as it is, what the field starts with. */
@@ -36,6 +38,8 @@ export function InlineRename({
   fieldLabel?: string
   /** A search match in the name: opens the field with that part selected. */
   goTo?: { readonly at: number; readonly length: number } | undefined
+  /** Matches in the name while its text box is open. */
+  highlights?: ReadonlyArray<HighlightRange>
   /** Position the pencil after the last visible line of [data-inline-rename-text]. */
   lastLine?: boolean
 }) {
@@ -126,27 +130,29 @@ export function InlineRename({
     )
   return (
     <span data-renaming="" className={`flex min-w-0 flex-1 items-center gap-1 ${className}`}>
-      <Input
-        aria-label={fieldLabel ?? `New name for ${label}`}
-        ref={input}
-        value={typed}
-        autoFocus
-        onFocus={(event) => {
-          if (!goTo) event.currentTarget.select()
-        }}
-        onChange={(event) => setTyped(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault()
-            void save()
-          } else if (event.key === "Escape") {
-            event.preventDefault()
-            event.stopPropagation()
-            setTyped(null)
-          }
-        }}
-        className={`h-8 min-w-0 flex-1 ${inputClassName}`}
-      />
+      <SearchHighlights value={typed} ranges={highlights} className="flex-1">
+        <Input
+          aria-label={fieldLabel ?? `New name for ${label}`}
+          ref={input}
+          value={typed}
+          autoFocus
+          onFocus={(event) => {
+            if (!goTo) event.currentTarget.select()
+          }}
+          onChange={(event) => setTyped(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault()
+              void save()
+            } else if (event.key === "Escape") {
+              event.preventDefault()
+              event.stopPropagation()
+              setTyped(null)
+            }
+          }}
+          className={`h-8 min-w-0 flex-1 ${inputClassName}`}
+        />
+      </SearchHighlights>
       <IconButton
         label="Save the name"
         hint="Save the name (Enter)"

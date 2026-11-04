@@ -1,3 +1,5 @@
+import { SearchHighlights } from "../../ui/SearchHighlights.tsx"
+import { useSearchHighlights } from "./searchHighlights.ts"
 // Form controls bound to an editor's fields: each reads its own field from the store and
 // writes it as a draft, so every change is on the server within a second, with its history.
 import { EditHistory, type Loaded } from "../../ui/EditHistory.tsx"
@@ -153,6 +155,7 @@ export function TextField({
   flash?: { readonly at: number; readonly length: number } | undefined
 }) {
   const [large, setLarge] = useState(false)
+  const highlights = useSearchHighlights(store, path)
   const match = useSearchMatch(path)
   const target = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -220,56 +223,58 @@ export function TextField({
         about={about ?? hint}
         aboutLabel={label}
       >
-        {rows === undefined ? (
-          <Input
-            {...props}
-            tools={tools}
-            status={status}
-            onChange={(event) => store.setText(path, event.currentTarget.value)}
-          />
-        ) : card ? (
-          <CardTextEditor
-            store={store}
-            field={field}
-            path={path}
-            value={value}
-            label={label}
-            rows={rows}
-            fullHeight={kind === "preset"}
-            mono={mono}
-            readOnly={readOnly}
-            source={source}
-            tools={tools}
-            status={status}
-            autoFocus={autoFocus}
-            flash={flash}
-            onChange={(value) => store.setText(path, value)}
-            onBlur={props.onBlur}
-          />
-        ) : (
-          <Textarea
-            {...props}
-            // Prose has them; a pattern (mono) doesn't.
-            textActions={!mono}
-            tools={
-              <>
-                {tools}
-                {!readOnly && (
-                  <FieldRevert
-                    store={store}
-                    path={path}
-                    value={value}
-                    onChange={(value) => store.setText(path, value)}
-                  />
-                )}
-              </>
-            }
-            status={status}
-            rows={rows}
-            className={`resize-y ${fit ? "max-h-[min(60vh,32rem)] min-h-0! field-sizing-content" : ""} ${props.className}`}
-            onChange={(event) => store.setText(path, event.currentTarget.value)}
-          />
-        )}
+        <SearchHighlights value={value} ranges={highlights}>
+          {rows === undefined ? (
+            <Input
+              {...props}
+              tools={tools}
+              status={status}
+              onChange={(event) => store.setText(path, event.currentTarget.value)}
+            />
+          ) : card ? (
+            <CardTextEditor
+              store={store}
+              field={field}
+              path={path}
+              value={value}
+              label={label}
+              rows={rows}
+              fullHeight={kind === "preset"}
+              mono={mono}
+              readOnly={readOnly}
+              source={source}
+              tools={tools}
+              status={status}
+              autoFocus={autoFocus}
+              flash={flash}
+              onChange={(value) => store.setText(path, value)}
+              onBlur={props.onBlur}
+            />
+          ) : (
+            <Textarea
+              {...props}
+              // Prose has them; a pattern (mono) doesn't.
+              textActions={!mono}
+              tools={
+                <>
+                  {tools}
+                  {!readOnly && (
+                    <FieldRevert
+                      store={store}
+                      path={path}
+                      value={value}
+                      onChange={(value) => store.setText(path, value)}
+                    />
+                  )}
+                </>
+              }
+              status={status}
+              rows={rows}
+              className={`resize-y ${fit ? "max-h-[min(60vh,32rem)] min-h-0! field-sizing-content" : ""} ${props.className}`}
+              onChange={(event) => store.setText(path, event.currentTarget.value)}
+            />
+          )}
+        </SearchHighlights>
       </Field>
       <FieldTools store={store} field={field} label={label} history={false} />
     </div>
@@ -427,42 +432,45 @@ export function SwitchField({
 /** A list of strings, one per line. Kept as typed, so a new empty line can be typed; empty lines aren't kept. */
 export function LinesField({ store, path, label }: { store: EditorStore; path: FieldPath; label: string }) {
   const lines = useValue<ReadonlyArray<string>>(store, path) ?? []
+  const highlights = useSearchHighlights(store, path, lines)
   const [typed, setTyped] = useState<string | null>(null)
   const field = valueField(path)
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <Field label={<FieldLabel store={store} field={field} label={label} />}>
-        <Textarea
-          rows={2}
-          spellCheck={false}
-          className="resize-y font-mono"
-          value={typed ?? lines.join("\n")}
-          tools={
-            <FieldRevert
-              store={store}
-              path={path}
-              value={typed ?? lines.join("\n")}
-              field={field}
-              format={linesText}
-              onChange={(value) => {
-                setTyped(null)
-                store.setValue(path, value === "" ? [] : value.split("\n"))
-              }}
-            />
-          }
-          onChange={(event) => {
-            const text = event.currentTarget.value
-            setTyped(text)
-            store.setValue(
-              path,
-              text.split("\n").filter((line) => line !== "")
-            )
-          }}
-          onBlur={() => {
-            setTyped(null)
-            void store.save(field)
-          }}
-        />
+        <SearchHighlights value={typed ?? lines.join("\n")} ranges={highlights}>
+          <Textarea
+            rows={2}
+            spellCheck={false}
+            className="resize-y font-mono"
+            value={typed ?? lines.join("\n")}
+            tools={
+              <FieldRevert
+                store={store}
+                path={path}
+                value={typed ?? lines.join("\n")}
+                field={field}
+                format={linesText}
+                onChange={(value) => {
+                  setTyped(null)
+                  store.setValue(path, value === "" ? [] : value.split("\n"))
+                }}
+              />
+            }
+            onChange={(event) => {
+              const text = event.currentTarget.value
+              setTyped(text)
+              store.setValue(
+                path,
+                text.split("\n").filter((line) => line !== "")
+              )
+            }}
+            onBlur={() => {
+              setTyped(null)
+              void store.save(field)
+            }}
+          />
+        </SearchHighlights>
       </Field>
       <FieldTools store={store} field={field} label={label} />
     </div>

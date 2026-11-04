@@ -110,9 +110,9 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
     .click()
   await expect(page.getByRole("img", { name: "The card's avatar" })).toBeVisible()
   await page.getByRole("button", { name: "Search and replace", exact: true }).click()
-  await page.getByRole("textbox", { name: "Find" }).fill("Wren")
-  await page.getByRole("dialog").getByRole("button", { name: "Find" }).click()
-  await expect(page.getByRole("dialog").getByRole("status")).toHaveText("1 match.")
+  await page.getByRole("textbox", { name: "Find", exact: true }).fill("Wren")
+  await page.getByRole("region", { name: "Search and replace" }).getByRole("button", { name: "Find" }).click()
+  await expect(page.getByRole("region", { name: "Search and replace" }).getByRole("status")).toHaveText("1 match.")
   // The character grid and the card's page, with its avatar and its definition.
   await page.goto(`${server().url}/`)
   await page.getByRole("main").getByRole("button", { name: "Open Wren", exact: true }).click()

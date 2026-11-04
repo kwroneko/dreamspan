@@ -1,5 +1,8 @@
 // Shared controlled search fields and matching options; each host owns searching and writes.
 import { type ReactNode, type KeyboardEventHandler, useState } from "react"
+import { Icon } from "./Icon.tsx"
+import { pressedButtonClass } from "./InlinePanel.tsx"
+import type { Ref } from "react"
 import { Button } from "./Button.tsx"
 import { Field, Input } from "./Field.tsx"
 
@@ -32,7 +35,7 @@ function SearchOption({
       role="checkbox"
       aria-checked={checked}
       aria-label={String(children)}
-      hint={hint}
+      hint={`Click to ${checked ? "turn off" : "turn on"} ${String(children).toLowerCase()}. ${hint}`}
       className={`size-8 px-0! font-mono ${checked ? "bg-accent/15 text-accent" : ""}`}
       onClick={() => onCheckedChange(!checked)}
     >
@@ -118,7 +121,7 @@ export function SearchReplace({
                 className="px-2! sm:hidden"
                 aria-expanded={options}
                 aria-controls={`${idPrefix}-options`}
-                hint="Shows where to look and how to match."
+                hint={options ? "Click to hide matching options" : "Click to show matching options"}
                 onClick={() => setOptions(!options)}
               >
                 Options{chosen > 0 ? ` (${chosen})` : ""}
@@ -168,5 +171,35 @@ export function SearchReplace({
       {(!inline || alwaysShowOptions || options) && scopeControl}
       {inline && !alwaysShowOptions && !options && <div className="hidden sm:block">{scopeControl}</div>}
     </div>
+  )
+}
+
+/** Every editor uses the same entry control, including its pressed state and explanation. */
+export function SearchReplaceButton({
+  open,
+  onClick,
+  controls,
+  ref,
+  className = ""
+}: {
+  open: boolean
+  onClick: () => void
+  controls: string
+  ref?: Ref<HTMLButtonElement>
+  className?: string
+}) {
+  return (
+    <Button
+      ref={ref}
+      aria-label="Search and replace"
+      aria-controls={controls}
+      aria-pressed={open}
+      className={`h-8! shrink-0 px-2! ${pressedButtonClass} ${className}`}
+      hint={open ? "Click to close search and replace" : "Click to open search and replace"}
+      onClick={onClick}
+    >
+      <Icon name="replace" />
+      <span>Search and replace</span>
+    </Button>
   )
 }

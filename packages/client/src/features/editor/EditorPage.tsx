@@ -1,3 +1,4 @@
+import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useCast } from "../chat/cast.ts"
 import { usePlaceParam } from "../../usePlaceParam.ts"
@@ -23,7 +24,6 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
-import { pressedButtonClass } from "../../ui/InlinePanel.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { WindowClose } from "../../ui/WindowClose.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
@@ -148,7 +148,8 @@ export function Editor({
   // A preset's search sits in the sticky bar, so its matches stay beside the document; it's
   // folded away until asked for.
   const [presetToolbar, setPresetToolbar] = useState<HTMLDivElement | null>(null)
-  const [searching, setSearching] = useState(false)
+  const searching = dialog === "search"
+  const setSearching = (next: boolean) => setDialog(next ? "search" : "")
   const searchButton = useRef<HTMLButtonElement>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [more, setMore] = useState(false)
@@ -415,12 +416,12 @@ export function Editor({
             <div ref={setPresetToolbar} />
           ) : (
             <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
-              {!scopes && (
-                <Button hint="Search and replace text in every field." onClick={() => setOpen("search")}>
-                  <Icon name="replace" />
-                  Search and replace
-                </Button>
-              )}
+              <SearchReplaceButton
+                ref={searchButton}
+                open={searching}
+                controls="editor-search"
+                onClick={() => setSearching(!searching)}
+              />
               <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
                 History
               </Button>
@@ -463,23 +464,6 @@ export function Editor({
                   </div>
                 </Popover>
               )}
-              {/* Other editors retain their existing search toggle. */}
-              <div className="flex min-w-0 items-center justify-end gap-2 sm:ml-auto">
-                {scopes && (
-                  <Button
-                    ref={searchButton}
-                    variant="ghost"
-                    className={`h-7! shrink-0 px-2! ${pressedButtonClass}`}
-                    aria-pressed={searching}
-                    aria-controls="preset-search"
-                    hint={searching ? "Click to close search and replace" : "Click to open search and replace"}
-                    onClick={() => setSearching(!searching)}
-                  >
-                    <Icon name="replace" />
-                    Search and replace
-                  </Button>
-                )}
-              </div>
             </div>
           )}
           {clash && (
@@ -488,11 +472,11 @@ export function Editor({
             </p>
           )}
           {ref.kind === "preset" && <HeldChangesBar store={store} />}
-          {ref.kind !== "preset" && scopes && searching && (
+          {ref.kind !== "preset" && searching && (
             <SearchDialog
               store={store}
               inline
-              idPrefix="preset-search"
+              idPrefix="editor-search"
               scopes={scopes}
               onReveal={setSearchMatch}
               onClose={() => {
@@ -589,7 +573,6 @@ export function Editor({
         {ref.kind === "lorebook" && <SlotOutlet slot={lorebookEditorSections} props={{ store, call }} />}
 
         {open === "history" && <RevisionsDialog store={store} call={call} onClose={() => setOpen(null)} />}
-        {open === "search" && <SearchDialog store={store} onClose={() => setOpen(null)} onReveal={setSearchMatch} />}
         {open === "fork" && <ForkDialog store={store} onClose={() => setOpen(null)} />}
         {open === "update" && <UpdateDialog store={store} call={call} onClose={() => setOpen(null)} />}
       </div>

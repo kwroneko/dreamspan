@@ -1,6 +1,7 @@
+import { setSearchHighlights } from "./searchHighlights.ts"
 // Search and replace across an editor's text fields, as plain text or a regular expression
 // (DESIGN §6.2, §5.3). Replacing edits each field through its draft, like typing would.
-import { type FormEvent, type ReactNode, useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, type FormEvent, type ReactNode, useRef, useState, useSyncExternalStore } from "react"
 import { SearchReplace } from "../../ui/SearchReplace.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
@@ -86,7 +87,7 @@ export function SearchDialog({
       wholeWord,
       preserveCase,
       replace: replacement,
-      max: MAX_MATCHES
+      max: Number.MAX_SAFE_INTEGER
     })
     setPending(false)
     return { fields, response, asked }
@@ -125,6 +126,20 @@ export function SearchDialog({
   // are for text that's gone. (The error that asks to find again is shown, with its own say.)
   const shown = found !== null && found.asked === asked && sameFields(found.fields, current) ? found : null
   const response = shown?.response
+  const highlights = JSON.stringify(
+    response?.ok
+      ? response.matches.map((match) => ({
+          path: shown!.fields[match.index]!.path,
+          at: match.at,
+          length: match.length
+        }))
+      : []
+  )
+  useEffect(() => {
+    setSearchHighlights(store, JSON.parse(highlights) as SearchMatch[])
+    return () => setSearchHighlights(store, [])
+  }, [store, highlights])
+
   const wrap = (children: ReactNode) =>
     inline ? (
       <InlinePanel
@@ -132,7 +147,7 @@ export function SearchDialog({
         title="Search and replace"
         titleHidden
         onClose={() => onClose?.()}
-        className="@container max-w-5xl"
+        className="@container max-w-5xl [&>span]:right-2"
       >
         {children}
       </InlinePanel>
@@ -226,7 +241,7 @@ export function SearchDialog({
             aria-label="Matches"
             className={`flex ${inline ? "max-h-28 sm:max-h-48" : "max-h-48"} flex-col divide-y divide-border overflow-y-auto`}
           >
-            {response.matches.map((match, index) => {
+            {response.matches.slice(0, MAX_MATCHES).map((match, index) => {
               const field = found.fields[match.index]!
               const text = field.text
               const reveal = () => {

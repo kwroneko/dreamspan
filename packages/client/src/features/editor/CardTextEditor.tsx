@@ -1,3 +1,4 @@
+import { useSearchHighlights } from "./searchHighlights.ts"
 import { type FieldPath, getAt } from "@rp/shared/editing.ts"
 import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -51,6 +52,7 @@ export function CardTextEditor({
   onChange: (value: string) => void
   onBlur?: (() => void) | undefined
 }) {
+  const highlights = useSearchHighlights(store, path)
   const saved = getAt(useRevisionDoc(store) ?? {}, path)
   const searchMatch = useSearchMatch(path)
   const revision = useComparisonRevision(store, field)
@@ -82,6 +84,7 @@ export function CardTextEditor({
         value={value}
         autoFocus={autoFocus}
         selection={searchMatch}
+        highlights={highlights}
         flash={flash}
         onRevealSelection={scrollToSearchField}
         base={comparison?.revision === revision ? comparison.value : value}

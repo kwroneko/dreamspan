@@ -1,3 +1,4 @@
+import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 // One lorebook, edited in a narrow column (owner, 2026-11-01): the side panel's Lorebooks tab
 // opens the book picked in its list here, below the list, and the card editor can show a
 // card's own book the same way. It takes one book: a store and where the book is in its
@@ -8,9 +9,6 @@ import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import type { FieldPath } from "@rp/shared/editing.ts"
 import { useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
-import { Button } from "../../ui/Button.tsx"
-import { Icon } from "../../ui/Icon.tsx"
-import { pressedButtonClass } from "../../ui/InlinePanel.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
@@ -111,20 +109,12 @@ export function LorebookPanelEditor({
             book={book}
             panel
             tools={
-              <Button
+              <SearchReplaceButton
                 ref={findButton}
-                variant="ghost"
-                className={`h-8! px-2! ${pressedButtonClass}`}
-                aria-label="Search and replace"
-                aria-pressed={searching}
-                aria-controls="panel-lore-search"
-                hint={searching ? "Click to close search and replace" : "Click to open search and replace"}
+                open={searching}
+                controls="panel-lore-search"
                 onClick={() => setSearching(!searching)}
-              >
-                <Icon name="replace" />
-                {/* Its label goes first when the row is narrow (LorebookTable's collapse order). */}
-                <span className="hidden @[22rem]:inline">Search and replace</span>
-              </Button>
+              />
             }
             toolPanel={
               searching && (

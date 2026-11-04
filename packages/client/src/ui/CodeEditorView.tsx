@@ -148,6 +148,26 @@ const flashField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field)
 })
 
+const setHighlights = StateEffect.define<CodeEditorProps["highlights"]>()
+const searchMark = Decoration.mark({ class: "rp-search-match" })
+const searchHighlights = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(marks, transaction) {
+    marks = marks.map(transaction.changes)
+    for (const effect of transaction.effects)
+      if (effect.is(setHighlights)) {
+        marks = Decoration.set(
+          (effect.value ?? [])
+            .filter((range) => range.length > 0 && range.at + range.length <= transaction.state.doc.length)
+            .map((range) => searchMark.range(range.at, range.at + range.length)),
+          true
+        )
+      }
+    return marks
+  },
+  provide: (field) => EditorView.decorations.from(field)
+})
+
 function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (text: string) => void) {
   const root = host.shadowRoot ?? host.attachShadow({ mode: "open" })
   const options = new Compartment()
@@ -177,6 +197,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
         lineChanges,
         changeGutter,
         flashField,
+        searchHighlights,
         initial.quietMarkers ? quietMarkers : [],
         options.of(attributes()),
         EditorView.updateListener.of((update) => {
@@ -235,6 +256,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       applying = false
     }
   }
+  view.dispatch({ effects: setHighlights.of(initial.highlights) })
   let selection: CodeEditorProps["selection"]
   let flash: CodeEditorProps["flash"]
   let fade: ReturnType<typeof setTimeout> | undefined
@@ -251,6 +273,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       deferred = null
       replace(next.value)
     }
+    if (next.highlights !== oldProps.highlights) view.dispatch({ effects: setHighlights.of(next.highlights) })
     if (next.selection && selection !== next.selection) {
       selection = next.selection
       const anchor = Math.min(selection.at, view.state.doc.length)
