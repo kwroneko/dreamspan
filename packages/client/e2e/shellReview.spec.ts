@@ -38,7 +38,7 @@ test("Groups opens its forks after navigating home from an unrelated character",
   await expect(page.getByRole("navigation", { name: "Chat breadcrumbs" })).toContainText("Alone")
   await page
     .getByRole("navigation", { name: "Main", exact: true })
-    .getByRole("link", { name: "Characters", exact: true })
+    .getByRole("link", { name: "Home", exact: true })
     .click()
   await page
     .getByRole("group", { name: "Show", exact: true })
@@ -84,7 +84,7 @@ test("home pins discard an unrelated remembered character tab", async ({ page })
   await expect(page.getByRole("navigation", { name: "Chat breadcrumbs" })).toContainText("Pinned Alone")
   await page
     .getByRole("navigation", { name: "Main", exact: true })
-    .getByRole("link", { name: "Characters", exact: true })
+    .getByRole("link", { name: "Home", exact: true })
     .click()
   await page
     .getByRole("main")
@@ -180,7 +180,7 @@ test("home pins keep a remembered tab for a character the user plays there", asy
   await expect(page.getByRole("tab", { name: played.label, exact: true })).toHaveAttribute("aria-selected", "true")
   await page
     .getByRole("navigation", { name: "Main", exact: true })
-    .getByRole("link", { name: "Characters", exact: true })
+    .getByRole("link", { name: "Home", exact: true })
     .click()
   await page
     .getByRole("main")

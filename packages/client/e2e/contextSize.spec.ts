@@ -167,7 +167,7 @@ test("a budget refusal sits in the composer's column, names its sources and open
   // The model chip's "Model settings…" opens the model the chat's reply uses, named, in the Model tab.
   await openModelSettings(page)
   await expect(page.getByTestId("model-panel-name")).toHaveText("tiny-window on Tiny")
-  await expect(page.getByText("Your current model: every chat's next reply uses it.")).toBeVisible()
+  await expect(page.getByText("Your current model for chats without a lock.")).toBeVisible()
 
   // A learned size, forgotten, stays forgotten when an edited draft is saved after it.
   await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>

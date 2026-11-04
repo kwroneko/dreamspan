@@ -164,7 +164,7 @@ test("the full editor opens the card used everywhere over the chat, and goes bac
   await expectTextBox(editor.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
   expect(new URL(page.url()).pathname).toBe(new URL(chat).pathname)
   expect(new URL(page.url()).searchParams.has("editor")).toBe(true)
-  await editor.getByRole("button", { name: "Back to the chat", exact: true }).click()
+  await editor.getByRole("button", { name: "Close", exact: true }).click()
   await expect(editor).toHaveCount(0)
   expect(page.url()).toBe(chat)
 })

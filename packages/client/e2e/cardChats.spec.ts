@@ -153,7 +153,7 @@ test("a first message typed before the chat exists survives leaving it, and goes
   await box.fill(text)
   // A pending chat has the chat's header on a phone, as any chat: its ← opens the menu.
   await page.getByRole("button", { name: "Chats and menu" }).click()
-  await page.locator(".fixed.inset-0").getByRole("link", { name: "Characters", exact: true }).last().click()
+  await page.locator(".fixed.inset-0").getByRole("link", { name: "Home", exact: true }).last().click()
   await page.getByRole("main").getByRole("button", { name: "Open Fen", exact: true }).click()
   await page.getByRole("button", { name: "Close", exact: true }).click()
   await expect(box).toHaveValue(text)

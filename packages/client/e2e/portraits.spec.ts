@@ -71,7 +71,7 @@ for (const width of [1440, 390]) {
       // chats first, then Characters and the rest.
       await showAppNavigation(page)
       await expect(
-        page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Characters", exact: true })
+        page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Home", exact: true })
       ).toBeVisible()
       await expect(
         page.getByRole("group", { name: "Left panel" }).getByRole("button", { name: "Chats", exact: true })
@@ -246,6 +246,7 @@ test("a touch long-press chooses concealment without toggling shown images", asy
     const page = await touch.newPage()
     await prepare(page)
     await page.goto(server().url)
+    await showAppNavigation(page)
     const toggle = page.getByRole("button", { name: "Blur all images", exact: true }).filter({ visible: true }).first()
     const box = (await toggle.boundingBox())!
     const cdp = await touch.newCDPSession(page)
