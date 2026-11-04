@@ -13,9 +13,9 @@ import { LorebookTable } from "./LorebookTable.tsx"
 import { type EditorStore, useValue } from "./store.ts"
 
 /** The book's own settings: name, description and what it overrides of the chat's. */
-function BookSettings({ store, root, entries }: { store: EditorStore; root: FieldPath; entries: number }) {
+export function BookSettings({ store, root, entries }: { store: EditorStore; root: FieldPath; entries: number }) {
   return (
-    <details className="group rounded-lg border border-border p-3">
+    <details className="@container group rounded-lg border border-border p-3">
       <summary className="cursor-pointer text-sm font-medium">
         Book settings{" "}
         <span className="hidden font-normal text-muted sm:inline">· description, scan depth, budget, recursion</span>
@@ -30,7 +30,7 @@ function BookSettings({ store, root, entries }: { store: EditorStore; root: Fiel
           about="For you: it isn't sent to the model."
           rows={3}
         />
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 @min-[30rem]:grid-cols-3">
           <NumberField
             store={store}
             path={[...root, "scan_depth"]}
