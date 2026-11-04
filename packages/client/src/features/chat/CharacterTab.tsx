@@ -1,3 +1,4 @@
+import { panelEditorActions } from "../editor/panelActions.tsx"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 import { SearchDialog } from "../editor/SearchDialog.tsx"
 import { SearchNavigation, type SearchMatch } from "../editor/searchNavigation.ts"
@@ -258,13 +259,14 @@ function CardPanel({
                 error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
               />
             )}
-            <div>
+            <div className="flex flex-wrap items-center gap-2">
               <SearchReplaceButton
                 ref={searchButton}
                 open={searching}
                 controls="card-panel-search"
                 onClick={() => setSearching(!searching)}
               />
+              <SlotOutlet slot={panelEditorActions} props={{ store }} />
             </div>
             {searching && (
               <SearchDialog

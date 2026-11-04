@@ -302,6 +302,7 @@ test.describe("synthetic library and every app surface", () => {
           defaults: {
             model: { connection: connection.id, model: model.id },
             preset:
+              process.env.LAYOUT_AUDIT_CARDHISTORY_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SAVEFLOW_ONLY === "1" ||
               process.env.LAYOUT_AUDIT_SEARCHREPLACE_ONLY === "1" ||
@@ -726,6 +727,41 @@ test.describe("synthetic library and every app surface", () => {
           await openPanel(page, "Cast")
           await page.getByRole("button", { name: `More for ${cardName}`, exact: true }).click()
           await formats("menu-pending-cast-export", true)
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_CARDHISTORY_ONLY === "1") {
+          const persona = await admin((api) =>
+            api.CreateCard({ label: `History persona ${width} ${theme}`, name: `History persona ${width} ${theme}` })
+          )
+          await admin((api) =>
+            api.ChangeCast({ chatId, slotId: null, change: { _tag: "Persona", entityId: persona.entityId } })
+          )
+          const book = (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).find((ref) => ref.id === bookRef)!
+          for (const [kind, tab] of [
+            ["card", cardName],
+            ["persona", persona.label],
+            ["preset", "Prompt preset"],
+            ["lorebook", "Lorebooks"]
+          ]) {
+            await page.goto(
+              `${server.url}/chats/${chatId}${kind === "persona" ? `?panel=card:${persona.entityId}` : ""}`
+            )
+            let editor =
+              kind === "persona"
+                ? page.getByRole("tabpanel", { name: persona.label, exact: true })
+                : await openPanel(page, tab!)
+            if (kind === "lorebook") {
+              await editor.getByRole("button").filter({ hasText: book.label }).first().click()
+              editor = editor.getByRole("region", { name: `Lorebook ${book.label}`, exact: true })
+            }
+            const row =
+              kind === "lorebook"
+                ? editor.getByRole("toolbar", { name: "Editing", exact: true })
+                : editor.getByRole("button", { name: "Search and replace", exact: true }).locator("..")
+            await row.evaluate((el) => el.setAttribute("data-cardhistory-header", ""))
+            await expect(editor.getByRole("button", { name: "History", exact: true })).toBeVisible()
+            await audit(`cardhistory-${kind}`, "[data-cardhistory-header]")
+          }
           return
         }
         if (process.env.LAYOUT_AUDIT_SEARCHREPLACE_ONLY === "1") {
