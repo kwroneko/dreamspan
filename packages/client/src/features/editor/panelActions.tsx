@@ -1,4 +1,5 @@
-import { useState } from "react"
+import type { RefId } from "@rp/shared/library.ts"
+import { createContext, useContext, useState } from "react"
 import { defineSlot } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -6,6 +7,8 @@ import { useCaller } from "./caller.ts"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { type EditorStore, useEditorState } from "./store.ts"
 import { ForkDialog } from "./RefDialogs.tsx"
+
+export const PanelVariantNavigation = createContext<((ref: RefId) => void) | undefined>(undefined)
 
 /** Document actions beside Search and replace in the compact editors. */
 export const panelEditorActions = defineSlot<{ store: EditorStore }>("editor.panel.actions")
@@ -32,6 +35,7 @@ export function PanelHistory({ store }: { store: EditorStore }) {
 
 /** Uses the same variant action and dialog as the full lorebook editor. */
 export function PanelVariant({ store }: { store: EditorStore }) {
+  const onCreated = useContext(PanelVariantNavigation)
   const snapshot = useEditorState(store).snapshot
   const [open, setOpen] = useState(false)
   if (snapshot?.ref.kind !== "lorebook" || snapshot.ref.refKind === "chat_override") return null
@@ -46,7 +50,7 @@ export function PanelVariant({ store }: { store: EditorStore }) {
         <Icon name="branch" />
         <span className="@max-[30rem]:hidden">Make a variant</span>
       </Button>
-      {open && <ForkDialog store={store} onClose={() => setOpen(false)} />}
+      {open && <ForkDialog store={store} onClose={() => setOpen(false)} {...(onCreated ? { onCreated } : {})} />}
     </>
   )
 }

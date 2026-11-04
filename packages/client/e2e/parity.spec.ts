@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { expect, test, type Locator } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
@@ -83,7 +83,8 @@ for (const width of [390, 1440])
         }
         if (process.env.LAYOUT_AUDIT) {
           await surface.evaluate((el) => el.setAttribute("data-parity-audit", ""))
-          await expectLayout(page, info, name, { scope: "[data-parity-audit]" })
+          const findings = await expectLayout(page, info, name, { scope: "[data-parity-audit]" })
+          if (dir) writeFileSync(`${dir}/${width}-${theme}-${name}.json`, JSON.stringify(findings))
           await surface.evaluate((el) => el.removeAttribute("data-parity-audit"))
         }
       }
@@ -98,6 +99,11 @@ for (const width of [390, 1440])
         await expect(
           editor.getByRole("navigation", { name: "Variants" }).getByRole("link", { name: "Waters variant" })
         ).toBeVisible()
+        await editor.getByRole("link", { name: "Waters variant", exact: true }).click()
+        const selectedVariant = lore.getByRole("region", { name: "Lorebook Waters variant", exact: true })
+        await expect(selectedVariant).toBeVisible()
+        await expect(page).toHaveURL(new RegExp(`/chats/${fixture.chat.id}`))
+        await selectedVariant.getByRole("link", { name: "Waters", exact: true }).click()
         await editor.getByRole("button", { name: "Make a variant", exact: true }).click()
         const variantDialog = page.getByRole("dialog", { name: "Make a variant", exact: true })
         await expect(variantDialog.getByRole("textbox", { name: "Library label", exact: true })).toHaveValue(
@@ -106,6 +112,10 @@ for (const width of [390, 1440])
         await variantDialog.getByRole("button", { name: "Cancel", exact: true }).click()
         await editor.getByText("Book settings", { exact: false }).click()
         await editor.getByRole("textbox", { name: "Lorebook description", exact: true }).fill("Side-panel description")
+        await editor.getByRole("button", { name: "Save", exact: true }).click()
+        await expect
+          .poll(async () => (await admin((api) => api.OpenEditor({ refId: book.id }))).doc.description)
+          .toBe("Side-panel description")
         await capture(editor.locator("details").first(), "library-settings")
         await editor.getByRole("button", { name: "History", exact: true }).click()
         await expect(page.getByRole("dialog", { name: "History", exact: true })).toBeVisible()
@@ -114,7 +124,18 @@ for (const width of [390, 1440])
           .getByRole("button", { name: "Close", exact: true })
           .click()
       }
+      if (!process.env.PARITY_BEFORE) {
+        await editor.getByRole("button", { name: "Make a variant", exact: true }).click()
+        const create = page.getByRole("dialog", { name: "Make a variant", exact: true })
+        await create.getByRole("textbox", { name: "Library label", exact: true }).fill(`New waters ${width} ${theme}`)
+        await create.getByRole("button", { name: "Make the variant", exact: true }).click()
+        await expect(
+          lore.getByRole("region", { name: `Lorebook New waters ${width} ${theme}`, exact: true })
+        ).toBeVisible()
+        await expect(page).toHaveURL(new RegExp(`/chats/${fixture.chat.id}`))
+      }
       const character = await openPanel(page, "Sailor")
+      await expect(character.getByRole("textbox", { name: "Description", exact: true })).toBeVisible()
       await capture(character, "character")
       if (!process.env.PARITY_BEFORE) {
         const favourite = character.getByRole("button", { name: "Add Sailor to favourites", exact: true })

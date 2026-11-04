@@ -1,9 +1,12 @@
+import { useSession } from "../../session.ts"
+import { usePresetWorkspace } from "./PresetWorkspace.tsx"
+import type { ComponentProps } from "react"
 import { lorebookEditorSections } from "./cardSections.ts"
 import { useCaller } from "./caller.ts"
 import { addedTo } from "./StandaloneLorebook.tsx"
 import type { ReactNode } from "react"
 import { SlotOutlet } from "../../slots.tsx"
-import { panelEditorActions } from "./panelActions.tsx"
+import { PanelVariantNavigation, panelEditorActions } from "./panelActions.tsx"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 // One lorebook, edited in a narrow column (owner, 2026-11-01): the side panel's Lorebooks tab
 // opens the book picked in its list here, below the list, and the card editor can show a
@@ -26,7 +29,7 @@ import { SaveRevision } from "./SaveRevision.tsx"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { type SearchMatch, SearchNavigation } from "./searchNavigation.ts"
 import { lorebookScopes } from "./searchScopes.ts"
-import { type EditorStore, useEditorState, useLeaveGuard, useText, useValue } from "./store.ts"
+import { EditorStore, useEditorState, useLeaveGuard, useText, useValue } from "./store.ts"
 
 /**
  * The book's name, renamed in place with the pencil. A library lorebook's is its library name,
@@ -59,7 +62,28 @@ export function BookName({
   )
 }
 
-export function LorebookPanelEditor({
+export function LorebookPanelEditor(props: ComponentProps<typeof LorebookPanelBody>) {
+  const [selected, setSelected] = useState<EditorStore | null>(null)
+  const workspace = usePresetWorkspace()
+  const call = useCaller()
+  const userId = useSession().user.id
+  const select = (ref: import("@rp/shared/library.ts").RefId) =>
+    setSelected(workspace?.store(ref) ?? new EditorStore(ref, userId, call))
+  const store = selected ?? props.store
+  return (
+    <PanelVariantNavigation value={select}>
+      <LorebookPanelBody
+        {...props}
+        key={store.refId}
+        store={store}
+        fallbackName={props.root.length === 0 ? (store.snapshot?.ref.label ?? props.fallbackName) : props.fallbackName}
+        {...(selected && workspace ? { onOpenLarge: () => workspace.open(store.refId) } : {})}
+      />
+    </PanelVariantNavigation>
+  )
+}
+
+function LorebookPanelBody({
   store,
   root,
   fallbackName,
@@ -94,7 +118,10 @@ export function LorebookPanelEditor({
   if (!state.snapshot) return <p role="status">Loading the lorebook…</p>
   return (
     <SearchNavigation value={match}>
-      <section aria-label={`Lorebook ${fallbackName}`} className="flex min-w-0 flex-col gap-3">
+      <section
+        aria-label={`Lorebook ${root.length === 0 ? state.snapshot.ref.label : fallbackName}`}
+        className="flex min-w-0 flex-col gap-3"
+      >
         <div data-editor-header className="flex items-start gap-0.5">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="font-medium">

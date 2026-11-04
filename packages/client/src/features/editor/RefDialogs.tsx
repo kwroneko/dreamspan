@@ -1,3 +1,4 @@
+import type { RefId } from "@rp/shared/library.ts"
 import { useUserDraft, UserDraftStatus } from "./userDraft.tsx"
 import { cardNames } from "@rp/shared/cardNames.ts"
 import { Effect } from "effect"
@@ -16,7 +17,15 @@ import { InlineRename } from "../../ui/InlineRename.tsx"
 import { type EditorStore, useEditorState } from "./store.ts"
 import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
 
-export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: () => void }) {
+export function ForkDialog({
+  store,
+  onClose,
+  onCreated
+}: {
+  store: EditorStore
+  onClose: () => void
+  onCreated?: (ref: RefId) => void
+}) {
   const state = useEditorState(store)
   const ref = state.snapshot!.ref
   const action = useAction()
@@ -79,7 +88,12 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
         )
         setPreparing(false)
         if (result.ok && ref.kind === "card") void refreshOpenEditors()
-        if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+        if (result.ok) {
+          if (onCreated) {
+            onClose()
+            onCreated(result.value.id)
+          } else void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+        }
         return result.ok
       })
       .finally(() => setPreparing(false))
