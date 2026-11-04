@@ -1,3 +1,4 @@
+import { centerHeaderTests } from "./support/centerHeaders.ts"
 // Run before UI approval: LAYOUT_AUDIT=1 PLAYWRIGHT_WORKERS=1 npx playwright test -c
 // packages/client/playwright.config.ts e2e/layoutAudit.spec.ts --project=chromium
 // LAYOUT_AUDIT_ST_FOLDER can point to an existing SYNTHETIC fixture only.
@@ -158,6 +159,7 @@ async function sampleScrollEnds(page: Page, check: (suffix: string) => Promise<v
 }
 
 test.describe("synthetic library and every app surface", () => {
+  test.skip(!!process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY, "Focused center headers")
   test.describe.configure({ mode: "default" })
 
   let server: TestServer
@@ -1648,6 +1650,7 @@ test.describe("synthetic library and every app surface", () => {
 for (const width of [390, 1440])
   for (const theme of ["light", "dark"] as const)
     test(`new version notice ${width} ${theme}`, async ({ page }, info) => {
+      test.skip(!!process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY, "Focused center headers")
       const server = await startServer(withAdmin)
       try {
         await page.setViewportSize({ width, height: 900 })
@@ -1683,8 +1686,10 @@ for (const width of [390, 1440])
       }
     })
 
+if (process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY) centerHeaderTests()
 // Fresh synthetic revisions exercise the production dialog without a development instance.
 test.describe("revision dialogs", () => {
+  test.skip(!!process.env.LAYOUT_AUDIT_CENTERHEADER_ONLY, "Focused center headers")
   let server: TestServer
   let cookie: string
   test.beforeAll(async () => {

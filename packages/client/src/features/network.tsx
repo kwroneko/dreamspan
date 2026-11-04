@@ -139,7 +139,7 @@ function NetworkPage() {
   useTitle("Network")
   return (
     <Card>
-      <CardHeader title="Network" about="Each connection can override this." />
+      <CardHeader center title="Network" about="Each connection can override this." />
       <AsyncView atom={networkAtom}>{(settings) => <NetworkForm settings={settings} />}</AsyncView>
     </Card>
   )

@@ -1,3 +1,4 @@
+import { CenterHeaderHost } from "./CenterHeader.tsx"
 import { Dialog } from "@base-ui/react/dialog"
 import { type ReactNode, useLayoutEffect, useState } from "react"
 
@@ -51,7 +52,7 @@ export function ColumnOverlay({
               className={`${page ? "fixed top-[var(--preset-overlay-top,0px)] right-0 bottom-0 left-[var(--preset-overlay-left,0px)]" : "absolute inset-0"} z-30 flex min-h-0 flex-col bg-canvas text-text shadow-xl outline-none`}
             >
               <Dialog.Title className="sr-only">{label}</Dialog.Title>
-              {children}
+              <CenterHeaderHost>{children}</CenterHeaderHost>
             </Dialog.Popup>
           </Dialog.Portal>
         </Dialog.Root>

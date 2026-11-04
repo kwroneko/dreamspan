@@ -1029,6 +1029,13 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] (owner, 2026-11-04)**: “prompt preset main editor vs lorebook main editor vs main chat view. The latter has a clear top header that connects to the two columns, the former two do not. From now on I want all center-column views to have such a header.”
+- **[D] (owner, 2026-11-04)**: “Moreover: through the header, it must be possible to switch what specific document the center column editor is editing: so a selector for lorebooks and presets for each respective editor makes sense. Chats already have this in the form of the branch switcher.”
+
+- **[P] (centerheader, 2026-11-04)**: Reuse the chat height token through one registered header frame; contribute title/actions from each view and navigate with shared same-kind selectors and existing draft guards.
+
+**Built (centerheader, 2026-11-04):** These decisions are implemented and obsolete as implementation requirements; see ARCHITECTURE §5 and §14.6.
+
 - **[D] Owner, 2026-11-04 (snippettitle):** “After renaming a snippet, its History dialog/label must show the new title”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 
 - **[D] Owner, 2026-11-04 (historyport approval):** “The history UI is fine now.” Port the approved History redesign to master, retaining side-panel History access. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.

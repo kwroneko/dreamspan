@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { PresetWorkspace, PresetOverlayHost } from "../editor/PresetWorkspace.tsx"
 import { selectablePresets } from "../pickers/presetList.ts"
@@ -35,6 +36,9 @@ export function ChatDefaultsPage() {
   return (
     <PresetWorkspace>
       <div className="relative min-h-0 flex-1">
+        <CenterHeaderContent>
+          <h1 className="text-base font-semibold">Chats</h1>
+        </CenterHeaderContent>
         <ChatDefaultsContent />
         <PresetOverlayHost page />
       </div>

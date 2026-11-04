@@ -25,7 +25,7 @@ import type { WorkspaceViewProps } from "../editor/workspaceViews.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Alert } from "../../ui/Surface.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { type NoteCard, NoteSectionHeader, SharedNotePicker } from "../editor/notes.tsx"
+import { type NoteCard, NoteSectionHeader, SharedNotePicker, noteTitle } from "../editor/notes.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useCast } from "./cast.ts"
 import { chatNoteActions } from "./presentation.tsx"
@@ -369,7 +369,13 @@ function ChatNoteLargeIn({
                 settingsOpen={settings.isOpen(refId)}
                 onSettingsOpenChange={(open) => settings.setOpen(refId, open)}
                 onRelinked={() => relinked(refId)}
-                large={{ onClose: close }}
+                large={{
+                  onClose: close,
+                  choices: notes.map((note) => ({
+                    value: note.ref.id,
+                    label: noteTitle(note.doc["title"], note.doc["content"], note.ref.label).title
+                  }))
+                }}
               />
             </ul>
           )

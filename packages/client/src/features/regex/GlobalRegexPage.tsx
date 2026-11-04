@@ -195,7 +195,7 @@ export function GlobalRegexPage() {
   useTitle("Regex scripts")
   return (
     <Card>
-      <CardHeader title="Global regex scripts" />
+      <CardHeader center title="Global regex scripts" />
       <AsyncView atom={globalRegexAtom}>{(saved) => <GlobalRegexForm saved={saved} />}</AsyncView>
     </Card>
   )

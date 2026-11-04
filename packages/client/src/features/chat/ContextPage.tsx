@@ -1,3 +1,4 @@
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { usePlaceExpansion, usePlaceParam } from "../../usePlaceParam.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { tokenizerText } from "../editor/tokenCounts.ts"
@@ -724,7 +725,9 @@ export function ContextPage() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <header className="flex flex-wrap items-center gap-3">
-        <h1 className="text-lg font-semibold">The request a reply was generated from</h1>
+        <CenterHeaderContent>
+          <h1 className="text-lg font-semibold">The request a reply was generated from</h1>
+        </CenterHeaderContent>
       </header>
       <AsyncView atom={atom} loading="Loading the context…">
         {(run) =>
