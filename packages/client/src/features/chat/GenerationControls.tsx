@@ -1,6 +1,7 @@
 // Account selections: the strip's model and preset chips, and their side panel tabs.
 import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@rp/shared/generation.ts"
 import type { Model } from "@rp/shared/providers.ts"
+import { Icon } from "../../ui/Icon.tsx"
 import { Link } from "@tanstack/react-router"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
@@ -27,7 +28,7 @@ function useSelections(session: ChatSession) {
 }
 
 /**
- * The next-reply strip's model chip: the account's model, which every chat's next reply uses
+ * The next-reply strip's model chip: the chat lock, or the account's model
  * (DESIGN §2.2: switched here, its settings in the side panel). "…" until both it and the
  * model list are read, so "Choose a model" never flashes before the real one. Its popover is
  * the shared model picker (`features/pickers`), as the Model tab's.
@@ -37,7 +38,7 @@ export function ModelChip({
   view,
   onSettings
 }: {
-  /** Null in a chat not made yet: the model is the account's either way. */
+  /** Null in a chat not made yet: the model follows the account. */
   session: ChatSession | null
   view: ChatView
   onSettings: (tab: "model") => void
@@ -64,7 +65,16 @@ export function ModelChip({
             : "No model chosen yet"
       }
       triggerClassName={chipClass()}
-      trigger={<ChipText>{short}</ChipText>}
+      trigger={
+        <>
+          {selection.lock?.locked && (
+            <span role="img" aria-label="Model locked for this chat">
+              <Icon name="lock" size={12} />
+            </span>
+          )}
+          <ChipText>{short}</ChipText>
+        </>
+      }
       {...(modelPanel
         ? {
             footer: (close: () => void) => (
@@ -106,7 +116,16 @@ export function PresetChip({
       triggerLabel={`Prompt preset: ${label}. Change the preset`}
       hint={`Prompt preset for the next reply: ${label}`}
       triggerClassName={chipClass()}
-      trigger={<ChipText>{label}</ChipText>}
+      trigger={
+        <>
+          {selection.lock?.locked && (
+            <span role="img" aria-label="Preset locked for this chat">
+              <Icon name="lock" size={12} />
+            </span>
+          )}
+          <ChipText>{label}</ChipText>
+        </>
+      }
       {...(presetPanel
         ? {
             footer: (close: () => void) => (
@@ -196,8 +215,8 @@ export function GenerationSettingsPanel({
         </p>
         <p className="text-xs text-muted">
           {used?.scope === "chat"
-            ? "The model this chat is bound to."
-            : "Your current model: every chat's next reply uses it."}
+            ? "This chat keeps this model when you change it elsewhere."
+            : "Your current model for chats without a lock."}
         </p>
       </div>
       <ModelSettingsEditor key={model.id} model={model} onSaved={() => setSaves((n) => n + 1)} />

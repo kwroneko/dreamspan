@@ -2,6 +2,7 @@
 // composer's chip and the Model tab.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
+import { useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { type ModelChoice, modelValue, parseModelValue, useModelChoiceList } from "../chat/modelChoices.ts"
@@ -15,6 +16,7 @@ const modelUseAtom = AppClient.query("ListModelUse", undefined, {
 
 export interface ModelSelection {
   /** False until the account's choice and the model lists are read. */
+  readonly lock?: { readonly locked: boolean; readonly disabled: boolean; readonly change: (locked: boolean) => void }
   readonly loaded: boolean
   /** The chosen model's `modelValue`, or null with none chosen. */
   readonly value: string | null
@@ -37,7 +39,9 @@ export function useModelSelection(session: ChatSession | null): ModelSelection {
   const refreshUse = useAtomRefresh(modelUseAtom)
   useRefreshOnContext(session, defaultsAtom)
   useRefreshOnContext(session, modelUseAtom)
-  const chosen = AsyncResult.isSuccess(defaults) ? defaults.value.model : undefined
+  const view = useSyncExternalStore(session?.subscribe ?? (() => () => {}), session?.snapshot ?? (() => null))
+  const locked = view?.cast?.model != null
+  const chosen = view?.cast?.model ?? (AsyncResult.isSuccess(defaults) ? defaults.value.model : undefined)
   const value = chosen ? modelValue(chosen.connection, chosen.model) : null
   const { choices, loaded } = useModelChoiceList(true, value)
   const used = new Map(
@@ -46,15 +50,28 @@ export function useModelSelection(session: ChatSession | null): ModelSelection {
       : []
   )
   return {
-    loaded: loaded && chosen !== undefined,
+    ...(session
+      ? {
+          lock: {
+            locked,
+            disabled: !chosen,
+            change: (on: boolean) => {
+              if (on && chosen) void session.changeCast({ _tag: "Model", ...chosen })
+              else if (!on) void session.changeCast({ _tag: "DefaultModel" })
+            }
+          }
+        }
+      : {}),
+    loaded: loaded && chosen !== undefined && (!session || view?.cast != null),
     value,
     current: choices.find((model) => model.value === value),
     models: choices,
     used,
-    choose: (next) =>
-      action
-        .run((client) => client("ChangeGenerationDefaults", { change: { model: parseModelValue(next) } }), ["settings"])
-        .then((result) => result.ok),
+    choose: async (next) => {
+      const model = parseModelValue(next)
+      if (locked && session) return (await session.changeCast({ _tag: "Model", ...model })).ok
+      return (await action.run((client) => client("ChangeGenerationDefaults", { change: { model } }), ["settings"])).ok
+    },
     refresh: refreshUse,
     error: action.error
   }

@@ -219,7 +219,7 @@ const modelStage: AssemblerStage = {
   run: (assembly) =>
     Effect.gen(function* () {
       const sources = yield* AssemblySources
-      assembly.model = yield* sources.model(null)
+      assembly.model = yield* sources.model(need(assembly, "state").modelBindings[""] ?? null)
       return assembly
     })
 }
@@ -234,7 +234,7 @@ const presetStage: AssemblerStage = {
         : null
       assembly.preset = yield* sources.preset({
         role: null,
-        chat: null,
+        chat: need(assembly, "state").presetBindings[""] ?? null,
         connection: null,
         ...(settings?.withPreset === "specific" && settings.preset ? { summary: settings.preset } : {})
       })
