@@ -529,11 +529,11 @@ Preset and lorebook copy audit (2026-11-04): editor controls and entry menus hav
 
 Library copy audit (2026-11-04): creation, transfer, search, history, update, shared-note and import controls use existing explanations. Redundant archived-preset guidance is removed; controls keep their labels and actions.
 
-Chat copy audit (2026-11-04): message, summary, queue, history, branch, image and panel actions use the existing explanations. Action hints omit promises about retained text; redundant names-in-prompts, branch-name and summary-request introductions are removed. Lorebook hints name the book and its scope. Labels and actions are unchanged.
+Chat copy audit (2026-11-04): message, summary, queue, history, branch, image and panel actions use the existing explanations. Action hints omit promises about retained text; redundant names-in-prompts, branch-name and summary-request introductions are removed. Lorebook hints name the book and its scope; toggle hints name the next click. Labels and actions are unchanged.
 
 Settings copy audit (2026-11-04): connection, model, key, account, network, pricing, global-regex and bin controls explain their actions. Pricing and global-regex introductions live in heading question-mark help; explanations keep technical terms and omit recovery instructions.
 
-Character and navigation copy audit (2026-11-04): card tiles, chat lists, sorting, persona actions, setup links and shell navigation use existing hover/focus explanations. Sort-menu descriptions use the shared menu explanation rather than permanent text under each label; redundant empty-chat guidance is removed. No labels changed.
+Character and navigation copy audit (2026-11-04): card tiles, chat lists, sorting, persona actions, setup links and shell navigation use existing hover/focus explanations. Sort-menu descriptions use the shared menu explanation rather than permanent text under each label; redundant empty-chat guidance is removed. No labels changed. The focused `LAYOUT_AUDIT_COPY_ONLY=1` entry in `e2e/layoutAudit.spec.ts` audits surfaces whose copy changed size across the standard width/theme profiles. `e2e/explanations.spec.ts` checks revised menu/switch descriptions and Cancel hover help; `e2e/presetMarkers.spec.ts` checks the concise cache-breakpoint explanation.
 
 ### 3.11 Recycle bin
 

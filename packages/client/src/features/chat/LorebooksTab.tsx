@@ -54,7 +54,11 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
       <Switch
         checked={on}
         onCheckedChange={onChange}
-        hint="On, every matching entry goes in one block just after the history. Off, each entry goes where its own position says."
+        hint={
+          on
+            ? "Click to use each entry’s position. Entries currently go in one block just after the history."
+            : "Click to place every matching entry in one block just after the history."
+        }
         labelHelp={
           <Popover
             open={open}
@@ -125,8 +129,8 @@ function Book({
         <Tooltip
           label={
             selected
-              ? "Closes the book below the list."
-              : "Opens the book below the list, to read and edit its entries here."
+              ? "Click to close the lorebook editor below the list."
+              : "Click to open the lorebook editor below the list."
           }
         >
           <button
@@ -253,7 +257,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
           row.on ? `${card.name}'s own lorebook` : `${card.name}'s own lorebook, off in this chat`,
           ...(card.lorebookEntries === undefined ? [] : [entries(card.lorebookEntries)])
         ].join(" · "),
-        switchHint: `Enables or disables ${card.name}'s lorebook for this chat.`,
+        switchHint: `Click to ${row.on ? "disable" : "enable"} ${card.name}’s lorebook for this chat.`,
         edit: ref ? { ref: ref.id, root: ["character_book"] } : null,
         focus: CARD_LOREBOOK_FOCUS,
         menu: []
@@ -273,7 +277,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
           row.on ? "Sent with the preset" : "In the preset, switched off there",
           ...(ref?.lorebookEntries === undefined ? [] : [entries(ref.lorebookEntries)])
         ].join(" · "),
-        switchHint: `Enables or disables this lorebook in preset ${presetName ?? ""}. Changes affect every chat using the preset.`,
+        switchHint: `Click to ${row.on ? "disable" : "enable"} this lorebook in preset ${presetName ?? ""}. Changes affect every chat using the preset.`,
         presetLink: { label: presetLabel, open: openPreset },
         edit: ref ? { ref: ref.id, root: [] } : null,
         menu: []
@@ -291,7 +295,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
         // The same book as a card's own, both active (an ST import keeps both): its entries go twice.
         ...(twin && row.on ? [`Also active as ${twin.name}'s own lorebook`] : [])
       ].join(" · "),
-      switchHint: "Enables or disables this lorebook for this chat.",
+      switchHint: `Click to ${row.on ? "disable" : "enable"} this lorebook for this chat.`,
       ...(row.presetSends ? { presetLink: { label: `Also ${presetLabel.toLowerCase()}`, open: openPreset } } : {}),
       edit: ref ? { ref: ref.id, root: [] } : null,
       menu: [

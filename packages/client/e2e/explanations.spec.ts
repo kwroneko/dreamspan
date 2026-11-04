@@ -192,10 +192,10 @@ for (const theme of ["light", "dark"] as const) {
     // A choice: the chosen one's explanation under the row, as nothing hovers; a book's
     // switch and its ⋯ items say what they do.
     await panelTab(page, "Lorebooks")
-    await expect(page.getByText(/^Off stops the book in this chat/)).toBeVisible()
+    await expect(page.getByText(/^Click to disable this lorebook for this chat/)).toBeVisible()
     await page.getByRole("button", { name: "More for Saltmarsh" }).tap()
     await expect(
-      page.getByRole("menuitem", { name: "Remove from this chat" }).getByText(/^Takes it off this chat's list/)
+      page.getByRole("menuitem", { name: "Remove from this chat" }).getByText(/^Removes this lorebook from this chat/)
     ).toBeVisible()
     await page.screenshot({ path: join(shots, `lorebook-menu-390-${theme}.png`) })
     await page.keyboard.press("Escape")
@@ -222,22 +222,20 @@ for (const theme of ["light", "dark"] as const) {
     const below = lore.getByRole("switch", { name: "Force all lorebook entries below the history" })
     await expect(below).toHaveAccessibleDescription(/one block just after the history/)
     await below.hover()
-    await expect(
-      page.getByText(/^On, every matching entry goes in one block just after the history/).last()
-    ).toBeVisible()
+    await expect(page.getByText(/^Click to use each entry’s position/).last()).toBeVisible()
     await page.screenshot({ path: join(shots, `choice-1440-${theme}.png`) })
 
     // The owner's example: a book's ⋯ item and its switch say what they do.
     await lore.getByRole("button", { name: "More for Saltmarsh" }).click()
     await page.getByRole("menuitem", { name: "Remove from this chat" }).hover()
-    await expect(explanation(page)).toHaveText(/^Takes it off this chat's list\. Add a lorebook brings it back/)
+    await expect(explanation(page)).toHaveText(/^Removes this lorebook from this chat\./)
     await page.screenshot({ path: join(shots, `lorebook-menu-1440-${theme}.png`) })
     await page.keyboard.press("Escape")
     // The row's switch: its explanation as its description, and in a tooltip on hover.
     const book = lore.getByRole("switch", { name: /^Saltmarsh/ })
-    await expect(book).toHaveAccessibleDescription(/^Off stops the book in this chat/)
+    await expect(book).toHaveAccessibleDescription(/^Click to disable this lorebook for this chat/)
     await book.hover()
-    await expect(page.getByText(/^Off stops the book in this chat/).last()).toBeVisible()
+    await expect(page.getByText(/^Click to disable this lorebook for this chat/).last()).toBeVisible()
 
     // The chat's menu: its commands, explained beside them.
     await page.getByRole("button", { name: "Chat actions" }).click()
@@ -255,6 +253,12 @@ for (const theme of ["light", "dark"] as const) {
     await save.hover()
     await expect(page.getByText("Saves a key once, for any number of connections to use.").last()).toBeVisible()
     await page.screenshot({ path: join(shots, `button-1440-${theme}.png`) })
+    await save.click()
+    const cancel = page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true })
+    await expect(cancel).toHaveAccessibleDescription("Closes this dialog without applying changes.")
+    await cancel.hover()
+    await expect(page.getByText("Closes this dialog without applying changes.").last()).toBeVisible()
+    await cancel.click()
     await context.close()
   })
 }
