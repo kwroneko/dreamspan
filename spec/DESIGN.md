@@ -784,6 +784,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 
 ### 6.2a The prompt preset editor (owner, 2026-10-27)
 
+- **[D]** (owner, 2026-11-04): “This text is not very responsive”. Prompt rows give descriptions the content width without breaking words; titles take priority over secondary badges, counts and actions. Keep the wide layout. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
+- **[P]** (promptrows, 2026-11-04): below a 36rem list container, use a grid for the handle, switch and wrapping title; secondary items wrap onto a following line. Apply the shared rule to every prompt kind in both editors.
+
 - **[D]** (owner, 2026-11-04): “unique built-in prompts with fixed names that are already highlighted by their colour … shouldn't repeat their name in a coloured badge.” Keep badges for special prompts with customizable titles that are not otherwise highlighted. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
 - **[D]** (owner, 2026-11-04): “Rename it 'Notes from this chat' (if it actually means notes placed inside the history, say exactly that instead …). Link each listed note so the user can open it. Don't change how notes at depth > 1 are shown.” **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6).
 - **[P]** (smallfixes5, 2026-11-04): keep kind badges for Main, Post-history, Auxiliary and Enhance definitions; omit placeholder, custom and unknown-kind badges. The positive-depth marker becomes “Notes in the chat history”; every listed note title opens its existing large editor, keeping depth and due annotations.
