@@ -46,6 +46,17 @@ test.beforeAll(async () => {
   )
 })
 
+async function countsOrder(usage: Locator, hasChats: boolean) {
+  await expect(usage).toHaveText(hasChats ? /^.+ tokens · .+ permanent1 chat$/ : /^.+ tokens · .+ permanent$/)
+  expect(await usage.locator(":scope > *").evaluateAll((children) => children.map((child) => child.tagName))).toEqual(
+    hasChats ? ["SPAN", "A"] : ["SPAN"]
+  )
+  const separators = await usage
+    .locator(":scope > *")
+    .evaluateAll((children) => children.map((child) => getComputedStyle(child, "::after").content))
+  expect(separators).toEqual(hasChats ? ['"·"', "none"] : ["none"])
+}
+
 async function structure(header: Locator, panel = true, allowWrap = false) {
   expect(
     await header.evaluate((root) =>
@@ -176,7 +187,7 @@ for (const width of [390, 1024, 1440])
           expect(row.x + row.width - end.x - end.width).toBeLessThanOrEqual(1)
           const usage = header.locator('[data-card-header-row="usage"]')
           await expect(usage.getByRole("link", { name: "1 chat", exact: true })).toBeVisible()
-          await expect(usage.locator("[data-card-tokens]")).toContainText("permanent")
+          await countsOrder(usage, true)
           await expect(scope.getByRole("button", { name: "Switch persona", exact: true })).toHaveCount(0)
           const toggle = header.getByRole("button", { name: "Persona", exact: true })
           await expect(toggle).toHaveAttribute("aria-pressed", "false")
@@ -356,3 +367,65 @@ test("the default persona badge shares the bottom row at the panel minimum", asy
     )
   }
 })
+
+for (const width of [1440, 390])
+  test(`optional chats count: ${width}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    const fixture = await withCookie(server(), cookie, (api) =>
+      Effect.gen(function* () {
+        const card = yield* api.CreateCard({ label: `Counts ${width}`, name: `Counts ${width}` })
+        const chat = yield* api.CreateChat({ title: `Counts ${width}` })
+        yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+        return { card, chat }
+      })
+    )
+    const separator = cookie.indexOf("=")
+    await page
+      .context()
+      .addCookies([{ name: cookie.slice(0, separator), value: cookie.slice(separator + 1), url: server().url }])
+    for (const hasChats of [false, true]) {
+      if (hasChats)
+        await withCookie(server(), cookie, (api) =>
+          api.SendMessage({
+            chatId: fixture.chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "Synthetic scene.",
+            reply: false
+          })
+        )
+      for (const view of ["panel", "full"] as const) {
+        await page.goto(
+          view === "panel" ? `${server().url}/chats/${fixture.chat.id}` : `${server().url}/library/${fixture.card.id}`
+        )
+        const scope = view === "panel" ? await openPanel(page, `Counts ${width}`) : page.getByRole("main")
+        const header = scope.locator("[data-card-header]")
+        const usage = header.locator('[data-card-header-row="usage"]')
+        await expect(usage.locator("[data-card-tokens]")).toBeVisible()
+        await expect(usage.getByRole("link")).toHaveCount(hasChats ? 1 : 0)
+        for (const persona of [false, true]) {
+          const toggle = header.getByRole("button", { name: "Persona", exact: true })
+          if ((await toggle.getAttribute("aria-pressed")) !== String(persona)) await toggle.click()
+          await expect(toggle).toHaveAttribute("aria-pressed", String(persona))
+          await countsOrder(usage, hasChats)
+          await page.mouse.move(0, 0)
+          if (work) {
+            mkdirSync(work, { recursive: true })
+            await header.screenshot({
+              path: join(
+                work,
+                `counts-${width}-${view}-${persona ? "persona" : "character"}-${hasChats ? "chats" : "no-chats"}.png`
+              )
+            })
+          }
+          if (audit)
+            await expectLayout(page, info, `counts-${width}-${view}-${persona}-${hasChats}`, {
+              scope: "[data-card-header]"
+            })
+        }
+        // Leave the next view in the initial character state.
+        await header.getByRole("button", { name: "Persona", exact: true }).click()
+      }
+    }
+  })
