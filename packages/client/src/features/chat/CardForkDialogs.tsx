@@ -177,10 +177,16 @@ function ChatCardForkDialog({ session, card, onClose }: { session: ChatSession; 
         )}
         <ErrorAlert error={action.error} />
         <DialogActions>
-          <Button onClick={onClose} disabled={action.pending}>
+          <Button hint="Closes this dialog without applying changes." onClick={onClose} disabled={action.pending}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" pending={action.pending} disabled={!name.trim() || clash !== null}>
+          <Button
+            hint="Forks this card and opens the copy for editing."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={!name.trim() || clash !== null}
+          >
             Fork and edit
           </Button>
         </DialogActions>
@@ -216,6 +222,7 @@ function CardVersionDialog({ session, card, onClose }: { session: ChatSession; c
         {tree(null).map(({ member, depth }) => (
           <li key={member.entityId} style={{ paddingInlineStart: `${Math.min(depth, 6) * 12}px` }}>
             <Button
+              hint="Selects this card fork."
               className="h-auto! min-h-11 w-full! justify-start! py-2! whitespace-normal! text-left"
               disabled={pending || member.entityId === card.entityId || !["live", "archived"].includes(member.state)}
               onClick={() => {
@@ -273,7 +280,7 @@ function CardVersionDialog({ session, card, onClose }: { session: ChatSession; c
         </p>
       )}
       <DialogActions>
-        <Button onClick={onClose} disabled={pending}>
+        <Button hint="Closes this dialog without applying changes." onClick={onClose} disabled={pending}>
           Cancel
         </Button>
       </DialogActions>

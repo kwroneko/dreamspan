@@ -141,15 +141,17 @@ function Row({
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">{body}</span>
         </label>
       ) : (
-        <button
-          type="button"
-          aria-current={current || undefined}
-          aria-label={`Version ${number}, ${writer}${current ? ", shown" : ""}: ${preview(text).slice(0, 80)}`}
-          className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          onClick={onPick}
-        >
-          {body}
-        </button>
+        <Tooltip label="Shows this message version.">
+          <button
+            type="button"
+            aria-current={current || undefined}
+            aria-label={`Version ${number}, ${writer}${current ? ", shown" : ""}: ${preview(text).slice(0, 80)}`}
+            className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            onClick={onPick}
+          >
+            {body}
+          </button>
+        </Tooltip>
       )}
       {!comparing && (
         <div className={`flex shrink-0 items-center py-0.5 ${rowActionInsetClass}`}>
@@ -251,11 +253,21 @@ function PickerBody({
         />
         <span className="flex-1" />
         {comparing ? (
-          <Button variant="ghost" className="h-8" onClick={() => setTicked(null)}>
+          <Button
+            hint="Closes this dialog without applying changes."
+            variant="ghost"
+            className="h-8"
+            onClick={() => setTicked(null)}
+          >
             Cancel
           </Button>
         ) : (
-          <Button className="h-8" disabled={versions.length < 2} onClick={() => setTicked([])}>
+          <Button
+            hint="Compares the selected message versions."
+            className="h-8"
+            disabled={versions.length < 2}
+            onClick={() => setTicked([])}
+          >
             <Icon name="compare" />
             Compare
           </Button>
@@ -276,9 +288,11 @@ function PickerBody({
         )}
         {hidden.length > 0 && (
           <details className="mt-2" open={comparing || undefined}>
-            <summary className="cursor-pointer rounded-md px-2 py-1 text-sm text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus">
-              Hidden {hidden.length}: left out of the arrows
-            </summary>
+            <Tooltip label="Shows message versions hidden from the arrows.">
+              <summary className="cursor-pointer rounded-md px-2 py-1 text-sm text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus">
+                Hidden {hidden.length}: left out of the arrows
+              </summary>
+            </Tooltip>
             <ol className="mt-1 flex flex-col gap-0.5" aria-label="Hidden versions">
               {hidden.map(row)}
             </ol>
@@ -319,7 +333,7 @@ function Compare({
           )}
           <StatusBadges version={version} />
           <span className="flex-1" />
-          <Button className="h-8" onClick={() => onPick(version)}>
+          <Button hint="Shows this message version." className="h-8" onClick={() => onPick(version)}>
             Show #{number}
           </Button>
         </header>

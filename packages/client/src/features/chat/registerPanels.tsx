@@ -178,7 +178,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "history",
     label: "History edits",
-    description: "Search and replace in this branch's messages, and undo past edits.",
+    description: "Search and replace in this branch’s messages, or review applied edits.",
     order: 90,
     icon: "history",
     component: lazyPanel(

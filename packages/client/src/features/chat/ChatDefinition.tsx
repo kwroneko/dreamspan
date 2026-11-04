@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The card as this chat reads it, read-only, for a chat that uses an earlier version: the tab's
 // text boxes edit the library's latest, so this is the one place the chat's own version shows.
 import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
@@ -23,15 +24,17 @@ function DefinitionField({ label, text }: { label: string; text: string }) {
         {text}
       </dd>
       {long && (
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={id}
-          onClick={() => setOpen(!open)}
-          className="self-start text-xs text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          {open ? "Show less" : "Show more"}
-        </button>
+        <Tooltip label={open ? "Click to collapse the definition." : "Click to show the full definition."}>
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={id}
+            onClick={() => setOpen(!open)}
+            className="self-start text-xs text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {open ? "Show less" : "Show more"}
+          </button>
+        </Tooltip>
       )}
     </div>
   )

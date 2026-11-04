@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { DocumentSwitcher } from "../editor/DocumentSwitcher.tsx"
 import { SNIPPET_FOCUS } from "../editor/workspaceViews.ts"
@@ -57,11 +58,15 @@ export function SnippetLarge({
     workspace.use(refId)
   }, [workspace, refId])
   const back = onClose ? (
-    <Button onClick={onClose}>Back to the chat</Button>
+    <Button hint="Returns to the chat." onClick={onClose}>
+      Back to the chat
+    </Button>
   ) : (
-    <Link to="/library" className="text-accent underline-offset-4 hover:underline">
-      Library
-    </Link>
+    <Tooltip label="Opens the library.">
+      <Link to="/library" className="text-accent underline-offset-4 hover:underline">
+        Library
+      </Link>
+    </Tooltip>
   )
   if (editor.loadError?.tag === "NotFound")
     return (
@@ -76,9 +81,11 @@ export function SnippetLarge({
   return (
     <section aria-label={`Snippet ${title}`} className="flex min-w-0 flex-col gap-3">
       {!onClose && (
-        <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
-          ← Library
-        </Link>
+        <Tooltip label="Returns to the library.">
+          <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
+            ← Library
+          </Link>
+        </Tooltip>
       )}
       <CenterHeaderContent>
         <header className="flex min-w-0 items-center gap-2">

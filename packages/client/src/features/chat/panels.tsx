@@ -209,7 +209,12 @@ export const lazyPanel = (load: () => Promise<{ default: ComponentType<PanelProp
             <p role="alert" className="text-sm text-danger">
               The {label} couldn't be loaded: the server can't be reached.
             </p>
-            <Button onClick={() => this.setState({ failed: false, Content: loaded ?? lazy(start) })}>Try again</Button>
+            <Button
+              hint="Retries loading this view."
+              onClick={() => this.setState({ failed: false, Content: loaded ?? lazy(start) })}
+            >
+              Try again
+            </Button>
           </div>
         )
       return (

@@ -198,8 +198,15 @@ export function EnableLcmDialog({
           {estimate && <EstimateList estimate={estimate} title="Estimate" />}
           {error && <Alert tone="danger">{error.message}</Alert>}
           <DialogActions>
-            <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button variant="primary" pending={pending} onClick={() => void enable()}>
+            <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              hint="Enables summaries with the selected settings."
+              variant="primary"
+              pending={pending}
+              onClick={() => void enable()}
+            >
               Enable summaries
             </Button>
           </DialogActions>

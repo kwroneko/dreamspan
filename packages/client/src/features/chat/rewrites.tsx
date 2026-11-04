@@ -111,7 +111,7 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
           variant="primary"
           pending={pending}
           disabled={raw === null || (raw.content === null && raw.reasoning === null && raw.sections === null)}
-          hint="Adds it as a new version of the message, which scripts don't change."
+          hint="Adds the original text as a new message version without applying scripts."
           onClick={() => void restore()}
         >
           Restore it
@@ -137,7 +137,7 @@ export const registerRewrites = () => [
     describe: viewOf(({ openDialog }) => ({
       label: "Show the original text",
       icon: "original",
-      hint: "See the text as the model wrote it, before scripts changed it, and restore it.",
+      hint: "Shows the original reply before scripts changed the text.",
       onSelect: () => openDialog("message.original-text")
     })),
     dialog: OriginalText

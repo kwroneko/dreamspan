@@ -312,7 +312,10 @@ export function TimelineSummary({
         >
           {error && (
             <p role="alert" className="text-sm text-danger">
-              {error} <Button onClick={() => setRetry(retry + 1)}>Retry</Button>
+              {error}{" "}
+              <Button hint="Retries loading this summary’s contents." onClick={() => setRetry(retry + 1)}>
+                Retry
+              </Button>
             </p>
           )}
           {summary.level > 1 ? (

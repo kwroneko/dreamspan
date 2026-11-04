@@ -127,7 +127,12 @@ function AttachmentList({
           {item.sending ? (
             <span className="text-xs text-muted">Sending…</span>
           ) : (
-            <Button variant="ghost" aria-label={`Remove ${item.name}`} onClick={() => onRemove(item.id)}>
+            <Button
+              hint="Removes this attached image."
+              variant="ghost"
+              aria-label={`Remove ${item.name}`}
+              onClick={() => onRemove(item.id)}
+            >
               Remove
             </Button>
           )}
@@ -647,19 +652,21 @@ function ImageThumbnails({
           const left = controls && !excluded ? leftOutBy(leftOut, controls.entry, index) : null
           const reason = excluded ? "taken out of the context by you" : left ? left.message : null
           const view = (
-            <button
-              type="button"
-              aria-label={`View image ${index + 1}${reason ? ` (not sent to the model: ${reason})` : ""}`}
-              onClick={() => setSelected(image)}
-              className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <ContentImage
-                src={mediaUrl(image.mediaId, 320)}
-                alt={image.altText || `Image ${index + 1}`}
-                loading="lazy"
-                className={`max-h-48 max-w-full rounded-md object-contain ${reason ? "opacity-40 grayscale" : ""}`}
-              />
-            </button>
+            <Tooltip label="Opens this image at full size.">
+              <button
+                type="button"
+                aria-label={`View image ${index + 1}${reason ? ` (not sent to the model: ${reason})` : ""}`}
+                onClick={() => setSelected(image)}
+                className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <ContentImage
+                  src={mediaUrl(image.mediaId, 320)}
+                  alt={image.altText || `Image ${index + 1}`}
+                  loading="lazy"
+                  className={`max-h-48 max-w-full rounded-md object-contain ${reason ? "opacity-40 grayscale" : ""}`}
+                />
+              </button>
+            </Tooltip>
           )
           return (
             <div
@@ -706,7 +713,9 @@ function ImageThumbnails({
             className="max-h-[75dvh] max-w-full object-contain"
           />
         )}
-        <Button onClick={() => setSelected(null)}>Close image</Button>
+        <Button hint="Closes the image viewer." onClick={() => setSelected(null)}>
+          Close image
+        </Button>
       </Dialog>
     </>
   )

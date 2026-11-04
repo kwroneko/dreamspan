@@ -340,7 +340,14 @@ function ChatNoteLargeIn({
           const note = notes.find((n) => n.ref.id === refId)
           if (!note)
             return (
-              <Alert tone="warning" actions={<Button onClick={close}>Back to the chat</Button>}>
+              <Alert
+                tone="warning"
+                actions={
+                  <Button hint="Returns to the chat." onClick={close}>
+                    Back to the chat
+                  </Button>
+                }
+              >
                 <p>This note isn't in this chat any more.</p>
               </Alert>
             )

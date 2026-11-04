@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 // The chats as a page (DESIGN §2.1): the sidebar's list, full width, for phones, where the
@@ -43,7 +44,7 @@ function EmptyChat() {
           value={title}
           onChange={(event) => setTitle(event.currentTarget.value)}
         />
-        <Button type="submit" pending={action.pending}>
+        <Button hint="Opens a new chat." type="submit" pending={action.pending}>
           New chat
         </Button>
       </div>
@@ -62,9 +63,11 @@ export function ChatsPage() {
       <CenterHeaderContent>
         <div className="flex w-full min-w-0 items-center justify-between gap-3">
           <h1 className="text-xl font-semibold">Chats</h1>
-          <Link to="/" className="text-sm text-accent hover:underline">
-            New chat with a character
-          </Link>
+          <Tooltip label="Opens the character picker for a new chat.">
+            <Link to="/" className="text-sm text-accent hover:underline">
+              New chat with a character
+            </Link>
+          </Tooltip>
         </div>
       </CenterHeaderContent>
       <ChatList />

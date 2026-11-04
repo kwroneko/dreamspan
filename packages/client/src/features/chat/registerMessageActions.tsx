@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { ForkNotesDialog } from "./ForkNotesDialog.tsx"
 import { Link } from "@tanstack/react-router"
 import { continueUnavailable, ContinueView, runContinue } from "./ContinueAction.tsx"
@@ -38,7 +39,7 @@ export const registerMessageActions = () => [
       hint:
         context.entry.version.writer === "human" && context.entry.version.status === "complete"
           ? `Change this message's text in place. ${EDIT_KEYS}`
-          : `Change this text: saving makes a new version, and this one stays. ${EDIT_KEYS}`,
+          : `Edit this message’s text and save a new version. ${EDIT_KEYS}`,
       onSelect: () => invokeMessageAction("message.edit", context, "button")
     }))
   }),
@@ -58,7 +59,7 @@ export const registerMessageActions = () => [
     describe: viewOf(({ session, entry }) => ({
       label: "Write your own version",
       icon: "write",
-      hint: "Write a new version of this message yourself, from an empty box. The versions it has stay.",
+      hint: "Write a new version of this message from an empty editor.",
       onSelect: () => session.openEditor({ _tag: "Write", slotId: entry.slotId }, "", entry.slotId)
     }))
   }),
@@ -72,7 +73,7 @@ export const registerMessageActions = () => [
     describe: viewOf(({ session, entry, report }) => ({
       label: "Generate a version",
       icon: "regenerate",
-      hint: "Have the model write a new version of this turn, as its speaker. Your version stays.",
+      hint: "Have the model write a new version of this turn as the same speaker.",
       onSelect: async () => report(await session.regenerate(entry))
     }))
   }),
@@ -112,11 +113,13 @@ export const registerMessageActions = () => [
       icon: "layers",
       hint: "See everything the model was sent for this version, and where each part came from.",
       link: (
-        <Link
-          to="/chats/$chatId/context/$versionId"
-          params={{ chatId: session.id, versionId: entry.version.id }}
-          search={viewedFork(session)}
-        />
+        <Tooltip label="Opens the context sent for this reply.">
+          <Link
+            to="/chats/$chatId/context/$versionId"
+            params={{ chatId: session.id, versionId: entry.version.id }}
+            search={viewedFork(session)}
+          />
+        </Tooltip>
       )
     }))
   }),
@@ -127,7 +130,7 @@ export const registerMessageActions = () => [
     describe: viewOf(({ session, entry }) => ({
       label: "Copy text",
       icon: "clipboard",
-      hint: "Copy the whole text of the version shown, as written (so far, while it's being written).",
+      hint: "Copy the text of the message version shown.",
       onSelect: () => void copy(session.textOf(entry.version), "Text")
     }))
   }),

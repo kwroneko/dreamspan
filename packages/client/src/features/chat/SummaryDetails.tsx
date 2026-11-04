@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import type { LcmSummary, SummaryDetails as Details } from "@rp/shared/lcm.ts"
 import { Link, useParams } from "@tanstack/react-router"
@@ -31,7 +32,6 @@ function requestLine(request: Details["requests"][number], details: Details, sum
 function Provenance({ details, summary, raw = false }: { details: Details; summary?: LcmSummary; raw?: boolean }) {
   return (
     <div className="flex flex-col gap-2 text-sm" aria-label="Summary generation details">
-      <p className="text-muted">The request that first wrote this summary. Later edits don't change it.</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
         <dt>Model</dt>
         <dd>{details.model ?? "Unknown"}</dd>
@@ -122,20 +122,29 @@ function SummaryProvenance({ session, summary }: { session: ChatSession; summary
     >
       <div className="flex min-h-0 flex-col gap-2 overflow-y-auto">
         {error ? (
-          <Alert tone="danger" actions={<Button onClick={() => setRead(read + 1)}>Retry details</Button>}>
+          <Alert
+            tone="danger"
+            actions={
+              <Button hint="Retries loading this summary’s details." onClick={() => setRead(read + 1)}>
+                Retry details
+              </Button>
+            }
+          >
             {error}
           </Alert>
         ) : details ? (
           <>
             <Provenance details={details} summary={summary} />
             {details.request ? (
-              <Link
-                to="/chats/$chatId/summaries/$summaryId/request"
-                params={{ chatId: session.id, summaryId: summary.id }}
-                className="self-start text-sm text-accent underline"
-              >
-                Open request in inspector
-              </Link>
+              <Tooltip label="Opens the captured summary request in the inspector.">
+                <Link
+                  to="/chats/$chatId/summaries/$summaryId/request"
+                  params={{ chatId: session.id, summaryId: summary.id }}
+                  className="self-start text-sm text-accent underline"
+                >
+                  Open request in inspector
+                </Link>
+              </Tooltip>
             ) : (
               <p className="text-sm text-muted">The request itself wasn't kept.</p>
             )}
@@ -176,14 +185,16 @@ function SummaryRequestPage() {
       {error && <Alert tone="danger">{error}</Alert>}
       {details && (
         <>
-          <Link
-            to="/chats/$chatId"
-            params={{ chatId: details.chatId }}
-            search={{ ...(details.forkId ? { fork: details.forkId } : {}), panel: "summaries", summary: summaryId }}
-            className="text-sm text-accent underline"
-          >
-            Back to the summary
-          </Link>
+          <Tooltip label="Returns to the summary.">
+            <Link
+              to="/chats/$chatId"
+              params={{ chatId: details.chatId }}
+              search={{ ...(details.forkId ? { fork: details.forkId } : {}), panel: "summaries", summary: summaryId }}
+              className="text-sm text-accent underline"
+            >
+              Back to the summary
+            </Link>
+          </Tooltip>
           <Provenance details={details} raw />
           {details.request ? (
             <>

@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { HistoryDiff, HistoryPreviewContext } from "./historyPreview.tsx"
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useId, type RefObject } from "react"
 import type { HistoryHit, HistoryRecord, HistorySearch, HistoryCursor } from "@rp/shared/historyApi.ts"
@@ -189,10 +190,12 @@ export function HistoryPanel({
             </Button>
             {record.items.map((item) => (
               <details key={item.id} className="mt-2">
-                <summary>
-                  {item.kind === "summary_revision" ? "Summary" : "Message"} ·{" "}
-                  {item.applied ? "applied" : "undone or changed"}
-                </summary>
+                <Tooltip label="Shows the text before and after this applied edit.">
+                  <summary>
+                    {item.kind === "summary_revision" ? "Summary" : "Message"} ·{" "}
+                    {item.applied ? "applied" : "undone or changed"}
+                  </summary>
+                </Tooltip>
                 <div className="my-2 whitespace-pre-wrap break-words font-mono text-xs">
                   <del>{item.before}</del> → <ins>{item.after}</ins>
                 </div>
@@ -549,11 +552,13 @@ function HistorySearchPair({
             {found.map((hit) => (
               <article key={keyOf(hit)} className="rounded-md border border-border p-2">
                 <div className="flex items-center justify-between gap-2">
-                  <button className="text-accent underline" onClick={() => openHit(hit)}>
-                    {hit.level
-                      ? `Level ${hit.level} summary, messages ${hit.depth + 1}–${hit.toDepth + 1}`
-                      : `Message ${hit.depth + 1}`}
-                  </button>
+                  <Tooltip label="Opens this search result in the chat.">
+                    <button className="text-accent underline" onClick={() => openHit(hit)}>
+                      {hit.level
+                        ? `Level ${hit.level} summary, messages ${hit.depth + 1}–${hit.toDepth + 1}`
+                        : `Message ${hit.depth + 1}`}
+                    </button>
+                  </Tooltip>
                   <label className="flex gap-1">
                     <input
                       type="checkbox"

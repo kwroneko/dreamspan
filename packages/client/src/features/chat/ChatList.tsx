@@ -83,68 +83,70 @@ function Row({
   const others = characters.filter((card) => card.name !== name.name).map((card) => card.name)
   return (
     <li className="tile-toggle-surface group relative">
-      <Link
-        to="/chats/$chatId"
-        params={{ chatId: chat.id }}
-        search={search.panel ? { panel: search.panel } : {}}
-        aria-current={active ? "page" : undefined}
-        className={`flex gap-3 rounded-lg px-2.5 py-2 outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:pr-16 ${
-          active ? "bg-surface-raised" : "hover:bg-surface-raised/60"
-        }`}
-      >
-        <AvatarStack
-          faces={characters.map((card) => ({
-            id: card.entityId,
-            name: card.name,
-            mediaId: card.avatarMediaId,
-            crop: card.avatarCrop
-          }))}
-        />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span
-              className={`truncate ${unseen > 0 ? "font-semibold" : "font-medium"}`}
-              onMouseEnter={titleIfClipped(name.name)}
-            >
-              {name.name}
+      <Tooltip label="Opens this chat.">
+        <Link
+          to="/chats/$chatId"
+          params={{ chatId: chat.id }}
+          search={search.panel ? { panel: search.panel } : {}}
+          aria-current={active ? "page" : undefined}
+          className={`flex gap-3 rounded-lg px-2.5 py-2 outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:pr-16 ${
+            active ? "bg-surface-raised" : "hover:bg-surface-raised/60"
+          }`}
+        >
+          <AvatarStack
+            faces={characters.map((card) => ({
+              id: card.entityId,
+              name: card.name,
+              mediaId: card.avatarMediaId,
+              crop: card.avatarCrop
+            }))}
+          />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span
+                className={`truncate ${unseen > 0 ? "font-semibold" : "font-medium"}`}
+                onMouseEnter={titleIfClipped(name.name)}
+              >
+                {name.name}
+              </span>
+              <span className="ml-auto shrink-0 text-xs text-muted">
+                {formatWhen(chat.lastMessageAt ?? chat.createdAt)}
+              </span>
             </span>
-            <span className="ml-auto shrink-0 text-xs text-muted">
-              {formatWhen(chat.lastMessageAt ?? chat.createdAt)}
+            {/* What tells two chats of the same cast apart, on a line of its own so it's never cut off. */}
+            <span data-chat-meta className="text-xs text-muted">
+              <span>started {formatDay(name.started ?? new Date(chat.createdAt))}</span>
+              {summary && (
+                <>
+                  {" · "}
+                  <span className="whitespace-nowrap">{plural(summary.messages, "message")}</span>
+                </>
+              )}
             </span>
-          </span>
-          {/* What tells two chats of the same cast apart, on a line of its own so it's never cut off. */}
-          <span data-chat-meta className="text-xs text-muted">
-            <span>started {formatDay(name.started ?? new Date(chat.createdAt))}</span>
-            {summary && (
-              <>
-                {" · "}
-                <span className="whitespace-nowrap">{plural(summary.messages, "message")}</span>
-              </>
+            {others.length > 0 && (
+              <span className="truncate text-xs text-muted" onMouseEnter={titleIfClipped(others.join(", "))}>
+                with {others.join(", ")}
+              </span>
+            )}
+            {summary?.last && (
+              <span className="truncate text-sm text-muted">
+                {speaker ? <span className="text-text">{speaker}: </span> : null}
+                {summary.last.text.replace(/\s+/g, " ")}
+              </span>
+            )}
+            {(unseen > 0 || unfinished) && (
+              <span className="mt-0.5 flex gap-1.5 text-xs">
+                {unseen > 0 && (
+                  <span className="rounded-full bg-accent px-1.5 text-accent-contrast">
+                    {unseen === 1 ? "1 new reply" : `${unseen} new replies`}
+                  </span>
+                )}
+                {unfinished && <span className="text-warning">import unfinished</span>}
+              </span>
             )}
           </span>
-          {others.length > 0 && (
-            <span className="truncate text-xs text-muted" onMouseEnter={titleIfClipped(others.join(", "))}>
-              with {others.join(", ")}
-            </span>
-          )}
-          {summary?.last && (
-            <span className="truncate text-sm text-muted">
-              {speaker ? <span className="text-text">{speaker}: </span> : null}
-              {summary.last.text.replace(/\s+/g, " ")}
-            </span>
-          )}
-          {(unseen > 0 || unfinished) && (
-            <span className="mt-0.5 flex gap-1.5 text-xs">
-              {unseen > 0 && (
-                <span className="rounded-full bg-accent px-1.5 text-accent-contrast">
-                  {unseen === 1 ? "1 new reply" : `${unseen} new replies`}
-                </span>
-              )}
-              {unfinished && <span className="text-warning">import unfinished</span>}
-            </span>
-          )}
-        </span>
-      </Link>
+        </Link>
+      </Tooltip>
       {fork && (
         <span data-layout-overlay="Pin action sits over the chat row" className="absolute right-2.5 bottom-2">
           <PinButton fork={fork} className="tile-toggle" />
@@ -315,7 +317,13 @@ function Loaded({ first, query }: { first: ReadonlyArray<Chat>; query: Query }) 
         </ul>
       )}
       {!firstEnd && !end && last !== undefined && (
-        <Button variant="ghost" className="self-center" pending={more.pending} onClick={() => void loadMore()}>
+        <Button
+          hint="Loads more chats."
+          variant="ghost"
+          className="self-center"
+          pending={more.pending}
+          onClick={() => void loadMore()}
+        >
           Load more
         </Button>
       )}

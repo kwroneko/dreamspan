@@ -42,6 +42,7 @@ function ColorControl({
           onValueChange={(value) => void viewer.change({ [color.key]: value })}
         />
         <Button
+          hint="Resets this message colour to the default."
           variant="secondary"
           aria-label={`Reset ${color.label.toLowerCase()} colour`}
           disabled={!viewer.ready || viewer.pending || viewer.prefs[color.key] === null}

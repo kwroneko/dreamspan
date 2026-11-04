@@ -67,22 +67,13 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
             side="bottom"
             align="end"
           >
-            <p className="text-sm">
-              The model's provider keeps what it has already read (its cache) only up to the first thing that changed.
-              An entry that comes and goes above the history changes everything after it, so the whole history is read
-              again, slowly and at full price.
-            </p>
-            <p className="text-sm">
-              On, every entry that matches goes in one block just after the history, and is looked at again every turn.
-              Off, each entry goes where its own position says; entries above the history stay until the history's start
-              next moves.
-            </p>
+            <p className="text-sm">Places matching entries below the history to preserve the cache prefix.</p>
+            <p className="text-sm">When off, each entry uses its own position.</p>
           </Popover>
         }
       >
         Force all lorebook entries below the history
       </Switch>
-      <p className="ps-12 text-sm text-muted">Applies to this chat, for all lorebooks.</p>
     </section>
   )
 }
@@ -150,7 +141,7 @@ function Book({
           </button>
         </Tooltip>
         {shown.presetLink && (
-          <Tooltip label="Opens the preset at its lorebooks: switching or removing it there changes every chat using the preset.">
+          <Tooltip label="Opens the preset’s lorebooks. Changes affect every chat using this preset.">
             <button
               type="button"
               onClick={shown.presetLink.open}
@@ -262,7 +253,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
           row.on ? `${card.name}'s own lorebook` : `${card.name}'s own lorebook, off in this chat`,
           ...(card.lorebookEntries === undefined ? [] : [entries(card.lorebookEntries)])
         ].join(" · "),
-        switchHint: `Off stops ${card.name}'s own book in this chat only. The card keeps it.`,
+        switchHint: `Enables or disables ${card.name}'s lorebook for this chat.`,
         edit: ref ? { ref: ref.id, root: ["character_book"] } : null,
         focus: CARD_LOREBOOK_FOCUS,
         menu: []
@@ -282,7 +273,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
           row.on ? "Sent with the preset" : "In the preset, switched off there",
           ...(ref?.lorebookEntries === undefined ? [] : [entries(ref.lorebookEntries)])
         ].join(" · "),
-        switchHint: `Switches it in the preset ${presetName ?? ""}: every chat using that preset, as you switch it.`,
+        switchHint: `Enables or disables this lorebook in preset ${presetName ?? ""}. Changes affect every chat using the preset.`,
         presetLink: { label: presetLabel, open: openPreset },
         edit: ref ? { ref: ref.id, root: [] } : null,
         menu: []
@@ -300,13 +291,13 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
         // The same book as a card's own, both active (an ST import keeps both): its entries go twice.
         ...(twin && row.on ? [`Also active as ${twin.name}'s own lorebook`] : [])
       ].join(" · "),
-      switchHint: "Off stops the book in this chat; it stays listed here, off, until you remove it.",
+      switchHint: "Enables or disables this lorebook for this chat.",
       ...(row.presetSends ? { presetLink: { label: `Also ${presetLabel.toLowerCase()}`, open: openPreset } } : {}),
       edit: ref ? { ref: ref.id, root: [] } : null,
       menu: [
         {
           label: "Remove from this chat",
-          description: "Takes it off this chat's list. Add a lorebook brings it back.",
+          description: "Removes this lorebook from this chat.",
           tone: "danger",
           onSelect: () => {
             if (selected === row.key) setSelected(null)

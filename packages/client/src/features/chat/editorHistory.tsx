@@ -109,7 +109,7 @@ function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryD
               </p>
               <Button
                 disabled={busy}
-                hint="Puts this text back in the editor as its newest state; the text there now stays in this history."
+                hint="Loads this text into the message editor."
                 onClick={async () => {
                   setBusy(true)
                   const restored = await draft.restoreState(state.seq)
@@ -211,7 +211,7 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
       wide
       onOpenChange={(open) => !open && closeDialog()}
       title="Saved amendment history"
-      description="Restore earlier saved text and images of this message. What's there now stays in this history."
+      description="Choose earlier saved text and images for this message."
     >
       {error && (
         <p role="alert" className="text-sm text-danger">
@@ -232,6 +232,7 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
               </p>
               <RevisionComparison label="Compare with saved text" before={state.content} after={base.version.content} />
               <Button
+                hint="Restores this saved message text."
                 disabled={busy}
                 onClick={async () => {
                   const forkId = base.forkId

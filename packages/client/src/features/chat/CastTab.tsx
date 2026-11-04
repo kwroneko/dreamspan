@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDefaultPersona } from "../characters/defaultPersona.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useChatCards } from "./chatCards.ts"
@@ -117,15 +118,17 @@ function Member({
         <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="lg" preview />
       </span>
       <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-        <button
-          type="button"
-          title={name}
-          aria-label={`${name}: open their card`}
-          onClick={() => showPanel(`card:${card.entityId}`)}
-          className={`line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus ${muted ? "text-muted" : ""}`}
-        >
-          {name}
-        </button>
+        <Tooltip label="Opens this character’s card in the panel.">
+          <button
+            type="button"
+            title={name}
+            aria-label={`${name}: open their card`}
+            onClick={() => showPanel(`card:${card.entityId}`)}
+            className={`line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus ${muted ? "text-muted" : ""}`}
+          >
+            {name}
+          </button>
+        </Tooltip>
         {(writing || muted || card.inBin) && (
           <span className="flex flex-wrap items-center gap-1">
             {writing && <Badge tone="success">writing…</Badge>}
@@ -184,16 +187,18 @@ function You({
       <div className="flex min-w-0 flex-1 flex-col items-start">
         {card ? <PersonaBadge played /> : <span className="text-xs text-muted">You play</span>}
         {card ? (
-          <button
-            type="button"
-            title={card.name}
-            aria-label={`${card.name}: open your persona`}
-            onClick={() => showPanel(`card:${card.entityId}`)}
-            className="line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            {card.name}
-            {isDefault ? " (default)" : ""}
-          </button>
+          <Tooltip label="Opens your persona’s card in the panel.">
+            <button
+              type="button"
+              title={card.name}
+              aria-label={`${card.name}: open your persona`}
+              onClick={() => showPanel(`card:${card.entityId}`)}
+              className="line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              {card.name}
+              {isDefault ? " (default)" : ""}
+            </button>
+          </Tooltip>
         ) : (
           <span className="font-medium">No persona</span>
         )}
@@ -322,15 +327,17 @@ function PendingMember({
     <li aria-label={name} className="flex items-center gap-3 py-2">
       <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="lg" preview />
       <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-        <button
-          type="button"
-          title={name}
-          aria-label={`${name}: open their card`}
-          onClick={() => showPanel(`card:${card.entityId}`)}
-          className="line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          {name}
-        </button>
+        <Tooltip label="Opens this character’s card in the panel.">
+          <button
+            type="button"
+            title={name}
+            aria-label={`${name}: open their card`}
+            onClick={() => showPanel(`card:${card.entityId}`)}
+            className="line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {name}
+          </button>
+        </Tooltip>
       </div>
       <Menu trigger={<IconButton icon="more" label={`More for ${name}`} />} label={name} keepMounted>
         <MenuItem

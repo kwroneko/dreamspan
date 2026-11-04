@@ -95,10 +95,6 @@ export function MacroBindings({ session }: { session: ChatSession }) {
   return (
     <Disclosure title="Advanced: names in prompts">
       <section aria-label="Names in prompts" className="flex flex-col gap-4">
-        <p className="text-sm text-muted">
-          What the prompt preset and notes call you and the character. They follow who's in the chat; Keep this name
-          stops one changing.
-        </p>
         {(["user", "char"] as const).map((name) => (
           <Binding
             key={`${session.id}:${forkId}:${name}`}

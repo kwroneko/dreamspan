@@ -1,3 +1,4 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
 // The composer's speaker, always visible; it opens the chat's cast, the persona and the cards
 // in the chat (DESIGN §2.2: to speak as another card, add it to the chat first), with a search
 // field on top, focused as it opens: typing filters by name, the arrow keys move through
@@ -371,16 +372,18 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
               ? "No cards in the persona folder."
               : "No cards yet."
   const addToChat = onAddToChat && !persona && (
-    <button
-      type="button"
-      onClick={() => {
-        openChange(false)
-        onAddToChat()
-      }}
-      className="rounded-sm text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
-    >
-      Add to chat
-    </button>
+    <Tooltip label="Opens the character picker to add to this chat.">
+      <button
+        type="button"
+        onClick={() => {
+          openChange(false)
+          onAddToChat()
+        }}
+        className="rounded-sm text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        Add to chat
+      </button>
+    </Tooltip>
   )
   const list =
     personas !== undefined ? (
@@ -561,16 +564,18 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         list
       )}
       {onNone && (
-        <button
-          type="button"
-          onClick={() => {
-            openChange(false)
-            onNone()
-          }}
-          className="shrink-0 rounded-md px-2 py-1.5 text-left text-sm text-muted outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          No persona
-        </button>
+        <Tooltip label="Uses no persona for this chat.">
+          <button
+            type="button"
+            onClick={() => {
+              openChange(false)
+              onNone()
+            }}
+            className="shrink-0 rounded-md px-2 py-1.5 text-left text-sm text-muted outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            No persona
+          </button>
+        </Tooltip>
       )}
     </Popover>
   )

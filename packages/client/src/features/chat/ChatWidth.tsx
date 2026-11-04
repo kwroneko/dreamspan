@@ -65,6 +65,7 @@ export function ChatWidthSetting() {
       {/* Back to the default in one click. */}
       {value !== CHAT_WIDTH.default && (
         <Button
+          hint="Resets the chat column to its default width."
           variant="ghost"
           disabled={!viewer.ready}
           onClick={() => void viewer.change({ chatWidth: CHAT_WIDTH.default })}

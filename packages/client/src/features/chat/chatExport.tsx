@@ -92,10 +92,15 @@ export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
         </p>
       )}
       <DialogActions>
-        <Button onClick={onClose} disabled={read !== null}>
+        <Button hint="Closes this dialog without applying changes." onClick={onClose} disabled={read !== null}>
           Cancel
         </Button>
-        <Button variant="primary" pending={read !== null} onClick={() => void run()}>
+        <Button
+          hint="Exports the chat with the selected options."
+          variant="primary"
+          pending={read !== null}
+          onClick={() => void run()}
+        >
           Export
         </Button>
       </DialogActions>

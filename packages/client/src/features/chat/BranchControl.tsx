@@ -88,12 +88,22 @@ function BranchRow({
             }}
           />
           {error && <p className="text-xs text-danger">{error.message}</p>}
-          <p className="text-xs text-muted">Leave it empty to take the name off.</p>
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" className="h-8" onClick={() => setEditing(false)}>
+            <Button
+              hint="Closes this dialog without applying changes."
+              variant="ghost"
+              className="h-8"
+              onClick={() => setEditing(false)}
+            >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" className="h-8" pending={pending}>
+            <Button
+              hint="Saves the branch’s new name."
+              type="submit"
+              variant="primary"
+              className="h-8"
+              pending={pending}
+            >
               Rename
             </Button>
           </div>
@@ -105,31 +115,33 @@ function BranchRow({
       data-fork={fork.id}
       className={`flex items-start gap-1 rounded-md border p-2 ${shown ? "border-accent bg-accent/5" : "border-transparent hover:bg-surface-raised"}`}
     >
-      <button
-        type="button"
-        aria-current={shown || undefined}
-        aria-label={`${label}${shown ? ", shown" : ""}${fork.current ? ", the chat opens here" : ""}: ${fork.tipExcerpt.slice(0, 80) || "no messages"}`}
-        onClick={onSwitch}
-        className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
-      >
-        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
-          <span className="min-w-0 truncate font-medium">{label}</span>
-          {shown && <span className="text-xs font-medium text-accent">shown</span>}
-          {fork.current && (
-            <Tooltip label={OPENS_HERE_HINT}>
-              <span tabIndex={0} className="rounded outline-none focus-visible:ring-2 focus-visible:ring-focus">
-                <Badge tone="neutral">opens here</Badge>
-              </span>
-            </Tooltip>
-          )}
-          <span className="ml-auto text-xs text-muted tabular-nums" title="Its last message">
-            {formatMoment(branchLastAt(fork))}
+      <Tooltip label="Opens this chat branch.">
+        <button
+          type="button"
+          aria-current={shown || undefined}
+          aria-label={`${label}${shown ? ", shown" : ""}${fork.current ? ", the chat opens here" : ""}: ${fork.tipExcerpt.slice(0, 80) || "no messages"}`}
+          onClick={onSwitch}
+          className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
+            <span className="min-w-0 truncate font-medium">{label}</span>
+            {shown && <span className="text-xs font-medium text-accent">shown</span>}
+            {fork.current && (
+              <Tooltip label={OPENS_HERE_HINT}>
+                <span tabIndex={0} className="rounded outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                  <Badge tone="neutral">opens here</Badge>
+                </span>
+              </Tooltip>
+            )}
+            <span className="ml-auto text-xs text-muted tabular-nums" title="Its last message">
+              {formatMoment(branchLastAt(fork))}
+            </span>
           </span>
-        </span>
-        <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
-          {fork.tipExcerpt || "No messages yet"}
-        </span>
-      </button>
+          <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
+            {fork.tipExcerpt || "No messages yet"}
+          </span>
+        </button>
+      </Tooltip>
       <div className={`flex shrink-0 items-center ${rowActionInsetClass}`}>
         <IconButton
           label={`Rename ${label}`}
