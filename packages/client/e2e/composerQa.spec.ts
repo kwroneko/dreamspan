@@ -1,3 +1,4 @@
+import { composerChoice, setGuidance } from "./support/composer.ts"
 // QA regressions: mode changes beat slow preference writes, and a phone keeps
 // most of its height for the conversation even with a group and multiline guidance.
 import { mkdirSync } from "node:fs"
@@ -75,16 +76,16 @@ const path = (chatId: Awaited<ReturnType<typeof group>>) =>
   rpc((api) => api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 30 }))
 
 for (const width of [1440, 390]) {
-  test(`Guidance on/off acts locally before the preference RPC (${width}px)`, async ({ page }) => {
+  test(`Guidance on/off acts locally before the composer RPC (${width}px)`, async ({ page }) => {
     const held: Array<() => void> = []
     await page.routeWebSocket(/\/rpc$/, (socket) => {
       const upstream = socket.connectToServer()
       socket.onMessage((data) => {
-        if (typeof data === "string" && JSON.parse(data).tag === "SetDisplayPrefs") held.push(() => upstream.send(data))
+        if (typeof data === "string" && JSON.parse(data).tag === "SetComposerChoice")
+          held.push(() => upstream.send(data))
         else upstream.send(data)
       })
     })
-    await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
     const chatId = await group()
     await page.setViewportSize({ width, height: 844 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -104,7 +105,7 @@ for (const width of [1440, 390]) {
     await expect(box(page)).toHaveValue("")
     await expect(toggle(page)).toBeChecked()
     // The server still has the old preference; the first write remains held.
-    expect((await rpc((api) => api.GetDisplayPrefs({}))).guidance).toBe(false)
+    expect((await rpc((api) => composerChoice(api, chatId))).guidance).toBe(false)
     const story = "Sam sets the glass down."
     await box(page).fill(story)
     await toggle(page).click()
@@ -124,24 +125,23 @@ for (const width of [1440, 390]) {
     // An old acknowledgement must not put the composer back into Guidance.
     await expect(toggle(page)).not.toBeChecked()
     held[1]!()
-    await expect.poll(async () => (await rpc((api) => api.GetDisplayPrefs({}))).guidance).toBe(false)
+    await expect.poll(async () => (await rpc((api) => composerChoice(api, chatId))).guidance).toBe(false)
     await page.reload()
     await expect(toggle(page)).not.toBeChecked()
   })
 }
 
-test("a preference read after acknowledgement accepts a newer account choice", async ({ page }) => {
+test("a preference read after acknowledgement accepts a newer composer choice", async ({ page }) => {
   let holdReads = false
   const held: Array<() => void> = []
   await page.routeWebSocket(/\/rpc$/, (socket) => {
     const upstream = socket.connectToServer()
     socket.onMessage((data) => {
-      if (holdReads && typeof data === "string" && JSON.parse(data).tag === "GetDisplayPrefs")
+      if (holdReads && typeof data === "string" && JSON.parse(data).tag === "GetComposerChoice")
         held.push(() => upstream.send(data))
       else upstream.send(data)
     })
   })
-  await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
   const chatId = await group()
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
@@ -149,9 +149,9 @@ test("a preference read after acknowledgement accepts a newer account choice", a
   holdReads = true
   await toggle(page).click()
   await expect.poll(() => held.length).toBe(1)
-  expect((await rpc((api) => api.GetDisplayPrefs({}))).guidance).toBe(true)
-  // Another browser changes the account after this tab's save, before its readback.
-  await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
+  expect((await rpc((api) => composerChoice(api, chatId))).guidance).toBe(true)
+  // Another browser changes the composer after this tab's save, before its readback.
+  await rpc((api) => setGuidance(api, chatId, false))
   holdReads = false
   held[0]!()
   await expect(toggle(page)).not.toBeChecked()
@@ -164,7 +164,7 @@ test("a refused Guidance save rolls back visibly and a later choice can still sa
     const upstream = socket.connectToServer()
     socket.onMessage((data) => {
       const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
-      if (request?.tag === "SetDisplayPrefs" && refuse) {
+      if (request?.tag === "SetComposerChoice" && refuse) {
         release = () =>
           socket.send(
             JSON.stringify({
@@ -179,7 +179,6 @@ test("a refused Guidance save rolls back visibly and a later choice can still sa
       } else upstream.send(data)
     })
   })
-  await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
   const chatId = await group()
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
@@ -192,7 +191,7 @@ test("a refused Guidance save rolls back visibly and a later choice can still sa
   await expect(page.getByRole("alert")).toContainText("Something failed on the server")
   refuse = false
   await toggle(page).click()
-  await expect.poll(async () => (await rpc((api) => api.GetDisplayPrefs({}))).guidance).toBe(true)
+  await expect.poll(async () => (await rpc((api) => composerChoice(api, chatId))).guidance).toBe(true)
   await expect(page.getByRole("alert")).toHaveCount(0)
   await page.reload()
   await expect(toggle(page)).toBeChecked()
@@ -201,10 +200,10 @@ test("a refused Guidance save rolls back visibly and a later choice can still sa
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`group reading space and controls (${width}px ${theme})`, async ({ page }, testInfo) => {
-      await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: true } }))
       // This measures daily use after the one-time preset explanation has been acknowledged.
       await rpc((api) => api.ImpersonationNotice({}))
       const chatId = await group()
+      await rpc((api) => setGuidance(api, chatId, true))
       await page.setViewportSize({ width, height: 844 })
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)

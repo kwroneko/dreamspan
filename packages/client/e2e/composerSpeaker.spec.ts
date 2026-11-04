@@ -463,7 +463,6 @@ test("typing stays available while the saved speaker is loading; sending waits f
 
 test("empty Enter requests the visible empty-box reply without adding human text", async ({ page }) => {
   const chatId = await chatWith(["Mira"])
-  await admin((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(page.getByRole("button", { name: "Mira replies", exact: true })).toBeEnabled()
   await composer(page).press("Enter")

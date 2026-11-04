@@ -58,6 +58,7 @@ interface DraftRow {
   /** The composer's choices (migration 0036); null for other drafts. */
   readonly speaker_entity_id: string | null
   readonly reply_from_entity_id: string | null
+  readonly guidance: number
 }
 
 /** The draft a write took its text from: by its id, in the session it was typed in, with exactly that text. */
@@ -155,6 +156,7 @@ const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | nu
     id: row.id,
     key: { targetKind: row.target_kind, targetId: row.target_id, field: row.field },
     content: row.content,
+    ...(row.target_kind === "composer" ? { guidance: row.guidance === 1 } : {}),
     ...imageFields(row.images_json),
     status: row.status,
     baseRevision: row.base_revision,
@@ -1093,13 +1095,14 @@ export const makeDraftStore = (
       // explicit reset to turn order (null), as switching branches keeps their text.
       if (from !== null && here === null)
         yield* sql`UPDATE drafts SET speaker_entity_id = ${from.speaker_entity_id},
-          reply_from_entity_id = ${from.reply_from_entity_id} WHERE id = ${opened.id}`
-      return toDraft(opened, recovered)
+          reply_from_entity_id = ${from.reply_from_entity_id}, guidance = ${from.guidance} WHERE id = ${opened.id}`
+      return toDraft(from !== null && here === null ? { ...opened, guidance: from.guidance } : opened, recovered)
     })
 
   const choiceOf = (row: DraftRow) =>
     new ComposerChoice({
       draftId: row.id,
+      guidance: row.guidance === 1,
       speakerEntityId: row.speaker_entity_id as EntityId | null,
       replyFromEntityId: row.reply_from_entity_id as EntityId | null
     })
@@ -1123,6 +1126,7 @@ export const makeDraftStore = (
     change: {
       readonly speakerEntityId?: EntityId | null
       readonly replyFromEntityId?: EntityId | null
+      readonly guidance?: boolean
       readonly consumeReplyFromEntityId?: EntityId
     }
   ) =>
@@ -1144,9 +1148,10 @@ export const makeDraftStore = (
           : change.replyFromEntityId === undefined
             ? draft.reply_from_entity_id
             : change.replyFromEntityId
-      yield* sql`UPDATE drafts SET speaker_entity_id = ${speaker}, reply_from_entity_id = ${replyFrom}
+      const guidance = change.guidance === undefined ? draft.guidance : Number(change.guidance)
+      yield* sql`UPDATE drafts SET speaker_entity_id = ${speaker}, reply_from_entity_id = ${replyFrom}, guidance = ${guidance}
         WHERE id = ${draft.id}`
-      return choiceOf({ ...draft, speaker_entity_id: speaker, reply_from_entity_id: replyFrom })
+      return choiceOf({ ...draft, speaker_entity_id: speaker, reply_from_entity_id: replyFrom, guidance })
     })
 
   /**
