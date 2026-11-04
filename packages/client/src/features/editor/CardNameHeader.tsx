@@ -237,7 +237,7 @@ export function CardNameHeader({
             hint={DISPLAY_HINT}
             fieldLabel="Display name"
             goTo={nameMatch}
-            className="min-w-[var(--card-name-min)]! max-w-[min(60%,calc(100%_-_var(--card-name-min)_-_0.25rem))] shrink-0 data-[renaming]:max-w-none data-[renaming]:shrink"
+            className="min-w-[var(--card-name-min)]! max-w-[min(60%,calc(100%_-_var(--card-name-min)_-_0.25rem))] shrink data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]! data-[renaming]:max-w-none"
             onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
           >
             {/* The pencil beside the heading, not in it: the heading's name is the card's name. */}
@@ -257,7 +257,7 @@ export function CardNameHeader({
             fieldLabel="Version"
             goTo={versionMatch}
             allowEmpty
-            className="min-w-[var(--card-name-min)]! shrink text-xs text-muted"
+            className="min-w-[var(--card-name-min)]! shrink text-xs text-muted data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]!"
             onRename={async (next) => {
               if (await clashes(name, next)) return false
               write({ version: next })

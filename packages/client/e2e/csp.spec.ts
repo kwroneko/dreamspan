@@ -69,22 +69,28 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   await expect(page.getByRole("option").first()).toBeVisible()
   await page.keyboard.press("Escape")
 
-  for (const path of [
-    "/",
-    "/chats",
-    "/library",
-    "/import",
-    "/import/st",
-    "/settings",
-    "/settings/account",
-    "/settings/users",
-    "/settings/notifications",
-    "/settings/status",
-    "/bin"
-  ]) {
+  for (const [path, heading] of [
+    ["/", "Characters"],
+    ["/chats", "Chats"],
+    ["/library", "Library"],
+    ["/import", "Import"],
+    ["/import/st", "Import ST data"],
+    ["/settings", "Connections"],
+    ["/settings/account", "Account"],
+    ["/settings/users", "Users"],
+    ["/settings/notifications", "Notifications"],
+    ["/settings/status", "Server"],
+    ["/bin", "Bin"]
+  ] as const) {
     await page.goto(`${server().url}${path}`)
     await expect(page.getByRole("main")).toBeVisible()
-    await page.waitForLoadState("networkidle")
+    // The route's content proves it mounted under the policy. RPC connections and
+    // background health checks make network idleness unrelated to screen readiness.
+    const contentHeading = page
+      .getByRole("main")
+      .getByRole("heading", { name: heading, exact: true })
+      .and(page.locator(":not(nav *)"))
+    await expect(contentHeading).toBeVisible()
   }
   // The card editor, with its avatar from /library/media and its search in a worker.
   await page.goto(`${server().url}/library`)

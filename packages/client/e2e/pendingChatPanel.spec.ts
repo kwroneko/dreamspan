@@ -37,8 +37,11 @@ const tabNames = async (page: Page) => {
   const more = page.getByRole("button", { name: "More tools", exact: true })
   if (await more.isVisible()) {
     await more.click()
-    names.push(...(await page.getByRole("menuitem").allInnerTexts()))
+    const menu = page.getByRole("menu", { name: "More tools", exact: true })
+    await expect(menu.getByRole("menuitem").last()).toBeVisible()
+    names.push(...(await menu.getByRole("menuitem").allInnerTexts()))
     await page.keyboard.press("Escape")
+    await expect(menu).toHaveCount(0)
   }
   const cast = await page.getByRole("tablist", { name: "Characters", exact: true }).getByRole("tab").allInnerTexts()
   return [...names.map((name) => name.trim()).sort(), "|", ...cast.map((name) => name.trim())]

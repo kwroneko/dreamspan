@@ -96,6 +96,9 @@ test("two tabs: a change made in the other is loaded, and the next try succeeds"
   await expect(page.getByRole("alert")).toContainText("changed since you opened it")
   await page.getByRole("button", { name: "Load the latest" }).click()
   await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Renamed in the other tab")
+  // The shared draft can already show that name before its asynchronous discard
+  // finishes. Start the next edit only once the loaded form is clean.
+  await expect(page.getByRole("button", { name: "Discard changes", exact: true })).toHaveCount(0)
   // The second tab may have opened the shared draft after concurrency was typed and
   // saved that visible value too. Make a fresh change after loading the latest version.
   await page.getByLabel("Concurrent requests", { exact: true }).fill("4")

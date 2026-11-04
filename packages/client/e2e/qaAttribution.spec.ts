@@ -199,13 +199,13 @@ for (const width of [1440, 390])
       await expect(preview.locator("ins")).toHaveText("pier")
       await shoot(page, `summary-search-${width}-${theme}`)
       // Returning preserves the query; match navigation must open summaries too.
-      await panelTab(page, "Search and replace")
+      await panelTab(page, "History edits")
       await expect(page.getByRole("textbox", { name: "Find", exact: true })).toHaveValue("bridge")
       await expect(page.getByLabel("Skip match 1 in message 1", { exact: true })).toBeChecked()
       await page.getByRole("button", { name: "Next", exact: true }).click()
       await expect(row).toBeVisible()
       await expect(preview.locator("del")).toHaveText("bridge")
-      await panelTab(page, "Search and replace")
+      await panelTab(page, "History edits")
       await page.getByRole("button", { name: "Previous", exact: true }).click()
       await expect(row).toBeVisible()
       await expect(preview.locator("ins")).toHaveText("pier")
@@ -233,6 +233,9 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/chats/${chat.id}`)
       const heading = page.getByRole("heading", { level: 1, name: title, exact: true })
       await expect(heading).toBeVisible()
+      // The title can appear before the branch control finishes loading. Check
+      // the final header rather than that transient extra space.
+      await expect(page.getByRole("button", { name: /^Branch: Original, 1 of 1:/ })).toBeDisabled()
       // A clamped title still has the full accessible name, so inspect its actual text box.
       const label = heading.locator("span").first()
       await expect

@@ -61,7 +61,7 @@ for (const width of [1440, 390]) {
       await hint(page, history, "No edit history yet.")
       const before = await boxes(chrome)
       const cluster = saveCluster(page).first()
-      const revert = cluster.getByRole("button", { name: "Revert to the last save", exact: true })
+      const revert = cluster.getByRole("button", { name: "Revert", exact: true })
       await expect(revert).toBeDisabled()
       const saved = await boxes(cluster)
       if (label === "Description") {
