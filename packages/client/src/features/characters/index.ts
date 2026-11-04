@@ -1,3 +1,5 @@
+import { panelEditorActions } from "../editor/panelActions.tsx"
+import { PanelFavourite } from "./CardFavourite.tsx"
 import { ChatBrowseBar, sidebarChatBrowse } from "./ChatBrowseBar.tsx"
 import { registerCharacterPanels } from "./panels.tsx"
 import { routes } from "../../routes.tsx"
@@ -16,6 +18,7 @@ import { castMemberNavigation } from "../chat/presentation.tsx"
 
 export const register = () => {
   registerDefaultPersona()
+  panelEditorActions.register({ id: "characters.panel-favourite", order: 40, component: PanelFavourite })
   characterChatActions.register({ id: "characters.new-chat", order: 10, component: NewCharacterChat })
   cardContributions.register({
     id: "characters.chats-link",

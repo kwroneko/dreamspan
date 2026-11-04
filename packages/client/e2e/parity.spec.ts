@@ -117,6 +117,17 @@ for (const width of [390, 1440])
       const character = await openPanel(page, "Sailor")
       await capture(character, "character")
       if (!process.env.PARITY_BEFORE) {
+        const favourite = character.getByRole("button", { name: "Add Sailor to favourites", exact: true })
+        await favourite.click()
+        await expect(
+          character.getByRole("button", { name: "Remove Sailor from favourites", exact: true })
+        ).toBeVisible()
+        await character.getByRole("button", { name: "Import a new version…", exact: true }).click()
+        const imported = page.getByRole("dialog", { name: "Import a new version of Sailor", exact: true })
+        await expect(imported).toBeVisible()
+        await imported.getByRole("button", { name: "Close", exact: true }).click()
+      }
+      if (!process.env.PARITY_BEFORE) {
         await character.getByRole("button", { name: "Card fork actions", exact: true }).click()
         const menu = page.getByRole("menu", { name: "Card fork actions", exact: true })
         await capture(menu, "fork-actions")
