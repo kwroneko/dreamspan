@@ -1,3 +1,5 @@
+**Built 2026-11-04 (interfacetab):** The Interface tab naming decision in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
+
 **Built 2026-11-04 (smallfixes5):** The card editor navigation (§2.2), prompt badges and linked history-note marker (§6.2a) are implemented and obsolete as implementation requirements; see ARCHITECTURE §14.6.
 
 **Built 2026-11-02 (stablebuttons):** The stable unavailable-control rule in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §5.
@@ -1028,6 +1030,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D] Owner, 2026-11-04 (interfacetab):** “The Display tab should be renamed to "Interface"”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §12. **[P]** Use `/settings/interface` and `?panel=interface`, redirecting old links and preserving internal display identifiers.
 
 - **[D] Owner, 2026-11-04 (historyport approval):** “The history UI is fine now.” Port the approved History redesign to master, retaining side-panel History access. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 
