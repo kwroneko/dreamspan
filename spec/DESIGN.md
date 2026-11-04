@@ -1029,7 +1029,13 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] Owner, 2026-11-04 (navtilesport):** “This looks fine now, proceed with the other changes”. Port the approved Home / Library / Import / Settings / Bin tiles to master. “One issue. I'd like them to all be the same width.” **[P]** Use equal columns sized to fit the widest label, retaining balanced wrapping and the same width on incomplete rows. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §5.
+
 - **[D] Owner, 2026-11-04 (snippettitle):** “After renaming a snippet, its History dialog/label must show the new title”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
+
+- **[D] Owner, 2026-11-04 (navtiles Home and Library copy):** “The tool tip for library implies the library doesn't have characters but it literally opens on them. I think "characters" in this footer menu should probably become "home", it's the home page.” Rename the footer tile Home with a home icon; describe Library's actual contents, including characters. **[P]** Home: “Open the home page.” Library: “Browse characters, personas, lorebooks and presets.” **Built; obsolete as an implementation requirement**, see ARCHITECTURE §5.
+
+- **[D] Owner, 2026-11-04 (navtiles trial):** “turn it into a series of buttons/tabs with icon+text under, styled similarly to our right-sidebar tabs”; “on one row if space permits, but split into multiple rows (they all need to always be visible) responsively.” Initially trialled on `ui/next`; approved for master above. **[P]** Reuse panel-tool styling on route links, balance wrapping by measured label widths, and keep the account/recovery row below. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §5.
 
 - **[D] Owner, 2026-11-04 (historyport approval):** “The history UI is fine now.” Port the approved History redesign to master, retaining side-panel History access. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 

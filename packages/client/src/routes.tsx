@@ -9,6 +9,7 @@ import {
   retainSearchParams,
   type AnyRoute
 } from "@tanstack/react-router"
+import type { IconName } from "./ui/Icon.tsx"
 import type { ReactNode } from "react"
 import { makeRegistry } from "./registry.ts"
 
@@ -27,6 +28,7 @@ export interface RouteEntry {
    */
   readonly nav?: {
     readonly label: string
+    readonly icon?: IconName
     readonly description?: string
     readonly order: number
     readonly adminOnly?: boolean

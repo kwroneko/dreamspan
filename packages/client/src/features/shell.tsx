@@ -28,6 +28,7 @@ import { Button } from "../ui/Button.tsx"
 import { WindowClose } from "../ui/WindowClose.tsx"
 import { ImageControls } from "../ui/ImageControls.tsx"
 import { ResizeHandle, usePanelWidth } from "../ui/ResizeHandle.tsx"
+import { NavigationTiles } from "../ui/NavigationTiles.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Toasts } from "../ui/Toast.tsx"
 import { IconButton } from "../ui/Tooltip.tsx"
@@ -101,20 +102,22 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const session = useSession()
   const isAdmin = session.user.role === "admin"
   return (
-    <nav aria-label="Main" className="flex flex-col gap-0.5">
-      <Link to="/" activeOptions={{ exact: true }} className={navLink} onClick={onNavigate}>
-        Characters
-      </Link>
-      {navEntries("app", isAdmin)
-        .filter((entry) => fullPath(entry) !== "/" && fullPath(entry) !== "/chats")
-        .map((entry) => (
-          <Link key={entry.id} to={fullPath(entry)} className={navLink} onClick={onNavigate}>
-            {entry.nav!.label}
-          </Link>
-        ))}
-      <Link to="/bin" className={navLink} onClick={onNavigate}>
-        Bin
-      </Link>
+    <nav aria-label="Main" className="flex shrink-0 flex-col gap-0.5">
+      <NavigationTiles
+        onNavigate={onNavigate}
+        items={[
+          { to: "/", label: "Home", icon: "home", description: "Open the home page." },
+          ...navEntries("app", isAdmin)
+            .filter((entry) => fullPath(entry) !== "/" && fullPath(entry) !== "/chats")
+            .map((entry) => ({
+              to: fullPath(entry),
+              label: entry.nav!.label,
+              icon: entry.nav!.icon ?? "panel",
+              description: entry.nav!.description ?? `Open ${entry.nav!.label}.`
+            })),
+          { to: "/bin", label: "Bin", icon: "trash", description: "Browse deleted items." }
+        ]}
+      />
       <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border px-2.5 pt-2 text-sm">
         <Link
           to="/settings/account"

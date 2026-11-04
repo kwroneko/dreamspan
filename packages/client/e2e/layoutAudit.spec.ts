@@ -35,6 +35,77 @@ test.use({
   launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"], args: ["--disable-features=OverlayScrollbar"] }
 })
 
+// Focused navigation checks use a fresh, synthetic local server.
+for (const theme of ["light", "dark"] as const)
+  test(`navigation tiles: ${theme}`, async ({ page }, info) => {
+    const server = await startServer()
+    try {
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.goto(server.url)
+      const navigation = page.getByRole("navigation", { name: "Main", exact: true }).filter({ visible: true })
+      await expect(navigation).toBeVisible()
+      const measurements = []
+      for (const size of ["minimum", "default", "maximum", "phone"] as const) {
+        if (size === "phone") {
+          await page.setViewportSize({ width: 390, height: 900 })
+          await showAppNavigation(page)
+        } else {
+          const grip = page.getByRole("separator", { name: "Resize sidebar", exact: true })
+          if (size === "default") await grip.dblclick()
+          else {
+            await grip.focus()
+            await page.keyboard.press(size === "minimum" ? "Home" : "End")
+          }
+        }
+        const links = navigation.locator("a").filter({ has: page.locator("svg") })
+        await expect(links).toHaveCount(5)
+        for (const link of await links.all()) await expect(link).toBeInViewport()
+        await expect
+          .poll(async () => {
+            const boxes = await links.evaluateAll((elements) => elements.map((el) => el.getBoundingClientRect()))
+            const counts = new Map<number, number>()
+            for (const box of boxes) counts.set(box.y, (counts.get(box.y) ?? 0) + 1)
+            return [...counts.values()].sort().join(",")
+          })
+          .toBe(size === "minimum" ? "2,3" : "5")
+        await expectLayout(page, info, `navtiles-${size}-${theme}`, { scope: 'nav[aria-label="Main"]' })
+        const box = await navigation.boundingBox()
+        const widths = await links.evaluateAll((elements) => elements.map((el) => el.getBoundingClientRect().width))
+        expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(0.1)
+        const clipped = await links.evaluateAll((elements) => elements.some((el) => el.scrollWidth > el.clientWidth))
+        expect(clipped).toBe(false)
+        measurements.push({ size, theme, ...box, widths })
+        await navigation.screenshot({ path: info.outputPath(`navtiles-${size}-${theme}.png`) })
+      }
+      writeFileSync(info.outputPath("tile-widths.json"), JSON.stringify(measurements, null, 2))
+      await info.attach("tile widths", {
+        body: JSON.stringify(measurements, null, 2),
+        contentType: "application/json"
+      })
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await hideAppNavigation(page)
+      for (const [label, explanation] of [
+        ["Library", "Browse characters, personas, lorebooks and presets."],
+        ["Import", "Import characters, chats and library items."],
+        ["Settings", "Change your account and app preferences."],
+        ["Bin", "Browse deleted items."],
+        ["Home", "Open the home page."]
+      ]) {
+        const link = navigation.getByRole("link", { name: label!, exact: true })
+        await link.click()
+        await expect(link).toHaveAttribute("data-status", "active")
+        await expect(navigation.locator('a[data-status="active"]').filter({ has: page.locator("svg") })).toHaveCount(1)
+        await page.mouse.move(0, 0)
+        await link.hover()
+        await expect(page.getByText(explanation!, { exact: true })).toBeVisible()
+        await page.mouse.move(0, 0)
+      }
+    } finally {
+      await server.stop()
+    }
+  })
+
 // Deliberately broken fixtures prove each rule reports measured defects, and the
 // exceptions don't hide defects inside an overlay. No app CSS or fixed snapshots.
 test("the detector catches geometry defects and respects documented intent", async ({ page }) => {

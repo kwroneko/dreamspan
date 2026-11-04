@@ -39,7 +39,7 @@ interface SubjectTab {
 }
 
 // The icon over its label, small, as a phone's tab bar: about six fit in the panel's default width.
-const toolClass =
+export const panelToolClass =
   "relative flex shrink-0 flex-col items-center gap-0.5 rounded-md border-b-2 border-transparent px-1.5 pt-1 pb-0.5 text-xs whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
 const GAP = 2
 /** The subjects' strip's gap (gap-1). */
@@ -111,12 +111,12 @@ export function ToolTabs({
         {/* Every tool at its natural width, measured, never seen. */}
         <div ref={ruler} aria-hidden="true" className="pointer-events-none invisible absolute flex">
           {tabs.map((tab) => (
-            <span key={tab.value} className={toolClass}>
+            <span key={tab.value} className={panelToolClass}>
               <Icon name={tab.icon} />
               {tab.label}
             </span>
           ))}
-          <span className={toolClass}>
+          <span className={panelToolClass}>
             <Icon name="more" />
             {MORE}
           </span>
@@ -132,7 +132,7 @@ export function ToolTabs({
                     value={tab.value}
                     data-unsaved={tab.dirty || undefined}
                     aria-description={tab.dirty ? "Unsaved changes" : undefined}
-                    className={`group ${toolClass} data-active:border-accent data-active:text-text`}
+                    className={`group ${panelToolClass} data-active:border-accent data-active:text-text`}
                   >
                     <Icon name={tab.icon} className="group-data-active:text-accent" />
                     {tab.label}
@@ -157,7 +157,7 @@ export function ToolTabs({
                   data-layout-audit-ignore="inset: More tools continues the tab strip"
                   type="button"
                   aria-label={moreLabel}
-                  className={toolClass}
+                  className={panelToolClass}
                 >
                   <Icon name="more" />
                   {MORE}
