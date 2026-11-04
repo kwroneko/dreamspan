@@ -174,24 +174,18 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
   await page.getByRole("button", { name: "Hide panel" }).click()
   await expect(cast).toHaveCount(0)
   for (const shape of SHAPES) {
-    if (shape.name !== "Huge") {
-      // The cast strip's and the character tab's portraits: reopen the panel at their tab.
-      await openPanel(page, "Cast")
-      await page.getByRole("tab", { name: shape.name }).click()
-      await expect(column(shape.name)).toBeVisible()
-      await page.getByRole("button", { name: "Hide panel" }).click()
-    } else {
-      await openPanel(page, shape.name)
-      // The tab's own portrait toggles the image already shown by the character chip.
-      const portrait = page
-        .getByRole("tabpanel", { name: shape.name })
-        .getByRole("button", { name: `View ${shape.name}'s picture`, exact: true })
+    // Selecting the tab leaves the viewer alone; its portrait opens the image.
+    const tab = await openPanel(page, shape.name)
+    const portrait = tab.getByRole("button", { name: `View ${shape.name}'s picture`, exact: true })
+    await portrait.click()
+    await expect(column(shape.name)).toBeVisible()
+    if (shape.name === "Huge") {
       await portrait.click()
       await expect(column(shape.name)).toHaveCount(0)
       await portrait.click()
       await expect(column(shape.name)).toBeVisible()
-      await page.getByRole("button", { name: "Hide panel" }).click()
     }
+    await page.getByRole("button", { name: "Hide panel" }).click()
     const fitted = await expectFitted(page, shape.name)
     // Never a thumbnail in the middle: the column takes the image's width at its height.
     if (shape.height / shape.width > 1) expect(fitted.height).toBeGreaterThan(Math.min(780, shape.height * 2 - 2))
@@ -203,6 +197,41 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
   }
   await column("Huge").getByRole("button", { name: "Close the portrait" }).click()
   await expect(page.locator("[data-portrait-column]")).toHaveCount(0)
+})
+
+test("cast-strip tabs only switch tabs and leave open or closed viewers unchanged", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openChat(page)
+  const cast = await openPanel(page, "Cast")
+  const viewers = page.locator("[data-portrait-viewer]")
+  const order = () => viewers.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")))
+  const select = async (name: string) => {
+    await page.getByRole("tablist", { name: "Characters", exact: true }).getByRole("tab", { name, exact: true }).click()
+    await expect(page.getByRole("tabpanel", { name, exact: true })).toBeVisible()
+  }
+  await select("Wide")
+  await expect(viewers).toHaveCount(0)
+  await openPanel(page, "Cast")
+  await cast.getByRole("button", { name: "View Tall's portrait" }).click()
+  const tall = page.getByRole("complementary", { name: "Tall's portrait", exact: true })
+  for (const single of [false, true]) {
+    await setSingle(tall, single)
+    await select("Wide")
+    await expect(viewers).toHaveCount(1)
+    expect(await order()).toEqual(["Tall's portrait"])
+    await select("Tall")
+    await expect(viewers).toHaveCount(1)
+    expect(await order()).toEqual(["Tall's portrait"])
+    await openPanel(page, "Cast")
+  }
+  await setSingle(tall, false)
+  await cast.getByRole("button", { name: "View Wide's portrait" }).click()
+  await select("Standard")
+  await expect(viewers).toHaveCount(2)
+  expect(await order()).toEqual(["Wide's portrait", "Tall's portrait"])
+  await select("Tall")
+  await expect(viewers).toHaveCount(2)
+  expect(await order()).toEqual(["Wide's portrait", "Tall's portrait"])
 })
 
 test("the column follows its card's name when another version is swapped in; Escape from the chat page closes it", async ({
@@ -297,10 +326,14 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   await shoot(page, "stack-2-1024")
   await page.setViewportSize({ width: 1440, height: 900 })
 
-  // Four: the cast strip's chips open theirs too, on top.
+  // Four: the character tab's portrait opens its image on top.
   await openPanel(page, "Cast")
   await cast.getByRole("button", { name: "View Standard's portrait" }).click()
   await page.getByRole("tab", { name: "Huge" }).click()
+  await page
+    .getByRole("tabpanel", { name: "Huge" })
+    .getByRole("button", { name: "View Huge's picture", exact: true })
+    .click()
   await expect(viewers).toHaveCount(4)
   expect(await order()).toEqual(["Huge's portrait", "Standard's portrait", "Wide's portrait", "Tall's portrait"])
   for (const name of ["Huge", "Standard", "Wide", "Tall"]) await expectFitted(page, name)
