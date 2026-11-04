@@ -1021,6 +1021,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] Owner, 2026-11-04 (historyui action order and close):** “1. Put restore before compare. 2. the layout now has a pointless empty row above the comparison tabs. Remove it and move the x to be next tot he tabs.” Entry action order is Restore to revision N, Compare, then the message action. The close X belongs at the end of the comparison tabs row; remove its former empty row and divider. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
+
+
 - **[D] Owner, 2026-11-04 (historyui revision actions):** “The position of that restore button makes no sense, and there's no reason for it to be buried. It should be next to the compare button, and say something like "Restore to revision x"”. On the origin line: “Can it have other values? Otherwise, saved seems redundant, and imported should just be a badge next to the revision name.” Restore belongs beside Compare on each entry and works without opening the diff; keep the latest action disabled with an explanation. **[P]** Omit user/Saved; badges: import → Imported, merge → Updated, agent → Agent edit, changeset → Changed. Generation usage and its chat link stay on a line, as does branch-change context. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 
 

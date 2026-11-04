@@ -1608,6 +1608,9 @@ for (const width of [1440, 390])
         await expect(revisions.nth(1).getByRole("button", { name: /^Restore to revision / })).toBeEnabled()
         await expect(dialog.getByText("Saved", { exact: true })).toHaveCount(0)
         await expect(revisions.last().getByText("Imported", { exact: true })).toBeVisible()
+        const actions = revisions.nth(1).getByRole("button")
+        await expect(actions.nth(0)).toHaveText("Restore to revision 2")
+        await expect(actions.nth(1)).toHaveText("Compare")
         await audit("list")
         await dialog.screenshot({
           path: info.outputPath(`${kind}-actions-${width}-${theme}.png`),
@@ -1634,6 +1637,8 @@ for (const width of [1440, 390])
           }
         }
         await openDiff("Revision 1", "Revision 2")
+        const tabsRow = dialog.getByRole("tablist", { name: "Revision changes", exact: true }).locator("..")
+        await expect(tabsRow.getByRole("button", { name: "Close comparison", exact: true })).toBeVisible()
         await audit("comparison")
         await dialog.screenshot({
           path: info.outputPath(`${kind}-previous-${width}-${theme}.png`),

@@ -55,6 +55,7 @@ export function RevisionEntry({
       </div>
       {title && <div className="text-sm [overflow-wrap:anywhere]">{title}</div>}
       <div className="flex flex-wrap items-center gap-2">
+        {restore}
         <Button
           variant={selected ? "secondary" : "ghost"}
           aria-label={`${name} ${when(createdAt)}: Compare`}
@@ -66,7 +67,6 @@ export function RevisionEntry({
           <Icon name="history" />
           Compare
         </Button>
-        {restore}
         <Button
           variant="ghost"
           aria-label={message ? `Change the message of ${name}` : `Add a message to ${name}`}

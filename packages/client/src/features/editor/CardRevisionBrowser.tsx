@@ -206,14 +206,19 @@ function RevisionComparison({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex justify-end">
-        <IconButton label="Close comparison" hint="Closes this revision's comparison" icon="close" onClick={onClose} />
-      </div>
       <ErrorAlert error={error} />
-      <div className="min-w-0 border-t border-border pt-3">
+      <div className="min-w-0">
         <Tabs
           wrap
           label="Revision changes"
+          end={
+            <IconButton
+              label="Close comparison"
+              hint="Closes this revision's comparison"
+              icon="close"
+              onClick={onClose}
+            />
+          }
           value={mode}
           onValueChange={setMode}
           tabs={[
