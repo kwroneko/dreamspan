@@ -1,3 +1,4 @@
+import { panelEditorActions, PanelHistory } from "./panelActions.tsx"
 import { replyHooks } from "../chat/replyHooks.ts"
 import { editorExtensions } from "../../ui/editorExtensions.ts"
 import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
@@ -49,6 +50,7 @@ function LazyEditorPage() {
 }
 
 export const register = () => {
+  panelEditorActions.register({ id: "editor.panel.history", order: 10, component: PanelHistory })
   editorExtensions.register({
     id: "editor.macro-highlighting",
     load: () => import("../../ui/macroHighlight.ts").then((module) => module.macroHighlight)

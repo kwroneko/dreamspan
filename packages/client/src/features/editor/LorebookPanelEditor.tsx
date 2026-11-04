@@ -1,3 +1,5 @@
+import { SlotOutlet } from "../../slots.tsx"
+import { panelEditorActions } from "./panelActions.tsx"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 // One lorebook, edited in a narrow column (owner, 2026-11-01): the side panel's Lorebooks tab
 // opens the book picked in its list here, below the list, and the card editor can show a
@@ -109,12 +111,16 @@ export function LorebookPanelEditor({
             book={book}
             panel
             tools={
-              <SearchReplaceButton
-                ref={findButton}
-                open={searching}
-                controls="panel-lore-search"
-                onClick={() => setSearching(!searching)}
-              />
+              <div className="flex items-center gap-2">
+                <SearchReplaceButton
+                  ref={findButton}
+                  className="@max-[30rem]:[&>span]:hidden"
+                  open={searching}
+                  controls="panel-lore-search"
+                  onClick={() => setSearching(!searching)}
+                />
+                <SlotOutlet slot={panelEditorActions} props={{ store }} />
+              </div>
             }
             toolPanel={
               searching && (

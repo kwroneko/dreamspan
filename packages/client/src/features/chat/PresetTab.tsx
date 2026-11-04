@@ -1,3 +1,4 @@
+import { panelEditorActions } from "../editor/panelActions.tsx"
 // The side panel's Prompt preset tab (DESIGN §6.2a; owner, 2026-11-01): the whole preset,
 // editable in the column. The prompt order is the large editor's own document in its "column"
 // layout, sharing the workspace's store, so an edit in either shows in the other. What's typed
@@ -74,6 +75,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
           store={store}
           context={workspace?.context}
           layout="column"
+          toolbarEnd={<SlotOutlet slot={panelEditorActions} props={{ store }} />}
           onSearchReveal={setSearchMatch}
           goTo={goTo}
           onOpenLarge={(identifier) => workspace?.open(store.refId, identifier)}
