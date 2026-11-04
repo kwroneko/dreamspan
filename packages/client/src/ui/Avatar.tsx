@@ -139,6 +139,20 @@ interface Face {
   readonly crop?: AvatarCrop | null | undefined
 }
 
+/** Overlays the last portrait without changing the group's width or neighbouring controls. */
+export function PortraitCount({ remaining }: { remaining: number }) {
+  return remaining > 0 ? (
+    <span
+      data-portrait-count
+      data-layout-overlay="Remaining-character count covers the last portrait"
+      aria-hidden="true"
+      className="absolute right-0 bottom-0 z-10 rounded-sm border border-border bg-surface text-[0.625rem] leading-4 font-semibold text-text px-1 shadow-sm"
+    >
+      +{remaining}
+    </span>
+  ) : null
+}
+
 /** A chat's cast as a compact row of consistently shaped portraits. */
 export function AvatarStack({
   faces,
@@ -151,18 +165,25 @@ export function AvatarStack({
 }) {
   const shown = faces.slice(0, 3)
   return (
-    <span className="inline-flex shrink-0 gap-0.5">
-      {(shown.length ? shown : [{ id: "", name: "?" }]).map((face) => (
-        <Avatar
-          key={face.id}
-          id={face.id}
-          name={face.name}
-          mediaId={face.mediaId ?? null}
-          crop={face.crop ?? null}
-          size={size}
-          preview={preview}
-        />
-      ))}
-    </span>
+    <Tooltip label={`Characters: ${faces.map((face) => face.name).join(", ")}`}>
+      <span
+        tabIndex={0}
+        aria-label={`Characters: ${faces.map((face) => face.name).join(", ")}`}
+        className="relative inline-flex w-fit shrink-0 gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        {(shown.length ? shown : [{ id: "", name: "?" }]).map((face) => (
+          <Avatar
+            key={face.id}
+            id={face.id}
+            name={face.name}
+            mediaId={face.mediaId ?? null}
+            crop={face.crop ?? null}
+            size={size}
+            preview={preview}
+          />
+        ))}
+        <PortraitCount remaining={faces.length - shown.length} />
+      </span>
+    </Tooltip>
   )
 }

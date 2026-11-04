@@ -9,7 +9,7 @@ import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, FailureView, useAction } from "../../actions.tsx"
-import { Avatar } from "../../ui/Avatar.tsx"
+import { Avatar, PortraitCount } from "../../ui/Avatar.tsx"
 import { useSession } from "../../session.ts"
 import { rememberedPanel } from "../chat/ChatPanels.tsx"
 import { useWide } from "../chat/ChatPanels.tsx"
@@ -229,22 +229,27 @@ export function ForkRow({
           className="fork-row-open flex min-w-0 flex-1 items-center self-stretch gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           {!branchOnly && (
-            <span
-              data-row-portraits
-              data-layout-audit-ignore="overlap: Cast portraits intentionally overlap in compact chat rows"
-              className="flex shrink-0 gap-0.5"
-            >
-              {fork.cast.slice(0, 2).map((c) => (
-                <Avatar
-                  key={c.entityId}
-                  id={c.entityId}
-                  name={c.name}
-                  mediaId={c.avatarMediaId}
-                  crop={c.avatarCrop}
-                  size="md"
-                />
-              ))}
-            </span>
+            <Tooltip label={`Characters: ${fork.cast.map((c) => c.name).join(", ")}`}>
+              <span
+                tabIndex={0}
+                aria-label={`Characters: ${fork.cast.map((c) => c.name).join(", ")}`}
+                data-row-portraits
+                data-layout-audit-ignore="overlap: Cast portraits intentionally overlap in compact chat rows"
+                className="relative flex w-fit shrink-0 gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                {fork.cast.slice(0, 2).map((c) => (
+                  <Avatar
+                    key={c.entityId}
+                    id={c.entityId}
+                    name={c.name}
+                    mediaId={c.avatarMediaId}
+                    crop={c.avatarCrop}
+                    size="md"
+                  />
+                ))}
+                <PortraitCount remaining={fork.cast.length - 2} />
+              </span>
+            </Tooltip>
           )}
           <span data-row-text className="flex min-w-0 flex-1 flex-col self-stretch">
             {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
