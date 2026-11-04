@@ -1,3 +1,4 @@
+import { ChatLock } from "./PickerParts.tsx"
 // The model picker: the composer's model chip and the Model tab open this same list. A filter,
 // Name or Used, when each model last wrote a reply under its name, and Manage connections… at
 // the end, where models come from. The body is the registered `model.picker` entry.
@@ -43,6 +44,7 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
   const shown = modelsInOrder(prefs.modelSort, query, models, used)
   return (
     <>
+      <ChatLock lock={selection.lock} kind="model" />
       {models.length > 0 && (
         <>
           <PickerSearch
@@ -72,8 +74,8 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
             <span className="flex flex-col">
               <span>
                 {model.value === value
-                  ? "In use for the next reply in every chat"
-                  : "Use it for the next reply in every chat"}
+                  ? `In use for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`
+                  : `Use this model for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`}
               </span>
               <span>{modelTime(used.get(model.value))}</span>
             </span>

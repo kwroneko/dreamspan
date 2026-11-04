@@ -36,7 +36,7 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
     case "Model":
       return { key: "model.binding", value: { connection: change.connection, model: change.model } }
     case "Preset":
-      return { key: "preset.binding", value: { ref: change.ref } }
+      return { key: "preset.binding", value: change.ref === null ? {} : { ref: change.ref } }
     case "DefaultModel":
       return { key: "model.unbind", value: {} }
     case "DefaultPreset":
@@ -192,8 +192,9 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       participants: state.participants as Cast["participants"],
       absent: state.absent as Cast["absent"],
       playedByMe: state.playedByMe as Cast["playedByMe"],
-      model: null,
-      preset: null,
+      model: (state.modelBindings[""] ?? null) as Cast["model"],
+      preset: (state.presetBindings[""]?.ref ?? null) as Cast["preset"],
+      presetLocked: state.presetBindings[""] !== undefined,
       lorebooks: state.lorebooks as Cast["lorebooks"],
       cardLorebooksOff: Object.entries(state.embeddedLorebooks).flatMap(([entity, on]) =>
         on ? [] : [entity as Cast["cardLorebooksOff"][number]]
@@ -403,22 +404,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     ChangeCast: ({ chatId, slotId, change, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        if (["Model", "Preset", "DefaultModel", "DefaultPreset"].includes(change._tag)) {
-          yield* reader.StateEventsAt({ userId: id, chatId, slotId, forkId: forkId ?? null, displayEnd: true })
-          const selection =
-            change._tag === "Model"
-              ? { model: { connection: change.connection, model: change.model } }
-              : change._tag === "Preset"
-                ? { preset: change.ref }
-                : change._tag === "DefaultModel"
-                  ? { model: null }
-                  : { preset: null }
-          // A model or preset change names no summarization setting, so it can't be refused as one.
-          yield* writer
-            .ChangeGenerationDefaults({ userId: id, change: selection })
-            .pipe(Effect.catchTag("LcmSettingsInvalid", (error) => Effect.die(error)))
-          yield* warmth.refreshUser(id)
-        } else if (change._tag === "Persona") {
+        if (change._tag === "Persona") {
           const before = yield* castAt(id, chatId, slotId, forkId)
           const persona = new Set(before.cards.flatMap((card) => (card.persona ? [card.entityId] : [])))
           yield* writer.AddStateEvents({

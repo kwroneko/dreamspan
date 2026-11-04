@@ -17,6 +17,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel, openSummarySettings } from "./support/panel.ts"
 import { showAppNavigation, hideAppNavigation } from "./support/appMenu.ts"
 import { level1 } from "./support/summaries.ts"
+import { modelChip, presetChip } from "./support/strip.ts"
 import { portraitPng } from "./support/portrait.ts"
 import { writeScaleFolder } from "./support/stScaleFolder.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
@@ -1048,6 +1049,25 @@ test.describe("synthetic library and every app surface", () => {
           await go("group-chat-header", `/chats/${chatId}`)
           await openPanel(page, "Cast")
           await audit("panel-Cast")
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_LOCKCHAT_ONLY === "1") {
+          await go("lockchat-chips", `/chats/${chatId}`)
+          await audit("lockchat-chips", '[role="group"][aria-label="Next reply"]')
+          for (const [kind, chip] of [
+            ["preset", presetChip],
+            ["model", modelChip]
+          ] as const) {
+            await chip(page).click()
+            const toggle = page.getByRole("switch", { name: "Lock for this chat" })
+            await expect(toggle).toBeVisible()
+            await audit(`lockchat-${kind}-picker`, '[role="dialog"]')
+            await toggle.click()
+            await expect(page.getByText("This chat only", { exact: true })).toBeVisible()
+            await audit(`lockchat-${kind}-locked-picker`, '[role="dialog"]')
+            await page.keyboard.press("Escape")
+          }
+          await audit("lockchat-locked-chips", '[role="group"][aria-label="Next reply"]')
           return
         }
         if (process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1") {
