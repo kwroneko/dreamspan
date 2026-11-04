@@ -1,3 +1,4 @@
+import { Tooltip } from "./Tooltip.tsx"
 import { lazy, Suspense, useState } from "react"
 
 const Diff = lazy(() => import("./RevisionDiffView.tsx"))
@@ -10,7 +11,9 @@ export function RevisionComparison({ label, before, after }: { label: string; be
       className="min-w-0 rounded-md border border-border p-2"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary className="cursor-pointer text-sm">{label}</summary>
+      <Tooltip label="Shows the added and removed text for this revision.">
+        <summary className="cursor-pointer text-sm">{label}</summary>
+      </Tooltip>
       {open && (
         <div className="mt-2">
           <RevisionDiff before={before} after={after} />

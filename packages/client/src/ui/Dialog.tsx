@@ -133,8 +133,16 @@ export function ConfirmDialog({
           </div>
           {children}
           <DialogActions>
-            <BaseAlertDialog.Close render={<Button />}>Cancel</BaseAlertDialog.Close>
-            <Button variant="danger" disabled={confirmDisabled} pending={pending} onClick={onConfirm}>
+            <BaseAlertDialog.Close render={<Button hint="Closes this confirmation without applying changes." />}>
+              Cancel
+            </BaseAlertDialog.Close>
+            <Button
+              hint={confirmLabel}
+              variant="danger"
+              disabled={confirmDisabled}
+              pending={pending}
+              onClick={onConfirm}
+            >
               {confirmLabel}
             </Button>
           </DialogActions>

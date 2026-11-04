@@ -1,3 +1,4 @@
+import { Tooltip } from "./Tooltip.tsx"
 // A card's avatar: its image when it has one, else its initials on a tint picked from its
 // id, so the same card always looks the same. A stack shows a chat's cast together.
 
@@ -108,20 +109,22 @@ export function Avatar({
     </>
   )
   return preview && open ? (
-    <button
-      ref={ref}
-      data-portrait
-      type="button"
-      aria-label={`View ${name}'s portrait`}
-      title={`View ${name}'s full portrait`}
-      className={`${box} outline-none focus-visible:ring-2 focus-visible:ring-focus`}
-      onClick={(event) => {
-        event.stopPropagation()
-        open({ id, name, mediaId, picture: crop?.picture })
-      }}
-    >
-      <PortraitFrame className="@container size-full">{content}</PortraitFrame>
-    </button>
+    <Tooltip label="Opens this portrait at full size.">
+      <button
+        ref={ref}
+        data-portrait
+        type="button"
+        aria-label={`View ${name}'s portrait`}
+        title={`View ${name}'s full portrait`}
+        className={`${box} outline-none focus-visible:ring-2 focus-visible:ring-focus`}
+        onClick={(event) => {
+          event.stopPropagation()
+          open({ id, name, mediaId, picture: crop?.picture })
+        }}
+      >
+        <PortraitFrame className="@container size-full">{content}</PortraitFrame>
+      </button>
+    </Tooltip>
   ) : (
     <span ref={ref} data-portrait className={box}>
       <PortraitFrame className="@container size-full">{content}</PortraitFrame>

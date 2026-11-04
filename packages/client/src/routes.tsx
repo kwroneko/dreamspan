@@ -1,3 +1,4 @@
+import { Tooltip } from "./ui/Tooltip.tsx"
 // The route registry (spec/PLUGINS.md §8): every screen registers here by id, and the
 // router is built from what's registered. A layout's navigation lists its children.
 import {
@@ -63,9 +64,11 @@ function NotFound() {
   return (
     <main className="mx-auto flex max-w-xl flex-col gap-2 p-6">
       <h1 className="text-lg font-semibold">Nothing here</h1>
-      <Link to="/" className="text-accent underline-offset-4 hover:underline">
-        Back home
-      </Link>
+      <Tooltip label="Returns to the home page.">
+        <Link to="/" className="text-accent underline-offset-4 hover:underline">
+          Back home
+        </Link>
+      </Tooltip>
     </main>
   )
 }

@@ -523,6 +523,8 @@ Before a chat exists, `StartChatPage` uses its card or group pending-copy key as
 
 The streaming above covers private `user_field` workspaces (authored settings, names and pending first messages). Library fields, message edits, summaries and existing-chat composers keep their own refresh/recovery lifecycles; they do not subscribe to private-workspace text events.
 
+Copy audit (2026-11-04): shared confirmation, history, navigation and disclosure controls use existing Button hints and Tooltip explanations on hover and focus. Segmented choices retain their descriptions and fall back to the selection action; disclosures without custom help explain the next expand or collapse action.
+
 ### 3.11 Recycle bin
 
 Delete explanations use “Moves this <thing> to the bin, from which it can be restored later.” without additional text. Delete toasts say “<Thing> moved to the bin.” and retain the Undo and Open the bin actions. Cancel and Discard explanations briefly name the cancelled action and where the typed text is kept; the bin’s “Recovered text” section is named when needed to distinguish it from “Deleted”.

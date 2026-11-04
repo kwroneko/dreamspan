@@ -1046,6 +1046,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] Action explanations** (owner, 2026-11-01/02; implemented 2026-11-04, obsolete as an implementation proposal): action buttons and menu items “need popover explanations”; avoid “giving the user pointless implementation details”; “ST shouldn’t be mentioned in explanatory text unless the text is actually relevant to ST interop”; “Assume every user looking at a preset editor knows what a prompt cache prefix is.” Explanations state the action and at most one clarifying fact, without recovery instructions; standing guidance belongs in adjacent question-mark help. Implementation is recorded in ARCHITECTURE.md.
+
 - **[D] New chat from a character’s chat list** (owner, 2026-11-04): “But how do I go from there to "new chat with this character"? "Start a chat" at the top header makes you find the character again.” On the proposed right-panel control: “That button intentionally doesn’t exist anymore”. Left panel only. **Built; obsolete as an implementation requirement** (charnewchat; ARCHITECTURE §12). **[P]** A list action row above one named character’s chats opens the existing pending chat with that character chosen; omit it from All chats, groups and branch scopes.
 
 - **[D] (owner, 2026-11-04, headerswap)**: “these two buttons on the chat header should swap places: the sidepanel thing needs to be next tot he sidepanel”. The ⋯ menu precedes the side-panel toggle, leaving the toggle last beside the panel, including on phones and any center header with that toggle. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
