@@ -1007,7 +1007,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
-- **[D] Owner, 2026-11-04 (viewertop trial):** “matching only the top viewer's header to the chat header's height. Stacked viewers below it keep the compact height.” “I wonder if it'd look bad to have them uneven. We can try it though”. **Built on ui/next as a dev-instance trial; obsolete as an implementation requirement**, see ARCHITECTURE §14.5a. **[P]** Reuse the shell-header height token only for the first side viewer; at narrow column widths its two control rows share that height.
+- **[D] Owner, 2026-11-04 (viewertop approval):** “The header size change does look slightly off, but it's better than not having it, and I think it won't bother most users. We're keeping it”. Keep the top side viewer's header aligned with the chat header; lower viewers retain compact headers. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.5a.
+
+- **[D] Owner, 2026-11-04 (viewertop trial):** “matching only the top viewer's header to the chat header's height. Stacked viewers below it keep the compact height.” “I wonder if it'd look bad to have them uneven. We can try it though”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.5a. **[P]** Reuse the shell-header height token only for the first side viewer; at narrow column widths its two control rows share that height.
 
 - **[D]** (owner, 2026-11-04): Field help wrapping below the label is “obviously totally incorrect, broken and sloppy looking and it's a regression I didn't ask for.” The ? stays inline immediately after the label. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
 
