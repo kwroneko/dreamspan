@@ -1,3 +1,4 @@
+import { composerChoice } from "./speaker.ts"
 // The chat header's built-in parts, each a registration a plugin can override or disable:
 // its buttons (the pin, the side panel, ⋯) in `chatHeaderActions`, and the chat-level commands of
 // its ⋯ menu in `chatCommands` (Rename, Branches…, New chat with this cast, Export, Delete
@@ -63,9 +64,11 @@ export const registerChatHeader = () => [
     available: ({ view, navigate }) => navigate !== undefined && castCharacters(view).length > 0,
     run: ({ session, view, navigate }) => {
       const cast = castCharacters(view)
+      const search = { guidance: composerChoice(session).snapshot().guidance ? "on" : "off" }
       // One character: a new chat with its card; several: with the group, every member greeting.
-      if (cast.length === 1) void navigate?.({ to: "/cards/$entityId/chat", params: { entityId: cast[0]!.entityId } })
-      else void navigate?.({ to: "/groups/$chatId/new", params: { chatId: session.id } })
+      if (cast.length === 1)
+        void navigate?.({ to: "/cards/$entityId/chat", params: { entityId: cast[0]!.entityId }, search })
+      else void navigate?.({ to: "/groups/$chatId/new", params: { chatId: session.id }, search })
     }
   }),
   chatCommands.register({

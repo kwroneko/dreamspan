@@ -791,6 +791,7 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       draftId: Schema.String,
+      guidance: Schema.optionalKey(Schema.Boolean),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       /** Consume a one-reply pick only if it still names this card. */
@@ -1622,6 +1623,7 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("StartChat", {
     payload: {
+      guidance: Schema.optionalKey(Schema.Boolean),
       userId: UserId,
       cards: Schema.Array(EntityId),
       persona: Schema.NullOr(EntityId),

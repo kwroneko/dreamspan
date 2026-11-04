@@ -478,6 +478,25 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_GUIDANCE_ONLY === "1") {
+          const scope = '.chat-column:has([data-testid="composer"])'
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const toggle = page.getByRole("switch", { name: "Guidance", exact: true })
+          await expect(toggle).toBeEnabled()
+          if (await toggle.isChecked()) await toggle.click()
+          await expect(toggle).not.toBeChecked()
+          await audit("composer-message", scope)
+          await toggle.click()
+          await expect(toggle).toBeChecked()
+          await audit("composer-guidance", scope)
+          await page.goto(`${server.url}/cards/${cardId}/chat`)
+          await expect(toggle).toBeEnabled()
+          await audit("pending-message", scope)
+          await toggle.click()
+          await expect(toggle).toBeChecked()
+          await audit("pending-guidance", scope)
+          return
+        }
         if (process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1") {
           await admin((api) => api.ChangeLcmSettings({ chatId, change: { withPreset: "specific", preset: presetRef } }))
           await page.goto(`${server.url}/chats/${chatId}`)

@@ -255,9 +255,18 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       SetComposerImage: ({ userId, chatId, draftId, id, mediaId, altText }) =>
         composerImages(sql).set(userId, chatId, draftId, id, mediaId, altText).pipe(transaction("SetComposerImage")),
-      SetComposerChoice: ({ userId, chatId, draftId, speakerEntityId, replyFromEntityId, consumeReplyFromEntityId }) =>
+      SetComposerChoice: ({
+        userId,
+        chatId,
+        draftId,
+        guidance,
+        speakerEntityId,
+        replyFromEntityId,
+        consumeReplyFromEntityId
+      }) =>
         drafts
           .setComposerChoice(userId, chatId, draftId, {
+            ...(guidance === undefined ? {} : { guidance }),
             ...(speakerEntityId === undefined ? {} : { speakerEntityId }),
             ...(replyFromEntityId === undefined ? {} : { replyFromEntityId }),
             ...(consumeReplyFromEntityId === undefined ? {} : { consumeReplyFromEntityId })

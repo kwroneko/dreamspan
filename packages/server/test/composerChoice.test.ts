@@ -46,12 +46,19 @@ describe("the composer's choice", () => {
 
       const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
       const none = yield* api.GetComposerChoice({ chatId: chat.id, draftId: draft.id })
+      assert.isFalse(none.guidance)
       assert.deepStrictEqual([none.speakerEntityId, none.replyFromEntityId], [null, null])
 
-      const set = yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, speakerEntityId: bo })
+      const set = yield* api.SetComposerChoice({
+        chatId: chat.id,
+        draftId: draft.id,
+        speakerEntityId: bo,
+        guidance: true
+      })
       assert.deepStrictEqual([set.speakerEntityId, set.replyFromEntityId], [bo, null])
       // A missing field stays; null clears.
       yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, replyFromEntityId: mira })
+      assert.isTrue(set.guidance)
       const both = yield* api.GetComposerChoice({ chatId: chat.id, draftId: draft.id })
       assert.deepStrictEqual([both.speakerEntityId, both.replyFromEntityId], [bo, mira])
       yield* eventually(() => events.some((e) => e._tag === "ComposerChoice" && e.choice.replyFromEntityId === mira))
@@ -83,11 +90,13 @@ describe("the composer's choice", () => {
         (yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).replyFromEntityId,
         mira
       )
-      // ...unless that fork had a speaker of its own.
+      assert.isTrue((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).guidance)
+      // ...unless that fork had choices of its own.
       yield* api.SetComposerChoice({
         chatId: chat.id,
         draftId: branch.id,
         speakerEntityId: ana,
+        guidance: false,
         replyFromEntityId: null
       })
       yield* api.OpenComposer({ chatId: chat.id, forkId: fork.id, copyFrom: moved.id })
@@ -96,6 +105,9 @@ describe("the composer's choice", () => {
         (yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).replyFromEntityId,
         null
       )
+
+      assert.isFalse((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).guidance)
+      assert.isTrue((yield* api.GetComposerChoice({ chatId: chat.id, draftId: moved.id })).guidance)
 
       // A send uses its original draft's pick, without erasing a different newer pick.
       yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, replyFromEntityId: ana })
@@ -113,6 +125,8 @@ describe("the composer's choice", () => {
         "NotFound"
       )
       const other = yield* api.CreateChat({ title: "Elsewhere" })
+      const otherDraft = yield* api.OpenComposer({ chatId: other.id, forkId: null })
+      assert.isFalse((yield* api.GetComposerChoice({ chatId: other.id, draftId: otherDraft.id })).guidance)
       assert.strictEqual(yield* outcome(api.GetComposerChoice({ chatId: other.id, draftId: draft.id })), "NotFound")
     }).pipe(Effect.scoped, withServer(testConfig()))
   )

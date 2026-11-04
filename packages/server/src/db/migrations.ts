@@ -11,9 +11,16 @@ const runAll = (statements: ReadonlyArray<string>) =>
   })
 
 // Migrations run in the writer worker, before any reader connection is opened.
-// While no one uses the app the schema is edited in the baseline and the deploy starts fresh.
+// Keep the squashed baseline intact; subsequent migrations preserve existing data.
 export const migrations = {
-  "0001_baseline": runAll(baseline)
+  "0001_baseline": runAll(baseline),
+  "0002_composer_guidance": runAll([
+    `ALTER TABLE drafts ADD COLUMN guidance INTEGER NOT NULL DEFAULT 0 CHECK (guidance IN (0, 1))`,
+    `UPDATE drafts SET guidance = COALESCE((SELECT json_extract(value_json, '$.guidance') = 1
+      FROM user_prefs WHERE user_id = drafts.user_id AND key = 'display'), 0)
+      WHERE target_kind = 'composer'`,
+    `UPDATE user_prefs SET value_json = json_remove(value_json, '$.guidance') WHERE key = 'display'`
+  ])
 }
 
 /**

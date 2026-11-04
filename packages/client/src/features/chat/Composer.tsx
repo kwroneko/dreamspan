@@ -252,30 +252,38 @@ export function Composer({
   const editor = guidanceEditor(session)
   const editing = useGuidanceEdit(session)
   const text = editing === null ? draftText : editing.text
-  // The guidance toggle, per account (DESIGN §2.2), shown on while a reply's guidance is
+  const choices = composerChoice(session)
+  const choice = useComposerChoice(session)
+  // The guidance toggle belongs to this composer, shown on while a reply's guidance is
   // edited, and as it was after. New versions and Continue ask the session for their guidance
   // as they're asked for: a new version reuses its reply's own, except the reply edited here.
   const viewPrefs = useViewPrefs()
   const submitHint = composerSubmitHint(viewPrefs.prefs.enterSends)
-  const guidance = viewPrefs.prefs.guidance || editing !== null
-  const toggleOn = viewPrefs.prefs.guidance
+  const guidance = choice.guidance || editing !== null
+  const choicesReady =
+    choice.loaded &&
+    choice.draftId === draftId &&
+    draftId !== null &&
+    draft.draftIdFor(view.forkId) === draftId &&
+    !view.loading
   useEffect(
     () =>
       session.provideGuidance(
         composerGuidance(
           editor,
-          () => toggleOn,
+          () => {
+            const current = choices.snapshot()
+            return current.loaded && current.draftId === draft.draftIdFor(session.snapshot().forkId) && current.guidance
+          },
           () => draft.snapshot().text
         )
       ),
-    [session, draft, editor, toggleOn]
+    [session, draft, editor, choices]
   )
   // Said once per preset when writing for a card the user plays (DESIGN §2.2).
   const [impersonationNotice, setImpersonationNotice] = useState(false)
   // The speaker and the reply picked here or with "Write as" in the Cast tab, kept on the
   // server with this tip's draft (speaker.ts). Nothing is sent until they're read.
-  const choices = composerChoice(session)
-  const choice = useComposerChoice(session)
   useEffect(() => choices.bind(draftId), [choices, draftId])
   const turnEntries = useComposerTurn(session, view, cast)
   // Revising an existing reply needs its slot/fork, not the new turn's speaker choice or
@@ -284,12 +292,7 @@ export function Composer({
     viewPrefs.ready &&
     (editing !== null
       ? !view.loading && editStillShown(editing, view)
-      : !attachmentInput?.busy &&
-        textReady &&
-        choice.loaded &&
-        !choice.saving &&
-        choice.draftId === draftId &&
-        turnEntries !== null)
+      : !attachmentInput?.busy && textReady && choicesReady && !choice.saving && turnEntries !== null)
   const speaker = choice.speaker ?? defaultSpeaker(cast)
   const setPicked = (id: EntityId) => void choices.change({ speaker: id }).then(report)
   const name = nameOf(castView, speaker)
@@ -550,9 +553,9 @@ export function Composer({
     onRecent: setPicked,
     guidance,
     // While a reply's guidance is edited, the box is guidance whatever the toggle says.
-    prefsReady: viewPrefs.ready && editing === null,
+    prefsReady: viewPrefs.ready && choicesReady && editing === null,
     changeGuidance: (next) => {
-      void viewPrefs.change({ guidance: next })
+      void choices.change({ guidance: next }).then((result) => setError(result.ok ? null : result.error))
     },
     hint:
       editing !== null
@@ -595,6 +598,9 @@ export function Composer({
   return (
     <div
       ref={composerRef}
+      style={{
+        visibility: editing !== null || (choicesReady && textReady) ? undefined : "hidden"
+      }}
       className="@container chat-column flex flex-col gap-1.5 border-t border-border pt-2 pb-2 max-sm:px-2"
     >
       {/* Sent while a reply is written, posting after it: between the messages and the box. */}

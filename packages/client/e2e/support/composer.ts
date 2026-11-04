@@ -19,3 +19,16 @@ export const typeInto = (api: Client, chatId: ChatId, forkId: ForkId | null, con
     })
     return saved.draft!
   })
+
+/** The switch and speaker choices of this chat's current composer. */
+export const composerChoice = (api: Client, chatId: ChatId) =>
+  Effect.gen(function* () {
+    const draft = yield* api.OpenComposer({ chatId, forkId: null })
+    return yield* api.GetComposerChoice({ chatId, draftId: draft.id })
+  })
+
+export const setGuidance = (api: Client, chatId: ChatId, guidance: boolean) =>
+  Effect.gen(function* () {
+    const draft = yield* api.OpenComposer({ chatId, forkId: null })
+    return yield* api.SetComposerChoice({ chatId, draftId: draft.id, guidance })
+  })

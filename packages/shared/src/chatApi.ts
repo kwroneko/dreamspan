@@ -105,9 +105,7 @@ const displayFields = {
   coverageRail: Schema.Boolean,
   outputMacros: Schema.Boolean,
   displayRegex: Schema.Boolean,
-  /** The composer's text is guidance for the next generation, not a message (DESIGN §2.2). */
   enterSends: Schema.Literals(["automatic", "always", "never"]),
-  guidance: Schema.Boolean,
   chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
   /** How preset lists sort (the composer's picker, the Prompt preset tab's, the library's). */
   presetSort: PresetSort,
@@ -144,7 +142,6 @@ export const DisplayPrefsChange = Schema.Struct({
   outputMacros: Schema.optionalKey(displayFields.outputMacros),
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
   enterSends: Schema.optionalKey(displayFields.enterSends),
-  guidance: Schema.optionalKey(displayFields.guidance),
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
   presetSort: Schema.optionalKey(displayFields.presetSort),
   modelSort: Schema.optionalKey(displayFields.modelSort),
@@ -168,7 +165,6 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   outputMacros: false,
   displayRegex: true,
   enterSends: "automatic",
-  guidance: false,
   chatWidth: CHAT_WIDTH.default,
   presetSort: "name",
   modelSort: "name",

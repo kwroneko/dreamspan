@@ -249,19 +249,21 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
           id: string
           speaker_entity_id: EntityId | null
           reply_from_entity_id: EntityId | null
+          guidance: number
         }>`
           UPDATE drafts SET
             speaker_entity_id = CASE WHEN speaker_entity_id = ${entityId} THEN ${ref.entityId} ELSE speaker_entity_id END,
             reply_from_entity_id = CASE WHEN reply_from_entity_id = ${entityId} THEN ${ref.entityId} ELSE reply_from_entity_id END
           WHERE user_id = ${userId} AND target_kind = 'composer' AND target_id = ${chatId} AND field = ${fork.id}
             AND (speaker_entity_id = ${entityId} OR reply_from_entity_id = ${entityId})
-          RETURNING id, speaker_entity_id, reply_from_entity_id`
+          RETURNING id, speaker_entity_id, reply_from_entity_id, guidance`
         return {
           ref,
           choices: choices.map(
             (c) =>
               new ComposerChoice({
                 draftId: c.id,
+                guidance: c.guidance === 1,
                 speakerEntityId: c.speaker_entity_id,
                 replyFromEntityId: c.reply_from_entity_id
               })

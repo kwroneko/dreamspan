@@ -1,3 +1,4 @@
+import { setGuidance as setComposerGuidance } from "./support/composer.ts"
 // The RP loop (DESIGN §2.2, §3.5): the persona separate from the speaker, the composer's
 // guidance toggle, conditioned prompts in the preset editor, muting and the one-time
 // impersonation notice, on the realistic synthetic ST folder through a fake provider, so the
@@ -38,7 +39,7 @@ const usePreset = (label: string) =>
       })
     })
   )
-const setGuidance = (guidance: boolean) => admin((api) => api.SetDisplayPrefs({ prefs: { guidance } }))
+const setGuidance = (guidance: boolean) => admin((api) => setComposerGuidance(api, inn, guidance))
 const newestVersion = () =>
   admin((api) =>
     Effect.map(
@@ -393,7 +394,6 @@ test("the pending chat's Playing as is the persona control, and guidance generat
   page
 }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await setGuidance(true)
   await page.goto(`${server().url}/library`)
   await page
     .getByRole("link", { name: /^Start a chat with / })
@@ -405,6 +405,7 @@ test("the pending chat's Playing as is the persona control, and guidance generat
   await expect(page.getByRole("tab", { name: "Personas", selected: true })).toBeVisible()
   await page.keyboard.press("Escape")
   await closePanel(page)
+  await guidanceSwitch(page).click()
   const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
   await guidance.fill("Open on the docks at dawn.")
   const sent = provider.completions.length

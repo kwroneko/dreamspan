@@ -426,7 +426,7 @@ test("Auto's pick follows the branch tip, beyond the loaded window", async ({ pa
   await expect(nextChip(page)).toHaveAccessibleName(nextName("Wren"))
 })
 
-test("typing stays available while the saved speaker is loading; sending waits for it", async ({ page }) => {
+test("the composer waits for its saved speaker and guidance mode before appearing", async ({ page }) => {
   const chatId = await chatWith(["Mira"])
   let waiting = false
   let release: (() => void) | null = null
@@ -448,13 +448,11 @@ test("typing stays available while the saved speaker is loading; sending waits f
   })
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect.poll(() => waiting).toBe(true)
-  await expect(composer(page)).toBeEditable()
-  await composer(page).fill("Kept while the speaker loads.")
-  const send = page.getByRole("button", { name: "Send as Ana" })
-  await expect(send).toBeDisabled()
+  await expect(composer(page)).toBeHidden()
   release!()
+  const send = page.getByRole("button", { name: "Send as Ana" })
   await expect(send).toBeEnabled()
-  await expect(composer(page)).toHaveValue("Kept while the speaker loads.")
+  await composer(page).fill("Kept while the speaker loads.")
   await send.click()
   await expect(page.getByRole("article", { name: "Your message", exact: true }).last()).toContainText(
     "Kept while the speaker loads."
@@ -463,7 +461,6 @@ test("typing stays available while the saved speaker is loading; sending waits f
 
 test("empty Enter requests the visible empty-box reply without adding human text", async ({ page }) => {
   const chatId = await chatWith(["Mira"])
-  await admin((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(page.getByRole("button", { name: "Mira replies", exact: true })).toBeEnabled()
   await composer(page).press("Enter")

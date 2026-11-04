@@ -22,7 +22,6 @@ const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => {
 const setup = (human = false) =>
   admin((api) =>
     Effect.gen(function* () {
-      yield* api.SetDisplayPrefs({ prefs: { guidance: false } })
       const connection = yield* api.CreateConnection({
         kind: "openai-chat",
         settings: {
@@ -278,7 +277,7 @@ test("composer and Enter sends display at desktop and phone widths in both theme
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chat = await admin((api) =>
     Effect.gen(function* () {
-      yield* api.SetDisplayPrefs({ prefs: { guidance: false, enterSends: "never" } })
+      yield* api.SetDisplayPrefs({ prefs: { enterSends: "never" } })
       const card = yield* api.CreateCard({ label: "Screenshot Mira", name: "Mira" })
       const chat = yield* api.CreateChat({ title: "The lantern keeper" })
       yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })

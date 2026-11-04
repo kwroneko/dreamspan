@@ -313,7 +313,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
 
     const handlers = {
       ...(yield* makeShellWriteHandlers),
-      StartChat: ({ userId, cards, persona, greeters, first, title }) =>
+      StartChat: ({ guidance, userId, cards, persona, greeters, first, title }) =>
         Effect.gen(function* () {
           const ids = [...new Set([...cards, ...(persona === null ? [] : [persona])])]
           const loaded = yield* loadCards(sql, userId, ids)
@@ -402,7 +402,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               Effect.catchTag("LeafMoved", (error) => Effect.die(error))
             )
           const composer = yield* bin.drafts.openComposer(userId, composerKey(chatId, added.forkId), null)
-          yield* bin.drafts.setComposerChoice(userId, chatId, composer.id, { speakerEntityId: first.speakerEntityId })
+          yield* bin.drafts.setComposerChoice(userId, chatId, composer.id, {
+            speakerEntityId: first.speakerEntityId,
+            guidance: guidance ?? false
+          })
           return { ...added, composer }
         }).pipe(transaction("StartChat")),
 

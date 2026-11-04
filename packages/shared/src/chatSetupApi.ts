@@ -491,6 +491,7 @@ export class ChatSetupApi extends RpcGroup.make(
    */
   Rpc.make("StartChat", {
     payload: {
+      guidance: Schema.optionalKey(Schema.Boolean),
       cards: Schema.Array(EntityId).check(Schema.isMinLength(1)),
       persona: Schema.NullOr(EntityId),
       greeting: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
