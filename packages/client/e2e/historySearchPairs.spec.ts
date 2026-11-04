@@ -77,7 +77,13 @@ for (const width of [390, 1024, 1440])
             .getByRole("button")
             .evaluateAll(
               (buttons) =>
-                buttons.length === 3 && new Set(buttons.map((button) => button.getBoundingClientRect().top)).size === 1
+                buttons.length === 3 &&
+                buttons.every((button, index) => {
+                  if (!index) return true
+                  const previous = buttons[index - 1]!.getBoundingClientRect()
+                  const current = button.getBoundingClientRect()
+                  return current.top === previous.top && current.left - previous.right >= 4
+                })
             )
         )
         .toBe(true)
