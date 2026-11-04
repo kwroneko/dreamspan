@@ -1031,6 +1031,25 @@ test.describe("synthetic library and every app surface", () => {
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, "Snippets")
           await audit("panel-Snippets")
+          const snippet = page.getByRole("region", { name: "Snippet Harbour details", exact: true })
+          await snippet.getByRole("button", { name: "Rename Harbour details", exact: true }).click()
+          await snippet
+            .getByRole("textbox", { name: "New name for Harbour details", exact: true })
+            .fill("Harbour revisions")
+          await page.keyboard.press("Enter")
+          const renamed = page.getByRole("region", { name: "Snippet Harbour revisions", exact: true })
+          const expand = renamed.getByRole("button", { name: "Expand Harbour revisions", exact: true })
+          if (await expand.count()) await expand.click()
+          await renamed.getByRole("button", { name: "History of Harbour revisions", exact: true }).click()
+          await expect(page.getByRole("dialog", { name: "History: Harbour revisions", exact: true })).toBeVisible()
+          await audit("dialog-snippet-History", '[role="dialog"]')
+          // The synthetic chat is shared by the viewport/theme profiles.
+          await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click()
+          await renamed.getByRole("button", { name: "Rename Harbour revisions", exact: true }).click()
+          await renamed
+            .getByRole("textbox", { name: "New name for Harbour revisions", exact: true })
+            .fill("Harbour details")
+          await page.keyboard.press("Enter")
           return
         }
         if (process.env.LAYOUT_AUDIT_CASTGAP_ONLY === "1") {

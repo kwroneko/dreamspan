@@ -1021,6 +1021,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D] Owner, 2026-11-04 (snippettitle):** “After renaming a snippet, its History dialog/label must show the new title”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
+
 - **[D] Owner, 2026-11-04 (historyport approval):** “The history UI is fine now.” Port the approved History redesign to master, retaining side-panel History access. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 
 - **[D] Owner, 2026-11-04 (historyui add and editor controls):** “The add message button had its style changed and now has no message anymore, which is not what I asked. The message can remain removed from the edit one because it's redundant. But the add message one needs the text and should be styled like before, height equivalence notwithstanding, moreover, the spacing between the text and the pencil to edit it is zero”. On editor controls: “Why do the x and tick buttons go all the way there”. Restore the original ghost-style pencil-and-text Add message button for empty messages; keep Edit icon-only with the shared title-pencil gap. Confirm/cancel belong directly after the input, using the shared inline editor’s gap. Preserve equal row heights. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
