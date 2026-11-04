@@ -15,6 +15,7 @@ import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { RadioGroup } from "../../ui/Choice.tsx"
 import type { Caller } from "./caller.ts"
 import { ValueDiff } from "./diff.tsx"
@@ -67,7 +68,12 @@ function FieldComparison({
       className="min-w-0 rounded-md border border-border p-2"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]">{label}</summary>
+      <summary
+        className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]"
+        title={`Show or hide changes to ${label}`}
+      >
+        {label}
+      </summary>
       {open && (
         <div className="mt-2">
           {text ? (
@@ -100,6 +106,7 @@ function RevisionTitle({ revision }: { revision: Revision }) {
           params={{ chatId: use.chatId }}
           search={use.forkId ? { fork: use.forkId, slot: use.slotId } : { slot: use.slotId }}
           className="text-accent underline-offset-4 hover:underline"
+          title="Opens the chat at the reply that used this revision"
         >
           {use.chatTitle ? readableChatTitle(use.chatTitle) : "a chat"}
         </Link>{" "}
@@ -127,11 +134,13 @@ function RevisionComparison({
   store,
   call,
   revision,
-  settingLines
+  settingLines,
+  onClose
 }: {
   store: EditorStore
   call: Caller
   revision: Revision
+  onClose: () => void
   settingLines?: SettingLines | undefined
 }) {
   const [mode, setMode] = useState<"parent" | "current">("parent")
@@ -183,15 +192,46 @@ function RevisionComparison({
     docs === null ? null : mode === "parent" ? changedFields(docs.parent, docs.doc) : changedFields(docs.doc, current)
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <RadioGroup
-        aria-label="Compare revision against"
-        value={mode}
-        onValueChange={setMode}
-        options={[
-          { value: "parent", label: "Parent revision" },
-          { value: "current", label: "As it is now" }
-        ]}
-      />
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <Button
+            disabled={
+              !docs || clash !== null || (revision.id === state.snapshot!.ref.headRevisionId && state.dirty === 0)
+            }
+            focusableWhenDisabled
+            hint={
+              !docs
+                ? "The revision is loading"
+                : (clash ??
+                  (revision.id === state.snapshot!.ref.headRevisionId && state.dirty === 0
+                    ? "This revision is already the latest, with no unsaved changes"
+                    : "Restores this revision's content"))
+            }
+            onClick={() => void restore()}
+          >
+            Restore
+          </Button>
+          {docs && clash && (
+            <p role="status" className="text-sm text-muted">
+              {clash}
+            </p>
+          )}
+        </div>
+        <IconButton label="Close comparison" hint="Closes this revision's comparison" icon="close" onClick={onClose} />
+      </div>
+      <Tooltip label="Chooses what to compare with this revision">
+        <div>
+          <RadioGroup
+            aria-label="Compare revision against"
+            value={mode}
+            onValueChange={setMode}
+            options={[
+              { value: "parent", label: "Parent revision" },
+              { value: "current", label: "As it is now" }
+            ]}
+          />
+        </div>
+      </Tooltip>
       <p className="text-xs text-muted">
         {mode === "parent"
           ? revision.parents.length === 0
@@ -223,26 +263,6 @@ function RevisionComparison({
               />
             )
           })}
-        </div>
-      )}
-      {(revision.id !== state.snapshot!.ref.headRevisionId || state.dirty > 0) && (
-        <div>
-          <Button
-            disabled={!docs || clash !== null}
-            hint={
-              revision.id === state.snapshot!.ref.headRevisionId
-                ? "Puts every field back to this revision. What you typed since stays in each field's edit history."
-                : "Saves this revision's content as a new revision, and the fields take it. Nothing in between is lost."
-            }
-            onClick={() => void restore()}
-          >
-            Restore
-          </Button>
-          {docs && clash && (
-            <p role="status" className="text-sm text-muted">
-              {clash}
-            </p>
-          )}
         </div>
       )}
     </div>
@@ -318,9 +338,12 @@ export function CardRevisionBrowser({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <ErrorAlert error={error} />
-      <ol aria-label="Revisions" className="flex flex-col divide-y divide-border">
+      <ol aria-label="Revisions" className="flex min-w-0 flex-col gap-3">
         {revisions.map((revision) => (
-          <li key={revision.id} className="py-2">
+          <li
+            key={revision.id}
+            className={`min-w-0 rounded-lg border bg-surface-raised p-3 ${selected?.id === revision.id ? "border-accent" : "border-border"}`}
+          >
             <RevisionEntry
               number={revision.number}
               createdAt={revision.createdAt}
@@ -328,7 +351,7 @@ export function CardRevisionBrowser({
               message={revision.message}
               current={revision.id === head}
               selected={selected?.id === revision.id}
-              onSelect={() => setSelected(revision)}
+              onSelect={() => setSelected(selected?.id === revision.id ? null : revision)}
               onMessage={async (message) => {
                 const result = await call(
                   (client) => client("SetRevisionMessage", { refId: store.refId, revisionId: revision.id, message }),
@@ -346,22 +369,28 @@ export function CardRevisionBrowser({
                 return true
               }}
             />
+            {selected?.id === revision.id && (
+              <section
+                aria-label={`Comparison of revision ${revision.number}`}
+                className="relative mt-3 min-w-0 border-t border-border pt-3"
+              >
+                <RevisionComparison
+                  key={selected.id}
+                  store={store}
+                  call={call}
+                  revision={selected}
+                  onClose={() => setSelected(null)}
+                  settingLines={settingLines}
+                />
+              </section>
+            )}
           </li>
         ))}
       </ol>
       {(revisions.at(-1)?.parents.length ?? 0) > 0 && (
-        <Button pending={pending} onClick={() => void more()}>
+        <Button pending={pending} hint="Loads earlier revisions" onClick={() => void more()}>
           Earlier revisions
         </Button>
-      )}
-      {selected !== null && (
-        <RevisionComparison
-          key={selected.id}
-          store={store}
-          call={call}
-          revision={selected}
-          settingLines={settingLines}
-        />
       )}
     </div>
   )

@@ -22,10 +22,11 @@ export function RevisionsDialog({
   return (
     <Dialog
       wide
+      placement="top"
       open
       onOpenChange={(open) => !open && onClose()}
       title={title}
-      description="Restore an earlier version. Later saves stay in History."
+      description="Select Compare to review changes or restore a revision."
     >
       <CardRevisionBrowser store={store} call={call} settingLines={settingLines} />
     </Dialog>

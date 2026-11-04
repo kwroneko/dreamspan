@@ -1570,3 +1570,55 @@ for (const width of [390, 1440])
         await server.stop()
       }
     })
+
+// Narrow audit against the synthetic hot-reload instance, without importing a scale dataset.
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`revision dialogs live dev ${width} ${theme}`, async ({ page }, info) => {
+      const url = process.env.LAYOUT_AUDIT_REVISIONS_URL
+      test.skip(!url, "requires the synthetic development instance")
+      await page.setViewportSize({ width, height: 960 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      const findings: unknown[] = []
+      for (const kind of ["note", "card"] as const) {
+        const id = process.env[kind === "note" ? "LAYOUT_AUDIT_REVISION_NOTE" : "LAYOUT_AUDIT_REVISION_CARD"]
+        expect(id).toBeTruthy()
+        // Vite proxies /library requests; enter through its app shell, then navigate in the app.
+        await page.goto(url!)
+        await expect(page.getByRole("main")).toBeVisible()
+        await page.evaluate((path) => {
+          history.pushState({}, "", path)
+          dispatchEvent(new PopStateEvent("popstate"))
+        }, `/library/${id}`)
+        await page.getByRole("button", { name: "History", exact: true }).click()
+        const dialog = page.getByRole("dialog")
+        const revisions = dialog.getByRole("list", { name: "Revisions" }).getByRole("listitem")
+        await expect(revisions).toHaveCount(3)
+        const audit = async (state: string) => {
+          await page.mouse.move(0, 0)
+          const surface = `${kind}-${state}-${width}-${theme}`
+          const violations = await expectLayout(page, info, surface, { scope: '[role="dialog"]' })
+          findings.push({ surface, violations })
+          mkdirSync(work, { recursive: true })
+          writeFileSync(join(work, `revisions-${width}-${theme}.json`), JSON.stringify(findings, null, 2))
+          console.log(`${surface}: ${violations.length} violations`)
+        }
+        await audit("list")
+        const compare = revisions.nth(1).getByRole("button", { name: /^Revision \d+ / })
+        const before = await compare.boundingBox()
+        await compare.click()
+        const after = await compare.boundingBox()
+        expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1)
+        expect(Math.abs(after!.x - before!.x)).toBeLessThanOrEqual(1)
+        await expect(dialog.getByRole("button", { name: "Restore", exact: true })).toBeEnabled()
+        await audit("comparison")
+        await dialog.getByRole("button", { name: "Close comparison", exact: true }).click()
+        await revisions
+          .first()
+          .getByRole("button", { name: /^Change the message/ })
+          .click()
+        await expect(dialog.getByRole("textbox", { name: /^Message of Revision/ })).toBeVisible()
+        await audit("message")
+      }
+    })

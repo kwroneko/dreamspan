@@ -1,11 +1,12 @@
 // One revision in an editor's History (owner, 2026-11-01): its number and time, what made it
 // (a reply that used its text, a Save, an import) and its message, a label added or changed
 // in place at any time, never content. Picking it shows how it changed (the editor's own
-// comparison below the list).
+// comparison directly below the entry).
 import { type ReactNode, useState } from "react"
 import { Button } from "./Button.tsx"
 import { OneLineField } from "./OneLineField.tsx"
 import { Badge } from "./Surface.tsx"
+import { Icon } from "./Icon.tsx"
 import { IconButton } from "./Tooltip.tsx"
 
 const when = (at: number) => new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
@@ -35,46 +36,71 @@ export function RevisionEntry({
   const [editing, setEditing] = useState(false)
   const name = number === undefined ? "Revision" : `Revision ${number}`
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold">{name}</span>
+          {current && <Badge tone="accent">latest</Badge>}
+        </div>
+        <time dateTime={new Date(createdAt).toISOString()} className="text-xs text-muted">
+          {when(createdAt)}
+        </time>
+      </div>
+      <div className="text-sm [overflow-wrap:anywhere]">{title}</div>
+      <div className="flex flex-wrap items-center gap-2">
         <Button
-          variant="ghost"
+          variant={selected ? "secondary" : "ghost"}
+          aria-label={`${name} ${when(createdAt)}: Compare`}
           aria-pressed={selected}
-          className="-ml-2 h-8"
-          hint="Shows how this revision changed things, and lets you restore it."
+          className="h-8 px-2"
+          hint={selected ? "Click to hide this revision's comparison" : "Click to compare this revision"}
           onClick={onSelect}
         >
-          <span className="font-medium">{name}</span>
-          <span className="text-muted">{when(createdAt)}</span>
+          <Icon name="history" />
+          Compare
         </Button>
-        {current && <Badge tone="accent">latest</Badge>}
+        <Button
+          variant="ghost"
+          aria-label={message ? `Change the message of ${name}` : `Add a message to ${name}`}
+          aria-pressed={editing}
+          hint={
+            editing
+              ? "Click to close the revision message"
+              : message
+                ? "Click to edit this revision's message"
+                : "Click to add a message saying what changed"
+          }
+          className="h-8 px-2"
+          onClick={() => setEditing(!editing)}
+        >
+          <Icon name="edit" />
+          {message ? "Edit message" : "Add message"}
+        </Button>
       </div>
-      <p className="text-sm [overflow-wrap:anywhere]">{title}</p>
-      {editing ? (
-        <OneLineField
-          label={`Message of ${name}`}
-          initial={message ?? ""}
-          placeholder="What changed"
-          saveLabel="Save the message"
-          saveHint="Saves this message as the revision's label"
-          onSave={async (next) => {
-            const kept = await onMessage(next)
-            if (kept) setEditing(false)
-            return kept
-          }}
-          onCancel={() => setEditing(false)}
-        />
-      ) : (
-        <span className="flex min-w-0 items-center gap-1 text-sm text-muted">
-          {message && <span className="min-w-0 [overflow-wrap:anywhere]">“{message}”</span>}
+      {message && <p className="text-sm [overflow-wrap:anywhere]">“{message}”</p>}
+      {editing && (
+        <div className="relative rounded-md border border-border bg-surface p-3 pt-10">
           <IconButton
-            label={message ? `Change the message of ${name}` : `Add a message to ${name}`}
-            hint={message ? "Change this revision's message" : "Add a message saying what changed"}
-            icon="edit"
-            className="size-7! shrink-0"
-            onClick={() => setEditing(true)}
+            label="Close message"
+            hint="Closes the revision message"
+            icon="close"
+            className="absolute top-2 right-2"
+            onClick={() => setEditing(false)}
           />
-        </span>
+          <OneLineField
+            label={`Message of ${name}`}
+            initial={message ?? ""}
+            placeholder="What changed"
+            saveLabel="Save the message"
+            saveHint="Saves this message as the revision's label"
+            onSave={async (next) => {
+              const kept = await onMessage(next)
+              if (kept) setEditing(false)
+              return kept
+            }}
+            onCancel={() => setEditing(false)}
+          />
+        </div>
       )}
     </div>
   )

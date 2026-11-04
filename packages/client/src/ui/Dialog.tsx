@@ -17,6 +17,7 @@ export function Dialog({
   title,
   description,
   wide = false,
+  placement = "center",
   finalFocus,
   initialFocus,
   children
@@ -27,6 +28,8 @@ export function Dialog({
   description?: ReactNode
   /** Room for two columns side by side on a wide screen. */
   wide?: boolean
+  /** Top placement keeps inline expansions from moving their trigger. */
+  placement?: "center" | "top"
   /** Override focus restoration when an action navigates outside the dialog. */
   finalFocus?: (() => boolean) | undefined
   /** The element to focus on open, such as the field a link opened the dialog at. */
@@ -59,7 +62,7 @@ export function Dialog({
           ref={content}
           finalFocus={finalFocus}
           initialFocus={focusOnOpen}
-          className={wide ? `${popup} sm:max-w-5xl` : popup}
+          className={`${popup} ${wide ? "sm:max-w-5xl" : ""} ${placement === "top" ? "top-4! translate-y-0! [scrollbar-gutter:stable]" : ""}`}
         >
           <div className="flex shrink-0 items-start gap-3">
             <div className="flex min-w-0 flex-1 flex-col gap-1 [overflow-wrap:anywhere]">
