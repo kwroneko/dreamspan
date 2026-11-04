@@ -117,7 +117,7 @@ export function Avatar({
       className={`${box} outline-none focus-visible:ring-2 focus-visible:ring-focus`}
       onClick={(event) => {
         event.stopPropagation()
-        open({ id, name, mediaId })
+        open({ id, name, mediaId, picture: crop?.picture })
       }}
     >
       <PortraitFrame className="@container size-full">{content}</PortraitFrame>

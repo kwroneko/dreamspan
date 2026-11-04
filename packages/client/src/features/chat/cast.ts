@@ -38,7 +38,7 @@ export const useCast = () => useContext(CastContext)
 /** A cast card's portrait as the cast has it now: its name and image (ui/Portrait.tsx). */
 export const castPortrait = (view: CastView, id: string) => {
   const card = view.cards.get(id)
-  return card ? { id, name: card.name, mediaId: card.avatarMediaId } : null
+  return card ? { id, name: card.name, mediaId: card.avatarMediaId, picture: card.avatarCrop?.picture } : null
 }
 
 export const nameOf = (view: CastView, id: EntityId | null) => (id === null ? null : (view.cards.get(id)?.name ?? null))

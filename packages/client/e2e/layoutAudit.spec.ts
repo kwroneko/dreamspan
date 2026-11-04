@@ -364,6 +364,15 @@ test.describe("synthetic library and every app surface", () => {
       })
     )
     ;({ chatId, cardId, cardRef, presetRef, bookRef, replyId, connectionId, cardName } = seeded)
+    if (process.env.LAYOUT_AUDIT_PICTURECROP_ONLY === "1") {
+      const ref = await admin((api) => api.OpenEditor({ refId: cardRef }))
+      const response = await fetch(`${server.url}/library/avatar?ref=${cardRef}&rowVersion=${ref.ref.rowVersion}`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/octet-stream" },
+        body: portraitPng()
+      })
+      expect(response.ok).toBe(true)
+    }
     // Populate the shared Extra-tab gallery for its grid audit, at both panel widths.
     for (const [index, name] of ["Alternative coat", "Happy", "Harbor", "Evening"].entries()) {
       const ref = await admin((api) => api.OpenEditor({ refId: cardRef }))
@@ -476,6 +485,19 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.locator("main")).toBeVisible()
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
+        }
+        if (process.env.LAYOUT_AUDIT_PICTURECROP_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const card = await openPanel(page, cardName)
+          await card.getByRole("button", { name: "Picture", exact: true }).click()
+          await expect(page.locator("[data-cutout-box]")).toBeVisible()
+          const dialog = page.getByRole("dialog")
+          for (const tab of ["Picture", "Portrait"]) {
+            await dialog.getByRole("button", { name: tab, exact: true }).click()
+            await audit(`dialog-picture-${tab.toLowerCase()}`, '[role="dialog"]')
+            await dialog.screenshot({ path: join(work, `${width}-${theme}-${tab.toLowerCase()}.png`) })
+          }
+          return
         }
         if (process.env.LAYOUT_AUDIT_SUMMARY_SETTINGS_ONLY === "1") {
           await admin((api) => api.ChangeLcmSettings({ chatId, change: { withPreset: "specific", preset: presetRef } }))

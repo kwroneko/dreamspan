@@ -1,6 +1,7 @@
 // Importing and exporting files at the real boundary (ARCHITECTURE.md §11): a real server
 // with its database and format workers, files uploaded over HTTP, and the library rows,
 // files on disk and reports checked. Cross-user probes are in isolation.test.ts.
+import sharp from "sharp"
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { request } from "node:http"
@@ -136,7 +137,11 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.isTrue(second.library!.keptAvatar)
       const { bytes } = yield* exported(second.library!.ref.id, "card-png")
       // The exported PNG is the card's own image, not the placeholder.
-      assert.strictEqual(sha256(run(importCard(bytes)).avatar!.bytes), sha256(avatar))
+      const decoded = (image: Uint8Array) => sharp(image).raw().toBuffer()
+      assert.deepStrictEqual(
+        yield* Effect.promise(() => decoded(run(importCard(bytes)).avatar!.bytes)),
+        yield* Effect.promise(() => decoded(avatar))
+      )
     })
   )
 
@@ -149,7 +154,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("a card whose avatar isn't a PNG won't go into a PNG, and says what will hold it", () =>
+  it.effect("a card with an invalid image refuses PNG rendering and retains its CHARX export", () =>
     Effect.gen(function* () {
       const webp = Buffer.concat([Buffer.from("RIFF\x10\x00\x00\x00WEBPVP8 ", "latin1"), Buffer.alloc(8)])
       const card = {
@@ -164,7 +169,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const { library } = yield* imported(archive, "wren.charx")
       const refused = yield* exported(library!.ref.id, "card-png")
       assert.strictEqual(refused.status, 422)
-      assert.include(new TextDecoder().decode(refused.bytes), "CHARX")
+      assert.include(new TextDecoder().decode(refused.bytes), "rendered as PNG")
       assert.strictEqual((yield* exported(library!.ref.id, "card-charx")).status, 200)
     })
   )

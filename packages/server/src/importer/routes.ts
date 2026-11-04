@@ -140,7 +140,7 @@ export const layer = Layer.unwrap(
     const thumbnails = new Map<string, ReturnType<typeof formats.thumbnail>>()
     const thumbnail = Effect.fnUntraced(function* (
       path: string,
-      width: ReturnType<typeof mediaWidth>,
+      width: 0 | ReturnType<typeof mediaWidth>,
       // undefined: the whole image; null: the default cutout; else the chosen one.
       crop: AvatarCrop | null | undefined
     ) {
@@ -549,7 +549,11 @@ export const layer = Layer.unwrap(
         }
         // The cutout chosen for the new image (§14.5c), as a thumbnail URL names one; none: the default.
         const cropQuery = query.get("crop")
-        const crop = cropQuery === null ? null : parseCropKey(cropQuery)
+        const portrait = cropQuery === null ? null : parseCropKey(cropQuery)
+        const pictureQuery = query.get("picture")
+        const picture = pictureQuery === null ? null : parseCropKey(pictureQuery)
+        if (pictureQuery !== null && !picture) return jsonError(400, "picture must name a crop")
+        const crop = portrait && picture ? { ...portrait, picture } : portrait
         if (crop === undefined) return jsonError(400, "crop must name a cutout inside the image")
         // Before the body is read: a refused upload reads and stores nothing.
         const target = yield* reader.GetLibraryRef({ userId: user.id, refId })
@@ -705,7 +709,14 @@ export const layer = Layer.unwrap(
       if (cropQuery !== null && (crop === undefined || Option.isNone(width))) {
         return jsonError(400, "crop must name a cutout inside the image, with a width")
       }
-      const derivative = Option.isNone(width) ? null : yield* thumbnail(file.path, mediaWidth(width.value), crop)
+      const pictureQuery = query.get("picture")
+      const picture = pictureQuery === null ? null : parseCropKey(pictureQuery)
+      if (pictureQuery !== null && !picture) return jsonError(400, "picture must name a crop")
+      const derivative = picture
+        ? yield* thumbnail(file.path, 0, picture)
+        : Option.isNone(width)
+          ? null
+          : yield* thumbnail(file.path, mediaWidth(width.value), crop)
       const path = derivative?.path ?? file.path
       const original = derivative === null || derivative.original
       const headers = {
@@ -729,7 +740,7 @@ export const layer = Layer.unwrap(
       }
       const bytes = yield* Effect.tryPromise(() => readFile(join(config.dataDir, path)))
       return HttpServerResponse.uint8Array(bytes, {
-        contentType: original ? file.mime : "image/webp",
+        contentType: original ? file.mime : picture ? "image/png" : "image/webp",
         headers
       })
     }).pipe(

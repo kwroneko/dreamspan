@@ -379,7 +379,7 @@ export class EditorApi extends RpcGroup.make(
     error: Schema.Union([...Writes])
   }),
   /**
-   * The card's avatar's cutout, the 2:3 part its small portraits show (ARCHITECTURE.md §14.5c),
+   * The card's Picture and Portrait cuts (ARCHITECTURE.md §14.5c),
    * chosen again without a new image; null: back to the default. A new image's goes with
    * `POST /library/avatar`.
    */

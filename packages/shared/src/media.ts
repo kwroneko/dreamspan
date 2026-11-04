@@ -14,7 +14,7 @@ const Fraction = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }
 /** Steps a cutout is stored and addressed in: 1/10000 of the original's width or height. */
 const CUTOUT_STEPS = 10_000
 
-export const AvatarCrop = Schema.Struct({
+export const PictureCrop = Schema.Struct({
   x: Fraction,
   y: Fraction,
   width: Fraction.check(Schema.isGreaterThan(0)),
@@ -27,7 +27,38 @@ export const AvatarCrop = Schema.Struct({
       "A cutout must lie inside its image"
   )
 )
+export type PictureCrop = typeof PictureCrop.Type
+
+/** Portrait coordinates remain relative to the kept original. The optional picture bounds them. */
+export const AvatarCrop = Schema.Struct({
+  ...PictureCrop.fields,
+  picture: Schema.optionalKey(PictureCrop)
+}).check(
+  Schema.makeFilter((crop) => {
+    const p = crop.picture ?? WHOLE_PICTURE
+    return (
+      (crop.x >= p.x - 0.0001 &&
+        crop.y >= p.y - 0.0001 &&
+        crop.x + crop.width <= p.x + p.width + 0.0001 &&
+        crop.y + crop.height <= p.y + p.height + 0.0001) ||
+      "The portrait must lie inside the picture"
+    )
+  })
+)
 export type AvatarCrop = typeof AvatarCrop.Type
+export const WHOLE_PICTURE: PictureCrop = { x: 0, y: 0, width: 1, height: 1 }
+
+/** Free rectangle in oriented pixels, with rounded edges kept inside the original. */
+export const picturePixels = (crop: PictureCrop, width: number, height: number) => {
+  const left = Math.min(width - 1, Math.max(0, Math.round(crop.x * width)))
+  const top = Math.min(height - 1, Math.max(0, Math.round(crop.y * height)))
+  return {
+    left,
+    top,
+    width: Math.max(1, Math.min(width - left, Math.round(crop.width * width))),
+    height: Math.max(1, Math.min(height - top, Math.round(crop.height * height)))
+  }
+}
 
 /** The portrait frame's shape: two wide, three high. */
 export const PORTRAIT_RATIO = 2 / 3
@@ -42,7 +73,8 @@ export const snapCrop = (crop: AvatarCrop): AvatarCrop => {
     x: Math.min(step(crop.x), step(1 - width)),
     y: Math.min(step(crop.y), step(1 - height)),
     width,
-    height
+    height,
+    ...(crop.picture ? { picture: snapCrop(crop.picture) } : {})
   }
 }
 
@@ -108,7 +140,8 @@ export const StoredCrop = Schema.Struct({
   x: Schema.Finite,
   y: Schema.Finite,
   width: Schema.Finite,
-  height: Schema.Finite
+  height: Schema.Finite,
+  picture: Schema.optionalKey(PictureCrop)
 })
 export type StoredCrop = typeof StoredCrop.Type
 
@@ -116,7 +149,13 @@ export type StoredCrop = typeof StoredCrop.Type
 export const avatarCropOf = (avatarMediaId: unknown, stored: unknown): AvatarCrop | null => {
   if (typeof avatarMediaId !== "string" || !Schema.is(StoredCrop)(stored) || stored.media_id !== avatarMediaId)
     return null
-  const crop = { x: stored.x, y: stored.y, width: stored.width, height: stored.height }
+  const crop = {
+    x: stored.x,
+    y: stored.y,
+    width: stored.width,
+    height: stored.height,
+    ...(stored.picture ? { picture: stored.picture } : {})
+  }
   return Schema.is(AvatarCrop)(crop) ? crop : null
 }
 
