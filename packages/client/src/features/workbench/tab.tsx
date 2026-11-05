@@ -111,9 +111,3 @@ export function useTabRegion(label: string) {
   }, [tab, item, label])
   return tab !== null
 }
-
-/** Editing the view's content keeps its preview tab open (VS Code's rule). */
-export function useKeepTab() {
-  const tab = useContext(TabContext)
-  return () => tab?.store.pin(tab.tabId)
-}

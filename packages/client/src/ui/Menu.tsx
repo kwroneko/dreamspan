@@ -126,7 +126,10 @@ export function MenuAction({
   const inMenu = useMenuActions()
   if (href && !disabled)
     return inMenu ? (
-      <MenuLinkItem description={hint} render={<a href={href} aria-label={props["aria-label"]} onClick={openOnPlainClick(onClick)} />}>
+      <MenuLinkItem
+        description={hint}
+        render={<a href={href} aria-label={props["aria-label"]} onClick={openOnPlainClick(onClick)} />}
+      >
         {children}
       </MenuLinkItem>
     ) : (

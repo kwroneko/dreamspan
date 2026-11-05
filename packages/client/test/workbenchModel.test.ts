@@ -110,10 +110,18 @@ describe("workbench layout", () => {
     expect(titles(restored)).toEqual(titles(layout))
     expect(restored.focused).toBe(layout.focused)
     expect(restoreLayout({ version: 2 })).toBeNull()
-    expect(restoreLayout({ version: 1, root: { type: "frame", id: "f", tabs: [{ id: "t", href: "https://x" }] } })).toBeNull()
+    expect(
+      restoreLayout({ version: 1, root: { type: "frame", id: "f", tabs: [{ id: "t", href: "https://x" }] } })
+    ).toBeNull()
     const broken = restoreLayout({
       version: 1,
-      root: { type: "split", id: "s", direction: "row", sizes: [1, "x"], children: [saved.root, { type: "frame", id: "e", tabs: [] }] }
+      root: {
+        type: "split",
+        id: "s",
+        direction: "row",
+        sizes: [1, "x"],
+        children: [saved.root, { type: "frame", id: "e", tabs: [] }]
+      }
     })
     expect(broken && titles(broken)).toEqual(titles(layout))
   })

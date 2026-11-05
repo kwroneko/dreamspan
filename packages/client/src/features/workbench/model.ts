@@ -48,7 +48,7 @@ let counter = 0
 export const newId = (prefix: string) =>
   `${prefix}${Date.now().toString(36)}${(counter++).toString(36)}${Math.random().toString(36).slice(2, 6)}`
 
-export const frameNode = (tabs: ReadonlyArray<Tab>, id = newId("f")): Frame => ({
+const frameNode = (tabs: ReadonlyArray<Tab>, id = newId("f")): Frame => ({
   type: "frame",
   id,
   tabs,
@@ -66,7 +66,7 @@ export const frames = (node: Node): ReadonlyArray<Frame> =>
 
 export const allTabs = (layout: Layout): ReadonlyArray<Tab> => frames(layout.root).flatMap((f) => f.tabs)
 
-export const findFrame = (layout: Layout, frameId: string) => frames(layout.root).find((f) => f.id === frameId)
+const findFrame = (layout: Layout, frameId: string) => frames(layout.root).find((f) => f.id === frameId)
 
 export const frameOfTab = (layout: Layout, tabId: string) =>
   frames(layout.root).find((f) => f.tabs.some((t) => t.id === tabId))

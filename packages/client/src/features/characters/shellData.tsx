@@ -180,7 +180,7 @@ export function useShellNavigation() {
 }
 
 /** Where a character's tile links: the chat it opens (its latest), else a new one. */
-export const characterLink = (card: ShellCard) => {
+const characterLink = (card: ShellCard) => {
   const latest = card.open ?? null
   const entity = card.card.entityId
   return latest

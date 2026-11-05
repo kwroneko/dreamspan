@@ -574,7 +574,7 @@ function TabStrip({
   )
 }
 
-export function TabIcon({ tab, store }: { tab: Tab; store: WorkbenchStore }) {
+function TabIcon({ tab, store }: { tab: Tab; store: WorkbenchStore }) {
   const meta = useMeta(store, tab.id)
   if (meta?.decoration)
     return (
@@ -585,7 +585,7 @@ export function TabIcon({ tab, store }: { tab: Tab; store: WorkbenchStore }) {
   return <Icon name={tabKind(tab.href)?.icon ?? "panel"} size={14} className="text-muted" />
 }
 
-export const useTabTitle = (store: WorkbenchStore, tab: Tab) => useMeta(store, tab.id)?.title ?? defaultTitle(tab.href)
+const useTabTitle = (store: WorkbenchStore, tab: Tab) => useMeta(store, tab.id)?.title ?? defaultTitle(tab.href)
 
 function TabButton({
   tab,
