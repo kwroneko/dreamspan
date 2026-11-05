@@ -127,7 +127,8 @@ describe("independent shell reads", () => {
           branch: false
         })
       )
-      yield* api.SetChatPin({ chatId, leaf: first.entry.slotId, pinned: true })
+      const pinnedFork = (yield* api.ListForks({ chatId })).find((f) => f.tipSlotId === first.entry.slotId)!
+      yield* api.PinFork({ forkId: pinnedFork.id, pinned: true })
       const second = yield* posted(
         api.SendMessage({
           chatId,
@@ -161,9 +162,9 @@ describe("independent shell reads", () => {
       rows = (yield* api.GetShellLibrary()).forks.filter((f) => f.chat.id === chatId)
       assert.strictEqual(rows.find((f) => f.current)!.leaf, continued.entry.slotId)
       assert.strictEqual(rows.find((f) => f.pinned)!.leaf, continued.entry.slotId)
-      yield* api.SetChatPin({ chatId, leaf: continued.entry.slotId, pinned: false })
+      yield* api.PinFork({ forkId: pinnedFork.id, pinned: false })
       assert.isFalse((yield* api.GetShellLibrary()).forks.some((f) => f.pinned))
-      yield* api.SetChatPin({ chatId, leaf: continued.entry.slotId, pinned: true })
+      yield* api.PinFork({ forkId: pinnedFork.id, pinned: true })
       const secondFork = (yield* api.ListForks({ chatId })).find((f) => f.tipSlotId === second.entry.slotId)!
       yield* api.DeleteFork({ forkId: secondFork.id })
       assert.strictEqual((yield* api.GetShellLibrary()).forks.find((f) => f.pinned)!.leaf, continued.entry.slotId)

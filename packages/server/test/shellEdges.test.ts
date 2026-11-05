@@ -35,11 +35,12 @@ it.live("a pinned divergent fork can be unpinned after deleting its only message
         branch: true
       })
     )
-    yield* api.SetChatPin({ chatId, leaf: divergent.entry.slotId, pinned: true })
+    const branch = (yield* api.ListForks({ chatId })).find((f) => f.tipSlotId === divergent.entry.slotId)!
+    yield* api.PinFork({ forkId: branch.id, pinned: true })
     yield* api.DeleteMessage({ slotId: divergent.entry.slotId })
     const pin = (yield* api.GetShellLibrary()).forks.find((f) => f.pinned)!
     assert.strictEqual(pin.leaf, start.chat.activeLeafSlotId)
-    yield* api.SetChatPin({ chatId, leaf: pin.leaf, forkId: pin.forkId, pinned: false })
+    yield* api.PinFork({ forkId: pin.forkId, pinned: false })
     assert.isFalse((yield* api.GetShellLibrary()).forks.some((f) => f.pinned))
   }).pipe(Effect.scoped, Effect.provide(layer()))
 )

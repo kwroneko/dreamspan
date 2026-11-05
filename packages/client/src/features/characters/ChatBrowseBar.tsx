@@ -9,7 +9,7 @@ import { SortDirection } from "./cardBrowse.tsx"
 
 const FILTERS = {
   all: { label: "All", hint: "Shows all chats" },
-  pinned: { label: "Pinned", hint: "Shows chats with a pinned branch" },
+  pinned: { label: "Pinned", hint: "Shows pinned chats" },
   groups: { label: "Group chats", hint: "Shows chats with two or more characters in the cast" },
   solo: { label: "One-on-one", hint: "Shows chats with one character in the cast" },
   branches: { label: "With branches", hint: "Shows chats with more than one branch" }

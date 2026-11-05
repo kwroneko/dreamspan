@@ -124,3 +124,57 @@ it.effect("migrates existing composer switches from each account and removes onl
     assert.strictEqual(again!.guidance, 1)
   }).pipe(Effect.provide(layer()))
 )
+
+it.effect("migrates branch pins to one global chat pin and preserves local pins on rerun", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* SqliteMigrator.run({
+      loader: SqliteMigrator.fromRecord({
+        "0001_baseline": migrations["0001_baseline"],
+        "0002_composer_guidance": migrations["0002_composer_guidance"],
+        "0003_branch_added_characters": migrations["0003_branch_added_characters"]
+      })
+    })
+    yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('owner', 'owner', 'Owner', 'user', 0)`
+    for (const id of ["pinned", "ordinary", "legacy"])
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at)
+        VALUES (${id}, 'owner', 'rp', 'active', 0)`
+    for (const [id, chat, pin] of [
+      ["a", "pinned", 100],
+      ["b", "pinned", 200],
+      ["c", "ordinary", null]
+    ] as const)
+      yield* sql`INSERT INTO forks (id, chat_id, created_at, pinned_at) VALUES (${id}, ${chat}, 0, ${pin})`
+    yield* sql`INSERT INTO chat_pins (user_id, chat_id, fork_id) VALUES ('owner', 'legacy', 'old')`
+    yield* Effect.scoped(Layer.build(Migrations))
+    const pins = yield* sql`SELECT user_id, chat_id FROM chat_pins ORDER BY chat_id`
+    assert.deepStrictEqual(
+      pins.map((r) => [r.user_id, r.chat_id]),
+      [
+        ["owner", "legacy"],
+        ["owner", "pinned"]
+      ]
+    )
+    const branches = yield* sql`SELECT id, pinned_at FROM forks WHERE id IN ('a', 'b', 'c') ORDER BY id`
+    assert.deepStrictEqual(
+      branches.map((r) => [r.id, r.pinned_at]),
+      [
+        ["a", 100],
+        ["b", 200],
+        ["c", null]
+      ]
+    )
+    // A restart must not re-pin a chat the user has since unpinned.
+    yield* sql`DELETE FROM chat_pins WHERE chat_id = 'pinned'`
+    yield* Effect.scoped(Layer.build(Migrations))
+    const remaining = yield* sql`SELECT chat_id FROM chat_pins`
+    assert.deepStrictEqual(
+      remaining.map((r) => r.chat_id),
+      ["legacy"]
+    )
+    assert.deepStrictEqual(
+      yield* sql`SELECT id, pinned_at FROM forks WHERE id IN ('a', 'b', 'c') ORDER BY id`,
+      branches
+    )
+  }).pipe(Effect.provide(layer()))
+)

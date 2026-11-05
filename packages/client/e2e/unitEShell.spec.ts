@@ -1,3 +1,4 @@
+import type { ForkId } from "@rp/shared/chat.ts"
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -31,7 +32,8 @@ test.beforeAll(async ({ browser }) => {
   await admin((api) =>
     Effect.all([
       api.SetChatPin({ chatId: one.chat.id, leaf: one.leaf, pinned: true }),
-      api.SetChatPin({ chatId: group.chat.id, leaf: group.leaf, pinned: true })
+      api.SetChatPin({ chatId: group.chat.id, leaf: group.leaf, pinned: true }),
+      api.PinFork({ forkId: group.forkId as ForkId, pinned: true })
     ])
   )
   data = await admin((api) => api.GetShellLibrary())
@@ -78,13 +80,15 @@ for (const width of [1440, 390]) {
     await openLeft()
     const crumbs = page.getByRole("navigation", { name: "Chat breadcrumbs" })
     await expect(crumbs).toContainText(character.card.label)
-    const scopedPins = data.forks.filter((f) => f.pinned && f.joined.includes(character.card.entityId))
+    const scopedPins = new Set(
+      data.forks.filter((f) => f.chatPinned && f.joined.includes(character.card.entityId)).map((f) => f.chat.id)
+    )
     await expect(
       page
         .getByRole("region", { name: "Pinned chats", exact: true })
         .first()
         .getByRole("button", { name: /^Open chat / })
-    ).toHaveCount(scopedPins.length)
+    ).toHaveCount(scopedPins.size)
     // The left panel's place is in the URL (owner, 2026-10-31); browsing it keeps the chat in the middle.
     const before = new URL(page.url()).pathname
     await crumbs.getByRole("button", { name: "All chats", exact: true }).click()
@@ -129,7 +133,7 @@ for (const width of [1440, 390]) {
     await openLeft()
     await expect(crumbs).toContainText(group.name)
     // Scoped to the chat, its pinned branches lead its own list, not a separate Pinned chats.
-    await expect(page.getByRole("region", { name: "Named and pinned", exact: true })).toBeVisible()
+    await expect(page.getByRole("region", { name: "Pinned branches", exact: true })).toBeVisible()
     if (width === 390) await page.getByRole("button", { name: "Close the menu", exact: true }).click()
     const appended = await admin((api) =>
       api.SendMessage({

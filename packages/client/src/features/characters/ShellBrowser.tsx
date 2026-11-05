@@ -47,28 +47,42 @@ import {
   type ShellLibrary
 } from "./shellData.tsx"
 
-export function PinButton({ fork, className = "" }: { fork: ShellFork; className?: string }) {
+export function PinButton({
+  fork,
+  branch = false,
+  className = ""
+}: {
+  fork: ShellFork
+  branch?: boolean
+  className?: string
+}) {
   const action = useAction()
+  const pinned = branch ? fork.pinned : fork.chatPinned
   return (
     <span className="shrink-0">
       {/* A pin, filled when pinned: the star is a favourite character's (cardBrowse.tsx). */}
       <IconButton
-        label={`${fork.pinned ? "Unpin" : "Pin"} ${fork.name}`}
+        label={`${pinned ? "Unpin" : "Pin"} ${branch ? fork.name : fork.chatName}`}
         icon="pin"
-        filled={fork.pinned}
-        aria-pressed={fork.pinned}
-        hint={fork.pinned ? "Click to unpin this branch" : "Click to pin this branch above the rest"}
+        filled={pinned}
+        aria-pressed={pinned}
+        hint={
+          branch
+            ? pinned
+              ? "Click to unpin this branch within this chat"
+              : "Click to pin this branch above the other branches in this chat"
+            : pinned
+              ? "Click to remove this chat from Pinned"
+              : "Click to add this chat to Pinned"
+        }
         disabled={action.pending}
-        className={`${fork.pinned ? "text-text!" : ""} ${className}`}
+        className={`${pinned ? "text-text!" : ""} ${className}`}
         onClick={() =>
           void action.run(
             (client) =>
-              client("SetChatPin", {
-                chatId: fork.chat.id,
-                leaf: fork.leaf,
-                forkId: fork.forkId,
-                pinned: !fork.pinned
-              }),
+              branch
+                ? client("PinFork", { forkId: fork.forkId as ForkId, pinned: !pinned })
+                : client("SetChatPin", { chatId: fork.chat.id, leaf: null, pinned: !pinned }),
             ["pins"]
           )
         }
@@ -272,7 +286,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
         </Tooltip>
       </div>
       <span data-branch-pin>
-        <PinButton fork={fork} />
+        <PinButton fork={fork} branch />
       </span>
       {action.error && (
         <span
@@ -298,7 +312,7 @@ export function ForkRow({
   fork: ShellFork
   scopeChat?: boolean
   details?: boolean
-  /** The row is this fork (a chat's branches, pins), not its chat (a list of chats). */
+  /** The row is this fork (a chat's branches), not its chat (a list of chats). */
   perFork?: boolean
   /** Among its chat's branches only: the branch's own label, without the chat's name or faces. */
   branchOnly?: boolean
@@ -311,7 +325,7 @@ export function ForkRow({
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
-  // rows of several chats mix, as pins do, the chat's name, with a named branch's name after it
+  // rows of several chats mix, the chat's name, with a named branch's name after it
   // and an unnamed one's label under it once the chat has more than one.
   const title = branchOnly ? label : perFork && fork.named ? `${fork.chatName} › ${fork.name}` : fork.chatName
   const branchLine = !branchOnly && perFork && !fork.named && fork.branches > 1 ? label : null
@@ -411,7 +425,7 @@ export function ForkRow({
         data-layout-overlay="Corner actions share the full-width open control in narrow chat rows"
         className="my-1 flex shrink-0 flex-col items-end justify-between self-stretch"
       >
-        <PinButton fork={fork} />
+        <PinButton fork={fork} branch={perFork} />
         {!perFork && <BranchesButton fork={fork} entity={entity} />}
       </div>
     </div>
@@ -444,11 +458,12 @@ export function OpenChatBranches() {
     search: "",
     sort: "recent",
     sections: [
+      { id: "pinnedBranches", limit: 5000 },
       { id: "peers", limit: 5000 },
       { id: "other", limit: 5000 }
     ]
   })
-  const rows = [...forks.section("peers").rows, ...forks.section("other").rows]
+  const rows = [...forks.section("pinnedBranches").rows, ...forks.section("peers").rows, ...forks.section("other").rows]
   const visible = chatId !== null && !grid && scope.chat !== chatId && rows.length > 0
   const { ref, height, min, max, change, reset } = useBranchHeight(userId, visible)
   if (!visible) return null
@@ -621,7 +636,6 @@ export function PinnedChats({
             <ForkRow
               key={`${fork.chat.id}/${fork.forkId}`}
               fork={fork}
-              perFork
               here={fork.chat.id === params.chatId && (shown ? fork.forkId === shown : fork.current)}
             />
           ))}
@@ -641,10 +655,11 @@ const SECTIONS = {
     ["with", "With others"],
     ["was", "Was in"]
   ],
-  // Named and pinned first, then the rest, each by last message; the one the chat opens on is
+  // Pinned, named, then the rest, each by last message; the one the chat opens on is
   // marked where it is (owner, 2026-11-01).
   chat: [
-    ["peers", "Named and pinned"],
+    ["pinnedBranches", "Pinned branches"],
+    ["peers", "Named branches"],
     ["other", "Branches"]
   ]
 } as const satisfies Record<string, ReadonlyArray<readonly [ShellSection, string]>>

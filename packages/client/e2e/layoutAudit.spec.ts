@@ -511,6 +511,7 @@ test.describe("synthetic library and every app surface", () => {
         if (process.env.LAYOUT_AUDIT_CHAT_ROWS_ONLY === "1") {
           const forks = yield* api.ListForks({ chatId: started.chat.id })
           yield* api.PinFork({ forkId: forks[0]!.id, pinned: true })
+          yield* api.SetChatPin({ chatId: started.chat.id, leaf: null, pinned: true })
         }
         return {
           chatId: started.chat.id,

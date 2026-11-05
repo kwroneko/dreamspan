@@ -35,6 +35,7 @@ test.beforeAll(async () => {
         chatId = started.chat.id
         const original = (yield* api.ListForks({ chatId: started.chat.id }))[0]!
         yield* api.PinFork({ forkId: original.id, pinned: true })
+        yield* api.SetChatPin({ chatId: started.chat.id, leaf: null, pinned: true })
         for (const name of ["North quay", "South quay"]) {
           const peer = (yield* api.CreateFork({
             chatId: started.chat.id,
@@ -110,8 +111,8 @@ for (const theme of ["light", "dark"] as const)
 
       await page.goto(`${server().url}/chats/${chatId}?forks=${chatId}`)
       await expect(
-        sidebar.getByRole("region", { name: "Named and pinned", exact: true }).locator("[data-chat-id]")
-      ).toHaveCount(3)
+        sidebar.getByRole("region", { name: "Pinned branches", exact: true }).locator("[data-chat-id]")
+      ).toHaveCount(1)
       await expect(sidebar.getByRole("region", { name: "Branches of the open chat" })).toHaveCount(0)
       await capture("branch-scope", size)
       await sidebar.getByLabel("Find a chat", { exact: true }).fill("South")

@@ -141,7 +141,7 @@ it.live("shell rows retain interior checkpoints, same-tip peers and empty forks 
     )
     const peer = (yield* api.CreateFork({ chatId, fromForkId: checkpoint.id, atSlotId: checkpoint.tipSlotId })).fork
     yield* api.NameFork({ forkId: peer.id, name: "Same-tip peer" })
-    yield* api.SetChatPin({ chatId, forkId: peer.id, leaf: peer.tipSlotId, pinned: true })
+    yield* api.PinFork({ forkId: peer.id, pinned: true })
     yield* api.ChangeCast({
       chatId,
       forkId: peer.id,
@@ -185,12 +185,6 @@ it.live("shell rows retain interior checkpoints, same-tip peers and empty forks 
     assert.strictEqual(rows.find((f) => f.current)!.forkId, empty.id)
     assert.strictEqual(rows.find((f) => f.forkId === empty.id)!.leaf, null)
     assert.strictEqual(rows.find((f) => f.forkId === original.id)!.leaf, continuation.entry.slotId)
-    const unrelated = yield* api.CreateChat({ title: "Unrelated synthetic chat" })
-    const foreign = (yield* api.ListForks({ chatId: unrelated.id }))[0]!
-    assert.strictEqual(
-      (yield* Effect.flip(api.SetChatPin({ chatId, forkId: foreign.id, leaf: null, pinned: true })))._tag,
-      "NotFound"
-    )
     // Deletion is local even when the two forks have the exact same endpoint.
     yield* api.DeleteMessage({ slotId: peer.tipSlotId!, forkId: peer.id })
     rows = (yield* api.GetShellLibrary()).forks.filter((f) => f.chat.id === chatId)
@@ -198,7 +192,7 @@ it.live("shell rows retain interior checkpoints, same-tip peers and empty forks 
     assert.strictEqual(rows.find((f) => f.forkId === peer.id)!.preview, "")
     assert.strictEqual(rows.find((f) => f.forkId === peer.id)!.messages, 0)
     assert.strictEqual(rows.find((f) => f.forkId === checkpoint.id)!.preview, "Shared root")
-    yield* api.SetChatPin({ chatId, forkId: peer.id, leaf: null, pinned: false })
+    yield* api.PinFork({ forkId: peer.id, pinned: false })
     yield* api.DeleteFork({ forkId: peer.id })
     assert.notInclude(
       (yield* api.GetShellLibrary()).forks.map((f) => f.forkId),

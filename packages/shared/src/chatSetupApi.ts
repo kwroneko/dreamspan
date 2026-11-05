@@ -148,6 +148,8 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   current: Schema.Boolean,
   named: Schema.Boolean,
   pinned: Schema.Boolean,
+  /** The chat's global pin, independent of this branch's pin. */
+  chatPinned: Schema.Boolean,
   /** The chat's first fork: made from no other. */
   original: Schema.Boolean,
   /** Where it parts from the fork it was made from (`ForkSplit`); null for the original. */
@@ -197,11 +199,12 @@ export class ShellCards extends Schema.Class<ShellCards>("ShellCards")({
 /**
  * The lists of fork rows a screen shows (GetShellForks): each a part of the forks in the view's
  * scope (a card's chats, one chat's forks, or every chat), matching its search.
- * - `pinned`: the pinned ones, by `sort`;
+ * - `pinned`: globally pinned chats, once each on their current fork, by `sort`;
  * - `chats`: each chat once, by its current fork, the most recent chat first (All chats);
  * - `just`, `with`, `was`: the scope card's chats, once each, by how it is in them, its latest turn first;
- * - `current`, `peers`, `other`: a chat's current fork; its pinned and named ones, the current
- *   one among them when it is; the rest; the last two by their last message, newest first;
+ * - `current`: a chat's current fork;
+ * - `pinnedBranches`, `peers`, `other`: pinned branches, unpinned named branches, the rest;
+ *   each by its last message, newest first;
  * - `groups`: chats of two or more characters, once each, by `sort`;
  * - `card`: each chat the scope card joined, once, its latest turn first, then newest;
  * - `all`: every fork in scope, newest first.
@@ -215,6 +218,7 @@ export const ShellSection = Schema.Literals([
   "with",
   "was",
   "current",
+  "pinnedBranches",
   "peers",
   "other",
   "groups",

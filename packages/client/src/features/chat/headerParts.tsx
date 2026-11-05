@@ -27,7 +27,7 @@ export function HeaderPin({ view }: ChatHeaderActionProps) {
   // lists' rows have the pin too.
   return fork ? (
     <span className="flex @max-[40rem]/header:hidden">
-      <PinButton fork={fork} />
+      <PinButton fork={fork} branch />
     </span>
   ) : null
 }

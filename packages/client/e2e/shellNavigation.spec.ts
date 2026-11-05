@@ -126,7 +126,7 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
   await expect(crumbs(page)).not.toContainText("Wren")
   await expect(
     sidebar(page)
-      .getByRole("region", { name: /^(Named and pinned|Branches)$/ })
+      .getByRole("region", { name: /^(Named branches|Branches)$/ })
       .first()
   ).toBeVisible()
   expect(path(page)).toBe(chatPath)

@@ -1,3 +1,5 @@
+**Built 2026-11-05 (pinsplit):** Branch-local and global chat pins in §10.1 are implemented and obsolete as implementation requirements; see ARCHITECTURE §12.
+
 **Built 2026-11-05 (branchrows):** The current-branch group classification (§2.1), split-relative branch additions (§3.2), and selected-row rename (§10.1) decisions are implemented and obsolete as implementation requirements; see ARCHITECTURE §3.8 and §12.
 
 **Built 2026-11-05 (castorder):** The chat-row character order in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §3.8.
@@ -1056,6 +1058,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D] Branch and chat pins** (owner, 2026-11-04): “Currently you can pin any branch, and it becomes listed among pinned chats. This feels somewhat odd, you go straight from a branch being one of many under a chat, to it being pinned at the global top level among a few chats.” “Usually, you'd want to pin a branch *above others* somehow, because it's one of the main branches of conversation you want to remember/continue and separate it from the rest, which could be a long list kept for historical reasons.” (Owner, 2026-11-05, approving branch-row pins within their chat and chat-row pins globally): “Yes, this should obviously be done.” Pinned branches precede named branches, then the rest, each by last message. Global Pinned lists chats once, opening their current branch. Existing pinned branches retain their local pin and pin their chat globally. Both pins explain their action on hover/focus. **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
+- **[P]** (pinsplit, 2026-11-05; implemented) Keep branch pin storage; migration 0004 rebuilds the unused chat pin table with one row per user/chat and carries existing branch pins over. Existing registered shell rows select the corresponding pin operation.
 
 - **[D]** (owner, 2026-11-05, branchrows) “If we put the pencil, the button has to be far smaller than it normally is to fit the layout and the title text size. It CANNOT make the card taller. Moreover, I am thinking about whether we want it on every branch, or just the selected one. Probably the latter.” Only the selected left-panel branch row has a small pencil after its name, opening the shared inline rename with Enter/Escape and confirm/cancel, without changing row height. **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
 - **[P]** (branchrows, 2026-11-05; implemented) The existing registered branch-list surface uses compact `InlineRename`, the `NameFork` RPC and existing `SetForkName` worker operation. An invisible copy preserves the title's measured height while the editor replaces it.

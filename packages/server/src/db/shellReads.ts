@@ -99,7 +99,7 @@ const byTurn = (forks: ReadonlyArray<Fork>, entity: string) => {
 const categoryOf = (f: Fork, entity: string) =>
   f.activity.find((a) => a.entityId === entity)?.category ?? (f.departed.some((id) => id === entity) ? "was" : "with")
 
-/** Chat metrics come from the current path, and pins from any live branch. No message reads. */
+/** Chat metrics come from the current path; chat pins are independent of branch pins. */
 const inChatFilter = (f: Fork, filter: ChatBrowse["filter"], pinned: ReadonlySet<string>) =>
   filter === "pinned"
     ? pinned.has(f.chat.id)
@@ -159,12 +159,15 @@ const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection):
   switch (id) {
     case "pinned":
       return sortBy(
-        scoped.filter(
-          (f) =>
-            f.pinned &&
-            (!view.browse || inChatFilter(state.chatIndex.get(f.chat.id)!, view.browse.filter, state.pinnedChats))
-        ),
-        view.sort
+        perChat(scoped)
+          .filter(
+            (f) =>
+              state.pinnedChats.has(f.chat.id) &&
+              (!view.browse || inChatFilter(state.chatIndex.get(f.chat.id)!, view.browse.filter, state.pinnedChats))
+          )
+          .map((f) => state.chatIndex.get(f.chat.id)!),
+        view.sort,
+        "chat"
       )
     case "chats":
       return view.browse ? browseChats(perChat(scoped), view.browse, state) : perChat(scoped)
@@ -183,8 +186,10 @@ const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection):
       }
     case "current":
       return scoped.filter((f) => f.current)
+    case "pinnedBranches":
+      return byLast(scoped.filter((f) => f.pinned))
     case "peers":
-      return byLast(scoped.filter(peer))
+      return byLast(scoped.filter((f) => f.named && !f.pinned))
     case "other":
       return byLast(scoped.filter((f) => !peer(f)))
     case "groups": {
@@ -257,6 +262,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           )
         ])
       )
+      const chatPins = yield* sql<{ chat_id: string }>`SELECT chat_id FROM chat_pins WHERE user_id = ${userId}`
+      const pinnedChats = new Set(chatPins.map((row) => row.chat_id))
       // Each live fork with its chat and its stored summary, when there is one: only what the shell shows.
       const joinedRows = yield* sql<{
         id: string
@@ -401,6 +408,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           named: record.name !== null,
           current: record.id === row.current_fork_id,
           pinned: record.pinned_at !== null,
+          chatPinned: pinnedChats.has(record.chat_id),
           original: record.parent_fork_id === null,
           split: s.split,
           createdAt: record.created_at,
@@ -522,7 +530,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         personas: shellCards.filter((c) => byCard.get(c.card.entityId)!.persona),
         forks,
         chatIndex: new Map(perChat(forks).map((f) => [f.chat.id, f])),
-        pinnedChats: new Set(forks.filter((f) => f.pinned).map((f) => f.chat.id)),
+        pinnedChats,
         pinsCollapsed: prefs?.pins_collapsed === 1,
         fresh: [...fresh].map(([chatId, list]) => ({
           chatId,

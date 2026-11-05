@@ -476,6 +476,7 @@ export class WriteOps extends RpcGroup.make(
   historyWriteRpcs[1]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[1].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
+  /** Pins the owned chat globally. Legacy leaf/forkId are ignored. */
   Rpc.make("SetChatPin", {
     payload: {
       userId: UserId,
@@ -877,7 +878,7 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Struct({ fork: Fork, startSlotId: Schema.NullOr(SlotId) }),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** Pins a live fork of the user's, or unpins it: pinned forks are its chat's peers (UX-REWORK §3). */
+  /** Pins a live fork within its chat only, independently of the global chat pin. */
   Rpc.make("SetForkPinned", {
     payload: { userId: UserId, forkId: ForkId, pinned: Schema.Boolean },
     success: Fork,

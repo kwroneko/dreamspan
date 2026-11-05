@@ -29,6 +29,7 @@ for (const width of [1440, 390])
           yield* api.NameFork({ forkId: peer.id, name: `Checkpoint ${width} ${theme}` })
           yield* api.PinFork({ forkId: original.id, pinned: true })
           yield* api.PinFork({ forkId: peer.id, pinned: true })
+          yield* api.SetChatPin({ chatId: start.chat.id, leaf: null, pinned: true })
           return {
             a,
             chatName: `Identity ${width} ${theme} & Companion ${width} ${theme}`,
@@ -45,11 +46,10 @@ for (const width of [1440, 390])
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       await page.goto(server().url)
       const pins = page.getByRole("main").getByRole("region", { name: "Pinned chats", exact: true })
-      // Pins are branches: each row names its chat, then the branch (fheader).
-      const pin = (name: string) =>
-        pins.getByRole("button", { name: `Open chat ${data.chatName} › ${name}`, exact: true })
-      await expect(pin(data.original.name)).toBeVisible()
-      await expect(pin(data.peer.name)).toBeVisible()
+      // Global pins are chats, represented once by the current branch.
+      const pin = pins.getByRole("button", { name: `Open chat ${data.chatName}`, exact: true })
+      await expect(pin).toHaveCount(1)
+      await expect(pin).toBeVisible()
       await expect(page.locator("html")).toHaveCSS("color-scheme", theme)
       const screens = process.env.SCREENSHOT_DIR
       if (screens) {
@@ -57,8 +57,8 @@ for (const width of [1440, 390])
         await page.screenshot({ path: join(screens, `shell-forks-${width}-${theme}.png`), fullPage: true })
       }
       // The original shares its tip with the current peer; a leaf-only URL opens the peer.
-      await pin(data.original.name).click()
-      await expect(page).toHaveURL(new RegExp(`fork=${data.original.id}`))
+      await pin.click()
+      await expect(page).toHaveURL(new RegExp(`fork=${data.currentForkId}`))
       await expect(page.getByRole("article").filter({ hasText: "Shared checkpoint text" })).toBeVisible()
       await page.goto(server().url)
       await page

@@ -23,6 +23,16 @@ export const migrations = {
   ]),
   "0003_branch_added_characters": runAll([
     `ALTER TABLE fork_summaries ADD COLUMN added_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(added_json))`
+  ]),
+  "0004_chat_pins": runAll([
+    `CREATE TABLE chat_pins_new (user_id TEXT NOT NULL REFERENCES users(id),
+      chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, PRIMARY KEY(user_id, chat_id))`,
+    `INSERT INTO chat_pins_new (user_id, chat_id)
+      SELECT user_id, chat_id FROM chat_pins
+      UNION SELECT c.owner_user_id, f.chat_id FROM forks f JOIN chats c ON c.id = f.chat_id
+      WHERE f.pinned_at IS NOT NULL`,
+    `DROP TABLE chat_pins`,
+    `ALTER TABLE chat_pins_new RENAME TO chat_pins`
   ])
 }
 
