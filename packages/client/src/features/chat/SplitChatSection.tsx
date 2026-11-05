@@ -43,7 +43,7 @@ export function SplitLink({
 export function SplitChatSection() {
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
-  const split = useSplitChats((params.chatId ?? null) as ChatId | null, shown)
+  const nextSplit = useSplitChats((params.chatId ?? null) as ChatId | null, shown)
   const userId = useSession().user.id
   const key = `rp.splitChatsOpen.${userId}`
   const [expanded, setExpanded] = useState(() => {
@@ -53,17 +53,23 @@ export function SplitChatSection() {
       return true
     }
   })
-  const visible = !!split && (split.parent !== null || split.children.length > 0)
-  const { ref, height, min, max, change, reset } = useBranchHeight(userId, visible, "split", true)
   const forks = useShellForks({
     entity: null,
     chat: null,
-    chats: split?.children.map((c) => c.id) ?? [],
+    chats: nextSplit?.children.map((c) => c.id) ?? [],
     search: "",
     sort: "recent",
     sections: [{ id: "chats", limit: 5000 }]
   })
-  if (!visible) return null
+  const nextRows = forks.section("chats").rows
+  const [last, setLast] = useState<{ split: typeof nextSplit; rows: typeof nextRows } | null>(null)
+  const ready = nextSplit !== null && !forks.loading
+  if (ready && (last?.split !== nextSplit || last?.rows !== nextRows)) setLast({ split: nextSplit, rows: nextRows })
+  const split = ready ? nextSplit : last?.split
+  const rows = ready ? nextRows : (last?.rows ?? [])
+  const visible = params.chatId !== undefined && !!split && (split.parent !== null || split.children.length > 0)
+  const { ref, height, min, max, change, reset } = useBranchHeight(userId, visible, "split", true)
+  if (!visible || !split) return null
   const toggle = () => {
     setExpanded(!expanded)
     try {
@@ -75,6 +81,8 @@ export function SplitChatSection() {
   return (
     <section
       ref={ref}
+      inert={!ready}
+      aria-busy={!ready}
       aria-label="Split chats"
       style={expanded ? { height: height } : undefined}
       className="relative flex min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
@@ -116,7 +124,7 @@ export function SplitChatSection() {
       </div>
       {expanded && split.children.length > 0 && (
         <div className="flex min-h-0 flex-col gap-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
-          {forks.section("chats").rows.map((fork) => (
+          {rows.map((fork) => (
             <ForkRow key={fork.chat.id} fork={fork} splitNavigation />
           ))}
         </div>

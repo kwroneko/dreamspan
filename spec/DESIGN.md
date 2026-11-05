@@ -1,3 +1,5 @@
+**Built 2026-11-05 (chatflash):** The chat-switch handover in §10.1 is implemented and obsolete as an implementation proposal; see ARCHITECTURE §12.
+
 **Built 2026-11-05 (lockline2):** The preset/model picker scope-line removal in §2.2 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §15.
 
 **Built 2026-11-05 (pinsplit):** Branch-local and global chat pins in §10.1 are implemented and obsolete as implementation requirements; see ARCHITECTURE §12.
@@ -1066,6 +1068,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D]** Chat-switch flashes (owner, 2026-11-05): “"first time" for each chat, not for the page. Also that's only for the sidebar. For the chat view itself it seems to flash every time a chat is switched”. Investigate both sidebar and centre in Vite and built clients, including owner-sized synthetic data.
+- **[P]** How (chatflash, built 2026-11-05; obsolete as an implementation proposal, see ARCHITECTURE §12): retain the outgoing chat until the incoming session's first window is ready, and retain branch/split sections until their replacement reads finish; retained controls are inert during the handover. Keep the existing virtualizer landing and restoration logic.
 
 - **[D]** (owner, 2026-11-05, splitlink follow-up) “The title line of a branch row never wraps: the title truncates with an ellipsis, and the pencil and the 'opens here' chip stay on that one line after it, at every panel width including phone. Row height must be identical with and without the pencil/chip.” **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
 

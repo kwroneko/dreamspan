@@ -15,7 +15,7 @@ import { registerModelMarks } from "./modelMarks.tsx"
 import { registerReplyCommands } from "./replyCommands.ts"
 import { registerHistoryCommands } from "./historyContributions.ts"
 import { registerPanels } from "./registerPanels.tsx"
-import { createElement, lazy, Suspense } from "react"
+import { createElement, lazy, Suspense, useState } from "react"
 import { loadChatPage, loadedChatPage } from "./chatPageLoader.ts"
 import { routes } from "../../routes.tsx"
 import { Loading, reloadPage } from "../../ui/Spinner.tsx"
@@ -34,13 +34,8 @@ const ContextPage = lazy(() => import("./ContextPage.tsx").then((module) => ({ d
 
 function LazyChatPage() {
   // Loaded ahead (a pending chat does, chatPageLoader.ts): no fallback to show.
-  const Loaded = loadedChatPage()
-  if (Loaded) return createElement(Loaded)
-  return (
-    <Suspense fallback={<ChatSkeleton onRetry={reloadPage} />}>
-      <ChatPage />
-    </Suspense>
-  )
+  const [Page] = useState(() => loadedChatPage() ?? ChatPage)
+  return <Suspense fallback={<ChatSkeleton onRetry={reloadPage} />}>{createElement(Page)}</Suspense>
 }
 
 function LazyContextPage() {

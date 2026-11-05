@@ -19,7 +19,7 @@ import { useIsPanelTab } from "./panels.tsx"
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
 import type { ChatId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
-import { useLocation, useNavigate, useParams, useSearch } from "@tanstack/react-router"
+import { useLocation, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   useCallback,
@@ -32,7 +32,7 @@ import {
   useSyncExternalStore
 } from "react"
 import { Button } from "../../ui/Button.tsx"
-import { SkeletonMessages } from "./SkeletonMessages.tsx"
+import { ChatSkeleton, SkeletonMessages } from "./SkeletonMessages.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { TooltipProvider } from "../../ui/Tooltip.tsx"
 import { showToast } from "../../ui/Toast.tsx"
@@ -511,17 +511,61 @@ function OpenChat({
 }) {
   const registry = useContext(RegistryContext)
   const userId = useSession().user.id
-  const [session] = useState(() => new ChatSession(chatId, fork, registry, userId, (title) => showToast({ title })))
-  useLookingAt(chatId)
-  // The slot the chat opened at; a deep link within the open chat moves the window instead.
   const reading = useLocation({ select: (l) => l.state.chatReading })
-  const [restore] = useState(() => (reading?.key === `${userId}/${chatId}/${fork}` ? reading : null))
-  const [initialSlot] = useState(restore ? restore.slot : slot)
-  useEffect(() => {
-    session.start(initialSlot)
-    return () => session.dispose()
-  }, [session, initialSlot])
-  return <ChatSurface session={session} fork={fork} slot={slot} panel={panel} restore={restore} />
+  // Capture the initial destination once per chat. Later links within this chat still
+  // move its existing window through ChatSurface rather than starting another session.
+  const [target, setTarget] = useState({ chatId, fork, slot, panel, reading })
+  const [active, setActive] = useState<{
+    key: number
+    session: ChatSession
+    restore: ReadingPosition | null
+  } | null>(null)
+  if (target.chatId !== chatId || (active?.session.id !== chatId && (target.fork !== fork || target.slot !== slot)))
+    setTarget({ chatId, fork, slot, panel, reading })
+  // A seeded session (the first send from a pending chat) is ready synchronously;
+  // publish it before paint so that handover keeps its existing no-skeleton behaviour.
+  useLayoutEffect(() => {
+    const session = new ChatSession(target.chatId, target.fork, registry, userId, (title) => showToast({ title }))
+    const restore = target.reading?.key === `${userId}/${target.chatId}/${target.fork}` ? target.reading : null
+    let accepted = false
+    const ready = () => {
+      if (accepted || session.snapshot().loading) return
+      accepted = true
+      setActive((before) => ({ key: (before?.key ?? 0) + 1, session, restore }))
+    }
+    const unsubscribe = session.subscribe(ready)
+    session.start(restore ? restore.slot : target.slot)
+    ready()
+    return () => {
+      unsubscribe()
+      if (!accepted) session.dispose()
+    }
+  }, [target, registry, userId])
+  useEffect(() => () => active?.session.dispose(), [active])
+  const pending = active?.session.id !== chatId
+  const [surface, setSurface] = useState({ chatId, fork, slot, panel })
+  if (
+    !pending &&
+    (surface.chatId !== chatId || surface.fork !== fork || surface.slot !== slot || surface.panel !== panel)
+  )
+    setSurface({ chatId, fork, slot, panel })
+  useLookingAt(active?.session.id ?? chatId)
+  if (!active) return <ChatSkeleton onRetry={() => window.location.reload()} />
+  // The outgoing surface keeps its own destination until the new read finishes. Inert
+  // prevents an edit or a branch action against the outgoing chat during that interval.
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" inert={pending} aria-busy={pending}>
+      <ChatSurface
+        key={active.key}
+        session={active.session}
+        fork={pending ? surface.fork : fork}
+        slot={pending ? surface.slot : slot}
+        panel={pending ? surface.panel : panel}
+        restore={active.restore}
+        pending={pending}
+      />
+    </div>
+  )
 }
 
 function ChatSurface({
@@ -529,16 +573,19 @@ function ChatSurface({
   fork,
   slot,
   panel: urlPanel,
-  restore
+  restore,
+  pending
 }: {
   session: ChatSession
   fork: ForkId | null
   slot: SlotId | null
   panel: PanelTab | null
   restore: ReadingPosition | null
+  pending: boolean
 }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const navigate = useNavigate()
+  const router = useRouter()
   const { panel, show, withPanel, wide, userId } = usePanel(urlPanel, view)
   const shown = useRef({ fork, slot })
   const [originalTarget] = useState({ fork, slot })
@@ -555,11 +602,19 @@ function ChatSurface({
   }, [session, fork, slot, view.forkId, view.chat])
   // Deleted while open, here or elsewhere: there's nothing left to show.
   useEffect(() => {
-    if (view.deleted) void navigate({ to: "/chats", replace: true })
-  }, [navigate, view.deleted])
-  // Pin the viewed branch even when it is currently the chat's default.
+    if (!pending && view.deleted) void navigate({ to: "/chats", replace: true })
+  }, [navigate, pending, view.deleted])
+  // Pin the viewed branch even when it is currently the chat's default. The router's
+  // location can advance before these props; an outgoing render must not undo the pick.
   useEffect(() => {
+    const latestFork = router.latestLocation.search.fork
     if (
+      router.latestLocation.pathname !== `/chats/${session.id}` ||
+      (typeof latestFork === "string" && latestFork !== "" ? latestFork : null) !== fork
+    )
+      return
+    if (
+      !pending &&
       !session.snapshot().loading &&
       view.forkId === session.snapshot().forkId &&
       view.forkId !== null &&
@@ -571,7 +626,7 @@ function ChatSurface({
         replace: true,
         resetScroll: false
       })
-  }, [navigate, session, fork, view.forkId])
+  }, [navigate, router, session, fork, view.forkId, pending])
   // Rows read the cast from context: it's the same object until the cast changes.
   const cast = useMemo(() => castView(view.cast), [view.cast])
   /** Turning summaries on, which asks first what it costs. */
@@ -740,7 +795,7 @@ export function ChatPage() {
   const panel = validPanel ? (search.panel as string) : null
   return (
     <div data-fill className="flex min-h-0 flex-1 flex-col">
-      <OpenChat key={chatId} chatId={chatId} fork={fork} slot={slot} panel={panel} />
+      <OpenChat chatId={chatId} fork={fork} slot={slot} panel={panel} />
     </div>
   )
 }

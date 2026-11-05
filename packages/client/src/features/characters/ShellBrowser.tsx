@@ -9,7 +9,7 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
-import { useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, FailureView, useAction } from "../../actions.tsx"
 import type { ForkId } from "@rp/shared/chat.ts"
 import { InlineRename } from "../../ui/InlineRename.tsx"
@@ -483,13 +483,36 @@ export function OpenChatBranches() {
       { id: "other", limit: 5000 }
     ]
   })
-  const rows = [...forks.section("pinnedBranches").rows, ...forks.section("peers").rows, ...forks.section("other").rows]
-  const visible = chatId !== null && !grid && scope.chat !== chatId && rows.length > 0
+  const pinned = forks.section("pinnedBranches").rows
+  const peers = forks.section("peers").rows
+  const other = forks.section("other").rows
+  const nextRows = useMemo(() => [...pinned, ...peers, ...other], [pinned, peers, other])
+  // Uncached per-chat reads used to remove the section, stretching the list above it.
+  // Commit split metadata and branch rows together; keep the outgoing section meanwhile.
+  const [last, setLast] = useState<{
+    chatId: ChatId
+    rows: typeof nextRows
+    split: typeof split
+    shown: typeof shown
+  } | null>(null)
+  const ready = split !== null && !forks.loading
+  if (
+    ready &&
+    chatId !== null &&
+    (last?.chatId !== chatId || last.split !== split || last.rows !== nextRows || last.shown !== shown)
+  )
+    setLast({ chatId, rows: nextRows, split, shown })
+  const rows = ready ? nextRows : (last?.rows ?? [])
+  const displayedSplit = ready ? split : last?.split
+  const displayedChat = ready ? chatId : last?.chatId
+  const displayedFork = ready ? shown : last?.shown
+  const waiting = !ready
+  const visible = params.chatId !== undefined && !grid && scope.chat !== displayedChat && rows.length > 0
   const { ref, height, min, max, change, reset } = useBranchHeight(
     userId,
     visible,
     "branch",
-    !!split && (split.parent !== null || split.children.length > 0)
+    !!displayedSplit && (displayedSplit.parent !== null || displayedSplit.children.length > 0)
   )
   if (!visible) return null
   const toggle = () => {
@@ -504,6 +527,8 @@ export function OpenChatBranches() {
   return (
     <section
       ref={ref}
+      inert={waiting}
+      aria-busy={waiting}
       aria-label="Branches of the open chat"
       style={expanded ? { height } : undefined}
       className="relative flex min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
@@ -544,13 +569,19 @@ export function OpenChatBranches() {
           label="List these branches in the panel"
           hint="Show these branches in the sidebar"
           icon="expand"
-          onClick={() => setScope({ entity: null, chat: chatId })}
+          onClick={() => setScope({ entity: null, chat: displayedChat ?? null })}
         />
       </div>
       {expanded && (
         <div className="flex min-h-0 flex-col gap-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
           {rows.map((f) => (
-            <ForkRow key={f.forkId} fork={f} perFork branchOnly here={shown ? f.forkId === shown : f.current} />
+            <ForkRow
+              key={f.forkId}
+              fork={f}
+              perFork
+              branchOnly
+              here={displayedFork ? f.forkId === displayedFork : f.current}
+            />
           ))}
         </div>
       )}
