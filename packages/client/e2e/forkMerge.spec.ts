@@ -9,11 +9,28 @@ import { Effect } from "effect"
 import { book, draftField, importFile, saveField, seedPresetFork } from "./support/forkMerge.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
-import { asUser } from "./support/rpc.ts"
-import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
+import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+// Reuse this synthetic user's session: repeated fixture RPCs must not exhaust login limits.
+let session: Promise<string> | undefined
+const sessionCookie = () => (session ??= loginCookie(server(), ADMIN.handle, ADMIN.password))
+const admin = async <A>(use: (api: Client) => Effect.Effect<A, unknown>) =>
+  withCookie(server(), await sessionCookie(), use)
+const signIn = async (page: Page) => {
+  const cookie = await sessionCookie()
+  const at = cookie.indexOf("=")
+  await page.context().addCookies([
+    {
+      name: cookie.slice(0, at),
+      value: cookie.slice(at + 1),
+      url: server().url,
+      httpOnly: true,
+      sameSite: "Strict"
+    }
+  ])
+}
 const shots = process.env.FORK_MERGE_ARTIFACTS
 
 /** A screenshot (when asked for) and, under LAYOUT_AUDIT, the audit of that surface. */
@@ -40,7 +57,7 @@ for (const width of [1440, 390])
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await signIn(page)
       const { fork, parent } = await seedPresetFork(server(), ` ${width} ${theme}`)
       await page.goto(`${server().url}/library/${fork.id}`)
 
@@ -101,7 +118,7 @@ test("unsaved fields refuse the merge until saved or reverted, and an older pare
   page
 }) => {
   test.setTimeout(120_000)
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const { fork } = await seedPresetFork(server(), " drafts")
   await admin((api) => draftField(api, fork.id, ["prompts", "identifier=main", "content"], "UNSAVED NIGHT TEXT"))
   await page.goto(`${server().url}/library/${fork.id}`)
@@ -130,7 +147,7 @@ test("unsaved fields refuse the merge until saved or reverted, and an older pare
 
 test("a stale comparison keeps the choices and compares again", async ({ page }) => {
   test.setTimeout(120_000)
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const { fork } = await seedPresetFork(server(), " stale")
   await page.goto(`${server().url}/library/${fork.id}`)
   await notice(page).getByRole("button", { name: "Review and merge" }).click()
@@ -167,7 +184,7 @@ for (const width of [1440, 390])
   test(`a lorebook fork merges from the chat's side panel and shows its family ${width}`, async ({ page }, info) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width, height: 900 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await signIn(page)
     const lore = await importFile(
       page.request,
       server(),
@@ -270,7 +287,7 @@ const cardFile = (description: string, scenario: string, entry: string) => ({
 
 test("a card merges a new version of its file instead of replacing it", async ({ page }, info) => {
   test.setTimeout(120_000)
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const card = await importFile(
     page.request,
     server(),
@@ -313,7 +330,7 @@ test("a card fork in a chat offers its parent's changes; one marked by hand expl
   page
 }) => {
   test.setTimeout(120_000)
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const seed = await admin((api) =>
     Effect.gen(function* () {
       const card = yield* api.CreateCard({ label: "Gull", name: "Gull" })
@@ -345,7 +362,7 @@ test("a card fork in a chat offers its parent's changes; one marked by hand expl
 })
 
 test("a refused choices draft keeps the review open without announcing a merge", async ({ page }, info) => {
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const { fork } = await seedPresetFork(server(), " draft refusal")
   let refuse = true
   let commits = 0
@@ -388,7 +405,7 @@ test("a refused choices draft keeps the review open without announcing a merge",
 })
 
 test("merge waits for saved exclusions to load after reopening", async ({ page }, info) => {
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const lore = await importFile(
     page.request,
     server(),
@@ -445,7 +462,7 @@ test("merge waits for saved exclusions to load after reopening", async ({ page }
 })
 
 test("held preset changes refuse review with Save and Revert", async ({ page }, info) => {
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const { fork } = await seedPresetFork(server(), " held")
   await admin((api) => draftField(api, fork.id, ["~held"], JSON.stringify({ deleted: ["nsfw"] })))
   await page.goto(`${server().url}/library/${fork.id}`)
@@ -459,7 +476,7 @@ test("held preset changes refuse review with Save and Revert", async ({ page }, 
 })
 
 test("held preset changes disable Undo merge at the head", async ({ page }, info) => {
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const { fork } = await seedPresetFork(server(), " held undo")
   await admin((api) =>
     Effect.gen(function* () {
