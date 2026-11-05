@@ -396,8 +396,11 @@ export function Editor({
                 ref.kind !== "note" &&
                 ref.refKind !== "chat_override" && (
                   <>
-                    <Button hint="Makes a named copy to change on its own." onClick={() => setOpen("fork")}>
-                      Fork
+                    <Button
+                      hint="A named copy with its own changes. Later changes to this one can be merged into it."
+                      onClick={() => setOpen("fork")}
+                    >
+                      Make a variant
                     </Button>
                     <SlotOutlet slot={editorActions} props={{ store }} />
                   </>
@@ -505,12 +508,12 @@ export function Editor({
                 {ref.refKind !== "chat_override" && (
                   <Button
                     className="h-8! px-2!"
-                    aria-label="Fork"
-                    hint="Makes a named copy to change on its own."
+                    aria-label="Make a variant"
+                    hint="Makes a named copy with its own changes."
                     onClick={() => setOpen("fork")}
                   >
                     <Icon name="branch" />
-                    <span>Fork</span>
+                    <span>Make a variant</span>
                   </Button>
                 )}
                 <SlotOutlet slot={editorActions} props={{ store }} />

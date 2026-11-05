@@ -104,10 +104,10 @@ for (const width of [390, 1440])
         await expect(selectedVariant).toBeVisible()
         await expect(page).toHaveURL(new RegExp(`/chats/${fixture.chat.id}`))
         await selectedVariant.getByRole("link", { name: "Waters", exact: true }).click()
-        await editor.getByRole("button", { name: "Fork", exact: true }).click()
-        const variantDialog = page.getByRole("dialog", { name: "Fork", exact: true })
+        await editor.getByRole("button", { name: "Make a variant", exact: true }).click()
+        const variantDialog = page.getByRole("dialog", { name: "Make a variant", exact: true })
         await expect(variantDialog.getByRole("textbox", { name: "Library label", exact: true })).toHaveValue(
-          "Waters (fork)"
+          "Waters (variant)"
         )
         await variantDialog.getByRole("button", { name: "Cancel", exact: true }).click()
         await editor.getByText("Book settings", { exact: false }).click()
@@ -125,10 +125,10 @@ for (const width of [390, 1440])
           .click()
       }
       if (!process.env.PARITY_BEFORE) {
-        await editor.getByRole("button", { name: "Fork", exact: true }).click()
-        const create = page.getByRole("dialog", { name: "Fork", exact: true })
+        await editor.getByRole("button", { name: "Make a variant", exact: true }).click()
+        const create = page.getByRole("dialog", { name: "Make a variant", exact: true })
         await create.getByRole("textbox", { name: "Library label", exact: true }).fill(`New waters ${width} ${theme}`)
-        await create.getByRole("button", { name: "Fork", exact: true }).click()
+        await create.getByRole("button", { name: "Make the variant", exact: true }).click()
         await expect(
           lore.getByRole("region", { name: `Lorebook New waters ${width} ${theme}`, exact: true })
         ).toBeVisible()
