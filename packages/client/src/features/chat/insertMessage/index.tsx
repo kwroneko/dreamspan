@@ -84,6 +84,7 @@ function GeneratingNote({ entry, place }: { entry: PathEntry; place: "above" | "
 export const register = () => [
   messageActions.register({
     id: "message.insert-above",
+    onMerges: true,
     order: 70,
     group: "place",
     available: isFirst,
@@ -96,6 +97,7 @@ export const register = () => [
   }),
   messageActions.register({
     id: "message.insert-below",
+    onMerges: true,
     order: 71,
     group: "place",
     run: ({ session, entry }) => openInsertEditor(session, entry),

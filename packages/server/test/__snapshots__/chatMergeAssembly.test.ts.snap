@@ -1,0 +1,99 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`merge layouts > block at the join: heading, the source and the marker where the merge is 1`] = `
+[
+  {
+    "content": "Main prompt",
+    "role": "system",
+  },
+  {
+    "content": "[Start a new group chat. Group members: Mira, Kai]",
+    "role": "system",
+  },
+  {
+    "content": "Mira: Mira greets you at the gate.",
+    "role": "assistant",
+  },
+  {
+    "content": "We leave the gate.",
+    "role": "user",
+  },
+  {
+    "content": "Mira: Mira leads the way to the market.",
+    "role": "assistant",
+  },
+  {
+    "content": "We buy apples.",
+    "role": "user",
+  },
+  {
+    "content": "Mira: Mira haggles.",
+    "role": "assistant",
+  },
+  {
+    "content": "Meanwhile, elsewhere: Docks, with Kai.
+
+Kai: The rain came in over the docks.
+
+Ana: We wait under the awning.",
+    "role": "system",
+  },
+  {
+    "content": "[Here “Docks” joins this chat.]",
+    "role": "system",
+  },
+  {
+    "content": "[Write the next reply only as Mira.]",
+    "role": "user",
+  },
+]
+`;
+
+exports[`merge layouts > parallel span: the section opens the destination's parallel span, the marker sits at the join 1`] = `
+[
+  {
+    "content": "Main prompt",
+    "role": "system",
+  },
+  {
+    "content": "[Start a new group chat. Group members: Mira, Kai]",
+    "role": "system",
+  },
+  {
+    "content": "Mira: Mira greets you at the gate.",
+    "role": "assistant",
+  },
+  {
+    "content": "We leave the gate.",
+    "role": "user",
+  },
+  {
+    "content": "Meanwhile, in parallel with what follows: Docks, with Kai.
+
+Kai: The rain came in over the docks.
+
+Ana: We wait under the awning.",
+    "role": "system",
+  },
+  {
+    "content": "Mira: Mira leads the way to the market.",
+    "role": "assistant",
+  },
+  {
+    "content": "We buy apples.",
+    "role": "user",
+  },
+  {
+    "content": "Mira: Mira haggles.",
+    "role": "assistant",
+  },
+  {
+    "content": "[Here “Docks” joins this chat.]",
+    "role": "system",
+  },
+  {
+    "content": "[Write the next reply only as Mira.]",
+    "role": "user",
+  },
+]
+`;

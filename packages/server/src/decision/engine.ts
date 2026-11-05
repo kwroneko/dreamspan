@@ -158,6 +158,7 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
               requestClass: context.requestClass,
               snapshot: JSON.stringify({ decision: { point: pointId, threshold, state, questions } })
             })
+            let finished = false
             const finish = (
               status: "completed" | "failed" | "stopped",
               error: string | null,
@@ -171,58 +172,80 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
                   error,
                   result: JSON.stringify(result)
                 })
-                .pipe(Effect.catchCause((cause) => Effect.logError(`closing decision ${rolloutId} failed`, cause)))
-            const sent = yield* providers
-              .decide({
-                userId: context.userId,
-                connectionId,
-                modelId,
-                state,
-                questions,
-                attribution: { chatId: context.chatId, rolloutId }
+                .pipe(
+                  Effect.catchCause((cause) => Effect.logError(`closing decision ${rolloutId} failed`, cause)),
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      finished = true
+                    })
+                  )
+                )
+            return yield* Effect.gen(function* () {
+              const sent = yield* providers
+                .decide({
+                  userId: context.userId,
+                  connectionId,
+                  modelId,
+                  state,
+                  questions,
+                  attribution: { chatId: context.chatId, rolloutId }
+                })
+                .pipe(Effect.timeoutOption(timeoutMs), Effect.exit)
+              if (Exit.isFailure(sent)) {
+                const interrupted = Cause.hasInterruptsOnly(sent.cause)
+                const failure = Option.getOrUndefined(Cause.findErrorOption(sent.cause))
+                const message = failure?.message ?? "the request failed"
+                yield* finish(interrupted ? "stopped" : "failed", interrupted ? null : message, {
+                  source: "heuristic",
+                  reason: "error"
+                })
+                if (interrupted) return yield* Effect.interrupt
+                return fallback("error", rolloutId)
+              }
+              if (Option.isNone(sent.value)) {
+                yield* finish("failed", `No answer within ${timeoutMs / 1000} s.`, {
+                  source: "heuristic",
+                  reason: "timeout"
+                })
+                return fallback("timeout", rolloutId)
+              }
+              const response = sent.value.value
+              const answers = parseAnswers(response.answers, questions)
+              if (!answers) {
+                yield* finish("failed", "The decision model's answer didn't fit the questions.", {
+                  source: "heuristic",
+                  reason: "malformed",
+                  servedModel: response.servedModel,
+                  raw: response.answers ?? null
+                })
+                return fallback("malformed", rolloutId)
+              }
+              const value = point.resolve(answers, input, threshold)
+              if (value === null) {
+                yield* finish("completed", null, {
+                  source: "heuristic",
+                  reason: "low_confidence",
+                  servedModel: response.servedModel,
+                  answers
+                })
+                return fallback("low_confidence", rolloutId)
+              }
+              yield* finish("completed", null, { source: "model", servedModel: response.servedModel, answers, value })
+              return { value, source: "model" as const, rolloutId }
+            }).pipe(
+              Effect.onExit((exit) => {
+                if (finished || Exit.isSuccess(exit)) return Effect.void
+                const interrupted = Cause.hasInterruptsOnly(exit.cause)
+                return finish(
+                  interrupted ? "stopped" : "failed",
+                  interrupted ? null : "The decision could not be resolved.",
+                  {
+                    source: "heuristic",
+                    reason: "error"
+                  }
+                )
               })
-              .pipe(Effect.timeoutOption(timeoutMs), Effect.exit)
-            if (Exit.isFailure(sent)) {
-              const interrupted = Cause.hasInterruptsOnly(sent.cause)
-              const failure = Option.getOrUndefined(Cause.findErrorOption(sent.cause))
-              const message = failure?.message ?? "the request failed"
-              yield* finish(interrupted ? "stopped" : "failed", interrupted ? null : message, {
-                source: "heuristic",
-                reason: "error"
-              })
-              if (interrupted) return yield* Effect.interrupt
-              return fallback("error", rolloutId)
-            }
-            if (Option.isNone(sent.value)) {
-              yield* finish("failed", `No answer within ${timeoutMs / 1000} s.`, {
-                source: "heuristic",
-                reason: "timeout"
-              })
-              return fallback("timeout", rolloutId)
-            }
-            const response = sent.value.value
-            const answers = parseAnswers(response.answers, questions)
-            if (!answers) {
-              yield* finish("failed", "The decision model's answer didn't fit the questions.", {
-                source: "heuristic",
-                reason: "malformed",
-                servedModel: response.servedModel,
-                raw: response.answers ?? null
-              })
-              return fallback("malformed", rolloutId)
-            }
-            const value = point.resolve(answers, input, threshold)
-            if (value === null) {
-              yield* finish("completed", null, {
-                source: "heuristic",
-                reason: "low_confidence",
-                servedModel: response.servedModel,
-                answers
-              })
-              return fallback("low_confidence", rolloutId)
-            }
-            yield* finish("completed", null, { source: "model", servedModel: response.servedModel, answers, value })
-            return { value, source: "model" as const, rolloutId }
+            )
           }).pipe(
             // Settings that can't be read, or a rollout that can't be written: the old way decides.
             Effect.catchCause((cause) =>

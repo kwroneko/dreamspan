@@ -1766,6 +1766,53 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.GetSplitChats({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
   },
+  // Merging another chat in (spec/CHAT-MERGE.md): neither side may be someone else's chat.
+  PreviewChatMerge: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const mine = { chatId: actor.chat.chatId, forkId: actor.chat.forkId }
+        const theirs = { chatId: owner.chat.chatId, forkId: owner.chat.forkId }
+        for (const [into, source] of [
+          [mine, theirs],
+          [theirs, mine]
+        ] as const)
+          yield* refused(actor.api.PreviewChatMerge({ ...into, at: null, source, includeLeftOut: false }), "NotFound")
+      })
+  },
+  MergeChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const mine = { chatId: actor.chat.chatId, forkId: actor.chat.forkId }
+        const theirs = { chatId: owner.chat.chatId, forkId: owner.chat.forkId }
+        for (const [into, source] of [
+          [mine, theirs],
+          [theirs, mine]
+        ] as const)
+          yield* refused(
+            actor.api.MergeChat({
+              ...into,
+              at: null,
+              source,
+              includeLeftOut: false,
+              title: "planted",
+              framing: null,
+              digest: ""
+            }),
+            "NotFound"
+          )
+      })
+  },
+  GetMerge: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        yield* refused(actor.api.GetMerge({ chatId: owner.chat.chatId, slotId: theirs.slotId }), "NotFound")
+      })
+  },
+  MergeMessages: {
+    probe: (actor, owner) =>
+      refused(actor.api.MergeMessages({ chatId: owner.chat.chatId, mergeId: "none", offset: 0, limit: 10 }), "NotFound")
+  },
   SetSplitChat: {
     probe: (actor, owner) => refused(actor.api.SetSplitChat({ forkId: owner.chat.forkId, split: true }), "NotFound")
   },

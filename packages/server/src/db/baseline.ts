@@ -385,7 +385,7 @@ export const baseline: ReadonlyArray<string> = [
     reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)),
     frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
     origin TEXT NOT NULL CHECK (origin IN
-      ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')),
+      ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate', 'merge')),
     source_version_id TEXT REFERENCES versions(id),
     greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)),
     direction TEXT,
@@ -1901,5 +1901,46 @@ export const baseline: ReadonlyArray<string> = [
     WHEN (SELECT chat_id FROM forks WHERE id=NEW.fork_id) IS NOT NEW.chat_id
     BEGIN SELECT RAISE(ABORT, 'maintenance belongs to a fork of its chat'); END`,
   `CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json)))`,
+  // A merge of another chat into this one (spec/CHAT-MERGE.md §2): its join message (slot_id),
+  // and its second parent, recorded softly: the source columns name another fork or chat and
+  // have no foreign key, so deleting the source never blocks or changes the destination.
+  `CREATE TABLE chat_merges (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    slot_id TEXT NOT NULL UNIQUE REFERENCES slots(id) ON DELETE CASCADE,
+    fork_id TEXT,
+    source_chat_id TEXT,
+    source_fork_id TEXT,
+    source_tip_slot_id TEXT,
+    base_slot_id TEXT,
+    start_slot_id TEXT,
+    title TEXT NOT NULL,
+    framing TEXT,
+    cast_json TEXT NOT NULL CHECK (json_valid(cast_json) AND json_type(cast_json) = 'array'),
+    counts_json TEXT NOT NULL CHECK (json_valid(counts_json) AND json_type(counts_json) = 'object'),
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX chat_merges_chat ON chat_merges(chat_id)`,
+  `CREATE INDEX chat_merges_source_fork ON chat_merges(chat_id, source_fork_id)`,
+  `CREATE TRIGGER chat_merges_same_chat BEFORE INSERT ON chat_merges
+    WHEN (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a merge''s join message is in its chat'); END`,
+  `CREATE TRIGGER chat_merges_frozen BEFORE UPDATE ON chat_merges
+    BEGIN SELECT RAISE(ABORT, 'a merge never changes'); END`,
+  `CREATE TABLE chat_merge_messages (
+    merge_id TEXT NOT NULL REFERENCES chat_merges(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('message', 'summary')),
+    source_slot_id TEXT,
+    speaker_entity_id TEXT,
+    speaker_name TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    sent_at INTEGER NOT NULL,
+    included TEXT NOT NULL CHECK (included IN ('verbatim', 'summarized', 'left_out')),
+    PRIMARY KEY (merge_id, ordinal)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TRIGGER chat_merge_messages_frozen BEFORE UPDATE ON chat_merge_messages
+    BEGIN SELECT RAISE(ABORT, 'a merged message never changes'); END`,
   ...shellSummaries
 ]
