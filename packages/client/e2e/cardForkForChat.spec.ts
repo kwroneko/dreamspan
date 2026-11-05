@@ -110,7 +110,9 @@ for (const width of [1440, 390])
       await expect(forked).toContainText("Storm")
       await forked.getByRole("button", { name: `Use another version: ${name}`, exact: true }).click()
       const family = page.getByRole("dialog", { name: "Use another version", exact: true })
-      await expect(family.getByRole("list", { name: "Card family" })).toContainText("Storm")
+      // Pickers omit bare version subtitles; the card's own tab above identifies Storm.
+      await expect(family.getByRole("list", { name: "Card family" })).not.toContainText("Storm")
+      await expect(family.getByRole("button", { name: `↳ ${name} · 0 chats · in use`, exact: true })).toBeDisabled()
       await shot("family")
       await family.getByRole("button", { name: `${name} · 1 chat`, exact: true }).click()
       await page

@@ -89,6 +89,59 @@ export const NoteCondition = Schema.Union([
 ])
 export type NoteCondition = typeof NoteCondition.Type
 
+/**
+ * The card fields a note can replace (DESIGN §4.2, spec/NOTE-OVERRIDES.md): those sent as prompt
+ * text. A persona has only its description.
+ */
+export const REPLACEABLE_CARD_FIELDS = [
+  "description",
+  "personality",
+  "scenario",
+  "mes_example",
+  "system_prompt",
+  "post_history_instructions"
+] as const
+export type ReplaceableCardField = (typeof REPLACEABLE_CARD_FIELDS)[number]
+
+/**
+ * What a note replaces wherever it applies (DESIGN §4.2): a preset prompt by its identifier,
+ * resolved in whichever preset the chat uses, or a card field. A card field's `card` is the
+ * character's place in the chat: the card named, or whichever card took its place through the
+ * branch's swaps (Fork for this chat, Use another version). A card's own note may leave it out
+ * for its own card.
+ */
+export const ReplaceTarget = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("preset_prompt"),
+    identifier: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("card_field"),
+    field: Schema.Literals(REPLACEABLE_CARD_FIELDS),
+    card: Schema.optionalKey(EntityId)
+  })
+])
+export type ReplaceTarget = typeof ReplaceTarget.Type
+
+const decodeTarget = Schema.decodeUnknownOption(ReplaceTarget)
+
+/** A stored `replaces`, or null when there's none or it isn't one (an undecoded document's). */
+export const readReplaceTarget = (raw: unknown): ReplaceTarget | null => Option.getOrNull(decodeTarget(raw))
+
+/**
+ * Whether a note goes where the prompt it replaces goes (DESIGN §4.2: by default), rather than at
+ * its own placement: then its placement is ignored.
+ */
+export const replacesInPlace = (doc: { readonly replaces?: unknown; readonly own_position?: unknown }) =>
+  readReplaceTarget(doc.replaces) !== null && doc.own_position !== true
+
+/**
+ * The card a card-field target names, its own card filled in for a card's note; null for a
+ * preset prompt, or a chat's note that names none.
+ */
+export const targetCard = (target: ReplaceTarget, ownerCard: string | null): string | null =>
+  target.kind === "card_field" ? (target.card ?? ownerCard) : null
+
 /** Who a note belongs to: a card, a chat, or no one (a shared named note/snippet, global or chat-scoped). */
 const NoteOwner = Schema.Union([
   Schema.Struct({ card: EntityId }),
@@ -105,6 +158,16 @@ export const NoteDoc = Schema.Struct({
   owner: NoteOwner,
   /** When it applies (absent: always). */
   condition: Schema.optionalKey(NoteCondition),
+  /**
+   * The preset prompt or card field this note replaces wherever it applies (DESIGN §4.2): on, it's
+   * sent in that prompt's place, and empty, the prompt is off; off, the prompt comes back.
+   */
+  replaces: Schema.optionalKey(ReplaceTarget),
+  /**
+   * With `replaces`: the note goes at its own `placement`, and the prompt it replaces is left out.
+   * Absent or false, it goes where that prompt would have gone.
+   */
+  own_position: Schema.optionalKey(Schema.Boolean),
   /** Lorebook entries can trigger on its text (ST's "Include in World Info Scanning"). Absent is off. */
   scan_lore: Schema.optionalKey(Schema.Boolean),
   /** A card's note on in every chat with the card unless the chat switches it off. Absent is off. */

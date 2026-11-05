@@ -9,6 +9,7 @@ import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Cause, Context, Effect, Exit, Layer, Stream } from "effect"
 import type { ContextSnapshot, Generation } from "../assembler/types.ts"
 import { providerRequest } from "../assembler/wire.ts"
+import { rolloutRequest } from "../agent/wire.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import type { SummaryJob } from "../db/lcmJobs.ts"
@@ -174,55 +175,19 @@ export function makeSummarizer(pool: boolean) {
           )
           const wire = providerRequest(hydrated, model)
           candidate = output.candidate
-          let context = output.tools ? { ...wire.context, tools: output.tools } : wire.context
           const extras: Message[] = []
           for (let turn = 0; turn < 8; turn++) {
             output.beginTurn()
             let answer: AssistantMessage | undefined
-            let payload = wire.payload
-            if (extras.length && model.api === "openai-completions") {
-              payload = {
-                ...payload,
-                messages: [
-                  ...((wire.payload?.messages as Array<unknown>) ?? []),
-                  ...extras.map((m) =>
-                    m.role === "assistant"
-                      ? {
-                          role: "assistant",
-                          content: m.content
-                            .filter((p) => p.type === "text")
-                            .map((p) => p.text)
-                            .join(""),
-                          tool_calls: m.content
-                            .filter((p) => p.type === "toolCall")
-                            .map((p) => ({
-                              id: p.id,
-                              type: "function",
-                              function: { name: p.name, arguments: JSON.stringify(p.arguments) }
-                            }))
-                        }
-                      : m.role === "toolResult"
-                        ? {
-                            role: "tool",
-                            tool_call_id: m.toolCallId,
-                            content: m.content
-                              .filter((p) => p.type === "text")
-                              .map((p) => p.text)
-                              .join("")
-                          }
-                        : m
-                  )
-                ]
-              }
-            }
+            const request = rolloutRequest(wire, model.api, extras, output.tools)
             yield* providers
               .stream({
                 userId: job.userId,
                 connectionId: model.connectionId as ConnectionId,
                 modelId: model.modelId as ModelId,
-                context,
+                context: request.context,
                 inspection: { request: generation.request, model, display: generation.inspection },
-                options: { ...wire, payload, sessionId: job.chatId },
+                options: { ...wire, payload: request.payload, sessionId: job.chatId },
                 attribution: {
                   purpose: job.level === 1 ? "summarize" : "condense",
                   chatId: job.chatId,
@@ -241,7 +206,6 @@ export function makeSummarizer(pool: boolean) {
             const reply: AssistantMessage = answer
             const { done, content, appended } = output.accept(reply)
             extras.push(...appended)
-            if (appended.length) context = { ...context, messages: [...context.messages, ...appended] }
             if (!done && turn < 7) continue
             if (!content.trim()) return yield* Effect.fail(new Error("The summary is empty."))
             for (const check of checks.list()) {

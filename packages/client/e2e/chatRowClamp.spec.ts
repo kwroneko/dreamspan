@@ -32,6 +32,7 @@ test.beforeAll(async () => {
         yield* api.RenameChat({ chatId: started.chat.id, name })
         const original = (yield* api.ListForks({ chatId: started.chat.id }))[0]!
         yield* api.PinFork({ forkId: original.id, pinned: true })
+        yield* api.SetChatPin({ chatId: started.chat.id, leaf: null, pinned: true })
         if (name !== title) continue
         chatId = started.chat.id
         for (const name of [title, token]) {
@@ -55,7 +56,7 @@ for (const width of [1440, 390])
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const geometry: unknown[] = []
     const capture = async (scope: Locator, scene: string) => {
-      const buttons = scope.locator("[data-chat-id]")
+      const buttons = scope.locator(".fork-row-open[data-chat-id]")
       await expect(buttons.first()).toBeVisible()
       for (const button of await buttons.all()) {
         const heading = button.locator("[data-chat-title]")
@@ -195,10 +196,10 @@ for (const width of [1440, 390])
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `${width}-${scene}.png`) })
       }
     }
+    // Compact branch rows have separate geometry coverage in branchRows.spec.ts.
     for (const [scene, query] of [
       ["all-pins-bottom", ""],
-      ["character", `?character=${characterId}`],
-      ["branches", `?forks=${chatId}`]
+      ["character", `?character=${characterId}`]
     ]) {
       await page.goto(`${server().url}/chats/${chatId}${query}`)
       if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()

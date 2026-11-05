@@ -72,6 +72,10 @@ test("split action acts on the branch shown and supports undo", async ({ page })
   await page.goto(`${server().url}/chats/${seed.chatId}?fork=${seed.market}`)
   await page.getByRole("button", { name: "Chat actions", exact: true }).click()
   await page.getByRole("menuitem", { name: "Make this branch its own chat", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Make this branch its own chat?", exact: true })
+    .getByRole("button", { name: "Make its own chat", exact: true })
+    .click()
   await expect(page.getByText("Branch is now its own chat", { exact: true })).toBeVisible()
   await expect(
     page

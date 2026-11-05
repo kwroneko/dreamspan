@@ -3,7 +3,17 @@ import { textActions } from "../../textActions.tsx"
 // shared named notes, used by the card editor, a note's own page and a chat's notes.
 import { useAtomValue } from "@effect/atom-react"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { anyOf, conditionCards, type NoteCondition, type Placement, readNoteCondition } from "@rp/shared/docs/note.ts"
+import {
+  anyOf,
+  conditionCards,
+  type NoteCondition,
+  type Placement,
+  readNoteCondition,
+  replacesInPlace
+} from "@rp/shared/docs/note.ts"
+import { SlotOutlet } from "../../slots.tsx"
+import { noteSettingSections } from "./fieldViews.ts"
+import { type NoteTargetNames, noteTarget, targetLabel } from "./noteTargets.ts"
 import { type FieldPath, valueField } from "@rp/shared/editing.ts"
 import type { ChatNotePosition, SharedNote } from "@rp/shared/editorApi.ts"
 import type { Doc } from "@rp/shared/library.ts"
@@ -167,6 +177,8 @@ const conditionText = (stored: unknown, cards: ReadonlyArray<NoteCard>) => {
     : `While ${anyOf([...shown, ...(others > 0 ? [`${others} others`] : [])])} isn't muted`
 }
 
+const INHERITED = "Goes where the prompt it replaces goes. Switch on Its own position to place it somewhere else."
+
 /** "With the definitions" for a card's note: inside its card's part (DESIGN §4.1). */
 const CARD_DEFINITIONS = "At the top of this card's own part of the definitions, inside its wrapper."
 
@@ -175,13 +187,16 @@ function PlacementField({
   store,
   path,
   label,
-  card
+  card,
+  inherited = false
 }: {
   store: EditorStore
   path: FieldPath
   label: string
   /** A card's note: "with the definitions" is inside its card's part. */
   card: boolean
+  /** It goes where the prompt it replaces goes: the position is greyed until it has its own. */
+  inherited?: boolean
 }) {
   const placement = useValue<Placement | undefined>(store, path) ?? END_OF_TAIL
   const [depth, setDepth] = useState<string | null>(null)
@@ -207,7 +222,15 @@ function PlacementField({
     <>
       <div className="min-w-40 flex-[3]">
         <Field label={label}>
-          <Select items={items} value={placeOf(placement)} onValueChange={(place) => set(place)} />
+          {inherited ? (
+            <Tooltip label={INHERITED}>
+              <span className="block">
+                <Select items={items} value={placeOf(placement)} disabled onValueChange={(place) => set(place)} />
+              </span>
+            </Tooltip>
+          ) : (
+            <Select items={items} value={placeOf(placement)} onValueChange={(place) => set(place)} />
+          )}
         </Field>
       </div>
       {placement.mode === "depth" && (
@@ -220,6 +243,7 @@ function PlacementField({
                 min={0}
                 max={10000}
                 value={depth ?? String(placement.depth)}
+                disabled={inherited}
                 onChange={(event) => {
                   const text = event.currentTarget.value
                   setDepth(text)
@@ -237,7 +261,12 @@ function PlacementField({
       {(placement.mode === "depth" || placement.mode === "tail" || placement.mode === "section") && (
         <div className="w-28">
           <Field label="Role">
-            <Select items={ROLES} value={role} onValueChange={(next) => set(placeOf(placement), { role: next })} />
+            <Select
+              items={ROLES}
+              value={role}
+              disabled={inherited}
+              onValueChange={(next) => set(placeOf(placement), { role: next })}
+            />
           </Field>
         </div>
       )}
@@ -469,10 +498,16 @@ export function NoteSettings({ store, cards = [] }: { store: EditorStore; cards?
   const owner = useValue<{ card?: string; chat?: string; shared?: string } | undefined>(store, ["owner"])
   const exportable = useValue<boolean | undefined>(store, ["exportable"]) !== false
   const card = owner?.card !== undefined
+  // A note sent in a prompt's place goes where that prompt goes (DESIGN §4.2).
+  const inPlace = replacesInPlace({
+    replaces: useValue<unknown>(store, ["replaces"]),
+    own_position: useValue<unknown>(store, ["own_position"])
+  })
   return (
     <div className="flex min-w-0 flex-col gap-3">
+      <SlotOutlet slot={noteSettingSections} props={{ store, cards }} />
       <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2">
-        <PlacementField store={store} path={["placement"]} label="Position" card={card} />
+        <PlacementField store={store} path={["placement"]} label="Position" card={card} inherited={inPlace} />
         <ConditionField store={store} cards={cards} />
       </div>
       <div className="flex min-w-0 flex-wrap items-start gap-x-6 gap-y-2">
@@ -579,10 +614,19 @@ export const noteTitle = (title: unknown, content: unknown, label: string) => {
 }
 
 /** Where a note goes and when, in a few words, for the line under its name: "End of tail · Aria's turn". */
-export const noteState = (doc: Doc, cards: ReadonlyArray<NoteCard>) =>
-  [shortPlace(doc["placement"] as Placement | undefined), conditionText(doc["condition"], cards) ?? "always"].join(
-    " · "
-  )
+export const noteState = (doc: Doc, cards: ReadonlyArray<NoteCard>, names: NoteTargetNames | null = null) => {
+  const target = noteTarget(doc)
+  const what =
+    target === null ? null : targetLabel(target, names, (entity) => cards.find((card) => card.entity === entity)?.name)
+  // In a prompt's place, its own placement doesn't apply (DESIGN §4.2).
+  const place =
+    what === null
+      ? shortPlace(doc["placement"] as Placement | undefined)
+      : doc["own_position"] === true
+        ? `${shortPlace(doc["placement"] as Placement | undefined)} · replaces ${what}`
+        : `In place of ${what}`
+  return [place, conditionText(doc["condition"], cards) ?? "always"].join(" · ")
+}
 
 /**
  * A note's settings as History reads them (owner, 2026-11-01: words, never JSON): "Position:

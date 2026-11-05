@@ -1,4 +1,5 @@
 import { panelEditorActions } from "../editor/panelActions.tsx"
+import { editorNotices } from "../editor/editorSlots.ts"
 // The side panel's Prompt preset tab (DESIGN §6.2a; owner, 2026-11-01): the whole preset,
 // editable in the column. The prompt order is the large editor's own document in its "column"
 // layout, sharing the workspace's store, so an edit in either shows in the other. What's typed
@@ -73,6 +74,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
         )}
         <RestoredNotice count={state.restored} />
         <RecoveredNotice store={store} />
+        <SlotOutlet slot={editorNotices} props={{ store }} />
         <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
         <PromptDocument
           store={store}

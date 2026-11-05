@@ -1,3 +1,4 @@
+import { summaryResponse } from "./summaryResponse.ts"
 import { Formats } from "../importer/Formats.ts"
 import { payloadText } from "./textPayload.ts"
 import { documentedCachePolicy } from "./cachePolicy.ts"
@@ -1021,6 +1022,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                   ...(textEstimate ? { textEstimate } : {}),
                   usageSource: source,
                   rawUsage: state.capture.rawUsage,
+                  ...(request.attribution.purpose === "summarize" || request.attribution.purpose === "condense"
+                    ? {
+                        summaryResponse: summaryResponse(message, prepared.scrub)
+                      }
+                    : {}),
                   reportedCost: state.capture.reportedCost,
                   cost,
                   error: error === null ? null : { reason: error.reason, message: error.message, status: error.status }

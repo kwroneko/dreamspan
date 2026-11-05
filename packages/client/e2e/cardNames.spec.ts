@@ -170,12 +170,12 @@ for (const width of [1440, 390]) {
       .last()
       .getByRole("button", { name: /^Revision \d+ / })
       .click()
-    // DESIGN §10.1 historyui: each entry restores directly and reports a refused name check.
+    // A known name clash disables restore and explains the conflict in the comparison.
     const revisionCount = await history.getByRole("list", { name: "Revisions" }).getByRole("listitem").count()
-    await history.getByRole("button", { name: "Restore to revision 1", exact: true }).click()
-    await expect(history.getByRole("alert")).toContainText("Another card is already called Aria Vance · 1")
+    await expect(history.getByRole("button", { name: "Restore to revision 1", exact: true })).toBeDisabled()
+    await expect(history.getByRole("status")).toContainText("Another card is already called Aria Vance · 1")
     await expect(history.getByRole("list", { name: "Revisions" }).getByRole("listitem")).toHaveCount(revisionCount)
-    await history.getByRole("alert").scrollIntoViewIfNeeded()
+    await history.getByRole("status").scrollIntoViewIfNeeded()
     await shoot("history-clash")
     // Restore the synthetic fixture for the next viewport through the storage-compatible API.
     await admin((api) =>

@@ -44,6 +44,9 @@ import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { SaveRevision } from "./SaveRevision.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText, useValue } from "./store.ts"
 import { NOTE_FOCUS } from "./workspaceViews.ts"
+import { SlotOutlet } from "../../slots.tsx"
+import { noteMenuItems } from "./fieldViews.ts"
+import { type NoteTargetNames, noteTarget, useNoteTargetNames } from "./noteTargets.ts"
 
 /** A note as a list shows it. */
 export interface NoteListEntry {
@@ -67,11 +70,13 @@ export interface NoteListEntry {
 }
 
 /** Under a note's name: where it goes and when, and its role ("End of tail · always · as system"). */
-const headerState = (doc: Doc, cards: ReadonlyArray<NoteCard>) => {
+const headerState = (doc: Doc, cards: ReadonlyArray<NoteCard>, names: NoteTargetNames | null) => {
   const placement = doc["placement"] as { mode?: string; role?: string } | undefined
-  const role = placement?.mode === "none" ? null : `as ${placement?.role ?? "system"}`
+  // In a prompt's place it's sent as that prompt is.
+  const inPlace = noteTarget(doc) !== null && doc["own_position"] !== true
+  const role = placement?.mode === "none" || inPlace ? null : `as ${placement?.role ?? "system"}`
   return [
-    noteState(doc, cards),
+    noteState(doc, cards, names),
     role,
     doc["scan_lore"] === true ? "lorebook scan" : null,
     doc["agent_editable"] === true ? "agent may edit" : null
@@ -152,6 +157,9 @@ export function NoteBlock({
   const onByDefault = useValue<unknown>(store, ["on_by_default"])
   const exportable = useValue<unknown>(store, ["exportable"])
   const agentEditable = useValue<unknown>(store, ["agent_editable"])
+  const replaces = useValue<unknown>(store, ["replaces"])
+  const ownPosition = useValue<unknown>(store, ["own_position"])
+  const targetNames = useNoteTargetNames()
   const link = useValue<EntityId | undefined>(store, ["link"])
   // What it is now: what's typed and set once its editor read it, the listed note until then.
   const doc: Doc = loaded
@@ -165,6 +173,8 @@ export function NoteBlock({
         on_by_default: onByDefault,
         exportable,
         agent_editable: agentEditable,
+        replaces,
+        own_position: ownPosition,
         link
       }
     : entry.doc
@@ -225,7 +235,7 @@ export function NoteBlock({
     onRelinked?.()
   }
 
-  const summary = headerState(doc, cards)
+  const summary = headerState(doc, cards, targetNames)
   const { ref: titleRef, truncated: titleTruncated } = useTruncated(title)
   const { ref: summaryRef, truncated: summaryTruncated } = useTruncated(summary)
   const titleHint = open ? "Hide the note's text" : "Show the note's text"
@@ -375,6 +385,7 @@ export function NoteBlock({
                       Large editor
                     </MenuLinkItem>
                   )}
+                  {loaded && <SlotOutlet slot={noteMenuItems} props={{ store, title }} />}
                   <MenuItem
                     icon="history"
                     disabled={!loaded}

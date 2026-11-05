@@ -431,6 +431,11 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         })}
         WHERE id = ${request.id} AND owner_user_id = ${userId} AND status = 'running' RETURNING id`
         if (rows.length === 0) return yield* new NotFound({ entity: "running request", id: request.id })
+        if (request.summaryResponse !== undefined)
+          yield* sql`INSERT INTO summary_responses(request_id,rollout_id,response)
+            SELECT id,rollout_id,${request.summaryResponse} FROM llm_requests
+            WHERE id=${request.id} AND owner_user_id=${userId} AND rollout_id IS NOT NULL
+              AND purpose IN ('summarize','condense')`
       }).pipe(transaction(sql, "CloseLlmRequest")),
 
     InterruptRunningLlmRequests: () =>

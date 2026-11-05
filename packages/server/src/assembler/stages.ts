@@ -32,7 +32,8 @@ import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { cachePrefixDigests, placeBreakpoints, summaryLevelOf } from "./breakpoints.ts"
 import { DEFAULT_MAX_IMAGES, imagesStage, messageImagesOf } from "./images.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
-import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
+import { cardFieldKey, replacementFor, replacementsStage } from "./replacements.ts"
+import { cardFields, makeMacroEnvironment, type MacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
 import {
   applyScripts,
   compile,
@@ -821,7 +822,12 @@ const cardNewlines = (assembly: Assembly, piece: number): Text => {
 }
 
 /** A card field as ST's baseChatReplace gives it: trimmed, expanded without card fields, no carriage returns. */
-const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["doc"], names?: Partial<Names>): Text => {
+const ownCardText = (
+  assembly: Assembly,
+  card: CardInput,
+  field: keyof CardInput["doc"],
+  names?: Partial<Names>
+): Text => {
   const env = need(assembly, "macros")
   const raw = String(card.doc[field] ?? "").trim()
   const piece = env.piece(`card:${card.entity}:${String(field)}`, cardSource(assembly, card, String(field)), raw, {
@@ -829,6 +835,67 @@ const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["d
     ...(names ? { names } : {})
   })
   return cardNewlines(assembly, piece)
+}
+
+/**
+ * A card field this turn: the note that replaces it in this chat, in its place (DESIGN §4.2),
+ * expanded and cleaned as the field would be; else the field itself.
+ */
+const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["doc"], names?: Partial<Names>): Text =>
+  withReplacement(
+    assembly,
+    cardFieldKey(card.entity, String(field)),
+    () => ownCardText(assembly, card, field, names),
+    { withoutCard: true, ...(names ? { names } : {}) },
+    (piece) => cardNewlines(assembly, piece)
+  ) ?? ownCardText(assembly, card, field, names)
+
+type PieceOptions = NonNullable<Parameters<MacroEnvironment["piece"]>[3]>
+
+/**
+ * A target's text this turn (DESIGN §4.2; spec/NOTE-OVERRIDES.md §3): the replacing note's in its
+ * place, `{{original}}` the target's own text; nothing when the note goes at its own position;
+ * else the target's own (`own`). A target whose note has a condition comes and goes with the
+ * turn, due or not, so it's volatile either way.
+ */
+const withReplacement = <T extends Text | null>(
+  assembly: Assembly,
+  key: string,
+  own: () => T,
+  options: PieceOptions = {},
+  finish: (piece: number) => Text = (piece) => ({ text: need(assembly, "macros").text(piece), piece })
+): Text | T => {
+  const found = replacementFor(assembly, key)
+  if (!found) return own()
+  const env = need(assembly, "macros")
+  const { note, record } = found
+  const changing = conditioned(note)
+  if (changing) env.potentialVariableWrite()
+  if (record.status === "not_due" || record.status === "disabled") {
+    const text = own()
+    if (text && changing) env.markVolatile(text.piece)
+    return text
+  }
+  if (record.status === "own_position") {
+    const piece = env.verbatim(`replaced:${key}`, noteSource(assembly, note), "")
+    record.piece = piece
+    return { text: "", piece }
+  }
+  const raw = note.doc.content.trim()
+  const original = /\{\{\s*original\s*\}\}/i.test(raw) ? (own()?.text ?? "") : undefined
+  const owner = noteCard(note.doc)
+  const ownerCard =
+    owner === null
+      ? undefined
+      : [...need(assembly, "cast").characters, ...need(assembly, "cast").personas].find((c) => c.entity === owner)
+  const piece = env.piece(`note:${note.entity}:${key}`, noteSource(assembly, note), raw, {
+    ...options,
+    ...(ownerCard && !key.startsWith("card:") ? { names: { ...options.names, char: modelName(ownerCard.doc) } } : {}),
+    ...(original === undefined ? {} : { original })
+  })
+  if (changing) env.markVolatile(piece)
+  record.piece = piece
+  return finish(piece)
 }
 
 const presetText = (
@@ -898,10 +965,12 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
       else if (condition !== "always") skipped.push(presetSource(assembly, prompt.identifier, condition))
     }
     if (!allowed && entry.identifier !== "main") continue
-    const text =
+    const own = () =>
       allowed && prompt.content
         ? presetText(assembly, prompt.identifier, prompt.content, {}, condition === "always" ? undefined : condition)
         : null
+    // A note may replace it in this chat (DESIGN §4.2).
+    const text = allowed ? withReplacement(assembly, `preset:${prompt.identifier}`, own) : null
     const summary = text !== null && hasSummary(assembly, text.piece)
     collection.push({
       identifier: prompt.identifier,
@@ -948,6 +1017,9 @@ const override = (
 ) => {
   // An empty card prompt does nothing, and isn't worth showing in the editors.
   if (!text.text) return
+  // A note that replaces the prompt in this chat wins over the card's (DESIGN §4.2).
+  const noted = replacementFor(assembly, `preset:${identifier}`)?.record.status
+  if (noted === "replaced" || noted === "own_position") return
   const at = collection.findIndex((p) => p.identifier === identifier)
   const status =
     at === -1
@@ -994,6 +1066,13 @@ const prefill = (assembly: Assembly) => {
   const id = type === "impersonate" ? "prefill.impersonation" : "prefill.assistant"
   const text = raw ? presetText(assembly, id, raw).text.trimEnd() : ""
   if (!text) return
+  if (assembly.request.agent && type !== "impersonate") {
+    assembly.issues.push({
+      kind: "prefill_dropped",
+      message: "The preset's prefill wasn't sent: the reply mode uses tools."
+    })
+    return
+  }
   if (assembly.model && assembly.model.prefill !== "none" && !assembly.model.continueUnavailable) {
     assembly.prefill = text
   } else {
@@ -1369,11 +1448,13 @@ const composeStage = sync("compose", (assembly) => {
   const disabled = disabledIn(doc)
   const optional = (id: string, text: string, options?: Partial<Names>) =>
     text ? presetText(assembly, id, text, options) : null
-  const characters = cast.characters
-  const group = characters.length > 1
   // The speaking card, a card the user plays included (owner 2026-10-28: its prompts apply on an
   // impersonation turn, as ST passes the character's prompts for every generation type).
   const speaker = cast.speaker
+  // Card-swap (DESIGN §5.2): the speaking character's card goes at the tail, the others stay.
+  const atTail = assembly.request.agent?.cardsAtTail && speaker && cast.characters.includes(speaker) ? speaker : null
+  const characters = atTail ? cast.characters.filter((card) => card !== atTail) : cast.characters
+  const group = cast.characters.length > 1
   const own = (card: CardInput) => ({ char: modelName(card.doc) })
 
   // The speaker's card prompts, as ST's group generation takes them, expanded with the card's
@@ -1540,16 +1621,23 @@ const composeStage = sync("compose", (assembly) => {
         assembly,
         card,
         null,
-        card.doc.description
-          ? (() => {
-              const piece = env.piece(
-                `card:${card.entity}:description`,
-                cardSource(assembly, card, "description"),
-                card.doc.description
-              )
-              return cardNewlines(assembly, piece)
-            })()
-          : null
+        withReplacement(
+          assembly,
+          cardFieldKey(card.entity, "description"),
+          () =>
+            card.doc.description
+              ? cardNewlines(
+                  assembly,
+                  env.piece(
+                    `card:${card.entity}:description`,
+                    cardSource(assembly, card, "description"),
+                    card.doc.description
+                  )
+                )
+              : null,
+          {},
+          (piece) => cardNewlines(assembly, piece)
+        )
       )
     markers = {
       definitions: null,
@@ -1566,8 +1654,17 @@ const composeStage = sync("compose", (assembly) => {
       )
     }
   }
+  if (atTail) {
+    const tailText = (a: Assembly, card: CardInput, name: keyof CardInput["doc"], n?: Partial<Names>) =>
+      name === "description" || name === "personality" || name === "scenario"
+        ? field(card, name)
+        : cardText(a, card, name, n)
+    const block = cardBlock(assembly, atTail, tailText, wrap, cardNotes(assembly, atTail, atTail))
+    if (block) assembly.tailCard = block
+    else delete assembly.tailCard
+  } else delete assembly.tailCard
   // Examples keep their own handling: parsed per card into example chats, named in a group.
-  const examples0 = characters.flatMap((card) =>
+  const examples0 = cast.characters.flatMap((card) =>
     group ? exampleLines(assembly, card, modelName(card.doc), true) : exampleLines(assembly, card, names.char, false)
   )
   let examples: Array<Array<ChatLine>> = examples0
@@ -1958,14 +2055,25 @@ const composeStage = sync("compose", (assembly) => {
     group: cast.characters.length > 1 ? cast.characters.map((c) => modelName(c.doc)) : []
   }
   const cost = (built: ReturnType<typeof compose>) => {
-    const messages = built.messages.filter((message) => message.content)
+    const all = assembly.tailCard
+      ? [
+          ...built.messages,
+          {
+            role: "system" as const,
+            content: assembly.tailCard.text,
+            pieces: [assembly.tailCard.piece],
+            kind: "volatile" as const
+          }
+        ]
+      : built.messages
+    const messages = all.filter((message) => message.content)
     const processed = postProcess(doc.squash ? squash(messages) : messages, doc.postprocess, postNames)
     const tokens = (messages: ReadonlyArray<StMessage>) =>
       limitImageEstimates(messages, assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES).reduce(
         (sum, message) => sum + tokensOf(message),
         0
       )
-    return 3 + Math.max(tokens(built.messages), tokens(processed))
+    return 3 + Math.max(tokens(all), tokens(processed))
   }
   const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, false, false))
   const contextBudgetInfo = (nonHistoryTokens: number) => ({
@@ -2330,6 +2438,17 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
       const text = presetText(assembly, identifier, content)
       return text.text.trim() === "" ? [] : [text]
     })
+    // An agent reply's instructions come last, so the prefix is the plain reply's (spec/AGENTIC.md §6).
+    const instructions = assembly.request.agent?.instructions.trim()
+    if (instructions)
+      parts.push({
+        text: instructions,
+        piece: need(assembly, "macros").verbatim(
+          "agent:instructions",
+          { kind: "assembler", what: "Agent instructions" },
+          instructions
+        )
+      })
     if (parts.length === 0) return
     return {
       role: "user",
@@ -2364,6 +2483,13 @@ const messagesStage = sync("messages", (assembly) => {
     }
   })
   messages = messages.filter((m) => m.content)
+  if (assembly.tailCard)
+    messages.push({
+      role: "system",
+      content: assembly.tailCard.text,
+      pieces: [assembly.tailCard.piece],
+      kind: "volatile"
+    })
   if (doc.squash) messages = squash(messages)
   messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
   // DESIGN §2.2 requires one separate final user message, even in merging/single modes.
@@ -2541,6 +2667,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   imageTokensStage,
   rolesStage,
   noteGateStage,
+  replacementsStage,
   loreScanStage,
   loreActivationStage,
   endOfRequestStage,

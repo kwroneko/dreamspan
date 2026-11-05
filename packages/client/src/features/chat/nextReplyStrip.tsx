@@ -16,11 +16,11 @@ const chipTones: Record<ChipTone, string> = {
 }
 
 /**
- * A strip chip's look: a pill, one line. On a phone the row scrolls sideways, so a chip keeps its
+ * A strip chip's look: a rounded rectangle like the app's buttons, one line. On a phone the row scrolls sideways, so a chip keeps its
  * whole text; wider, a very long name is cut with an ellipsis, its whole text in the tooltip.
  */
 export const chipClass = (tone: ChipTone = "neutral") =>
-  `inline-flex h-9 min-w-0 shrink-0 sm:max-w-80 items-center gap-1 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${chipTones[tone]}`
+  `inline-flex h-9 min-w-0 shrink-0 sm:max-w-80 items-center gap-1 rounded-md border px-2.5 text-xs font-medium whitespace-nowrap outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${chipTones[tone]}`
 
 /**
  * The strip's row: it wraps where there's room; on a phone (`scroll`) it's one row that scrolls

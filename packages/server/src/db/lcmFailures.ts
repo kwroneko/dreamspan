@@ -89,7 +89,7 @@ export const recordFailedSummary = (
     const id = uuidv7(),
       revisionId = uuidv7(),
       now = Date.now()
-    yield* sql`INSERT INTO summary_revisions ${sql.insert({ id: revisionId, summary_id: id, content: "", token_count: 0, origin: "generated", created_at: now })}`
+    yield* sql`INSERT INTO summary_revisions ${sql.insert({ id: revisionId, summary_id: id, rollout_id: rolloutId, content: "", token_count: 0, origin: "generated", created_at: now })}`
     yield* sql`INSERT INTO summaries ${sql.insert({
       id,
       chat_id: job.chat_id,

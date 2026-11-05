@@ -52,7 +52,7 @@ const run = (
         sections = chunk.sections
         panel += chunk.text
       } else if ("held" in chunk) held = { ...chunk }
-      else reasoning += chunk.reasoning
+      else if ("reasoning" in chunk) reasoning += chunk.reasoning
     }
     bodies.push(body)
     panels.push(panel)

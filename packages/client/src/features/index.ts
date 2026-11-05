@@ -5,6 +5,7 @@ import * as snippets from "./snippets/index.tsx"
 import * as gallery from "./gallery/index.tsx"
 import * as cardRename from "./cardRename/index.tsx"
 import * as cardForks from "./cardForks/index.tsx"
+import * as forkMerge from "./forkMerge/index.tsx"
 import * as cardSources from "./cardSources/index.tsx"
 import * as cardExport from "./cardExport/index.tsx"
 import * as cardImport from "./cardImport/index.tsx"
@@ -20,6 +21,7 @@ import * as firstRun from "./firstRun/index.tsx"
 import * as library from "./library/index.ts"
 import * as login from "./login.tsx"
 import * as network from "./network.tsx"
+import * as noteOverrides from "./noteOverrides/index.tsx"
 import * as pickers from "./pickers/index.tsx"
 import * as regex from "./regex/index.tsx"
 import * as notices from "./notices.tsx"
@@ -31,6 +33,7 @@ import * as workbench from "./workbench/index.tsx"
 
 export const registerFeatures = () => {
   cardForks.register()
+  forkMerge.register()
   cardRename.register()
   gallery.register()
   cardSources.register()
@@ -46,6 +49,7 @@ export const registerFeatures = () => {
   library.register()
   editor.register()
   chat.register()
+  noteOverrides.register()
   pickers.register()
   insertMessage.register()
   snippets.register()

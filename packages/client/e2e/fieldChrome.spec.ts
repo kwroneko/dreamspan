@@ -27,6 +27,8 @@ const boxesOutside = (frame: Locator) =>
   frame.evaluate((frame) => {
     const skip = (element: Element) =>
       frame.contains(element) ||
+      // Browser-copy notices can appear in the independent sidebar while typing.
+      element.closest('[aria-label="Sidebar"]') !== null ||
       element.matches(':has(> [role="status"])') ||
       element.closest('[role="status"], [role="tooltip"], [data-base-ui-portal]') !== null
     const kept = window as unknown as {

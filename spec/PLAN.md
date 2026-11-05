@@ -68,6 +68,8 @@ Session notes are not kept in the repository.
 - Backfill for imported chats (lazy, with a cost estimate).
 
 ## Phase 4: Agentic rollouts
+**Status (2026-11-05): designed** in [AGENTIC.md](AGENTIC.md) (deltas from reference-harness `latest`, ten build units in its §11); building from U1.
+
 - Timeline/rollout separation: fork per turn, a commit pipeline for both output contracts.
 - pi-agent-core with reference-harness-style persistence: context snapshot, flushed transcript, invisible mid-rollout resume, editing a step and then resuming.
 - RP tools: `expand_summary`, summary and chat search, lorebook lookup, notes, presence. Tool effect classes; chat-state effects attached to versions.

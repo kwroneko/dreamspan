@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@earendil-works/pi-agent-core": "1.0.3",
     "@earendil-works/pi-ai": "1.0.3",
     "@effect/platform-node": "4.0.1",
     "@effect/sql-sqlite-node": "4.0.1",

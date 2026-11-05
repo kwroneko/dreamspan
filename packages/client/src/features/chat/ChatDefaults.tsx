@@ -262,7 +262,7 @@ export function SummaryDefaults({
             value={tail}
             onChange={(event) => type(event.target.value)}
             rows={5}
-            disabled={!defaults}
+            disabled={!defaults || !instructionDraft.ready}
           />
         </Field>
         <UserDraftNotices draft={instructionDraft} />

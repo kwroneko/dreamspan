@@ -112,7 +112,7 @@ export function ForkDialog({
           about={
             ref.kind === "card"
               ? "Unsaved changes move to the copy; the original returns to its last save."
-              : "The variant receives updates to the original."
+              : "The variant keeps its own content. Later changes to the original can be merged into it."
           }
         >
           <Input value={label} onChange={(event) => setLabel(event.currentTarget.value)} required />

@@ -187,7 +187,10 @@ for (const width of [1440, 390])
       await expect(header.getByRole("heading", { name: "Mira" })).toBeVisible()
       await header.getByRole("button", { name: "Add note", exact: true }).click()
       const made = notes.getByRole("region", { name: "Note Note" })
-      await expect(made).toBeInViewport({ ratio: 1 })
+      // A card's note opens with its settings (Replaces first, DESIGN §4.2), taller than a phone's
+      // panel: its header is what's revealed whole, the rest following below it.
+      await expect(made.getByRole("button", { name: /^(Expand|Collapse) Note$/ })).toBeInViewport({ ratio: 1 })
+      await expect(made).toBeInViewport({ ratio: width === 390 ? 0.5 : 1 })
       await expectAligned(made, "Note")
       await expectAligned(notes.getByRole("region", { name: "Note Outfit" }), "Outfit")
       await shoot(page, `card-tab-${width}`)

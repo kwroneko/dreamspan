@@ -13,7 +13,7 @@ const Dialog = lazy(() => import("./ImportNewVersion.tsx").then((m) => ({ defaul
 
 /** What the action does, beside its library menu entry. */
 const DESCRIPTION =
-  "Replaces the card with a new version of its file, after showing what changes. Its notes, favourite, cutout and chats stay."
+  "Replaces the card with a new version of its file, or merges the file's changes into it, after showing what changes."
 
 export const register = () => [
   cardContributions.register({

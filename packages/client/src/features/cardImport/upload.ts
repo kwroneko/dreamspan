@@ -1,6 +1,7 @@
 // "Import a new version…" over the import route (ARCHITECTURE.md §11.1, §11.4): `preview`
 // parses the file and stores nothing; `replace` makes its content the card's next revision,
-// if the card's head is still the one the preview showed.
+// if the card's head is still the one the preview showed; `merge` puts the file on the card's
+// import line without changing the card, for the merge review to take its changes from.
 import { CardReplacePreview } from "@rp/shared/cardReplace.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
@@ -37,3 +38,6 @@ export const previewVersion = (file: File, refId: RefId) =>
 
 export const replaceWithVersion = (file: File, refId: RefId, head: RevisionId) =>
   send(file, { into: refId, mode: "replace", head }, Schema.decodeUnknownSync(ImportResult), "replace the card")
+
+export const stageVersion = (file: File, refId: RefId) =>
+  send(file, { into: refId, mode: "merge" }, Schema.decodeUnknownSync(ImportResult), "read the file")

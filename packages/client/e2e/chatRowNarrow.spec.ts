@@ -123,6 +123,10 @@ for (const [scene, panelWidth, viewport] of [
           style: { wrap: getComputedStyle(heading).overflowWrap, clamp: getComputedStyle(heading).webkitLineClamp },
           words,
           rootRem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+          contentWidth:
+            row.clientWidth -
+            parseFloat(getComputedStyle(row).paddingLeft) -
+            parseFloat(getComputedStyle(row).paddingRight),
           container: getComputedStyle(row).containerName
         }
       })
@@ -135,8 +139,7 @@ for (const [scene, panelWidth, viewport] of [
       }
       if (!before) {
         expect(result.container).toBe("fork-row")
-        const narrow = scene === "minimum"
-        const overlap = scene === "middle" && title !== titles[0]
+        const narrow = result.contentWidth < (title === titles[0] ? 14.4375 : 17.8125) * result.rootRem
         expect(result.portraits).toHaveLength(title === titles[0] ? 1 : 2)
         if (narrow) {
           expect(result.text.top).toBeGreaterThanOrEqual(result.portraits[0]!.bottom + 7)
@@ -149,8 +152,7 @@ for (const [scene, panelWidth, viewport] of [
         }
         if (result.portraits.length === 2) {
           const [first, second] = result.portraits
-          if (overlap || narrow) expect(second!.left - first!.left).toBeCloseTo(first!.width / 3, 0)
-          else expect(second!.left - first!.right).toBe(2)
+          expect(second!.left - first!.right).toBe(2)
         }
         expect(result.words.every((word) => word.lines <= 1)).toBe(true)
         expect(result.style).toEqual({ wrap: "normal", clamp: "2" })

@@ -432,6 +432,20 @@ export class Generations extends Context.Service<
                 } else if ("held" in chunk) {
                   entry.held = chunk
                   return Effect.void
+                } else if ("steps" in chunk) {
+                  // Steps go to subscribers as they stand; the transcript is what keeps them.
+                  const { chatId, versionId } = entry.request
+                  hub.publish(chatId, { _tag: "Steps", versionId, steps: chunk.steps })
+                  return Effect.void
+                } else if ("restart" in chunk) {
+                  // Back to where it began (a continuation's source text stays).
+                  const initial = entry.request.initial
+                  entry.text = initial?.text ?? ""
+                  entry.reasoning = initial?.reasoning ?? ""
+                  entry.reasoned = false
+                  entry.sections = initial?.sections ?? null
+                  entry.sectionsText = sectionsDisplay(initial?.sections)
+                  entry.held = null
                 } else {
                   // A continuation's own reasoning goes after its source's, a paragraph apart.
                   const text =
