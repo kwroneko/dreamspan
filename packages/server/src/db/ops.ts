@@ -1,4 +1,5 @@
-import { SplitChats } from "@rp/shared/splitChat.ts"
+import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
+import { EditRefused } from "@rp/shared/editorApi.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
@@ -308,6 +309,7 @@ const OpenLlmRequest = Schema.Struct({
 
 /** Closes a ledger row with what the request produced. */
 const CloseLlmRequest = Schema.Struct({
+  summaryResponse: Schema.optionalKey(Schema.String),
   textEstimate: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, tokenizer: Schema.String })),
   cacheIdentity: Schema.optionalKey(
     Schema.NullOr(
@@ -463,9 +465,9 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError, BinChanged])
   }),
   Rpc.make("SetSplitChat", {
-    payload: { userId: UserId, forkId: ForkId, split: Schema.Boolean },
-    success: Schema.Void,
-    error: Schema.Union([NotFound, StorageError])
+    payload: { userId: UserId, ...SetSplitChatFields },
+    success: ChatId,
+    error: Schema.Union([NotFound, StorageError, EditRefused])
   }),
   Rpc.make("ChangeBinLimit", {
     payload: { userId: UserId, ...BinLimitChange.fields },
@@ -2494,6 +2496,11 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, view: ShellForksView },
     success: ShellForksRead,
     error: StorageError
+  }),
+  Rpc.make("GetSummaryRevisionRequest", {
+    payload: { userId: UserId, revisionId: SummaryRevisionId },
+    success: SummaryDetails,
+    error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("GetSummaryDetails", {
     payload: { userId: UserId, summaryId: SummaryId },

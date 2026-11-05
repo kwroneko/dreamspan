@@ -11,7 +11,7 @@
 import type { EntityId } from "@rp/shared/chat.ts"
 import { branchOwned, foldState, type FoldableEvent } from "@rp/shared/state.ts"
 import { Effect } from "effect"
-import type { SqlClient } from "effect/sql"
+import type { SqlClient, SqlError } from "effect/sql"
 import { pathPieces } from "./displayPath.ts"
 import { shownIn, slotDeletedIn } from "./forkState.ts"
 import type { ForkRow } from "./rows.ts"
@@ -86,9 +86,34 @@ export const computeForkSummaries = (
   sql: SqlClient.SqlClient,
   records: ReadonlyArray<ForkRow>,
   pathsOnly = records.length <= 2
-) =>
+): Effect.Effect<Array<ForkSummary>, SqlError.SqlError> =>
   Effect.gen(function* () {
     if (records.length === 0) return []
+    // Dense overrides need a row per position per fork. Holding hundreds of
+    // long paths at once exhausted the reader heap. Keep the shared-tree read
+    // for plain forks, and bound the number of overridden paths held at once.
+    const batchSize = 16
+    if (!pathsOnly && records.length > batchSize) {
+      const plain = new Set(
+        (yield* sql.unsafe<{ id: string }>(shellPlainForksQuery, [
+          JSON.stringify([
+            ...new Set(records.flatMap((r) => (r.parent_fork_id === null ? [r.id] : [r.id, r.parent_fork_id])))
+          ])
+        ])).map((r) => r.id)
+      )
+      const needsPath = (r: ForkRow) => !plain.has(r.id) || (r.parent_fork_id !== null && !plain.has(r.parent_fork_id))
+      const overridden = records.filter(needsPath)
+      if (overridden.length > batchSize) {
+        const summaries = yield* computeForkSummaries(
+          sql,
+          records.filter((r) => plain.has(r.id)),
+          false
+        )
+        for (let at = 0; at < overridden.length; at += batchSize)
+          summaries.push(...(yield* computeForkSummaries(sql, overridden.slice(at, at + batchSize), true)))
+        return summaries
+      }
+    }
     const chatIds = JSON.stringify([...new Set(records.map((r) => r.chat_id))])
     // Where a fork splits off reads its parent's path, so a live parent not in `records` is
     // walked too (its path only: it gets no summary here).
@@ -319,7 +344,7 @@ export const computeForkSummaries = (
 
 /**
  * Where each of chat `chatId`'s live forks `records` parts from its parent and when its last
- * message is, for a read: the stored summaries while they're all valid, else computed now (a
+ * message is, for a read: the stored summaries where valid, computing only the stale forks now (a
  * reader stores nothing; the shell's next read stores them).
  */
 export const chatForkSummaries = (
@@ -335,22 +360,26 @@ export const chatForkSummaries = (
       end_at: number | null
       split_at: number | null
       split_after: number | null
-    }>`SELECT s.fork_id, s.end_at, s.split_at, s.split_after FROM fork_summaries s JOIN chats c ON c.id = s.chat_id
+      preview: string
+    }>`SELECT s.fork_id, s.end_at, s.split_at, s.split_after, s.preview FROM fork_summaries s JOIN chats c ON c.id = s.chat_id
       WHERE s.chat_id = ${chatId} AND s.format = ${FORK_SUMMARY_FORMAT} AND s.stamp = c.shell_stamp
         AND s.user_stamp = ${userStamp}`
-    const byFork = new Map<string, Pick<ForkSummary, "endAt" | "split">>(
+    const byFork = new Map<string, Pick<ForkSummary, "endAt" | "split" | "preview">>(
       stored.map((row) => [
         row.fork_id,
         {
           endAt: row.end_at,
+          preview: row.preview,
           split: row.split_at === null || row.split_after === null ? null : { at: row.split_at, after: row.split_after }
         }
       ])
     )
-    if (records.every((record) => byFork.has(record.id))) return byFork
-    return new Map<string, Pick<ForkSummary, "endAt" | "split">>(
-      (yield* computeForkSummaries(sql, records)).map((s) => [s.forkId, { endAt: s.endAt, split: s.split }])
-    )
+    for (const s of yield* computeForkSummaries(
+      sql,
+      records.filter((record) => !byFork.has(record.id))
+    ))
+      byFork.set(s.forkId, { endAt: s.endAt, split: s.split, preview: s.preview })
+    return byFork
   })
 
 /** A chat's summaries as a read computed them, with the stamps it read (`ChatSummariesAt` in ops.ts). */

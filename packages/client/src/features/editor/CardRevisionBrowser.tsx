@@ -386,7 +386,6 @@ export function CardRevisionBrowser({
                     restoringId !== null ||
                     (selected?.id === revision.id && (!selectedDoc || clash !== null))
                   }
-                  aria-label={selected?.id === revision.id && clash ? "Restore" : undefined}
                   focusableWhenDisabled
                   hint={
                     revision.id === head

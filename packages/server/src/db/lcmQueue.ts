@@ -489,6 +489,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           updated_at: now
         })}`
         yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
+        yield* sql`INSERT INTO summary_attempts ${sql.insert({ job_id: jobId, epoch: attempt, rollout_id: rolloutId })}`
         yield* sql`UPDATE summarization_jobs SET rollout_id = ${rolloutId} WHERE id = ${jobId}`
       }).pipe(transaction(sql, "StartSummaryRollout")),
     FailSummaryAttempt: ({ userId, jobId, attempt, rolloutId, error, errorClass, errorKind, errorCategory, draft }) =>
