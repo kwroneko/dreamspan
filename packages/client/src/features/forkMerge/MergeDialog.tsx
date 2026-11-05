@@ -77,7 +77,9 @@ const elementNames = (kind: EntityKind, docs: ReadonlyArray<Doc>, path: Path) =>
     }
   }
   return (value: unknown) =>
-    Array.isArray(value) ? value.map((id, i) => `${i + 1}. ${names.get(String(id)) ?? String(id)}`) : readableLines(value)
+    Array.isArray(value)
+      ? value.map((id, i) => `${i + 1}. ${names.get(String(id)) ?? String(id)}`)
+      : readableLines(value)
 }
 
 const isOrder = (path: Path) => path.at(-1) === "$order"
@@ -95,15 +97,19 @@ const unitLabel = (kind: EntityKind, preview: Preview, path: Path) => {
 
 /** What the source did to it: a word for its badge. */
 const changeWord = (unit: Unit) =>
-  isOrder(unit.path)
-    ? "moved"
-    : unit.base === undefined
-      ? "added"
-      : unit.theirs === undefined
-        ? "removed"
-        : "changed"
+  isOrder(unit.path) ? "moved" : unit.base === undefined ? "added" : unit.theirs === undefined ? "removed" : "changed"
 
-function UnitChange({ unit, kind, preview, source }: { unit: Unit; kind: EntityKind; preview: Preview; source: string }) {
+function UnitChange({
+  unit,
+  kind,
+  preview,
+  source
+}: {
+  unit: Unit
+  kind: EntityKind
+  preview: Preview
+  source: string
+}) {
   if (isOrder(unit.path))
     return (
       <ReadableDiff
@@ -447,7 +453,12 @@ function MergeReview({
               {changes.map((change) => (
                 <FieldComparison
                   key={keyOf(change.path)}
-                  label={fieldLabel(kind, outcome && "doc" in outcome ? outcome.doc : preview.ours, change.path, preview.ours)}
+                  label={fieldLabel(
+                    kind,
+                    outcome && "doc" in outcome ? outcome.doc : preview.ours,
+                    change.path,
+                    preview.ours
+                  )}
                   change={change}
                   doc={outcome && "doc" in outcome ? outcome.doc : preview.ours}
                   beforeLabel="Now"
@@ -652,8 +663,8 @@ function MergeBody({
     return (
       <>
         <p className="text-sm">
-          This {kindWord(ref.kind)} was marked as a fork by hand, so there's no shared starting revision to compare
-          its changes with.
+          This {kindWord(ref.kind)} was marked as a fork by hand, so there's no shared starting revision to compare its
+          changes with.
         </p>
         <DialogActions>
           <Button hint="Closes this review." onClick={onClose}>
@@ -692,9 +703,7 @@ function MergeBody({
           />
         </Field>
       )}
-      {!fromFile && versions.length === 1 && (
-        <p className="text-sm text-muted">{revisionLabel(versions[0]!, 0)}</p>
-      )}
+      {!fromFile && versions.length === 1 && <p className="text-sm text-muted">{revisionLabel(versions[0]!, 0)}</p>}
     </div>
   )
   if (versions.length === 0 && !preview)
@@ -713,9 +722,7 @@ function MergeBody({
       <>
         {header}
         <Alert tone="warning" title={`${dirty === 1 ? "A field has" : `${dirty} fields have`} unsaved changes`}>
-          <p>
-            Save them as a revision or revert them first, so the merge compares saved revisions only.
-          </p>
+          <p>Save them as a revision or revert them first, so the merge compares saved revisions only.</p>
           <div className="mt-2">
             <SaveRevision store={store} />
           </div>

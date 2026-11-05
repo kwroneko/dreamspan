@@ -35,9 +35,7 @@ const notice = (scope: Page | Locator) =>
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
-    test(`a preset fork merges its parent's changes and undoes the merge ${width} ${theme}`, async ({
-      page
-    }, info) => {
+    test(`a preset fork merges its parent's changes and undoes the merge ${width} ${theme}`, async ({ page }, info) => {
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
@@ -242,7 +240,9 @@ for (const width of [1440, 390])
     await expect(dialog).toHaveCount(0)
     await expect(notice(editor)).toHaveCount(0)
     const [head] = await admin((api) => api.ListRevisions({ refId: seed.variant.id, limit: 1 }))
-    const doc = (await admin((api) => api.GetRevision({ refId: seed.variant.id, revisionId: head!.id }))) as unknown as {
+    const doc = (await admin((api) =>
+      api.GetRevision({ refId: seed.variant.id, revisionId: head!.id })
+    )) as unknown as {
       entries: Array<{ uid: number; content: string }>
     }
     expect(doc.entries.map((e) => e.content)).toEqual(["The water is rough.", "The lamp turns all night."])
@@ -291,10 +291,7 @@ test("a card merges a new version of its file instead of replacing it", async ({
   await expect(rows.filter({ hasText: "Scenario" })).not.toContainText("conflict")
   await expect(rows.filter({ hasText: "Description" })).toContainText("conflict")
   await expect(rows.filter({ hasText: "Lorebook" })).toHaveCount(1)
-  await rows
-    .filter({ hasText: "Description" })
-    .getByRole("radio", { name: "Keep current version" })
-    .check()
+  await rows.filter({ hasText: "Description" }).getByRole("radio", { name: "Keep current version" }).check()
   await capture(page, info, dialog, "1440-card-file-merge")
   await dialog.getByRole("button", { name: "Merge", exact: true }).click()
   await expect(dialog).toHaveCount(0)

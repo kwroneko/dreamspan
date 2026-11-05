@@ -45,11 +45,7 @@ const paths = {
     "M18 9a9 9 0 0 1-9 9"
   ],
   /** Two lines joining: taking a parent's changes into a fork. */
-  merge: [
-    "M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
-    "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
-    "M6 21V9a9 9 0 0 0 9 9"
-  ],
+  merge: ["M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 21V9a9 9 0 0 0 9 9"],
   /** A small tree of boxes: a family of forks. */
   family: [
     "M17 16h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z",

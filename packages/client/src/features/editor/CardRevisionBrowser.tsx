@@ -29,7 +29,7 @@ import { type EditorStore, useEditorState, useWorkingDoc } from "./store.ts"
 const isText = (value: unknown) => value === undefined || typeof value === "string"
 
 /** A preset's order, by its prompts' names: "3. Main Prompt · on". */
-export const orderLines = (doc: Doc) => (value: unknown) => {
+const orderLines = (doc: Doc) => (value: unknown) => {
   if (!Array.isArray(value)) return readableLines(value)
   const prompts = new Map(
     ((doc.prompts as ReadonlyArray<PresetPrompt> | undefined) ?? []).map((p) => [
@@ -382,29 +382,29 @@ export function CardRevisionBrowser({
               originLabel={originBadges[revision.origin]}
               restore={
                 <>
-                <Button
-                  className="h-8 px-2"
-                  disabled={
-                    revision.id === head ||
-                    restoringId !== null ||
-                    (selected?.id === revision.id && (!selectedDoc || clash !== null))
-                  }
-                  aria-label={selected?.id === revision.id && clash ? "Restore" : undefined}
-                  focusableWhenDisabled
-                  hint={
-                    revision.id === head
-                      ? "This is the latest revision"
-                      : restoringId
-                        ? "A revision is being restored"
-                        : selected?.id === revision.id && clash
-                          ? clash
-                          : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
-                  }
-                  onClick={() => void restore(revision)}
-                >
-                  Restore to {revisionName(revision.number).toLowerCase()}
-                </Button>
-                <SlotOutlet slot={revisionActions} props={{ store, revision }} />
+                  <Button
+                    className="h-8 px-2"
+                    disabled={
+                      revision.id === head ||
+                      restoringId !== null ||
+                      (selected?.id === revision.id && (!selectedDoc || clash !== null))
+                    }
+                    aria-label={selected?.id === revision.id && clash ? "Restore" : undefined}
+                    focusableWhenDisabled
+                    hint={
+                      revision.id === head
+                        ? "This is the latest revision"
+                        : restoringId
+                          ? "A revision is being restored"
+                          : selected?.id === revision.id && clash
+                            ? clash
+                            : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
+                    }
+                    onClick={() => void restore(revision)}
+                  >
+                    Restore to {revisionName(revision.number).toLowerCase()}
+                  </Button>
+                  <SlotOutlet slot={revisionActions} props={{ store, revision }} />
                 </>
               }
               message={revision.message}

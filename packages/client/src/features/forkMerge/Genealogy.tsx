@@ -92,7 +92,9 @@ function Branch({
             {member.refId === current && <Badge tone="accent">this one</Badge>}
             {member.refKind === "chat_override" && <Badge>one chat's copy</Badge>}
             {member.state !== "live" && (
-              <Badge>{member.state === "binned" ? "in the bin" : member.state === "purged" ? "deleted" : member.state}</Badge>
+              <Badge>
+                {member.state === "binned" ? "in the bin" : member.state === "purged" ? "deleted" : member.state}
+              </Badge>
             )}
           </div>
           <p className="text-xs text-muted">{line}</p>
