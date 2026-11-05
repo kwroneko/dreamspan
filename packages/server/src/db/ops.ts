@@ -125,7 +125,7 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
-import { RolloutStep } from "@rp/shared/agent.ts"
+import { ActivityPage, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import {
@@ -3243,6 +3243,18 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("RolloutSteps", {
     payload: { userId: UserId, versionId: VersionId },
     success: Schema.Array(RolloutStep),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** An agent reply's transcript after its request, verbatim, with its offered tools (agentReads.ts). */
+  Rpc.make("RolloutTranscript", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: RunTranscript,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A chat's model work that made no message, from the ledger, newest first (agentReads.ts). */
+  Rpc.make("ListActivity", {
+    payload: { userId: UserId, chatId: ChatId, before: Schema.optionalKey(Schema.Number), limit: Schema.Int },
+    success: ActivityPage,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Generation time and tokens of the user's versions (inspectorReads.ts); others are left out. */

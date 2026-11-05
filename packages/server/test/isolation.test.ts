@@ -1814,6 +1814,34 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.deepStrictEqual(yield* owner.api.GetRolloutSteps({ versionId: owner.chat.generatingId }), [])
       })
   },
+  GetRunTranscript: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetRunTranscript({ versionId: owner.chat.generatingId }), "NotFound")
+        assert.deepStrictEqual(yield* owner.api.GetRunTranscript({ versionId: owner.chat.generatingId }), {
+          tools: [],
+          entries: []
+        })
+      })
+  },
+  // The registered modes and tools: the same for everyone, nobody's data.
+  ListReplyModes: {
+    probe: (actor) =>
+      Effect.gen(function* () {
+        const modes = yield* actor.api.ListReplyModes({})
+        assert.include(
+          modes.modes.map((m) => m.id),
+          "plain"
+        )
+      })
+  },
+  ListActivity: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.ListActivity({ chatId: owner.chat.chatId }), "NotFound")
+        assert.isArray((yield* owner.api.ListActivity({ chatId: owner.chat.chatId })).rows)
+      })
+  },
   GetRunContext: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

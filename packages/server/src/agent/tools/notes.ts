@@ -65,6 +65,7 @@ const notesAt = (context: ToolContext) =>
 export const listNotes: RolloutTool<Record<string, never>> = {
   id: "list_notes",
   label: "Looked at the notes",
+  explanation: "List this chat's notes",
   effect: "read",
   description:
     "Lists the chat's notes and its characters' notes: title, whose it is, whether it's on, and whether you may change it. On notes are already in your context.",
@@ -92,6 +93,7 @@ export const listNotes: RolloutTool<Record<string, never>> = {
 export const switchNote: RolloutTool<{ readonly note: string; readonly on: boolean }> = {
   id: "switch_note",
   label: "Switched a note",
+  explanation: "Switch the notes you let it change",
   effect: "chat_state",
   description:
     "Turns one of the notes on or off from the next message on, by its title (list_notes gives them). Only notes you may change.",

@@ -29,6 +29,8 @@ import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { ImageEstimate } from "./imageTokens.tsx"
 import { requestStatusText } from "./requestWords.ts"
 import { useTitle } from "../shell.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { runInspectorSections } from "./presentation.tsx"
 
 /** How much of a collapsed message shows. */
 const PREVIEW = 200
@@ -711,6 +713,7 @@ function Inspector({ run }: { run: RunContext }) {
         )}
       </section>
       <NotSent run={run} />
+      <SlotOutlet slot={runInspectorSections} props={{ run }} />
       <Card>
         <CardHeader
           title="Usage"

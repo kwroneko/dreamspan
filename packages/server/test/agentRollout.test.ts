@@ -103,7 +103,7 @@ describe("agent rollouts", () => {
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
-      const { version, events } = yield* generateReply(api, {
+      const { version, events, chat } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         preset: { assistant_prefill: "Hm." },
@@ -164,6 +164,52 @@ describe("agent rollouts", () => {
       assert.deepStrictEqual(
         roles.filter((r) => r !== "system"),
         ["rpRequest", "assistant", "toolResult", "assistant"]
+      )
+
+      // The run inspector's view: the offered tools and every turn after the request, verbatim.
+      const run = yield* api.GetRunTranscript({ versionId: version.id })
+      assert.deepStrictEqual(run.tools, [
+        {
+          name: "look_up",
+          label: "Looked something up",
+          description: "Looks up a detail of the story.",
+          parameters: lookup.parameters,
+          effect: "read"
+        }
+      ])
+      assert.deepStrictEqual(
+        run.entries.map((e) => (e.role === "assistant" ? { role: e.role, parts: e.parts } : e)),
+        [
+          {
+            role: "assistant",
+            parts: [
+              { type: "text", text: "Let me check." },
+              { type: "toolCall", id: "call_1", name: "look_up", args: { topic: "lighthouse" } }
+            ]
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call_1",
+            tool: "look_up",
+            text: "The lighthouse keeper is called Ansel.",
+            isError: false
+          },
+          { role: "assistant", parts: [{ type: "text", text: "Ansel waves from the lighthouse." }] }
+        ]
+      )
+      // A reply is reached from its message, never listed as Activity.
+      assert.deepStrictEqual(yield* api.ListActivity({ chatId: chat.id }), { rows: [], before: null })
+      // The settings list the registered tool, its label standing in for a missing explanation.
+      const modes = yield* api.ListReplyModes({})
+      assert.deepInclude(modes.tools, {
+        id: "look_up",
+        label: "Looked something up",
+        explanation: "Looked something up",
+        effect: "read"
+      })
+      assert.deepInclude(
+        modes.modes.map((m) => ({ id: m.id, agentic: m.agentic })),
+        { id: "plain", agentic: false }
       )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
