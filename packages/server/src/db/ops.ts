@@ -2423,9 +2423,11 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       versionId: VersionId,
+      /** The state the point read: a later user/tool change or swipe makes the effect stale. */
+      expectedState: Schema.String,
       events: Schema.Array(StoredStateEventData)
     },
-    success: Schema.Void,
+    success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The account defaults, including its new-chat persona; choices must be owned and live. */
@@ -3263,7 +3265,10 @@ export class ReadOps extends RpcGroup.make(
       agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, cardsAtTail: Schema.Boolean })),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
       decisions: Schema.optionalKey(
-        Schema.Struct({ lore: Schema.Array(Schema.Struct({ entry: Schema.String, probability: Schema.Number })) })
+        Schema.Struct({
+          stamp: Schema.String,
+          lore: Schema.Array(Schema.Struct({ entry: Schema.String, probability: Schema.Number }))
+        })
       )
     },
     success: Schema.Struct({
@@ -3275,6 +3280,7 @@ export class ReadOps extends RpcGroup.make(
       /** What the `lore` decision point would ask about; absent when no entry the keys left out has a question. */
       loreDecision: Schema.optionalKey(
         Schema.Struct({
+          stamp: Schema.String,
           candidates: Schema.Array(
             Schema.Struct({ key: Schema.String, title: Schema.String, question: Schema.String })
           ),

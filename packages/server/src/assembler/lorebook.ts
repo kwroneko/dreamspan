@@ -30,6 +30,8 @@ interface Scan {
    */
   readonly injections?: ReadonlyArray<{ readonly text: string; readonly scan: boolean; readonly name?: string }>
   readonly trigger?: string
+  /** Model admissions replace keyword matching, subject to the normal entry gates and budgets. */
+  readonly decisions?: ReadonlyMap<string, number>
 }
 
 const workLimits = {
@@ -72,6 +74,7 @@ interface Source {
 type Why =
   | { readonly kind: "constant" }
   | { readonly kind: "sticky" }
+  | { readonly kind: "decision"; readonly probability: number }
   | {
       readonly kind: "keys"
       readonly primaryKey: string
@@ -506,7 +509,10 @@ export const matchLorebooks = (
         const scoring = entry.group && (settings.groupScoring || scoredGroups.has(entry.group))
         const text = !entry.constant || scoring ? buffer(source) : { text: "" }
         let why: Why = { kind: entry.constant ? "constant" : sticky ? "sticky" : "constant" }
-        if (!entry.constant && !sticky) {
+        const decision = scan.decisions?.get(`${source.book}:${entry.uid}`)
+        if (!entry.constant && !sticky && decision !== undefined) {
+          why = { kind: "decision", probability: decision }
+        } else if (!entry.constant && !sticky) {
           let primaryKey: string | undefined
           let unsafe = false
           for (const key of entry.keys) {
