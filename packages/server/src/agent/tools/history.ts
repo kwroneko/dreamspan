@@ -72,7 +72,13 @@ const pathMessages = (context: ToolContext) =>
       const user = (persona && names.get(persona)) ?? "User"
       return entries.flatMap((entry): Array<PathMessage> => {
         const { version } = entry
-        if (entry.contextExcluded || version.status !== "complete" || !version.content.trim()) return []
+        if (
+          entry.contextExcluded ||
+          version.status === "generating" ||
+          version.status === "failed" ||
+          !version.content.trim()
+        )
+          return []
         const speaker = names.get(version.speakerEntityId ?? "") ?? (version.writer === "human" ? user : "Narrator")
         // A template message (a greeting) as the model read it: its names filled in [P: only these two].
         const content =
@@ -216,6 +222,7 @@ const summaryTree = (context: ToolContext) =>
         const summary = queue.shift()!
         const children = summary.children.map((c) => (typeof c === "string" ? c : c.summaryId))
         nodes.push({
+          id: summary.id,
           level: summary.level,
           from: summary.from,
           to: summary.to,
@@ -232,6 +239,7 @@ const summaryTree = (context: ToolContext) =>
   )
 
 interface SummaryNode {
+  readonly id: string
   readonly level: number
   readonly from: number
   readonly to: number
@@ -280,7 +288,8 @@ const expandSummary: RolloutTool<{ readonly messages: string; readonly max_token
           node.level <= 1
             ? (yield* pathMessages(context)).filter((m) => m.n >= node.from && m.n <= node.to).map(line)
             : tree
-                .filter((s) => s.level === node.level - 1 && s.from >= node.from && s.to <= node.to)
+                .filter((s) => node.children.includes(s.id))
+                .toSorted((a, b) => node.children.indexOf(a.id) - node.children.indexOf(b.id))
                 .map((s) => `<summary level="${s.level}" from="${s.from}" to="${s.to}">\n${s.content}\n</summary>`)
         const shown: Array<string> = []
         let used = 0
