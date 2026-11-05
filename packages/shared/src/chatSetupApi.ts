@@ -299,6 +299,10 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   replyOrder: Schema.optionalKey(Schema.String),
   /** True: one reply per user action instead of the reply order's round (`reply.single`); absent is off, as in ST. */
   replySingle: Schema.optionalKey(Schema.Boolean),
+  /** How replies are written (`orchestration.mode`, a reply mode's id); absent is the default, plain. */
+  replyMode: Schema.optionalKey(Schema.String),
+  /** The tools agent modes offer (`agent.tools`); absent: each mode's own. */
+  agentTools: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Active and departed cards, including former personas, to retain historical names and portraits. */
   cards: Schema.Array(CastCard)
 }) {}
@@ -347,6 +351,12 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("ReplyOrder", { order: Schema.String.check(Schema.isMaxLength(200)) }),
   /** One reply per user action, or the reply order's whole round as in ST (`reply.single`). */
   Schema.TaggedStruct("ReplySingle", { on: Schema.Boolean }),
+  /** How replies are written from here on (`orchestration.mode`): a reply mode's id. */
+  Schema.TaggedStruct("ReplyMode", { mode: Schema.String.check(Schema.isMaxLength(200)) }),
+  /** The tools agent modes offer from here on (`agent.tools`), by id. */
+  Schema.TaggedStruct("AgentTools", {
+    tools: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100))
+  }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type

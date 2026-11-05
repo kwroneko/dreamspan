@@ -101,6 +101,8 @@ const displayFields = {
   underlineTextColor: messageColor,
   quoteTextColor: messageColor,
   reasoning: ReasoningDisplay,
+  /** An agent reply's steps while it's written, open or folded, as reasoning's (DESIGN §7.4). */
+  steps: ReasoningDisplay,
   portraitSize: Schema.Literals(["small", "default", "large", "largest"]),
   timeline: Schema.Literals(["originals", "summaries"]),
   coverageRail: Schema.Boolean,
@@ -137,6 +139,7 @@ export const DisplayPrefsChange = Schema.Struct({
   underlineTextColor: Schema.optionalKey(displayFields.underlineTextColor),
   quoteTextColor: Schema.optionalKey(displayFields.quoteTextColor),
   reasoning: Schema.optionalKey(displayFields.reasoning),
+  steps: Schema.optionalKey(displayFields.steps),
   portraitSize: Schema.optionalKey(displayFields.portraitSize),
   timeline: Schema.optionalKey(displayFields.timeline),
   coverageRail: Schema.optionalKey(displayFields.coverageRail),
@@ -160,6 +163,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   underlineTextColor: null,
   quoteTextColor: null,
   reasoning: "expanded",
+  steps: "expanded",
   portraitSize: "default",
   timeline: "originals",
   coverageRail: false,
@@ -225,7 +229,9 @@ export const ChatEvent = Schema.Union([
         /** The reasoning streamed so far, when there is any. */
         reasoning: Schema.optionalKey(Schema.String),
         /** The reply sections' panel text streamed so far, when there is any (spec/REPLY-SECTIONS.md). */
-        sections: Schema.optionalKey(Schema.String)
+        sections: Schema.optionalKey(Schema.String),
+        /** An agent reply's steps so far, when it has any (spec/AGENTIC.md §5.1). */
+        steps: Schema.optionalKey(Schema.Array(RolloutStep))
       })
     )
   }),
