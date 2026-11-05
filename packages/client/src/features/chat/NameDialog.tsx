@@ -13,11 +13,13 @@ export function NameDialog({
   open,
   onOpenChange,
   title,
+  summary,
   label,
   initial,
   description,
   maxLength,
   saveLabel = "Save",
+  saveHint = "Saves the new name.",
   pending,
   error,
   onSave,
@@ -27,6 +29,8 @@ export function NameDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
   title: ReactNode
+  /** What the dialog is about, under its title. */
+  summary?: ReactNode
   label: string
   /** The name now, which the field starts with. */
   initial: string
@@ -34,6 +38,7 @@ export function NameDialog({
   description?: ReactNode
   maxLength: number
   saveLabel?: string
+  saveHint?: string
   pending: boolean
   error: AppError | null
   onSave: (name: string) => Promise<boolean>
@@ -41,7 +46,7 @@ export function NameDialog({
   children?: ReactNode
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={title}>
+    <Dialog open={open} onOpenChange={onOpenChange} title={title} description={summary}>
       {/* Mounted while open only, so it starts from the name as it is each time. */}
       {open && (
         <NameForm
@@ -51,6 +56,7 @@ export function NameDialog({
           description={description}
           maxLength={maxLength}
           saveLabel={saveLabel}
+          saveHint={saveHint}
           pending={pending}
           error={error}
           onSave={onSave}
@@ -70,6 +76,7 @@ function NameForm({
   description,
   maxLength,
   saveLabel,
+  saveHint,
   pending,
   error,
   onSave,
@@ -82,6 +89,7 @@ function NameForm({
   description?: ReactNode
   maxLength: number
   saveLabel: string
+  saveHint: string
   pending: boolean
   error: AppError | null
   onSave: (name: string) => Promise<boolean>
@@ -114,7 +122,7 @@ function NameForm({
         <Button hint="Closes this dialog without applying changes." type="button" onClick={onCancel}>
           Cancel
         </Button>
-        <Button hint="Saves the new name." type="submit" variant="primary" pending={pending}>
+        <Button hint={saveHint} type="submit" variant="primary" pending={pending}>
           {saveLabel}
         </Button>
       </DialogActions>

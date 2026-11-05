@@ -35,6 +35,9 @@ const ExportChatDialog = deferred<ChatCommandDialogProps>(() =>
 const DeleteChatGroupDialog = deferred<ChatCommandDialogProps>(() =>
   import("./DeleteChatGroupDialog.tsx").then((m) => ({ default: m.DeleteChatGroupDialog }))
 )
+const SplitChatCommandDialog = deferred<ChatCommandDialogProps>(() =>
+  import("./SplitChatDialog.tsx").then((m) => ({ default: m.SplitChatCommandDialog }))
+)
 
 export const registerChatHeader = () => [
   chatHeaderActions.register({ id: "chat.pin", order: 10, component: part("HeaderPin") }),
@@ -67,9 +70,7 @@ export const registerChatHeader = () => [
     icon: "branch",
     available: ({ view, splitRootId }) =>
       splitRootId !== undefined && (view.forkId ?? view.chat?.currentForkId) !== splitRootId,
-    run: ({ session }) => {
-      void session.splitChat()
-    }
+    dialog: SplitChatCommandDialog
   }),
   chatCommands.register({
     id: "chat.new-with-cast",

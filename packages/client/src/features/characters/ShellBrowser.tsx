@@ -14,6 +14,7 @@ import { AsyncView, ErrorAlert, FailureView, useAction } from "../../actions.tsx
 import type { ForkId } from "@rp/shared/chat.ts"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { forksChanged } from "../chat/forks.ts"
+import { SplitChatDialog } from "../chat/SplitChatDialog.tsx"
 import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"
 import { useSession } from "../../session.ts"
 import { rememberedPanel } from "../chat/ChatPanels.tsx"
@@ -202,6 +203,29 @@ function BranchesButton({ fork, entity = null }: { fork: ShellFork; entity?: Ent
   )
 }
 
+/** Makes the selected branch its own chat, after the explanatory confirmation (owner, 2026-11-05). */
+function SplitBranchButton({ fork, label }: { fork: ShellFork; label: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <IconButton
+        label={`Make ${label} its own chat`}
+        hint="Moves this branch and the branches made from it into a chat of their own."
+        icon="split"
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+      />
+      {open && (
+        <SplitChatDialog
+          chatId={fork.sourceChatId ?? fork.chat.id}
+          forkId={fork.forkId as ForkId}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  )
+}
+
 /** Branch-list content shares the row's open target without nesting rename controls in it. */
 function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; open: () => void }) {
   const action = useAction()
@@ -212,7 +236,9 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
     <div
       data-fork-row
       onClick={(event) => {
-        if (!(event.target as HTMLElement).closest("button, input, [data-added-portraits]")) open()
+        // A dialog opened from the row is portalled elsewhere; its clicks still bubble here.
+        const target = event.target as HTMLElement
+        if (event.currentTarget.contains(target) && !target.closest("button, input, [data-added-portraits]")) open()
       }}
       className={`fork-row branch-list-row @container/fork-row relative grid w-full shrink-0 max-w-controls min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${here ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
     >
@@ -274,7 +300,8 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
               {label}
             </span>
           )}
-          {fork.current && fork.branches > 1 && (
+          {/* While renaming, the field takes the whole title line (owner, 2026-11-05). */}
+          {fork.current && fork.branches > 1 && !renaming && (
             <span data-opens-here className="flex shrink-0">
               <Badge>opens here</Badge>
             </span>
@@ -301,12 +328,16 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
           </button>
         </Tooltip>
       </div>
-      <span
-        data-branch-pin
-        data-layout-overlay="Pin occupies the preview’s reserved end padding below the full-width title"
+      {/* The corners of a chat row (owner, 2026-11-05): the pin at the top; at the bottom, where a
+          chat row lists its branches, Split off, on the selected branch only. */}
+      <div
+        data-row-actions
+        data-layout-overlay="Corner actions share the full-width open control in narrow branch rows"
+        className="flex shrink-0 flex-col items-end justify-between self-stretch"
       >
         <PinButton fork={fork} branch />
-      </span>
+        {here && !fork.original && <SplitBranchButton fork={fork} label={label} />}
+      </div>
       {action.error && (
         <span
           role="alert"

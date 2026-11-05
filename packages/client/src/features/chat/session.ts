@@ -1,5 +1,3 @@
-import { showToast } from "../../ui/Toast.tsx"
-import { requestSplitReveal } from "./splitReveal.ts"
 import { refreshTokenCounts } from "../editor/tokenCounts.ts"
 import type { ForkNoteSelection } from "@rp/shared/chatApi.ts"
 // One open chat (CLIENT-FRAMEWORK §5): the loaded window of its path, kept current by its
@@ -1801,33 +1799,6 @@ export class ChatSession {
     const result = await this.call((client) => client("NameFork", { forkId, name }))
     if (result.ok) await this.refreshSlot(entry.slotId)
     return result
-  }
-
-  async splitChat() {
-    const forkId = this.view.forkId ?? this.view.chat?.currentForkId
-    if (!forkId) return
-    const result = await this.call((client) => client("SetSplitChat", { forkId, split: true }))
-    if (!result.ok) {
-      showToast({ title: "Couldn't split the chat", description: result.error.message })
-      return
-    }
-    requestSplitReveal(forkId, true)
-    this.invalidate(["chats", "pins"])
-    showToast({
-      title: "Branch is now its own chat",
-      actions: [
-        {
-          label: "Undo",
-          hint: "Puts this chat back among its parent's branches.",
-          onClick: () => {
-            void this.call((client) => client("SetSplitChat", { forkId, split: false })).then((undone) => {
-              if (undone.ok) this.invalidate(["chats", "pins"])
-              else showToast({ title: "Couldn't restore the branch", description: undone.error.message })
-            })
-          }
-        }
-      ]
-    })
   }
 
   /** Names the chat; the header shows it at once, other tabs on the `Chat` event, lists read again. */

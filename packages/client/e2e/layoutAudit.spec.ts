@@ -898,6 +898,36 @@ test.describe("synthetic library and every app surface", () => {
           await audit("splitlink-header", '[role="dialog"]')
           return
         }
+        if (process.env.LAYOUT_AUDIT_SPLITCONFIRM_ONLY === "1") {
+          const branch = await admin((api) =>
+            Effect.gen(function* () {
+              const forks = yield* api.ListForks({ chatId })
+              const parent = forks.find((f) => f.current)!
+              const { fork } = yield* api.CreateFork({ chatId, fromForkId: parent.id, atSlotId: parent.tipSlotId })
+              return fork
+            })
+          )
+          await go("splitconfirm-chat", `/chats/${chatId}?fork=${branch.id}`)
+          await audit("splitconfirm-composer", '.chat-column:has([data-testid="composer"])')
+          await showAppNavigation(page)
+          const foot = page
+            .getByRole("region", { name: "Branches of the open chat", exact: true })
+            .getByRole("button", { name: /^Branches of / })
+          if ((await foot.getAttribute("aria-expanded")) !== "true") await foot.click()
+          await expect(foot).toHaveAttribute("aria-expanded", "true")
+          await audit("splitconfirm-rows", "[data-fork-row]")
+          await page
+            .getByRole("button", { name: /its own chat$/ })
+            .first()
+            .click()
+          await expect(page.getByRole("dialog")).toBeVisible()
+          await audit("splitconfirm-dialog", '[role="dialog"]')
+          await page.keyboard.press("Escape")
+          await go("splitconfirm-list", `/chats/${chatId}?fork=${branch.id}&side=chats&forks=${chatId}`)
+          await showAppNavigation(page)
+          await audit("splitconfirm-list-rows", "[data-fork-row]")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_SIDEBAR_ONLY === "1") {
           for (const [scope, query] of [
             ["all", ""],

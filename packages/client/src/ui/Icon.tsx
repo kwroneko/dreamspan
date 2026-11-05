@@ -44,6 +44,8 @@ const paths = {
     "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
     "M18 9a9 9 0 0 1-9 9"
   ],
+  /** A path forking off on its own: a branch made its own chat, apart from branch's tree. */
+  split: ["M16 3h5v5", "M8 3H3v5", "M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3", "m15 9 6-6"],
   /** A window with a side column: the chat's side panel. */
   panel: ["M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M15 3v18"],
   /** A window with a column on its left: the app's sidebar. */

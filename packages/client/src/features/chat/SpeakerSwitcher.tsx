@@ -485,7 +485,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       triggerClassName={
         trigger
           ? buttonClass("secondary")
-          : `inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised py-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus ${compact ? "pr-1.5 pl-1" : "max-w-44 pr-2.5 pl-1"}`
+          : `inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-raised py-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus ${compact ? "pr-1.5 pl-1" : "max-w-44 pr-2.5 pl-1"}`
       }
       title={persona ? "Your persona" : "Speak as"}
       trigger={
