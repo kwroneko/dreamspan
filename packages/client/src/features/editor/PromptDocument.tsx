@@ -115,16 +115,19 @@ const keepOptionsOpen = (userId: string, open: boolean) => {
 function TokenCount({
   prompt,
   content,
-  context
+  context,
+  replaced
 }: {
   prompt: PresetPrompt
   content: string
   context: PresetContext | null | undefined
+  replaced: boolean
 }) {
   const filled = context?.blocks.find((b) => b.identifier === prompt.identifier)
-  // A prompt's own text: the chat model's tokenizer. A marker's: what the open chat fills it
-  // with, as the context budget counts it (ARCHITECTURE §15 "Token counts").
-  const texts = useMemo(() => [prompt.marker ? "" : content], [prompt.marker, content])
+  // Markers and replaced prompts count what's actually sent in the open chat; other
+  // prompts count their own text with the chat model's tokenizer.
+  const fromChat = prompt.marker || replaced
+  const texts = useMemo(() => [fromChat ? "" : content], [fromChat, content])
   const own = useTokenCounts(texts)
   return (
     <Tooltip label="Estimated tokens this prompt sends.">
@@ -133,7 +136,7 @@ function TokenCount({
         data-prompt-tokens
         className="shrink-0 rounded text-xs whitespace-nowrap text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
-        {prompt.marker
+        {fromChat
           ? filled
             ? `~${filled.tokens.toLocaleString()} tokens`
             : context === undefined
@@ -590,7 +593,7 @@ function PromptBlock({
             {replacedBadge}
             {summary}
             {!prompt.marker && <SendBadges prompt={prompt} />}
-            <TokenCount prompt={prompt} content={content} context={context} />
+            <TokenCount prompt={prompt} content={content} context={context} replaced={Boolean(noted)} />
           </div>
         )}
         {column && (
@@ -599,7 +602,9 @@ function PromptBlock({
           // line up with the other rows' (owner, 2026-11-03: "both alignment and spacing are off").
           <span data-prompt-end className="ml-auto flex h-8 min-w-0 items-center gap-2 self-start">
             {!prompt.marker && <PromptKindTag prompt={prompt} />}
-            {(prompt.marker || !open) && <TokenCount prompt={prompt} content={content} context={context} />}
+            {(prompt.marker || !open) && (
+              <TokenCount prompt={prompt} content={content} context={context} replaced={Boolean(noted)} />
+            )}
             <span className="flex shrink-0 items-center gap-1">
               {optionsToggle || <span aria-hidden className="size-8 shrink-0" />}
               {menu}
@@ -617,7 +622,7 @@ function PromptBlock({
             {open && (
               <>
                 <SendBadges prompt={prompt} />
-                <TokenCount prompt={prompt} content={content} context={context} />
+                <TokenCount prompt={prompt} content={content} context={context} replaced={Boolean(noted)} />
               </>
             )}
           </div>

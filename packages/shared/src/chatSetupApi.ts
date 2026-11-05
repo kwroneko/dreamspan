@@ -22,7 +22,7 @@ import {
 } from "./chat.ts"
 import { ChatNameInput, GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { EditRefused } from "./editorApi.ts"
+import { EditRefused, InvalidDocument } from "./editorApi.ts"
 import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 import { RegexScript } from "./docs/regexScript.ts"
@@ -637,7 +637,7 @@ export class ChatSetupApi extends RpcGroup.make(
       content: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
-    error: Schema.Union([...Errors])
+    error: Schema.Union([...Errors, InvalidDocument])
   }),
   /** The chat's send queue, in order. */
   Rpc.make("ListQueued", {
