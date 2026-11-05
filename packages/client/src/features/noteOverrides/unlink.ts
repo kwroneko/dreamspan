@@ -9,10 +9,10 @@ import type { ReplaceChat } from "./chat.tsx"
 type Workspace = NonNullable<ReturnType<typeof usePresetWorkspace>>
 
 /** A listed note's store in the chat's workspace: a chat's own note at the branch shown. */
-export const noteStore = (workspace: Workspace, chat: ReplaceChat, note: ChatNote): EditorStore =>
+const noteStore = (workspace: Workspace, chat: ReplaceChat, note: ChatNote): EditorStore =>
   workspace.store(note.ref.id, note.card === null ? chat.position : undefined)
 
-export const unlink = async (store: EditorStore) => {
+const unlink = async (store: EditorStore) => {
   if (store.snapshot === null) await store.load()
   store.setValue(["replaces"], undefined)
   store.setValue(["own_position"], undefined)

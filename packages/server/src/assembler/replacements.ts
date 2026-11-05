@@ -5,7 +5,7 @@
 // text in its target's place (`replacedText`), or leaves the target out when the note goes at
 // its own position. Anything that wants a prompt replaced in a chat, an agent tool among them
 // (Phase 4), writes such a note: nothing else needs to know.
-import { readReplaceTarget, type ReplaceTarget, targetCard, type ReplaceableCardField } from "@rp/shared/docs/note.ts"
+import { readReplaceTarget, type ReplaceTarget, targetCard } from "@rp/shared/docs/note.ts"
 import { presetOrder, withMain } from "@rp/shared/presetOrder.ts"
 import { type FoldableEvent, swappedCard } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -13,7 +13,7 @@ import { type AssemblerStage, type Assembly, need } from "./pipeline.ts"
 import { noteCard, type NoteInput, type NoteReplacement, type ResolvedTarget } from "./types.ts"
 
 /** One key per target: `preset:<identifier>`, `card:<entity>:<field>`. */
-export const replaceKey = (target: ResolvedTarget) =>
+const replaceKey = (target: ResolvedTarget) =>
   target.kind === "preset_prompt" ? `preset:${target.identifier}` : `card:${target.card}:${target.field}`
 
 /** A card field's key, for the composition's lookups. */
@@ -24,7 +24,7 @@ export const cardFieldKey = (card: string, field: string) => `card:${card}:${fie
  * the card that fills it now (a card forked for this chat, another version). Null when a chat's
  * note names a card field but no card.
  */
-export const resolveTarget = (
+const resolveTarget = (
   target: ReplaceTarget,
   owner: string | null,
   events: Iterable<FoldableEvent>
@@ -110,16 +110,6 @@ export const replacementsStage: AssemblerStage = {
       assembly.skippedNotes = skipped.filter((note) => !taken.has(note))
       return assembly
     })
-}
-
-/** A card field's label, for the inspector's words. */
-export const CARD_FIELD_NAMES: Readonly<Record<ReplaceableCardField, string>> = {
-  description: "Description",
-  personality: "Personality",
-  scenario: "Scenario",
-  mes_example: "Example messages",
-  system_prompt: "System prompt",
-  post_history_instructions: "Post-history instructions"
 }
 
 /** The replacement on this turn for a target, when one applies to what's sent (not `missing` and so on). */

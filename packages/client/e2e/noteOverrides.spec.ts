@@ -5,6 +5,7 @@
 // target. At 1440 and 390, light and dark, with the layout audit on each surface. A made-up
 // card and ST's default preset.
 import { mkdirSync, readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -16,7 +17,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "20" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
-const shots = process.env.SCREENSHOT_DIR ?? "<work>/artifacts/noteoverrides/shots"
+const shots = process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-note-overrides")
 mkdirSync(shots, { recursive: true })
 
 const preset = JSON.parse(
@@ -128,7 +129,9 @@ for (const width of [1440, 390])
       if (await mainToggle.count()) await mainToggle.click()
       const main = presetTab.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
       await main.click()
-      await fieldOf(presetTab, "Prompt: Main Prompt").getByRole("button", { name: "Replace with a note in this chat" }).click()
+      await fieldOf(presetTab, "Prompt: Main Prompt")
+        .getByRole("button", { name: "Replace with a note in this chat" })
+        .click()
       const mainTabs = presetTab.getByRole("tablist", { name: "Prompt: Main Prompt: as replaced or original" })
       await expect(mainTabs.getByRole("tab", { name: "As replaced" })).toHaveAttribute("aria-selected", "true")
       await expect(presetTab.locator('[data-prompt="main"] [data-prompt-replaced]')).toBeVisible({ timeout: 60_000 })

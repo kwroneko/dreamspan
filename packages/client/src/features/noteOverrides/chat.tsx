@@ -43,10 +43,10 @@ const Context = createContext<ReplaceChat | null>(null)
 export const useReplaceChat = () => useContext(Context)
 
 /** Whether a replacement is sent this chat (or would be, on the turns its condition holds). */
-export const shown = (r: NoteReplacementView) =>
+const shown = (r: NoteReplacementView) =>
   r.status === "replaced" || r.status === "own_position" || r.status === "not_due"
 
-export const sameTarget = (a: FieldTarget, b: FieldTarget) => targetKey(a) === targetKey(b)
+const sameTarget = (a: FieldTarget, b: FieldTarget) => targetKey(a) === targetKey(b)
 
 /** The note that replaces `target` in the open chat, as the next reply's assembly found it. */
 export const useReplacement = (target: FieldTarget | null) => {
