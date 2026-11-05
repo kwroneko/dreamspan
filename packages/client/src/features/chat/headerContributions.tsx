@@ -32,6 +32,10 @@ const ExportChatDialog = deferred<ChatCommandDialogProps>(() =>
   import("./chatExport.tsx").then((m) => ({ default: m.ExportChatDialog }))
 )
 
+const DeleteChatGroupDialog = deferred<ChatCommandDialogProps>(() =>
+  import("./DeleteChatGroupDialog.tsx").then((m) => ({ default: m.DeleteChatGroupDialog }))
+)
+
 export const registerChatHeader = () => [
   chatHeaderActions.register({ id: "chat.pin", order: 10, component: part("HeaderPin") }),
   chatHeaderActions.register({ id: "chat.menu", order: 20, component: part("HeaderMenu") }),
@@ -54,6 +58,18 @@ export const registerChatHeader = () => [
     icon: "branch",
     available: ({ view }) => view.chat !== null,
     run: ({ session }) => requestBranches(session.id)
+  }),
+  chatCommands.register({
+    id: "chat.split",
+    label: "Make this branch its own chat",
+    description: "Moves this branch and the branches made from it into a chat of their own.",
+    order: 2.5,
+    icon: "branch",
+    available: ({ view, splitRootId }) =>
+      splitRootId !== undefined && (view.forkId ?? view.chat?.currentForkId) !== splitRootId,
+    run: ({ session }) => {
+      void session.splitChat()
+    }
   }),
   chatCommands.register({
     id: "chat.new-with-cast",
@@ -87,7 +103,17 @@ export const registerChatHeader = () => [
     icon: "keyboard",
     dialog: ShortcutsDialog
   }),
-  // To the bin, with Undo, as every delete (DESIGN §6.2): no confirmation.
+  chatCommands.register({
+    id: "chat.delete-group",
+    label: "Delete chat",
+    description: "Moves this chat's branches to the bin, from which they can be restored later.",
+    order: 90,
+    icon: "trash",
+    tone: "danger",
+    available: ({ view, hasSplitGroups }) => view.chat !== null && hasSplitGroups === true,
+    dialog: DeleteChatGroupDialog
+  }),
+  // Chats without split groups keep the existing immediate delete.
   chatCommands.register({
     id: "chat.delete",
     label: "Delete chat",
@@ -95,7 +121,8 @@ export const registerChatHeader = () => [
     order: 90,
     icon: "trash",
     tone: "danger",
-    available: ({ view, deleted }) => view.chat !== null && deleted !== undefined,
+    available: ({ view, deleted, hasSplitGroups }) =>
+      view.chat !== null && deleted !== undefined && hasSplitGroups === false,
     run: ({ session, deleted }) =>
       void session
         .call((client) => client("DeleteChat", { chatId: session.id }))

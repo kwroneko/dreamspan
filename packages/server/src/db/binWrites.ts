@@ -29,6 +29,8 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
             ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
           return limits
         }).pipe(transaction(sql, "ChangeBinLimit")),
+      DeleteChatGroup: ({ userId, chatId, forkId, expectedForkIds, title }) =>
+        deleting("DeleteChatGroup", userId, bin.deleteChatGroup(userId, chatId, forkId, expectedForkIds, title)),
       DeleteChat: ({ userId, chatId }) => deleting("DeleteChat", userId, bin.deleteChat(userId, chatId)),
       DeleteMessage: ({ userId, slotId, forkId }) =>
         deleting("DeleteMessage", userId, bin.deleteMessage(userId, slotId, forkId)),

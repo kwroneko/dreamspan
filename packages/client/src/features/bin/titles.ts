@@ -3,6 +3,7 @@ import type { BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { readableChatTitle } from "../chat/chatTitle.ts"
 
 export const binTitle = (item: BinItem) => {
+  if (typeof item.origin.groupId === "string") return item.title
   if (item.kind === "chat") return item.title === "" ? "Untitled chat" : readableChatTitle(item.title)
   const chat = typeof item.origin.chatTitle === "string" ? readableChatTitle(item.origin.chatTitle) : null
   if (chat === null) return item.title

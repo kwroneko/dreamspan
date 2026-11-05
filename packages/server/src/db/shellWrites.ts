@@ -1,3 +1,4 @@
+import { splitChatKey } from "./splitChats.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { setFavourite } from "./cardFavourites.ts"
@@ -8,11 +9,29 @@ import { transaction } from "./tx.ts"
 export const makeShellWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
+    SetSplitChat: ({ userId, forkId, split }) =>
+      Effect.gen(function* () {
+        const [fork] = yield* sql`SELECT f.id FROM forks f JOIN chats c ON c.id = f.chat_id
+          WHERE f.id = ${forkId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+            AND f.deleted_at IS NULL AND f.parent_fork_id IS NOT NULL`
+        if (!fork) return yield* new NotFound({ entity: "branch", id: forkId })
+        if (split)
+          yield* sql`INSERT INTO user_settings(user_id, key, value_json)
+          VALUES (${userId}, ${splitChatKey(forkId)}, 'true') ON CONFLICT(user_id, key) DO NOTHING`
+        else yield* sql`DELETE FROM user_settings WHERE user_id = ${userId} AND key = ${splitChatKey(forkId)}`
+      }).pipe(transaction(sql, "SetSplitChat")),
     SetChatPin: ({ userId, chatId, pinned }) =>
       Effect.gen(function* () {
         const [chat] =
           yield* sql`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
-        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        if (!chat) {
+          const [root] = yield* sql`SELECT f.id FROM forks f JOIN chats c ON c.id = f.chat_id
+            JOIN user_settings m ON m.user_id = c.owner_user_id AND m.key = ${splitChatKey(chatId)} AND m.value_json = 'true'
+            WHERE f.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
+          if (!root) return yield* new NotFound({ entity: "chat", id: chatId })
+          yield* sql`UPDATE forks SET pinned_at = ${pinned ? Date.now() : null}, row_version = row_version + 1 WHERE id = ${chatId}`
+          return
+        }
         if (pinned)
           yield* sql`INSERT INTO chat_pins (user_id, chat_id) VALUES (${userId}, ${chatId})
             ON CONFLICT(user_id, chat_id) DO NOTHING`

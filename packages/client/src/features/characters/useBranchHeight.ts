@@ -1,8 +1,13 @@
 import { useLayoutEffect, useRef, useState } from "react"
 
 /** Same account/device lifetime as column widths; a smaller window only clamps the rendered size. */
-export function useBranchHeight(userId: string, active: boolean) {
-  const key = `rp.branchHeight.${userId}`
+export function useBranchHeight(
+  userId: string,
+  active: boolean,
+  section: "branch" | "split" = "branch",
+  shared = false
+) {
+  const key = `rp.${section}Height.${userId}`
   const ref = useRef<HTMLElement>(null)
   const [available, setAvailable] = useState(0)
   const [saved, setSaved] = useState<number | null>(() => {
@@ -24,8 +29,8 @@ export function useBranchHeight(userId: string, active: boolean) {
   }, [active])
   const min = Math.min(112, available * 0.4)
   // Leave room for the tabs, scope and search controls and at least one full chat row.
-  const max = Math.max(min, available - 224)
-  const height = Math.max(min, Math.min(max, saved ?? available * 0.45))
+  const max = Math.max(min, shared ? available * 0.36 : available - 224)
+  const height = Math.max(min, Math.min(max, saved ?? available * (shared ? 0.26 : 0.45)))
   const save = (value: number | null) => {
     setSaved(value)
     try {

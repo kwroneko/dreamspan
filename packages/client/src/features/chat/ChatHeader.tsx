@@ -1,3 +1,4 @@
+import { useSplitChats } from "./splitChats.ts"
 import { CenterHeader } from "../../ui/CenterHeader.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { chatBranchControls, chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
@@ -59,6 +60,7 @@ function ChatTitle({
   name: ChatName | null
   request: number
 }) {
+  const split = useSplitChats(view.chat?.id ?? null, view.forkId)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
   const [open, setOpen] = useState(false)
@@ -72,6 +74,11 @@ function ChatTitle({
     setGroup(null)
     setScope("chat")
     write.clear()
+    if (split && split.group.id !== split.group.chatId) {
+      setDraft(shown)
+      setEditing(true)
+      return
+    }
     const result = await session.call((client) => client("ListGroupChats", { chatId: view.chat!.id }))
     if (!result.ok && result.error.tag !== "NotFound") {
       showToast({ title: "Couldn't check this chat's group", description: result.error.message })
@@ -268,7 +275,10 @@ export function ChatHeader({
 }) {
   const characters = castCharacters(view)
   const [renameRequest, setRenameRequest] = useState(0)
-  const name = view.chat ? chatName(importState(view.chat.title).title, characters, view.chat.createdAt) : null
+  const split = useSplitChats(view.chat?.id ?? null, view.forkId)
+  const baseName = view.chat ? chatName(importState(view.chat.title).title, characters, view.chat.createdAt) : null
+  const name =
+    baseName && split && split.group.id !== split.group.chatId ? { ...baseName, name: split.group.title } : baseName
   useTitle(name?.name ?? "Chat")
   const loading = view.chat === null
   return (

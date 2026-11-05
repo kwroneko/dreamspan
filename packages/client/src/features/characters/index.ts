@@ -1,3 +1,4 @@
+import { SplitChatSection } from "../chat/SplitChatSection.tsx"
 import { panelEditorActions } from "../editor/panelActions.tsx"
 import { PanelFavourite } from "./CardFavourite.tsx"
 import { ChatBrowseBar, sidebarChatBrowse } from "./ChatBrowseBar.tsx"
@@ -38,6 +39,7 @@ export const register = () => {
   registerCharacterPanels()
   // The open chat's branches at the left panel's foot, below whatever it lists.
   sidebarFoot.register({ id: "open-chat-branches", order: 10, component: OpenChatBranches })
+  sidebarFoot.register({ id: "split-chats", order: 20, component: SplitChatSection })
   // The home screen: the character grid (DESIGN §2.1).
   routes.register({ id: "characters", parent: "app", path: "/", component: CharactersPage, retainSearch: homeSearch })
   // A card without entering a chat; its pending chat is `/cards/$entityId/chat` (chat feature).

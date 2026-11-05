@@ -1,3 +1,4 @@
+import { useSplitChats } from "./splitChats.ts"
 // The chat header's built-in buttons and dialogs (headerContributions.tsx registers them),
 // loaded with the chat rather than with the app.
 import { useNavigate } from "@tanstack/react-router"
@@ -12,17 +13,20 @@ import { ChatCommandMenu, type ChatCommandDialogProps, chatCommands, shortcutTex
 
 /** The pin: pins the fork shown, from its shell row (this chat's forks only). */
 export function HeaderPin({ view }: ChatHeaderActionProps) {
+  const split = useSplitChats(view.chat?.id ?? null, view.forkId)
   const fork = useShellForks({
     entity: null,
-    chat: view.chat?.id ?? null,
-    chats: view.chat ? [view.chat.id] : [],
+    chat: split?.group.id ?? view.chat?.id ?? null,
+    chats: split ? [split.group.id] : view.chat ? [view.chat.id] : [],
     search: "",
     sort: "recent",
     sections: [{ id: "all", limit: 1000 }]
   })
     .section("all")
     // By id: a branch made at another's last message ends where that one does.
-    .rows.find((f) => f.chat.id === view.chat?.id && f.forkId === (view.forkId ?? view.chat?.currentForkId))
+    .rows.find(
+      (f) => (f.sourceChatId ?? f.chat.id) === view.chat?.id && f.forkId === (view.forkId ?? view.chat?.currentForkId)
+    )
   // A narrow header (a phone, or a narrow chat column) keeps its room for the name; the chat
   // lists' rows have the pin too.
   return fork ? (
@@ -49,7 +53,22 @@ export function HeaderPanel({ view, panel }: Pick<ChatHeaderActionProps, "view" 
 export function HeaderMenu({ session, view, onHistory, onJump, onRename }: ChatHeaderActionProps) {
   const navigate = useNavigate()
   const deleted = useDeletedToast()
-  return <ChatCommandMenu context={{ session, view, onHistory, onJump, onRename, navigate, deleted }} />
+  const split = useSplitChats(view.chat?.id ?? null, view.forkId)
+  return (
+    <ChatCommandMenu
+      context={{
+        session,
+        view,
+        onHistory,
+        onJump,
+        onRename,
+        navigate,
+        deleted,
+        splitRootId: split?.group.rootForkId,
+        hasSplitGroups: split?.hasSplits
+      }}
+    />
+  )
 }
 
 /** Every command with a key, from the registry, so a plugin's keys are listed too. */

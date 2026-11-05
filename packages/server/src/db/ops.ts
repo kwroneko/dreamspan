@@ -1,3 +1,4 @@
+import { SplitChats } from "@rp/shared/splitChat.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
@@ -449,6 +450,22 @@ const ShellCardsRead = Schema.Struct({ ...ShellCards.fields, fresh: Schema.Array
 const ShellForksRead = Schema.Struct({ ...ShellForks.fields, fresh: Schema.Array(ChatSummariesAt) })
 
 export class WriteOps extends RpcGroup.make(
+  Rpc.make("DeleteChatGroup", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      expectedForkIds: Schema.Array(ForkId),
+      title: Schema.String
+    },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError, BinChanged])
+  }),
+  Rpc.make("SetSplitChat", {
+    payload: { userId: UserId, forkId: ForkId, split: Schema.Boolean },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("ChangeBinLimit", {
     payload: { userId: UserId, ...BinLimitChange.fields },
     success: BinLimits,
@@ -2405,6 +2422,11 @@ export class WriteOps extends RpcGroup.make(
 ) {}
 
 export class ReadOps extends RpcGroup.make(
+  Rpc.make("GetSplitChats", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
+    success: SplitChats,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("GetBinLimits", { payload: { userId: UserId }, success: BinLimits, error: StorageError }),
   Rpc.make("GetImageTokenCount", {
     payload: { userId: UserId, sha256: Sha256, kind: Schema.String, modelKey: Schema.String, detail: Schema.String },

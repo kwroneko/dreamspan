@@ -1,3 +1,4 @@
+import { splitChatMarkers, splitGroups } from "./splitChats.ts"
 // The recycle bin (DESIGN §6.2), used by the writer. Deleting marks rows (deleted_at,
 // bin_item_id) instead of removing them, so restoring puts things back exactly where
 // they were. Two sections with independent capacities: deleted items and recovered text.
@@ -404,15 +405,18 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
    * That includes the inserted messages it shows, which another fork may show by its own
    * `insert` row (`insertedUnseen`).
    */
-  const deleteFork = (userId: UserId, forkId: string) =>
+  const removeFork = (
+    userId: UserId,
+    forkId: string,
+    group?: { readonly itemId: string; readonly forkIds: ReadonlyArray<string> }
+  ) =>
     Effect.gen(function* () {
       const [fork] = yield* sql<ForkRow & { chat_title: string }>`
         SELECT f.*, c.title AS chat_title FROM forks f JOIN chats c ON c.id = f.chat_id
         WHERE f.id = ${forkId} AND c.owner_user_id = ${userId} AND f.deleted_at IS NULL AND c.deleted_at IS NULL`
       if (!fork) return yield* new NotFound({ entity: "fork", id: forkId })
       const others = yield* sql<ForkRow>`
-        SELECT * FROM forks WHERE chat_id = ${fork.chat_id} AND purged_at IS NULL AND id <> ${forkId}`
-      if (!others.some((other) => other.deleted_at === null)) return yield* new CannotDeleteLastFork()
+        SELECT * FROM forks WHERE chat_id = ${fork.chat_id} AND purged_at IS NULL AND id NOT IN ${sql.in(group?.forkIds ?? [forkId])}`
       const below =
         fork.tip_slot_id === null
           ? Number.MAX_SAFE_INTEGER
@@ -449,23 +453,26 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       const end = yield* lastShown(sql, fork.chat_id, fork)
       const [tip] = yield* sql<{ content: string }>`
         SELECT v.content FROM slots t JOIN versions v ON v.id = ${shownIn(sql, forkId, "t")} WHERE t.id = ${end}`
-      const itemId = yield* insertItem({
-        userId,
-        kind: "branch",
-        targetId: forkId,
-        chatId: fork.chat_id,
-        title: `Fork of ${stats.slots} message${stats.slots === 1 ? "" : "s"} in ${chatName(fork.chat_title)}`,
-        excerpt: tip?.content ?? "",
-        origin: {
-          chatId: fork.chat_id,
-          chatTitle: fork.chat_title,
-          slotId: fork.tip_slot_id,
-          parentSlotId: fork.base_slot_id,
-          messages: stats.slots,
-          ...forkOrigin(fork)
-        },
-        byteSize: stats.bytes
-      })
+      const itemId = group
+        ? group.itemId
+        : yield* insertItem({
+            userId,
+            kind: "branch",
+            targetId: forkId,
+            chatId: fork.chat_id,
+            title: `Fork of ${stats.slots} message${stats.slots === 1 ? "" : "s"} in ${chatName(fork.chat_title)}`,
+            excerpt: tip?.content ?? "",
+            origin: {
+              chatId: fork.chat_id,
+              chatTitle: fork.chat_title,
+              slotId: fork.tip_slot_id,
+              parentSlotId: fork.base_slot_id,
+              messages: stats.slots,
+              ...forkOrigin(fork)
+            },
+            byteSize: stats.bytes
+          })
+      if (group) yield* sql`UPDATE bin_items SET byte_size = byte_size + ${stats.bytes} WHERE id = ${itemId}`
       yield* unseen("mark", itemId)
       if (inserted.kept.length > 0)
         yield* sql`UPDATE slots SET deleted_at = NULL, bin_item_id = NULL
@@ -482,6 +489,71 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       yield* replaceCurrentFork(fork.chat_id)
       yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${fork.chat_id}`
       return itemId
+    })
+
+  const deleteFork = (userId: UserId, forkId: string) =>
+    Effect.gen(function* () {
+      const [fork] = yield* sql<{ chat_id: string }>`SELECT f.chat_id FROM forks f JOIN chats c ON c.id = f.chat_id
+      WHERE f.id = ${forkId} AND c.owner_user_id = ${userId} AND f.deleted_at IS NULL AND c.deleted_at IS NULL`
+      if (!fork) return yield* new NotFound({ entity: "fork", id: forkId })
+      const [other] =
+        yield* sql`SELECT id FROM forks WHERE chat_id = ${fork.chat_id} AND id <> ${forkId} AND deleted_at IS NULL LIMIT 1`
+      if (!other) return yield* new CannotDeleteLastFork()
+      return yield* removeFork(userId, forkId)
+    })
+
+  const loadChatGroup = (userId: UserId, chatId: string, forkId: string | null) =>
+    Effect.gen(function* () {
+      const [chat] = yield* sql`SELECT id FROM chats WHERE id = ${chatId}
+        AND owner_user_id = ${userId} AND deleted_at IS NULL`
+      if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+      const forks = yield* sql<ForkRow>`SELECT * FROM forks WHERE chat_id = ${chatId}`
+      const groups = splitGroups(forks, yield* splitChatMarkers(sql, userId))
+      const shown = forks.find(
+        (f) => f.deleted_at === null && (forkId === null ? groups.get(f.id) === chatId : f.id === forkId)
+      )
+      if (!shown) return yield* new NotFound({ entity: "chat group", id: forkId ?? chatId })
+      const groupId = groups.get(shown.id)!
+      return { groupId, members: forks.filter((f) => f.deleted_at === null && groups.get(f.id) === groupId) }
+    })
+
+  const removeChatGroup = (
+    userId: UserId,
+    chatId: string,
+    groupId: string,
+    members: ReadonlyArray<ForkRow>,
+    title: string
+  ) =>
+    Effect.gen(function* () {
+      const itemId = yield* insertItem({
+        userId,
+        kind: "branch",
+        targetId: groupId,
+        chatId,
+        title,
+        excerpt: `${members.length} branch${members.length === 1 ? "" : "es"}`,
+        origin: { chatId, chatTitle: title, forkId: members[0]!.id, forkIds: members.map((f) => f.id), groupId },
+        byteSize: 0
+      })
+      const group = { itemId, forkIds: members.map((f) => f.id) }
+      for (const member of members) yield* removeFork(userId, member.id, group)
+      return itemId
+    })
+
+  /** One visible chat group, in one bin item; deeper split groups keep their shared path. */
+  const deleteChatGroup = (
+    userId: UserId,
+    chatId: string,
+    forkId: string,
+    expected: ReadonlyArray<string>,
+    title: string
+  ) =>
+    Effect.gen(function* () {
+      const { groupId, members } = yield* loadChatGroup(userId, chatId, forkId)
+      const confirmed = new Set(expected)
+      if (confirmed.size !== members.length || !members.every((f) => confirmed.has(f.id)))
+        return yield* new BinChanged()
+      return yield* removeChatGroup(userId, chatId, groupId, members, title)
     })
 
   /**
@@ -564,6 +636,14 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       const [chat] = yield* sql<{ id: string; title: string }>`
         SELECT id, title FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
       if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+      // The legacy physical-chat operation must not erase its split-off groups either.
+      const [split] = yield* sql`SELECT 1 FROM forks f JOIN user_settings m
+        ON m.user_id = ${userId} AND m.key = 'split-chat:' || f.id AND m.value_json = 'true'
+        WHERE f.chat_id = ${chatId} LIMIT 1`
+      if (split) {
+        const { groupId, members } = yield* loadChatGroup(userId, chatId, null)
+        return yield* removeChatGroup(userId, chatId, groupId, members, chat.title || "Untitled chat")
+      }
       // Messages and swipes already in the bin count under their own items.
       const [stats] = yield* sql<{ bytes: number; last: string | null; messages: number }>`
         SELECT coalesce(sum(CASE WHEN s.deleted_at IS NULL AND v.deleted_at IS NULL
@@ -763,10 +843,12 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
         return toBinItem(item)
       }
-      const forkId = (JSON.parse(item.origin_json) as { forkId?: string }).forkId
+      const origin = JSON.parse(item.origin_json) as { forkId?: string; forkIds?: ReadonlyArray<string> }
+      const forkId = origin.forkId
       if (forkId !== undefined && item.chat_id !== null) {
         yield* discardDeletedQueue(item.chat_id)
-        yield* restoreInFork(item, forkId)
+        for (const restored of origin.forkIds ?? [forkId]) yield* restoreInFork(item, restored)
+        yield* replaceCurrentFork(item.chat_id)
         yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
         yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${item.chat_id}`
         return toBinItem(item)
@@ -1170,6 +1252,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     insertItem,
     assetRestorers,
     deleteChat,
+    deleteChatGroup,
     deleteMessage,
     deleteFork,
     deleteVersion,

@@ -1688,6 +1688,24 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  DeleteChatGroup: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.DeleteChatGroup({
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId,
+          expectedForkIds: [owner.chat.forkId]
+        }),
+        "NotFound"
+      )
+  },
+  GetSplitChats: {
+    probe: (actor, owner) =>
+      refused(actor.api.GetSplitChats({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
+  },
+  SetSplitChat: {
+    probe: (actor, owner) => refused(actor.api.SetSplitChat({ forkId: owner.chat.forkId, split: true }), "NotFound")
+  },
   ListForks: {
     probe: (actor, owner) => refused(actor.api.ListForks({ chatId: owner.chat.chatId }), "NotFound")
   },
@@ -3545,6 +3563,22 @@ const storage: Record<
         "NotFound"
       )
     }),
+  DeleteChatGroup: (_reader, actor, owner, writer) =>
+    refused(
+      writer.DeleteChatGroup({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        forkId: owner.chat.forkId,
+        expectedForkIds: [owner.chat.forkId],
+        title: "Foreign"
+      }),
+      "NotFound"
+    ),
+  GetSplitChats: (reader, actor, owner) =>
+    refused(
+      reader.GetSplitChats({ userId: actor.user.id, chatId: owner.chat.chatId, forkId: owner.chat.forkId }),
+      "NotFound"
+    ),
   ListForks: (reader, actor, owner) =>
     refused(reader.ListForks({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
   GetPath: (reader, actor, owner) =>
