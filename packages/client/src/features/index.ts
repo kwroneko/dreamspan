@@ -15,6 +15,7 @@ import * as characters from "./characters/index.ts"
 import * as chat from "./chat/index.tsx"
 import * as insertMessage from "./chat/insertMessage/index.tsx"
 import * as connections from "./connections/index.ts"
+import * as decisions from "./decisions/index.tsx"
 import * as credentials from "./credentials.tsx"
 import * as editor from "./editor/index.tsx"
 import * as firstRun from "./firstRun/index.tsx"
@@ -55,6 +56,7 @@ export const registerFeatures = () => {
   snippets.register()
   bin.register()
   connections.register()
+  decisions.register()
   firstRun.register()
   costs.register()
   credentials.register()

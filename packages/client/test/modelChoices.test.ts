@@ -11,15 +11,20 @@ vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
 })
 
-const connection = (id: string, name: string) => ({ id, name })
+const connection = (id: string, name: string, kind = "openai-chat") => ({ id, name, kind })
 const model = (id: string, key: string, hidden = false) => ({ id, key, hidden })
 
 /** A client whose ListModels answers by connection id. */
-const fakeClient = (models: Record<string, Effect.Effect<unknown, unknown>>) =>
+const fakeClient = (
+  models: Record<string, Effect.Effect<unknown, unknown>>,
+  connections = [connection("a", "Alpha"), connection("b", "Beta"), connection("c", "Gamma")]
+) =>
   ((method: string, payload: { connectionId?: string }) =>
-    method === "ListConnections"
-      ? Effect.succeed([connection("a", "Alpha"), connection("b", "Beta"), connection("c", "Gamma")])
-      : models[payload.connectionId!]!) as unknown as AppClient["Service"]
+    method === "ListProviderKinds"
+      ? Effect.succeed([{ id: "openai-chat" }, { id: "system-one", decisions: true }])
+      : method === "ListConnections"
+        ? Effect.succeed(connections)
+        : models[payload.connectionId!]!) as unknown as AppClient["Service"]
 
 it.effect("lists the models of every connection that answers, naming the ones that fail", () =>
   Effect.gen(function* () {
@@ -57,5 +62,21 @@ it.effect("a connection that doesn't answer in time is named, not waited on for 
       ["Alpha · prose"]
     )
     assert.deepStrictEqual(read.failed, [{ connection: "Beta", message: "It didn't answer within 20 seconds." }])
+  })
+)
+
+it.effect("a decision model's connection isn't offered for replies", () =>
+  Effect.gen(function* () {
+    const read = yield* readModelChoices(
+      fakeClient({ a: Effect.succeed([model("m1", "prose")]), j: Effect.succeed([model("m9", "jev")]) }, [
+        connection("a", "Alpha"),
+        connection("j", "Jev", "system-one")
+      ])
+    )
+    assert.strictEqual(read.connections, 1)
+    assert.deepStrictEqual(
+      read.models.map((choice) => choice.label),
+      ["Alpha · prose"]
+    )
   })
 )

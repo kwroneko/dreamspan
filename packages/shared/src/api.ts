@@ -12,6 +12,7 @@ import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 import { BinItem } from "./bin.ts"
 import { ChatApi, ChatEventsApi } from "./chatApi.ts"
 import { AgentApi } from "./agentApi.ts"
+import { DecisionApi } from "./decisionApi.ts"
 import { ChatSetupApi } from "./chatSetupApi.ts"
 import { StImportApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
@@ -414,9 +415,13 @@ export class AuthenticatedChatEventsApi extends ChatEventsApi.middleware(Authent
 /** The agent RPCs (agentApi.ts). */
 export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {}
 
+/** The decision-model settings RPCs (decisionApi.ts). */
+export class AuthenticatedDecisionApi extends DecisionApi.middleware(Authentication) {}
+
 export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedChatEventsApi)
   .merge(AuthenticatedAgentApi)
+  .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedWorkbenchApi)
   .merge(AuthenticatedSummaryRequestApi)

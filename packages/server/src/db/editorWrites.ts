@@ -37,6 +37,7 @@ import type { SqlClient, SqlError } from "effect/sql"
 import { fieldContent, type makeDraftStore } from "./drafts.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { noteHere } from "./noteAt.ts"
+import { replacementConflict } from "./noteReplacementWrites.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { type makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import type { EncodedDoc } from "./libraryWrites.ts"
@@ -313,6 +314,10 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         }
         // A note's condition cards and link name only the user's own (§14.3).
         if (ref.kind === "note") yield* steps.checkReferences(userId, valid.doc)
+        if (ref.kind === "note") {
+          const conflict = yield* replacementConflict(sql, userId, ref.entity_id, valid.doc, chatNote, head)
+          if (conflict) return yield* new InvalidDocument({ problems: [conflict] })
+        }
         const change = yield* chatNote
           ? chatNoteEdit(userId, ref, valid.doc, message, chatNote, "user", null, resolved)
           : userEdit(ref, valid.doc, message, null)
@@ -352,6 +357,10 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         const saved = new Date(earlier.created_at).toISOString().replace("T", " ").slice(0, 16)
         const message = `Restored the revision of ${saved} UTC`
         const origin = JSON.stringify({ restored: revisionId })
+        if (ref.kind === "note") {
+          const conflict = yield* replacementConflict(sql, userId, ref.entity_id, doc, chatNote, head)
+          if (conflict) return yield* refused(ref, conflict)
+        }
         const change =
           resolved && chatNote
             ? yield* chatNoteEdit(userId, ref, doc, message, chatNote, "user", origin, resolved)
@@ -450,6 +459,10 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
               Effect.catchTag("NotFound", () => Effect.succeed(false))
             )
             if (!checked) continue
+            if (
+              yield* replacementConflict(sql, userId, ref.entity_id, valid.doc, resolved ? position : undefined, head)
+            )
+              continue
           }
           const change = resolved
             ? yield* chatNoteEdit(userId, ref, valid.doc, null, position, "generation", usedBy)
@@ -693,16 +706,21 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
         const label = (yield* linkTitle(userId, link)) ?? (title.trim().slice(0, 200) || "Note")
+        const doc = {
+          ...newChatNote(chat.id, label, link),
+          ...(content === undefined ? {} : { content }),
+          ...(replaces === undefined ? {} : { replaces })
+        }
+        yield* steps.checkReferences(userId, doc)
+        // A new note's initial head is visible in every fork (until bound differently).
+        const conflict = yield* replacementConflict(sql, userId, null, doc)
+        if (conflict) return yield* new InvalidDocument({ problems: [conflict] })
         const note = yield* steps.createUpstream({
           userId,
           kind: "note",
           label,
           subtitle: "",
-          doc: steps.encode({
-            ...newChatNote(chat.id, label, link),
-            ...(content === undefined ? {} : { content }),
-            ...(replaces === undefined ? {} : { replaces })
-          }),
+          doc: steps.encode(doc),
           schemaVersion: NOTE_SCHEMA_VERSION,
           origin: "user",
           originRef: null,

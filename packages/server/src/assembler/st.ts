@@ -325,6 +325,8 @@ export const compose = (input: {
   const sendExamples = () => {
     if (!has("dialogueExamples")) return
     const examples: Array<StMessage> = []
+    if (collection[index("dialogueExamples")]?.barrier)
+      examples.push({ role: "system", content: "", pieces: [], kind: "volatile" })
     const heading: StMessage | null = input.newExampleChat
       ? {
           role: "system",

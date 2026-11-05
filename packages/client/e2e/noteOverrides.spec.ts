@@ -153,3 +153,73 @@ for (const width of [1440, 390])
       await expect(fresh.getByRole("combobox", { name: "Replaces" })).toContainText("Main Prompt")
       await expect(fresh.getByText("Only one note can replace Main Prompt")).toHaveCount(0)
     })
+
+test("turning off a newly created replacement restores the original field while its editor stays open", async ({
+  page
+}) => {
+  await theme(page, 1440, "light")
+  const { chatId, name } = await setUp(page, "off-with-editor-open")
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
+  await openPanel(page, "Cast")
+  await panelTab(page, name)
+  const card = page.getByRole("tabpanel", { name })
+  const field = fieldOf(card, "Description")
+  await card.getByRole("textbox", { name: "Description", exact: true }).click()
+  await field.getByRole("button", { name: "Replace with a note in this chat" }).click()
+  await expect(card.locator("[data-replaced-field]")).toBeVisible()
+  const note = await admin((api) =>
+    Effect.gen(function* () {
+      const notes = yield* api.ListChatNotes({ chatId, slotId: null })
+      return notes.find((n) => n.doc["title"] === `${name}'s Description`)!
+    })
+  )
+  // Wait for assembly to acknowledge the replacement before switching it off.
+  await expect
+    .poll(() =>
+      admin((api) =>
+        Effect.map(
+          api.GetNextContext({ chatId, leafSlotId: null }),
+          (next) => next.presetContext?.replacements?.some((r) => r.note === note.ref.id) ?? false
+        )
+      )
+    )
+    .toBe(true)
+  await admin((api) =>
+    api.ChangeCast({ chatId, slotId: null, change: { _tag: "Note", entityId: note.ref.entityId, active: false } })
+  )
+  await expect(card.locator("[data-replaced-field]")).toHaveCount(0)
+  await expect(card.getByRole("textbox", { name: "Description", exact: true })).toContainText("grey coat")
+})
+
+for (const { label, content, expected } of [
+  { label: "empty", content: "", expected: "0 tokens" },
+  { label: "longer", content: "x".repeat(400), expected: "~100 tokens" }
+])
+  test(`a preset prompt shows the sent token count of its ${label} replacement`, async ({ page }) => {
+    await theme(page, 1440, "light")
+    const { chatId } = await setUp(page, `${label}-token-count`)
+    await admin((api) =>
+      Effect.gen(function* () {
+        const note = yield* api.CreateChatNote({
+          chatId,
+          title: "Replacement Main",
+          content,
+          replaces: { kind: "preset_prompt", identifier: "main" }
+        })
+        yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "Note", entityId: note.entityId, active: true } })
+      })
+    )
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
+    const panel = await openPanel(page, "Prompt preset")
+    const main = panel.locator('[data-prompt="main"]')
+    await expect(main.locator("[data-prompt-replaced]")).toBeVisible({ timeout: 60_000 })
+    await expect(main.locator("[data-prompt-tokens]")).toHaveText(expected)
+    const expand = main.getByRole("button", { name: /^Expand Main Prompt/ })
+    if (await expand.count()) await expand.click()
+    await expect(main.locator("[data-prompt-tokens]")).toHaveText(expected)
+    await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
+    const large = page.getByRole("dialog", { name: "Preset editor", exact: true })
+    await expect(large.locator('[data-prompt="main"] [data-prompt-tokens]')).toHaveText(expected)
+  })

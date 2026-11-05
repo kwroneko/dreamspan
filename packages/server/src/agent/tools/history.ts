@@ -139,6 +139,7 @@ const searchChat: RolloutTool<{
 }> = {
   id: "search_chat",
   label: "Searched the chat",
+  explanation: "Search the chat's earlier messages",
   effect: "read",
   description:
     "Searches the story's earlier messages for words, newest first, and returns short excerpts with their message numbers. Use it to find when something happened or was said, then read_messages to read the passage. Don't use it for what's already in front of you.",
@@ -174,6 +175,7 @@ const searchChat: RolloutTool<{
 const readMessages: RolloutTool<{ readonly from: number; readonly count?: number }> = {
   id: "read_messages",
   label: "Read earlier messages",
+  explanation: "Read earlier messages in full",
   effect: "read",
   description:
     "Reads earlier messages of the story verbatim, from a message number on. Use it after search_chat or expand_summary to read a passage in full.",
@@ -255,6 +257,7 @@ const range = (text: string) => {
 const expandSummary: RolloutTool<{ readonly messages: string; readonly max_tokens?: number }> = {
   id: "expand_summary",
   label: "Opened a summary",
+  explanation: "Open a summary for more detail",
   effect: "read",
   description:
     "Opens a summary in your context, named by the messages it covers (its from and to): a first-level summary gives its messages, a higher one the summaries it condenses. Use it when a summary leaves out a detail you need.",
@@ -306,6 +309,7 @@ const expandSummary: RolloutTool<{ readonly messages: string; readonly max_token
 const searchSummaries: RolloutTool<{ readonly query: string; readonly limit?: number }> = {
   id: "search_summaries",
   label: "Searched the summaries",
+  explanation: "Search the summaries",
   effect: "read",
   description:
     "Searches the summaries of earlier parts of the story for words, and returns which messages each match covers. Use it to find roughly when something happened, then expand_summary or read_messages.",

@@ -1,4 +1,9 @@
-import { AuthenticatedAgentApi, AuthenticatedChatEventsApi, AuthenticatedSplitChatApi } from "@rp/shared/api.ts"
+import {
+  AuthenticatedAgentApi,
+  AuthenticatedChatEventsApi,
+  AuthenticatedDecisionApi,
+  AuthenticatedSplitChatApi
+} from "@rp/shared/api.ts"
 import { makeAgentHandlers } from "./api/agent.ts"
 import { makeSplitChatHandlers } from "./api/splitChats.ts"
 import { Commands } from "./commands.ts"
@@ -6,6 +11,8 @@ import { makeHistoryHandlers } from "./api/history.ts"
 import { makeMessageHandlers } from "./api/messages.ts"
 import { ExecutionRegistry } from "./execution.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
+import { DecisionEngine } from "./decision/engine.ts"
+import { makeDecisionHandlers } from "./api/decisions.ts"
 import { SummaryChecks } from "./lcm/OutputChecks.ts"
 import { Summarizer } from "./lcm/Summarizer.ts"
 import { makeLcmHandlers, makeSummaryRequestHandlers } from "./api/lcm.ts"
@@ -142,6 +149,7 @@ const Handlers = Layer.mergeAll(
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
   AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),
+  AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedWorkbenchApi.toLayer(makeWorkbenchHandlers)
@@ -507,6 +515,8 @@ export const serverWith = <E>(
           Layer.provideMerge(summaries),
           // The refusal judge registers itself with the summary checks the summarizer runs.
           Layer.provideMerge(RefusalJudge.layer.pipe(Layer.provideMerge(SummaryChecks.layer))),
+          // Decision models (spec/AGENTIC.md §7): asked only for the points a user turned on.
+          Layer.provideMerge(DecisionEngine.layer),
           // Last, so the summarizer can tell open chats that their summaries changed.
           Layer.provideMerge(ChatHub.layer)
         )

@@ -47,7 +47,7 @@ const branchRow = (page: Page, forkId: string) =>
     .filter({ has: page.locator(`[data-fork-id="${forkId}"]`) })
 const confirm = (page: Page) => page.getByRole("dialog", { name: "Make this branch its own chat?", exact: true })
 const chatRow = (page: Page, groupId: string) =>
-  page.getByRole("region", { name: "Chats", exact: true }).locator(`button[data-chat-id="${groupId}"]`)
+  page.getByRole("region", { name: "Chats", exact: true }).locator(`[data-chat-id="${groupId}"]`)
 
 const openConfirmation = async (page: Page, chatId: string, forkId: string) => {
   await open(page, `/chats/${chatId}?fork=${forkId}`, 1440, "light")
@@ -262,8 +262,9 @@ test("the menu's confirmation applies the edited title", async ({ page }) => {
   await expect(chatRow(page, f.market)).toContainText("Market days")
   await expect(
     page
-      .getByRole("region", { name: "Split chats", exact: true })
-      .getByRole("link", { name: "From “Split demo · Harbor”" })
+      .getByRole("region", { name: "Related chats", exact: true })
+      .getByRole("group", { name: "This chat was split from", exact: true })
+      .getByRole("link", { name: "Open chat Split demo · Harbor", exact: true })
   ).toBeVisible()
 })
 

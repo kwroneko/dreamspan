@@ -27,7 +27,7 @@ export function SplitChatDivider({
     >
       {own && (
         <p>
-          Split from “
+          This chat was split from “
           <SplitLink group={split.parent!} hint={`Opens ${split.parent!.title}.`}>
             {split.parent!.title}
           </SplitLink>
@@ -36,7 +36,7 @@ export function SplitChatDivider({
       )}
       {children.map((child) => (
         <p key={child.id}>
-          Split into its own chat here ·{" "}
+          Split off from this chat here ·{" "}
           <SplitLink group={child} hint={`Opens ${child.title}.`}>
             {child.title}
           </SplitLink>

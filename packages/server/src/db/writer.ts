@@ -23,6 +23,7 @@ import { makeBinWriteHandlers } from "./binWrites.ts"
 import { makeChatSetupWriteHandlers } from "./chatSetupWrites.ts"
 import { makeGenerationWriteHandlers } from "./generationWrites.ts"
 import { makeRolloutWriteHandlers } from "./rolloutWrites.ts"
+import { makeDecisionWriteHandlers } from "./decisions.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeProviderWriteHandlers } from "./providerWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
@@ -83,7 +84,8 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
                 ...(yield* makeLcmQueueHandlers),
                 ...(yield* makeLcmUiWriteHandlers),
                 ...(yield* makeLcmEnableWriteHandlers(bin)),
-                ...(yield* makeRolloutWriteHandlers(bin))
+                ...(yield* makeRolloutWriteHandlers(bin)),
+                ...(yield* makeDecisionWriteHandlers(bin))
               },
               prefix
             )

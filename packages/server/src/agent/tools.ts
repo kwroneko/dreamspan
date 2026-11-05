@@ -42,6 +42,8 @@ export interface RolloutTool<A = never> {
   readonly id: string
   /** Short and user-facing, for the step's row: "Searched the chat". */
   readonly label: string
+  /** User-facing, the chat settings' tools list: what it lets the model do, as a checkbox label. */
+  readonly explanation?: string
   readonly effect: EffectClass
   /** Model-facing, with its usage guidance: when to call it and when not to. */
   readonly description: string

@@ -25,7 +25,9 @@ export class ProviderKindInfo extends Schema.Class<ProviderKindInfo>("ProviderKi
   api: WireApi,
   defaultBaseUrl: Schema.String,
   /** Whether a key is optional (local OpenAI-compatible servers often take none). */
-  keyOptional: Schema.Boolean
+  keyOptional: Schema.Boolean,
+  /** The kind answers decision questions (spec/AGENTIC.md §7) and writes no replies. */
+  decisions: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 export const ConnectionId = idSchema("ConnectionId", "connection")
