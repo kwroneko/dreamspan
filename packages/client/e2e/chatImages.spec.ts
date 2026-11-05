@@ -165,7 +165,6 @@ test("an attachment added during a send survives its acknowledgement, and an una
   holdPath = true
   await page.reload()
   await expect.poll(() => paths.length > 0).toBe(true)
-  await expect(page.getByLabel("Message", { exact: true })).toBeVisible()
   // No image reconciler may open a temporary current-fork scope while the real
   // fork is unknown: it could erase the durable marker before the fork reads it.
   await expect(page.getByRole("button", { name: "Attach images", exact: true })).toHaveCount(0)

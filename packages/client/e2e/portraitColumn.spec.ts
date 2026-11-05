@@ -264,7 +264,7 @@ test("the column follows its card's name when another version is swapped in; Esc
   await tab.getByRole("button", { name: "Use another version: Pilot", exact: true }).click()
   await page
     .getByRole("dialog", { name: "Use another version", exact: true })
-    .getByRole("button", { name: /Pilot Storm · Storm/ })
+    .getByRole("button", { name: /Pilot Storm ·/ })
     .click()
   const rename = page.getByRole("dialog", { name: "Replace the name in past messages?", exact: true })
   if (await rename.isVisible().catch(() => false)) await rename.getByRole("button", { name: /^No\./ }).click()

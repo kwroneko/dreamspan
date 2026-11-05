@@ -132,10 +132,10 @@ test("three name drafts and diffs work, but history must refuse a colliding rest
     .last()
     .getByRole("button", { name: /^Revision \d+ / })
     .click()
-  // DESIGN §10.1 historyui: Restore is an entry action; name validation runs on activation.
+  // The comparison checks names before allowing this revision to be restored.
   const restore = revisions.last().getByRole("button", { name: "Restore to revision 1", exact: true })
-  await restore.click()
-  await expect(history.getByRole("alert")).toContainText("Another card is already called History original · 1")
+  await expect(restore).toBeDisabled()
+  await expect(history.getByRole("status")).toContainText("Another card is already called History original · 1")
   await expect(revisions).toHaveCount(2)
   await history.getByRole("button", { name: "Close", exact: true }).click()
   await expect(page.getByRole("heading", { level: 1, name: "History renamed", exact: true })).toBeVisible()
