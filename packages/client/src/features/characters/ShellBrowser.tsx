@@ -358,9 +358,12 @@ export function ForkRow({
   here = false,
   perFork = false,
   branchOnly = false,
-  entity = null
+  entity = null,
+  relation = null
 }: {
   fork: ShellFork
+  /** One line under the preview saying how this chat relates to the open one (Related chats). */
+  relation?: readonly [string, string] | null
   scopeChat?: boolean
   splitNavigation?: boolean
   details?: boolean
@@ -465,6 +468,13 @@ export function ForkRow({
             <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
               {fork.preview || "No messages yet"}
             </span>
+            {relation !== null && (
+              <span data-row-relation className="text-xs text-muted">
+                {/* Wraps only between its two parts. */}
+                <span className="whitespace-nowrap">{relation[0]}</span> ·{" "}
+                <span className="whitespace-nowrap">{relation[1]}</span>
+              </span>
+            )}
             <span data-row-when className="mt-auto text-xs text-muted">
               {perFork ? "Last message " : ""}
               {perFork ? formatMoment(last) : formatWhen(last)}

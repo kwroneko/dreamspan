@@ -105,7 +105,7 @@ for (const width of [1440, 390])
           page.getByRole("region", { name: "Branches of the open chat", exact: true }).filter({ visible: true })
         ).toBeVisible()
         await expect(
-          page.getByRole("region", { name: "Split chats", exact: true }).filter({ visible: true })
+          page.getByRole("region", { name: "Related chats", exact: true }).filter({ visible: true })
         ).toBeVisible()
         frames = []
         await cdp.send("Page.startScreencast", { format: "jpeg", quality: 65, everyNthFrame: 1 })
@@ -123,8 +123,8 @@ for (const width of [1440, 390])
               branches: branches?.querySelectorAll("[data-fork-row]").length ?? 0,
               branchHeight: branches?.getBoundingClientRect().height ?? 0,
               branchTop: branches?.getBoundingClientRect().top ?? 0,
-              splitHeight: document.querySelector('[aria-label="Split chats"]')?.getBoundingClientRect().height ?? 0,
-              split: !!document.querySelector('[aria-label="Split chats"]'),
+              splitHeight: document.querySelector('[aria-label="Related chats"]')?.getBoundingClientRect().height ?? 0,
+              split: !!document.querySelector('[aria-label="Related chats"]'),
               main: document.querySelector("main")?.textContent?.slice(0, 180)
             })
             const now = performance.now()
@@ -203,7 +203,7 @@ for (const width of [1440, 390])
       if (process.env.LAYOUT_AUDIT) {
         if (width < 640) await showAppNavigation(page)
         const violations = await expectLayout(page, info, "chat-switch", {
-          scope: '[data-chat-main], [aria-label="Branches of the open chat"], [aria-label="Split chats"]'
+          scope: '[data-chat-main], [aria-label="Branches of the open chat"], [aria-label="Related chats"]'
         })
         writeFileSync(join(dir, "layout.json"), JSON.stringify(violations, null, 2))
       }
