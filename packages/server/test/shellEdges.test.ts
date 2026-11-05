@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest"
+import { ForkId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { layer as fakeGenerator } from "../src/dev/fakeGenerator.ts"
@@ -40,7 +41,7 @@ it.live("a pinned divergent fork can be unpinned after deleting its only message
     yield* api.DeleteMessage({ slotId: divergent.entry.slotId })
     const pin = (yield* api.GetShellLibrary()).forks.find((f) => f.pinned)!
     assert.strictEqual(pin.leaf, start.chat.activeLeafSlotId)
-    yield* api.PinFork({ forkId: pin.forkId, pinned: false })
+    yield* api.PinFork({ forkId: ForkId.make(pin.forkId), pinned: false })
     assert.isFalse((yield* api.GetShellLibrary()).forks.some((f) => f.pinned))
   }).pipe(Effect.scoped, Effect.provide(layer()))
 )
