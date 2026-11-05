@@ -236,7 +236,7 @@ test("the header checkbox selects all shown, none, or shows some; whole headers 
   const toggle = (open: boolean) => editor.getByRole("button", { name: `${open ? "Close" : "Open"} Harbour` })
   const head = header.locator("[data-entry-header]")
   const area = await box(head)
-  await page.mouse.click(area.x + area.width - 90, area.y + area.height - 4)
+  await head.click({ position: { x: 2, y: area.height - 2 } })
   await expect(toggle(true)).toHaveAttribute("aria-expanded", "true")
   await editor.getByRole("textbox", { name: "Title of Harbour" }).click()
   await expect(toggle(true)).toBeVisible()
@@ -247,10 +247,9 @@ test("the header checkbox selects all shown, none, or shows some; whole headers 
   await header.getByText("harbour, quay", { exact: true }).click()
   await expect(header.getByRole("textbox", { name: "Primary keys" })).toBeFocused()
   await page.keyboard.press("Escape")
-  // Under the switch, beside the keys line: the header's own space.
+  // The header's padding remains clickable when expanded.
   const opened = await box(head)
-  const under = await box(header.getByRole("switch", { name: "Harbour enabled" }))
-  await page.mouse.click(under.x + under.width / 2, opened.y + opened.height - 3)
+  await head.click({ position: { x: 2, y: opened.height - 2 } })
   await expect(toggle(false)).toHaveAttribute("aria-expanded", "false")
 })
 
@@ -323,7 +322,9 @@ test("the Lorebooks list shows every source and count, the twin, and the placeme
   ).toBeVisible()
   const force = panel.getByRole("switch", { name: "Force all lorebook entries below the history" })
   await expect(force).toBeChecked()
-  await expect(panel.getByText("Applies to this chat, for all lorebooks.", { exact: true })).toBeVisible()
+  await panel.getByRole("button", { name: "Why below the history", exact: true }).click()
+  await expect(page.getByText("When off, each entry uses its own position.", { exact: true })).toBeVisible()
+  await page.keyboard.press("Escape")
   await force.click()
   await expect(force).not.toBeChecked()
 })
