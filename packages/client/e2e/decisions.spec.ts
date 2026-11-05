@@ -4,6 +4,8 @@
 // aren't offered for replies. Screenshots of the card at 1440 and 390, light and dark.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
+import { expectLayout } from "./support/layoutAudit.ts"
+import { openEntry, openSettings } from "./support/lorebook.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -95,7 +97,46 @@ for (const width of [1440, 390])
       )
       await page.goto(`${server().url}/settings/connections/${id}`)
       const heading = page.getByRole("heading", { name: "Decisions" })
-      await heading.scrollIntoViewIfNeeded()
       await expect(page.getByRole("switch", { name: "Lorebook entries" })).toBeChecked()
-      await page.screenshot({ path: `${shots}/decisions-${width}-${colorScheme}.png`, fullPage: true })
+      await heading.evaluate((element) => element.scrollIntoView({ block: "start" }))
+      await page.screenshot({ path: `${shots}/decisions-${width}-${colorScheme}.png`, animations: "disabled" })
+      await expectLayout(page, test.info(), `decisions-${width}-${colorScheme}`)
     })
+
+// A synthetic book; nothing here comes from a real one.
+const book = (name: string) => ({
+  name,
+  entries: { 0: { uid: 0, key: ["airship"], comment: "Airship", content: "The airship hums overhead.", order: 10 } }
+})
+
+for (const width of [1440, 390])
+  test(`a lorebook entry's question for the decision model at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const response = await page.request.post(`${server().url}/library/import?name=Skyway ${width}.json`, {
+      headers: { "content-type": "application/octet-stream", origin: server().url },
+      data: Buffer.from(JSON.stringify(book(`Skyway ${width}`)))
+    })
+    expect(response.status()).toBe(200)
+    const { library } = await response.json()
+    await page.goto(`${server().url}/library/${library.ref.id}`)
+    const entry = page.getByRole("group", { name: "Lorebook entry 0", exact: true })
+    await openEntry(page, "Airship")
+    await openSettings(entry)
+    const question = entry.getByRole("textbox", { name: "Question for the decision model" })
+    await question.scrollIntoViewIfNeeded()
+    await question.fill("The airship is near the characters.")
+    await question.blur()
+    await page.reload()
+    await openEntry(page, "Airship")
+    await openSettings(entry)
+    await expect(entry.getByRole("textbox", { name: "Question for the decision model" })).toHaveValue(
+      "The airship is near the characters."
+    )
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme })
+      await entry.getByRole("textbox", { name: "Question for the decision model" }).scrollIntoViewIfNeeded()
+      if (shots) await page.screenshot({ path: `${shots}/lorebook-question-${width}-${colorScheme}.png` })
+      await expectLayout(page, test.info(), `lorebook-question-${width}-${colorScheme}`)
+    }
+  })
