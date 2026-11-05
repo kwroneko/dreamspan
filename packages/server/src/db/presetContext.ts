@@ -4,7 +4,7 @@ import type { SqlClient } from "effect/sql"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import type { Placement } from "@rp/shared/docs/note.ts"
+import type { Placement, ReplaceableCardField } from "@rp/shared/docs/note.ts"
 import type { ContextSnapshot, Piece } from "../assembler/types.ts"
 import { estimateTokens } from "../assembler/st.ts"
 
@@ -13,6 +13,16 @@ const slotOf = (placement: Placement, card: boolean): Placement =>
   card && placement.mode === "section" && placement.section === "after_main_prompt"
     ? { ...placement, section: "card" }
     : placement
+
+/** The preset block a card field is sent in: its marker, or the prompt its card override replaces. */
+const FIELD_BLOCKS: Readonly<Record<ReplaceableCardField, string>> = {
+  description: "charDescription",
+  personality: "charPersonality",
+  scenario: "scenario",
+  mes_example: "dialogueExamples",
+  system_prompt: "main",
+  post_history_instructions: "jailbreak"
+}
 
 export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot: ContextSnapshot) =>
   Effect.gen(function* () {
@@ -29,8 +39,23 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
         roots.add(piece)
         assign(piece, piece.marker)
       }
+    // A note's text in a prompt's or card field's place counts as that prompt's (DESIGN §4.2).
+    const replacements = snapshot.noteReplacements ?? []
+    const replacing = new Map(
+      replacements.flatMap((r) =>
+        r.piece === undefined || snapshot.pieces[r.piece] === undefined
+          ? []
+          : [
+              [
+                snapshot.pieces[r.piece]!,
+                r.target.kind === "preset_prompt" ? r.target.identifier : FIELD_BLOCKS[r.target.field]
+              ] as const
+            ]
+      )
+    )
+    const inPlace = new Set(replacements.flatMap((r) => (r.ownPosition ? [] : [r.revision])))
     const owner = (p: Piece): string | null => {
-      const marked = assigned.get(p)
+      const marked = assigned.get(p) ?? replacing.get(p)
       if (marked) return marked
       const s = p.source
       if (s.kind === "preset") return s.identifier
@@ -58,7 +83,8 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
       ...new Set([
         ...sent.flatMap((p) => (p.source.kind === "card" ? [p.source.revision] : [])),
         ...activeNotes.keys(),
-        ...overrides.map((o) => o.revision)
+        ...overrides.map((o) => o.revision),
+        ...replacements.map((r) => r.revision)
       ])
     ]
     const rows = revisions.length
@@ -110,8 +136,28 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
         name: names.get(revision) ?? "A card",
         status
       })),
+      ...(replacements.length
+        ? {
+            replacements: replacements.flatMap((r) => {
+              const row = rows.find((row) => row.id === r.revision)
+              return row
+                ? [
+                    {
+                      note: row.ref,
+                      title: row.title || "Untitled note",
+                      card: row.card,
+                      target: r.target,
+                      ownPosition: r.ownPosition,
+                      status: r.status
+                    }
+                  ]
+                : []
+            })
+          }
+        : {}),
+      // A note sent in a prompt's place has no slot of its own.
       notes: rows.flatMap((r) =>
-        r.title !== null && r.placement !== null
+        r.title !== null && r.placement !== null && !inPlace.has(r.id)
           ? [
               {
                 ref: r.ref,

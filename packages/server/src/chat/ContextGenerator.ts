@@ -13,6 +13,11 @@ import { Providers } from "../providers/Providers.ts"
 import { GenerationFailed, type GenerationRequest, Generator } from "./Generator.ts"
 import { throughParse } from "./replySections.ts"
 import { ChatHub } from "./ChatHub.ts"
+import { foldState } from "@rp/shared/state.ts"
+import { PLAIN_MODE, planTurn } from "../agent/modes.ts"
+import { frozenTool, sendMessageDefinition } from "../agent/tools.ts"
+import { DecisionEngine } from "../decision/engine.ts"
+import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
 const serverFailure = (operation: string) => (error: unknown) =>
@@ -32,6 +37,8 @@ export const layer = Layer.effect(
     const providers = yield* Providers
     const config = yield* AppConfig
     const hub = yield* ChatHub
+    // Optional, as decision models are (DESIGN §7.6): without the engine the keywords decide.
+    const decisions = yield* Effect.serviceOption(DecisionEngine)
 
     // Rollouts a previous process left running ended with it; their versions were
     // interrupted the same way (Generations).
@@ -56,30 +63,71 @@ export const layer = Layer.effect(
                 ...(forkId === null ? {} : { forkId })
               })
             : false
-          const assemble = reader
-            .AssembleContext({
-              userId,
-              chatId,
-              slotId,
-              versionId,
-              forkId,
-              now: Date.now(),
-              timeZone: "UTC",
-              frozen: null,
-              partialBatch,
-              ...(request.model ? { model: request.model } : {})
+          // The chat's mode at this point decides who runs and how (spec/AGENTIC.md §6).
+          const events = yield* reader
+            .StateEventsAt({ userId, chatId, slotId: parent, forkId })
+            .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("StateEventsAt")))
+          const state = foldState(events)
+          const planned = planTurn(execution.orchestrationModes, state)
+          if ("unavailable" in planned)
+            return yield* new GenerationFailed({
+              class: "unavailable",
+              message: `The reply mode “${planned.unavailable}” is unavailable.`
             })
-            .pipe(
-              Effect.catchTag("AssemblyFailed", (error) =>
-                Effect.fail(new GenerationFailed({ class: error.reason, message: error.message }))
-              ),
-              Effect.catchTag("NotFound", () =>
-                Effect.fail(
-                  new GenerationFailed({ class: "not_found", message: "The message being generated is gone." })
-                )
-              ),
-              Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("AssembleContext"))
-            )
+          // Continue keeps the source prefill; Write for remains a single plain turn.
+          const plainTurn =
+            request.initial !== undefined ||
+            (slot.entry.version.speakerEntityId !== null &&
+              state.playedByMe.includes(slot.entry.version.speakerEntityId))
+          const plan = plainTurn
+            ? { ...planned.plan, strategy: "reply", tools: [], contract: "final_text" as const }
+            : planned.plan
+          const agentic = plan.strategy !== "reply"
+          const tools = plan.tools.flatMap((id) => {
+            const tool = execution.rolloutTools.get(id)
+            // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
+            return tool && tool.effect !== "external" ? [tool] : []
+          })
+          const assemblyNow = Date.now()
+          const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>
+            reader
+              .AssembleContext({
+                userId,
+                chatId,
+                slotId,
+                versionId,
+                forkId,
+                now: assemblyNow,
+                timeZone: "UTC",
+                frozen: null,
+                partialBatch,
+                ...(request.model ? { model: request.model } : {}),
+                ...(admitted ? { decisions: admitted } : {}),
+                ...(plan.assembly || agentic
+                  ? {
+                      agent: {
+                        instructions:
+                          plan.assembly?.instructions(
+                            tools.map((t) => t.id),
+                            plan.contract
+                          ) ?? "",
+                        cardsAtTail: plan.assembly?.cardsAtTail ?? false
+                      }
+                    }
+                  : {})
+              })
+              .pipe(
+                Effect.catchTag("AssemblyFailed", (error) =>
+                  Effect.fail(new GenerationFailed({ class: error.reason, message: error.message }))
+                ),
+                Effect.catchTag("NotFound", () =>
+                  Effect.fail(
+                    new GenerationFailed({ class: "not_found", message: "The message being generated is gone." })
+                  )
+                ),
+                Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("AssembleContext"))
+              )
+          const assemble = assembleWith()
           let assembled = yield* assemble
           // Live text is what's sent (owner, 2026-11-01): what the assembly read and has changed
           // since its last revision gets a revision labelled with this reply, and the reply is
@@ -103,6 +151,18 @@ export const layer = Layer.effect(
             if (cut === 0) break
             hub.publish(chatId, { _tag: "State" })
             assembled = yield* assemble
+          }
+          // Lorebook entries the keys left out but that ask a decision model (spec/AGENTIC.md §7):
+          // only when the user turned the point on for a connection. A yes is assembled in, and
+          // frozen in the snapshot.
+          if (assembled.loreDecision && Option.isSome(decisions) && decisions.value.points.get("lore")) {
+            const outcome = yield* decisions.value.evaluate<LoreInput, ReadonlyArray<LoreAdmission>>(
+              "lore",
+              assembled.loreDecision,
+              { userId, chatId, slotId, forkId, requestClass: "interactive" }
+            )
+            if (outcome.source === "model" && outcome.value.length > 0)
+              assembled = yield* assembleWith({ stamp: assembled.loreDecision.stamp, lore: outcome.value })
           }
           const generation = JSON.parse(assembled.generation) as Generation
           const { model } = generation
@@ -142,7 +202,19 @@ export const layer = Layer.effect(
               forkId,
               connectionId: model.connectionId as ConnectionId,
               modelId: model.modelId as ModelId,
-              snapshot: assembled.snapshot,
+              // An agent turn's tools and contract are frozen with its context (spec/AGENTIC.md §3.3).
+              snapshot: agentic
+                ? `${assembled.snapshot.trimEnd().slice(0, -1)},"agent":${JSON.stringify({
+                    mode: planned.mode,
+                    contract: plan.contract,
+                    turnCap: plan.turnCap,
+                    tools: [
+                      ...tools.map(frozenTool),
+                      ...(plan.contract === "final_text" ? [] : [sendMessageDefinition])
+                    ]
+                  })}}`
+                : assembled.snapshot,
+              ...(planned.mode === PLAIN_MODE ? {} : { mode: planned.mode }),
               issues: generation.issues,
               variables: generation.variables,
               frozenMessages: generation.frozenMessages.map((m) => ({ ...m, versionId: m.versionId as VersionId }))
@@ -161,12 +233,12 @@ export const layer = Layer.effect(
               message: "Reply output strategy is unavailable."
             })
           const output = outputStrategy.create({
-            prefix: model.prefill === "tool_schema" ? generation.request.prefill : null,
+            prefix: !agentic && model.prefill === "tool_schema" ? generation.request.prefill : null,
             request,
             generation,
             rolloutId
           })
-          const strategy = execution.replyStrategies.get("reply")
+          const strategy = execution.replyStrategies.get(plan.strategy)
           if (!strategy)
             return yield* new GenerationFailed({ class: "unavailable", message: "Reply strategy is unavailable." })
           const reply = strategy.run({
@@ -175,14 +247,29 @@ export const layer = Layer.effect(
             rolloutId,
             output,
             providers,
+            ...(agentic
+              ? {
+                  agent: {
+                    plan,
+                    mode: planned.mode,
+                    tools,
+                    reader,
+                    writer,
+                    onState: () => hub.publish(chatId, { _tag: "State" })
+                  }
+                }
+              : {}),
             resolveImages: (input) =>
               hydrateMessageImages(input, model, (id) => reader.GetMediaFile({ userId, mediaId: id }), config.dataDir)
           })
           // The registered reply parsers, in order: the leading tagged sections (replySections.ts).
           return execution.replyParsers
             .list()
-            .flatMap((parser) => parser.create({ request, generation }) ?? [])
-            .reduce(throughParse, reply)
+            .flatMap((parser) => {
+              const parse = parser.create({ request, generation })
+              return parse ? [{ parse, fresh: () => parser.create({ request, generation })! }] : []
+            })
+            .reduce((stream, { parse, fresh }) => throughParse(stream, parse, fresh), reply)
         })
       )
 

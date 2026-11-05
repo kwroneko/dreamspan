@@ -1,4 +1,6 @@
 import { modelName } from "@rp/shared/cardNames.ts"
+import { canonicalJson } from "@rp/shared/editing.ts"
+import { createHash } from "node:crypto"
 // Lorebook reads and keyword activation, in the reader worker's registered pipeline.
 import { Effect } from "effect"
 import { loreIdentity, loreEntryKey } from "./loreTiming.ts"
@@ -181,6 +183,25 @@ export const loreActivationStage: AssemblerStage = {
           return effect ? [[entry, effect] as const] : []
         })
       )
+      const recent = need(assembly, "projected")
+        .slice(-6)
+        .map((p) => ({
+          from: p.name,
+          text: (assembly.scripted?.get(p.entry.versionId)?.text ?? env.text(p.piece)).slice(-2_000)
+        }))
+      const decisionStamp = createHash("sha256")
+        .update(
+          canonicalJson([
+            need(assembly, "target"),
+            inputs.map((book) => [book.id, book.revision]),
+            need(assembly, "projected")
+              .slice(-6)
+              .map((p) => p.entry.versionId),
+            recent
+          ])
+        )
+        .digest("hex")
+      const admissions = assembly.request.decisions?.stamp === decisionStamp ? assembly.request.decisions.lore : []
       const scan = {
         effects,
         ...(speaker ? { speaker } : {}),
@@ -188,6 +209,7 @@ export const loreActivationStage: AssemblerStage = {
         messages,
         messageCount: need(assembly, "loreMessageCount"),
         trigger: cast.type,
+        decisions: new Map(admissions.map((a) => [a.entry, a.probability])),
         descriptions: {
           persona_description: preview("persona", cast.personas[0]?.doc.description ?? ""),
           character_description: preview("description", char?.doc.description ?? ""),
@@ -310,6 +332,31 @@ export const loreActivationStage: AssemblerStage = {
           revision: book.revision,
           pinnedOnly: true
         })
+      }
+      // What the `lore` decision point would ask: enabled entries with a question that nothing
+      // included. Only for a reply's first assembly; the caller asks, then assembles again.
+      if (!assembly.request.decisions && !assembly.request.summaryJob && !assembly.request.rewrite) {
+        const included = new Set(lore.map((e) => `${e.book}:${e.entry.uid}`))
+        const candidates = result.skipped
+          .filter(
+            ({ book, entry, reason }) =>
+              (reason === "no_primary" || reason === "secondary") &&
+              !entry.constant &&
+              (entry.decision_hint ?? "").trim() !== "" &&
+              !included.has(`${book}:${entry.uid}`)
+          )
+          .toSorted((a, b) => b.entry.order - a.entry.order)
+          .slice(0, 32)
+        if (candidates.length > 0)
+          assembly.loreDecision = {
+            stamp: decisionStamp,
+            candidates: candidates.map(({ book, entry }) => ({
+              key: `${book}:${entry.uid}`,
+              title: entry.comment,
+              question: entry.decision_hint!.trim()
+            })),
+            recent
+          }
       }
       // A pin takes the place activation would give it, so the pinned blocks stay byte for byte.
       const rank = new Map(

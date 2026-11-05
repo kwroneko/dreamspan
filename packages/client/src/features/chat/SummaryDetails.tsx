@@ -1,7 +1,7 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import type { LcmSummary, SummaryDetails as Details } from "@rp/shared/lcm.ts"
-import { Link, useParams } from "@tanstack/react-router"
+import { Link, useParams, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { routes } from "../../routes.tsx"
@@ -160,12 +160,18 @@ function SummaryProvenance({ session, summary }: { session: ChatSession; summary
 /** A summary request has no message version. Its registered route reads the stored capture directly. */
 function SummaryRequestPage() {
   const { summaryId } = useParams({ strict: false }) as { summaryId: LcmSummary["id"] }
+  const search = useSearch({ strict: false }) as { revision?: unknown }
+  const revisionId = typeof search.revision === "string" ? (search.revision as LcmSummary["revisionId"]) : null
   const { run } = useAction()
   const [details, setDetails] = useState<Details | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let live = true
-    void run((client) => client("GetSummaryDetails", { summaryId })).then((result) => {
+    void run((client) =>
+      revisionId === null
+        ? client("GetSummaryDetails", { summaryId })
+        : client("GetSummaryRevisionRequest", { revisionId })
+    ).then((result) => {
       if (!live) return
       if (result.ok) {
         setDetails(result.value)
@@ -176,7 +182,7 @@ function SummaryRequestPage() {
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run uses the lifetime transport
-  }, [summaryId])
+  }, [summaryId, revisionId])
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <CenterHeaderContent>

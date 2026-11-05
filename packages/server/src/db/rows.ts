@@ -1,3 +1,4 @@
+import type { StepsSummary } from "@rp/shared/agent.ts"
 // Row shapes and their mapping to domain types, shared by the writer and readers.
 import type { StoredRewrite, VersionRewrite } from "@rp/shared/regexScripts.ts"
 import type { ReplySections } from "@rp/shared/replySections.ts"
@@ -159,6 +160,8 @@ export interface VersionRow {
   readonly model_label?: string | null
   /** Its model's connection kind and key, as JSON (`versionExtras`); absent on a row just inserted. */
   readonly model_ref_json?: string | null
+  /** Its agent rollout's tool calls and run time, as JSON (`versionExtras`); null without steps. */
+  readonly steps_json?: string | null
   /** What an imported version's app recorded about its model and generation (`StoredGeneration`). */
   readonly recorded_model_json?: string | null
   readonly recorded_generation_json?: string | null
@@ -175,7 +178,9 @@ export const versionExtras = (alias: string) =>
   (SELECT c.name || ' · ' || m.model_key FROM models m JOIN connections c ON c.id = m.connection_id
     WHERE m.id = ${alias}.model_id) AS model_label,
   (SELECT json_object('provider', c.kind, 'model', m.model_key) FROM models m JOIN connections c ON c.id = m.connection_id
-    WHERE m.id = ${alias}.model_id) AS model_ref_json`
+    WHERE m.id = ${alias}.model_id) AS model_ref_json,
+  (SELECT json_object('count', r.step_count, 'ms', r.completed_at - r.started_at) FROM rollouts r
+    WHERE r.id = ${alias}.rollout_id AND r.step_count > 0) AS steps_json`
 
 const toVersionError = (json: string | null) => {
   if (json === null) return null
@@ -273,6 +278,7 @@ export const toVersion = (row: VersionRow) =>
             ? (JSON.parse(row.context_issues) as Array<ContextIssue>).filter((issue) => !UNSHOWN.has(issue.kind))
             : []
         },
+    ...(row.steps_json ? { steps: JSON.parse(row.steps_json) as StepsSummary } : {}),
     rowVersion: 1 + (row.amend_count ?? 0)
   })
 

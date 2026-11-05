@@ -12,9 +12,9 @@ export async function exercisePhoneFooters(page: Page, info: TestInfo, url: stri
   await showAppNavigation(page)
   const drawer = page.locator('[data-layout-overlay="Mobile navigation drawer covers the page"]')
   const branches = drawer.getByRole("region", { name: "Branches of the open chat", exact: true })
-  const splits = drawer.getByRole("region", { name: "Split chats", exact: true })
+  const splits = drawer.getByRole("region", { name: "Related chats", exact: true })
   const branchToggle = branches.getByRole("button", { name: /^Branches of / })
-  const splitToggle = splits.getByRole("button", { name: /^Split off / })
+  const splitToggle = splits.getByRole("button", { name: /^Related chats \(/ })
   await expect(branches).toHaveAttribute("aria-busy", "false")
   await expect(splits).toHaveAttribute("aria-busy", "false")
   for (const toggle of [branchToggle, splitToggle]) {

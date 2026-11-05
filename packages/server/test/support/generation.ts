@@ -59,6 +59,14 @@ export const generateReply = (
     readonly mira?: Partial<CardDoc>
     /** The connection's Token counts set to its own provider (off by default, DESIGN §11). */
     readonly countWithProvider?: boolean
+    /** Chat-wide state events set before the reply: a reply mode, say. */
+    readonly state?: ReadonlyArray<StateEventData>
+    /** More characters in the chat, after Mira (cards with these names). */
+    readonly characters?: ReadonlyArray<string>
+    /** Of those, the ones the user muted. */
+    readonly muted?: ReadonlyArray<string>
+    /** A lorebook the chat reads. */
+    readonly lorebook?: import("@rp/shared/docs/lorebook.ts").LorebookDoc
   }
 ) =>
   Effect.gen(function* () {
@@ -91,7 +99,7 @@ export const generateReply = (
         }
       }
     })
-    const entity = (kind: "card" | "preset", label: string, doc: object) =>
+    const entity = (kind: "card" | "preset" | "lorebook", label: string, doc: object) =>
       writer.CreateEntity({
         userId,
         kind,
@@ -136,6 +144,28 @@ export const generateReply = (
     const state = (data: StateEventData) =>
       writer.AddStateEvent({ userId, chatId: chat.id, slotId: null, versionId: null, scope: null, data })
     yield* state({ key: "played_by_me.set", value: { entities: [tobin.entityId as EntityId] } })
+    for (const data of options.state ?? []) yield* state(data)
+    const characters = []
+    for (const name of options.characters ?? []) {
+      const card = yield* entity("card", name, cardDoc(name, `{{char}} rides with {{user}}.`))
+      yield* state({ key: "participant.join", value: { entity: card.entityId as EntityId } })
+      if (options.muted?.includes(name))
+        yield* state({ key: "presence.set", value: { entity: card.entityId as EntityId, present: false } })
+      characters.push(card)
+    }
+    if (options.lorebook) {
+      const book = yield* writer.CreateEntity({
+        userId,
+        kind: "lorebook",
+        label: options.lorebook.name,
+        subtitle: "",
+        doc: options.lorebook as never,
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      yield* state({ key: "lorebook.attach", value: { ref: book.ref.id as never } })
+    }
     const events: Array<ChatEvent> = []
     yield* api.SubscribeChat({ chatId: chat.id }).pipe(
       Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
@@ -161,6 +191,7 @@ export const generateReply = (
       events,
       sent: sent.entry,
       mira,
+      characters,
       preset
     }
   })

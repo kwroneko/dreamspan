@@ -2,6 +2,16 @@ import { afterEach, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { Notice } from "@rp/shared/noticeApi.ts"
+// Load the UI graph before test deadlines; no assertion depends on import/transform speed.
+import * as sound from "../src/features/completionSound.ts"
+import { register } from "../src/features/completionSoundFeature.tsx"
+import {
+  noticeChannels,
+  NoticeChannelSettings,
+  activateNoticeChannels,
+  receiveNoticeChannels,
+  noticeDeduplicator
+} from "../src/features/noticeContributions.tsx"
 
 const stored = new Map<string, string>()
 const resume = vi.fn(async () => {})
@@ -30,19 +40,17 @@ class FakeAudio {
 }
 afterEach(() => {
   vi.unstubAllGlobals()
-  vi.resetModules()
   vi.clearAllMocks()
   stored.clear()
   state = "suspended"
 })
 
-it("is opt-in, activates only on interaction, skips suspended audio and stops after opt-out", async () => {
+it("is opt-in, activates only on interaction, skips suspended audio and stops after opt-out", () => {
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => stored.get(k),
     setItem: (k: string, v: string) => stored.set(k, v)
   })
   vi.stubGlobal("AudioContext", FakeAudio)
-  const sound = await import("../src/features/completionSound.ts")
   expect(sound.soundWanted()).toBe(false)
   sound.activateSound()
   sound.playCompletionSound()
@@ -63,8 +71,7 @@ it("is opt-in, activates only on interaction, skips suspended audio and stops af
   expect(start).toHaveBeenCalledOnce()
 })
 
-it("deduplicates replayed versions across chats and subscription retries", async () => {
-  const { noticeDeduplicator } = await import("../src/features/noticeContributions.tsx")
+it("deduplicates replayed versions across chats and subscription retries", () => {
   const first = noticeDeduplicator()
   expect(first({ versionId: "v1", status: "complete" })).toBe(true)
   expect(first({ versionId: "v1", status: "complete" })).toBe(false)
@@ -72,18 +79,14 @@ it("deduplicates replayed versions across chats and subscription retries", async
   expect(first({ versionId: "v2", status: "failed" })).toBe(false)
 })
 
-it("replaces or disables sound settings, activation and playback together, then restores them", async () => {
+it("replaces or disables sound settings, activation and playback together, then restores them", () => {
   vi.stubGlobal("localStorage", {
     getItem: (k: string) => stored.get(k),
     setItem: (k: string, v: string) => stored.set(k, v)
   })
   vi.stubGlobal("AudioContext", FakeAudio)
-  const { register } = await import("../src/features/completionSoundFeature.tsx")
-  const { setSoundWanted } = await import("../src/features/completionSound.ts")
-  const { noticeChannels, NoticeChannelSettings, activateNoticeChannels, receiveNoticeChannels } =
-    await import("../src/features/noticeContributions.tsx")
   const dispose = register()
-  setSoundWanted(true)
+  sound.setSoundWanted(true)
   state = "running"
   const notice = { status: "complete" } as Extract<Notice, { _tag: "ReplyFinished" }>
   const render = () => renderToStaticMarkup(createElement(NoticeChannelSettings))

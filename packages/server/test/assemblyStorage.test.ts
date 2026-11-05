@@ -225,6 +225,118 @@ for (const workers of ["source", "bundle"] as const) {
 }
 
 describe("context assembly from the database", () => {
+  it.live("pins replacing notes in plain and agent replays and counts them in their preset slots", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, sent, generating, entity, state, mira, preset, assemble } = yield* setup()
+      yield* state({ key: "preset.binding", value: { ref: preset.ref.id } })
+      const connectionId = uuidv7() as ConnectionId
+      yield* writer.CreateConnection({
+        userId,
+        connectionId,
+        kind: "openai-chat",
+        api: "openai-completions",
+        settings: {
+          name: "Replacement cache markers",
+          baseUrl: null,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        credential: { existing: null }
+      })
+      const model = yield* writer.AddUserModel({
+        userId,
+        connectionId,
+        key: "synthetic-replacements",
+        overrides: { cacheBreakpoints: "explicit" }
+      })
+      yield* state({ key: "model.binding", value: { connection: connectionId, model: model.id } })
+      const mainText = "Only the replacement Main. ".repeat(20)
+      const main = yield* entity("note", "Main replacement", {
+        schema_version: 1,
+        title: "Main replacement",
+        content: mainText,
+        owner: { chat: chat.id },
+        placement: { mode: "tail", role: "system" },
+        exportable: false,
+        replaces: { kind: "preset_prompt", identifier: "main" }
+      })
+      const field = yield* entity("note", "Description replacement", {
+        schema_version: 1,
+        title: "Description replacement",
+        content: "A red scarf for {{char}}.",
+        owner: { chat: chat.id },
+        placement: { mode: "tail", role: "system" },
+        exportable: false,
+        replaces: { kind: "card_field", card: mira.entityId, field: "description" },
+        condition: { when: "turn", cards: [mira.entityId] }
+      })
+      for (const note of [main, field]) yield* state({ key: "note.activate", value: { note: note.entityId } })
+      const snapshots: Array<ContextSnapshot> = []
+      for (const agent of [
+        undefined,
+        { instructions: "Write the scene.", cardsAtTail: false },
+        { instructions: "Write Mira.", cardsAtTail: true }
+      ]) {
+        const built = yield* reader.AssembleContext({
+          userId,
+          chatId: chat.id,
+          slotId: generating.slotId,
+          versionId: generating.version.id,
+          now: NOW,
+          timeZone: "UTC",
+          frozen: null,
+          ...(agent ? { agent } : {})
+        })
+        const snapshot = JSON.parse(built.snapshot) as ContextSnapshot
+        assert.include(texts(snapshot).join("\n"), mainText.trim())
+        assert.include(texts(snapshot).join("\n"), "A red scarf for Mira.")
+        assert.notInclude(texts(snapshot).join("\n"), "keeps the ledger")
+        snapshots.push(snapshot)
+      }
+      const next = yield* reader.CacheWarmth({ userId, chatId: chat.id, leafSlotId: sent.slotId })
+      assert.strictEqual(
+        next.presetContext!.blocks.find((b) => b.identifier === "main")?.tokens,
+        Math.ceil(mainText.trim().length / 4)
+      )
+      assert.isFalse(next.presetContext!.notes.some((n) => n.ref === main.ref.id || n.ref === field.ref.id))
+      // This preset places the persona between Main and the conditional description.
+      assert.includeDeepMembers(
+        [...next.presetContext!.cacheAfter],
+        [{ identifier: "personaDescription", reason: "prefix" }]
+      )
+      yield* writer.EditRef({
+        userId,
+        refId: preset.ref.id,
+        expectedRowVersion: preset.ref.rowVersion,
+        doc: {
+          ...presetDoc,
+          prompts: presetDoc.prompts.map((p) =>
+            p.identifier === "main" ? { ...p, content: "Updated preset original." } : p
+          )
+        },
+        message: null,
+        commitDraft: null
+      })
+      assert.include(texts(yield* assemble()).join("\n"), mainText.trim())
+      yield* writer.EditRef({
+        userId,
+        refId: main.ref.id,
+        expectedRowVersion: main.ref.rowVersion,
+        doc: { ...(yield* reader.OpenEditor({ userId, refId: main.ref.id })).doc, content: "Changed since sending." },
+        message: null,
+        commitDraft: null
+      })
+      for (const snapshot of snapshots) {
+        const replayed = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(snapshot) })
+        assert.strictEqual(replayed._tag, "Rebuilt")
+        if (replayed._tag === "Rebuilt")
+          assert.deepStrictEqual((JSON.parse(replayed.snapshot) as ContextSnapshot).request, snapshot.request)
+      }
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("projects current preset fills, note slots and real cache boundaries without prompt text", () =>
     Effect.gen(function* () {
       const { reader, userId, chat, sent, entity, state } = yield* setup()

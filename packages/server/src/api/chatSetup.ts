@@ -61,6 +61,10 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "reply.order", value: change.order }
     case "ReplySingle":
       return { key: "reply.single", value: { on: change.on } }
+    case "ReplyMode":
+      return { key: "orchestration.mode", value: { mode: change.mode } }
+    case "AgentTools":
+      return { key: "agent.tools", value: { tools: change.tools } }
   }
 }
 
@@ -217,6 +221,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       rolesProjection: state.rolesProjection,
       ...(state.replyOrder === null ? {} : { replyOrder: state.replyOrder }),
       ...(state.replySingle === true ? { replySingle: true } : {}),
+      ...(state.orchestration ? { replyMode: state.orchestration.mode } : {}),
+      ...(state.agentTools ? { agentTools: state.agentTools } : {}),
       roleProjections,
       cards
     })
@@ -487,12 +493,14 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         )
       }).pipe(internal("ListChatNotes")),
 
-    CreateChatNote: ({ chatId, title, link, forkId }) =>
+    CreateChatNote: ({ chatId, title, link, forkId, replaces, content }) =>
       Effect.flatMap(userId, (id) =>
         writer.CreateChatNote({
           userId: id,
           chatId,
           title,
+          ...(replaces === undefined ? {} : { replaces }),
+          ...(content === undefined ? {} : { content }),
           ...(forkId === undefined ? {} : { forkId }),
           ...(link === undefined ? {} : { link })
         })

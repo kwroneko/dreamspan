@@ -1,4 +1,5 @@
-import { SplitChats } from "@rp/shared/splitChat.ts"
+import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
+import { EditRefused } from "@rp/shared/editorApi.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
@@ -107,7 +108,7 @@ import {
   NoteEntry,
   SharedNote
 } from "@rp/shared/editorApi.ts"
-import { NoteDoc } from "@rp/shared/docs/note.ts"
+import { NoteDoc, ReplaceTarget } from "@rp/shared/docs/note.ts"
 import {
   Connection,
   ConnectionId,
@@ -124,8 +125,10 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import { ActivityCursor, ActivityPage, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
+import { ConnectionDecisions, DecisionPointSetting } from "@rp/shared/decisions.ts"
 import {
   Cost,
   LlmRequest,
@@ -463,9 +466,9 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError, BinChanged])
   }),
   Rpc.make("SetSplitChat", {
-    payload: { userId: UserId, forkId: ForkId, split: Schema.Boolean },
-    success: Schema.Void,
-    error: Schema.Union([NotFound, StorageError])
+    payload: { userId: UserId, ...SetSplitChatFields },
+    success: ChatId,
+    error: Schema.Union([NotFound, StorageError, EditRefused])
   }),
   Rpc.make("ChangeBinLimit", {
     payload: { userId: UserId, ...BinLimitChange.fields },
@@ -2253,10 +2256,12 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       title: Schema.String,
-      link: Schema.optionalKey(EntityId)
+      link: Schema.optionalKey(EntityId),
+      replaces: Schema.optionalKey(ReplaceTarget),
+      content: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, InvalidDocument, StorageError])
   }),
   /**
    * A shared named note (DESIGN §4.1). With `fromNoteRefId`, from that slot, which is linked
@@ -2300,6 +2305,8 @@ export class WriteOps extends RpcGroup.make(
       connectionId: ConnectionId,
       modelId: ModelId,
       snapshot: Schema.String,
+      /** The orchestration mode it ran in, when not plain (spec/AGENTIC.md §6). */
+      mode: Schema.optionalKey(Schema.String),
       /** The snapshot's issues, kept on the rollout for its version to show. */
       issues: Schema.Array(ContextIssue),
       variables: Schema.Array(
@@ -2343,8 +2350,86 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * An agent rollout's transcript as it stands (spec/AGENTIC.md §3.3): the whole of it, replacing
+   * what was saved, and its step count (tool calls) for the version's badge.
+   */
+  /**
+   * A chat-state tool call's state events, attached to the rollout's version, with its receipt
+   * (rolloutWrites.ts). Receipted already: nothing is written, and the first result comes back.
+   */
+  Rpc.make("ApplyRolloutEffect", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      events: Schema.Array(StoredStateEventData),
+      result: Schema.String
+    },
+    success: Schema.Struct({ result: Schema.String, replayed: Schema.Boolean }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SaveRolloutTranscript", {
+    payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** At startup: rollouts a previous process left running are interrupted. */
   Rpc.make("InterruptRollouts", { success: Schema.Struct({ interrupted: Schema.Int }), error: StorageError }),
+  // --- Decision models (spec/AGENTIC.md §7; db/decisions.ts)
+  /** A connection's decision settings, replacing its own; NotFound unless it (and the model) is the user's. */
+  Rpc.make("SetDecisionSettings", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      model: Schema.NullOr(ModelId),
+      points: Schema.Record(Schema.String, DecisionPointSetting)
+    },
+    success: Schema.Array(ConnectionDecisions),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A decision call's rollout (kind `decision`), its state and questions as the snapshot. */
+  Rpc.make("StartDecisionRollout", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      rolloutId: Schema.String,
+      /** The message it decides for: the reply being written, or the one that just finished. */
+      slotId: Schema.NullOr(SlotId),
+      forkId: Schema.NullOr(ForkId),
+      connectionId: ConnectionId,
+      modelId: ModelId,
+      requestClass: Schema.Literals(["interactive", "background"]),
+      snapshot: Schema.String
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Closes a decision rollout with its outcome (JSON: answers, verdict, source) and its ledger rows' usage. */
+  Rpc.make("FinishDecisionRollout", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      status: Schema.Literals(["completed", "stopped", "failed"]),
+      error: Schema.NullOr(Schema.String),
+      result: Schema.String
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** State events a decision attaches to a version of its chat, with the decision as their origin. */
+  Rpc.make("ApplyDecisionEffect", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      versionId: VersionId,
+      /** The state the point read: a later user/tool change or swipe makes the effect stale. */
+      expectedState: Schema.String,
+      events: Schema.Array(StoredStateEventData)
+    },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The account defaults, including its new-chat persona; choices must be owned and live. */
   Rpc.make("SetGenerationDefaults", {
     payload: { userId: UserId, defaults: GenerationDefaults },
@@ -3175,14 +3260,33 @@ export class ReadOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       now: Schema.Number,
       timeZone: Schema.String,
-      frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)))
+      frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String))),
+      /** An agent reply's assembly (spec/AGENTIC.md §6). */
+      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, cardsAtTail: Schema.Boolean })),
+      /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
+      decisions: Schema.optionalKey(
+        Schema.Struct({
+          stamp: Schema.String,
+          lore: Schema.Array(Schema.Struct({ entry: Schema.String, probability: Schema.Number }))
+        })
+      )
     },
     success: Schema.Struct({
       snapshot: Schema.String,
       generation: Schema.String,
       /** The library entries it read, for `CheckpointLiveText`; message number in `message`. */
       used: Schema.Array(UsedEntry),
-      message: Schema.Int
+      message: Schema.Int,
+      /** What the `lore` decision point would ask about; absent when no entry the keys left out has a question. */
+      loreDecision: Schema.optionalKey(
+        Schema.Struct({
+          stamp: Schema.String,
+          candidates: Schema.Array(
+            Schema.Struct({ key: Schema.String, title: Schema.String, question: Schema.String })
+          ),
+          recent: Schema.Array(Schema.Struct({ from: Schema.String, text: Schema.String }))
+        })
+      )
     }),
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   }),
@@ -3207,6 +3311,24 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("RunContext", {
     payload: { userId: UserId, versionId: VersionId },
     success: RunContext,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** An agent reply's steps, from its stored transcript (agentReads.ts); empty for a plain one. */
+  Rpc.make("RolloutSteps", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Array(RolloutStep),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** An agent reply's transcript after its request, verbatim, with its offered tools (agentReads.ts). */
+  Rpc.make("RolloutTranscript", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: RunTranscript,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A chat's model work that made no message, from the ledger, newest first (agentReads.ts). */
+  Rpc.make("ListActivity", {
+    payload: { userId: UserId, chatId: ChatId, before: Schema.optionalKey(ActivityCursor), limit: Schema.Int },
+    success: ActivityPage,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Generation time and tokens of the user's versions (inspectorReads.ts); others are left out. */
@@ -3289,6 +3411,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetTokenCounting", {
     payload: { userId: UserId },
     success: Schema.Array(TokenCountingChoice),
+    error: StorageError
+  }),
+  /** The user's decision settings whose connections are live (db/decisions.ts). */
+  Rpc.make("GetDecisionSettings", {
+    payload: { userId: UserId },
+    success: Schema.Array(ConnectionDecisions),
     error: StorageError
   }),
   /** The user's live presets whose HEAD document lists the lorebook `ref` (`PresetDoc.lorebooks`). */

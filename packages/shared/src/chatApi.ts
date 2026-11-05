@@ -2,6 +2,7 @@
 // selection or a text carry the row version the client saw (StaleWrite otherwise); a new
 // message names the tip it was written under (LeafMoved otherwise).
 import { Schema } from "effect"
+import { RolloutStep } from "./agent.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem, CannotDeleteLastFork } from "./bin.ts"
 import {
@@ -100,6 +101,8 @@ const displayFields = {
   underlineTextColor: messageColor,
   quoteTextColor: messageColor,
   reasoning: ReasoningDisplay,
+  /** An agent reply's steps while it's written, open or folded, as reasoning's (DESIGN §7.4). */
+  steps: ReasoningDisplay,
   portraitSize: Schema.Literals(["small", "default", "large", "largest"]),
   timeline: Schema.Literals(["originals", "summaries"]),
   coverageRail: Schema.Boolean,
@@ -136,6 +139,7 @@ export const DisplayPrefsChange = Schema.Struct({
   underlineTextColor: Schema.optionalKey(displayFields.underlineTextColor),
   quoteTextColor: Schema.optionalKey(displayFields.quoteTextColor),
   reasoning: Schema.optionalKey(displayFields.reasoning),
+  steps: Schema.optionalKey(displayFields.steps),
   portraitSize: Schema.optionalKey(displayFields.portraitSize),
   timeline: Schema.optionalKey(displayFields.timeline),
   coverageRail: Schema.optionalKey(displayFields.coverageRail),
@@ -159,6 +163,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   underlineTextColor: null,
   quoteTextColor: null,
   reasoning: "expanded",
+  steps: "expanded",
   portraitSize: "default",
   timeline: "originals",
   coverageRail: false,
@@ -224,7 +229,9 @@ export const ChatEvent = Schema.Union([
         /** The reasoning streamed so far, when there is any. */
         reasoning: Schema.optionalKey(Schema.String),
         /** The reply sections' panel text streamed so far, when there is any (spec/REPLY-SECTIONS.md). */
-        sections: Schema.optionalKey(Schema.String)
+        sections: Schema.optionalKey(Schema.String),
+        /** An agent reply's steps so far, when it has any (spec/AGENTIC.md §5.1). */
+        steps: Schema.optionalKey(Schema.Array(RolloutStep))
       })
     )
   }),
@@ -234,6 +241,8 @@ export const ChatEvent = Schema.Union([
    * so far (ARCHITECTURE §12, "Live rewrites"); the text may get shorter.
    */
   Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String, replace: LiveReplace }),
+  /** A generating agent reply's steps, all of them as they stand (spec/AGENTIC.md §5.1). */
+  Schema.TaggedStruct("Steps", { versionId: VersionId, steps: Schema.Array(RolloutStep) }),
   /** Reasoning appended to a generating version at `offset`, as `Delta` is for its text. */
   Schema.TaggedStruct("Reasoning", {
     versionId: VersionId,
@@ -901,7 +910,14 @@ export class ChatApi extends RpcGroup.make(
     payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: Schema.NullOr(SlotId) },
     success: NextContext,
     error: Schema.Union([...Errors])
-  }),
+  })
+) {}
+
+/**
+ * The chat's live updates, in a group (and handler layer) of their own: with the event union
+ * in it, AppCoreApi's handler inference exceeds TypeScript's instantiation depth (TS2589).
+ */
+export class ChatEventsApi extends RpcGroup.make(
   /**
    * Live updates to one chat. Each element is a batch, coalesced on the server per frame
    * (about 16 ms). The first batch starts with Hello.

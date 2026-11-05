@@ -1,5 +1,6 @@
 // Library ancestry/merge reads, shared by reader previews and the writer transaction.
 import { Effect } from "effect"
+import { HELD_FIELD } from "@rp/shared/editing.ts"
 import type { SqlClient } from "effect/sql"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
@@ -81,7 +82,9 @@ export const makeForkMergeQueries = (sql: SqlClient.SqlClient) => {
   const noDrafts = Effect.fnUntraced(function* (userId: UserId, ref: RefRow) {
     const [row] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM drafts WHERE user_id = ${userId}
       AND target_kind = 'entity_field' AND (target_id = ${ref.id} OR target_id LIKE ${ref.id + "/%"})
-      AND status = 'active'`
+      AND status = 'active'
+      -- Save/Revert retains the cleared structural draft's history; it holds no changes.
+      AND NOT (${ref.kind} = 'preset' AND field = ${HELD_FIELD} AND content = '')`
     if (row!.n > 0) return yield* refused(ref, "Save or discard this entry's unsaved fields before merging.")
   })
   const preview = Effect.fnUntraced(function* (userId: UserId, refId: RefId, theirsRevisionId?: RevisionId) {

@@ -44,6 +44,16 @@ const paths = {
     "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
     "M18 9a9 9 0 0 1-9 9"
   ],
+  /** Two lines joining: taking a parent's changes into a fork. */
+  merge: ["M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 21V9a9 9 0 0 0 9 9"],
+  /** A small tree of boxes: a family of forks. */
+  family: [
+    "M17 16h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z",
+    "M3 16h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z",
+    "M10 2h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z",
+    "M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3",
+    "M12 12V8"
+  ],
   /** A path forking off on its own: a branch made its own chat, apart from branch's tree. */
   split: ["M16 3h5v5", "M8 3H3v5", "M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3", "m15 9 6-6"],
   /** A window with a side column: the chat's side panel. */
@@ -138,6 +148,14 @@ const paths = {
   ],
   sliders: ["M20 7h-9", "M14 17H5", "M14 17a3 3 0 1 0 6 0a3 3 0 1 0-6 0", "M4 7a3 3 0 1 0 6 0a3 3 0 1 0-6 0"],
   search: ["M21 21l-4.34-4.34", "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"],
+  /** An agent reply's tool use: a wrench. */
+  tool: [
+    "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+  ],
+  /** Model work in the background: a pulse line. */
+  activity: [
+    "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
+  ],
   /** Search and replace: a word, an arrow, its replacement. */
   replace: [
     "M14 4a1 1 0 0 1 1-1",

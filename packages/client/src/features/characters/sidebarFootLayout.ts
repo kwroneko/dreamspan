@@ -1,10 +1,12 @@
 export type FootKind = "branch" | "split"
 export type FootPresence = Record<FootKind, "list" | "header" | "absent">
 const FOOT_HEADER = 41
-// Two standard rows, including the header and the list's 4px row gap.
-export const FOOT_DEFAULT = { branch: 221, split: 237 }
-// Allow a complete row even with stacked portraits or a wrapped date.
-export const FOOT_MIN = { branch: 147, split: 211 }
+// Two standard rows, including the header and the list's 4px row gap. Related chats' rows
+// carry a relation line, and each of its two groups a caption (splitsection).
+export const FOOT_DEFAULT = { branch: 221, split: 356 }
+// Allow a complete row even with stacked portraits or a wrapped date (and, for Related
+// chats, its group's caption above it).
+export const FOOT_MIN = { branch: 147, split: 231 }
 
 /** Chats owns the remainder; short columns shrink lists before collapsing them. */
 export function sidebarFootLayout(

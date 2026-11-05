@@ -330,9 +330,23 @@ export const replySectionsParser: ReplyParser = {
 }
 
 /** The reply's chunks through one parse; it flushes when the reply finishes on its own. */
-export const throughParse = <R>(stream: Stream.Stream<GenerationChunk, GenerationFailed, R>, parse: ReplyParse) =>
-  stream.pipe(
-    Stream.map(parse.push),
+export const throughParse = <R>(
+  stream: Stream.Stream<GenerationChunk, GenerationFailed, R>,
+  parse: ReplyParse,
+  /** A fresh parse for when the reply starts over (`restart`); without it, the same one goes on. */
+  fresh?: () => ReplyParse
+) => {
+  let current = parse
+  return stream.pipe(
+    Stream.map((chunk): ReadonlyArray<GenerationChunk> => {
+      if (typeof chunk === "object" && "restart" in chunk && fresh) {
+        // What it held back belonged to the text that wasn't the reply.
+        current = fresh()
+        return [chunk]
+      }
+      return current.push(chunk)
+    }),
     Stream.flattenIterable,
-    Stream.concat(Stream.suspend(() => Stream.fromIterable(parse.end())))
+    Stream.concat(Stream.suspend(() => Stream.fromIterable(current.end())))
   )
+}
