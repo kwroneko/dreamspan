@@ -16,7 +16,7 @@ import { ChatHub } from "./ChatHub.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { PLAIN_MODE, planTurn } from "../agent/modes.ts"
 import type { OutputContract } from "../agent/modes.ts"
-import { type FrozenTool, frozenTool } from "../agent/tools.ts"
+import { type FrozenTool, frozenTool, sendMessageDefinition } from "../agent/tools.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
 const serverFailure = (operation: string) => (error: unknown) =>
@@ -118,6 +118,7 @@ export const layer = Layer.effect(
             offered: frozen.tools,
             reader,
             writer,
+            onState: () => hub.publish(request.chatId, { _tag: "State" }),
             resume: {
               transcript: resume.transcript,
               ...(resume.continuation === undefined ? {} : { continuation: resume.continuation })
@@ -156,13 +157,21 @@ export const layer = Layer.effect(
           const events = yield* reader
             .StateEventsAt({ userId, chatId, slotId: parent, forkId })
             .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("StateEventsAt")))
-          const planned = planTurn(execution.orchestrationModes, foldState(events))
+          const state = foldState(events)
+          const planned = planTurn(execution.orchestrationModes, state)
           if ("unavailable" in planned)
             return yield* new GenerationFailed({
               class: "unavailable",
               message: `The reply mode “${planned.unavailable}” is unavailable.`
             })
-          const { plan } = planned
+          // Continue keeps the source prefill; Write for remains a single plain turn.
+          const plainTurn =
+            request.initial !== undefined ||
+            (slot.entry.version.speakerEntityId !== null &&
+              state.playedByMe.includes(slot.entry.version.speakerEntityId))
+          const plan = plainTurn
+            ? { ...planned.plan, strategy: "reply", tools: [], contract: "final_text" as const }
+            : planned.plan
           const agentic = plan.strategy !== "reply"
           const tools = plan.tools.flatMap((id) => {
             const tool = execution.rolloutTools.get(id)
@@ -181,14 +190,15 @@ export const layer = Layer.effect(
               frozen: null,
               partialBatch,
               ...(request.model ? { model: request.model } : {}),
-              ...(plan.assembly
+              ...(plan.assembly || agentic
                 ? {
                     agent: {
-                      instructions: plan.assembly.instructions(
-                        tools.map((t) => t.id),
-                        plan.contract
-                      ),
-                      cardsAtTail: plan.assembly.cardsAtTail
+                      instructions:
+                        plan.assembly?.instructions(
+                          tools.map((t) => t.id),
+                          plan.contract
+                        ) ?? "",
+                      cardsAtTail: plan.assembly?.cardsAtTail ?? false
                     }
                   }
                 : {})
@@ -257,7 +267,10 @@ export const layer = Layer.effect(
                     mode: planned.mode,
                     contract: plan.contract,
                     turnCap: plan.turnCap,
-                    tools: tools.map(frozenTool)
+                    tools: [
+                      ...tools.map(frozenTool),
+                      ...(plan.contract === "final_text" ? [] : [sendMessageDefinition])
+                    ]
                   })}}`
                 : assembled.snapshot,
               ...(planned.mode === PLAIN_MODE ? {} : { mode: planned.mode }),
@@ -279,7 +292,7 @@ export const layer = Layer.effect(
               message: "Reply output strategy is unavailable."
             })
           const output = outputStrategy.create({
-            prefix: model.prefill === "tool_schema" ? generation.request.prefill : null,
+            prefix: !agentic && model.prefill === "tool_schema" ? generation.request.prefill : null,
             request,
             generation,
             rolloutId
@@ -293,7 +306,18 @@ export const layer = Layer.effect(
             rolloutId,
             output,
             providers,
-            ...(agentic ? { agent: { plan, mode: planned.mode, tools, reader, writer } } : {}),
+            ...(agentic
+              ? {
+                  agent: {
+                    plan,
+                    mode: planned.mode,
+                    tools,
+                    reader,
+                    writer,
+                    onState: () => hub.publish(chatId, { _tag: "State" })
+                  }
+                }
+              : {}),
             resolveImages: (input) =>
               hydrateMessageImages(input, model, (id) => reader.GetMediaFile({ userId, mediaId: id }), config.dataDir)
           })

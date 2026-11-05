@@ -60,7 +60,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             AND ${match === null ? sql`1` : sql`(v.seq IN (SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${match}) OR v.macro_mode = 'template')`}
             AND EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)
             AND (${before} IS NULL OR s.depth < ${before})
-            AND v.status = 'complete' AND v.id = ${shownIn(sql, fork, "s")}
+            AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
             AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
           ORDER BY s.depth DESC LIMIT ${limit}`
         return rows.map((r) => ({

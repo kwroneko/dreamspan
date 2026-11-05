@@ -131,6 +131,10 @@ describe("agent read tools", () => {
         result: "Mira is away from the next message on.",
         effect: "chat_state"
       })
+      assert.isTrue(
+        events.some((e) => e._tag === "State"),
+        "tool effects invalidate the live cast and notes"
+      )
       const reader = yield* Reader
       const me = yield* api.Whoami()
       const absentAt = Effect.map(
@@ -138,6 +142,20 @@ describe("agent read tools", () => {
         (e) => foldState(e).absent
       )
       assert.deepStrictEqual(yield* absentAt, [mira.entityId])
+
+      // A later fork inherits the shown effect, and then keeps its own state when the
+      // source fork swipes or deletes the message that produced it.
+      const sourceFork = chat.currentForkId!
+      const { fork: peer } = yield* api.CreateFork({
+        chatId: chat.id,
+        fromForkId: sourceFork,
+        atSlotId: version.slotId
+      })
+      const peerAbsent = Effect.map(
+        reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId, forkId: peer.id }),
+        (e) => foldState(e).absent
+      )
+      assert.deepStrictEqual(yield* peerAbsent, [mira.entityId])
 
       // Its receipt: the same call again writes nothing and answers as before.
       const db = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
@@ -158,10 +176,30 @@ describe("agent read tools", () => {
 
       // A swipe that doesn't send her away: shown, it takes the first one's effect with it.
       away = false
-      const { entry } = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
-      const swipe = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+      const { entry } = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId, forkId: sourceFork })
+      const swipe = yield* api.Regenerate({
+        slotId: entry.slotId,
+        expectedRowVersion: entry.rowVersion,
+        forkId: sourceFork
+      })
       yield* eventually(() => finished(events, swipe.version.id) !== undefined)
-      assert.deepStrictEqual(yield* absentAt, [])
+      const sourceAbsent = reader
+        .StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId, forkId: sourceFork })
+        .pipe(Effect.map((e) => foldState(e).absent))
+      assert.deepStrictEqual(yield* sourceAbsent, [])
+      assert.deepStrictEqual(yield* peerAbsent, [mira.entityId])
+      // Selecting the effected swipe again restores the effect, then deleting the
+      // message removes it only from the source fork.
+      yield* api.SelectVersion({
+        slotId: version.slotId,
+        versionId: version.id,
+        expectedVersionId: swipe.version.id,
+        forkId: sourceFork
+      })
+      assert.deepStrictEqual(yield* sourceAbsent, [mira.entityId])
+      yield* api.DeleteMessage({ slotId: version.slotId, forkId: sourceFork })
+      assert.deepStrictEqual(yield* sourceAbsent, [])
+      assert.deepStrictEqual(yield* peerAbsent, [mira.entityId])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
