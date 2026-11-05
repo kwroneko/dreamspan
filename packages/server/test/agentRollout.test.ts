@@ -423,4 +423,66 @@ describe("agent rollouts", () => {
       assert.include(messages.at(-1)!.content, agentInstructions(["look_up"], "both"))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
+
+  it.live("one message a turn: a second send_message is refused and the first is the reply", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const twice = [
+        {
+          id: "cmpl-t",
+          object: "chat.completion.chunk",
+          model: "served-model",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_a",
+                    type: "function",
+                    function: { name: "send_message", arguments: '{"message":"First."}' }
+                  },
+                  {
+                    index: 1,
+                    id: "call_b",
+                    type: "function",
+                    function: { name: "send_message", arguments: '{"message":"Second."}' }
+                  }
+                ]
+              },
+              finish_reason: null
+            }
+          ]
+        },
+        {
+          id: "cmpl-t",
+          object: "chat.completion.chunk",
+          model: "served-model",
+          choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
+        }
+      ]
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider((_request, res) => sse(res, twice))),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+      })
+      assert.strictEqual(version.content, "First.")
+      assert.strictEqual(mock.requests().filter((r) => r.path === "/v1/chat/completions").length, 1)
+      const results = read(config.dataDir, version.id).transcript!.filter((m) => m.role === "toolResult")
+      assert.deepStrictEqual(
+        results.map((m) => [m.toolCallId, m.isError]),
+        [
+          ["call_a", false],
+          ["call_b", true]
+        ]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 })
