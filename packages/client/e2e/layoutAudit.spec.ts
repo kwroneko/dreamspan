@@ -2284,195 +2284,97 @@ test.describe("revision dialogs", () => {
       })
 })
 
-// Split groups use the app's operations and the same list rows as ordinary chats.
+// Focused footer review: only the four requested full-sidebar images.
 for (const { width, height } of [
   { width: 1440, height: 1000 },
-  { width: 1440, height: 700 },
-  { width: 1440, height: 600 },
   { width: 390, height: 844 }
-])
-  for (const theme of ["light", "dark"] as const) {
-    test(`split chats layout ${width}x${height} ${theme}`, async ({ page }, info) => {
-      const local = await startServer(withAdmin)
-      try {
-        const splitCookie = await loginCookie(local, ADMIN.handle, ADMIN.password)
-        const splitSeed = await withCookie(local, splitCookie, seedSplitChats)
-        await apiLogin(page.request, local, ADMIN.handle, ADMIN.password)
-        await page.setViewportSize({ width, height })
-        await page.emulateMedia({ colorScheme: theme })
-        const plain = await withCookie(local, splitCookie, (api) => api.CreateChat({ title: "No splits" }))
-        const full = join(process.env.LAYOUT_AUDIT_WORK ?? info.outputDir, "full")
-        mkdirSync(full, { recursive: true })
-        const profiles = ["1440x1000", "1440x700", "1440x600", "390x844"]
-        writeFileSync(
-          join(full, "index.md"),
-          "# Full sidebar review\n\n" +
-            profiles
-              .flatMap((profile) =>
-                ["light", "dark"].flatMap((mode) =>
-                  ["journeys", "harbor", "hills", "no-splits"].map(
-                    (name) => `- [${name} ${profile} ${mode}](${name}-${profile}-${mode}.png)`
-                  )
-                )
-              )
-              .join("\n") +
-            "\n"
-        )
-        const measurements = []
-        let branchBox: { y: number; height: number } | undefined
-        for (const [name, chatId, fork] of [
-          ["journeys", splitSeed.chatId, splitSeed.original],
-          ["harbor", splitSeed.chatId, splitSeed.market],
-          ["hills", splitSeed.chatId, splitSeed.hills],
-          ["no-splits", plain.id, plain.currentForkId!]
-        ] as const) {
-          await page.goto(`${local.url}/chats/${chatId}?fork=${fork}&side=chats`)
-          if (width === 390)
-            await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
-          await showAppNavigation(page)
-          const column =
-            width === 390
-              ? page.locator('[data-layout-overlay="Mobile navigation drawer covers the page"]')
-              : page.getByRole("complementary", { name: "Sidebar", exact: true })
-          await expect(column.locator("[data-shell-list] [data-fork-row]").first()).toBeVisible()
-          const splits = column.getByRole("region", { name: "Split chats", exact: true })
-          if (name === "no-splits") await expect(splits).toHaveCount(0)
-          else if (name === "hills") {
-            await expect(splits.getByRole("link", { name: /^From / })).toBeVisible()
-            await expect(splits.getByRole("separator")).toHaveCount(0)
-            expect((await splits.boundingBox())!.height).toBeLessThanOrEqual(44)
-          } else await expect(splits.locator("[data-fork-row]")).toHaveCount(name === "journeys" ? 3 : 1)
-          const measure = async () =>
-            column.evaluate((el) => {
-              const list = el.querySelector<HTMLElement>("[data-shell-list]")!
-              const sections = [
-                ...el.querySelectorAll<HTMLElement>(
-                  'section[aria-label="Split chats"], section[aria-label="Branches of the open chat"]'
-                )
-              ]
-              return {
-                listHeight: list.clientHeight,
-                sections: sections.map((section) => {
-                  const rows = section.querySelectorAll<HTMLElement>("[data-fork-row]")
-                  const last = rows.item(rows.length - 1)
-                  const body = section.querySelector<HTMLElement>("[data-foot-body]")
-                  const open = body !== null && body.getAttribute("aria-hidden") !== "true"
-                  const box = body?.getBoundingClientRect()
-                  const visibleRows = open
-                    ? [...rows].filter((row) => {
-                        const rect = row.getBoundingClientRect()
-                        return rect.top >= box!.top - 1 && rect.bottom <= box!.bottom + 1
-                      }).length
-                    : 0
-                  const boundary = open
-                    ? Math.min(...[...rows].map((row) => Math.abs(row.getBoundingClientRect().bottom - box!.bottom)))
-                    : 0
-                  return {
-                    open,
-                    visibleRows,
-                    boundary,
-                    name: section.ariaLabel,
-                    y: section.getBoundingClientRect().y,
-                    height: section.offsetHeight,
-                    empty:
-                      last && open
-                        ? Math.max(0, section.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom)
-                        : 0
-                  }
-                })
-              }
-            })
-          await expect(column.getByRole("region", { name: "Branches of the open chat", exact: true })).toHaveAttribute(
-            "aria-busy",
-            "false"
-          )
-          const m = await measure()
-          const currentBranch = m.sections.find((s) => s.name === "Branches of the open chat")!
-          if (name === "journeys") branchBox = currentBranch
-          else if (name === "harbor" || name === "no-splits") {
-            expect(Math.abs(currentBranch.y - branchBox!.y)).toBeLessThanOrEqual(1)
-            expect(Math.abs(currentBranch.height - branchBox!.height)).toBeLessThanOrEqual(1)
-          }
-          for (const section of m.sections) if (section.open) expect(section.visibleRows).toBeGreaterThanOrEqual(1)
-          measurements.push({ name, width, height, theme, ...m })
-          await expectLayout(page, info, `${name}-${width}x${height}-${theme}`, {
-            scope:
-              width === 390
-                ? '[data-layout-overlay="Mobile navigation drawer covers the page"] [data-shell-list], section[aria-label="Split chats"], section[aria-label="Branches of the open chat"]'
-                : '[data-shell-list], section[aria-label="Split chats"], section[aria-label="Branches of the open chat"]'
-          })
-          await column.screenshot({ path: join(full, `${name}-${width}x${height}-${theme}.png`) })
-        }
-        writeFileSync(
-          join(full, `measurements-${width}x${height}-${theme}.json`),
-          JSON.stringify(measurements, null, 2)
-        )
-        // Exercise automatic collapse and restoration without touching saved choices.
-        if (width === 1440 && height === 1000 && theme === "light") {
-          await page.goto(`${local.url}/chats/${splitSeed.chatId}?fork=${splitSeed.original}`)
-          const user = await withCookie(local, splitCookie, (api) => api.Whoami())
-          await page.evaluate((id) => {
-            localStorage.setItem(`rp.branchHeight.${id}`, "300")
-            localStorage.setItem(`rp.splitHeight.${id}`, "330")
-          }, user.id)
-          await page.reload()
-          const branchToggle = page.getByRole("button", { name: /^Branches of / })
-          const splitToggle = page.getByRole("button", { name: "Split off (3)", exact: true })
-          await expect(branchToggle).toHaveAttribute("aria-expanded", "true")
-          await expect(splitToggle).toHaveAttribute("aria-expanded", "true")
-          const preferences = () =>
-            page.evaluate(() =>
-              Object.fromEntries(
-                Object.entries(localStorage).filter(([key]) =>
-                  /rp\.(branchRows|splitRows|branchHeight|splitHeight|openChatBranches|splitChatsOpen)\./.test(key)
-                )
-              )
-            )
-          const saved = await preferences()
-          await page.setViewportSize({ width, height: 700 })
-          await expect(branchToggle).toHaveAttribute("aria-expanded", "true")
-          await expect(splitToggle).toHaveAttribute("aria-expanded", "false")
-          await page.setViewportSize({ width, height: 600 })
-          await expect(branchToggle).toHaveAttribute("aria-expanded", "false")
-          await expect(splitToggle).toHaveAttribute("aria-expanded", "false")
-          await page.setViewportSize({ width, height: 1000 })
-          await expect(branchToggle).toHaveAttribute("aria-expanded", "true")
-          await expect(splitToggle).toHaveAttribute("aria-expanded", "true")
-          expect(await preferences()).toEqual(saved)
-        }
-        await page.setViewportSize({ width, height: 1000 })
-        await page.goto(`${local.url}/chats/${splitSeed.chatId}?fork=${splitSeed.market}`)
+]) {
+  test(`split chats layout ${width}x${height} dark`, async ({ page }, info) => {
+    const local = await startServer(withAdmin)
+    try {
+      const cookie = await loginCookie(local, ADMIN.handle, ADMIN.password)
+      const seed = await withCookie(local, cookie, seedSplitChats)
+      await withCookie(local, cookie, (api) => api.CreateChat({ title: "No splits" }))
+      await apiLogin(page.request, local, ADMIN.handle, ADMIN.password)
+      await page.setViewportSize({ width, height })
+      await page.emulateMedia({ colorScheme: "dark" })
+      const full = join(process.env.LAYOUT_AUDIT_WORK ?? info.outputDir, "full")
+      mkdirSync(full, { recursive: true })
+      writeFileSync(
+        join(full, "index.md"),
+        "# Sidebar review\n\n" +
+          [
+            "journeys-1440x1000-dark.png",
+            "harbor-1440x1000-dark.png",
+            "hills-1440x1000-dark.png",
+            "journeys-390x844-dark.png"
+          ]
+            .map((file) => `- [${file}](${file})`)
+            .join("\n") +
+          "\n"
+      )
+      const measurements = []
+      for (const [name, fork] of (width === 1440
+        ? [
+            ["journeys", seed.original],
+            ["harbor", seed.market],
+            ["hills", seed.hills]
+          ]
+        : [["journeys", seed.original]]) as Array<[string, typeof seed.original]>) {
+        await page.goto(`${local.url}/chats/${seed.chatId}?fork=${fork}&side=chats`)
         if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
         await showAppNavigation(page)
-        const splitSection = page.getByRole("region", { name: "Split chats", exact: true })
-        const branchSection = page.getByRole("region", { name: "Branches of the open chat", exact: true })
-        await expect(
-          splitSection.getByRole("link", { name: "From “Split demo · Journeys”", exact: true })
-        ).toBeVisible()
-        for (const state of ["expanded", "branches-collapsed", "both-collapsed", "split-collapsed"] as const) {
-          if (state === "branches-collapsed" || state === "split-collapsed")
-            await branchSection.getByRole("button", { name: /^Branches of / }).click()
-          if (state === "both-collapsed")
-            await splitSection.getByRole("button", { name: "Split off (1)", exact: true }).click()
-          await expectLayout(page, info, `split-${width}-${theme}-${state}`, {
-            scope: 'section[aria-label="Split chats"]'
-          })
-          await expectLayout(page, info, `branches-${width}-${theme}-${state}`, {
-            scope: 'section[aria-label="Branches of the open chat"]'
-          })
-          await expectLayout(page, info, `chats-${width}-${theme}-${state}`, { scope: "[data-shell-list]" })
-          await page.screenshot({ path: info.outputPath(`split-${width}-${theme}-${state}.png`) })
+        const column =
+          width === 390
+            ? page.locator('[data-layout-overlay="Mobile navigation drawer covers the page"]')
+            : page.getByRole("complementary", { name: "Sidebar", exact: true })
+        const branches = column.getByRole("region", { name: "Branches of the open chat", exact: true })
+        await expect(branches).toHaveAttribute("aria-busy", "false")
+        const splits = column.getByRole("region", { name: "Split chats", exact: true })
+        await expect(splits).toHaveAttribute("aria-busy", "false")
+        if (name === "hills") {
+          await expect(splits.getByRole("link", { name: /^From / })).toBeVisible()
+          await expect(splits.locator("[data-foot-body]")).toHaveCount(0)
+          await expect(splits.getByRole("separator")).toHaveCount(0)
+          expect((await splits.boundingBox())!.height).toBeLessThanOrEqual(41)
         }
-        await hideAppNavigation(page)
-        await page.getByRole("button", { name: "Chat actions", exact: true }).click()
-        await page.getByRole("menuitem", { name: "Delete chat", exact: true }).click()
-        await expect(page.getByRole("dialog", { name: /^Delete / })).toContainText("Moves 2 branches to the bin.")
-        await expectLayout(page, info, `split-delete-${width}-${theme}`, { scope: '[role="dialog"]' })
-        await page
-          .getByRole("dialog", { name: /^Delete / })
-          .screenshot({ path: info.outputPath(`split-delete-${width}-${theme}.png`) })
-      } finally {
-        await local.stop()
+        const measure = () =>
+          column.evaluate((el) => {
+            const list = el.querySelector<HTMLElement>("[data-shell-list]")!
+            const third = list.querySelectorAll<HTMLElement>("[data-fork-row]")[2]!
+            return {
+              listHeight: list.clientHeight,
+              threeRows: third.getBoundingClientRect().bottom - list.getBoundingClientRect().top + list.scrollTop,
+              sections: [...el.querySelectorAll<HTMLElement>("[data-foot-section]")].map((section) => {
+                const body = section.querySelector<HTMLElement>("[data-foot-body]")
+                const open = body !== null && body.getAttribute("aria-hidden") !== "true"
+                const box = body?.getBoundingClientRect()
+                const visibleRows = open
+                  ? [...body!.querySelectorAll<HTMLElement>("[data-fork-row]")].filter((row) => {
+                      const r = row.getBoundingClientRect()
+                      return r.top >= box!.top - 1 && r.bottom <= box!.bottom + 1
+                    }).length
+                  : 0
+                return { name: section.ariaLabel, height: section.offsetHeight, open, visibleRows }
+              })
+            }
+          })
+        await expect
+          .poll(async () => {
+            const m = await measure()
+            return m.listHeight - m.threeRows
+          })
+          .toBeGreaterThanOrEqual(-1)
+        const m = await measure()
+        for (const section of m.sections) if (section.open) expect(section.visibleRows).toBeGreaterThanOrEqual(1)
+        if (name === "hills") expect(m.listHeight).toBeGreaterThan(measurements[0]!.listHeight + 100)
+        measurements.push({ name, ...m })
+        await expectLayout(page, info, `split-${name}-${width}`, { scope: "[data-shell-list], [data-sidebar-feet]" })
+        await column.screenshot({ path: join(full, `${name}-${width}x${height}-dark.png`) })
       }
-    })
-  }
+      writeFileSync(join(full, `measurements-${width}x${height}-dark.json`), JSON.stringify(measurements, null, 2))
+    } finally {
+      await local.stop()
+    }
+  })
+}

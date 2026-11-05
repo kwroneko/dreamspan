@@ -67,6 +67,7 @@ export function SplitChatSection() {
       aria-busy={!ready}
       aria-label="Split chats"
       data-foot-section="split"
+      data-foot-list={rows.length > 0}
       data-foot-wanted={expanded && rows.length > 0}
       style={open ? { height } : undefined}
       className={`relative flex min-h-0 shrink-0 flex-col border-t border-border pt-2 ${open ? "gap-1" : ""}`}

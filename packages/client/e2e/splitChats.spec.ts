@@ -13,7 +13,7 @@ test.beforeAll(async () => {
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
-    test(`split chats navigate between groups at ${width} ${theme}`, async ({ page }, info) => {
+    test(`split chats navigate between groups at ${width} ${theme}`, async ({ page }) => {
       // This navigation scenario needs expanded foot lists beside its global pin;
       // short-column automatic collapse is covered by the layout audit.
       await page.setViewportSize({ width, height: 1200 })
@@ -40,7 +40,6 @@ for (const width of [1440, 390])
       await expect(selected).toHaveAttribute("aria-current", "page")
       await expect(selected).toBeInViewport({ ratio: 1 })
       // A shorter split list retains the same reserved height.
-      await page.screenshot({ path: info.outputPath("both-parent-and-child.png") })
       await parent.click()
       await showAppNavigation(page)
       await expect(splits.getByRole("button", { name: "Split off (3)", exact: true })).toBeVisible()
@@ -125,7 +124,7 @@ for (const width of [1440, 390])
   }
 
 for (const width of [1440, 390]) {
-  test(`switching top-level chats keeps branch placement at ${width}`, async ({ page }) => {
+  test(`header-only and absent splits give space to Chats at ${width}`, async ({ page }) => {
     await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreateChat({ title: "No split sizing" }))
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -134,19 +133,43 @@ for (const width of [1440, 390]) {
     await showAppNavigation(page)
     const branches = page.getByRole("region", { name: "Branches of the open chat", exact: true })
     await expect(branches).toHaveAttribute("aria-busy", "false")
-    const initial = (await branches.boundingBox())!
-    for (const title of ["Split demo · Harbor", "No split sizing", "Split demo · Journeys"]) {
+    const listHeight = () =>
+      page
+        .locator("[data-shell-list]")
+        .filter({ visible: true })
+        .evaluate((el) => el.clientHeight)
+    for (const title of ["Split demo · Harbor", "Split demo · Hills", "No split sizing", "Split demo · Journeys"]) {
       await page
         .locator("[data-shell-list]")
+        .filter({ visible: true })
         .getByRole("button", { name: `Open chat ${title}`, exact: true })
         .first()
         .click()
       await showAppNavigation(page)
       await expect(branches.getByRole("button", { name: new RegExp(`^Branches of ${title}`) })).toBeVisible()
       await expect(branches).toHaveAttribute("aria-busy", "false")
-      const box = (await branches.boundingBox())!
-      expect(Math.abs(box.y - initial.y)).toBeLessThanOrEqual(1)
-      expect(Math.abs(box.height - initial.height)).toBeLessThanOrEqual(1)
+      const threeRows = await page
+        .locator("[data-shell-list]")
+        .filter({ visible: true })
+        .evaluate((el) => {
+          const third = el.querySelectorAll<HTMLElement>("[data-fork-row]")[2]!
+          return third.getBoundingClientRect().bottom - el.getBoundingClientRect().top + el.scrollTop
+        })
+      // A short phone with Pinned-chat controls can be too small even after
+      // both lists collapse. No expanded footer may take space in that case.
+      if ((await listHeight()) < threeRows - 1) {
+        const browser = page.locator("[data-shell-list]").filter({ visible: true }).locator("..")
+        await expect(browser.locator('[data-foot-body][aria-hidden="false"]')).toHaveCount(0)
+      }
+      const unused = await page
+        .locator("[data-shell-list]")
+        .filter({ visible: true })
+        .evaluate((el) => {
+          const footer = el.parentElement!.querySelector<HTMLElement>("[data-sidebar-feet]")!
+          const gap = parseFloat(getComputedStyle(el.parentElement!).rowGap)
+          return footer.getBoundingClientRect().top - el.getBoundingClientRect().bottom - gap
+        })
+      expect(Math.abs(unused)).toBeLessThanOrEqual(1)
     }
   })
 }

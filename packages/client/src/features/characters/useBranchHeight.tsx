@@ -1,6 +1,6 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { useSession } from "../../session.ts"
-import { FOOT_DEFAULT, FOOT_MIN, sidebarFootLayout, type FootKind } from "./sidebarFootLayout.ts"
+import { FOOT_DEFAULT, FOOT_MIN, sidebarFootLayout, type FootKind, type FootPresence } from "./sidebarFootLayout.ts"
 
 const read = (key: string) => {
   try {
@@ -28,11 +28,12 @@ type State = ReturnType<typeof sidebarFootLayout> & {
 }
 const FootContext = createContext<State | null>(null)
 
-/** Both slots remain reserved even when the current chat has no split list. */
-export function SidebarFeet({ children, active }: { children: ReactNode; active: boolean }) {
+/** Only actual footer sections take space; Chats flexes into everything left. */
+export function SidebarFeet({ children }: { children: ReactNode }) {
   const userId = useSession().user.id
   const ref = useRef<HTMLDivElement>(null)
   const [available, setAvailable] = useState(0)
+  const [presence, setPresence] = useState<FootPresence>({ branch: "absent", split: "absent" })
   const [preferred, setPreferred] = useState(
     () =>
       Object.fromEntries(
@@ -52,15 +53,36 @@ export function SidebarFeet({ children, active }: { children: ReactNode; active:
     const measure = () => {
       const list = parent.querySelector<HTMLElement>("[data-shell-list]")
       const controls = list ? list.getBoundingClientRect().top - parent.getBoundingClientRect().top : 136
-      // Keep a small usable Chats viewport. Its contents never enter this calculation.
-      setAvailable(Math.max(0, parent.clientHeight - controls - 8 - 48))
+      const rows = list ? [...list.querySelectorAll<HTMLElement>("[data-fork-row]")].slice(0, 3) : []
+      const last = rows[2]
+      const threeRows =
+        list && last ? last.getBoundingClientRect().bottom - list.getBoundingClientRect().top + list.scrollTop : 322
+      setAvailable(Math.max(0, parent.clientHeight - controls - 8 - threeRows))
+      const next = Object.fromEntries(
+        (["branch", "split"] as const).map((kind) => {
+          const section = ref.current?.querySelector<HTMLElement>(`[data-foot-section="${kind}"]`)
+          return [kind, !section ? "absent" : section.dataset.footList === "true" ? "list" : "header"]
+        })
+      ) as FootPresence
+      setPresence((previous) => (previous.branch === next.branch && previous.split === next.split ? previous : next))
     }
     const observer = new ResizeObserver(measure)
     observer.observe(parent)
+    const content = new MutationObserver(measure)
+    content.observe(parent, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["data-foot-list", "data-foot-section"]
+    })
     measure()
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      content.disconnect()
+    }
   }, [])
-  const layout = sidebarFootLayout(available, preferred, expanded)
+  const layout = sidebarFootLayout(available, preferred, expanded, presence)
   const change = (kind: FootKind, value: number | null) => {
     const next =
       value === null ? FOOT_DEFAULT[kind] : Math.round(Math.max(FOOT_MIN[kind], Math.min(layout.max[kind], value)))
@@ -74,12 +96,7 @@ export function SidebarFeet({ children, active }: { children: ReactNode; active:
   }
   return (
     <FootContext value={{ ...layout, expanded, change, toggle }}>
-      <div
-        ref={ref}
-        data-sidebar-feet
-        style={active ? { height: layout.total } : undefined}
-        className="flex shrink-0 flex-col gap-2"
-      >
+      <div ref={ref} data-sidebar-feet className="flex shrink-0 flex-col gap-2">
         {children}
       </div>
     </FootContext>

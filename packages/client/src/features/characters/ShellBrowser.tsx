@@ -509,6 +509,7 @@ export function OpenChatBranches() {
       aria-busy={waiting}
       aria-label="Branches of the open chat"
       data-foot-section="branch"
+      data-foot-list="true"
       data-foot-wanted={expanded}
       style={open ? { height } : undefined}
       className={`relative flex min-h-0 shrink-0 flex-col border-t border-border pt-2 ${open ? "gap-1" : ""}`}
@@ -897,7 +898,7 @@ function Browser({ data }: { data: ShellLibrary }) {
           </div>
         )}
       </div>
-      <SidebarFeet active={params.chatId !== undefined && !grid && scope.chat !== selected}>
+      <SidebarFeet>
         <SlotOutlet slot={sidebarFoot} props={{}} />
       </SidebarFeet>
     </div>
