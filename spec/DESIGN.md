@@ -1072,6 +1072,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D]** Sidebar foot sections (splitfix, owner 2026-11-05): “Did this UI go through any kind of review!?” The coordinator's sizing decision is: “each foot section is only as tall as its content, up to its cap”; the default cap is about five rows, with the two sections together never above 40% of the sidebar; Chats keeps at least about three rows. Clamp violating saved sizes on load. A parent-only split section is one header row, without a body or resize handle; split rows use ordinary chat geometry, portraits and the “Last message” line. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §12.
+- **[P]** Implementation (splitfix, built 2026-11-05): keep the registered foot contributions and shared row renderer; use content height with a persisted maximum, divide the available foot budget between the two lists, and reserve three measured chat rows plus the upper controls and header-only sections.
+
 - **[D]** Chat-switch flashes (owner, 2026-11-05): “"first time" for each chat, not for the page. Also that's only for the sidebar. For the chat view itself it seems to flash every time a chat is switched”. Investigate both sidebar and centre in Vite and built clients, including owner-sized synthetic data.
 - **[P]** How (chatflash, built 2026-11-05; obsolete as an implementation proposal, see ARCHITECTURE §12): retain the outgoing chat until the incoming session's first window is ready, and retain branch/split sections until their replacement reads finish; retained controls are inert during the handover. Keep the existing virtualizer landing and restoration logic.
 

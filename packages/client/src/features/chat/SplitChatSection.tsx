@@ -84,10 +84,10 @@ export function SplitChatSection() {
       inert={!ready}
       aria-busy={!ready}
       aria-label="Split chats"
-      style={expanded ? { height: height } : undefined}
+      style={expanded && split.children.length > 0 ? { maxHeight: height } : undefined}
       className="relative flex min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
     >
-      {expanded && (
+      {expanded && split.children.length > 0 && (
         <div className="absolute inset-x-0 top-0">
           <ResizeHandle
             label="Resize split chats"

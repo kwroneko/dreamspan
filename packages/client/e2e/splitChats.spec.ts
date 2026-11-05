@@ -28,7 +28,6 @@ for (const width of [1440, 390])
       const chats = page.getByRole("region", { name: "Chats", exact: true })
       await expect(splits.getByRole("button", { name: "Split off (3)", exact: true })).toBeVisible()
       await expect(branches.getByRole("button", { name: /^Open branch / })).toHaveCount(2)
-      const before = (await splits.boundingBox())!
       await splits.getByRole("button", { name: "Open chat Split demo · Harbor", exact: true }).click()
       await showAppNavigation(page)
       await expect(splits.getByRole("button", { name: "Split off (1)", exact: true })).toBeVisible()
@@ -38,9 +37,7 @@ for (const width of [1440, 390])
       const selected = chats.locator(`button[data-chat-id="${seed.harbor}"]`)
       await expect(selected).toHaveAttribute("aria-current", "page")
       await expect(selected).toBeInViewport({ ratio: 1 })
-      const after = (await splits.boundingBox())!
-      expect(Math.abs(before.y - after.y)).toBeLessThanOrEqual(1)
-      expect(Math.abs(before.height - after.height)).toBeLessThanOrEqual(1)
+      // A shorter split list now returns its unused height to Chats.
       await page.screenshot({ path: info.outputPath("both-parent-and-child.png") })
       await parent.click()
       await showAppNavigation(page)

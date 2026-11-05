@@ -3,7 +3,7 @@ import { requestSplitReveal, useSplitReveal } from "../chat/splitReveal.ts"
 import type { ChatBrowse } from "@rp/shared/chatBrowse.ts"
 import { useChatBrowse } from "./useChatBrowse.ts"
 import { sidebarChatBrowse } from "./ChatBrowseBar.tsx"
-import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
+import { chatName, formatDay } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
@@ -213,7 +213,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
       onClick={(event) => {
         if (!(event.target as HTMLElement).closest("button, input, [data-added-portraits]")) open()
       }}
-      className={`fork-row branch-list-row @container/fork-row relative grid w-full max-w-controls min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${here ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
+      className={`fork-row branch-list-row @container/fork-row relative grid w-full shrink-0 max-w-controls min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${here ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
     >
       {fork.added.length > 0 && (
         <Tooltip label={addedNames}>
@@ -354,7 +354,7 @@ export function ForkRow({
   return (
     <div
       data-fork-row
-      className={`fork-row @container/fork-row relative flex w-full max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
+      className={`fork-row @container/fork-row relative flex w-full shrink-0 max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <Tooltip
         label={`${title}. ${
@@ -433,8 +433,7 @@ export function ForkRow({
               {fork.preview || "No messages yet"}
             </span>
             <span data-row-when className="mt-auto text-xs text-muted">
-              {perFork ? "Last message " : ""}
-              {perFork ? formatMoment(last) : formatWhen(last)}
+              Last message {formatMoment(last)}
             </span>
           </span>
         </button>
@@ -512,7 +511,7 @@ export function OpenChatBranches() {
     userId,
     visible,
     "branch",
-    !!displayedSplit && (displayedSplit.parent !== null || displayedSplit.children.length > 0)
+    !!displayedSplit && displayedSplit.children.length > 0
   )
   if (!visible) return null
   const toggle = () => {
@@ -530,7 +529,7 @@ export function OpenChatBranches() {
       inert={waiting}
       aria-busy={waiting}
       aria-label="Branches of the open chat"
-      style={expanded ? { height } : undefined}
+      style={expanded ? { maxHeight: height } : undefined}
       className="relative flex min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
     >
       {expanded && (
@@ -549,7 +548,7 @@ export function OpenChatBranches() {
         </div>
       )}
       {/* The same 8 px gutters as the list above (layoutlint), so these rows line up with its rows. */}
-      <div className="flex max-w-controls min-w-0 items-center gap-1 px-2">
+      <div className="flex max-w-controls min-w-0 shrink-0 items-center gap-1 px-2">
         <Tooltip
           label={expanded ? "Click to hide the open chat's branches." : "Click to show the open chat's branches here."}
         >

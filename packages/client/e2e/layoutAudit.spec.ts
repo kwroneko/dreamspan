@@ -2285,16 +2285,107 @@ test.describe("revision dialogs", () => {
 })
 
 // Split groups use the app's operations and the same list rows as ordinary chats.
-for (const width of [1440, 390])
+for (const { width, height } of [
+  { width: 1440, height: 1000 },
+  { width: 1440, height: 700 },
+  { width: 390, height: 844 }
+])
   for (const theme of ["light", "dark"] as const) {
-    test(`split chats layout ${width} ${theme}`, async ({ page }, info) => {
+    test(`split chats layout ${width}x${height} ${theme}`, async ({ page }, info) => {
       const local = await startServer(withAdmin)
       try {
         const splitCookie = await loginCookie(local, ADMIN.handle, ADMIN.password)
         const splitSeed = await withCookie(local, splitCookie, seedSplitChats)
         await apiLogin(page.request, local, ADMIN.handle, ADMIN.password)
-        await page.setViewportSize({ width, height: 900 })
+        await page.setViewportSize({ width, height })
         await page.emulateMedia({ colorScheme: theme })
+        const plain = await withCookie(local, splitCookie, (api) => api.CreateChat({ title: "No splits" }))
+        const full = join(process.env.LAYOUT_AUDIT_WORK ?? info.outputDir, "full")
+        mkdirSync(full, { recursive: true })
+        const profiles = ["1440x1000", "1440x700", "390x844"]
+        writeFileSync(
+          join(full, "index.md"),
+          "# Full sidebar review\n\n" +
+            profiles
+              .flatMap((profile) =>
+                ["light", "dark"].flatMap((mode) =>
+                  ["journeys", "harbor", "hills", "no-splits"].map(
+                    (name) => `- [${name} ${profile} ${mode}](${name}-${profile}-${mode}.png)`
+                  )
+                )
+              )
+              .join("\n") +
+            "\n"
+        )
+        const measurements = []
+        for (const [name, chatId, fork] of [
+          ["journeys", splitSeed.chatId, splitSeed.original],
+          ["harbor", splitSeed.chatId, splitSeed.market],
+          ["hills", splitSeed.chatId, splitSeed.hills],
+          ["no-splits", plain.id, plain.currentForkId!]
+        ] as const) {
+          await page.goto(`${local.url}/chats/${chatId}?fork=${fork}&side=chats`)
+          if (width === 390)
+            await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
+          await showAppNavigation(page)
+          const column =
+            width === 390
+              ? page.locator('[data-layout-overlay="Mobile navigation drawer covers the page"]')
+              : page.getByRole("complementary", { name: "Sidebar", exact: true })
+          await expect(column.locator("[data-shell-list] [data-fork-row]").first()).toBeVisible()
+          const splits = column.getByRole("region", { name: "Split chats", exact: true })
+          if (name === "no-splits") await expect(splits).toHaveCount(0)
+          else if (name === "hills") {
+            await expect(splits.getByRole("link", { name: /^From / })).toBeVisible()
+            await expect(splits.getByRole("separator")).toHaveCount(0)
+            expect((await splits.boundingBox())!.height).toBeLessThanOrEqual(44)
+          } else await expect(splits.locator("[data-fork-row]")).toHaveCount(name === "journeys" ? 3 : 1)
+          const measure = async () =>
+            column.evaluate((el) => {
+              const list = el.querySelector<HTMLElement>("[data-shell-list]")!
+              const first = list.querySelector<HTMLElement>("[data-fork-row]")!
+              const sections = [
+                ...el.querySelectorAll<HTMLElement>(
+                  'section[aria-label="Split chats"], section[aria-label="Branches of the open chat"]'
+                )
+              ]
+              return {
+                listHeight: list.clientHeight,
+                threeRows: 3 * (first.offsetHeight + 4),
+                sections: sections.map((section) => {
+                  const rows = section.querySelectorAll<HTMLElement>("[data-fork-row]")
+                  const last = rows.item(rows.length - 1)
+                  return {
+                    name: section.ariaLabel,
+                    height: section.offsetHeight,
+                    empty: last
+                      ? Math.max(0, section.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom)
+                      : 0
+                  }
+                })
+              }
+            })
+          await expect
+            .poll(async () => {
+              const m = await measure()
+              return m.listHeight - m.threeRows
+            })
+            .toBeGreaterThanOrEqual(-1)
+          const m = await measure()
+          for (const section of m.sections) expect(section.empty).toBeLessThanOrEqual(16)
+          measurements.push({ name, width, height, theme, ...m })
+          await expectLayout(page, info, `${name}-${width}x${height}-${theme}`, {
+            scope:
+              width === 390
+                ? '[data-layout-overlay="Mobile navigation drawer covers the page"] [data-shell-list], section[aria-label="Split chats"], section[aria-label="Branches of the open chat"]'
+                : '[data-shell-list], section[aria-label="Split chats"], section[aria-label="Branches of the open chat"]'
+          })
+          await column.screenshot({ path: join(full, `${name}-${width}x${height}-${theme}.png`) })
+        }
+        writeFileSync(
+          join(full, `measurements-${width}x${height}-${theme}.json`),
+          JSON.stringify(measurements, null, 2)
+        )
         await page.goto(`${local.url}/chats/${splitSeed.chatId}?fork=${splitSeed.market}`)
         if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
         await showAppNavigation(page)

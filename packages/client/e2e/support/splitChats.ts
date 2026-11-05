@@ -6,9 +6,18 @@ import type { Client } from "./rpc.ts"
 export const seedSplitChats = (api: Client) =>
   Effect.gen(function* () {
     const chat = yield* api.CreateChat({ title: "Split demo · Journeys" })
+    const card = yield* api.CreateCard({ label: "Synthetic traveler", name: "Traveler" })
+    yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
     const send = (forkId: ForkId, parentSlotId: SlotId | null, content: string) =>
       Effect.gen(function* () {
-        const sent = yield* api.SendMessage({ chatId: chat.id, forkId, parentSlotId, branch: false, content })
+        const sent = yield* api.SendMessage({
+          chatId: chat.id,
+          forkId,
+          parentSlotId,
+          branch: false,
+          content,
+          speakerEntityId: card.entityId
+        })
         if (sent._tag !== "Posted") throw new Error("Synthetic chat unexpectedly queued")
         return sent.entry.slotId
       })

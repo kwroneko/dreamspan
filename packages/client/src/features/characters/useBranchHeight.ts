@@ -10,6 +10,7 @@ export function useBranchHeight(
   const key = `rp.${section}Height.${userId}`
   const ref = useRef<HTMLElement>(null)
   const [available, setAvailable] = useState(0)
+  const [budget, setBudget] = useState(0)
   const [saved, setSaved] = useState<number | null>(() => {
     try {
       const value = Number(localStorage.getItem(key))
@@ -21,16 +22,36 @@ export function useBranchHeight(
   useLayoutEffect(() => {
     const parent = ref.current?.parentElement
     if (!parent) return
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setAvailable(entry.contentRect.height)
-    })
+    const measure = () => {
+      const list = parent.querySelector<HTMLElement>("[data-shell-list]")
+      const row = list?.querySelector<HTMLElement>("[data-fork-row]")
+      const total = parent.clientHeight
+      // Reserve three ordinary chat rows (including their gaps), plus the controls
+      // above the list. Foot headers remain part of the capped section heights.
+      const controls = list ? list.getBoundingClientRect().top - parent.getBoundingClientRect().top : 0
+      const sections = [...parent.querySelectorAll<HTMLElement>(":scope > section")]
+      const headers = sections
+        .filter((el) => !el.querySelector("[data-fork-row]"))
+        .reduce((sum, el) => sum + el.offsetHeight, 0)
+      const gaps = sections.length * (parseFloat(getComputedStyle(parent).rowGap) || 0)
+      setAvailable(total)
+      setBudget(Math.max(0, total - controls - headers - gaps - 3 * ((row?.offsetHeight ?? 100) + 4)))
+    }
+    const observer = new ResizeObserver(measure)
     observer.observe(parent)
-    return () => observer.disconnect()
+    const content = new MutationObserver(measure)
+    content.observe(parent, { childList: true, subtree: true })
+    measure()
+    return () => {
+      observer.disconnect()
+      content.disconnect()
+    }
   }, [active])
-  const min = Math.min(112, available * 0.4)
-  // Leave room for the tabs, scope and search controls and at least one full chat row.
-  const max = Math.max(min, shared ? available * 0.36 : available - 224)
-  const height = Math.max(min, Math.min(max, saved ?? available * (shared ? 0.26 : 0.45)))
+  // Both foot sections together use at most 40%, leaving the list and its controls
+  // the remaining 60%. Stored heights are caps, never reserved empty space.
+  const max = Math.max(0, Math.min(available * (shared ? 0.2 : 0.4), budget / (shared ? 2 : 1)))
+  const min = Math.min(80, max)
+  const height = Math.max(min, Math.min(max, saved ?? 544))
   const save = (value: number | null) => {
     setSaved(value)
     try {
