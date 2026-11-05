@@ -1,4 +1,3 @@
-import { Tooltip } from "../../ui/Tooltip.tsx"
 import { ForkNotesDialog } from "./ForkNotesDialog.tsx"
 import { Link } from "@tanstack/react-router"
 import { lazy, Suspense } from "react"
@@ -136,13 +135,11 @@ export const registerMessageActions = () => [
       icon: "layers",
       hint: "See everything the model was sent for this version, and where each part came from.",
       link: (
-        <Tooltip label="Opens the context sent for this reply.">
-          <Link
-            to="/chats/$chatId/context/$versionId"
-            params={{ chatId: session.id, versionId: entry.version.id }}
-            search={viewedFork(session)}
-          />
-        </Tooltip>
+        <Link
+          to="/chats/$chatId/context/$versionId"
+          params={{ chatId: session.id, versionId: entry.version.id }}
+          search={viewedFork(session)}
+        />
       )
     }))
   }),

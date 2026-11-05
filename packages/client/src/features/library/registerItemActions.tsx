@@ -62,11 +62,7 @@ function UpdateItem({ entry, description }: LibraryItemProps) {
     <MenuLinkItem
       icon="regenerate"
       description={description}
-      render={
-        <Tooltip label="Opens this chat.">
-          <Link to="/import" search={{ into: entry.id }} />
-        </Tooltip>
-      }
+      render={<Link to="/import" search={{ into: entry.id }} />}
     >
       Update from file…
     </MenuLinkItem>

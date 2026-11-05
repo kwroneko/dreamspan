@@ -3,7 +3,7 @@
 // message's actions (after that message): pick the chat or branch to bring in, see what comes in
 // and how the model will read it, and merge. Nothing is sent to a model here; the preview is
 // computed by the server from what's stored.
-import type { Chat, ChatId, Fork, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, Fork, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import {
   type ChatMergePreview,
   fillMergeTemplate,
@@ -29,6 +29,7 @@ import { branchLabel } from "./forks.ts"
 import type { MessageActionProps } from "./messageActions.tsx"
 import { positionOf } from "./position.ts"
 import type { ChatSession } from "./session.ts"
+import { useSplitChats } from "./splitChats.ts"
 
 const NEWEST = "newest"
 const AT_JOIN = "join"
@@ -47,6 +48,19 @@ const relation = (preview: ChatMergePreview) =>
       ? `Shares #1–${preview.shared} · merges ${plural(preview.messages, "message")} from #${preview.from}`
       : `Merges ${plural(preview.messages, "message")}`
 
+/**
+ * A chat to merge, as the chat list shows it: a chat made from a branch ("Make this branch its
+ * own chat") is listed under its own name, apart from the chat it came from.
+ */
+export interface MergeSource {
+  /** The chat that stores its messages. */
+  readonly chat: ChatId
+  /** The chat as listed: `chat`, or the branch it was made from for a split-off chat. */
+  readonly listed: ChatId
+  readonly title: string
+  readonly fork: ForkId
+}
+
 function SourcePicker({
   chatId,
   forkId,
@@ -55,14 +69,15 @@ function SourcePicker({
 }: {
   chatId: ChatId
   forkId: ForkId | null
-  chosen: { chat: Chat; fork: ForkId } | null
-  onChoose: (next: { chat: Chat; fork: ForkId }) => void
+  chosen: MergeSource | null
+  onChoose: (next: MergeSource) => void
 }) {
   const [search, setSearch] = useState("")
-  const [chats, setChats] = useState<ReadonlyArray<Chat> | null>(null)
-  const [listed, setListed] = useState<{ chat: ChatId; forks: ReadonlyArray<Fork> } | null>(null)
+  const [chats, setChats] = useState<ReadonlyArray<MergeSource> | null>(null)
+  const [listed, setListed] = useState<{ fork: ForkId; forks: ReadonlyArray<Fork> } | null>(null)
   const reader = useAction()
   const forksReader = useAction()
+  const thisChat = useSplitChats(chatId, forkId)?.group.id ?? chatId
   useEffect(() => {
     let live = true
     const query = search.trim()
@@ -70,10 +85,24 @@ function SourcePicker({
       () =>
         void reader
           .run((client) =>
-            client("ListChats", { limit: 30, before: null, ...(query === "" ? {} : { search: query.slice(0, 200) }) })
+            client("GetShellForks", {
+              entity: null,
+              chat: null,
+              search: query.slice(0, 200),
+              sort: "recent",
+              sections: [{ id: "chats", limit: 30 }]
+            })
           )
           .then((result) => {
-            if (live && result.ok) setChats(result.value)
+            if (live && result.ok)
+              setChats(
+                (result.value.sections[0]?.rows ?? []).map((row) => ({
+                  chat: row.sourceChatId ?? row.chat.id,
+                  listed: row.chat.id,
+                  title: row.chatName,
+                  fork: row.forkId as ForkId
+                }))
+              )
           }),
       query === "" ? 0 : 250
     )
@@ -84,41 +113,38 @@ function SourcePicker({
     // `reader` is a fresh object each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search])
-  const chosenChat = chosen?.chat.id ?? null
+  /** The branches of `source`'s chat as listed (a split-off chat's own), this branch left out. */
+  const branchesOf = async (source: MergeSource) => {
+    const all = await forksReader.run((client) => client("ListForks", { chatId: source.chat }))
+    const split = await forksReader.run((client) =>
+      client("GetSplitChats", { chatId: source.chat, forkId: source.fork })
+    )
+    if (!all.ok) return null
+    const own = split.ok ? new Set<string>(split.value.forkIds) : null
+    return all.value.filter((f) => (own === null || own.has(f.id)) && f.id !== forkId)
+  }
+  const chosenKey = chosen === null ? null : `${chosen.listed} ${chosen.fork}`
   useEffect(() => {
-    if (chosenChat === null) return
+    if (chosen === null) return
     let live = true
-    void forksReader
-      .run((client) => client("ListForks", { chatId: chosenChat }))
-      .then((result) => {
-        if (live && result.ok)
-          setListed({
-            chat: chosenChat,
-            forks: result.value.filter((f) => !(chosenChat === chatId && f.id === forkId))
-          })
-      })
+    void branchesOf(chosen).then((forks) => {
+      if (live && forks !== null) setListed({ fork: chosen.fork, forks })
+    })
     return () => {
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chosenChat])
-  const forks = listed !== null && listed.chat === chosenChat ? listed.forks : null
-  const pick = (chat: Chat) => {
+  }, [chosenKey])
+  const forks = listed !== null && chosen !== null && listed.fork === chosen.fork ? listed.forks : null
+  const pick = (source: MergeSource) => {
     // This chat's own branch can't be merged into itself: its newest other branch instead.
-    const fork = chat.id === chatId && chat.currentForkId === forkId ? null : chat.currentForkId
-    if (fork) onChoose({ chat, fork })
+    if (source.fork !== forkId) onChoose(source)
     else
-      void forksReader
-        .run((client) => client("ListForks", { chatId: chat.id }))
-        .then((result) => {
-          const other = result.ok
-            ? [...result.value]
-                .filter((f) => f.id !== forkId)
-                .sort((a, b) => (b.endAt ?? b.createdAt) - (a.endAt ?? a.createdAt))[0]
-            : undefined
-          if (other) onChoose({ chat, fork: other.id })
-          else showToast({ title: "This chat has no other branch to merge" })
-        })
+      void branchesOf(source).then((others) => {
+        const other = [...(others ?? [])].sort((a, b) => (b.endAt ?? b.createdAt) - (a.endAt ?? a.createdAt))[0]
+        if (other) onChoose({ ...source, fork: other.id })
+        else showToast({ title: "This chat has no other branch to merge" })
+      })
   }
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -141,16 +167,16 @@ function SourcePicker({
         )}
         {chats?.length === 0 && <li className="p-2 text-sm text-muted">No chats match.</li>}
         {chats?.map((chat) => (
-          <li key={chat.id}>
-            <Tooltip label={chat.id === chatId ? "Merge another branch of this chat." : `Merge “${chat.title}”.`}>
+          <li key={chat.listed}>
+            <Tooltip label={chat.listed === thisChat ? "Merge another branch of this chat." : `Merge “${chat.title}”.`}>
               <button
                 type="button"
-                aria-pressed={chosenChat === chat.id}
+                aria-pressed={chosen?.listed === chat.listed}
                 onClick={() => pick(chat)}
                 className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:font-medium"
               >
                 <span className="min-w-0 truncate">{chat.title || "Untitled chat"}</span>
-                {chat.id === chatId && <span className="shrink-0 text-xs text-muted">This chat</span>}
+                {chat.listed === thisChat && <span className="shrink-0 text-xs text-muted">This chat</span>}
               </button>
             </Tooltip>
           </li>
@@ -160,7 +186,7 @@ function SourcePicker({
         <Field label="Branch">
           <Select
             value={chosen.fork}
-            onValueChange={(fork) => onChoose({ chat: chosen.chat, fork })}
+            onValueChange={(fork) => onChoose({ ...chosen, fork })}
             items={forks.map((fork) => ({ value: fork.id, label: branchLabel(fork) }))}
           />
         </Field>
@@ -183,7 +209,7 @@ export function MergeChatDialog({
   const { cast } = useCast()
   const navigate = useNavigate()
   const [forkId] = useState(() => view.forkId ?? view.chat?.currentForkId ?? null)
-  const [source, setSource] = useState<{ chat: Chat; fork: ForkId } | null>(null)
+  const [source, setSource] = useState<MergeSource | null>(null)
   const [at, setAt] = useState<SlotId | null>(initialAt)
   const [start, setStart] = useState<SlotId | null>(null)
   const [includeLeftOut, setIncludeLeftOut] = useState(false)
@@ -203,7 +229,7 @@ export function MergeChatDialog({
             chatId: session.id,
             forkId,
             at,
-            source: { chatId: source.chat.id, forkId: source.fork },
+            source: { chatId: source.chat, forkId: source.fork },
             ...(start === null ? {} : { start }),
             includeLeftOut
           }
@@ -289,7 +315,7 @@ export function MergeChatDialog({
     onClose()
     void navigate({
       to: "/chats/$chatId",
-      params: { chatId: source.chat.id },
+      params: { chatId: source.chat },
       search: { fork: source.fork, panel: "summaries" }
     })
   }
@@ -346,7 +372,7 @@ export function MergeChatDialog({
           {previewError && <ErrorAlert error={previewError} title="Can't merge this" />}
           {source && !preview && !previewError && (
             <p className="flex items-center gap-2 text-sm text-muted">
-              <Spinner /> Reading “{source.chat.title}”…
+              <Spinner /> Reading “{source.title}”…
             </p>
           )}
           {preview && (
@@ -414,7 +440,7 @@ export function MergeChatDialog({
                       >
                         <span
                           tabIndex={0}
-                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 ${member.added ? "border-accent text-accent" : "border-border text-muted"}`}
+                          className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 ${member.added ? "border-accent text-accent" : "border-border text-muted"}`}
                         >
                           {member.added && <span aria-hidden="true">+</span>}
                           {member.name}

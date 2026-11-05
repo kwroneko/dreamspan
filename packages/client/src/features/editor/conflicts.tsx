@@ -17,6 +17,10 @@ export interface Conflict {
   readonly theirs: unknown
   /** What both started from, when known. */
   readonly base?: unknown
+  /** How a side reads, where JSON wouldn't say it well (a prompt order by names). */
+  readonly show?: (value: unknown) => string
+  /** Whether "Edit it" is offered: an order is picked, not typed. */
+  readonly editable?: boolean
 }
 
 const asEditable = (value: unknown) =>
@@ -49,7 +53,8 @@ export const resolution = (
   return invalid ? null : withValues(merged, values)
 }
 
-const shown = (value: unknown) => (value === undefined ? "(removed)" : asEditable(value))
+const shownAs = (conflict: Conflict, value: unknown) =>
+  value === undefined ? "(removed)" : conflict.show ? conflict.show(value) : asEditable(value)
 
 export function ConflictPicker({
   conflict,
@@ -59,7 +64,8 @@ export function ConflictPicker({
   theirsLabel
 }: {
   conflict: Conflict
-  choice: Choice
+  /** Null until the user picks: a merge's conflicts need an explicit choice. */
+  choice: Choice | null
   onChoice: (choice: Choice) => void
   mineLabel: string
   theirsLabel: string
@@ -74,13 +80,13 @@ export function ConflictPicker({
         <div className="flex min-w-0 flex-col gap-1">
           <span className="text-xs text-muted">{mineLabel}</span>
           <pre className="max-h-48 overflow-auto rounded-md border border-border bg-canvas p-2 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {shown(conflict.mine)}
+            {shownAs(conflict, conflict.mine)}
           </pre>
         </div>
         <div className="flex min-w-0 flex-col gap-1">
           <span className="text-xs text-muted">{theirsLabel}</span>
           <pre className="max-h-48 overflow-auto rounded-md border border-border bg-canvas p-2 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {shown(conflict.theirs)}
+            {shownAs(conflict, conflict.theirs)}
           </pre>
         </div>
       </div>
@@ -99,21 +105,21 @@ export function ConflictPicker({
       )}
       <RadioGroup
         aria-labelledby={legend}
-        value={choice.side}
+        value={(choice?.side ?? "") as Choice["side"]}
         onValueChange={(side) =>
           onChoice(
             side === "edit"
-              ? { side, text: asEditable(choice.side === "theirs" ? conflict.theirs : conflict.mine) }
+              ? { side, text: asEditable(choice?.side === "theirs" ? conflict.theirs : conflict.mine) }
               : { side }
           )
         }
         options={[
           { value: "mine", label: `Keep ${mineLabel.toLowerCase()}` },
           { value: "theirs", label: `Take ${theirsLabel.toLowerCase()}` },
-          { value: "edit", label: "Edit it" }
+          ...(conflict.editable === false ? [] : [{ value: "edit" as const, label: "Edit it" }])
         ]}
       />
-      {choice.side === "edit" && (
+      {choice?.side === "edit" && (
         <Field label={`${conflict.label}, edited`}>
           <Textarea
             rows={6}

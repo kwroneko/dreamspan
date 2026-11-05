@@ -33,7 +33,8 @@ import type {
   RequestMessage,
   Source,
   SummaryLayer,
-  Target
+  Target,
+  AgentAssembly
 } from "./types.ts"
 import { replySectionsOf } from "@rp/shared/replySections.ts"
 import { ASSEMBLER_VERSION, AssemblyFailed, historyLeafOf } from "./types.ts"
@@ -145,6 +146,8 @@ export interface AssemblyRequest {
   /** Where new random draws come from, in [0, 1). */
   readonly random: () => number
   readonly loreFallback?: ContextSnapshot["loreFallback"]
+  /** An agent reply's assembly (spec/AGENTIC.md §6): frozen in the snapshot, so a rebuild matches. */
+  readonly agent?: AgentAssembly
   readonly macros: MacroLookup
   /** The role projections in effect, by id (`roles` stage). */
   readonly projections: ProjectionRegistry
@@ -289,6 +292,8 @@ export interface Assembly {
   renderEndOfRequest?: () => StMessage | undefined
   /** The end-of-request message (DESIGN §2.2), the request's last; absent: none this turn. */
   endOfRequest?: StMessage
+  /** Card-swap: the speaker's card, sent just before the end of the request. */
+  tailCard?: { readonly text: string; readonly piece: number }
   composition?: Composition
   messages?: Array<RequestMessage & { readonly pieces: ReadonlyArray<number>; readonly kind: Stability }>
   /** The names ST folds into the text where a provider has no `name` field. */
@@ -396,6 +401,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       assemblerVersion: ASSEMBLER_VERSION,
       // How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md).
       ...(request.summaryJob ? {} : { replySections: replySectionsOf(preset.doc) }),
+      ...(request.agent ? { agentAssembly: request.agent } : {}),
       inputs: {
         chatId: target.chatId,
         slotId: target.slotId,

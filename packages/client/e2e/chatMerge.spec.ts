@@ -198,3 +198,53 @@ test("the dialog says why a merge can't be made, and Cancel changes nothing", as
   await dialog(page).getByRole("button", { name: "Cancel", exact: true }).click()
   await expect(dialog(page)).toHaveCount(0)
 })
+
+test("a branch made its own chat is listed under its own name, and so is the chat it came from", async ({ page }) => {
+  const seeded = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const home = yield* seedChat(api, "Quay split", "Mira", [
+        "The lantern swings over the quay.",
+        "Mira counts the crates twice.",
+        "A bell rings from the harbor master's office."
+      ])
+      const { fork } = yield* api.CreateFork({ chatId: home.chatId, fromForkId: home.forkId, atSlotId: home.slots[0]! })
+      let parent: SlotId = home.slots[0]!
+      for (const content of ["Fog rolls in over the other quay.", "Nobody rings the bell tonight."]) {
+        const sent: { readonly _tag: string; readonly entry?: { readonly slotId: SlotId } } = yield* api.SendMessage({
+          chatId: home.chatId,
+          forkId: fork.id,
+          parentSlotId: parent,
+          branch: false,
+          content
+        })
+        parent = sent.entry!.slotId
+      }
+      yield* api.SetSplitChat({ forkId: fork.id, split: true, title: { name: "Foggy night", expectedName: null } })
+      return { ...home, split: fork.id as ForkId }
+    })
+  )
+  const merge = async (search: string, title: string, relation: string) => {
+    await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Merge another chat…", exact: true }).click()
+    await dialog(page).getByRole("searchbox", { name: "Chat to merge" }).fill(search)
+    const chats = dialog(page).getByRole("list", { name: "Chats" })
+    await expect(chats.getByRole("button", { name: title, exact: true })).toBeVisible()
+    await chats.getByRole("button", { name: title, exact: true }).click()
+    await expect(dialog(page).getByTestId("merge-relation")).toHaveText(relation)
+    await expect(dialog(page).getByRole("textbox", { name: "Title" })).toHaveValue(title)
+    await dialog(page).getByRole("button", { name: "Cancel", exact: true }).click()
+  }
+  // From the chat it came from: the split-off chat, found by its own name.
+  await open(page, `/chats/${seeded.chatId}?fork=${seeded.forkId}`, 1440, "light")
+  await merge("Foggy", "Foggy night", "Shares #1–1 · merges 2 messages from #2")
+  // From the split-off chat: the chat it came from, by its name, and not as "This chat".
+  await page.goto(`${server().url}/chats/${seeded.chatId}?fork=${seeded.split}`)
+  await expect(page.getByTestId("composer")).toBeVisible()
+  await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Merge another chat…", exact: true }).click()
+  await dialog(page).getByRole("searchbox", { name: "Chat to merge" }).fill("Quay split")
+  const original = dialog(page).getByRole("list", { name: "Chats" }).getByRole("button", { name: "Quay split" })
+  await expect(original).toHaveText("Quay split")
+  await dialog(page).getByRole("button", { name: "Cancel", exact: true }).click()
+  await merge("Quay split", "Quay split", "Shares #1–1 · merges 2 messages from #2")
+})

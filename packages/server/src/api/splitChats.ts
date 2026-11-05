@@ -6,6 +6,7 @@ import { CurrentUser } from "@rp/shared/api.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
+import type { SplitChatTitle } from "@rp/shared/splitChat.ts"
 
 export const makeSplitChatHandlers = Effect.gen(function* () {
   const reader = yield* Reader
@@ -39,7 +40,11 @@ export const makeSplitChatHandlers = Effect.gen(function* () {
       }).pipe(Effect.uninterruptible, internal("DeleteChatGroup")),
     GetSplitChats: (payload: { chatId: ChatId; forkId: ForkId | null }) =>
       Effect.flatMap(userId, (id) => reader.GetSplitChats({ userId: id, ...payload })).pipe(internal("GetSplitChats")),
-    SetSplitChat: (payload: { forkId: ForkId; split: boolean }) =>
-      Effect.flatMap(userId, (id) => writer.SetSplitChat({ userId: id, ...payload })).pipe(internal("SetSplitChat"))
+    SetSplitChat: (payload: { forkId: ForkId; split: boolean; title?: typeof SplitChatTitle.Type }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const chatId = yield* writer.SetSplitChat({ userId: id, ...payload })
+        hub.publish(chatId, { _tag: "Reload" })
+      }).pipe(Effect.uninterruptible, internal("SetSplitChat"))
   }
 })

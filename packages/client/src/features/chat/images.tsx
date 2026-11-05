@@ -652,7 +652,7 @@ function ImageThumbnails({
           const left = controls && !excluded ? leftOutBy(leftOut, controls.entry, index) : null
           const reason = excluded ? "taken out of the context by you" : left ? left.message : null
           const view = (
-            <Tooltip label="Opens this image at full size.">
+            <Tooltip label={reason ? `Not sent to the model: ${reason}` : "Opens this image at full size."}>
               <button
                 type="button"
                 aria-label={`View image ${index + 1}${reason ? ` (not sent to the model: ${reason})` : ""}`}
@@ -674,7 +674,7 @@ function ImageThumbnails({
               className="tile-toggle-surface relative"
               data-image-sent={reason ? "no" : "yes"}
             >
-              {reason ? <Tooltip label={`Not sent to the model: ${reason}`}>{view}</Tooltip> : view}
+              {view}
               {controls && (
                 <ContextToggle
                   index={index}

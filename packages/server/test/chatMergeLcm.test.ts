@@ -2,7 +2,7 @@
 // §5): the next reply's request places the source's section by the chat's layout with the join
 // marker at the join, and a summary request over the join asks for one section per line.
 import { assert } from "@effect/vitest"
-import { type ChatId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type ChatId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { lcmHarness, lcmTest, requestsTo } from "./support/lcmHarness.ts"
@@ -72,22 +72,31 @@ const harness = (server: Parameters<typeof lcmHarness>[0]) =>
           digest: seen.digest
         })
       })
+    const assemble = (
+      row: { slotId: SlotId; version: { id: VersionId } },
+      agent?: { instructions: string; cardsAtTail: boolean }
+    ) =>
+      Effect.map(
+        h.reader.AssembleContext({
+          userId: h.userId,
+          chatId: h.chat.id,
+          forkId,
+          slotId: row.slotId,
+          versionId: row.version.id,
+          now: 1,
+          timeZone: "UTC",
+          frozen: null,
+          ...(agent ? { agent } : {})
+        }),
+        (built) => JSON.parse(built.snapshot) as ContextSnapshot
+      )
     const reply = (parentSlotId: SlotId) =>
+      Effect.flatMap(h.append("Message 9. The reply.", parentSlotId), (row) => assemble(row))
+    const rebuilt = (snapshot: ContextSnapshot) =>
       Effect.gen(function* () {
-        const row = yield* h.append("Message 9. The reply.", parentSlotId)
-        const built = JSON.parse(
-          (yield* h.reader.AssembleContext({
-            userId: h.userId,
-            chatId: h.chat.id,
-            forkId,
-            slotId: row.slotId,
-            versionId: row.version.id,
-            now: 1,
-            timeZone: "UTC",
-            frozen: null
-          })).snapshot
-        ) as ContextSnapshot
-        return built
+        const again = yield* h.reader.RebuildContext({ userId: h.userId, snapshot: JSON.stringify(snapshot) })
+        assert.strictEqual(again._tag, "Rebuilt")
+        return again._tag === "Rebuilt" ? (JSON.parse(again.snapshot) as ContextSnapshot) : snapshot
       })
     const layout = (id: string) =>
       h.writer.AddStateEvent({
@@ -98,7 +107,7 @@ const harness = (server: Parameters<typeof lcmHarness>[0]) =>
         scope: null,
         data: { key: "merge.layout", value: id }
       })
-    return { ...h, forkId, merge, reply, layout }
+    return { ...h, forkId, merge, assemble, reply, rebuilt, layout }
   })
 
 const all = (snapshot: ContextSnapshot) =>
@@ -184,5 +193,39 @@ lcmTest("a summary request over the join asks for one section per line and compl
     const text = all(yield* h.reply(h.rows.at(-1)!.slotId))
     assert.include(text, "SUMMARY(two lines)")
     assert.notInclude(text, "Docks one.")
+  })
+)
+
+lcmTest("an agent reply's context lays the merge out the same way, and a rebuild replays both layouts", (server) =>
+  Effect.gen(function* () {
+    const h = yield* harness(server)
+    const made = yield* h.merge(h.rows[3]!.slotId)
+    const agent = { instructions: "Agent tools go here.", cardsAtTail: false }
+    const row = yield* h.append("Message 9. The reply.", made.slotId)
+    const parallel = yield* h.assemble(row, agent)
+    ascending(all(parallel), [
+      "Meanwhile, in parallel with what follows: Docks",
+      "Docks one.",
+      "Message 3.",
+      "[Here “Docks” joins this chat.]",
+      "Agent tools go here."
+    ])
+    assert.deepStrictEqual((yield* h.rebuilt(parallel)).request, parallel.request)
+    yield* h.layout("join")
+    const plain = yield* h.assemble(row)
+    const atJoin = yield* h.assemble(row, agent)
+    for (const built of [plain, atJoin]) {
+      ascending(all(built), [
+        "Message 5.",
+        "Meanwhile, elsewhere: Docks",
+        "Docks one.",
+        "[Here “Docks” joins this chat.]"
+      ])
+      assert.deepStrictEqual((yield* h.rebuilt(built)).request, built.request)
+    }
+    assert.include(all(atJoin), "Agent tools go here.")
+    // The replay keeps the layout it was built with, though the chat's choice changed since.
+    yield* h.layout("parallel")
+    assert.deepStrictEqual((yield* h.rebuilt(atJoin)).request, atJoin.request)
   })
 )

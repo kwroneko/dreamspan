@@ -153,7 +153,7 @@ describe("per-fork summary validity", () => {
         assert.deepStrictEqual(yield* reached(override("s2", "X", 11, "delete_slot")), ["X"])
         assert.deepStrictEqual(yield* reached(sql`UPDATE fork_overrides SET flag = 1, seq = 12 WHERE id = 'old'`), all)
         assert.deepStrictEqual(yield* reached(sql`DELETE FROM fork_overrides WHERE id = 's1'`), ["main"])
-        // Kinds the summaries don't read move nothing; an insertion reaches the whole chat.
+        // Kinds the summaries don't read move nothing; insertion placement is fork-owned.
         assert.deepStrictEqual(yield* reached(override("h1", "Y", 13, "hide")), [])
         yield* Effect.andThen(
           sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at,
@@ -164,10 +164,12 @@ describe("per-fork summary validity", () => {
         assert.deepStrictEqual(
           yield* reached(sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, flag)
             VALUES ('i1', 'main', 'Y', 14, 'insert', 'i', 'b', 2, 1)`),
-          all
+          ["Y"]
         )
-        // In a chat with insertions, a slot's write reaches every fork.
-        assert.deepStrictEqual(yield* reached(sql`UPDATE slots SET created_at = 7 WHERE id = 'c'`), all)
+        // Structural slots retain precise reachability in a chat with insertions.
+        assert.deepStrictEqual(yield* reached(sql`UPDATE slots SET created_at = 7 WHERE id = 'c'`), ["main"])
+        // Inserted-slot changes still conservatively reach the whole chat.
+        assert.deepStrictEqual(yield* reached(sql`UPDATE slots SET created_at = 8 WHERE id = 'i'`), all)
         yield* sql`DELETE FROM fork_overrides WHERE id = 'i1'`
         // State events: in one fork, chat-wide, or removed (other forks may hold it in snapshots).
         const event = (id: string, fork: string | null, seq: number | null) =>

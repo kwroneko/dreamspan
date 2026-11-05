@@ -50,6 +50,8 @@ export const StateEventData = Schema.Union([
   /** On: one reply per user action, where ST replies with the reply order's whole round (DESIGN §2.3). */
   event("reply.single", Schema.Struct({ on: Schema.Boolean })),
   event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
+  /** The tools an agent reply mode offers, by id, in place of the mode's own list (spec/AGENTIC.md §6). */
+  event("agent.tools", Schema.Struct({ tools: Schema.Array(Schema.String) })),
   event("rollout.continuity", Schema.Literals(["fork", "resume_previous"])),
   event("lorebook.binding", Schema.Struct({ entity: EntityId, ref: Schema.NullOr(RefId) })),
   event("lorebook.attach", Schema.Struct({ ref: RefId })),
@@ -143,6 +145,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "reply.order": { ids: {} },
   "reply.single": { ids: {} },
   "output.contract": { ids: {} },
+  "agent.tools": { ids: {} },
   "rollout.continuity": { ids: {} },
   "lorebook.binding": { ids: { entity: { table: "entity", kind: "card" }, ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.attach": { ids: { ref: { table: "ref", kind: "lorebook" } } },
@@ -354,6 +357,8 @@ export interface ChatState {
   /** One reply per user action instead of a round; null (no event) is off, as in ST. */
   readonly replySingle: boolean | null
   readonly outputContract: "final_text" | "send_message" | "both" | null
+  /** `agent.tools`: the tools agent modes offer; null: each mode's own. */
+  readonly agentTools: ReadonlyArray<string> | null
   readonly rolloutContinuity: "fork" | "resume_previous" | null
   readonly lorebookBindings: Readonly<Record<string, string | null>>
   /** The attached lorebooks that are on, in listed order. */
@@ -388,6 +393,7 @@ const emptyChatState: ChatState = {
   replyOrder: null,
   replySingle: null,
   outputContract: null,
+  agentTools: null,
   rolloutContinuity: null,
   lorebookBindings: {},
   lorebooks: [],
@@ -506,6 +512,8 @@ const applyCore = (
       return { ...state, replySingle: data.value.on }
     case "output.contract":
       return { ...state, outputContract: data.value }
+    case "agent.tools":
+      return { ...state, agentTools: data.value.tools }
     case "rollout.continuity":
       return { ...state, rolloutContinuity: data.value }
     case "lorebook.binding":

@@ -7,6 +7,7 @@ import { addedTo } from "./StandaloneLorebook.tsx"
 import type { ReactNode } from "react"
 import { SlotOutlet } from "../../slots.tsx"
 import { PanelVariantNavigation, panelEditorActions } from "./panelActions.tsx"
+import { editorNotices } from "./editorSlots.ts"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 // One lorebook, edited in a narrow column (owner, 2026-11-01): the side panel's Lorebooks tab
 // opens the book picked in its list here, below the list, and the card editor can show a
@@ -156,6 +157,7 @@ function LorebookPanelBody({
         {root.length === 0 && (
           <>
             <RefVariants store={store} />
+            <SlotOutlet slot={editorNotices} props={{ store }} />
             <p className="text-sm text-muted">{addedTo(state.snapshot.usedByChats)}</p>
             <SlotOutlet slot={lorebookEditorSections} only="lorebook.use" props={{ store, call }} />
           </>

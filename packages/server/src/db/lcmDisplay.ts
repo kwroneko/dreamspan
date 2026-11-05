@@ -27,12 +27,19 @@ export const lcmView = (sql: SqlClient.SqlClient, chatId: string, fork: string |
   Effect.map(insertionPieces(sql, chatId, fork), (pieces): LcmView => ({ fork, pieces }))
 
 /** Slots' places by id (only the chat's). */
+// Drive point lookups from the requested ids. `chat_id = ? AND id IN (...)` let
+// SQLite choose slots_chat_depth and scan the entire chat once per summary.
+export const slotPlacesQuery = `SELECT s.id, s.chain_id, s.depth FROM json_each(?) j
+  CROSS JOIN slots s ON s.id = j.value WHERE s.chat_id = ?`
+
 export const placesOf = (sql: SqlClient.SqlClient, chatId: string, ids: ReadonlyArray<string>) =>
   ids.length === 0
     ? Effect.succeed(new Map<string, SlotPlace>())
     : Effect.map(
-        sql<{ id: string; chain_id: string; depth: number }>`
-          SELECT id, chain_id, depth FROM slots WHERE chat_id = ${chatId} AND id IN ${sql.in([...new Set(ids)])}`,
+        sql.unsafe<{ id: string; chain_id: string; depth: number }>(slotPlacesQuery, [
+          JSON.stringify([...new Set(ids)]),
+          chatId
+        ]),
         (rows) => new Map(rows.map((r) => [r.id, { id: r.id, chainId: r.chain_id, depth: r.depth }]))
       )
 

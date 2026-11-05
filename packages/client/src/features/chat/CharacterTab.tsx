@@ -1,4 +1,5 @@
 import { panelEditorActions } from "../editor/panelActions.tsx"
+import { editorNotices } from "../editor/editorSlots.ts"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 import { SearchDialog } from "../editor/SearchDialog.tsx"
 import { SearchNavigation, type SearchMatch } from "../editor/searchNavigation.ts"
@@ -279,6 +280,7 @@ function CardPanel({
               />
             )}
             <RecoveredNotice store={store} />
+            <SlotOutlet slot={editorNotices} props={{ store }} />
             <CardEditor
               store={store}
               call={call}

@@ -6,12 +6,13 @@ import { HistoryApi } from "./historyApi.ts"
 import { MessagesApi } from "./messagesApi.ts"
 import { ExportFormatInfo } from "./libraryImport.ts"
 import { StSettingsImport } from "./modelSettings.ts"
-import { LcmApi, LcmSettingsInvalid } from "./lcm.ts"
+import { LcmApi, LcmSettingsInvalid, SummaryRequestApi } from "./lcm.ts"
 // The client-facing contract. Every UI action is an RPC in this group (DESIGN §7.7).
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 import { BinItem } from "./bin.ts"
-import { ChatApi } from "./chatApi.ts"
+import { ChatApi, ChatEventsApi } from "./chatApi.ts"
+import { AgentApi } from "./agentApi.ts"
 import { ChatSetupApi } from "./chatSetupApi.ts"
 import { StImportApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
@@ -400,14 +401,24 @@ export class AppCoreApi extends RpcGroup.make(
 export const AuthenticatedForkMergeApi = ForkMergeApi.middleware(Authentication)
 
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
+export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
 /** The whole API: what the client calls and the server serves. */
 export class AuthenticatedSplitChatApi extends SplitChatApi.middleware(Authentication) {}
 /** Merging another chat into this one (mergeApi.ts). */
 export class AuthenticatedChatMergeApi extends ChatMergeApi.middleware(Authentication) {}
 
+/** The chat's live updates (chatApi.ts), in a layer of their own like the fork merges. */
+export class AuthenticatedChatEventsApi extends ChatEventsApi.middleware(Authentication) {}
+
+/** The agent RPCs (agentApi.ts). */
+export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {}
+
 export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
+  .merge(AuthenticatedChatEventsApi)
+  .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedGalleryApi)
+  .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi) {}
 

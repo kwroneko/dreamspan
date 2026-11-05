@@ -14,7 +14,8 @@
 //   common ancestor); its deletion, restore or removal, or a tip from or to none, all its children.
 // - an override or a state event a fork wrote, at its sequence number: the forks whose lineage
 //   holds that fork up to at least that number. A snapshot of a fork: every fork whose
-//   lineage holds it.
+//   lineage holds it. Insert placement overrides follow this rule too: a new fork's
+//   exclusion after its base and compaction's copies change no existing fork's display.
 // - anything else (a moved slot, an insertion, a chat-wide event, an event changed in place):
 //   every fork of the chat, as before.
 // A summary that wasn't valid when the write began stays stale. Only the writer writes; a
@@ -38,10 +39,9 @@ const touch = (kind: string, chat: string, ref = "NULL", seq = "NULL", when = "1
 /** The kinds of override a summary reads (baseline's shell_fork_overrides_* triggers). */
 const READ_OVERRIDES = `('select', 'replace', 'delete_slot', 'insert', 'suppress_event')`
 
-/** An insertion changes which slots paths show; the other kinds reach their fork's lineage. */
+/** Placement, like selection, belongs to the fork's frozen lineage, including insert=0 at a new fork's base. */
 const overrideTouch = (row: string) =>
-  `${touch(CHAT, `${row}.chat_id`, "NULL", "NULL", `${row}.kind = 'insert'`)}
-  ${touch(FORK, `${row}.chat_id`, `${row}.fork_id`, `${row}.seq`, `${row}.kind IN ${READ_OVERRIDES} AND ${row}.kind <> 'insert'`)}`
+  touch(FORK, `${row}.chat_id`, `${row}.fork_id`, `${row}.seq`, `${row}.kind IN ${READ_OVERRIDES}`)
 
 const slotChat = (slot: string) => `(SELECT chat_id FROM slots WHERE id = ${slot})`
 const forkChat = (fork: string) => `(SELECT chat_id FROM forks WHERE id = ${fork})`
@@ -150,9 +150,11 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
         kept(chat_id, stamp) AS MATERIALIZED (
           SELECT m.chat_id, m.stamp FROM shell_moved m WHERE NOT EXISTS (
             SELECT 1 FROM shell_touches t WHERE t.chat_id = m.chat_id AND (t.kind = ${CHAT}
-              -- A chat with insertions shows slots off its tree's paths.
+              -- Only inserted slots can be shown off the structural path. A
+              -- normal reply still reaches its forks by chain intervals even
+              -- when another message in the chat has an insertion.
               OR (t.kind = ${SLOT} AND EXISTS (
-                SELECT 1 FROM fork_overrides o WHERE o.chat_id = m.chat_id AND o.kind = 'insert'))))),
+                SELECT 1 FROM slots s WHERE s.id = t.ref AND s.inserted = 1))))),
         -- A shared old slot can have hundreds of thousands of descendants. Reach its
         -- forks by chain intervals, never by enumerating that message history. Deduplicate
         -- swipes pinned together before joining them to the forks' segments.
@@ -192,8 +194,9 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
           SELECT t.ref FROM shell_touches t WHERE t.kind IN (${SELF}, ${FORK})
           UNION ALL SELECT f.id FROM shell_touches t JOIN forks f ON f.parent_fork_id = t.ref
             WHERE t.kind = ${KIN} OR (t.kind = ${TIP} AND EXISTS (
-              -- Paths in a chat with insertions aren't the tree's.
-              SELECT 1 FROM fork_overrides o WHERE o.chat_id = t.chat_id AND o.kind = 'insert'))
+              -- Moving to/from an inserted tip can change the display end.
+              -- Normal structural tip moves use the shifted chain below.
+              SELECT 1 FROM slots s WHERE s.id IN (t.from_slot, t.to_slot) AND s.inserted = 1))
           UNION ALL SELECT f.id FROM shifted h JOIN forks f ON f.parent_fork_id = h.fork AND f.tip_slot_id = h.id
           UNION ALL SELECT g.fork_id FROM segments g JOIN touched t ON t.chat_id = g.chat_id
             AND t.chain_id = g.chain_id AND t.depth BETWEEN g.lo AND g.hi
