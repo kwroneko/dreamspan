@@ -97,7 +97,7 @@ for (const kind of ["lorebook", "preset", "card"] as const) {
         .first()
         .click()
       await panel.getByRole("button", { name: "Expand all", exact: true }).click()
-      await panel.getByRole("button", { name: "Large editor", exact: true }).click()
+      await panel.getByRole("link", { name: "Large editor", exact: true }).click()
     } else {
       await panel
         .getByRole("button", {

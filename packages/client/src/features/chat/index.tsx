@@ -1,3 +1,4 @@
+import { tabKinds } from "../workbench/kinds.ts"
 import { registerChatHeader } from "./headerContributions.tsx"
 import { registerSummaryDetails } from "./SummaryDetails.tsx"
 import { registerEditorHistory } from "./editorHistory.tsx"
@@ -80,6 +81,28 @@ export const register = () => {
   registerHistoryCommands()
   registerChatHeader()
   registerReplyCommands()
+  // One tab per chat (features/workbench): its branches and messages are places within it.
+  tabKinds.register({
+    id: "chat",
+    order: 100,
+    match: (url) => /^\/chats\/([^/]+)$/.exec(url.pathname)?.[1] ?? null,
+    title: () => "Chat",
+    icon: "chat"
+  })
+  tabKinds.register({
+    id: "chat.context",
+    order: 100,
+    match: (url) => /^\/chats\/([^/]+\/context\/[^/]+)$/.exec(url.pathname)?.[1] ?? null,
+    title: () => "Request",
+    icon: "search"
+  })
+  tabKinds.register({
+    id: "chat.start",
+    order: 100,
+    match: (url) => /^\/(?:cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.exec(url.pathname)?.[0] ?? null,
+    title: () => "New chat",
+    icon: "chat"
+  })
   routes.register({
     id: "chats",
     parent: "app",

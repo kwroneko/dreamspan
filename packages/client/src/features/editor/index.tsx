@@ -1,3 +1,4 @@
+import { tabKinds } from "../workbench/kinds.ts"
 import { panelEditorActions, PanelHistory, PanelVariant } from "./panelActions.tsx"
 import { replyHooks } from "../chat/replyHooks.ts"
 import { editorExtensions } from "../../ui/editorExtensions.ts"
@@ -83,4 +84,12 @@ export const register = () => {
   lorebookEditorSections.register({ id: "lorebook.entries", order: 100, component: StandaloneLorebook })
   editorTextFields.register({ id: "lorebook.entries", kind: "lorebook", fields: standaloneLorebookFields })
   routes.register({ id: "library.editor", parent: "app", path: "/library/$refId", component: LazyEditorPage })
+  // One tab per library entry; the view names it once its document has loaded.
+  tabKinds.register({
+    id: "library.editor",
+    order: 200,
+    match: (url) => /^\/library\/([^/]+)$/.exec(url.pathname)?.[1] ?? null,
+    title: () => "Editor",
+    icon: "edit"
+  })
 }

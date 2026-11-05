@@ -114,7 +114,7 @@ for (const width of [1440, 390])
       await page
         .getByRole("menuitem", { name: `Open Display Aria ${width} ${theme} in the full editor`, exact: true })
         .click()
-      await expect(page.getByRole("dialog", { name: "Card editor", exact: true })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Card editor", exact: true })).toBeVisible()
       await rename(page, "Aria")
       await prompt(page).getByRole("button", { name: /^No\./ }).click()
       await rename(page, "Ari")

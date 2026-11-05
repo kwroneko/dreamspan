@@ -27,6 +27,7 @@ import * as completionSound from "./completionSoundFeature.tsx"
 import * as settings from "./settings/index.tsx"
 import * as shell from "./shell.tsx"
 import * as status from "./status.tsx"
+import * as workbench from "./workbench/index.tsx"
 
 export const registerFeatures = () => {
   cardForks.register()
@@ -36,6 +37,7 @@ export const registerFeatures = () => {
   cardExport.register()
   cardImport.register()
   shell.register()
+  workbench.register()
   clientVersion.register()
   settings.register()
   login.register()

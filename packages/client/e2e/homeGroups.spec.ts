@@ -58,11 +58,11 @@ test("Groups lists each multi-character chat as a tile and scopes its forks on o
     .getByRole("group", { name: "Show", exact: true })
     .getByRole("button", { name: "Groups", exact: true })
     .click()
-  await expect(grid(page).getByRole("button", { name: "Open chat The Lantern Inn", exact: true })).toHaveCount(2)
+  await expect(grid(page).getByRole("link", { name: "Open chat The Lantern Inn", exact: true })).toHaveCount(2)
   // The faces show who; the tile counts them, the names in its tooltip.
   await expect(grid(page)).toContainText("3 members")
   await expect(grid(page).getByTitle("Ana, Mira, Tobin").first()).toBeVisible()
-  await grid(page).getByRole("button", { name: "Open chat The Lantern Inn", exact: true }).first().click()
+  await grid(page).getByRole("link", { name: "Open chat The Lantern Inn", exact: true }).first().click()
   await expect(page).toHaveURL(new RegExp(`/chats/${latest}`))
   await expect(page.getByRole("navigation", { name: "Chat breadcrumbs" })).toContainText("The Lantern Inn")
 })
@@ -116,7 +116,7 @@ test("on a phone group tiles open their current fork", async ({ page }) => {
     .getByRole("group", { name: "Show", exact: true })
     .getByRole("button", { name: "Groups", exact: true })
     .click()
-  await grid(page).getByRole("button", { name: "Open chat The Lantern Inn", exact: true }).first().click()
+  await grid(page).getByRole("link", { name: "Open chat The Lantern Inn", exact: true }).first().click()
   await expect(page).toHaveURL(new RegExp(`/chats/${latest}`))
 })
 
@@ -136,7 +136,7 @@ test("long group and member names are readable on a touch screen", async ({ brow
     .getByRole("group", { name: "Show", exact: true })
     .getByRole("button", { name: "Groups", exact: true })
     .click()
-  const tile = grid(page).getByRole("button", { name: "Open chat Masquerade at Corvina Hall", exact: true })
+  const tile = grid(page).getByRole("link", { name: "Open chat Masquerade at Corvina Hall", exact: true })
   // The members are counted on the tile; their names are its tooltip (UI audit, 2026-10-31).
   await expect(tile.getByTitle(names.join(", "), { exact: true })).toBeVisible()
   for (const text of ["Masquerade at Corvina Hall", "3 members"]) {

@@ -37,7 +37,7 @@ for (const width of [390, 1440]) {
       await page.goto(server().url)
       await page
         .getByRole("main")
-        .getByRole("button", { name: `Open ${name}`, exact: true })
+        .getByRole("link", { name: `Open ${name}`, exact: true })
         .click()
       await expect(page).toHaveURL(new RegExp(`/chats/${old.chat.id}`))
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()

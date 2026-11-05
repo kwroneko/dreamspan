@@ -82,7 +82,7 @@ test("Branch from here makes an unnamed branch, shows it at once, keeps the URL,
   const branches = page.getByRole("button", { name: /switch branch/ })
   await expect(branches).toHaveAccessibleName(/Branch: Split .+ at #1, 1 of 2/)
   const chats = page.getByRole("complementary").first().getByRole("region", { name: "Chats", exact: true })
-  const rows = chats.getByRole("button", { name: /^Open chat/ })
+  const rows = chats.getByRole("link", { name: /^Open chat/ })
   await expect(rows.first()).toHaveAttribute("data-chat-id", /./)
   expect(await rows.first().getAttribute("data-chat-id")).not.toBe(chatId)
   // The shown branch is the current one: Branch from here at message #1 splits there, unnamed,

@@ -129,7 +129,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByText("You play this card in this chat.", { exact: true })).toBeVisible()
     await page.goto(`${server().url}/chats/${chat.id}?editor=${pia.id}`)
     await expect(
-      page.getByRole("dialog", { name: "Card editor", exact: true }).locator("[data-persona-badge]")
+      page.getByRole("region", { name: "Card editor", exact: true }).locator("[data-persona-badge]")
     ).toHaveText("You")
     await page.goto(`${server().url}/chats/${chat.id}`)
     await openPanel(page, "Cast")

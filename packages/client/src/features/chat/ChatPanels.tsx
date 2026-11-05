@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The chat panel host: descriptors own its tabs and bodies; the host owns layout and retention.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
@@ -174,6 +175,7 @@ export function ChatSidePanel({
   title,
   onTab,
   onClose,
+  host = null,
   ...content
 }: {
   tab: PanelTab
@@ -182,6 +184,8 @@ export function ChatSidePanel({
   title: string
   onTab: (tab: PanelTab) => void
   onClose: () => void
+  /** Beside the workbench's frames rather than beside the chat (features/workbench). */
+  host?: HTMLElement | null
 } & SidePanelContent) {
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
@@ -309,7 +313,7 @@ export function ChatSidePanel({
         </div>
       </Sheet>
     )
-  return (
+  const aside = (
     <aside
       aria-label="Chat panel"
       style={{ width }}
@@ -328,6 +332,7 @@ export function ChatSidePanel({
       {panels}
     </aside>
   )
+  return host ? createPortal(aside, host) : aside
 }
 /**
  * The side panel's tab: the URL's, else on a wide screen the one this browser last had open

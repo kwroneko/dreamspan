@@ -142,7 +142,7 @@ const phone = async (browser: import("@playwright/test").Browser) => {
 
 const chatLinks = (page: Page) => {
   const list = page.getByRole("main").getByRole("list", { name: "Chats" })
-  return list.getByRole("link").or(list.getByRole("button", { name: /^Open chat / }))
+  return list.getByRole("link").or(list.getByRole("link", { name: /^Open chat / }))
 }
 
 test("a first message typed before the chat exists survives leaving it, and goes once sent", async ({ browser }) => {
@@ -154,7 +154,7 @@ test("a first message typed before the chat exists survives leaving it, and goes
   // A pending chat has the chat's header on a phone, as any chat: its ← opens the menu.
   await page.getByRole("button", { name: "Chats and menu" }).click()
   await page.locator(".fixed.inset-0").getByRole("link", { name: "Home", exact: true }).last().click()
-  await page.getByRole("main").getByRole("button", { name: "Open Fen", exact: true }).click()
+  await page.getByRole("main").getByRole("link", { name: "Open Fen", exact: true }).click()
   await page.getByRole("button", { name: "Close", exact: true }).click()
   await expect(box).toHaveValue(text)
   // A reload, too: it's kept in the browser, not the page.
@@ -210,12 +210,12 @@ test("the phone's chats page loads older chats and finds those not loaded", asyn
 test("Continue and the tile open the chat with the last message, not a newer empty one", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/`)
-  await page.getByRole("main").getByRole("button", { name: "Open Aria Vance", exact: true }).click()
+  await page.getByRole("main").getByRole("link", { name: "Open Aria Vance", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${used}`))
   await page.goto(`${server().url}/cards/${aria}`)
   const main = page.getByRole("main")
   // Her conversation and the group; the chat she only joined isn't one of hers (castpresence).
-  await expect(main.getByRole("button", { name: /^Open chat / })).toHaveCount(2)
+  await expect(main.getByRole("link", { name: /^Open chat / })).toHaveCount(2)
   await main.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${used}`))
 })

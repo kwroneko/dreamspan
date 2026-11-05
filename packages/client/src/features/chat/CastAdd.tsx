@@ -144,6 +144,7 @@ function AddGrid({
   ])
   const pick: TilePick = {
     onOpen: (c) => workspace?.open(c.card.refId),
+    ...(workspace ? { href: (c: ShellCard) => workspace.href(c.card.refId) } : {}),
     onPick: (c) => add(c.card.entityId, c.card.label),
     label: (c, s) => labelOf(fullName(c), s),
     hint: (c, s) => hintOf(target, c.card.label, s),

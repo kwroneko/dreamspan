@@ -115,8 +115,8 @@ for (const width of [1440, 390]) {
       await expect(name).toHaveAttribute("aria-pressed", "true")
       const below = tab.getByRole("region", { name: `Lorebook ${book}`, exact: true })
       await expect(below.getByRole("button", { name: `Open ${entry}`, exact: true })).toBeVisible()
-      await below.getByRole("button", { name: "Large editor", exact: true }).click()
-      const editor = page.getByRole("dialog", { name: "Lorebook editor", exact: true })
+      await below.getByRole("link", { name: "Large editor", exact: true }).click()
+      const editor = page.getByRole("region", { name: "Lorebook editor", exact: true })
       // The book is what's in view: its name, and its entries, on screen without scrolling.
       await expect(editor.getByRole("heading", { level: 1, name: book })).toBeVisible()
       await expect(editor.getByRole("list", { name: "Entries" })).toBeVisible()

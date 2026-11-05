@@ -48,9 +48,9 @@ for (const width of [1440, 390]) {
     const pins = page.getByRole("main").getByRole("region", { name: "Pinned chats", exact: true })
     await pins.getByRole("button", { name: /Pinned chats/ }).click()
     await page.reload()
-    await expect(pins.getByRole("button", { name: /^Open chat / })).toHaveCount(0)
+    await expect(pins.getByRole("link", { name: /^Open chat / })).toHaveCount(0)
     await pins.getByRole("button", { name: /Pinned chats/ }).click()
-    await expect(pins.getByRole("button", { name: /^Open chat / })).toHaveCount(2)
+    await expect(pins.getByRole("link", { name: /^Open chat / })).toHaveCount(2)
     const character = data.cards.find((c) => c.card.chats > 0)!
     const latest = [...data.forks.filter((f) => f.joined.includes(character.card.entityId))].sort(
       (a, b) =>
@@ -87,7 +87,7 @@ for (const width of [1440, 390]) {
       page
         .getByRole("region", { name: "Pinned chats", exact: true })
         .first()
-        .getByRole("button", { name: /^Open chat / })
+        .getByRole("link", { name: /^Open chat / })
     ).toHaveCount(scopedPins.size)
     // The left panel's place is in the URL (owner, 2026-10-31); browsing it keeps the chat in the middle.
     const before = new URL(page.url()).pathname
@@ -120,7 +120,7 @@ for (const width of [1440, 390]) {
     await page
       .getByRole("main")
       .getByLabel("Groups", { exact: true })
-      .getByRole("button", { name: `Open chat ${group.chatName}`, exact: true })
+      .getByRole("link", { name: `Open chat ${group.chatName}`, exact: true })
       .first()
       .click()
     await expect(page).toHaveURL(new RegExp(`/chats/${group.chat.id}`))
@@ -278,7 +278,7 @@ for (const width of [1440, 390]) {
         })
         .click()
       // Its new chat, the card in the side panel's character tab, as in any chat.
-      const fullEditor = page.getByRole("button", { name: `Open ${unused.card.name} in the full editor`, exact: true })
+      const fullEditor = page.getByRole("link", { name: `Open ${unused.card.name} in the full editor`, exact: true })
       await expect(fullEditor).toBeVisible()
       await shoot("new-chat-card")
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()

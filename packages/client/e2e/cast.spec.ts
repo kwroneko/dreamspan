@@ -159,7 +159,7 @@ test("the full editor opens the card used everywhere over the chat, and goes bac
   const chat = page.url()
   await page.getByRole("button", { name: "More for Mira" }).click()
   await page.getByRole("menuitem", { name: "Open Mira in the full editor", exact: true }).click()
-  const editor = page.getByRole("dialog", { name: "Card editor", exact: true })
+  const editor = page.getByRole("region", { name: "Card editor", exact: true })
   await expect(editor.getByText(/Used by \d+ chats?/)).toBeVisible()
   await expectTextBox(editor.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
   expect(new URL(page.url()).pathname).toBe(new URL(chat).pathname)

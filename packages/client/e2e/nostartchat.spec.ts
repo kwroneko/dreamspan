@@ -32,11 +32,11 @@ for (const width of [1440, 390]) {
     await expect(navigation.getByRole("button", { name: "Start a chat", exact: true })).toHaveCount(0)
     await navigation.getByRole("group", { name: "Left panel", exact: true }).getByText("Characters").click()
     await expect(navigation.getByText(version, { exact: true })).toHaveCount(0)
-    await navigation.getByRole("button", { name: `Open ${card.label}`, exact: true }).click()
+    await navigation.getByRole("link", { name: `Open ${card.label}`, exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
     expect(new URL(page.url()).searchParams.get("character")).toBe(card.entityId)
     if (width === 1440) {
-      await expect(navigation.getByRole("button", { name: /^Open chat / }).first()).toBeVisible()
+      await expect(navigation.getByRole("link", { name: /^Open chat / }).first()).toBeVisible()
     }
     await hideAppNavigation(page)
     await page.goto(`${server().url}/chats/${chat.id}?panel=card:${card.entityId}`)

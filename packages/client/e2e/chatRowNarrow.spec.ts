@@ -94,7 +94,7 @@ for (const [scene, panelWidth, viewport] of [
     await expect(chats.locator("[data-chat-id]")).toHaveCount(3)
     const measurements = []
     for (const title of titles) {
-      const button = chats.getByRole("button", { name: `Open chat ${title}`, exact: true })
+      const button = chats.getByRole("link", { name: `Open chat ${title}`, exact: true })
       await button.scrollIntoViewIfNeeded()
       const result = await button.evaluate((button) => {
         const box = (el: Element) => {

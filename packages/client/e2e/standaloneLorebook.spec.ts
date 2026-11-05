@@ -77,9 +77,9 @@ for (const width of [1440, 390]) {
     await inUse.getByRole("button", { name: new RegExp(`^Saltmarsh ${width}`) }).click()
     const below = panel.getByRole("region", { name: `Lorebook Saltmarsh ${width}`, exact: true })
     await expect(below.getByRole("list", { name: "Entries" })).toBeVisible()
-    await below.getByRole("button", { name: "Large editor", exact: true }).click()
+    await below.getByRole("link", { name: "Large editor", exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
-    const overlay = page.getByRole("dialog", { name: "Lorebook editor" })
+    const overlay = page.getByRole("region", { name: "Lorebook editor" })
     await expect(overlay.getByRole("list", { name: "Entries" })).toBeVisible()
     // A lorebook isn't a preset: its way out says where it goes.
     await page.getByRole("button", { name: "Close", exact: true }).click()

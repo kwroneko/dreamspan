@@ -54,7 +54,7 @@ test("the sidebar lists chats without a link between them, under a switch that f
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
-  await expect(sidebar(page).getByRole("button", { name: "Open chat Lamp story" }).first()).toBeVisible()
+  await expect(sidebar(page).getByRole("link", { name: "Open chat Lamp story" }).first()).toBeVisible()
   await expect(sidebar(page).getByRole("button", { name: "Forks", exact: true })).toHaveCount(0)
   const left = await sidebar(page).getByRole("group", { name: "Left panel", exact: true }).boundingBox()
   const find = await sidebar(page).getByLabel("Find a chat").boundingBox()
@@ -84,7 +84,7 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
   await expect(crumbs(page)).toHaveCount(0)
-  await page.getByRole("main").getByRole("button", { name: "Open Wren", exact: true }).click()
+  await page.getByRole("main").getByRole("link", { name: "Open Wren", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${chatId}`))
   await expect(crumbs(page)).toContainText("Wren")
   const chatPath = path(page)
@@ -109,7 +109,7 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
   await expect(crumbs(page)).toContainText("Wren")
 
   // A pick in the character's list keeps the list where it is.
-  await sidebar(page).getByRole("button", { name: "Open chat Lamp story" }).first().click()
+  await sidebar(page).getByRole("link", { name: "Open chat Lamp story" }).first().click()
   await expect(crumbs(page)).toContainText("Wren")
 
   // The root shows all chats; the chat in the middle stays.

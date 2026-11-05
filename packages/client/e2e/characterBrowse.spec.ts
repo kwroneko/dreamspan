@@ -179,7 +179,7 @@ for (const width of [1440, 390]) {
     await panel.getByRole("combobox", { name: "Show" }).click()
     await page.getByRole("option", { name: "Groups · 1" }).click()
     await expect(
-      panel.getByLabel("Groups", { exact: true }).getByRole("button", { name: "Open chat The pair" })
+      panel.getByLabel("Groups", { exact: true }).getByRole("link", { name: "Open chat The pair" })
     ).toBeVisible()
     await panel.getByRole("combobox", { name: "Show" }).click()
     await page.getByRole("option", { name: "All · 4" }).click()

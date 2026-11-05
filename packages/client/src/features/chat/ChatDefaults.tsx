@@ -1,7 +1,7 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
-import { PresetWorkspace, PresetOverlayHost } from "../editor/PresetWorkspace.tsx"
+import { PresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { selectablePresets } from "../pickers/presetList.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { accountSettingSections, summarySettingFields } from "./presentation.tsx"
@@ -41,7 +41,6 @@ export function ChatDefaultsPage() {
           <h1 className="text-base font-semibold">Chats</h1>
         </CenterHeaderContent>
         <ChatDefaultsContent />
-        <PresetOverlayHost page />
       </div>
     </PresetWorkspace>
   )

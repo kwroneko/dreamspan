@@ -181,7 +181,7 @@ for (const width of [390, 1024, 1440])
           const end =
             view === "panel"
               ? (await identity
-                  .getByRole("button", { name: `Open ${card.name} in the full editor`, exact: true })
+                  .getByRole("link", { name: `Open ${card.name} in the full editor`, exact: true })
                   .boundingBox())!
               : at
           expect(row.x + row.width - end.x - end.width).toBeLessThanOrEqual(1)

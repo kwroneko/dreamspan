@@ -353,7 +353,8 @@ export function BranchControl(props: BranchControlProps) {
         <>
           <Icon name="branch" size={14} className="shrink-0" />
           <span className="truncate">
-            <span className="text-muted">Branch:</span> {label}
+            <span className="text-muted @max-[40rem]/header:hidden">Branch: </span>
+            {label}
             {off && <span className="text-xs text-muted"> · not where it opens</span>}
           </span>
           <Icon name="down" size={14} className="shrink-0 text-muted" />

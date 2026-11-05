@@ -208,8 +208,8 @@ export function centerHeaderTests() {
         await capture("preset-overlay")
         await page.getByRole("combobox", { name: "Switch preset" }).click()
         await page.getByRole("option", { name: `Preset B ${width}`, exact: true }).click()
-        await expect(page).toHaveURL(new RegExp(`editor=${presetB.id}`))
-        await expect(page.getByRole("dialog", { name: "Preset editor" })).toBeVisible()
+        await expect(page).toHaveURL(new RegExp(`/library/${presetB.id}`))
+        await expect(page.getByRole("region", { name: "Preset editor" })).toBeVisible()
         const folder = process.env.LAYOUT_AUDIT_WORK ?? info.outputDir
         mkdirSync(folder, { recursive: true })
         writeFileSync(join(folder, `header-bottoms-${width}.json`), JSON.stringify(measurements, null, 2))

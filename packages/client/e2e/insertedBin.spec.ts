@@ -86,7 +86,7 @@ for (const width of [1440, 390])
       await reply.getByRole("button", { name: "Previous version" }).click()
       await expect(inserted).toBeVisible()
       if (width === 1440)
-        await expect(page.getByRole("button", { name: `Open chat ${title}`, exact: true }).first()).toContainText(
+        await expect(page.getByRole("link", { name: `Open chat ${title}`, exact: true }).first()).toContainText(
           "An inserted reply beside the lantern."
         )
       await shot(page, `chat-${width}-${theme}`)

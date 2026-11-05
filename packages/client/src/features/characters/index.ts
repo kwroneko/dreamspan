@@ -1,3 +1,5 @@
+import { sidebarSearch } from "./sidebarSearch.ts"
+import { shellSearchKeys, tabKinds } from "../workbench/kinds.ts"
 import { SplitChatSection } from "../chat/SplitChatSection.tsx"
 import { panelEditorActions } from "../editor/panelActions.tsx"
 import { PanelFavourite } from "./CardFavourite.tsx"
@@ -40,6 +42,22 @@ export const register = () => {
   // The open chat's branches at the left panel's foot, below whatever it lists.
   sidebarFoot.register({ id: "open-chat-branches", order: 10, component: OpenChatBranches })
   sidebarFoot.register({ id: "split-chats", order: 20, component: SplitChatSection })
+  // The sidebar's place belongs to the browser's URL, never to a tab (features/workbench).
+  shellSearchKeys.register({ id: "characters.sidebar", keys: sidebarSearch })
+  tabKinds.register({
+    id: "card",
+    order: 200,
+    match: (url) => /^\/cards\/([^/]+)$/.exec(url.pathname)?.[1] ?? null,
+    title: () => "Card",
+    icon: "person"
+  })
+  tabKinds.register({
+    id: "group",
+    order: 200,
+    match: (url) => /^\/groups\/([^/]+)$/.exec(url.pathname)?.[1] ?? null,
+    title: () => "Group",
+    icon: "people"
+  })
   // The home screen: the character grid (DESIGN §2.1).
   routes.register({ id: "characters", parent: "app", path: "/", component: CharactersPage, retainSearch: homeSearch })
   // A card without entering a chat; its pending chat is `/cards/$entityId/chat` (chat feature).

@@ -9,7 +9,7 @@ import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, IconLink } from "../../ui/Tooltip.tsx"
 import { MenuAction } from "../../ui/Menu.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -49,11 +49,30 @@ export function EditChatCard({ session, card, info, presentation }: ChatCardActi
   }
   const label = `Open ${card.name} in the full editor`
   const hint =
-    presentation === "header" ? "Opens this card in the large editor." : "Edit every field of the card, over the chat."
+    presentation === "header"
+      ? "Opens this card in the large editor."
+      : "Edit every field of the card, in a tab beside the chat."
+  const href = info
+    ? workspace
+      ? workspace.href(info.refId)
+      : `/library/${encodeURIComponent(info.refId)}${session === null ? "" : `?renameChat=${session.id}`}`
+    : null
   return presentation === "header" ? (
-    <IconButton label={label} hint={hint} icon="expand" disabled={!info} onClick={open} />
+    href ? (
+      <IconLink label={label} hint={hint} icon="expand" href={href} onOpen={open} />
+    ) : (
+      <IconButton label={label} hint={hint} icon="expand" disabled onClick={open} />
+    )
   ) : (
-    <MenuAction variant="ghost" className="h-8! px-2!" aria-label={label} hint={hint} disabled={!info} onClick={open}>
+    <MenuAction
+      variant="ghost"
+      className="h-8! px-2!"
+      aria-label={label}
+      hint={hint}
+      disabled={!info}
+      href={href ?? undefined}
+      onClick={open}
+    >
       Full editor
     </MenuAction>
   )

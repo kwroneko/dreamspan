@@ -60,7 +60,7 @@ for (const width of [1440, 390]) {
     await openLeft()
     const chats = panel().getByRole("region", { name: "Chats", exact: true })
     // Each chat once, named by its group or card, never by a branch file; its branches counted.
-    const group = chats.getByRole("button", { name: "Open chat Mika and Kuro", exact: true })
+    const group = chats.getByRole("link", { name: "Open chat Mika and Kuro", exact: true })
     await expect(group).toBeVisible()
     await expect(chats.getByText(/Branch #4/)).toHaveCount(0)
     const count = chats.getByRole("button", { name: "3 branches of Mika and Kuro: list them", exact: true })
@@ -145,7 +145,7 @@ for (const width of [1440, 390]) {
     await page.goto(`${server().url}/`)
     if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
     const panel = width === 390 ? page : page.getByRole("complementary").first()
-    await panel.getByRole("button", { name: "Open chat Bob", exact: true }).click()
+    await panel.getByRole("link", { name: "Open chat Bob", exact: true }).click()
     // The card's `chat` names the first branch: the chat opens on it.
     await expect(page.getByRole("main").getByText("Solo: they head home.")).toBeVisible()
     const header = page.getByRole("button", { name: /switch branch/ })

@@ -160,7 +160,7 @@ for (const theme of ["light", "dark"] as const)
 
     // Chat rows and character tiles, over their whole area (what's inside inherits).
     const row = sidebar(page)
-      .getByRole("button", { name: /^Open chat / })
+      .getByRole("link", { name: /^Open chat / })
       .first()
     expect(await cursor(row)).toBe("pointer")
     expect(await cursor(row.locator("span").first())).toBe("pointer")
