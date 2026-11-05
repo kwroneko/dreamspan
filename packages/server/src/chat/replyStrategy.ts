@@ -15,6 +15,8 @@ export interface ReplyStrategy {
     readonly rolloutId: string
     readonly output: ReturnType<ReplyOutputStrategy["create"]>
     readonly providers: Providers["Service"]
+    /** An agent turn's plan, tools and storage (spec/AGENTIC.md §3); absent for a plain reply. */
+    readonly agent?: import("../agent/session.ts").AgentRun
   }) => Stream.Stream<GenerationChunk, GenerationFailed>
 }
 /** The existing single provider turn, including streaming preference and output decoding. */

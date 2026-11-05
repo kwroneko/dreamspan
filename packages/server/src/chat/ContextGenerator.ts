@@ -13,6 +13,9 @@ import { Providers } from "../providers/Providers.ts"
 import { GenerationFailed, type GenerationRequest, Generator } from "./Generator.ts"
 import { throughParse } from "./replySections.ts"
 import { ChatHub } from "./ChatHub.ts"
+import { foldState } from "@rp/shared/state.ts"
+import { PLAIN_MODE, planTurn } from "../agent/modes.ts"
+import { frozenTool } from "../agent/tools.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
 const serverFailure = (operation: string) => (error: unknown) =>
@@ -56,6 +59,23 @@ export const layer = Layer.effect(
                 ...(forkId === null ? {} : { forkId })
               })
             : false
+          // The chat's mode at this point decides who runs and how (spec/AGENTIC.md §6).
+          const events = yield* reader
+            .StateEventsAt({ userId, chatId, slotId: parent, forkId })
+            .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("StateEventsAt")))
+          const planned = planTurn(execution.orchestrationModes, foldState(events))
+          if ("unavailable" in planned)
+            return yield* new GenerationFailed({
+              class: "unavailable",
+              message: `The reply mode “${planned.unavailable}” is unavailable.`
+            })
+          const { plan } = planned
+          const agentic = plan.strategy !== "reply"
+          const tools = plan.tools.flatMap((id) => {
+            const tool = execution.rolloutTools.get(id)
+            // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
+            return tool && tool.effect !== "external" ? [tool] : []
+          })
           const assemble = reader
             .AssembleContext({
               userId,
@@ -142,7 +162,16 @@ export const layer = Layer.effect(
               forkId,
               connectionId: model.connectionId as ConnectionId,
               modelId: model.modelId as ModelId,
-              snapshot: assembled.snapshot,
+              // An agent turn's tools and contract are frozen with its context (spec/AGENTIC.md §3.3).
+              snapshot: agentic
+                ? `${assembled.snapshot.trimEnd().slice(0, -1)},"agent":${JSON.stringify({
+                    mode: planned.mode,
+                    contract: plan.contract,
+                    turnCap: plan.turnCap,
+                    tools: tools.map(frozenTool)
+                  })}}`
+                : assembled.snapshot,
+              ...(planned.mode === PLAIN_MODE ? {} : { mode: planned.mode }),
               issues: generation.issues,
               variables: generation.variables,
               frozenMessages: generation.frozenMessages.map((m) => ({ ...m, versionId: m.versionId as VersionId }))
@@ -166,7 +195,7 @@ export const layer = Layer.effect(
             generation,
             rolloutId
           })
-          const strategy = execution.replyStrategies.get("reply")
+          const strategy = execution.replyStrategies.get(plan.strategy)
           if (!strategy)
             return yield* new GenerationFailed({ class: "unavailable", message: "Reply strategy is unavailable." })
           const reply = strategy.run({
@@ -175,14 +204,18 @@ export const layer = Layer.effect(
             rolloutId,
             output,
             providers,
+            ...(agentic ? { agent: { plan, mode: planned.mode, tools, reader, writer } } : {}),
             resolveImages: (input) =>
               hydrateMessageImages(input, model, (id) => reader.GetMediaFile({ userId, mediaId: id }), config.dataDir)
           })
           // The registered reply parsers, in order: the leading tagged sections (replySections.ts).
           return execution.replyParsers
             .list()
-            .flatMap((parser) => parser.create({ request, generation }) ?? [])
-            .reduce(throughParse, reply)
+            .flatMap((parser) => {
+              const parse = parser.create({ request, generation })
+              return parse ? [{ parse, fresh: () => parser.create({ request, generation })! }] : []
+            })
+            .reduce((stream, { parse, fresh }) => throughParse(stream, parse, fresh), reply)
         })
       )
 

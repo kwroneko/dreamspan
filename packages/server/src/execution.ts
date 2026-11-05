@@ -1,4 +1,7 @@
 import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
+import { agentReplyStrategy } from "./agent/strategy.ts"
+import { narratorMode, plainMode, type OrchestrationMode } from "./agent/modes.ts"
+import type { RolloutTool } from "./agent/tools.ts"
 import { Context, Effect, Layer, Option } from "effect"
 import { makeRegistry, type Registry } from "./registry.ts"
 import { defaultReplyOutput, type ReplyOutputStrategy } from "./chat/replyOutput.ts"
@@ -28,6 +31,10 @@ export class ExecutionRegistry extends Context.Service<
     readonly liveRewrites: Registry<LiveRewrite>
     readonly summaries: Registry<SummaryStrategy>
     readonly summaryTools: Registry<SummaryToolFactory>
+    /** Who runs on a turn, what it sees and how its output is taken (spec/AGENTIC.md §6). */
+    readonly orchestrationModes: Registry<OrchestrationMode>
+    /** The tools an agent turn may offer, with their effect classes (spec/AGENTIC.md §4). */
+    readonly rolloutTools: Registry<RolloutTool<never>>
   }
 >()("rp/ExecutionRegistry") {
   static readonly layer = Layer.effect(
@@ -35,6 +42,11 @@ export class ExecutionRegistry extends Context.Service<
     Effect.gen(function* () {
       const replyStrategies = makeRegistry<ReplyStrategy>()
       yield* replyStrategies.register(defaultReplyStrategy)
+      yield* replyStrategies.register(agentReplyStrategy)
+      const orchestrationModes = makeRegistry<OrchestrationMode>()
+      yield* orchestrationModes.register(plainMode)
+      yield* orchestrationModes.register(narratorMode)
+      const rolloutTools = makeRegistry<RolloutTool<never>>()
       const replies = makeRegistry<ReplyOutputStrategy>()
       const summaries = makeRegistry<SummaryStrategy>()
       const summaryTools = makeRegistry<SummaryToolFactory>()
@@ -47,7 +59,16 @@ export class ExecutionRegistry extends Context.Service<
       yield* summaries.register(directSummary)
       yield* summaries.register(toolSummary)
       yield* summaryTools.register(summaryToolFactory)
-      return { replyStrategies, replies, replyParsers, liveRewrites, summaries, summaryTools }
+      return {
+        replyStrategies,
+        replies,
+        replyParsers,
+        liveRewrites,
+        summaries,
+        summaryTools,
+        orchestrationModes,
+        rolloutTools
+      }
     })
   )
 }

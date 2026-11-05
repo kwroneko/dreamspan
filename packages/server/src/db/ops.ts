@@ -124,6 +124,7 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import { RolloutStep } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import {
@@ -2299,6 +2300,8 @@ export class WriteOps extends RpcGroup.make(
       connectionId: ConnectionId,
       modelId: ModelId,
       snapshot: Schema.String,
+      /** The orchestration mode it ran in, when not plain (spec/AGENTIC.md §6). */
+      mode: Schema.optionalKey(Schema.String),
       /** The snapshot's issues, kept on the rollout for its version to show. */
       issues: Schema.Array(ContextIssue),
       variables: Schema.Array(
@@ -2339,6 +2342,15 @@ export class WriteOps extends RpcGroup.make(
       status: Schema.Literals(["completed", "stopped", "failed"]),
       error: Schema.NullOr(Schema.String)
     },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * An agent rollout's transcript as it stands (spec/AGENTIC.md §3.3): the whole of it, replacing
+   * what was saved, and its step count (tool calls) for the version's badge.
+   */
+  Rpc.make("SaveRolloutTranscript", {
+    payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -3201,6 +3213,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("RunContext", {
     payload: { userId: UserId, versionId: VersionId },
     success: RunContext,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** An agent reply's steps, from its stored transcript (agentReads.ts); empty for a plain one. */
+  Rpc.make("RolloutSteps", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Array(RolloutStep),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Generation time and tokens of the user's versions (inspectorReads.ts); others are left out. */

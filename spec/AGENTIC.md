@@ -2,6 +2,8 @@
 
 **Status**: Proposed, 2026-11-05 (job `phase4`). The design for PLAN Phase 4 and DESIGN §7.1–§7.6, with the Phase 4 parts of §4.1a and §4.2. Everything below is **[P]** unless it cites a **[D]** in DESIGN. It is a delta from two things: the build at master `12cf25b6` (ARCHITECTURE §3.7, §3.8, §6, §12, §15, §16), and reference-harness on branch `latest` (`9b385944`, 2026-10-29), whose agent core [the earlier reference notes](the earlier reference notes) describes. That reference was re-checked against `latest` on 2026-11-05. Its claims all still hold, the `factory.ts` line numbers have moved (the Agent is built at `src/agent/factory.ts:2495–2571`), and the mechanisms it leaves out are listed in §1.2. Built units are listed in §11; their sections become obsolete as they move to ARCHITECTURE.
 
+**Built (2026-11-05):** U1 and the server half of U2 (ARCHITECTURE §16, "Agent rollouts"): §2 and §3 are obsolete as proposals, and §5.1's server side (steps, the `Steps` event, `GetRolloutSteps`) is built. Not yet: U1's Anthropic round trip and stop-mid-tool tests, and `capture.ts` as its own module (the flush lives in `session.ts`).
+
 ## 0. Summary
 
 - **An agentic reply is still a reply.** It is a version made by a rollout, as every generation is (DATA-MODEL principle 7). The plain path stays as it is. An agentic mode swaps the registered `reply` strategy for one that runs a pi-agent-core loop. The loop's output goes through the same chunk pipeline, parsers, live rewrites and version persistence as a plain reply. That shared pipeline is the "one internal commit pipeline" of [D] §7.2.
