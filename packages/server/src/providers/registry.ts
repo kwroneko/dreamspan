@@ -39,6 +39,34 @@ export interface ProviderKindEntry {
   readonly catalog?: () => Promise<Catalog>
   /** When this provider makes a prefix write readable; defaults to first chunk, 10 s. */
   readonly cacheRelease?: import("./cacheStagger.ts").CacheReleasePolicy
+  /**
+   * A kind that answers decision questions (spec/AGENTIC.md §7) instead of writing replies: its
+   * wire call. Such a kind's connections are refused for replies and left out of model pickers.
+   */
+  readonly decide?: DecisionWire
+}
+
+/** One decision request on the wire (reference-harness's System-One body), sent with the connection's fetch. */
+export interface DecisionWire {
+  readonly decide: (request: {
+    readonly baseUrl: string
+    readonly apiKey: string | null
+    readonly headers: Readonly<Record<string, string>>
+    readonly fetch: typeof globalThis.fetch
+    readonly body: {
+      readonly model: string
+      readonly state: unknown
+      readonly questions: Readonly<Record<string, import("@rp/shared/decisions.ts").DecisionQuestion>>
+    }
+    readonly signal: AbortSignal
+  }) => Promise<{
+    readonly status: number
+    /** The parsed JSON body; null when it wasn't JSON. */
+    readonly body: unknown
+    readonly retryAfterMs: number | null
+    /** The start of a failed response's body, for its error. */
+    readonly detail?: string
+  }>
 }
 
 /** What a transform or observer is looking at: the kind and wire API of the request. */

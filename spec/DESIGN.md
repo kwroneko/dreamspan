@@ -952,7 +952,10 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 - **[P]** Any step of a rollout can be edited before resuming. **Unbuilt Phase 4 proposal** (AGENTIC §4.4).
 
 ### 7.6 Decision models
-- **[D]** Jev and similar decision models are integrated as in reference-harness (`spec/DECISION-MODEL.md`), but are **never mandatory**. Each decision point has a heuristic fallback. Phase 4 design: AGENTIC §7 (points `presence` and `lore`, opt-in per connection).
+- **[D]** Jev and similar decision models are integrated as in reference-harness (`spec/DECISION-MODEL.md`), but are **never mandatory**. Each decision point has a heuristic fallback. Phase 4 design: AGENTIC §7 (points `presence` and `lore`, opt-in per connection). **Built** (phase4decide, 2026-11-05; ARCHITECTURE §16 "Decision models").
+- **[P]** (phase4decide) A decision connection (kind `system-one`) answers decisions only: it's left out of model pickers and refused for replies. Its Decisions card picks one of its models and turns each point on, with a confidence slider; nothing is sent until a point is on. Several connections with the same point on: the first by name answers.
+- **[P]** (phase4decide) `presence` decides who is in the scene after each reply (two or more characters), and away is Mute, so it governs who Auto picks to reply next; the reply policy still picks among those present. It never overrides the user's own Mute or the agent's `set_presence`, and never sends everyone away.
+- **[P]** (phase4decide) `lore` asks only about entries that carry a question for the decision model (the entry's `decision_hint`, set in its Matching settings), at most 32 per reply, over the last six messages; a yes includes the entry as if its keys had matched.
 
 ### 7.7 Agent use ("workshop")
 - **[D]** Agentic work outside the RP itself: creating cards with tools, editing and cloning them, changing settings, setting up chat modes, eventually writing plugins.

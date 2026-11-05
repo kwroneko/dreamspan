@@ -15,6 +15,7 @@ import type { QueueOutcome } from "../db/ops.ts"
 import { sectionsDisplay, type ReplySections } from "@rp/shared/replySections.ts"
 import { CacheWarmth } from "./CacheWarmth.ts"
 import { ChatHub } from "./ChatHub.ts"
+import { DecisionEngine } from "../decision/engine.ts"
 import { fromItems, type Rewritten, rewriteItems, rewriteText } from "./rewrites.ts"
 import { settleHeld } from "./replySections.ts"
 import { executionRegistry } from "../execution.ts"
@@ -103,6 +104,8 @@ export class Generations extends Context.Service<
       const notices = yield* Notices
       const generator = yield* Generator
       const warmth = yield* Effect.serviceOption(CacheWarmth)
+      // Decision points that act after a reply (spec/AGENTIC.md §7: presence); optional.
+      const decisions = yield* Effect.serviceOption(DecisionEngine)
       const { liveRewrites } = yield* executionRegistry
       const scope = yield* Effect.scope
       const running = new Map<VersionId, Running>()
@@ -241,6 +244,25 @@ export class Generations extends Context.Service<
           }
           if (status === "complete" && entry.text.trim() !== "")
             yield* Effect.forkIn(markIfRefused(request, entry.text), scope)
+          if (status === "complete" && Option.isSome(decisions))
+            yield* Effect.forkIn(
+              decisions.value
+                .afterReply({
+                  userId: request.userId,
+                  chatId: request.chatId,
+                  slotId: request.slotId,
+                  versionId: request.versionId,
+                  forkId: request.forkId ?? null
+                })
+                .pipe(
+                  Effect.tap((changed) =>
+                    Effect.sync(() => {
+                      if (changed) hub.publish(request.chatId, { _tag: "State" })
+                    })
+                  )
+                ),
+              scope
+            )
           if (status === "complete")
             yield* summaries.afterReply({
               userId: request.userId,

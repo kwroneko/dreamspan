@@ -15,6 +15,7 @@ import { builtinImageCounters } from "./imageCounters.ts"
 import { builtinTextCounters } from "./textCounters.ts"
 import { builtinModelCatalogs } from "./contextCatalog.ts"
 import { builtinContextLimitParsers } from "./contextLimits.ts"
+import { systemOneKind } from "./systemOne.ts"
 
 const completions = openAICompletionsApi()
 
@@ -96,7 +97,9 @@ export const builtinKinds: ReadonlyArray<ProviderKindEntry> = [
     defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
     keyOptional: false,
     list: "google"
-  })
+  }),
+  // Decision models (spec/AGENTIC.md §7): asked only for the points a user turns on.
+  systemOneKind
 ]
 
 /** The registry with every built-in registered for the layer's lifetime. */

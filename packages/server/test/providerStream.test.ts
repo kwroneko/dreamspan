@@ -1511,7 +1511,7 @@ describe("provider registry", () => {
   it("lists built-in kinds in picker order", () =>
     assert.deepStrictEqual(
       ProviderBuiltins.builtinKinds.map((k) => k.id),
-      ["openai-chat", "anthropic", "openai-responses", "openrouter", "deepseek", "google"]
+      ["openai-chat", "anthropic", "openai-responses", "openrouter", "deepseek", "google", "system-one"]
     ))
 })
 

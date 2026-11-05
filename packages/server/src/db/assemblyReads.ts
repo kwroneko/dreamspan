@@ -35,6 +35,7 @@ import { readDefaults, readGlobalRegex } from "./generationSettings.ts"
 import { readCardPromptUse, readLorebookPresets } from "./lorebookSettings.ts"
 import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
 import { makeTokenCountingReadHandlers } from "./tokenCounting.ts"
+import { makeDecisionReadHandlers } from "./decisions.ts"
 import type { ReadOps } from "./ops.ts"
 import { usedEntries } from "./usedEntries.ts"
 import { query } from "./tx.ts"
@@ -51,6 +52,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
     ...(yield* makeTokenCountingReadHandlers),
+    ...(yield* makeDecisionReadHandlers),
     RoleProjections: () => assembler.projectionOptions,
     AssembleContext: ({
       userId,
@@ -63,7 +65,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
       frozen,
       partialBatch,
       model,
-      agent
+      agent,
+      decisions
     }) =>
       Effect.suspend(() => {
         const sources = sqlSources(sql, {
@@ -75,10 +78,17 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           ...(model === undefined ? {} : { modelOverride: model })
         })
         return assembler
-          .assemble({ now, timeZone, frozen: frozen ?? {}, random: Math.random, ...(agent ? { agent } : {}) })
+          .assemble({
+            now,
+            timeZone,
+            frozen: frozen ?? {},
+            random: Math.random,
+            ...(agent ? { agent } : {}),
+            ...(decisions ? { decisions } : {})
+          })
           .pipe(
             Effect.provide(sources.layer),
-            Effect.flatMap((built) =>
+            Effect.flatMap(({ loreDecision, ...built }) =>
               Effect.gen(function* () {
                 const snapshot: ContextSnapshot = {
                   ...built,
@@ -90,7 +100,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   snapshot: JSON.stringify(snapshot),
                   generation: JSON.stringify({ ...generationOf(snapshot), inspection }),
                   used: usedEntries(snapshot),
-                  message: (snapshot.sources?.target.depth ?? 0) + 1
+                  message: (snapshot.sources?.target.depth ?? 0) + 1,
+                  ...(loreDecision ? { loreDecision } : {})
                 }
               })
             )
@@ -127,6 +138,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             frozen: taken.frozen,
             random: Math.random,
             ...(taken.agentAssembly ? { agent: taken.agentAssembly } : {}),
+            ...(taken.decisionAssembly ? { decisions: taken.decisionAssembly } : {}),
             ...(taken.summaryJob
               ? {
                   summarizing: true,
@@ -141,7 +153,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             ...(taken.loreFallback ? { loreFallback: taken.loreFallback } : {})
           })
           .pipe(Effect.provide(sources.layer))
-        const rebuilt = taken.summaryJob ? yield* fitSummaryOutput(built) : built
+        const { loreDecision: _asked, ...assembled } = built
+        const rebuilt = taken.summaryJob ? yield* fitSummaryOutput(assembled) : assembled
         return {
           _tag: "Rebuilt" as const,
           snapshot: JSON.stringify({
