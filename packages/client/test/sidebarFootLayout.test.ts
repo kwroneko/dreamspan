@@ -24,7 +24,7 @@ it("gives header-only and absent sections' space back to Chats", () => {
   const parentOnly = sidebarFootLayout(600, FOOT_DEFAULT, expanded, { branch: "list", split: "header" })
   const absent = sidebarFootLayout(600, FOOT_DEFAULT, expanded, { branch: "list", split: "absent" })
   expect(parentOnly.height.split).toBe(41)
-  expect(both.total - parentOnly.total).toBe(196)
+  expect(both.total - parentOnly.total).toBe(FOOT_DEFAULT.split - 41)
   expect(absent.total).toBe(221)
 })
 it("restores saved sizes and manual collapse choices without writing either", () => {

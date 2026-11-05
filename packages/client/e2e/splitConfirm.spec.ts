@@ -262,8 +262,9 @@ test("the menu's confirmation applies the edited title", async ({ page }) => {
   await expect(chatRow(page, f.market)).toContainText("Market days")
   await expect(
     page
-      .getByRole("region", { name: "Split chats", exact: true })
-      .getByRole("link", { name: "From “Split demo · Harbor”" })
+      .getByRole("region", { name: "Related chats", exact: true })
+      .getByRole("group", { name: "This chat was split from", exact: true })
+      .getByRole("button", { name: "Open chat Split demo · Harbor", exact: true })
   ).toBeVisible()
 })
 

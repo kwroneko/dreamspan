@@ -2,7 +2,7 @@ import { BinChanged, BinItem } from "./bin.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { NotFound, ServerError } from "./errors.ts"
 import { Schema } from "effect"
-import { ChatId, ForkId, SlotId } from "./chat.ts"
+import { ChatId, ForkId, ForkSplit, SlotId } from "./chat.ts"
 import { EditRefused } from "./editorApi.ts"
 
 /** A title change guarded by the branch name the confirmation actually showed. */
@@ -23,7 +23,9 @@ export const SplitChatLink = Schema.Struct({
   forkId: ForkId,
   rootForkId: ForkId,
   title: Schema.String,
-  slotId: Schema.NullOr(SlotId)
+  slotId: Schema.NullOr(SlotId),
+  /** Where a split group's first branch parts from the chat it was split from; null for an original group. */
+  split: Schema.NullOr(ForkSplit)
 })
 export type SplitChatLink = typeof SplitChatLink.Type
 export const SplitChats = Schema.Struct({
