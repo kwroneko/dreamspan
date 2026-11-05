@@ -14,6 +14,9 @@ import { contextExcludedIn } from "./lcmVisibility.ts"
 import { pathSegments } from "./pathSegments.ts"
 import { query } from "./tx.ts"
 
+/** At most this many full-text matches in the chat, SearchChat starts from them. */
+const FEW = 2000
+
 export const makeAgentReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
@@ -46,23 +49,49 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         if ((yield* placedInsertions(sql, chatId, fork)).length > 0) return null
         // Each token as the start of a word, quoted so FTS syntax in it is only text.
         const match = tokens.length ? tokens.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" AND ") : null
-        const rows = yield* sql<{
+        type Row = {
           readonly position: number
           readonly speaker: string | null
           readonly writer: string
           readonly macro_mode: string
           readonly content: string
-        }>`
-          ${pathSegments(sql, chatId, leafSlotId, null)}
-          SELECT s.depth AS position, v.speaker_entity_id AS speaker, v.writer, v.macro_mode, v.content
-          FROM versions v JOIN slots s ON s.id = v.slot_id
-          WHERE s.chat_id = ${chatId}
-            AND ${match === null ? sql`1` : sql`(v.seq IN (SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${match}) OR v.macro_mode = 'template')`}
-            AND EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)
-            AND (${before} IS NULL OR s.depth < ${before})
+        }
+        const shown = sql`(${before} IS NULL OR s.depth < ${before})
             AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
-            AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
-          ORDER BY s.depth DESC LIMIT ${limit}`
+            AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}`
+        const onPath = sql`EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)`
+        // Few matches in the whole chat (a rare word): start from them, each checked against the
+        // path, with the path's template messages (matched once their names are filled in). Many
+        // (a common word): walk the path newest first until the limit [P: 2,000].
+        const [few] =
+          match === null
+            ? [{ n: Infinity }]
+            : yield* sql<{ readonly n: number }>`
+                SELECT count(*) AS n FROM (SELECT 1 FROM versions_fts WHERE versions_fts MATCH ${match} LIMIT ${FEW + 1})`
+        const rows =
+          match !== null && few!.n <= FEW
+            ? yield* sql<Row>`
+                ${pathSegments(sql, chatId, leafSlotId, null)},
+                -- Materialized first, so the visibility checks run once per candidate only.
+                candidates(seq) AS MATERIALIZED (
+                  SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${match}
+                  UNION
+                  SELECT v.seq FROM segments g
+                  CROSS JOIN slots s ON s.chain_id = g.chain_id AND s.depth BETWEEN g.lo AND g.hi
+                  CROSS JOIN versions v ON v.slot_id = s.id
+                  WHERE v.macro_mode = 'template')
+                SELECT s.depth AS position, v.speaker_entity_id AS speaker, v.writer, v.macro_mode, v.content
+                FROM candidates h CROSS JOIN versions v ON v.seq = h.seq CROSS JOIN slots s ON s.id = v.slot_id
+                WHERE s.chat_id = ${chatId} AND ${onPath} AND ${shown}
+                ORDER BY position DESC LIMIT ${limit}`
+            : yield* sql<Row>`
+                ${pathSegments(sql, chatId, leafSlotId, null)}
+                SELECT s.depth AS position, v.speaker_entity_id AS speaker, v.writer, v.macro_mode, v.content
+                FROM versions v JOIN slots s ON s.id = v.slot_id
+                WHERE s.chat_id = ${chatId}
+                  AND ${match === null ? sql`1` : sql`(v.seq IN (SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${match}) OR v.macro_mode = 'template')`}
+                  AND ${onPath} AND ${shown}
+                ORDER BY s.depth DESC LIMIT ${limit}`
         return rows.map((r) => ({
           position: r.position,
           speakerEntityId: r.speaker,
