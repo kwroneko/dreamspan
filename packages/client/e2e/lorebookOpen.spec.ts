@@ -123,7 +123,7 @@ for (const width of [1440, 390]) {
       await expect(editor.getByRole("button", { name: `Open ${entry}`, exact: true })).toBeInViewport()
       // Not the card's definition.
       await expect(editor.getByRole("textbox", { name: "Description", exact: true })).toHaveCount(0)
-      await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
+      await expect(page).toHaveURL(new RegExp(`/library/.*chat=${chat.id}`))
       if (shots) await page.screenshot({ path: `${shots}/lorebook-open-${book.split(" ")[0]}-${width}.png` })
       await editor.getByRole("button", { name: "Close", exact: true }).click()
       await expect(editor).toHaveCount(0)

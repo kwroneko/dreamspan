@@ -59,7 +59,7 @@ for (const width of [1440, 390]) {
     )[0]!
     await page
       .getByRole("main")
-      .getByRole("button", {
+      .getByRole("link", {
         name: `Open ${character.card.label}`,
         exact: true
       })
@@ -101,7 +101,7 @@ for (const width of [1440, 390]) {
     await expect.poll(() => new URL(page.url()).searchParams.get("side")).toBe("characters")
     expect(new URL(page.url()).pathname).toBe(before)
     await page
-      .getByRole("button", {
+      .getByRole("link", {
         name: `Open ${character.card.label}`,
         exact: true
       })
@@ -226,7 +226,7 @@ for (const width of [1440, 390]) {
       await expect(
         page
           .getByRole("tabpanel")
-          .getByRole("button", { name: /^Open .+ in the full editor$/ })
+          .getByRole("link", { name: /^Open .+ in the full editor$/ })
           .first()
       ).toBeVisible()
       await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
@@ -272,7 +272,7 @@ for (const width of [1440, 390]) {
       const unused = data.cards.find((c) => !c.card.chats)!
       await page
         .getByRole("main")
-        .getByRole("button", {
+        .getByRole("link", {
           name: `Open ${unused.card.label}`,
           exact: true
         })

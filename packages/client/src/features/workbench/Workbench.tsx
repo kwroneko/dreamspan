@@ -24,6 +24,7 @@ import { buildRouter } from "../../routes.tsx"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { useCaller } from "../editor/caller.ts"
+import { Away } from "../../ui/away.ts"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
@@ -210,7 +211,12 @@ function TabHost({ tab, store, target }: { tab: Tab; store: WorkbenchStore; targ
     element.dataset["workbenchTab"] = tab.id
     return element
   })
-  const [history] = useState(() => createMemoryHistory({ initialEntries: [tab.href] }))
+  const [history] = useState(() => {
+    const from = store.takeOpenedFrom(tab.id)
+    return createMemoryHistory(
+      from ? { initialEntries: [from, tab.href], initialIndex: 1 } : { initialEntries: [tab.href] }
+    )
+  })
   const [router] = useState(() => buildRouter({ history, layouts: { app: CenterPage } }))
   useLayoutEffect(() => store.attach(tab.id, history), [store, tab.id, history])
   useLayoutEffect(
@@ -236,10 +242,23 @@ function TabHost({ tab, store, target }: { tab: Tab; store: WorkbenchStore; targ
     }
   }, [target, container])
   useEffect(() => () => container.remove(), [container])
+  // An editor's tab is a region named for it, its header included (useTabRegion).
+  const region = useMeta(store, tab.id)?.region
+  useLayoutEffect(() => {
+    if (region) {
+      container.setAttribute("role", "region")
+      container.setAttribute("aria-label", region)
+    } else {
+      container.removeAttribute("role")
+      container.removeAttribute("aria-label")
+    }
+  }, [container, region])
   // Editing what a tab shows keeps it open (VS Code's preview rule): typing in an editor or a
-  // chat's composer. Searching a list isn't editing it.
+  // chat's composer. Searching a list or filling a page's form isn't editing a document.
   useEffect(() => {
     const edit = (event: Event) => {
+      const href = allTabs(store.snapshot()).find((t) => t.id === tab.id)?.href
+      if (!href || !tabKind(href)?.document) return
       const target = event.target
       if (target instanceof HTMLInputElement && target.type === "search") return
       if (target instanceof Element && target.closest('[role="search"], [role="searchbox"], [role="combobox"]')) return
@@ -250,7 +269,9 @@ function TabHost({ tab, store, target }: { tab: Tab; store: WorkbenchStore; targ
   }, [container, store, tab.id])
   return createPortal(
     <TabContext value={{ tabId: tab.id, store }}>
-      <RouterProvider router={router} />
+      <Away value={target === null}>
+        <RouterProvider router={router} />
+      </Away>
     </TabContext>,
     container
   )
@@ -620,7 +641,16 @@ function TabButton({
           className="flex h-full min-w-0 flex-1 items-center gap-1.5 ps-2 pe-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
         >
           <TabIcon tab={tab} store={store} />
-          <span className={`min-w-0 truncate ${tab.preview ? "italic" : ""}`}>{title}</span>
+          {/* As wide as the title in either style: keeping a preview moves nothing after it. */}
+          <span className="grid min-w-0">
+            <span className={`col-start-1 row-start-1 min-w-0 truncate ${tab.preview ? "italic" : ""}`}>{title}</span>
+            <span
+              aria-hidden="true"
+              className={`invisible col-start-1 row-start-1 min-w-0 truncate ${tab.preview ? "" : "italic"}`}
+            >
+              {title}
+            </span>
+          </span>
         </button>
       </Tooltip>
       <IconButton

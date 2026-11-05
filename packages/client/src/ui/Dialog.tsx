@@ -5,6 +5,7 @@ import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { useRef, type ReactNode } from "react"
 import { Button } from "./Button.tsx"
 import { WindowClose } from "./WindowClose.tsx"
+import { useAway } from "./away.ts"
 
 const backdrop =
   "fixed inset-0 z-40 min-h-dvh bg-overlay transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none supports-[-webkit-touch-callout:none]:absolute"
@@ -40,6 +41,7 @@ export function Dialog({
   children: ReactNode
 }) {
   const content = useRef<HTMLDivElement>(null)
+  const away = useAway()
   const focusOnOpen = () => {
     if (initialFocus) return initialFocus() ?? true
     const root = content.current
@@ -69,7 +71,7 @@ export function Dialog({
     </>
   )
   return (
-    <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
+    <BaseDialog.Root open={open && !away} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal>
         <BaseDialog.Backdrop className={backdrop} />
         <BaseDialog.Popup
@@ -122,8 +124,9 @@ export function ConfirmDialog({
   /** Extra content, such as an error from the last attempt. */
   children?: ReactNode
 }) {
+  const away = useAway()
   return (
-    <BaseAlertDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
+    <BaseAlertDialog.Root open={open && !away} onOpenChange={(next) => onOpenChange(next)}>
       <BaseAlertDialog.Portal>
         <BaseAlertDialog.Backdrop className={backdrop} />
         <BaseAlertDialog.Popup data-layout-overlay="Confirmation dialog covers the page" className={popup}>

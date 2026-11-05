@@ -68,7 +68,7 @@ test("home tiles in a row are one height, their last lines aligned", async ({ pa
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
   const grid = page.getByRole("main").getByLabel("Characters", { exact: true })
-  const tile = (label: string) => grid.getByRole("button", { name: new RegExp(`^Open ${label}`) })
+  const tile = (label: string) => grid.getByRole("link", { name: new RegExp(`^Open ${label}`) })
   await expect(tile("Plain")).toBeVisible()
   const boxes = await Promise.all(["Wren", "Plain", "Other"].map((label) => tile(label).boundingBox()))
   expect(new Set(boxes.map((b) => Math.round(b!.y))).size).toBe(1)

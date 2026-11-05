@@ -16,11 +16,11 @@ import { useSession } from "../../session.ts"
 import { UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
 import { CastContext, type CastView } from "../chat/cast.ts"
 import type { ChatSession, ChatView } from "../chat/session.ts"
-import { useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
+import { useTabRegion, useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
 import { useCaller } from "./caller.ts"
 import { browserEnv } from "./backup.ts"
 import { EditorStore } from "./store.ts"
-import { workspaceViews } from "./workspaceViews.ts"
+import { boundEditorSurroundings, workspaceViews } from "./workspaceViews.ts"
 /** The chat the workspace is in, for what a card's save offers after it (a rename in the history). */
 interface WorkspaceChat {
   readonly chatId: string
@@ -168,6 +168,37 @@ const subscribeLive = (listener: () => void) => {
 }
 const useLiveChat = (chatId: string) => useSyncExternalStore(subscribeLive, () => liveShown.get(chatId) ?? null)
 
+/**
+ * An editor, named as a region: in a workbench tab the tab is the region, so its header (the
+ * switcher, Save, Close) is inside it; elsewhere this section is.
+ */
+export function Region({ label, className, children }: { label: string; className: string; children: ReactNode }) {
+  const inTab = useTabRegion(label)
+  return inTab ? (
+    <div className={className}>{children}</div>
+  ) : (
+    <section aria-label={label} className={className}>
+      {children}
+    </section>
+  )
+}
+
+/**
+ * An editor opened from a chat scrolls on its own, below the tab's header, with the padding
+ * and the sticky toolbar's place the chat's large editors had (searchNavigation.ts).
+ */
+export function BoundScroll({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-(--scroll-pad) [--scroll-pad:0.75rem] sm:[--scroll-pad:1rem]"
+      data-testid="preset-scroll"
+      data-preset-scroll
+    >
+      {children}
+    </div>
+  )
+}
+
 /** An entry's editor, as a tab of its own: bound to the chat it's opened from (live.ts). */
 export const editorHref = (ref: RefId, focus: string | undefined, chat: WorkspaceChat | undefined) => {
   const params = new URLSearchParams()
@@ -207,12 +238,14 @@ export function ChatBoundEditor({
   if (!live) return children({ store: undefined, context: undefined, current: undefined, session: undefined })
   const registered = focus === undefined ? undefined : views.entries.find((v) => v.id === focus)
   const content = registered ? (
-    <section aria-label={registered.label} className="contents">
-      <LiveView
-        session={live.session}
-        render={(view) => <registered.component refId={refId} onClose={onClose} session={live.session} view={view} />}
-      />
-    </section>
+    <Region label={registered.label} className="flex min-h-0 flex-1 flex-col">
+      <BoundScroll>
+        <LiveView
+          session={live.session}
+          render={(view) => <registered.component refId={refId} onClose={onClose} session={live.session} view={view} />}
+        />
+      </BoundScroll>
+    </Region>
   ) : (
     children({
       store: live.workspace.store(refId),
@@ -223,9 +256,30 @@ export function ChatBoundEditor({
   )
   return (
     <Context value={live.workspace}>
-      <CastContext value={live.cast}>{content}</CastContext>
+      <CastContext value={live.cast}>
+        <Surroundings cast={live.cast}>{content}</Surroundings>
+      </CastContext>
     </Context>
   )
+}
+
+/** The chat's surroundings for its editor's tab (`boundEditorSurroundings`). */
+function Surroundings({ cast, children }: { cast: CastView; children: ReactNode }) {
+  const snapshot = useSyncExternalStore(
+    boundEditorSurroundings.subscribe,
+    boundEditorSurroundings.snapshot,
+    boundEditorSurroundings.snapshot
+  )
+  return [...snapshot.entries]
+    .sort((a, b) => b.order - a.order)
+    .reduce<ReactNode>(
+      (inner, entry) => (
+        <entry.component key={entry.id} cast={cast}>
+          {inner}
+        </entry.component>
+      ),
+      children
+    )
 }
 
 function LiveView({ session, render }: { session: ChatSession; render: (view: ChatView) => ReactNode }) {

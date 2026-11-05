@@ -8,6 +8,7 @@ import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
+import { Away, useAway } from "../../ui/away.ts"
 import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
 import { UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
 import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
@@ -332,7 +333,8 @@ export function ChatSidePanel({
       {panels}
     </aside>
   )
-  return host ? createPortal(aside, host) : aside
+  // Shown beside the frames even while this chat's tab is behind another (its editor's, say).
+  return host ? createPortal(<Away value={false}>{aside}</Away>, host) : aside
 }
 /**
  * The side panel's tab: the URL's, else on a wide screen the one this browser last had open
@@ -400,6 +402,13 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
     },
     [navigate, userId]
   )
+  // A phone's sheet covers everything: once this chat's tab is behind another (an editor opened
+  // from it, or a resize below the breakpoint while it was) the sheet closes rather than coming
+  // back over the chat, as opening a large editor from it closes it.
+  const away = useAway()
+  useEffect(() => {
+    if (!wide && away && latest.current.panel !== null) show(null)
+  }, [wide, away, show])
   /** Search params that keep the panel's tab: the one shown when the call is made. */
   const withPanel = useCallback(
     (search: Record<string, string>) => {

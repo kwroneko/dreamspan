@@ -22,7 +22,7 @@ export const centerColumn = defineSlot<Record<string, never>>("shell.center")
 // The app shell: it lets nobody past without a session (the server decides; this only
 // routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
+import { Link, Outlet, useLocation, useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../actions.tsx"
@@ -402,7 +402,10 @@ function AppShell() {
 export function CenterPage() {
   const pathname = useLocation({ select: (location) => location.pathname })
   const fill = /^\/(?:chats\/[^/]+|cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.test(pathname)
+  // An editor opened from a chat scrolls itself, as the chat's large editors did (BoundScroll).
+  const bound = useSearch({ strict: false, select: (search) => typeof search.chat === "string" && search.chat !== "" })
   if (fill) return <Outlet />
+  const own = bound && pathname.startsWith("/library/")
   return (
     <CenterHeaderHost
       leading={
@@ -418,11 +421,17 @@ export function CenterPage() {
         </>
       }
     >
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-5xl px-4 py-6">
+      {own ? (
+        <div className="flex min-h-0 flex-1 flex-col">
           <Outlet />
         </div>
-      </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-5xl px-4 py-6">
+            <Outlet />
+          </div>
+        </div>
+      )}
     </CenterHeaderHost>
   )
 }

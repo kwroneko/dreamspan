@@ -161,13 +161,13 @@ test("chat navigation shares reads and still refreshes after writes", async ({ p
     await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
   }
   const navigate = async (id: string) => {
-    await page.locator(`button[data-chat-id="${id}"]`).first().click()
+    await page.locator(`[data-chat-id="${id}"]`).first().click()
     await expect(page).toHaveURL(new RegExp(`/chats/${id}`))
     await ready()
   }
   for (let i = 0; i < (work ? 5 : 1); i++) {
     await page.goto(`${server().url}/?side=chats`)
-    await expect(page.locator(`button[data-chat-id="${fixture.chats[0]}"]`).first()).toBeVisible()
+    await expect(page.locator(`[data-chat-id="${fixture.chats[0]}"]`).first()).toBeVisible()
     await settle()
     const opened = await measure("open chat", () => navigate(fixture.chats[0]!))
     if (!process.env.READ_COUNTS_RECORD) {

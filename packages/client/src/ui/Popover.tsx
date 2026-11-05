@@ -6,6 +6,7 @@ import { useRef, type ReactNode, type RefObject } from "react"
 import { buttonClass } from "./Button.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 import { WindowClose } from "./WindowClose.tsx"
+import { useAway } from "./away.ts"
 
 export function Popover({
   open,
@@ -58,6 +59,7 @@ export function Popover({
         !element.closest("[hidden], [inert]") &&
         element.getClientRects().length > 0
     ) ?? true
+  const away = useAway()
   const button = (
     <BasePopover.Trigger
       aria-label={triggerLabel}
@@ -69,7 +71,7 @@ export function Popover({
     </BasePopover.Trigger>
   )
   return (
-    <BasePopover.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
+    <BasePopover.Root open={open && !away} onOpenChange={(next) => onOpenChange(next)}>
       {hint === undefined ? (
         button
       ) : (

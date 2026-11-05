@@ -83,7 +83,8 @@ test.beforeEach(async ({ page }) => {
 })
 const open = async (page: Page, extra = "") => {
   await page.goto(`${server().url}/chats/${chat}?fork=${fork}${extra}`)
-  await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
+  // A link from before tabs (`?editor=`) opens the editor in a tab of its own, over the chat's.
+  if (!extra.includes("editor=")) await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
 }
 const reload = async (page: Page) => {
   const url = page.url()
@@ -244,7 +245,7 @@ test("library: kind, search, filter, sort, direction and view reload, with histo
 
 test("settings: section path survives reload and Back/Forward", async ({ page }) => {
   await page.goto(`${server().url}/settings/chats`)
-  await expect(page.getByRole("heading", { name: "Chats", exact: true })).toBeVisible()
+  await expect(page.getByRole("main").getByRole("heading", { name: "Chats", exact: true })).toBeVisible()
   await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Interface", exact: true }).click()
   await reload(page)
   await expect(page).toHaveURL(/\/settings\/interface$/)

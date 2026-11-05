@@ -24,7 +24,7 @@ import {
 } from "./cardSections.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -47,7 +47,7 @@ import { CARD_TAB_LOREBOOK } from "./cardTabs.ts"
 import { StorePortrait } from "./PortraitControls.tsx"
 import { EnsurePortraitViewer } from "../../ui/Portrait.tsx"
 import { useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
-import { ChatBoundEditor } from "./PresetWorkspace.tsx"
+import { BoundScroll, ChatBoundEditor, Region } from "./PresetWorkspace.tsx"
 import { NoteFields } from "./notes.tsx"
 import { workspaceViews } from "./workspaceViews.ts"
 import { PresetEditor } from "./PresetEditor.tsx"
@@ -258,6 +258,8 @@ export function Editor({
     </div>
   )
 
+  // Opened from a chat, it scrolls on its own below the tab's header.
+  const Scroll = onClose ? BoundScroll : Fragment
   // Named for what it edits, as a region of the page (a tab of its own in the workbench).
   const region =
     ref.kind === "lorebook" || bookOnly
@@ -271,296 +273,298 @@ export function Editor({
             : "Editor"
   return (
     <SearchNavigation value={searchMatch}>
-      <section aria-label={region} className="contents">
-        <div ref={root} className="flex flex-col gap-6">
-          <header
-            className={
-              onClose && ref.kind === "preset" && variants.length <= 1 && !ref.subtitle
-                ? "hidden"
-                : "flex flex-col gap-1"
-            }
-          >
-            {onClose ? null : ref.chatId !== null ? (
-              <span className="text-sm">
-                <OverrideChat chatId={ref.chatId} prefix="← Back to " />
-              </span>
-            ) : (
-              <Tooltip label="Returns to the library.">
-                <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
-                  ← Library
-                </Link>
-              </Tooltip>
-            )}
-            {/* Identity and document actions go to the column header. A card's names retain
-              their rename questions (CardNameHeader). */}
-            {ref.kind === "card" && !bookOnly ? (
-              <CardHeader
-                portrait={
-                  <StorePortrait
-                    store={store}
-                    call={call}
-                    id={ref.entityId}
-                    badge={
-                      cast.cast?.playedByMe.includes(ref.entityId) ? (
-                        <PersonaBadge played portrait />
-                      ) : AsyncResult.isSuccess(shell) &&
-                        shell.value.personas.some((p) => p.card.entityId === ref.entityId) ? (
-                        <PersonaBadge portrait />
-                      ) : undefined
-                    }
-                  />
-                }
-              >
-                <CardNameHeader
-                  saveControls={
-                    <SaveRevision
-                      store={store}
-                      shownNameClash={clash}
-                      onSaved={(saved) => setNotice(savedNotice(saved))}
-                    />
-                  }
-                  store={store}
-                  call={call}
-                  current={current}
-                  heading="h1"
-                  centerTitle={<DocumentSwitcher refId={ref.id} label={workingName || ref.label} kind="card" />}
-                  centerAfter={onClose && <WindowClose onClick={onClose} />}
-                  after={<CardFavourite entityId={ref.entityId} />}
-                />
-                <CardTokensRow store={store} entityId={ref.entityId} label={ref.label} />
-              </CardHeader>
-            ) : (
-              <CenterHeaderContent>
-                <div data-editor-header className="flex w-full min-w-0 items-center justify-between gap-2">
-                  <div className="min-w-0 flex-1">{title("text-base")}</div>
-                  <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
-                  {onClose && <WindowClose onClick={onClose} />}
-                </div>
-              </CenterHeaderContent>
-            )}
-            {ref.kind === "card" && !bookOnly && <CardSurface placement="provenance" entityId={ref.entityId} />}
-            {ref.subtitle && ref.kind !== "card" && !bookOnly && (
-              <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>
-            )}
-            <p className="text-sm text-muted">
-              {bookOnly ? (
-                // The book is part of the card's document: saved, versioned and exported with it.
-                <>
-                  {ref.label}'s own lorebook.{" "}
-                  <Tooltip label="Shows every card field.">
-                    <button
-                      type="button"
-                      className="text-accent underline-offset-4 hover:underline"
-                      onClick={() => {
-                        setBookView(false)
-                        setCardTab(CARD_TAB_LOREBOOK)
-                      }}
-                    >
-                      Show the whole card
-                    </button>
-                  </Tooltip>
-                </>
-              ) : ref.kind === "preset" ? null : ref.chatId !== null ? (
-                // A chat override (DESIGN §4): this chat's own version of the entry.
-                <>
-                  Only <OverrideChat chatId={ref.chatId} /> uses this version; the original's later changes still reach
-                  it where you haven't edited the same text.
-                </>
-              ) : ref.kind === "lorebook" ? (
-                addedTo(usedByChats)
-              ) : ref.kind === "card" ? (
-                <Tooltip label="Shows this card's chats.">
-                  <Link
-                    to="/cards/$entityId"
-                    params={{ entityId: ref.entityId }}
-                    className="text-accent underline-offset-4 hover:underline"
-                  >
-                    {usedBy(usedByChats)}
+      <Region label={region} className={onClose ? "flex min-h-0 flex-1 flex-col" : "contents"}>
+        <Scroll>
+          <div ref={root} className="flex flex-col gap-6">
+            <header
+              className={
+                onClose && ref.kind === "preset" && variants.length <= 1 && !ref.subtitle
+                  ? "hidden"
+                  : "flex flex-col gap-1"
+              }
+            >
+              {onClose ? null : ref.chatId !== null ? (
+                <span className="text-sm">
+                  <OverrideChat chatId={ref.chatId} prefix="← Back to " />
+                </span>
+              ) : (
+                <Tooltip label="Returns to the library.">
+                  <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
+                    ← Library
                   </Link>
                 </Tooltip>
-              ) : (
-                usedBy(usedByChats)
               )}
-            </p>
-            <RefVariants store={store} />
-          </header>
-
-          <div
-            ref={toolbar}
-            // Whether typing is still on its way to the server: for tests, never shown.
-            data-keeping={state.saving ? "true" : "false"}
-            data-layout-overlay="Sticky editor toolbar covers scrolled document content"
-            className="sticky top-[calc(var(--scroll-pad,0px)*-1)] z-10 flex flex-col gap-2 border-b border-border bg-canvas/95 py-2 backdrop-blur"
-          >
-            {ref.kind === "preset" ? (
-              <div ref={setPresetToolbar} />
-            ) : (
-              <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
-                <SearchReplaceButton
-                  ref={searchButton}
-                  open={searching}
-                  controls="editor-search"
-                  onClick={() => setSearching(!searching)}
-                />
-                <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
-                  History
-                </Button>
-                {ref.kind === "card" && (
-                  <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
-                )}
-                {ref.kind !== "card" ? (
-                  ref.kind !== "note" &&
-                  ref.refKind !== "chat_override" && (
-                    <Button
-                      hint="A named copy with its own changes, which still gets this one's updates."
-                      onClick={() => setOpen("fork")}
-                    >
-                      Make a variant
-                    </Button>
-                  )
-                ) : (
-                  // What's used less, grouped; each opens its own dialog.
-                  <Popover
-                    open={more}
-                    onOpenChange={setMore}
-                    trigger={
-                      <span className="flex items-center gap-1">
-                        More
-                        <Icon name="down" />
-                      </span>
+              {/* Identity and document actions go to the column header. A card's names retain
+              their rename questions (CardNameHeader). */}
+              {ref.kind === "card" && !bookOnly ? (
+                <CardHeader
+                  portrait={
+                    <StorePortrait
+                      store={store}
+                      call={call}
+                      id={ref.entityId}
+                      badge={
+                        cast.cast?.playedByMe.includes(ref.entityId) ? (
+                          <PersonaBadge played portrait />
+                        ) : AsyncResult.isSuccess(shell) &&
+                          shell.value.personas.some((p) => p.card.entityId === ref.entityId) ? (
+                          <PersonaBadge portrait />
+                        ) : undefined
+                      }
+                    />
+                  }
+                >
+                  <CardNameHeader
+                    saveControls={
+                      <SaveRevision
+                        store={store}
+                        shownNameClash={clash}
+                        onSaved={(saved) => setNotice(savedNotice(saved))}
+                      />
                     }
-                    triggerLabel="More actions"
-                    title="More actions"
-                    triggerClassName={buttonClass("secondary")}
-                    side="bottom"
-                    align="end"
-                    keepMounted
-                  >
-                    <div
-                      className="flex flex-col items-stretch gap-1 *:justify-start [&_button]:w-full [&_button]:justify-start"
-                      onClickCapture={() => setMore(false)}
+                    store={store}
+                    call={call}
+                    current={current}
+                    heading="h1"
+                    centerTitle={<DocumentSwitcher refId={ref.id} label={workingName || ref.label} kind="card" />}
+                    centerAfter={onClose && <WindowClose onClick={onClose} />}
+                    after={<CardFavourite entityId={ref.entityId} />}
+                  />
+                  <CardTokensRow store={store} entityId={ref.entityId} label={ref.label} />
+                </CardHeader>
+              ) : (
+                <CenterHeaderContent>
+                  <div data-editor-header className="flex w-full min-w-0 items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">{title("text-base")}</div>
+                    <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
+                    {onClose && <WindowClose onClick={onClose} />}
+                  </div>
+                </CenterHeaderContent>
+              )}
+              {ref.kind === "card" && !bookOnly && <CardSurface placement="provenance" entityId={ref.entityId} />}
+              {ref.subtitle && ref.kind !== "card" && !bookOnly && (
+                <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>
+              )}
+              <p className="text-sm text-muted">
+                {bookOnly ? (
+                  // The book is part of the card's document: saved, versioned and exported with it.
+                  <>
+                    {ref.label}'s own lorebook.{" "}
+                    <Tooltip label="Shows every card field.">
+                      <button
+                        type="button"
+                        className="text-accent underline-offset-4 hover:underline"
+                        onClick={() => {
+                          setBookView(false)
+                          setCardTab(CARD_TAB_LOREBOOK)
+                        }}
+                      >
+                        Show the whole card
+                      </button>
+                    </Tooltip>
+                  </>
+                ) : ref.kind === "preset" ? null : ref.chatId !== null ? (
+                  // A chat override (DESIGN §4): this chat's own version of the entry.
+                  <>
+                    Only <OverrideChat chatId={ref.chatId} /> uses this version; the original's later changes still
+                    reach it where you haven't edited the same text.
+                  </>
+                ) : ref.kind === "lorebook" ? (
+                  addedTo(usedByChats)
+                ) : ref.kind === "card" ? (
+                  <Tooltip label="Shows this card's chats.">
+                    <Link
+                      to="/cards/$entityId"
+                      params={{ entityId: ref.entityId }}
+                      className="text-accent underline-offset-4 hover:underline"
                     >
-                      <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
-                    </div>
-                  </Popover>
+                      {usedBy(usedByChats)}
+                    </Link>
+                  </Tooltip>
+                ) : (
+                  usedBy(usedByChats)
                 )}
-              </div>
-            )}
-            {clash && (
-              <p role="status" className="text-sm text-muted">
-                {clash}
               </p>
-            )}
-            {ref.kind === "preset" && <HeldChangesBar store={store} />}
-            {ref.kind !== "preset" && searching && (
-              <SearchDialog
-                store={store}
-                inline
-                idPrefix="editor-search"
-                scopes={scopes}
-                onReveal={setSearchMatch}
-                onClose={() => {
-                  setSearching(false)
-                  searchButton.current?.focus()
-                }}
+              <RefVariants store={store} />
+            </header>
+
+            <div
+              ref={toolbar}
+              // Whether typing is still on its way to the server: for tests, never shown.
+              data-keeping={state.saving ? "true" : "false"}
+              data-layout-overlay="Sticky editor toolbar covers scrolled document content"
+              className="sticky top-[calc(var(--scroll-pad,0px)*-1)] z-10 flex flex-col gap-2 border-b border-border bg-canvas/95 py-2 backdrop-blur"
+            >
+              {ref.kind === "preset" ? (
+                <div ref={setPresetToolbar} />
+              ) : (
+                <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
+                  <SearchReplaceButton
+                    ref={searchButton}
+                    open={searching}
+                    controls="editor-search"
+                    onClick={() => setSearching(!searching)}
+                  />
+                  <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
+                    History
+                  </Button>
+                  {ref.kind === "card" && (
+                    <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
+                  )}
+                  {ref.kind !== "card" ? (
+                    ref.kind !== "note" &&
+                    ref.refKind !== "chat_override" && (
+                      <Button
+                        hint="A named copy with its own changes, which still gets this one's updates."
+                        onClick={() => setOpen("fork")}
+                      >
+                        Make a variant
+                      </Button>
+                    )
+                  ) : (
+                    // What's used less, grouped; each opens its own dialog.
+                    <Popover
+                      open={more}
+                      onOpenChange={setMore}
+                      trigger={
+                        <span className="flex items-center gap-1">
+                          More
+                          <Icon name="down" />
+                        </span>
+                      }
+                      triggerLabel="More actions"
+                      title="More actions"
+                      triggerClassName={buttonClass("secondary")}
+                      side="bottom"
+                      align="end"
+                      keepMounted
+                    >
+                      <div
+                        className="flex flex-col items-stretch gap-1 *:justify-start [&_button]:w-full [&_button]:justify-start"
+                        onClickCapture={() => setMore(false)}
+                      >
+                        <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
+                      </div>
+                    </Popover>
+                  )}
+                </div>
+              )}
+              {clash && (
+                <p role="status" className="text-sm text-muted">
+                  {clash}
+                </p>
+              )}
+              {ref.kind === "preset" && <HeldChangesBar store={store} />}
+              {ref.kind !== "preset" && searching && (
+                <SearchDialog
+                  store={store}
+                  inline
+                  idPrefix="editor-search"
+                  scopes={scopes}
+                  onReveal={setSearchMatch}
+                  onClose={() => {
+                    setSearching(false)
+                    searchButton.current?.focus()
+                  }}
+                />
+              )}
+            </div>
+
+            {state.saveError && (
+              <ErrorAlert
+                error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
               />
             )}
-          </div>
-
-          {state.saveError && (
-            <ErrorAlert
-              error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
-            />
-          )}
-          <RestoredNotice count={state.restored} />
-          <RecoveredNotice store={store} />
-          {notice && (
-            <Alert
-              tone="success"
-              actions={
-                <Button hint="Dismisses this notice." variant="ghost" onClick={() => setNotice(null)}>
-                  Dismiss
-                </Button>
-              }
-            >
-              <p>{notice}</p>
-            </Alert>
-          )}
-          {ref.updateAvailable && (
-            <Alert
-              tone="warning"
-              title={
-                ref.refKind === "upstream"
-                  ? "A newer version of the file was imported"
-                  : "What this variant follows changed"
-              }
-              actions={
-                <Button hint="Opens the source update for review." onClick={() => setOpen("update")}>
-                  Review the update
-                </Button>
-              }
-            >
-              <p>It isn't in this {KINDS[ref.kind]} yet.</p>
-            </Alert>
-          )}
-
-          {bookOnly && <SlotOutlet slot={cardEditorSections} props={{ store, call }} only={CARD_LOREBOOK_SECTION} />}
-          {ref.kind === "card" && !bookOnly && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
-          {ref.kind === "card" && !bookOnly && (
-            <CardEditor
-              store={store}
-              call={call}
-              layout="page"
-              {...(cardTab ? { initial: cardTab, reveal: true } : {})}
-              onOpenBook={() => setBookView(true)}
-            />
-          )}
-          {ref.kind === "preset" && (
-            <PresetEditor
-              store={store}
-              call={call}
-              context={context}
-              focus={focus}
-              toolbarTarget={presetToolbar}
-              onSearchReveal={setSearchMatch}
-              toolbarEnd={
-                <>
-                  <Button
-                    className="h-8! px-2!"
-                    aria-label="History"
-                    hint="Every saved revision, to compare or restore."
-                    onClick={() => setOpen("history")}
-                  >
-                    <Icon name="history" />
-                    <span>History</span>
+            <RestoredNotice count={state.restored} />
+            <RecoveredNotice store={store} />
+            {notice && (
+              <Alert
+                tone="success"
+                actions={
+                  <Button hint="Dismisses this notice." variant="ghost" onClick={() => setNotice(null)}>
+                    Dismiss
                   </Button>
-                  {ref.refKind !== "chat_override" && (
+                }
+              >
+                <p>{notice}</p>
+              </Alert>
+            )}
+            {ref.updateAvailable && (
+              <Alert
+                tone="warning"
+                title={
+                  ref.refKind === "upstream"
+                    ? "A newer version of the file was imported"
+                    : "What this variant follows changed"
+                }
+                actions={
+                  <Button hint="Opens the source update for review." onClick={() => setOpen("update")}>
+                    Review the update
+                  </Button>
+                }
+              >
+                <p>It isn't in this {KINDS[ref.kind]} yet.</p>
+              </Alert>
+            )}
+
+            {bookOnly && <SlotOutlet slot={cardEditorSections} props={{ store, call }} only={CARD_LOREBOOK_SECTION} />}
+            {ref.kind === "card" && !bookOnly && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
+            {ref.kind === "card" && !bookOnly && (
+              <CardEditor
+                store={store}
+                call={call}
+                layout="page"
+                {...(cardTab ? { initial: cardTab, reveal: true } : {})}
+                onOpenBook={() => setBookView(true)}
+              />
+            )}
+            {ref.kind === "preset" && (
+              <PresetEditor
+                store={store}
+                call={call}
+                context={context}
+                focus={focus}
+                toolbarTarget={presetToolbar}
+                onSearchReveal={setSearchMatch}
+                toolbarEnd={
+                  <>
                     <Button
                       className="h-8! px-2!"
-                      aria-label="Make a variant"
-                      hint="Makes a named copy with its own changes."
-                      onClick={() => setOpen("fork")}
+                      aria-label="History"
+                      hint="Every saved revision, to compare or restore."
+                      onClick={() => setOpen("history")}
                     >
-                      <Icon name="branch" />
-                      <span>Make a variant</span>
+                      <Icon name="history" />
+                      <span>History</span>
                     </Button>
-                  )}
-                </>
-              }
-            />
-          )}
-          {ref.kind === "note" && (
-            <Card>
-              <NoteFields store={store} />
-            </Card>
-          )}
-          {ref.kind === "lorebook" && <SlotOutlet slot={lorebookEditorSections} props={{ store, call }} />}
+                    {ref.refKind !== "chat_override" && (
+                      <Button
+                        className="h-8! px-2!"
+                        aria-label="Make a variant"
+                        hint="Makes a named copy with its own changes."
+                        onClick={() => setOpen("fork")}
+                      >
+                        <Icon name="branch" />
+                        <span>Make a variant</span>
+                      </Button>
+                    )}
+                  </>
+                }
+              />
+            )}
+            {ref.kind === "note" && (
+              <Card>
+                <NoteFields store={store} />
+              </Card>
+            )}
+            {ref.kind === "lorebook" && <SlotOutlet slot={lorebookEditorSections} props={{ store, call }} />}
 
-          {open === "history" && <RevisionsDialog store={store} call={call} onClose={() => setOpen(null)} />}
-          {open === "fork" && <ForkDialog store={store} onClose={() => setOpen(null)} />}
-          {open === "update" && <UpdateDialog store={store} call={call} onClose={() => setOpen(null)} />}
-        </div>
-      </section>
+            {open === "history" && <RevisionsDialog store={store} call={call} onClose={() => setOpen(null)} />}
+            {open === "fork" && <ForkDialog store={store} onClose={() => setOpen(null)} />}
+            {open === "update" && <UpdateDialog store={store} call={call} onClose={() => setOpen(null)} />}
+          </div>
+        </Scroll>
+      </Region>
     </SearchNavigation>
   )
 }
@@ -584,7 +588,9 @@ export function EditorPage() {
         <ChatBoundEditor key={refId} refId={refId as RefId} focus={shownFocus} chatId={chat} onClose={close}>
           {(bound) =>
             own && !bound.session ? (
-              <own.component refId={refId as RefId} />
+              <BoundScroll>
+                <own.component refId={refId as RefId} />
+              </BoundScroll>
             ) : (
               <Editor
                 refId={refId as RefId}

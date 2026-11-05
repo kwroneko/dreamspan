@@ -14,6 +14,11 @@ export interface TabKind {
   /** The tab's title until its view names itself (`useTitle`). */
   readonly title?: (url: URL) => string
   readonly icon?: IconName
+  /**
+   * A document (a chat, an editor): typing in it keeps its preview tab open. Typing in a page's
+   * forms and filters doesn't.
+   */
+  readonly document?: boolean
   /** The URL as saved in the layout, or null to leave the tab out of it. By default, as is. */
   readonly persist?: (url: URL) => string | null
 }

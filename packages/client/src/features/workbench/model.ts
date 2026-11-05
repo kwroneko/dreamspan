@@ -165,8 +165,8 @@ export interface OpenOptions {
 
 /**
  * Opens an item: an open tab with the same item is focused and shown at `href`; else the
- * item opens in the frame, in place of its preview tab (VS Code reuses the preview's place
- * for any open), else beside the shown tab.
+ * item opens in the frame's preview tab, which keeps its id (VS Code reuses the preview for
+ * any open), else in a new tab beside the shown one.
  */
 export const openTab = (layout: Layout, href: string, keyOf: KeyOf, options: OpenOptions = {}): Layout => {
   const preview = options.preview ?? true
@@ -178,20 +178,22 @@ export const openTab = (layout: Layout, href: string, keyOf: KeyOf, options: Ope
     return options.background ? next : focusTab(next, existing.id)
   }
   const target = (options.frame && findFrame(layout, options.frame)) || focusedFrame(layout)
-  const tab: Tab = { id: options.id ?? newId("t"), href, preview }
+  // The preview tab takes the item in place (the same tab, as navigating did before tabs).
+  const reused = target.tabs.find((t) => t.preview)
+  const tab: Tab = { id: reused?.id ?? options.id ?? newId("t"), href, preview }
   const next = updateFrames(layout, (f) => {
     if (f.id !== target.id) return f
     const previewAt = f.tabs.findIndex((t) => t.preview)
     if (previewAt >= 0) {
       const tabs = [...f.tabs]
       tabs[previewAt] = tab
-      return { ...f, tabs, active: options.background && f.active !== tabs[previewAt]?.id ? f.active : tab.id }
+      return { ...f, tabs, active: options.background && f.active !== tab.id ? f.active : tab.id }
     }
     const at = f.tabs.findIndex((t) => t.id === f.active)
     const tabs = [...f.tabs.slice(0, at + 1), tab, ...f.tabs.slice(at + 1)]
     return { ...f, tabs, active: options.background && f.active ? f.active : tab.id }
   })
-  if (options.background) return { ...next, recent: [...next.recent, tab.id] }
+  if (options.background) return reused ? next : { ...next, recent: [...next.recent, tab.id] }
   return focusTab(next, tab.id)
 }
 
@@ -375,7 +377,11 @@ export const restoreLayout = (value: unknown, accept: (href: string) => boolean 
       const active = tabs.some((t) => t.id === raw["active"]) ? (raw["active"] as string) : (tabs[0]?.id ?? null)
       return { type: "frame", id: raw["id"], tabs, active }
     }
-    if (raw["type"] === "split" && typeof raw["id"] === "string" && (raw["direction"] === "row" || raw["direction"] === "column")) {
+    if (
+      raw["type"] === "split" &&
+      typeof raw["id"] === "string" &&
+      (raw["direction"] === "row" || raw["direction"] === "column")
+    ) {
       const children = (Array.isArray(raw["children"]) ? raw["children"] : []).map((c) => node(c, depth + 1))
       const sizes = Array.isArray(raw["sizes"]) ? raw["sizes"] : []
       const kept = children.flatMap((c, i) => {

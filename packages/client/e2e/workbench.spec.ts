@@ -58,9 +58,8 @@ const sidebarChat = (page: Page, title: string) =>
 const fresh = async (page: Page, width: number, theme: "light" | "dark" = "light") => {
   await page.setViewportSize({ width, height: 900 })
   await page.emulateMedia({ colorScheme: theme })
+  // Logging in starts the account's layout over at one tab (support/rpc.ts forgetWorkbench).
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  // Every test starts from one tab: a saved layout from the test before would add its tabs.
-  await admin((api) => api.SetWorkbenchLayout({ layout: "{}" }))
 }
 
 test("one chat looks as a single view; opens are previews until kept", async ({ page }) => {

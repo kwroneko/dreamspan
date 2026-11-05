@@ -30,6 +30,8 @@ import { LcmBoundary } from "./LcmBoundary.tsx"
 import { CoverageRail } from "./CoverageRail.tsx"
 import { HistoryMessagePreview, HistorySummaryPreview, HistoryPreviewProvider } from "./historyPreview.tsx"
 import { ChatPortraitProvider } from "./ChatPortraitProvider.tsx"
+import { BoundPortraits } from "./BoundPortraits.tsx"
+import { boundEditorSurroundings } from "../editor/workspaceViews.ts"
 import { PortraitColumn } from "./PortraitColumn.tsx"
 import { AssemblyRefusal } from "./AssemblyRefusal.tsx"
 import { LearnContextLimit } from "./LearnContextLimit.tsx"
@@ -187,5 +189,7 @@ export const registerPresentation = () => [
     )
   }),
   chatColumns.register({ id: "chat.portrait-column", order: 10, component: PortraitColumn }),
+  // An editor opened from the chat, in its own tab, opens pictures in the same column beside it.
+  boundEditorSurroundings.register({ id: "chat.portraits", order: 10, component: BoundPortraits }),
   ...registerImages()
 ]

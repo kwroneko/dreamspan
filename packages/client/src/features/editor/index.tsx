@@ -90,6 +90,7 @@ export const register = () => {
     order: 200,
     match: (url) => /^\/library\/([^/]+)$/.exec(url.pathname)?.[1] ?? null,
     title: () => "Editor",
-    icon: "edit"
+    icon: "edit",
+    document: true
   })
 }

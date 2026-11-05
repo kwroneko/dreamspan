@@ -2,7 +2,8 @@
 // side panel's place, and how to name the tab. Outside a workbench (tests, a feature that
 // replaced it) every answer is the single-view one: focused, shown, the panel inline.
 import { createContext, type ReactNode, useContext, useEffect, useSyncExternalStore } from "react"
-import { focusedFrame, focusedTab, frameOfTab, leftEdgeFrames } from "./model.ts"
+import { itemKey } from "./kinds.ts"
+import { findTab, focusedFrame, focusedTab, frameOfTab, leftEdgeFrames } from "./model.ts"
 import type { WorkbenchStore } from "./store.ts"
 
 export interface TabContextValue {
@@ -70,6 +71,14 @@ export function useSidePanelPlace(wide: boolean): { show: boolean; host: HTMLEle
   return { show: owner, host: wide ? (workbench?.sideHost ?? null) : null }
 }
 
+/** The item the tab shows now: what it says about itself is said again when this changes. */
+function useTabItem(tab: TabContextValue | null) {
+  return useSyncExternalStore(tab?.store.subscribe ?? noop, () => {
+    const href = tab ? findTab(tab.store.layout, tab.tabId)?.href : undefined
+    return href === undefined ? null : itemKey(href)
+  })
+}
+
 /**
  * Names the tab: its strip shows the title, and a picture where the view gives one (`key`
  * says when the picture changed).
@@ -78,6 +87,7 @@ export function useTabMeta(title: string | undefined, decoration?: { key: string
   const tab = useContext(TabContext)
   const key = decoration?.key
   const node = decoration?.node
+  const item = useTabItem(tab)
   useEffect(() => {
     if (!tab) return
     tab.store.setMeta(tab.tabId, {
@@ -86,7 +96,20 @@ export function useTabMeta(title: string | undefined, decoration?: { key: string
     })
     // The picture is described by its key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, title, key])
+  }, [tab, item, title, key])
+}
+
+/**
+ * Names what the tab holds as a region (an editor: "Preset editor"), its header included; true
+ * inside a tab. Outside one the view names its own region.
+ */
+export function useTabRegion(label: string) {
+  const tab = useContext(TabContext)
+  const item = useTabItem(tab)
+  useEffect(() => {
+    if (tab) tab.store.setMeta(tab.tabId, { region: label })
+  }, [tab, item, label])
+  return tab !== null
 }
 
 /** Editing the view's content keeps its preview tab open (VS Code's rule). */

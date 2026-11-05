@@ -17,6 +17,7 @@ import {
   findTab,
   focusFrame,
   focusTab,
+  focusedFrame,
   focusedTab,
   frameOfTab,
   frames,
@@ -49,9 +50,26 @@ const clean = (state: unknown): HistoryState => {
 export interface TabMeta {
   readonly title?: string
   readonly decoration?: { readonly key: string; readonly node: ReactNode }
+  /** What the tab holds, as a named region (an editor: "Preset editor"). */
+  readonly region?: string
 }
 
 const HOME = "/"
+
+/**
+ * The sidebar's keys (`shellSearchKeys`) that differ from `before` in `after`, with their new
+ * values (null: cleared); with no `before`, all of them as `after` has them.
+ */
+const shellDiff = (before: string | null, after: string) => {
+  const was = before === null ? null : new URL(before, "http://tab.invalid").searchParams
+  const now = new URL(after, "http://tab.invalid").searchParams
+  const change = new Map<string, string | null>()
+  for (const key of shellKeys()) {
+    const value = now.get(key)
+    if (was === null || was.get(key) !== value) change.set(key, value)
+  }
+  return change
+}
 
 export class WorkbenchStore {
   layout: Layout
@@ -59,10 +77,14 @@ export class WorkbenchStore {
   private readonly histories = new Map<string, RouterHistory>()
   /** Where a tab not yet mounted starts: its URL's history state. */
   private readonly initialState = new Map<string, HistoryState>()
-  private readonly meta = new Map<string, TabMeta>()
+  /** Where a new tab was opened from: its history's entry before its own, so Back returns. */
+  private readonly openedFrom = new Map<string, string>()
+  private readonly meta = new Map<string, { readonly item: string; readonly meta: TabMeta }>()
   private readonly metaListeners = new Set<() => void>()
   /** Tabs whose views show the side panel (chats), most recent decides who shows it. */
   private readonly panelTabs = new Set<string>()
+  /** The sidebar's keys a tab's own navigation set or cleared, for the next mirror. */
+  private shellChange: ReadonlyMap<string, string | null> | null = null
   private mirroring = false
   private applying = false
   private saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -160,12 +182,26 @@ export class WorkbenchStore {
     }
   }
 
+  /** The entry before a new tab's own in its history: where it was opened from. */
+  takeOpenedFrom(tabId: string) {
+    const from = this.openedFrom.get(tabId)
+    this.openedFrom.delete(tabId)
+    return from
+  }
+
   /** Whether a navigation inside a tab leaves for another item: it opens there instead. */
   leaves(tabId: string, href: string, state: unknown, action: string) {
     if (this.applying) return false
     const tab = findTab(this.layout, tabId)
     if (!tab || action !== "PUSH" || itemKey(href) === itemKey(tab.href)) return false
+    // A preview tab in the focused frame goes there itself, as navigating did before tabs
+    // (fromTab), unless another tab has that item open.
+    const elsewhere = allTabs(this.layout).some((t) => itemKey(t.href) === itemKey(href))
+    if (tab.preview && !elsewhere && frameOfTab(this.layout, tabId)?.id === focusedFrame(this.layout).id) return false
+    // The view navigated to that URL whole: its sidebar keys are what the sidebar shows next.
+    this.shellChange = shellDiff(null, href)
     this.open(href, { state: clean(state) })
+    this.shellChange = null
     return true
   }
 
@@ -196,6 +232,8 @@ export class WorkbenchStore {
     }
     const focused = focusedTab(this.layout)?.id === tabId
     const before = this.layout
+    // A tab's view changing the sidebar's keys (Chats with Mira) changes the sidebar.
+    if (focused) this.shellChange = shellDiff(findTab(before, tabId)?.href ?? null, href)
     this.layout = setTabHref(this.layout, tabId, href)
     if (before !== this.layout) {
       for (const listener of this.listeners) listener()
@@ -207,11 +245,13 @@ export class WorkbenchStore {
   private fromBrowser(href: string, state: HistoryState, action: Action) {
     const focused = focusedTab(this.layout)
     if (focused && itemKey(focused.href) === itemKey(href)) {
-      this.set(setTabHref(this.layout, focused.id, href))
+      // The tab first, so the browser's URL (Back's place) isn't copied back over it.
       this.apply(focused.id, href, state, action)
+      this.set(setTabHref(this.layout, focused.id, href))
       return
     }
-    this.open(href, { state })
+    // The browser has its entry already: the URL is corrected in place, not pushed again.
+    this.open(href, { state, mirror: "REPLACE" })
   }
 
   /** The browser's URL: the focused tab's, with the sidebar's place as the browser has it. */
@@ -221,10 +261,17 @@ export class WorkbenchStore {
     const history = this.histories.get(tab.id)
     const location = history?.location
     const href = this.withShellParams(location?.href ?? tab.href)
-    if (href === this.browser.location.href) return
+    let state = clean(location?.state)
+    if (href === this.browser.location.href) {
+      // The same place: only what the view keeps in its history state (a chat's reading place).
+      const browserState = clean(this.browser.location.state)
+      const same = (key: string, value: unknown) => JSON.stringify(browserState[key]) === JSON.stringify(value)
+      if (Object.entries(state).every(([key, value]) => same(key, value))) return
+      state = { ...browserState, ...state }
+      action = "REPLACE"
+    }
     this.mirroring = true
     try {
-      const state = clean(location?.state)
       if (action === "PUSH") this.browser.push(href, state, { ignoreBlocker: true })
       else this.browser.replace(href, state, { ignoreBlocker: true })
     } finally {
@@ -234,13 +281,15 @@ export class WorkbenchStore {
 
   private withShellParams(href: string) {
     const keys = shellKeys()
+    const change = this.shellChange
+    this.shellChange = null
     if (keys.size === 0) return href
     const url = new URL(href, "http://tab.invalid")
     const current = new URL(this.browser.location.href, "http://tab.invalid")
     for (const key of keys) url.searchParams.delete(key)
     for (const key of keys) {
-      const value = current.searchParams.get(key)
-      if (value !== null) url.searchParams.set(key, value)
+      const value = change?.has(key) ? change.get(key) : current.searchParams.get(key)
+      if (value !== null && value !== undefined) url.searchParams.set(key, value)
     }
     const search = url.searchParams.toString()
     return `${url.pathname}${search ? `?${search}` : ""}${url.hash}`
@@ -249,16 +298,22 @@ export class WorkbenchStore {
   // --- What the user does.
 
   /** Opens an item (model.ts `openTab`), at its URL's history state. */
-  open(href: string, options: OpenOptions & { state?: HistoryState } = {}) {
-    const { state, ...rest } = options
-    const id = rest.id ?? newId("t")
-    const existing = allTabs(this.layout).find((t) => itemKey(t.href) === itemKey(href))
-    const next = openTab(this.layout, href, itemKey, { ...rest, id })
-    if (existing) this.apply(existing.id, href, state ?? {}, "PUSH")
-    else if (state && Object.keys(state).length > 0) this.initialState.set(id, state)
+  open(href: string, options: OpenOptions & { state?: HistoryState; mirror?: Action } = {}) {
+    const { state, mirror = "PUSH", ...rest } = options
+    const next = openTab(this.layout, href, itemKey, { ...rest, id: rest.id ?? newId("t") })
+    const opened = allTabs(next).find((t) => itemKey(t.href) === itemKey(href))!
+    // A tab already mounted (the item's own, or the preview taking it) navigates in place.
+    if (findTab(this.layout, opened.id)) this.apply(opened.id, href, state ?? {}, "PUSH")
+    else {
+      if (state && Object.keys(state).length > 0) this.initialState.set(opened.id, state)
+      // Back inside the new tab (an Import page's own Back) returns to where it was opened.
+      const from = focusedTab(this.layout)
+      const fromHref = from && (this.histories.get(from.id)?.location.href ?? from.href)
+      if (fromHref && itemKey(fromHref) !== itemKey(href)) this.openedFrom.set(opened.id, fromHref)
+    }
     // Opening pushes a place in the browser's history, so Back returns to what was shown.
-    this.set(next, "PUSH")
-    return existing?.id ?? id
+    this.set(next, mirror)
+    return opened.id
   }
 
   focusTab(tabId: string) {
@@ -311,16 +366,28 @@ export class WorkbenchStore {
   // --- What views say about themselves.
 
   setMeta(tabId: string, meta: TabMeta) {
-    const before = this.meta.get(tabId)
+    // What a view said is about the item it showed: a tab that took another item starts over.
+    const tab = findTab(this.layout, tabId)
+    if (!tab) return
+    const item = itemKey(tab.href)
+    const stored = this.meta.get(tabId)
+    const before = stored?.item === item ? stored.meta : undefined
     if (
-      (meta.title === undefined || before?.title === meta.title) &&
-      (meta.decoration === undefined || before?.decoration?.key === meta.decoration.key)
+      before &&
+      (meta.title === undefined || before.title === meta.title) &&
+      (meta.decoration === undefined || before.decoration?.key === meta.decoration.key) &&
+      (meta.region === undefined || before.region === meta.region)
     )
       return
-    this.meta.set(tabId, { ...before, ...meta })
+    this.meta.set(tabId, { item, meta: { ...before, ...meta } })
     for (const listener of this.metaListeners) listener()
   }
-  metaOf = (tabId: string) => this.meta.get(tabId)
+  /** What the tab's view says about the item it shows now. */
+  metaOf = (tabId: string) => {
+    const stored = this.meta.get(tabId)
+    const tab = findTab(this.layout, tabId)
+    return stored && tab && stored.item === itemKey(tab.href) ? stored.meta : undefined
+  }
   subscribeMeta = (listener: () => void) => {
     this.metaListeners.add(listener)
     return () => void this.metaListeners.delete(listener)
@@ -337,15 +404,27 @@ export class WorkbenchStore {
   }
   /**
    * The tab whose side panel shows (owner direction, 2026-11-05: the panels follow the frame
-   * last focused): beside the chat focused last, even while its editor covers it; on a
-   * phone only the tab shown has one.
+   * last focused): the chat focused last among those shown, or the chat an editor shown was
+   * opened from; on a phone only the tab shown has one.
    */
   panelOwner(wide: boolean) {
     if (!wide) {
       const tab = focusedTab(this.layout)
       return tab && this.panelTabs.has(tab.id) ? tab.id : null
     }
-    return this.layout.recent.find((id) => this.panelTabs.has(id)) ?? null
+    // The shown tab focused last that is a chat, or an editor opened from a chat (its
+    // `?chat=`): that chat's panel. A library page shown on its own has none, as before tabs.
+    for (const id of this.layout.recent) {
+      const tab = findTab(this.layout, id)
+      if (!tab || frameOfTab(this.layout, id)?.active !== id) continue
+      if (this.panelTabs.has(id)) return id
+      const chat = new URL(tab.href, "http://tab.invalid").searchParams.get("chat")
+      if (!chat) continue
+      const key = itemKey(`/chats/${chat}`)
+      const owner = allTabs(this.layout).find((t) => this.panelTabs.has(t.id) && itemKey(t.href) === key)
+      if (owner) return owner.id
+    }
+    return null
   }
 
   frames() {

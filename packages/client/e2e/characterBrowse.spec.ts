@@ -61,7 +61,7 @@ const unstarBram = () =>
   )
 
 const tiles = (scope: ReturnType<Page["getByRole"]>) =>
-  scope.getByLabel("Characters", { exact: true }).getByRole("button", { name: /^Open / })
+  scope.getByLabel("Characters", { exact: true }).getByRole("link", { name: /^Open / })
 const labels = (buttons: ReturnType<typeof tiles>) =>
   buttons.evaluateAll((nodes) =>
     nodes.map((n) =>
@@ -121,9 +121,10 @@ for (const width of [1440, 390]) {
     const inheritedDate = await page.evaluate(() =>
       new Date("2022-01-01T00:00:00Z").toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     )
-    await expect(
-      main.getByRole("button", { name: /^Open Dora(?: ·.*)?$/ }).locator("[data-sort-date]")
-    ).toHaveAttribute("aria-label", `Added: ${inheritedDate}`)
+    await expect(main.getByRole("link", { name: /^Open Dora(?: ·.*)?$/ }).locator("[data-sort-date]")).toHaveAttribute(
+      "aria-label",
+      `Added: ${inheritedDate}`
+    )
     // The tile keeps its height: the date shares the line with the chat count.
     const tile = tiles(main).first()
     const line = tile.locator("[data-sort-date]").locator("..")

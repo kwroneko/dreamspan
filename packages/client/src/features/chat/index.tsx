@@ -87,7 +87,8 @@ export const register = () => {
     order: 100,
     match: (url) => /^\/chats\/([^/]+)$/.exec(url.pathname)?.[1] ?? null,
     title: () => "Chat",
-    icon: "chat"
+    icon: "chat",
+    document: true
   })
   tabKinds.register({
     id: "chat.context",
@@ -101,7 +102,8 @@ export const register = () => {
     order: 100,
     match: (url) => /^\/(?:cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.exec(url.pathname)?.[0] ?? null,
     title: () => "New chat",
-    icon: "chat"
+    icon: "chat",
+    document: true
   })
   routes.register({
     id: "chats",

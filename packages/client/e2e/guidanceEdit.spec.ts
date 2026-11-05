@@ -264,10 +264,12 @@ for (const width of [1440, 390]) {
     await expect(box(page)).toHaveValue(draft)
     await page.getByRole("button", { name: "New version with this guidance" }).click()
     await expect(bar(page)).toBeVisible()
+    const guidance = await box(page).inputValue()
     await showAppNavigation(page)
     await page.getByRole("link", { name: "Home", exact: true }).filter({ visible: true }).first().click()
     await page.goBack()
-    await expect(bar(page)).toHaveCount(0)
-    await expect(box(page)).toHaveValue(draft)
+    // Home opened in a tab of its own; the chat's tab kept its state (owner, 2026-11-05).
+    await expect(bar(page)).toBeVisible()
+    await expect(box(page)).toHaveValue(guidance)
   })
 }

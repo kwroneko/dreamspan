@@ -33,7 +33,7 @@ const show = (page: Page, name: string) =>
 const tiles = (page: Page) =>
   main(page)
     .getByLabel("Characters", { exact: true })
-    .getByRole("button", { name: /^Open / })
+    .getByRole("link", { name: /^Open / })
     .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")).sort())
 const include = (page: Page) => main(page).getByRole("button", { name: "Include personas", exact: true })
 

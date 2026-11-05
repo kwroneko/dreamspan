@@ -102,8 +102,10 @@ export function centerHeaderTests() {
           const bottoms = await header.evaluate((el) => {
             const side = document.querySelector("aside .h-shell-header")
             const tabs = document.querySelector('[role=tablist][aria-label="Chat panel"]')?.closest(".h-shell-header")
+            // Once a frame has two tabs, its tab strip sits above the header (features/workbench).
+            const strip = document.querySelector("[data-tab-strip]")?.getBoundingClientRect().height ?? 0
             return {
-              center: el.getBoundingClientRect().bottom,
+              center: el.getBoundingClientRect().bottom - strip,
               height: el.getBoundingClientRect().height,
               side: side?.getBoundingClientRect().bottom ?? null,
               panel: tabs?.getBoundingClientRect().bottom ?? null

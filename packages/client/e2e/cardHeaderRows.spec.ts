@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, test } from "@playwright/test"
 import { Effect } from "effect"
-import { loginCookie, withCookie } from "./support/rpc.ts"
+import { forgetWorkbench, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -142,6 +142,7 @@ for (const width of [390, 1024, 1440])
         await page.setViewportSize({ width, height: 1000 })
         await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
         await page.addInitScript((theme) => localStorage.setItem("rp.theme", theme), theme)
+        await forgetWorkbench(server(), cookie)
         const separator = cookie.indexOf("=")
         await page
           .context()

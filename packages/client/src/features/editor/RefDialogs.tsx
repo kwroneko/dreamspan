@@ -89,10 +89,10 @@ export function ForkDialog({
         setPreparing(false)
         if (result.ok && ref.kind === "card") void refreshOpenEditors()
         if (result.ok) {
-          if (onCreated) {
-            onClose()
-            onCreated(result.value.id)
-          } else void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+          // Closed first: the fork may open in a tab of its own, beside this one.
+          onClose()
+          if (onCreated) onCreated(result.value.id)
+          else void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
         }
         return result.ok
       })

@@ -51,7 +51,7 @@ test("group member listing hides bare card versions", async ({ page }) => {
     .click()
   const groups = page.getByRole("main").getByLabel("Groups", { exact: true })
   // The tile counts its members; the tooltip names them without bare versions.
-  await expect(groups.getByRole("button").filter({ hasText: "2 members" })).toBeVisible()
+  await expect(groups.getByRole("link").filter({ hasText: "2 members" })).toBeVisible()
   await expect(groups.getByTitle("Review A, Review B", { exact: true })).toBeVisible()
 })
 test("the sidebar refreshes card name and version after an ordinary editor Save", async ({ page }) => {
