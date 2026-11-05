@@ -42,7 +42,7 @@ export function SplitLink({
 }
 
 /** ["Shares messages #1–14", "split 4 Nov, 19:13"]: what a related chat has in common with this one. */
-export const splitRelation = (split: ForkSplit | null | undefined, now = Date.now()) => {
+const splitRelation = (split: ForkSplit | null | undefined, now = Date.now()) => {
   if (!split) return null
   const shared =
     split.after === 0
