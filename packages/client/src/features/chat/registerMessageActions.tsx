@@ -1,9 +1,10 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { ForkNotesDialog } from "./ForkNotesDialog.tsx"
 import { Link } from "@tanstack/react-router"
+import { lazy, Suspense } from "react"
 import { continueUnavailable, ContinueView, runContinue } from "./ContinueAction.tsx"
 import { copy } from "./copy.ts"
-import { invokeMessageAction, messageActions, viewOf } from "./messageActions.tsx"
+import { invokeMessageAction, type MessageActionProps, messageActions, viewOf } from "./messageActions.tsx"
 import type { ChatSession } from "./session.ts"
 
 /**
@@ -14,6 +15,13 @@ const viewedFork = (session: ChatSession) => {
   const fork = session.snapshot().forkId
   return fork === null ? {} : { fork }
 }
+
+const MergeHere = lazy(() => import("./MergeChatDialog.tsx").then((m) => ({ default: m.MergeChatHereDialog })))
+const MergeChatHereDialog = (props: MessageActionProps) => (
+  <Suspense fallback={null}>
+    <MergeHere {...props} />
+  </Suspense>
+)
 
 /** Ways in besides the button, said in Edit's explanation. */
 const EDIT_KEYS = "Or double-click the message; ↑ in the empty composer edits the latest message, Ctrl+↑ your own."
@@ -79,6 +87,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.branch",
+    onMerges: true,
     order: 60,
     group: "place",
     pinned: true,
@@ -91,7 +100,21 @@ export const registerMessageActions = () => [
     dialog: ForkNotesDialog
   }),
   messageActions.register({
+    id: "message.merge",
+    order: 75,
+    group: "place",
+    available: ({ entry }) => entry.version.origin !== "merge",
+    describe: viewOf(({ openDialog }) => ({
+      label: "Merge a chat here…",
+      icon: "merge",
+      hint: "Brings another chat's messages into this one, after this message.",
+      onSelect: () => openDialog("message.merge")
+    })),
+    dialog: MergeChatHereDialog
+  }),
+  messageActions.register({
     id: "message.visibility",
+    onMerges: true,
     order: 80,
     group: "context",
     describe: viewOf(({ hidden, session, entry, report }) => ({
@@ -136,6 +159,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.copy-link",
+    onMerges: true,
     order: 101,
     group: "copy",
     describe: viewOf(({ session, entry, branchFork }) => ({
@@ -152,6 +176,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.delete",
+    onMerges: true,
     order: 110,
     group: "delete",
     pinned: true,

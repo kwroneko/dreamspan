@@ -16,6 +16,7 @@ import {
 import { ForkNotesChanged, GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
 import { EditConflict, EditRefused, InvalidDocument } from "@rp/shared/editorApi.ts"
 import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
+import { MergeChanged, MergeRefused } from "@rp/shared/mergeApi.ts"
 import { Cause } from "effect"
 import { RpcClientError } from "effect/rpc"
 
@@ -88,6 +89,9 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof GenerationUnavailable) return make("GenerationUnavailable", sentence(error.message))
   if (error instanceof NotAmendable)
     return make("NotAmendable", "Only a finished message you wrote can be changed in place.")
+  if (error instanceof MergeRefused) return make("MergeRefused", sentence(error.message))
+  if (error instanceof MergeChanged)
+    return make("MergeChanged", "One of the chats changed while this was open. Check what merging brings now.")
   // Editors
   if (error instanceof InvalidDocument) {
     return make("InvalidDocument", "These changes wouldn't make a valid document:", null, error.problems)

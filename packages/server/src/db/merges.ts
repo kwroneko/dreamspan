@@ -409,6 +409,7 @@ export const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: Mer
           added: added.includes(id)
         }
       }),
+      castNames,
       framing: fillMergeTemplate(MERGE_SECTION_DEFAULT, title, castNames),
       section: transcript,
       join: fillMergeTemplate(MERGE_JOIN_DEFAULT, title, castNames),
@@ -498,18 +499,16 @@ export const makeMergeReadHandlers = Effect.gen(function* () {
         }>`SELECT mm.* FROM chat_merge_messages mm JOIN chat_merges m ON m.id = mm.merge_id
           WHERE m.id = ${mergeId} AND m.chat_id = ${chatId} AND mm.ordinal >= ${offset}
           ORDER BY mm.ordinal LIMIT ${Math.min(200, Math.max(1, limit))}`
-        return rows.map(
-          (r): MergedMessage => ({
-            ordinal: r.ordinal,
-            kind: r.kind,
-            speakerEntityId: r.speaker_entity_id as EntityId | null,
-            speakerName: r.speaker_name,
-            side: r.side,
-            content: r.content,
-            sentAt: r.sent_at,
-            included: r.included
-          })
-        )
+        return rows.map((r): MergedMessage => ({
+          ordinal: r.ordinal,
+          kind: r.kind,
+          speakerEntityId: r.speaker_entity_id as EntityId | null,
+          speakerName: r.speaker_name,
+          side: r.side,
+          content: r.content,
+          sentAt: r.sent_at,
+          included: r.included
+        }))
       }).pipe(query("MergeMessages"))
   } satisfies Partial<ReadHandlers>
 })
@@ -606,7 +605,9 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
               status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
               row_version = row_version + 1
             WHERE id = ${chatId} RETURNING *`
-          const [tip] = yield* sql<{ tip: string | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${plan.fork.id}`
+          const [tip] = yield* sql<{
+            tip: string | null
+          }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${plan.fork.id}`
           const pieces = yield* pathPieces(sql, chatId, plan.fork.id, tip!.tip)
           const position = positionOf(pieces, (yield* slotPlace(sql, chatId, slotId))!)!
           return new MergeResult({

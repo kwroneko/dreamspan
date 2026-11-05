@@ -1,6 +1,6 @@
 # Merging another chat into this one
 
-**Status**: Proposed, 2026-11-05 (chatmerge). The owner's decisions are in DESIGN §3.3 (**[D]**, 2026-11-05); everything below is **[P]** unless it cites one. It is a delta from master 12cf25b (ARCHITECTURE §3.7, §3.8 "Display paths", §3.11, §12, §15, §16; spec/MESSAGE-INSERT.md). reference-harness has no counterpart: its rooms never merge, and its forks only truncate and continue (`src/agent/fork.ts`), so nothing there is reused.
+**Status**: Obsolete: implemented 2026-11-05 (chatmerge); ARCHITECTURE §12 "Merging another chat into this one" documents what was built, and §10 below lists what wasn't. Kept as the design record. Originally Proposed, 2026-11-05 (chatmerge). The owner's decisions are in DESIGN §3.3 (**[D]**, 2026-11-05); everything below is **[P]** unless it cites one. It is a delta from master 12cf25b (ARCHITECTURE §3.7, §3.8 "Display paths", §3.11, §12, §15, §16; spec/MESSAGE-INSERT.md). reference-harness has no counterpart: its rooms never merge, and its forks only truncate and continue (`src/agent/fork.ts`), so nothing there is reused.
 
 ## 0. Summary
 
@@ -102,3 +102,4 @@ Owner-shaped data (hundreds of branches, thousands of messages, 20–50 swipes):
 - A source's own joins are not merged again (the transcript notes "[n earlier merges not included]").
 - Per-character agents' presence filter: Phase 4.
 - Interleaving by time: rejected by the owner; finer alignment inside a span by time: noted, not built.
+- Not built in this round: copying the source's chat notes (§6; the dialog lists none), and numbering that skips joins (§7): J takes a display position like any message, so after a merge in the middle of the history the later messages number one higher. The default, merging after the newest message, renumbers nothing.

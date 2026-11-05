@@ -12,6 +12,8 @@ export const MERGE_LAYOUT_DEFAULT = "parallel"
 
 /** The preset's framing line when a merge has none of its own (`utility.merge_section_prompt`). */
 export const MERGE_SECTION_DEFAULT = "Meanwhile, in parallel with what follows: {{title}}, with {{cast}}."
+/** The block-at-the-join layout's framing line, where neither the merge nor the preset has one. */
+export const MERGE_BLOCK_SECTION_DEFAULT = "Meanwhile, elsewhere: {{title}}, with {{cast}}."
 /** What the layout sends at the join (`utility.merge_join_prompt`). */
 export const MERGE_JOIN_DEFAULT = "[Here “{{title}}” joins this chat.]"
 
@@ -78,6 +80,8 @@ export class ChatMergePreview extends Schema.Class<ChatMergePreview>("ChatMergeP
   /** Where the parallel span starts in the destination; null: directly before the join. */
   start: Schema.NullOr(Schema.Struct({ slotId: SlotId, number: Schema.Int })),
   cast: Schema.Array(MergeCastMember),
+  /** The source's cast as the templates name them (`{{cast}}`). */
+  castNames: Schema.Array(Schema.String),
   /** The framing line with this merge's title and cast, from the built-in default. */
   framing: Schema.String,
   /** What the model reads of the source (the join message's text). */

@@ -7,6 +7,7 @@ import { makeRegistry } from "../../registry.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { ChangeContextSize, contextOrigin, reserveOrigin, targetOrigin, withOrigin } from "./budgetSources.tsx"
 import { Alert } from "../../ui/Surface.tsx"
+import { MergedChatRow } from "./MergedChatRow.tsx"
 import { timelineBoundaries, timelineSummaries } from "./presentation.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
@@ -60,6 +61,25 @@ const boundaryRow = (rows: ReadonlyArray<TimelineRow>, entries: ReadonlyArray<Pa
 }
 
 export const registerTimelineTransforms = () => [
+  // A merged chat's entry is one row of its own (spec/CHAT-MERGE.md §7), registered so a plugin can replace it.
+  timelineTransforms.register({
+    id: "timeline.merges",
+    order: 5,
+    transform: (rows) =>
+      rows.some((row) => row.entry?.version.origin === "merge")
+        ? rows.map((row) =>
+            row.entry?.version.origin === "merge"
+              ? {
+                  ...row,
+                  estimate: 64,
+                  render: ({ session, anchor }) => (
+                    <MergedChatRow entry={row.entry!} session={session} highlighted={row.entry!.slotId === anchor} />
+                  )
+                }
+              : row
+          )
+        : rows
+  }),
   timelineTransforms.register({
     id: "timeline.history-budget",
     order: 10,

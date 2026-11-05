@@ -3202,6 +3202,7 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
   }),
   Rpc.make("RoleProjections", { success: Schema.Array(RoleProjectionOption) }),
+  Rpc.make("MergeLayouts", { success: Schema.Array(RoleProjectionOption) }),
   Rpc.make("AssembleContext", {
     payload: {
       partialBatch: Schema.optionalKey(Schema.Boolean),

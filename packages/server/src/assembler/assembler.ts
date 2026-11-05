@@ -1,4 +1,9 @@
-import { builtinMergeLayouts, makeMergeLayoutRegistry, mergeSectionsTransform, type MergeLayoutRegistry } from "./merges.ts"
+import {
+  builtinMergeLayouts,
+  makeMergeLayoutRegistry,
+  mergeSectionsTransform,
+  type MergeLayoutRegistry
+} from "./merges.ts"
 import { builtinTextCounters, type TextTokenCounter } from "../providers/textCounters.ts"
 import { builtinSourceDescriptors, type SourceDescriptor } from "./sourceDescriptors.ts"
 import {
@@ -66,6 +71,9 @@ export interface Assembler {
   /** What rewrites text as it's written, in order (ARCHITECTURE §12, "Rewrites"). */
   readonly rewrites: Registry<MessageRewrite>
   readonly projectionOptions: Effect.Effect<
+    ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
+  >
+  readonly mergeLayoutOptions: Effect.Effect<
     ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
   >
   readonly assemble: (
@@ -161,6 +169,12 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
             .list()
             .map(({ id, label, description }) => ({ id, label, ...(description === undefined ? {} : { description }) }))
         )
+      )
+    ),
+    mergeLayoutOptions: Effect.suspend(() =>
+      withAssemblyModules(
+        assembler,
+        Effect.sync(() => mergeLayouts.list().map(({ id, label, description }) => ({ id, label, description })))
       )
     ),
     assemble: (request) =>

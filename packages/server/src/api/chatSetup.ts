@@ -47,6 +47,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
         : { key: "macro.binding", value: { name: change.name, value: change.value } }
     case "Roles":
       return { key: "roles.projection", value: change.projection }
+    case "MergeLayout":
+      return { key: "merge.layout", value: change.layout }
     case "Lorebook":
       return { key: change.active ? "lorebook.attach" : "lorebook.detach", value: { ref: change.ref } }
     case "Note":
@@ -152,11 +154,12 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           })
         )
       const roleProjections = yield* reader.RoleProjections()
+      const mergeLayouts = yield* reader.MergeLayouts()
       return positions.map((position) => {
         const ids = idsOf(position)
         const all = read.get(JSON.stringify(bindingsOf(position.state)))!
         const cards = all.filter((card) => ids.includes(card.entityId))
-        return castOf(position.slotId, position.state, cards, roleProjections)
+        return castOf(position.slotId, position.state, cards, roleProjections, mergeLayouts)
       })
     })
 
@@ -184,7 +187,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     slotId: SlotId | null,
     state: ChatState,
     cards: ReadonlyArray<CastCard>,
-    roleProjections: Cast["roleProjections"]
+    roleProjections: Cast["roleProjections"],
+    mergeLayouts: Cast["roleProjections"] = []
   ) => {
     const persona = cards.find((card) => card.entityId === state.playedByMe.at(-1))
     return new Cast({
@@ -218,6 +222,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       ...(state.replyOrder === null ? {} : { replyOrder: state.replyOrder }),
       ...(state.replySingle === true ? { replySingle: true } : {}),
       roleProjections,
+      ...(state.mergeLayout === null ? {} : { mergeLayout: state.mergeLayout }),
+      ...(mergeLayouts.length ? { mergeLayouts } : {}),
       cards
     })
   }

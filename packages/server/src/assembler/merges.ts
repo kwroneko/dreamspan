@@ -6,7 +6,13 @@
 // transform are each registered and replaceable. This is its own stage, after `roles`, so the
 // stages other work changes stay as they are.
 import { Effect } from "effect"
-import { MERGE_JOIN_DEFAULT, MERGE_LAYOUT_DEFAULT, MERGE_SECTION_DEFAULT, fillMergeTemplate } from "@rp/shared/mergeApi.ts"
+import {
+  MERGE_BLOCK_SECTION_DEFAULT,
+  MERGE_JOIN_DEFAULT,
+  MERGE_LAYOUT_DEFAULT,
+  MERGE_SECTION_DEFAULT,
+  fillMergeTemplate
+} from "@rp/shared/mergeApi.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { need, type AssemblerStage, type AssemblyTransform, type ProjectedEntry } from "./pipeline.ts"
 import type { HistoryEntry, HistoryMerge } from "./types.ts"
@@ -59,7 +65,7 @@ export const joinLayout: MergeLayout = {
   id: "join",
   label: "Block at the join",
   description: "The merged chat's messages go in one block where the merge is, after this chat's own messages.",
-  framing: "Meanwhile, elsewhere: {{title}}, with {{cast}}.",
+  framing: MERGE_BLOCK_SECTION_DEFAULT,
   place: () => null
 }
 
@@ -153,9 +159,7 @@ export const mergeSectionsTransform: AssemblyTransform = {
       const titles = [
         ...new Set(
           snapshot.pieces.flatMap((piece) =>
-            piece.source.kind === "merge/join"
-              ? [String((piece.source.data as { title?: unknown }).title ?? "")]
-              : []
+            piece.source.kind === "merge/join" ? [String((piece.source.data as { title?: unknown }).title ?? "")] : []
           )
         )
       ].filter((title) => title !== "")
