@@ -23,7 +23,7 @@ const textOf = (content: unknown) =>
       : ""
 
 /** What the loop added after the frozen request, as the model saw it; the request's own marker left out. */
-export const transcriptEntries = (messages: ReadonlyArray<AgentMessage>): Array<TranscriptEntry> =>
+const transcriptEntries = (messages: ReadonlyArray<AgentMessage>): Array<TranscriptEntry> =>
   messages.flatMap((m): Array<TranscriptEntry> => {
     if (m.role === "assistant")
       return [

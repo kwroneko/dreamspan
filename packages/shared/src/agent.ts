@@ -81,7 +81,7 @@ export const RunTranscript = Schema.Struct({
 export type RunTranscript = typeof RunTranscript.Type
 
 /** A reply mode the chat settings offer (spec/AGENTIC.md §6). */
-export const ReplyModeInfo = Schema.Struct({
+const ReplyModeInfo = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
   description: Schema.String,
@@ -90,10 +90,9 @@ export const ReplyModeInfo = Schema.Struct({
   /** The tools it offers when the chat doesn't choose, by id, as far as they're registered. */
   tools: Schema.Array(Schema.String)
 })
-export type ReplyModeInfo = typeof ReplyModeInfo.Type
 
 /** A tool an agent reply may be offered, as the settings list it. */
-export const ReplyToolInfo = Schema.Struct({
+const ReplyToolInfo = Schema.Struct({
   id: Schema.String,
   /** Short, as a step's row shows it: "Searched the chat". */
   label: Schema.String,
@@ -101,7 +100,6 @@ export const ReplyToolInfo = Schema.Struct({
   explanation: Schema.String,
   effect: EffectClass
 })
-export type ReplyToolInfo = typeof ReplyToolInfo.Type
 
 export const ReplyModes = Schema.Struct({
   modes: Schema.Array(ReplyModeInfo),
