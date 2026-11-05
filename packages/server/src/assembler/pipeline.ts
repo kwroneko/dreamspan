@@ -35,7 +35,9 @@ import type {
   Source,
   SummaryLayer,
   Target,
-  AgentAssembly
+  AgentAssembly,
+  DecisionAssembly,
+  LoreDecisionInput
 } from "./types.ts"
 import { replySectionsOf } from "@rp/shared/replySections.ts"
 import { ASSEMBLER_VERSION, AssemblyFailed, historyLeafOf } from "./types.ts"
@@ -149,6 +151,8 @@ export interface AssemblyRequest {
   readonly loreFallback?: ContextSnapshot["loreFallback"]
   /** An agent reply's assembly (spec/AGENTIC.md §6): frozen in the snapshot, so a rebuild matches. */
   readonly agent?: AgentAssembly
+  /** What decision models decided (spec/AGENTIC.md §7): frozen in the snapshot, so a rebuild matches. */
+  readonly decisions?: DecisionAssembly
   readonly macros: MacroLookup
   /** The role projections in effect, by id (`roles` stage). */
   readonly projections: ProjectionRegistry
@@ -243,6 +247,8 @@ export interface Assembly {
   loreState?: LoreTimingState
   loreTiming?: ReadonlyArray<LoreReceipt>
   loreMessageCount?: number
+  /** The `lore` decision point's input, when an entry the keys left out has a question. */
+  loreDecision?: LoreDecisionInput
   lore?: ReadonlyArray<{
     readonly entry: import("@rp/shared/docs/lorebook.ts").LorebookEntry
     readonly piece: number
@@ -409,6 +415,8 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       ...(request.agent && assembly.lorebooks?.length
         ? { agentLore: assembly.lorebooks.map(({ id, entity, revision }) => ({ id, entity, revision })) }
         : {}),
+      ...(request.decisions ? { decisionAssembly: request.decisions } : {}),
+      ...(assembly.loreDecision ? { loreDecision: assembly.loreDecision } : {}),
       inputs: {
         chatId: target.chatId,
         slotId: target.slotId,

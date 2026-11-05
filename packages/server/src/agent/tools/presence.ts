@@ -11,6 +11,7 @@ import { safely } from "./history.ts"
 export const setPresence: RolloutTool<{ readonly character: string; readonly present: boolean }> = {
   id: "set_presence",
   label: "Changed who's present",
+  explanation: "Mark characters present or away",
   effect: "chat_state",
   description:
     "Marks a character as present in the scene or away from it, from the next message on. An away character isn't picked to reply until it's back. Use it when a character leaves or returns in the story.",

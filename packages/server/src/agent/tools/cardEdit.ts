@@ -34,6 +34,7 @@ export const editCard: RolloutTool<{
 }> = {
   id: "edit_card",
   label: "Changed a character",
+  explanation: "Change the character details you let it change",
   effect: "chat_state",
   description:
     "Changes a passage of a character's card in this chat from the next message on, when the story changes it for good (a new outfit, a lost arm). Give the passage exactly as it stands, once in the field, and what it becomes; to change it again later, give the passage as you last wrote it. The card itself stays as it is. Only fields you may change.",

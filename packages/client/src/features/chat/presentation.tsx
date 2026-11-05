@@ -21,6 +21,13 @@ export function ChatCardActions(props: ChatCardActionProps) {
   return <SlotOutlet slot={chatCardActions} props={props} />
 }
 export const chatSettingSections = defineSlot<{ session: ChatSession }>("chat.setting-sections")
+/**
+ * Sections of the request inspector after the context and what it left out (ContextPage.tsx): an
+ * agent reply's tools and steps (agent/RunSteps.tsx), the run behind the request.
+ */
+export const runInspectorSections = defineSlot<{ readonly run: import("@rp/shared/inspectorApi.ts").RunContext }>(
+  "inspector.run-sections"
+)
 /** Sections of the Cast tab under the cast itself: Add characters (CastAdd.tsx). */
 export const castSections = defineSlot<{ session: ChatSession }>("chat.cast-sections")
 /** The same sections in a chat not made yet: who answers first, Add characters. */

@@ -6,6 +6,7 @@ import { Summarizer } from "../lcm/Summarizer.ts"
 // version with its cause. Everything here runs on the main thread and never blocks it:
 // text arrives in chunks, and storage is a message to the writer worker.
 import type { ChatId, ForkId, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import type { RolloutStep } from "@rp/shared/agent.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effect"
@@ -14,6 +15,7 @@ import type { QueueOutcome } from "../db/ops.ts"
 import { sectionsDisplay, type ReplySections } from "@rp/shared/replySections.ts"
 import { CacheWarmth } from "./CacheWarmth.ts"
 import { ChatHub } from "./ChatHub.ts"
+import { DecisionEngine } from "../decision/engine.ts"
 import { fromItems, type Rewritten, rewriteItems, rewriteText } from "./rewrites.ts"
 import { settleHeld } from "./replySections.ts"
 import { executionRegistry } from "../execution.ts"
@@ -40,6 +42,8 @@ interface Running {
   /** The reply's leading tagged sections as parsed so far (replySections.ts), and their panel text. */
   sections: ReplySections | null
   sectionsText: string
+  /** An agent reply's steps as last sent, for a subscriber that joins while it runs (spec/AGENTIC.md §5.1). */
+  steps: ReadonlyArray<RolloutStep> | null
   /** What a reply parser holds back for now, kept if the reply ends here. */
   held: { readonly held: string; readonly into: "body" | "section" } | null
   /**
@@ -81,6 +85,7 @@ export class Generations extends Context.Service<
       readonly waitingCache?: boolean
       readonly reasoning?: string
       readonly sections?: string
+      readonly steps?: ReadonlyArray<RolloutStep>
     }>
     /** The versions generating in a chat. */
     readonly runningIn: (chatId: ChatId, forkIds?: ReadonlyArray<ForkId>) => Array<VersionId>
@@ -99,6 +104,8 @@ export class Generations extends Context.Service<
       const notices = yield* Notices
       const generator = yield* Generator
       const warmth = yield* Effect.serviceOption(CacheWarmth)
+      // Decision points that act after a reply (spec/AGENTIC.md §7: presence); optional.
+      const decisions = yield* Effect.serviceOption(DecisionEngine)
       const { liveRewrites } = yield* executionRegistry
       const scope = yield* Effect.scope
       const running = new Map<VersionId, Running>()
@@ -237,6 +244,25 @@ export class Generations extends Context.Service<
           }
           if (status === "complete" && entry.text.trim() !== "")
             yield* Effect.forkIn(markIfRefused(request, entry.text), scope)
+          if (status === "complete" && Option.isSome(decisions))
+            yield* Effect.forkIn(
+              decisions.value
+                .afterReply({
+                  userId: request.userId,
+                  chatId: request.chatId,
+                  slotId: request.slotId,
+                  versionId: request.versionId,
+                  forkId: request.forkId ?? null
+                })
+                .pipe(
+                  Effect.tap((changed) =>
+                    Effect.sync(() => {
+                      if (changed) hub.publish(request.chatId, { _tag: "State" })
+                    })
+                  )
+                ),
+              scope
+            )
           if (status === "complete")
             yield* summaries.afterReply({
               userId: request.userId,
@@ -435,6 +461,7 @@ export class Generations extends Context.Service<
                 } else if ("steps" in chunk) {
                   // Steps go to subscribers as they stand; the transcript is what keeps them.
                   const { chatId, versionId } = entry.request
+                  entry.steps = chunk.steps
                   hub.publish(chatId, { _tag: "Steps", versionId, steps: chunk.steps })
                   return Effect.void
                 } else if ("restart" in chunk) {
@@ -494,6 +521,7 @@ export class Generations extends Context.Service<
             reasoned: false,
             sections: request.initial?.sections ?? null,
             sectionsText: sectionsDisplay(request.initial?.sections),
+            steps: null,
             held: null,
             shown: {
               text: request.initial?.text ?? "",
@@ -546,7 +574,8 @@ export class Generations extends Context.Service<
               text: entry.shown.text,
               waitingCache: entry.waitingCache,
               ...(entry.shown.reasoning ? { reasoning: entry.shown.reasoning } : {}),
-              ...(entry.shown.sections ? { sections: entry.shown.sections } : {})
+              ...(entry.shown.sections ? { sections: entry.shown.sections } : {}),
+              ...(entry.steps ? { steps: entry.steps } : {})
             })),
         runningIn: (chatId, forkIds) =>
           [...running.values()]

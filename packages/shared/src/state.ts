@@ -23,7 +23,15 @@ export const StateEventData = Schema.Union([
   event("card.swap", Schema.Struct({ entity: EntityId, replaces: EntityId })),
   event("participant.join", Schema.Struct({ entity: EntityId })),
   event("participant.leave", Schema.Struct({ entity: EntityId })),
-  event("presence.set", Schema.Struct({ entity: EntityId, present: Schema.Boolean })),
+  event(
+    "presence.set",
+    Schema.Struct({
+      entity: EntityId,
+      present: Schema.Boolean,
+      /** Set by the presence decision point (spec/AGENTIC.md §7); absent when the user or a tool set it. */
+      source: Schema.optionalKey(Schema.Literal("decision"))
+    })
+  ),
   event("played_by_me.set", Schema.Struct({ entities: Schema.Array(EntityId) })),
   event(
     "card.binding",

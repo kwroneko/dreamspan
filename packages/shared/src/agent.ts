@@ -51,3 +51,116 @@ export const StepEdit = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("result"), text: Schema.String })
 ])
 export type StepEdit = typeof StepEdit.Type
+/** One tool the run was offered, as frozen into its snapshot: exactly what the model saw. */
+export const OfferedTool = Schema.Struct({
+  name: Schema.String,
+  label: Schema.String,
+  description: Schema.String,
+  parameters: Schema.Unknown,
+  effect: EffectClass
+})
+export type OfferedTool = typeof OfferedTool.Type
+
+/** A part of the model's turn, verbatim. */
+export const TurnPart = Schema.Union([
+  Schema.Struct({ type: Schema.Literals(["thinking", "text"]), text: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("toolCall"), id: Schema.String, name: Schema.String, args: Schema.Unknown })
+])
+export type TurnPart = typeof TurnPart.Type
+
+/**
+ * What the loop added after the frozen request, in order (spec/AGENTIC.md §5.3): the model's
+ * turns, the tools' results and the app's own messages to the model.
+ */
+export const TranscriptEntry = Schema.Union([
+  Schema.Struct({
+    role: Schema.Literal("assistant"),
+    parts: Schema.Array(TurnPart),
+    /** The provider's reason the turn ended: `stop`, `toolUse`, `error`, `aborted`… */
+    stopReason: Schema.String,
+    error: Schema.optionalKey(Schema.String)
+  }),
+  Schema.Struct({
+    role: Schema.Literal("toolResult"),
+    toolCallId: Schema.String,
+    tool: Schema.String,
+    text: Schema.String,
+    isError: Schema.Boolean
+  }),
+  /** A message the app sent the model (a nudge to send the reply, the turn cap's last word). */
+  Schema.Struct({ role: Schema.Literal("app"), text: Schema.String })
+])
+export type TranscriptEntry = typeof TranscriptEntry.Type
+
+/** An agent run as the inspector shows it: the tools offered and every turn after the request. */
+export const RunTranscript = Schema.Struct({
+  tools: Schema.Array(OfferedTool),
+  entries: Schema.Array(TranscriptEntry)
+})
+export type RunTranscript = typeof RunTranscript.Type
+
+/** A reply mode the chat settings offer (spec/AGENTIC.md §6). */
+const ReplyModeInfo = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  description: Schema.String,
+  /** Replies are written by a tool-using loop: the tools list applies. */
+  agentic: Schema.Boolean,
+  /** The tools it offers when the chat doesn't choose, by id, as far as they're registered. */
+  tools: Schema.Array(Schema.String)
+})
+
+/** A tool an agent reply may be offered, as the settings list it. */
+const ReplyToolInfo = Schema.Struct({
+  id: Schema.String,
+  /** Short, as a step's row shows it: "Searched the chat". */
+  label: Schema.String,
+  /** What it lets the model do, for the user, as the settings' checkbox label: "Search the chat's earlier messages". */
+  explanation: Schema.String,
+  effect: EffectClass
+})
+
+export const ReplyModes = Schema.Struct({
+  modes: Schema.Array(ReplyModeInfo),
+  tools: Schema.Array(ReplyToolInfo)
+})
+export type ReplyModes = typeof ReplyModes.Type
+
+/**
+ * Model work in a chat that made no message (spec/AGENTIC.md §5.4): a summary, a condensation,
+ * a judgment of a reply. One row a rollout and purpose; counts are null when nobody reported them.
+ */
+export const ActivityRow = Schema.Struct({
+  /** The rollout, or the request when it had none. */
+  id: Schema.String,
+  kind: Schema.Literals(["summarize", "condense", "decision", "workshop", "idle_job", "edit"]),
+  /** As the rollout ended, or as its last request did. */
+  status: Schema.String,
+  model: Schema.NullOr(Schema.String),
+  connection: Schema.NullOr(Schema.String),
+  startedAt: Schema.Number,
+  endedAt: Schema.NullOr(Schema.Number),
+  requests: Schema.Int,
+  input: Schema.NullOr(Schema.Int),
+  cacheRead: Schema.NullOr(Schema.Int),
+  cacheWrite: Schema.NullOr(Schema.Int),
+  output: Schema.NullOr(Schema.Int),
+  cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String })),
+  /** Some count is the app's estimate. */
+  estimated: Schema.Boolean,
+  /** The summary it wrote, whose request the summary's page shows. */
+  summaryId: Schema.NullOr(Schema.String),
+  /** The reply it was about (a judgment), to open in the chat. */
+  slotId: Schema.NullOr(Schema.String)
+})
+export type ActivityRow = typeof ActivityRow.Type
+
+export const ActivityPage = Schema.Struct({
+  rows: Schema.Array(ActivityRow),
+  /** Pass as `before` for the next older page; null at the end. */
+  before: Schema.NullOr(Schema.Number)
+})
+export type ActivityPage = typeof ActivityPage.Type
+
+/** Rows one Activity read returns at most. */
+export const ACTIVITY_PAGE = 50

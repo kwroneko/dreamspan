@@ -62,6 +62,7 @@ import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
+import { readDecisionUsage, unwrapEnvelope } from "@rp/shared/decisions.ts"
 
 export { ProviderError } from "./errors.ts"
 
@@ -136,6 +137,29 @@ export type ProviderEvent =
       readonly counts: TokenCounts
       readonly cost: Cost | null
     }
+
+interface DecideRequest {
+  readonly userId: UserId
+  readonly connectionId: ConnectionId
+  readonly modelId: ModelId
+  readonly state: unknown
+  readonly questions: Readonly<Record<string, import("@rp/shared/decisions.ts").DecisionQuestion>>
+  readonly attribution: {
+    readonly chatId: ChatId | null
+    readonly rolloutId: string | null
+    readonly versionId?: VersionId | null
+  }
+}
+
+interface DecideResult {
+  readonly requestId: LlmRequestId
+  /** The response's `answers`, unparsed: the caller checks them against its questions. */
+  readonly answers: unknown
+  /** The dated model id the provider served, when it says. */
+  readonly servedModel: string | null
+  readonly counts: TokenCounts
+  readonly cost: Cost | null
+}
 
 export interface TestResult {
   readonly ok: boolean
@@ -339,6 +363,12 @@ export interface ProvidersShape {
     connectionId: ConnectionId
   ) => Effect.Effect<TestResult, ProviderError | ServerError>
   readonly stream: (request: StreamRequest) => Stream.Stream<ProviderEvent, ProviderError | ServerError>
+  /**
+   * One decision request (spec/AGENTIC.md §7) on a connection whose kind answers decisions:
+   * sent once, with the connection's key, headers and route, and recorded in the ledger whether
+   * or not its answers parse (every billed attempt counts, as in reference-harness). Never retried.
+   */
+  readonly decide: (request: DecideRequest) => Effect.Effect<DecideResult, ProviderError | ServerError>
   /**
    * What a request with these counts would cost through the cost formulas, as the ledger
    * would record it (PROVIDERS §9.3): null when no formula prices this model. Nothing is sent.
@@ -1434,6 +1464,11 @@ export const layer = (options: ProvidersOptions = {}) =>
           Effect.gen(function* () {
             const offer = (event: ProviderEvent) => void Queue.offerUnsafe(queue, event)
             const prepared = yield* prepare(request.userId, request.connectionId)
+            if (prepared.kind.decide)
+              return yield* providerError(
+                "unusable",
+                `${prepared.connection.name} answers decision questions only; choose another connection for replies`
+              )
             const model = yield* fromStorage(reader.GetModel({ userId: request.userId, modelId: request.modelId }))
             if (model.connectionId !== prepared.connection.id) {
               return yield* providerError("unusable", "that model belongs to another connection")
@@ -1496,6 +1531,166 @@ export const layer = (options: ProvidersOptions = {}) =>
             })
           )
         )
+
+      const decide: ProvidersShape["decide"] = (request) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepare(request.userId, request.connectionId)
+          const wire = prepared.kind.decide
+          if (!wire)
+            return yield* providerError("unusable", `${prepared.connection.name} doesn't answer decision questions`)
+          const model = yield* fromStorage(reader.GetModel({ userId: request.userId, modelId: request.modelId }))
+          if (model.connectionId !== prepared.connection.id)
+            return yield* providerError("unusable", "that model belongs to another connection")
+          const pricing = {
+            settings: yield* fromStorage(reader.GetCostSettings({ userId: request.userId })),
+            kind: prepared.kind.id,
+            connectionId: prepared.connection.id,
+            model: model.key
+          }
+          const body = { model: model.key, state: request.state, questions: request.questions }
+          const requestId = uuidv7() as LlmRequestId
+          const target = { kind: prepared.kind.id, api: prepared.api, model: model.key }
+          const allowed = yield* fromStorage(
+            writer.OpenLlmRequest({
+              userId: request.userId,
+              request: {
+                id: requestId,
+                connectionId: prepared.connection.id,
+                modelId: model.id,
+                chatId: request.attribution.chatId,
+                rolloutId: request.attribution.rolloutId,
+                versionId: request.attribution.versionId ?? null,
+                purpose: "decision",
+                api: prepared.api,
+                provider: prepared.kind.piProvider,
+                modelKey: model.key,
+                startedAt: Date.now(),
+                reservation: {
+                  tokens: Buffer.byteLength(JSON.stringify(body), "utf8") + 256,
+                  cost: null,
+                  currency: null
+                }
+              }
+            })
+          )
+          if (!allowed)
+            return yield* providerError("budget_held", "The decision request is held at its approved limit.")
+          const close = (
+            outcome: { readonly status: "complete" | "failed" | "aborted"; readonly error: ProviderError | null },
+            usage: ReturnType<typeof readDecisionUsage>,
+            servedModel: string | null,
+            rawUsage: unknown
+          ) =>
+            Effect.gen(function* () {
+              const counts: TokenCounts = {
+                inputUncached: usage.inputTokens,
+                cacheRead: usage.inputTokens === null ? null : 0,
+                cacheWrite: usage.inputTokens === null ? null : 0,
+                cacheWriteLong: usage.inputTokens === null ? null : 0,
+                output: usage.outputTokens,
+                reasoning: null
+              }
+              const capture: Capture = { ...emptyCapture(), reportedCost: usage.cost, rawUsage: rawUsage as never }
+              const cost = costOf(registry.costs.list(), target, {
+                counts,
+                pricing,
+                capture,
+                price: model.upstream.price ?? null
+              })
+              yield* writer
+                .CloseLlmRequest({
+                  userId: request.userId,
+                  request: {
+                    id: requestId,
+                    status: outcome.status,
+                    endedAt: Date.now(),
+                    firstTokenAt: null,
+                    responseModel: servedModel === null ? null : prepared.scrub(servedModel).slice(0, 256),
+                    upstream: null,
+                    counts,
+                    usageSource: usage.inputTokens === null && usage.outputTokens === null ? "none" : "reported",
+                    rawUsage: rawUsage ?? null,
+                    reportedCost: usage.cost,
+                    cost,
+                    error:
+                      outcome.error === null
+                        ? null
+                        : { reason: outcome.error.reason, message: outcome.error.message, status: outcome.error.status }
+                  }
+                })
+                .pipe(Effect.catch((e) => Effect.logError(`could not close ledger row ${requestId}`, e)))
+              return { counts, cost }
+            })
+          const none = readDecisionUsage(null)
+          const sent = yield* Effect.tryPromise({
+            try: (signal) =>
+              wire.decide({
+                baseUrl: prepared.baseUrl,
+                apiKey: prepared.apiKey,
+                headers: prepared.headers,
+                fetch: fetchFor(prepared, () => {}),
+                body,
+                signal
+              }),
+            catch: (error) =>
+              scrubbed(
+                prepared,
+                error instanceof RedirectRefused
+                  ? providerError("unusable", error.message)
+                  : providerError("network", error instanceof Error ? error.message : String(error))
+              )
+          }).pipe(
+            Effect.onExit((exit) =>
+              Exit.isSuccess(exit)
+                ? Effect.void
+                : close(
+                    Cause.hasInterruptsOnly(exit.cause)
+                      ? { status: "aborted", error: providerError("aborted", "stopped") }
+                      : {
+                          status: "failed",
+                          error: Option.getOrElse(Cause.findErrorOption(exit.cause), () =>
+                            providerError("unknown", "the request failed")
+                          )
+                        },
+                    none,
+                    null,
+                    null
+                  ).pipe(Effect.asVoid)
+            )
+          )
+          const envelope = unwrapEnvelope(sent.body)
+          const usage = readDecisionUsage(envelope["usage"])
+          const servedModel = typeof envelope["model"] === "string" ? envelope["model"] : null
+          if (sent.status < 200 || sent.status >= 300) {
+            const reason =
+              sent.status === 401 || sent.status === 403
+                ? "auth"
+                : sent.status === 429
+                  ? "rate_limited"
+                  : sent.status === 503 || sent.status === 529
+                    ? "overloaded"
+                    : sent.status >= 400 && sent.status < 500
+                      ? "bad_request"
+                      : "unknown"
+            const error = scrubbed(
+              prepared,
+              providerError(reason, `HTTP ${sent.status}${sent.detail ? `: ${sent.detail}` : ""}`, {
+                status: sent.status,
+                retryAfterMs: sent.retryAfterMs
+              })
+            )
+            yield* close({ status: "failed", error }, usage, servedModel, envelope["usage"] ?? null)
+            return yield* error
+          }
+          // A 2xx was billed whatever its answers say: the ledger matches the provider's invoice.
+          const { counts, cost } = yield* close(
+            { status: "complete", error: null },
+            usage,
+            servedModel,
+            envelope["usage"] ?? null
+          )
+          return { requestId, answers: envelope["answers"], servedModel, counts, cost }
+        })
 
       const estimateCost: ProvidersShape["estimateCost"] = (userId, connectionId, modelId, counts) =>
         Effect.gen(function* () {
@@ -1634,6 +1829,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         estimateCost,
         countImageTokens,
         countTextTokens,
+        decide,
         kinds: () =>
           registry.kinds.list().map(
             (entry) =>
@@ -1642,7 +1838,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                 label: entry.label,
                 api: entry.api,
                 defaultBaseUrl: entry.defaultBaseUrl,
-                keyOptional: entry.keyOptional
+                keyOptional: entry.keyOptional,
+                ...(entry.decide ? { decisions: true } : {})
               })
           ),
         createConnection,

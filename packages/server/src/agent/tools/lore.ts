@@ -9,6 +9,7 @@ import { safely } from "./history.ts"
 export const lookupLore: RolloutTool<{ readonly query?: string; readonly entry?: string; readonly limit?: number }> = {
   id: "lookup_lore",
   label: "Looked up the lore",
+  explanation: "Look up lorebook entries",
   effect: "read",
   description:
     "Looks up the story's lorebook entries: by words in their keys, titles or text, or one entry by its title. Use it for a detail of the world, a place, a faction or a character that isn't in front of you. Entries already in the context don't need looking up.",

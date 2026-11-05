@@ -8,6 +8,7 @@ import type { ForkNoteSelection } from "@rp/shared/chatApi.ts"
 // of its own, which only its message's body reads, and deltas are applied once per
 // animation frame, so a token re-renders one row.
 import { sectionsDisplay } from "@rp/shared/replySections.ts"
+import type { RolloutStep } from "@rp/shared/agent.ts"
 import {
   type Chat,
   type ChatId,
@@ -65,6 +66,8 @@ export const liveText = Atom.family((_id: VersionId) => Atom.make<string | null>
 export const liveReasoning = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
 /** A generating version's reply-section panel text so far (spec/REPLY-SECTIONS.md); null when not streaming. */
 export const liveSections = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
+/** A generating agent reply's steps as they stand (spec/AGENTIC.md §5.1); null when it isn't generating or has none yet. */
+export const liveSteps = Atom.family((_id: VersionId) => Atom.make<ReadonlyArray<RolloutStep> | null>(null))
 
 export interface ChatView {
   readonly chat: Chat | null
@@ -639,6 +642,7 @@ export class ChatSession {
       this.registry.set(liveText(id), null)
       this.registry.set(liveReasoning(id), null)
       this.registry.set(liveSections(id), null)
+      this.registry.set(liveSteps(id), null)
       unmount()
     }
     this.live.clear()
@@ -1028,13 +1032,14 @@ export class ChatSession {
   ) {
     switch (event._tag) {
       case "Hello": {
-        for (const { versionId, text, waitingCache: waiting, reasoning, sections } of event.live) {
+        for (const { versionId, text, waitingCache: waiting, reasoning, sections, steps } of event.live) {
           this.registry.set(waitingCache(versionId), waiting ?? false)
           if (text.length >= (this.registry.get(liveText(versionId)) ?? "").length) this.setLive(versionId, text)
           if (reasoning && reasoning.length >= (this.registry.get(liveReasoning(versionId)) ?? "").length)
             this.setLiveSide(liveReasoning, versionId, reasoning)
           if (sections && sections.length >= (this.registry.get(liveSections(versionId)) ?? "").length)
             this.setLiveSide(liveSections, versionId, sections)
+          if (steps) this.setLiveSteps(versionId, steps)
         }
         // The first Hello opens the chat. Another means the socket reconnected, and
         // anything may have changed meanwhile.
@@ -1076,6 +1081,9 @@ export class ChatSession {
       case "ComposerChoice":
         for (const listener of this.choiceListeners) listener(event.choice)
         return
+      case "Steps":
+        // Each event holds every step as it stands: the newest replaces what's shown.
+        return this.setLiveSteps(event.versionId, event.steps)
       case "WaitingCache":
         if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
         this.registry.set(waitingCache(event.versionId), event.waiting)
@@ -1314,11 +1322,13 @@ export class ChatSession {
     const text = this.registry.mount(liveText(id))
     const reasoning = this.registry.mount(liveReasoning(id))
     const sections = this.registry.mount(liveSections(id))
+    const steps = this.registry.mount(liveSteps(id))
     const waiting = this.registry.mount(waitingCache(id))
     return () => {
       text()
       reasoning()
       sections()
+      steps()
       waiting()
     }
   }
@@ -1343,6 +1353,11 @@ export class ChatSession {
     this.registry.set(atom(id), text)
   }
 
+  private setLiveSteps(id: VersionId, steps: ReadonlyArray<RolloutStep>) {
+    if (!this.live.has(id)) this.live.set(id, this.mountLive(id))
+    this.registry.set(liveSteps(id), steps)
+  }
+
   private endLive(id: VersionId) {
     this.pending.delete(id)
     this.pendingReasoning.delete(id)
@@ -1351,6 +1366,7 @@ export class ChatSession {
     this.registry.set(liveText(id), null)
     this.registry.set(liveReasoning(id), null)
     this.registry.set(liveSections(id), null)
+    this.registry.set(liveSteps(id), null)
     this.live.get(id)?.()
     this.live.delete(id)
   }

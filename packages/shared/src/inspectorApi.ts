@@ -21,6 +21,8 @@ export const SourceActivation = Schema.Union([
       Schema.Struct({ kind: Schema.Literal("sticky") }),
       /** Kept from an earlier turn while the history's start holds (DESIGN §1.3). */
       Schema.Struct({ kind: Schema.Literal("pinned") }),
+      /** Admitted by a decision model whose answer to the entry's question was yes (spec/AGENTIC.md §7). */
+      Schema.Struct({ kind: Schema.Literal("decision"), probability: Schema.Number }),
       Schema.Struct({
         kind: Schema.Literal("keys"),
         primaryKey: Schema.String,

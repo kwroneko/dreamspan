@@ -1,0 +1,191 @@
+// Decision models' storage (spec/AGENTIC.md §7). The settings are `user_prefs` key `decisions`,
+// `{ connections: { [id]: { model, points: { [point]: { on, threshold } } } } }`; only entries
+// whose connection (and model) are still the user's and live read back, so a deleted connection
+// sends nothing. Each decision call is a rollout of kind `decision`: its state and questions are
+// its snapshot, its answers and verdict its transcript, and its ledger rows roll up onto it, so
+// the Activity panel lists it with tokens and cost. The presence point's state events attach to
+// the reply's version with the decision rollout as their origin, so a swipe takes them back.
+import type { ConnectionDecisions } from "@rp/shared/decisions.ts"
+import type { UserId } from "@rp/shared/domain.ts"
+import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
+import { Effect } from "effect"
+import { SqlClient } from "effect/sql"
+import type { Bin } from "./bin.ts"
+import { ownedModel } from "./generationSettings.ts"
+import { makeGraphWrites } from "./graphWrites.ts"
+import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
+import { query, transaction } from "./tx.ts"
+
+const KEY = "decisions"
+
+const stored = (sql: SqlClient.SqlClient, userId: UserId) =>
+  sql<{ value_json: string }>`SELECT value_json FROM user_prefs WHERE user_id = ${userId} AND key = ${KEY}`.pipe(
+    Effect.map(([row]): Array<ConnectionDecisions> => {
+      if (!row) return []
+      const value = JSON.parse(row.value_json) as { connections?: unknown }
+      const connections = value.connections
+      if (!connections || typeof connections !== "object" || Array.isArray(connections)) return []
+      return Object.entries(connections as Record<string, { model?: unknown; points?: unknown }>).flatMap(
+        ([connectionId, entry]) => {
+          if (!entry || typeof entry !== "object") return []
+          const points: Record<string, { on: boolean; threshold: number }> = {}
+          for (const [id, p] of Object.entries((entry.points ?? {}) as Record<string, unknown>)) {
+            const point = p as { on?: unknown; threshold?: unknown }
+            if (typeof point?.on === "boolean" && typeof point.threshold === "number")
+              points[id] = { on: point.on, threshold: point.threshold }
+          }
+          return [
+            {
+              connectionId: connectionId as ConnectionId,
+              model: typeof entry.model === "string" ? (entry.model as ModelId) : null,
+              points
+            }
+          ]
+        }
+      )
+    })
+  )
+
+/** The entries whose connection is still the user's and live; a model that isn't its connection's reads as none. */
+const live = (sql: SqlClient.SqlClient, userId: UserId) =>
+  Effect.gen(function* () {
+    const entries = yield* stored(sql, userId)
+    if (entries.length === 0) return entries
+    const rows = yield* sql<{ id: string }>`SELECT id FROM connections WHERE owner_user_id = ${userId}
+      AND deleted_at IS NULL AND purged_at IS NULL AND id IN ${sql.in(entries.map((e) => e.connectionId))}`
+    const kept = new Set(rows.map((row) => row.id))
+    const out: Array<ConnectionDecisions> = []
+    for (const entry of entries) {
+      if (!kept.has(entry.connectionId)) continue
+      const model =
+        entry.model !== null && (yield* ownedModel(sql, userId, entry.connectionId, entry.model)) ? entry.model : null
+      out.push({ ...entry, model })
+    }
+    return out
+  })
+
+export const makeDecisionReadHandlers = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  return {
+    GetDecisionSettings: ({ userId }) => live(sql, userId).pipe(query("GetDecisionSettings"))
+  } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
+})
+
+export const makeDecisionWriteHandlers = (bin: Bin) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const graph = makeGraphWrites(sql, bin.drafts)
+    /** A decision rollout of the user's, with what its effects attach to. */
+    const decisionRollout = (userId: UserId, rolloutId: string) =>
+      sql<{ readonly chat_id: string; readonly status: string }>`
+        SELECT r.chat_id, r.status FROM rollouts r JOIN chats c ON c.id = r.chat_id
+        WHERE r.id = ${rolloutId} AND r.kind = 'decision' AND c.owner_user_id = ${userId}`.pipe(
+        Effect.flatMap(([row]) =>
+          row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "decision", id: rolloutId }))
+        )
+      )
+    return {
+      SetDecisionSettings: ({ userId, connectionId, model, points }) =>
+        Effect.gen(function* () {
+          const [connection] = yield* sql<{ id: string }>`SELECT id FROM connections WHERE id = ${connectionId}
+            AND owner_user_id = ${userId} AND deleted_at IS NULL AND purged_at IS NULL`
+          if (!connection) return yield* new NotFound({ entity: "connection", id: connectionId })
+          if (model !== null && !(yield* ownedModel(sql, userId, connectionId, model)))
+            return yield* new NotFound({ entity: "model", id: model })
+          const next = (yield* live(sql, userId)).filter((entry) => entry.connectionId !== connectionId)
+          next.push({ connectionId, model, points })
+          const value = {
+            connections: Object.fromEntries(
+              next.map((entry) => [entry.connectionId, { model: entry.model, points: entry.points }])
+            )
+          }
+          yield* sql`INSERT INTO user_prefs (user_id, key, value_json)
+            VALUES (${userId}, ${KEY}, ${JSON.stringify(value)})
+            ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
+          return next
+        }).pipe(transaction(sql, "SetDecisionSettings")),
+
+      StartDecisionRollout: ({
+        userId,
+        chatId,
+        rolloutId,
+        slotId,
+        forkId,
+        connectionId,
+        modelId,
+        requestClass,
+        snapshot
+      }) =>
+        Effect.gen(function* () {
+          const [chat] = yield* sql<{ id: string }>`SELECT id FROM chats
+            WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+          if (!chat || !(yield* ownedModel(sql, userId, connectionId, modelId)))
+            return yield* new NotFound({ entity: "decision", id: rolloutId })
+          if (slotId !== null) {
+            const [slot] = yield* sql<{ id: string }>`SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`
+            if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
+          }
+          const now = Date.now()
+          yield* sql`INSERT INTO rollouts ${sql.insert({
+            id: rolloutId,
+            chat_id: chatId,
+            fork_id: forkId,
+            kind: "decision",
+            status: "running",
+            slot_id: slotId,
+            role: "decision",
+            connection_id: connectionId,
+            model_id: modelId,
+            request_class: requestClass,
+            created_at: now,
+            started_at: now,
+            updated_at: now
+          })}`
+          yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
+        }).pipe(transaction(sql, "StartDecisionRollout")),
+
+      FinishDecisionRollout: ({ userId, rolloutId, status, error, result }) =>
+        Effect.gen(function* () {
+          yield* decisionRollout(userId, rolloutId)
+          const [usage] = yield* sql<{
+            requests: number
+            input: number | null
+            output: number | null
+            cache_read: number | null
+            cache_write: number | null
+            cost: number | null
+          }>`
+            SELECT count(*) AS requests, sum(input_uncached) AS input, sum(output) AS output,
+              sum(cache_read) AS cache_read, sum(cache_write) AS cache_write, sum(cost) AS cost
+            FROM llm_requests WHERE rollout_id = ${rolloutId}`
+          const now = Date.now()
+          yield* sql`UPDATE rollouts SET status = ${status}, error = ${error}, llm_requests = ${usage!.requests},
+            usage_input_tokens = ${usage!.input}, usage_output_tokens = ${usage!.output},
+            usage_cache_read_tokens = ${usage!.cache_read}, usage_cache_write_tokens = ${usage!.cache_write},
+            usage_cost = ${usage!.cost}, completed_at = ${now}, updated_at = ${now}
+            WHERE id = ${rolloutId} AND status = 'running'`
+          yield* sql`UPDATE rollout_payloads SET transcript_json = ${result} WHERE rollout_id = ${rolloutId}`
+        }).pipe(transaction(sql, "FinishDecisionRollout")),
+
+      ApplyDecisionEffect: ({ userId, rolloutId, versionId, events }) =>
+        Effect.gen(function* () {
+          const decision = yield* decisionRollout(userId, rolloutId)
+          const [version] = yield* sql<{ readonly slot_id: string; readonly fork_id: string | null }>`
+            SELECT v.slot_id, g.fork_id FROM versions v JOIN slots s ON s.id = v.slot_id
+            LEFT JOIN rollouts g ON g.id = v.rollout_id
+            WHERE v.id = ${versionId} AND s.chat_id = ${decision.chat_id} AND v.deleted_at IS NULL`
+          if (!version) return yield* new NotFound({ entity: "version", id: versionId })
+          for (const data of events)
+            yield* graph.insertStateEvent(
+              userId,
+              decision.chat_id,
+              version.slot_id,
+              versionId,
+              null,
+              data,
+              version.fork_id,
+              { origin: "rollout", ref: rolloutId }
+            )
+        }).pipe(transaction(sql, "ApplyDecisionEffect"))
+    } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
+  })

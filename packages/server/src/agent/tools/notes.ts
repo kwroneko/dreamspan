@@ -111,6 +111,7 @@ const refusal = (note: NoteView) =>
 export const listNotes: RolloutTool<Record<string, never>> = {
   id: "list_notes",
   label: "Looked at the notes",
+  explanation: "List this chat's notes",
   effect: "read",
   description:
     "Lists the chat's notes and its characters' notes: title, whose it is, whether it's on, and whether you may change it. On notes are already in your context.",
@@ -138,6 +139,7 @@ export const listNotes: RolloutTool<Record<string, never>> = {
 export const switchNote: RolloutTool<{ readonly note: string; readonly on: boolean }> = {
   id: "switch_note",
   label: "Switched a note",
+  explanation: "Switch the notes you let it change",
   effect: "chat_state",
   description:
     "Turns one of the notes on or off from the next message on, by its title (list_notes gives them). Only notes you may change.",
@@ -193,6 +195,7 @@ export const writeNote: RolloutTool<{
 }> = {
   id: "write_note",
   label: "Wrote a note",
+  explanation: "Write new notes for this chat",
   effect: "chat_state",
   description:
     "Writes a new note for the chat, on from the next message on: a lasting fact the story should keep (an injury, an outfit, a promise, where someone is). It goes at the end of your context unless you give a depth. Use edit_note to change a note that exists rather than writing another.",
@@ -262,6 +265,7 @@ export const editNote: RolloutTool<{
 }> = {
   id: "edit_note",
   label: "Changed a note",
+  explanation: "Change the notes you let it change",
   effect: "chat_state",
   description:
     "Changes a note's text from the next message on, by its title: replace one exact passage (find and replace, the usual way), or give the whole new text as content. Only notes you may change.",
