@@ -10,6 +10,7 @@ import { join } from "node:path"
 import { card, header, jsonl } from "../../server/test/support/stFolder.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -267,4 +268,138 @@ test("a message shows its model with its lab's mark, its date and time, and its 
   await expect(lastReply(page)).toContainText("The bridge holds.")
   await expect(page.locator("article [data-portrait-details]:not(:empty)")).toHaveCount(0)
   await shoot(page, "07-hidden-390")
+})
+
+// The full connection gets the actual free header width, never a one-letter stub.
+test("model labels use the free header width and hide the whole connection when needed", async ({ page }, info) => {
+  const model = "acme.deepseek/deepseek-v4.1-flash-1017"
+  const full = `Custom · ${model}`
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.SetDisplayPrefs({
+      prefs: {
+        messageDetails: {
+          "message.time": true,
+          "message.model-icon": true,
+          "message.model": true,
+          "message.number": true,
+          "message.timer": true,
+          "message.tokens": true
+        }
+      }
+    })
+  )
+  const { importId } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.StartStImport({ unsupported: [] })
+  )
+  const cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+  for (const [path, body] of [
+    ["characters/Label.png", card("Label", "A synthetic greeting.")],
+    [
+      "chats/Label/Model label.jsonl",
+      jsonl([
+        header({ integrity: "11111111-1111-4111-8111-111111111111" }),
+        chat[1],
+        chat[2],
+        {
+          name: "Label",
+          is_user: false,
+          mes: "A synthetic reply.",
+          send_date: iso(RECENT),
+          extra: { api: "custom", model }
+        }
+      ])
+    ]
+  ] as const) {
+    const response = await fetch(`${server().url}/st-import/file?${new URLSearchParams({ import: importId, path })}`, {
+      method: "POST",
+      headers: { origin: server().url, cookie, "content-type": "application/octet-stream" },
+      body: new Uint8Array(body)
+    })
+    expect(response.status).toBe(200)
+  }
+  const { id } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api
+      .ListChats({ limit: 10, before: null })
+      .pipe(Effect.map((chats) => chats.find((c) => c.title === "Model label")!))
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${id}`)
+  for (const width of [1440, 390, 320, 1440]) {
+    for (const theme of ["light", "dark"] as const) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.evaluate((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.reload()
+      const head = lastReply(page).locator("header")
+      const label = head.locator("[data-model-label]")
+      await expect(label).toBeVisible()
+      const connection = label
+        .locator("span")
+        .filter({ hasText: /^Custom ·\s*$/ })
+        .last()
+      const geometry = await label.evaluate((element) => {
+        const full = element.firstElementChild!
+        const shown = element.lastElementChild!
+        const model = shown.lastElementChild!
+        return {
+          available: element.getBoundingClientRect().width,
+          full: full.getBoundingClientRect().width,
+          model: model.clientWidth,
+          modelFull: model.scrollWidth,
+          height: element.getBoundingClientRect().height
+        }
+      })
+      await info.attach(`label-${width}-${theme}`, { body: JSON.stringify(geometry), contentType: "application/json" })
+      await expect(connection).toBeVisible({ visible: geometry.full <= geometry.available })
+      if (width === 1440) {
+        expect(geometry.full).toBeLessThanOrEqual(geometry.available)
+        expect(geometry.modelFull).toBeLessThanOrEqual(geometry.model)
+        expect(geometry.full).toBeGreaterThan(256)
+      }
+      // The old label showed a clipped connection at this precise available width.
+      // Constrain only this label, leaving room for the model and one connection letter.
+      if (width === 320) {
+        const before = await head.boundingBox()
+        await label.evaluate((element, max) => {
+          element.style.maxWidth = `${max}px`
+        }, geometry.modelFull + 10)
+        await expect(connection).toBeHidden()
+        await expect
+          .poll(() =>
+            label.evaluate((element) => {
+              const model = element.lastElementChild!.lastElementChild!
+              return model.scrollWidth <= model.clientWidth
+            })
+          )
+          .toBe(true)
+        await label.evaluate((element, max) => {
+          element.style.maxWidth = `${max}px`
+        }, geometry.modelFull / 2)
+        await expect(connection).toBeHidden()
+        await expect
+          .poll(() =>
+            label.evaluate((element) => {
+              const model = element.lastElementChild!.lastElementChild!
+              return model.scrollWidth > model.clientWidth
+            })
+          )
+          .toBe(true)
+        await label.evaluate((element) => {
+          element.style.maxWidth = ""
+        })
+        await expect(connection).toBeVisible({ visible: geometry.full <= geometry.available })
+        expect((await head.boundingBox())!.height).toBe(before!.height)
+      }
+      await label.hover()
+      await expect(tip(page, `Generated with ${full}, as recorded at import`)).toBeVisible()
+      await page.mouse.move(0, 0)
+      await expect(tip(page, `Generated with ${full}, as recorded at import`)).toHaveCount(0)
+      if (process.env.SCREENSHOT_DIR) {
+        mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+        await head.screenshot({ path: join(process.env.SCREENSHOT_DIR, `model-label-${width}-${theme}.png`) })
+      }
+      if (process.env.LAYOUT_AUDIT)
+        await expectLayout(page, info, `model-label-${width}-${theme}`, { scope: "article header" })
+    }
+  }
 })
