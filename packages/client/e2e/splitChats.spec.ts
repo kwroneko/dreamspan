@@ -14,7 +14,9 @@ test.beforeAll(async () => {
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`split chats navigate between groups at ${width} ${theme}`, async ({ page }, info) => {
-      await page.setViewportSize({ width, height: 900 })
+      // This navigation scenario needs expanded foot lists beside its global pin;
+      // short-column automatic collapse is covered by the layout audit.
+      await page.setViewportSize({ width, height: 1200 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.SetChatPin({ chatId: seed.groupId, leaf: null, pinned: true })
@@ -37,7 +39,7 @@ for (const width of [1440, 390])
       const selected = chats.locator(`button[data-chat-id="${seed.harbor}"]`)
       await expect(selected).toHaveAttribute("aria-current", "page")
       await expect(selected).toBeInViewport({ ratio: 1 })
-      // A shorter split list now returns its unused height to Chats.
+      // A shorter split list retains the same reserved height.
       await page.screenshot({ path: info.outputPath("both-parent-and-child.png") })
       await parent.click()
       await showAppNavigation(page)
@@ -121,3 +123,30 @@ for (const width of [1440, 390])
       expect(restored.forkIds).toHaveLength(2)
     })
   }
+
+for (const width of [1440, 390]) {
+  test(`switching top-level chats keeps branch placement at ${width}`, async ({ page }) => {
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreateChat({ title: "No split sizing" }))
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${seed.chatId}?fork=${seed.original}&side=chats`)
+    if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
+    await showAppNavigation(page)
+    const branches = page.getByRole("region", { name: "Branches of the open chat", exact: true })
+    await expect(branches).toHaveAttribute("aria-busy", "false")
+    const initial = (await branches.boundingBox())!
+    for (const title of ["Split demo · Harbor", "No split sizing", "Split demo · Journeys"]) {
+      await page
+        .locator("[data-shell-list]")
+        .getByRole("button", { name: `Open chat ${title}`, exact: true })
+        .first()
+        .click()
+      await showAppNavigation(page)
+      await expect(branches.getByRole("button", { name: new RegExp(`^Branches of ${title}`) })).toBeVisible()
+      await expect(branches).toHaveAttribute("aria-busy", "false")
+      const box = (await branches.boundingBox())!
+      expect(Math.abs(box.y - initial.y)).toBeLessThanOrEqual(1)
+      expect(Math.abs(box.height - initial.height)).toBeLessThanOrEqual(1)
+    }
+  })
+}

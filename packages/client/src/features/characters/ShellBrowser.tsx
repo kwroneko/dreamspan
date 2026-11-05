@@ -3,7 +3,7 @@ import { requestSplitReveal, useSplitReveal } from "../chat/splitReveal.ts"
 import type { ChatBrowse } from "@rp/shared/chatBrowse.ts"
 import { useChatBrowse } from "./useChatBrowse.ts"
 import { sidebarChatBrowse } from "./ChatBrowseBar.tsx"
-import { chatName, formatDay } from "../chat/chatTitle.ts"
+import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
@@ -35,7 +35,7 @@ import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
-import { useBranchHeight } from "./useBranchHeight.ts"
+import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
 import {
   CharacterGrid,
   PAGE_ROWS,
@@ -433,7 +433,8 @@ export function ForkRow({
               {fork.preview || "No messages yet"}
             </span>
             <span data-row-when className="mt-auto text-xs text-muted">
-              Last message {formatMoment(last)}
+              {perFork ? "Last message " : ""}
+              {perFork ? formatMoment(last) : formatWhen(last)}
             </span>
           </span>
         </button>
@@ -450,8 +451,6 @@ export function ForkRow({
   )
 }
 
-const OPEN_BRANCHES_KEY = (userId: string) => `rp.openChatBranches.${userId}`
-
 /**
  * The open chat's branches at the bottom of the left panel, below whatever it lists (owner,
  * 2026-11-01): switch branches without leaving the list above; its header lists them as the
@@ -461,14 +460,6 @@ export function OpenChatBranches() {
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const { scope, setScope, grid } = useShellNavigation()
-  const userId = useSession().user.id
-  const [expanded, setExpanded] = useState(() => {
-    try {
-      return localStorage.getItem(OPEN_BRANCHES_KEY(userId)) !== "collapsed"
-    } catch {
-      return true
-    }
-  })
   const split = useSplitChats((params.chatId ?? null) as ChatId | null, shown)
   const chatId = split?.group.id ?? ((params.chatId ?? null) as ChatId | null)
   const forks = useShellForks({
@@ -502,37 +493,25 @@ export function OpenChatBranches() {
   )
     setLast({ chatId, rows: nextRows, split, shown })
   const rows = ready ? nextRows : (last?.rows ?? [])
-  const displayedSplit = ready ? split : last?.split
   const displayedChat = ready ? chatId : last?.chatId
   const displayedFork = ready ? shown : last?.shown
   const waiting = !ready
   const visible = params.chatId !== undefined && !grid && scope.chat !== displayedChat && rows.length > 0
-  const { ref, height, min, max, change, reset } = useBranchHeight(
-    userId,
-    visible,
-    "branch",
-    !!displayedSplit && displayedSplit.children.length > 0
-  )
+  const { height, min, max, change, reset, collapsed, expanded, toggle } = useBranchHeight("branch")
+  const open = expanded && !collapsed
   if (!visible) return null
-  const toggle = () => {
-    setExpanded(!expanded)
-    try {
-      localStorage.setItem(OPEN_BRANCHES_KEY(userId), expanded ? "collapsed" : "open")
-    } catch {
-      // Remembered only where the browser keeps it.
-    }
-  }
   const chatLabel = rows[0]!.chatName
   return (
     <section
-      ref={ref}
       inert={waiting}
       aria-busy={waiting}
       aria-label="Branches of the open chat"
-      style={expanded ? { maxHeight: height } : undefined}
-      className="relative flex min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
+      data-foot-section="branch"
+      data-foot-wanted={expanded}
+      style={open ? { height } : undefined}
+      className={`relative flex min-h-0 shrink-0 flex-col border-t border-border pt-2 ${open ? "gap-1" : ""}`}
     >
-      {expanded && (
+      {open && (
         <div className="absolute inset-x-0 top-0">
           <ResizeHandle
             label="Resize chats and branches"
@@ -548,17 +527,24 @@ export function OpenChatBranches() {
         </div>
       )}
       {/* The same 8 px gutters as the list above (layoutlint), so these rows line up with its rows. */}
-      <div className="flex max-w-controls min-w-0 shrink-0 items-center gap-1 px-2">
+      <div data-foot-header className="flex max-w-controls min-w-0 shrink-0 items-center gap-1 px-2">
         <Tooltip
-          label={expanded ? "Click to hide the open chat's branches." : "Click to show the open chat's branches here."}
+          label={
+            expanded && collapsed
+              ? "More height is needed to show a complete branch row."
+              : open
+                ? "Click to hide the open chat's branches."
+                : "Click to show the open chat's branches here."
+          }
         >
           <button
             type="button"
-            aria-expanded={expanded}
+            aria-expanded={open}
+            disabled={expanded && collapsed}
             onClick={toggle}
             className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs font-semibold text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
           >
-            <Icon name={expanded ? "down" : "right"} size={14} className="shrink-0" />
+            <Icon name={open ? "down" : "right"} size={14} className="shrink-0" />
             <span className="truncate">
               Branches of {chatLabel} ({rows.length.toLocaleString()})
             </span>
@@ -571,19 +557,23 @@ export function OpenChatBranches() {
           onClick={() => setScope({ entity: null, chat: displayedChat ?? null })}
         />
       </div>
-      {expanded && (
-        <div className="flex min-h-0 flex-col gap-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
-          {rows.map((f) => (
-            <ForkRow
-              key={f.forkId}
-              fork={f}
-              perFork
-              branchOnly
-              here={displayedFork ? f.forkId === displayedFork : f.current}
-            />
-          ))}
-        </div>
-      )}
+      <div
+        data-foot-body
+        inert={!open}
+        aria-hidden={!open}
+        style={open ? undefined : { height: 0, maxHeight: 0, visibility: "hidden" }}
+        className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
+      >
+        {rows.map((f) => (
+          <ForkRow
+            key={f.forkId}
+            fork={f}
+            perFork
+            branchOnly
+            here={displayedFork ? f.forkId === displayedFork : f.current}
+          />
+        ))}
+      </div>
     </section>
   )
 }
@@ -905,7 +895,9 @@ function Browser({ data }: { data: ShellLibrary }) {
           </div>
         )}
       </div>
-      <SlotOutlet slot={sidebarFoot} props={{}} />
+      <SidebarFeet active={params.chatId !== undefined && !grid && scope.chat !== selected}>
+        <SlotOutlet slot={sidebarFoot} props={{}} />
+      </SidebarFeet>
     </div>
   )
 }

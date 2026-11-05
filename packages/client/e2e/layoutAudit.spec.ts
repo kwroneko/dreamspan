@@ -2288,6 +2288,7 @@ test.describe("revision dialogs", () => {
 for (const { width, height } of [
   { width: 1440, height: 1000 },
   { width: 1440, height: 700 },
+  { width: 1440, height: 600 },
   { width: 390, height: 844 }
 ])
   for (const theme of ["light", "dark"] as const) {
@@ -2302,7 +2303,7 @@ for (const { width, height } of [
         const plain = await withCookie(local, splitCookie, (api) => api.CreateChat({ title: "No splits" }))
         const full = join(process.env.LAYOUT_AUDIT_WORK ?? info.outputDir, "full")
         mkdirSync(full, { recursive: true })
-        const profiles = ["1440x1000", "1440x700", "390x844"]
+        const profiles = ["1440x1000", "1440x700", "1440x600", "390x844"]
         writeFileSync(
           join(full, "index.md"),
           "# Full sidebar review\n\n" +
@@ -2318,6 +2319,7 @@ for (const { width, height } of [
             "\n"
         )
         const measurements = []
+        let branchBox: { y: number; height: number } | undefined
         for (const [name, chatId, fork] of [
           ["journeys", splitSeed.chatId, splitSeed.original],
           ["harbor", splitSeed.chatId, splitSeed.market],
@@ -2343,7 +2345,6 @@ for (const { width, height } of [
           const measure = async () =>
             column.evaluate((el) => {
               const list = el.querySelector<HTMLElement>("[data-shell-list]")!
-              const first = list.querySelector<HTMLElement>("[data-fork-row]")!
               const sections = [
                 ...el.querySelectorAll<HTMLElement>(
                   'section[aria-label="Split chats"], section[aria-label="Branches of the open chat"]'
@@ -2351,28 +2352,48 @@ for (const { width, height } of [
               ]
               return {
                 listHeight: list.clientHeight,
-                threeRows: 3 * (first.offsetHeight + 4),
                 sections: sections.map((section) => {
                   const rows = section.querySelectorAll<HTMLElement>("[data-fork-row]")
                   const last = rows.item(rows.length - 1)
+                  const body = section.querySelector<HTMLElement>("[data-foot-body]")
+                  const open = body !== null && body.getAttribute("aria-hidden") !== "true"
+                  const box = body?.getBoundingClientRect()
+                  const visibleRows = open
+                    ? [...rows].filter((row) => {
+                        const rect = row.getBoundingClientRect()
+                        return rect.top >= box!.top - 1 && rect.bottom <= box!.bottom + 1
+                      }).length
+                    : 0
+                  const boundary = open
+                    ? Math.min(...[...rows].map((row) => Math.abs(row.getBoundingClientRect().bottom - box!.bottom)))
+                    : 0
                   return {
+                    open,
+                    visibleRows,
+                    boundary,
                     name: section.ariaLabel,
+                    y: section.getBoundingClientRect().y,
                     height: section.offsetHeight,
-                    empty: last
-                      ? Math.max(0, section.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom)
-                      : 0
+                    empty:
+                      last && open
+                        ? Math.max(0, section.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom)
+                        : 0
                   }
                 })
               }
             })
-          await expect
-            .poll(async () => {
-              const m = await measure()
-              return m.listHeight - m.threeRows
-            })
-            .toBeGreaterThanOrEqual(-1)
+          await expect(column.getByRole("region", { name: "Branches of the open chat", exact: true })).toHaveAttribute(
+            "aria-busy",
+            "false"
+          )
           const m = await measure()
-          for (const section of m.sections) expect(section.empty).toBeLessThanOrEqual(16)
+          const currentBranch = m.sections.find((s) => s.name === "Branches of the open chat")!
+          if (name === "journeys") branchBox = currentBranch
+          else if (name === "harbor" || name === "no-splits") {
+            expect(Math.abs(currentBranch.y - branchBox!.y)).toBeLessThanOrEqual(1)
+            expect(Math.abs(currentBranch.height - branchBox!.height)).toBeLessThanOrEqual(1)
+          }
+          for (const section of m.sections) if (section.open) expect(section.visibleRows).toBeGreaterThanOrEqual(1)
           measurements.push({ name, width, height, theme, ...m })
           await expectLayout(page, info, `${name}-${width}x${height}-${theme}`, {
             scope:
@@ -2386,6 +2407,40 @@ for (const { width, height } of [
           join(full, `measurements-${width}x${height}-${theme}.json`),
           JSON.stringify(measurements, null, 2)
         )
+        // Exercise automatic collapse and restoration without touching saved choices.
+        if (width === 1440 && height === 1000 && theme === "light") {
+          await page.goto(`${local.url}/chats/${splitSeed.chatId}?fork=${splitSeed.original}`)
+          const user = await withCookie(local, splitCookie, (api) => api.Whoami())
+          await page.evaluate((id) => {
+            localStorage.setItem(`rp.branchHeight.${id}`, "300")
+            localStorage.setItem(`rp.splitHeight.${id}`, "330")
+          }, user.id)
+          await page.reload()
+          const branchToggle = page.getByRole("button", { name: /^Branches of / })
+          const splitToggle = page.getByRole("button", { name: "Split off (3)", exact: true })
+          await expect(branchToggle).toHaveAttribute("aria-expanded", "true")
+          await expect(splitToggle).toHaveAttribute("aria-expanded", "true")
+          const preferences = () =>
+            page.evaluate(() =>
+              Object.fromEntries(
+                Object.entries(localStorage).filter(([key]) =>
+                  /rp\.(branchRows|splitRows|branchHeight|splitHeight|openChatBranches|splitChatsOpen)\./.test(key)
+                )
+              )
+            )
+          const saved = await preferences()
+          await page.setViewportSize({ width, height: 700 })
+          await expect(branchToggle).toHaveAttribute("aria-expanded", "true")
+          await expect(splitToggle).toHaveAttribute("aria-expanded", "false")
+          await page.setViewportSize({ width, height: 600 })
+          await expect(branchToggle).toHaveAttribute("aria-expanded", "false")
+          await expect(splitToggle).toHaveAttribute("aria-expanded", "false")
+          await page.setViewportSize({ width, height: 1000 })
+          await expect(branchToggle).toHaveAttribute("aria-expanded", "true")
+          await expect(splitToggle).toHaveAttribute("aria-expanded", "true")
+          expect(await preferences()).toEqual(saved)
+        }
+        await page.setViewportSize({ width, height: 1000 })
         await page.goto(`${local.url}/chats/${splitSeed.chatId}?fork=${splitSeed.market}`)
         if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
         await showAppNavigation(page)
