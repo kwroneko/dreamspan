@@ -3,6 +3,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // drag to reorder; each prompt's role, position and depth; prefill text;
 // and the regex scripts, which run only once the user allows them (ARCHITECTURE.md §9).
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX } from "@rp/shared/docs/preset.ts"
+import { MERGE_JOIN_DEFAULT, MERGE_SECTION_DEFAULT } from "@rp/shared/mergeApi.ts"
 import { type ReactNode, useState } from "react"
 import type { SearchMatch } from "./searchNavigation.ts"
 import { PromptDocument } from "./PromptDocument.tsx"
@@ -38,6 +39,26 @@ function JoinWrapper({ store, which }: { store: EditorStore; which: "card_join_p
       rows={2}
       mono
       about="{{char}} is the character’s name; <FIELDNAME> is the name of the part, such as Description. Empty adds nothing."
+      description={stored === undefined ? `Default: ${JSON.stringify(fallback)}` : undefined}
+    />
+  )
+}
+
+/**
+ * How a chat merged into another is framed for the model (spec/CHAT-MERGE.md §4): the line before
+ * its messages, and the marker where it joins. Absent, the default applies; a merge's own framing
+ * line, set when merging, wins over the first.
+ */
+function MergeTemplate({ store, which }: { store: EditorStore; which: "merge_section_prompt" | "merge_join_prompt" }) {
+  const stored = useValue<string | undefined>(store, ["utility_prompts", which])
+  const fallback = which === "merge_section_prompt" ? MERGE_SECTION_DEFAULT : MERGE_JOIN_DEFAULT
+  return (
+    <TextField
+      store={store}
+      path={["utility_prompts", which]}
+      label={which === "merge_section_prompt" ? "Before a merged chat" : "Where a merged chat joins"}
+      rows={2}
+      about="{{title}} is the merged chat's title; {{cast}} names its characters. Empty adds nothing."
       description={stored === undefined ? `Default: ${JSON.stringify(fallback)}` : undefined}
     />
   )
@@ -155,7 +176,9 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
         <CardHeader title="Utility prompts" />
         <details>
           <Tooltip label="Shows the preset’s utility prompts.">
-            <summary className="cursor-pointer text-sm text-muted">Show the {UTILITY.length} utility prompts</summary>
+            <summary className="cursor-pointer text-sm text-muted">
+              Show the {UTILITY.length + 4} utility prompts
+            </summary>
           </Tooltip>
           <div className="mt-3 flex flex-col gap-3">
             {UTILITY.map(([key, label]) => (
@@ -163,6 +186,8 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
             ))}
             <JoinWrapper store={store} which="card_join_prefix" />
             <JoinWrapper store={store} which="card_join_suffix" />
+            <MergeTemplate store={store} which="merge_section_prompt" />
+            <MergeTemplate store={store} which="merge_join_prompt" />
           </div>
         </details>
       </Card>

@@ -74,6 +74,18 @@
     },
     {
       "type": "index",
+      "name": "chat_merges_chat",
+      "tbl_name": "chat_merges",
+      "sql": "CREATE INDEX chat_merges_chat ON chat_merges(chat_id)"
+    },
+    {
+      "type": "index",
+      "name": "chat_merges_source_fork",
+      "tbl_name": "chat_merges",
+      "sql": "CREATE INDEX chat_merges_source_fork ON chat_merges(chat_id, source_fork_id)"
+    },
+    {
+      "type": "index",
       "name": "chats_active_leaf",
       "tbl_name": "chats",
       "sql": "CREATE INDEX chats_active_leaf ON chats(active_leaf_slot_id) WHERE active_leaf_slot_id IS NOT NULL"
@@ -920,6 +932,18 @@
     },
     {
       "type": "table",
+      "name": "chat_merge_messages",
+      "tbl_name": "chat_merge_messages",
+      "sql": "CREATE TABLE chat_merge_messages ( merge_id TEXT NOT NULL REFERENCES chat_merges(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('message', 'summary')), source_slot_id TEXT, speaker_entity_id TEXT, speaker_name TEXT NOT NULL, side TEXT NOT NULL CHECK (side IN ('user', 'assistant')), content TEXT NOT NULL, sent_at INTEGER NOT NULL, included TEXT NOT NULL CHECK (included IN ('verbatim', 'summarized', 'left_out')), PRIMARY KEY (merge_id, ordinal) ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "chat_merges",
+      "tbl_name": "chat_merges",
+      "sql": "CREATE TABLE chat_merges ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, slot_id TEXT NOT NULL UNIQUE REFERENCES slots(id) ON DELETE CASCADE, fork_id TEXT, source_chat_id TEXT, source_fork_id TEXT, source_tip_slot_id TEXT, base_slot_id TEXT, start_slot_id TEXT, title TEXT NOT NULL, framing TEXT, cast_json TEXT NOT NULL CHECK (json_valid(cast_json) AND json_type(cast_json) = 'array'), counts_json TEXT NOT NULL CHECK (json_valid(counts_json) AND json_type(counts_json) = 'object'), created_at INTEGER NOT NULL ) STRICT"
+    },
+    {
+      "type": "table",
       "name": "chat_pins",
       "tbl_name": "chat_pins",
       "sql": "CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL, PRIMARY KEY(user_id, chat_id, fork_id))"
@@ -1336,7 +1360,7 @@
       "type": "table",
       "name": "versions",
       "tbl_name": "versions",
-      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), -- Cast when this version was written, independent of later cast changes. NULL only -- while an imported version awaits its file's cast at StImportFinishChat. cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, -- The text and reasoning as they were before regex scripts rewrote them (ARCHITECTURE §12), -- null when unchanged; never sent anywhere. What the scripts did: rewrite_json. raw_content TEXT, raw_reasoning TEXT, -- The reply sections before the reasoning scripts rewrote their text, as JSON. raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)), rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)), frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL CHECK (origin IN ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')), source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), -- An imported version's model, and its times and token count, as its app recorded them -- (rows.ts); null for none and for this app's own generations (model_id, usage_json). recorded_model_json TEXT CHECK (recorded_model_json IS NULL OR json_valid(recorded_model_json)), recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), -- Cast when this version was written, independent of later cast changes. NULL only -- while an imported version awaits its file's cast at StImportFinishChat. cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, -- The text and reasoning as they were before regex scripts rewrote them (ARCHITECTURE §12), -- null when unchanged; never sent anywhere. What the scripts did: rewrite_json. raw_content TEXT, raw_reasoning TEXT, -- The reply sections before the reasoning scripts rewrote their text, as JSON. raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)), rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)), frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL CHECK (origin IN ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate', 'merge')), source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), -- An imported version's model, and its times and token count, as its app recorded them -- (rows.ts); null for none and for this app's own generations (model_id, usage_json). recorded_model_json TEXT CHECK (recorded_model_json IS NULL OR json_valid(recorded_model_json)), recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1451,6 +1475,24 @@
       "name": "changesets_rollout_id_same_chat_update",
       "tbl_name": "changesets",
       "sql": "CREATE TRIGGER changesets_rollout_id_same_chat_update BEFORE UPDATE OF rollout_id, chat_id ON changesets WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'changesets.rollout_id must be in the same chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "chat_merge_messages_frozen",
+      "tbl_name": "chat_merge_messages",
+      "sql": "CREATE TRIGGER chat_merge_messages_frozen BEFORE UPDATE ON chat_merge_messages BEGIN SELECT RAISE(ABORT, 'a merged message never changes'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "chat_merges_frozen",
+      "tbl_name": "chat_merges",
+      "sql": "CREATE TRIGGER chat_merges_frozen BEFORE UPDATE ON chat_merges BEGIN SELECT RAISE(ABORT, 'a merge never changes'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "chat_merges_same_chat",
+      "tbl_name": "chat_merges",
+      "sql": "CREATE TRIGGER chat_merges_same_chat BEFORE INSERT ON chat_merges WHEN (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'a merge''s join message is in its chat'); END"
     },
     {
       "type": "trigger",

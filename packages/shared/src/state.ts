@@ -48,6 +48,8 @@ export const StateEventData = Schema.Union([
   event("layout.cards", Schema.Literals(["concat", "swap_tail"])),
   /** An open id: the built-ins are `by_writer`, `alternate` and `perspective`; a plugin registers others (resolved at use). */
   event("roles.projection", Schema.String),
+  /** How merged chats reach the model (spec/CHAT-MERGE.md §4): an open id, `parallel` and `join` built in. */
+  event("merge.layout", Schema.String),
   event("macro.binding", Schema.Struct({ name: Schema.String, value: Schema.String })),
   event("macro.unbind", Schema.Struct({ name: Schema.String })),
   event("orchestration.mode", Schema.Struct({ mode: Schema.String, config: Schema.optional(Schema.Unknown) })),
@@ -144,6 +146,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "model.unbind": { ids: {} },
   "layout.cards": { ids: {} },
   "roles.projection": { ids: {} },
+  "merge.layout": { ids: {} },
   "macro.binding": { ids: {} },
   "macro.unbind": { ids: {} },
   "orchestration.mode": { ids: {} },
@@ -353,6 +356,8 @@ export interface ChatState {
   readonly modelBindings: Readonly<Record<string, { readonly connection: string; readonly model: string }>>
   readonly layoutCards: "concat" | "swap_tail" | null
   readonly rolesProjection: string | null
+  /** The merge layout's id; null (no event) is `parallel`. */
+  readonly mergeLayout: string | null
   readonly macroBindings: Readonly<Record<string, string>>
   readonly orchestration: { readonly mode: string; readonly config?: unknown } | null
   /** The reply policy picking who replies when nobody is picked; null (no event) is the default. */
@@ -390,6 +395,7 @@ const emptyChatState: ChatState = {
   modelBindings: {},
   layoutCards: null,
   rolesProjection: null,
+  mergeLayout: null,
   macroBindings: {},
   orchestration: null,
   replyOrder: null,
@@ -498,6 +504,8 @@ const applyCore = (
       return { ...state, layoutCards: data.value }
     case "roles.projection":
       return { ...state, rolesProjection: data.value }
+    case "merge.layout":
+      return { ...state, mergeLayout: data.value }
     case "macro.unbind": {
       const { [data.value.name]: _gone, ...macroBindings } = state.macroBindings
       return { ...state, macroBindings }
