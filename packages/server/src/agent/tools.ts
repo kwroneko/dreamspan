@@ -27,6 +27,8 @@ export interface ToolContext {
   readonly leafSlotId: SlotId | null
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
+  /** Values a tool works out once per rollout (the path, the summaries), by key. */
+  readonly cache: Map<string, unknown>
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */

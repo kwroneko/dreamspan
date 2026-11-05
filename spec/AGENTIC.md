@@ -2,7 +2,7 @@
 
 **Status**: Proposed, 2026-11-05 (job `phase4`). The design for PLAN Phase 4 and DESIGN §7.1–§7.6, with the Phase 4 parts of §4.1a and §4.2. Everything below is **[P]** unless it cites a **[D]** in DESIGN. It is a delta from two things: the build at master `12cf25b6` (ARCHITECTURE §3.7, §3.8, §6, §12, §15, §16), and reference-harness on branch `latest` (`9b385944`, 2026-10-29), whose agent core [the earlier reference notes](the earlier reference notes) describes. That reference was re-checked against `latest` on 2026-11-05. Its claims all still hold, the `factory.ts` line numbers have moved (the Agent is built at `src/agent/factory.ts:2495–2571`), and the mechanisms it leaves out are listed in §1.2. Built units are listed in §11; their sections become obsolete as they move to ARCHITECTURE.
 
-**Built (2026-11-05):** U1, U3 and the server half of U2 (ARCHITECTURE §16, "Agent rollouts"): §2, §3 and §6 (but `per-character`) are obsolete as proposals, and §5.1's server side (steps, the `Steps` event, `GetRolloutSteps`) is built. Not yet: U1's Anthropic round trip and stop-mid-tool tests, and `capture.ts` as its own module (the flush lives in `session.ts`).
+**Built (2026-11-05):** U1, U3, the server half of U2, and of U4 `search_chat`, `read_messages`, `expand_summary` and `search_summaries` (in-memory matching over the causal path; `lookup_lore`, `list_notes` and the FTS scale target remain) (ARCHITECTURE §16, "Agent rollouts"): §2, §3 and §6 (but `per-character`) are obsolete as proposals, and §5.1's server side (steps, the `Steps` event, `GetRolloutSteps`) is built. Not yet: U1's Anthropic round trip and stop-mid-tool tests, and `capture.ts` as its own module (the flush lives in `session.ts`).
 
 ## 0. Summary
 

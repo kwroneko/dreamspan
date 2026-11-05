@@ -241,7 +241,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         return events
       }
 
+      const cache = new Map<string, unknown>()
       const context = (toolCallId: string) => ({
+        cache,
         userId: request.userId,
         chatId: request.chatId,
         forkId: request.forkId ?? null,

@@ -372,17 +372,18 @@ describe("agent rollouts", () => {
         .requests()
         .filter((r) => r.path === "/v1/chat/completions")
         .map((r) => r.body!)
-      // No RP tools are registered yet: only the contract's own.
+      // The built-in tools registered so far, in the mode's order, then the contract's own.
+      const offered = ["expand_summary", "search_summaries", "search_chat", "read_messages"]
       assert.deepStrictEqual(
         (first!.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
-        ["send_message"]
+        [...offered, "send_message"]
       )
       const last = (first!.messages as Array<{ role: string; content: string }>).at(-1)!
       assert.strictEqual(last.role, "user")
-      assert.isTrue(last.content.endsWith(`\n${agentInstructions([], "both")}`), last.content)
+      assert.isTrue(last.content.endsWith(`\n${agentInstructions(offered, "both")}`), last.content)
       const db = read(config.dataDir, version.id)
       assert.deepStrictEqual(db.snapshot.agentAssembly, {
-        instructions: agentInstructions([], "both"),
+        instructions: agentInstructions(offered, "both"),
         cardsAtTail: false
       })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
