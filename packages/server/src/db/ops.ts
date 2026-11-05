@@ -2261,7 +2261,7 @@ export class WriteOps extends RpcGroup.make(
       content: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, InvalidDocument, StorageError])
   }),
   /**
    * A shared named note (DESIGN §4.1). With `fromNoteRefId`, from that slot, which is linked

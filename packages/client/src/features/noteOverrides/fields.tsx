@@ -3,7 +3,7 @@
 // replaced" first, its box glowing blue and its edits going to the note, which is named and
 // linked under it; "Original", the card's or preset's own text, edited as usual. A field no note
 // replaces has "Replace with a note in this chat" in its box's strip, shown on hover and focus.
-import type { NoteReplacementView } from "@rp/shared/inspectorApi.ts"
+import type { NoteReplacementView, PresetContext } from "@rp/shared/inspectorApi.ts"
 import { useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
@@ -27,16 +27,21 @@ type Tab = "replaced" | "original"
 /** The registered field view (`note-overrides.field`). */
 export function ReplacedFieldView(props: FieldViewProps) {
   const chat = useReplaceChat()
+  const workspace = usePresetWorkspace()
   const kind = useEditorKind(props.store)
   const entity = useEditorState(props.store).snapshot?.ref.entityId
   const target = fieldTarget(kind, entity, props.path)
   const replacement = useReplacement(target)
   // A note just made here shows at once, before the next estimate names it.
-  const [made, setMade] = useState<{ note: string; title: string } | null>(null)
+  const [made, setMade] = useState<{
+    note: string
+    title: string
+    context: PresetContext | null | undefined
+  } | null>(null)
   if (!chat || !target) return props.render()
   const shownNote: NoteReplacementView | null =
     replacement ??
-    (made
+    (made && made.context === workspace?.context
       ? {
           note: made.note as never,
           title: made.title,
@@ -48,7 +53,14 @@ export function ReplacedFieldView(props: FieldViewProps) {
       : null)
   if (!shownNote)
     return props.render({
-      tools: <ReplaceButton chat={chat} target={target} {...props} onMade={setMade} />
+      tools: (
+        <ReplaceButton
+          chat={chat}
+          target={target}
+          {...props}
+          onMade={(note) => setMade({ ...note, context: workspace?.context })}
+        />
+      )
     })
   return <Replaced {...props} chat={chat} target={target} replacement={shownNote} />
 }

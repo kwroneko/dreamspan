@@ -78,6 +78,94 @@ const contents = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m
 const sent = (snapshot: ContextSnapshot) => contents(snapshot).join("\n")
 
 describe("notes that replace prompts", () => {
+  it("expands {{original}} at a replacing note's own position", async () => {
+    const note = chatNote("note-own-original", "Before: {{original}}", {
+      replaces: { kind: "card_field", field: "description", card: "mira" as never },
+      own_position: true,
+      placement: { mode: "tail", role: "system" }
+    })
+    const snapshot = await assembled(fixture({ notes: [note], events: on(note.entity) }))
+    expect(sent(snapshot)).toContain("Before: Mira keeps the ledger. She wears a grey coat.")
+    expect(sent(snapshot).match(/grey coat/g)).toHaveLength(1)
+  })
+
+  it.each([
+    { template: undefined, content: "Before: {{original}}" },
+    { template: "[{{summary}}]", content: "Before: {{original}}" },
+    { template: "Before: {{original}}", content: "Summary text." }
+  ])("expands {{original}} in an imported summary at its own position ($template)", async ({ template, content }) => {
+    const note = chatNote("summary-original", content, {
+      kind: "imported_summary",
+      ...(template === undefined ? {} : { template }),
+      replaces: { kind: "card_field", field: "description", card: "mira" as never },
+      own_position: true,
+      placement: { mode: "tail", role: "system" }
+    })
+    const snapshot = await assembled(fixture({ notes: [note], events: on(note.entity) }))
+    expect(sent(snapshot)).toContain("Before: Mira keeps the ledger. She wears a grey coat.")
+    expect(sent(snapshot).match(/grey coat/g)).toHaveLength(1)
+  })
+
+  it("keeps the persona's bindings when {{original}} is read at the note's own position", async () => {
+    const note = chatNote("persona-original", "Before: {{original}}", {
+      replaces: { kind: "card_field", field: "description", card: "tobin" as never },
+      own_position: true,
+      placement: { mode: "tail", role: "system" }
+    })
+    const snapshot = await assembled(
+      fixture({
+        notes: [note],
+        events: on(note.entity),
+        cards: [
+          { entity: "mira", doc: mira },
+          { entity: "tobin", doc: { ...tobin, description: "{{user}} follows {{char}}." } }
+        ]
+      })
+    )
+    expect(sent(snapshot)).toContain("Before: Tobin follows Mira.")
+  })
+
+  it("keeps the examples' cache boundary when a conditional replacement is empty", async () => {
+    const note = chatNote("empty-examples", "", {
+      replaces: { kind: "card_field", field: "mes_example", card: "mira" as never },
+      condition: { when: "turn", cards: ["mira" as never] }
+    })
+    const snapshot = await assembled(fixture({ notes: [note], events: on(note.entity) }))
+    const history = snapshot.request.messages.findIndex((m) => m.content.includes("[Start a new Chat]"))
+    expect(history).toBeGreaterThan(0)
+    expect(snapshot.request.breakpoints.every((b) => b.message < history)).toBe(true)
+  })
+
+  it("keeps an empty conditional field replacement outside the cached prefix", async () => {
+    const note = chatNote("note-conditional-empty", "", {
+      replaces: { kind: "card_field", field: "description", card: "mira" as never },
+      condition: { when: "turn", cards: ["mira" as never] }
+    })
+    const snapshot = await assembled(fixture({ notes: [note], events: on(note.entity) }))
+    const personality = snapshot.request.messages.findIndex((m) => m.content.includes("Exact."))
+    expect(personality).toBeGreaterThan(0)
+    expect(snapshot.request.breakpoints.every((b) => b.message < personality)).toBe(true)
+  })
+
+  it("keeps a conditional Main replacement volatile when the card overrides Main on a skipped turn", async () => {
+    const note = chatNote("note-conditional-main", "Only for Tobin.", {
+      replaces: { kind: "preset_prompt", identifier: "main" },
+      condition: { when: "turn", cards: ["tobin" as never] }
+    })
+    const snapshot = await assembled(
+      fixture({
+        notes: [note],
+        events: on(note.entity),
+        cards: [
+          { entity: "mira", doc: { ...mira, system_prompt: "Mira's own system prompt." } },
+          { entity: "tobin", doc: tobin }
+        ]
+      })
+    )
+    expect(sent(snapshot)).toContain("Mira's own system prompt.")
+    expect(snapshot.request.breakpoints).toEqual([])
+  })
+
   it("sends the note in a card field's place, with {{original}} its text, and the field back once off", async () => {
     const outfit = chatNote("note-outfit", "{{original}} Today: a red scarf.", {
       replaces: { kind: "card_field", field: "description", card: "mira" as never }
