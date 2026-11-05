@@ -14,6 +14,12 @@ export interface AgentPlan {
   readonly contract: OutputContract
   /** Most provider requests one reply makes; the last is made without tools. */
   readonly turnCap: number
+  /** What the mode changes in the context; absent: the plain reply's. */
+  readonly assembly?: {
+    /** Told with the end of the request, given the tools actually offered. */
+    readonly instructions: (offered: ReadonlyArray<string>, contract: OutputContract) => string
+    readonly cardsAtTail: boolean
+  }
 }
 
 export interface OrchestrationMode {
@@ -48,19 +54,50 @@ export const NARRATOR_TOOLS: ReadonlyArray<string> = [
   "edit_card"
 ]
 
-const agentPlan = ({ state }: { readonly state: ChatState }): AgentPlan => ({
-  strategy: "agent",
-  tools: NARRATOR_TOOLS,
-  contract: state.outputContract ?? "both",
-  turnCap: 12
-})
+/** What an agent turn is told with the end of the request: that it has tools, and how to reply. */
+export const agentInstructions = (offered: ReadonlyArray<string>, contract: OutputContract) =>
+  [
+    offered.length > 0
+      ? "Before you write, you can use your tools to check earlier events, summaries, lore and notes, and to keep notes. Use them only when they help."
+      : "",
+    contract === "final_text"
+      ? "When you're ready, write the reply as your answer, and nothing else."
+      : contract === "send_message"
+        ? "When you're ready, send the reply with send_message."
+        : "When you're ready, send the reply with send_message, or write it as your answer."
+  ]
+    .filter(Boolean)
+    .join(" ")
+
+const agentPlan =
+  (cardsAtTail: boolean) =>
+  ({ state }: { readonly state: ChatState }): AgentPlan => {
+    const contract = state.outputContract ?? "both"
+    const tools = state.agentTools ?? NARRATOR_TOOLS
+    return {
+      strategy: "agent",
+      tools,
+      contract,
+      turnCap: 12,
+      assembly: { instructions: agentInstructions, cardsAtTail }
+    }
+  }
 
 /** One agent a turn with every card loaded: reference-harness's way, the most cache-friendly (DESIGN §7.1). */
 export const narratorMode: OrchestrationMode = {
   id: "narrator",
   label: "Narrator with tools",
   description: "One model writes every reply with all the cards loaded, and can look things up and keep notes first.",
-  plan: agentPlan
+  plan: agentPlan(false)
+}
+
+/** As the narrator, with the speaking character's card at the tail (DESIGN §5.2's card-swap layout). */
+export const cardSwapMode: OrchestrationMode = {
+  id: "card-swap",
+  label: "Card swap with tools",
+  description:
+    "As the narrator, with the speaking character's card moved to the end, just before the reply. Follows the card more closely, and costs more cache.",
+  plan: agentPlan(true)
 }
 
 /** Plans the turn in the chat's mode; an unknown mode is unavailable, never silently plain. */

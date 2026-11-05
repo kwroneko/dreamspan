@@ -9,6 +9,7 @@ import { DatabaseSync } from "node:sqlite"
 import type { ServerResponse } from "node:http"
 import { databaseFile } from "../src/db/connection.ts"
 import { SEND_NUDGE, WRITE_NOW } from "../src/agent/session.ts"
+import { agentInstructions } from "../src/agent/modes.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -259,7 +260,7 @@ describe("agent rollouts", () => {
         status: "done",
         result: "The lighthouse keeper is called Ansel.",
         effect: "read"
-      }
+      } as const
       assert.deepStrictEqual(live.at(-1), [step])
       assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [step])
       assert.deepInclude(read(config.dataDir, version.id).rollout, { step_count: 1, llm_requests: 2 })
@@ -344,6 +345,81 @@ describe("agent rollouts", () => {
       // pi-ai sends an empty list when the history holds tool calls, as proxies require.
       assert.isEmpty((bodies[1]!.tools as Array<unknown> | undefined) ?? [])
       assert.deepStrictEqual((bodies[1]!.messages as Array<unknown>).at(-1), { role: "user", content: WRITE_NOW })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  /** Answers every request by sending the reply. */
+  const sends = (request: Recorded, res: ServerResponse) => {
+    void request
+    sse(res, toolCallChunks("send_message", { message: "Hi." }))
+  }
+
+  it.live("the narrator is told its tools and how to reply, with the end of the request", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(sends)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+      })
+      assert.strictEqual(version.content, "Hi.")
+      const [first] = mock
+        .requests()
+        .filter((r) => r.path === "/v1/chat/completions")
+        .map((r) => r.body!)
+      // No RP tools are registered yet: only the contract's own.
+      assert.deepStrictEqual(
+        (first!.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
+        ["send_message"]
+      )
+      const last = (first!.messages as Array<{ role: string; content: string }>).at(-1)!
+      assert.strictEqual(last.role, "user")
+      assert.isTrue(last.content.endsWith(`\n${agentInstructions([], "both")}`), last.content)
+      const db = read(config.dataDir, version.id)
+      assert.deepStrictEqual(db.snapshot.agentAssembly, {
+        instructions: agentInstructions([], "both"),
+        cardsAtTail: false
+      })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("card swap moves the speaker's card to the tail; agent.tools picks the tools", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      yield* registry.rolloutTools.register(lookup as RolloutTool<never>)
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(sends)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [
+          { key: "orchestration.mode", value: { mode: "card-swap" } },
+          { key: "agent.tools", value: { tools: ["look_up"] } }
+        ]
+      })
+      assert.strictEqual(version.content, "Hi.")
+      const [first] = mock
+        .requests()
+        .filter((r) => r.path === "/v1/chat/completions")
+        .map((r) => r.body!)
+      assert.deepStrictEqual(
+        (first!.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
+        ["look_up", "send_message"]
+      )
+      const messages = first!.messages as Array<{ role: string; content: string }>
+      const card = messages.flatMap((m, i) => (m.content.includes("keeps the ledger") ? [i] : []))
+      assert.deepStrictEqual(card, [messages.length - 2], "the card only just before the end of the request")
+      assert.strictEqual(messages.at(-2)?.role, "system")
+      assert.include(messages.at(-1)!.content, agentInstructions(["look_up"], "both"))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

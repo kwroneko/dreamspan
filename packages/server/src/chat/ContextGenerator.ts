@@ -87,7 +87,18 @@ export const layer = Layer.effect(
               timeZone: "UTC",
               frozen: null,
               partialBatch,
-              ...(request.model ? { model: request.model } : {})
+              ...(request.model ? { model: request.model } : {}),
+              ...(plan.assembly
+                ? {
+                    agent: {
+                      instructions: plan.assembly.instructions(
+                        tools.map((t) => t.id),
+                        plan.contract
+                      ),
+                      cardsAtTail: plan.assembly.cardsAtTail
+                    }
+                  }
+                : {})
             })
             .pipe(
               Effect.catchTag("AssemblyFailed", (error) =>

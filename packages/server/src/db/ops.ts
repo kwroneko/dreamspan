@@ -3181,7 +3181,9 @@ export class ReadOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       now: Schema.Number,
       timeZone: Schema.String,
-      frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)))
+      frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String))),
+      /** An agent reply's assembly (spec/AGENTIC.md §6). */
+      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, cardsAtTail: Schema.Boolean }))
     },
     success: Schema.Struct({
       snapshot: Schema.String,

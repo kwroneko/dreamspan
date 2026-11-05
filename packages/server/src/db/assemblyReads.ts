@@ -52,7 +52,19 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
     ...(yield* makeDisplayPrefsReadHandlers),
     ...(yield* makeTokenCountingReadHandlers),
     RoleProjections: () => assembler.projectionOptions,
-    AssembleContext: ({ userId, chatId, slotId, versionId, forkId, now, timeZone, frozen, partialBatch, model }) =>
+    AssembleContext: ({
+      userId,
+      chatId,
+      slotId,
+      versionId,
+      forkId,
+      now,
+      timeZone,
+      frozen,
+      partialBatch,
+      model,
+      agent
+    }) =>
       Effect.suspend(() => {
         const sources = sqlSources(sql, {
           userId,
@@ -62,25 +74,27 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           ...(partialBatch === undefined ? {} : { partialBatch }),
           ...(model === undefined ? {} : { modelOverride: model })
         })
-        return assembler.assemble({ now, timeZone, frozen: frozen ?? {}, random: Math.random }).pipe(
-          Effect.provide(sources.layer),
-          Effect.flatMap((built) =>
-            Effect.gen(function* () {
-              const snapshot: ContextSnapshot = {
-                ...built,
-                sources: sources.pins(),
-                ...(built.inputs.model ? { wire: wireContext(built.request, built.inputs.model) } : {})
-              }
-              const inspection = yield* inspectionInputs(sql, userId, snapshot, assembler)
-              return {
-                snapshot: JSON.stringify(snapshot),
-                generation: JSON.stringify({ ...generationOf(snapshot), inspection }),
-                used: usedEntries(snapshot),
-                message: (snapshot.sources?.target.depth ?? 0) + 1
-              }
-            })
+        return assembler
+          .assemble({ now, timeZone, frozen: frozen ?? {}, random: Math.random, ...(agent ? { agent } : {}) })
+          .pipe(
+            Effect.provide(sources.layer),
+            Effect.flatMap((built) =>
+              Effect.gen(function* () {
+                const snapshot: ContextSnapshot = {
+                  ...built,
+                  sources: sources.pins(),
+                  ...(built.inputs.model ? { wire: wireContext(built.request, built.inputs.model) } : {})
+                }
+                const inspection = yield* inspectionInputs(sql, userId, snapshot, assembler)
+                return {
+                  snapshot: JSON.stringify(snapshot),
+                  generation: JSON.stringify({ ...generationOf(snapshot), inspection }),
+                  used: usedEntries(snapshot),
+                  message: (snapshot.sources?.target.depth ?? 0) + 1
+                }
+              })
+            )
           )
-        )
       }).pipe(inFork(sql, chatId, forkId, slotId), query("AssembleContext")),
 
     RebuildContext: ({ userId, snapshot: json }) =>
@@ -112,6 +126,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             timeZone: inputs.timeZone,
             frozen: taken.frozen,
             random: Math.random,
+            ...(taken.agentAssembly ? { agent: taken.agentAssembly } : {}),
             ...(taken.summaryJob
               ? {
                   summarizing: true,
