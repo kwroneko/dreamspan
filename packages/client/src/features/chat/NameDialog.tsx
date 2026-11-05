@@ -1,7 +1,7 @@
 // Naming something the user owns (DESIGN §2.1): a chat, a group of chats, a branch. One field
 // with its name as it is now, what the name does, and Save; Enter saves, Escape cancels.
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
-import { type ReactNode } from "react"
+import { type ReactNode, useRef } from "react"
 import type { AppError } from "../../errors.ts"
 import { ErrorAlert } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -98,12 +98,21 @@ function NameForm({
 }) {
   const durable = useUserDraft(draftTarget, label, initial)
   const { text: name, setText: setName } = durable
+  const submitting = useRef(false)
   return (
     <form
       className="flex flex-col gap-4"
       onSubmit={(event) => {
         event.preventDefault()
-        if (!pending) void durable.commit(name, () => onSave(name))
+        // Draft persistence precedes onSave, so pending can still be false on a
+        // second submit. Lock before queuing either part of the commit.
+        if (pending || submitting.current) return
+        submitting.current = true
+        void durable
+          .commit(name, () => onSave(name))
+          .finally(() => {
+            submitting.current = false
+          })
       }}
     >
       <Field label={label} about={description}>

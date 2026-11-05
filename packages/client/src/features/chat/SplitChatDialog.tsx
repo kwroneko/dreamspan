@@ -1,6 +1,6 @@
 // "Make this branch its own chat" (DESIGN §10.1, splitconfirm): every entry point asks here first.
 // It says what splitting does and lets the new chat be titled, prefilled with the branch's own
-// name, else the title of the chat it leaves. Confirming names the branch, then splits it off.
+// name, else the title of the chat it leaves. The title and split are one guarded write.
 import { useEffect, useState } from "react"
 import type { ChatId, Fork, ForkId } from "@rp/shared/chat.ts"
 import { useAction } from "../../actions.tsx"
@@ -10,6 +10,7 @@ import { branchLabel, forksChanged } from "./forks.ts"
 import { NameDialog } from "./NameDialog.tsx"
 import { useSplitChats } from "./splitChats.ts"
 import { requestSplitReveal } from "./splitReveal.ts"
+import { cleanName } from "@rp/shared/chatName.ts"
 
 export function SplitChatDialog({
   chatId,
@@ -42,12 +43,11 @@ export function SplitChatDialog({
   const parent = split.group.title
   const own = fork.name ?? ""
   const save = async (title: string) => {
-    const name = title.trim()
-    if (name !== own) {
-      const named = await action.run((client) => client("NameFork", { forkId, name }), ["chats"])
-      if (!named.ok) return false
-    }
-    const done = await action.run((client) => client("SetSplitChat", { forkId, split: true }), ["chats", "pins"])
+    const name = cleanName(title)
+    const done = await action.run(
+      (client) => client("SetSplitChat", { forkId, split: true, title: { name, expectedName: fork.name } }),
+      ["chats", "pins"]
+    )
     if (!done.ok) return false
     forksChanged(chatId)
     requestSplitReveal(forkId, true)
@@ -61,11 +61,10 @@ export function SplitChatDialog({
           onClick: () => {
             void (async () => {
               const undone = await action.run(
-                (client) => client("SetSplitChat", { forkId, split: false }),
+                (client) =>
+                  client("SetSplitChat", { forkId, split: false, title: { name: own, expectedName: name || null } }),
                 ["chats", "pins"]
               )
-              if (undone.ok && name !== own)
-                await action.run((client) => client("NameFork", { forkId, name: own }), ["chats"])
               if (undone.ok) forksChanged(chatId)
               else showToast({ title: "Couldn't restore the branch", description: undone.error.message })
             })()
@@ -92,7 +91,7 @@ export function SplitChatDialog({
       label="Chat title"
       initial={own !== "" ? own : parent}
       description="Leave it empty to name the chat after the one it leaves, with the date."
-      maxLength={100}
+      maxLength={200}
       saveLabel="Make its own chat"
       saveHint="Splits this branch off as a separate chat with this title."
       pending={action.pending}

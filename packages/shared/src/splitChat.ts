@@ -3,6 +3,18 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { NotFound, ServerError } from "./errors.ts"
 import { Schema } from "effect"
 import { ChatId, ForkId, SlotId } from "./chat.ts"
+import { EditRefused } from "./editorApi.ts"
+
+/** A title change guarded by the branch name the confirmation actually showed. */
+export const SplitChatTitle = Schema.Struct({
+  name: Schema.String.check(Schema.isMaxLength(200)),
+  expectedName: Schema.NullOr(Schema.String)
+})
+export const SetSplitChatFields = {
+  forkId: ForkId,
+  split: Schema.Boolean,
+  title: Schema.optionalKey(SplitChatTitle)
+}
 
 /** A navigation group; chatId remains the unchanged physical chat owning its history. */
 export const SplitChatLink = Schema.Struct({
@@ -36,8 +48,8 @@ export class SplitChatApi extends RpcGroup.make(
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("SetSplitChat", {
-    payload: { forkId: ForkId, split: Schema.Boolean },
+    payload: SetSplitChatFields,
     success: Schema.Void,
-    error: Schema.Union([NotFound, ServerError])
+    error: Schema.Union([NotFound, ServerError, EditRefused])
   })
 ) {}
