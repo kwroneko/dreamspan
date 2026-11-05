@@ -88,7 +88,8 @@ export const layer = Layer.effect(
             // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
             return tool && tool.effect !== "external" ? [tool] : []
           })
-          const assembleWith = (admitted?: { readonly lore: ReadonlyArray<LoreAdmission> }) =>
+          const assemblyNow = Date.now()
+          const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>
             reader
               .AssembleContext({
                 userId,
@@ -96,7 +97,7 @@ export const layer = Layer.effect(
                 slotId,
                 versionId,
                 forkId,
-                now: Date.now(),
+                now: assemblyNow,
                 timeZone: "UTC",
                 frozen: null,
                 partialBatch,
@@ -154,14 +155,14 @@ export const layer = Layer.effect(
           // Lorebook entries the keys left out but that ask a decision model (spec/AGENTIC.md §7):
           // only when the user turned the point on for a connection. A yes is assembled in, and
           // frozen in the snapshot.
-          if (assembled.loreDecision && Option.isSome(decisions)) {
+          if (assembled.loreDecision && Option.isSome(decisions) && decisions.value.points.get("lore")) {
             const outcome = yield* decisions.value.evaluate<LoreInput, ReadonlyArray<LoreAdmission>>(
               "lore",
               assembled.loreDecision,
               { userId, chatId, slotId, forkId, requestClass: "interactive" }
             )
             if (outcome.source === "model" && outcome.value.length > 0)
-              assembled = yield* assembleWith({ lore: outcome.value })
+              assembled = yield* assembleWith({ stamp: assembled.loreDecision.stamp, lore: outcome.value })
           }
           const generation = JSON.parse(assembled.generation) as Generation
           const { model } = generation

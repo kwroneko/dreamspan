@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 49
+export const ASSEMBLER_VERSION = 50
 
 export type Role = "system" | "user" | "assistant"
 
@@ -300,12 +300,15 @@ export interface AgentAssembly {
 
 /** What decision models decided for this context (spec/AGENTIC.md §7): the lorebook entries admitted. */
 export interface DecisionAssembly {
+  /** The entry revisions and recent message versions the model judged. */
+  readonly stamp: string
   /** `<book>:<uid>` of each entry admitted, with the model's probability. */
   readonly lore: ReadonlyArray<{ readonly entry: string; readonly probability: number }>
 }
 
 /** What the `lore` decision point asks about: the entries the keys left out that have a question. */
 export interface LoreDecisionInput {
+  readonly stamp: string
   readonly candidates: ReadonlyArray<{ readonly key: string; readonly title: string; readonly question: string }>
   readonly recent: ReadonlyArray<{ readonly from: string; readonly text: string }>
 }
