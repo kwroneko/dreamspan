@@ -4,7 +4,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { ServerResponse } from "node:http"
-import { Reader } from "../src/db/Database.ts"
+import { foldState } from "@rp/shared/state.ts"
+import { DatabaseSync } from "node:sqlite"
+import { databaseFile } from "../src/db/connection.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
@@ -93,6 +96,69 @@ describe("agent read tools", () => {
       yield* eventually(() => finished(events, swipe.version.id) !== undefined)
       assert.strictEqual(finished(events, swipe.version.id)!.content, "Ansel waves.")
       assert.deepStrictEqual(yield* results(swipe.version.id), expected)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("set_presence holds while its version is shown, and a receipt makes it once", () => {
+    const config = testConfig()
+    let away = true
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const done = ((request.body?.messages ?? []) as Array<{ role: string }>).filter(
+              (m) => m.role === "tool"
+            ).length
+            if (away && done === 0) sse(res, call("call_0", "set_presence", { character: "mira", present: false }))
+            else sse(res, call(`call_${done}`, "send_message", { message: "Mira slips out." }))
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, events, mira, chat } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+      })
+      const steps = yield* api.GetRolloutSteps({ versionId: version.id })
+      assert.deepInclude(steps[0], {
+        tool: "set_presence",
+        status: "done",
+        result: "Mira is away from the next message on.",
+        effect: "chat_state"
+      })
+      const reader = yield* Reader
+      const me = yield* api.Whoami()
+      const absentAt = Effect.map(
+        reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId }),
+        (e) => foldState(e).absent
+      )
+      assert.deepStrictEqual(yield* absentAt, [mira.entityId])
+
+      // Its receipt: the same call again writes nothing and answers as before.
+      const db = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
+      const { rollout_id } = db.prepare("SELECT rollout_id FROM versions WHERE id = ?").get(version.id) as {
+        rollout_id: string
+      }
+      db.close()
+      const writer = yield* Writer
+      const again = yield* writer.ApplyRolloutEffect({
+        userId: me.id,
+        rolloutId: rollout_id,
+        toolCallId: "call_0",
+        events: [{ key: "presence.set", value: { entity: mira.entityId, present: true } }],
+        result: "other"
+      })
+      assert.deepStrictEqual(again, { result: "Mira is away from the next message on.", replayed: true })
+      assert.deepStrictEqual(yield* absentAt, [mira.entityId])
+
+      // A swipe that doesn't send her away: shown, it takes the first one's effect with it.
+      away = false
+      const { entry } = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      const swipe = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+      yield* eventually(() => finished(events, swipe.version.id) !== undefined)
+      assert.deepStrictEqual(yield* absentAt, [])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

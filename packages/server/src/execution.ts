@@ -1,6 +1,7 @@
 import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
 import { agentReplyStrategy } from "./agent/strategy.ts"
 import { historyTools } from "./agent/tools/history.ts"
+import { setPresence } from "./agent/tools/presence.ts"
 import { cardSwapMode, narratorMode, plainMode, type OrchestrationMode } from "./agent/modes.ts"
 import type { RolloutTool } from "./agent/tools.ts"
 import { Context, Effect, Layer, Option } from "effect"
@@ -49,7 +50,7 @@ export class ExecutionRegistry extends Context.Service<
       yield* orchestrationModes.register(narratorMode)
       yield* orchestrationModes.register(cardSwapMode)
       const rolloutTools = makeRegistry<RolloutTool<never>>()
-      for (const tool of historyTools) yield* rolloutTools.register(tool)
+      for (const tool of [...historyTools, setPresence as RolloutTool<never>]) yield* rolloutTools.register(tool)
       const replies = makeRegistry<ReplyOutputStrategy>()
       const summaries = makeRegistry<SummaryStrategy>()
       const summaryTools = makeRegistry<SummaryToolFactory>()

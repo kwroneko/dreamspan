@@ -3918,6 +3918,17 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  ApplyRolloutEffect: (_reader, actor, owner, writer) =>
+    refused(
+      writer.ApplyRolloutEffect({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        toolCallId: "call_1",
+        events: [],
+        result: "Done."
+      }),
+      "NotFound"
+    ),
   SaveRolloutTranscript: (_reader, actor, owner, writer) =>
     refused(
       writer.SaveRolloutTranscript({

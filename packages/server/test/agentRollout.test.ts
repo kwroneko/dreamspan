@@ -373,7 +373,7 @@ describe("agent rollouts", () => {
         .filter((r) => r.path === "/v1/chat/completions")
         .map((r) => r.body!)
       // The built-in tools registered so far, in the mode's order, then the contract's own.
-      const offered = ["expand_summary", "search_summaries", "search_chat", "read_messages"]
+      const offered = ["expand_summary", "search_summaries", "search_chat", "read_messages", "set_presence"]
       assert.deepStrictEqual(
         (first!.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
         [...offered, "send_message"]

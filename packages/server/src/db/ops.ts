@@ -2349,6 +2349,21 @@ export class WriteOps extends RpcGroup.make(
    * An agent rollout's transcript as it stands (spec/AGENTIC.md §3.3): the whole of it, replacing
    * what was saved, and its step count (tool calls) for the version's badge.
    */
+  /**
+   * A chat-state tool call's state events, attached to the rollout's version, with its receipt
+   * (rolloutWrites.ts). Receipted already: nothing is written, and the first result comes back.
+   */
+  Rpc.make("ApplyRolloutEffect", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      events: Schema.Array(StoredStateEventData),
+      result: Schema.String
+    },
+    success: Schema.Struct({ result: Schema.String, replayed: Schema.Boolean }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("SaveRolloutTranscript", {
     payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
     success: Schema.Void,

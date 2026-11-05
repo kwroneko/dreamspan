@@ -2,8 +2,7 @@
 // open a summary, search the summaries. All causal: the path read ends at the message before
 // the one being generated, in the generation's fork, with each message as that fork shows it.
 import { Type } from "@earendil-works/pi-ai"
-import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
-import type { EntityId } from "@rp/shared/domain.ts"
+import type { EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -115,7 +114,7 @@ export const excerpt = (text: string, words: ReadonlyArray<string>, size = 240) 
 const line = (m: PathMessage) => `Message ${m.n}, ${m.speaker}: ${m.content}`
 
 /** A tool's failure as text the model can act on; storage errors never reach the loop. */
-const safely = <E>(tool: string, run: Effect.Effect<ToolOutput, E>): Effect.Effect<ToolOutput> =>
+export const safely = <E>(tool: string, run: Effect.Effect<ToolOutput, E>): Effect.Effect<ToolOutput> =>
   run.pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning(`tool ${tool} failed`, cause).pipe(
