@@ -2,7 +2,7 @@
 // its effect class (DESIGN §7.3). Tools run on the main thread and reach storage only through
 // the reader and writer operations, owner-scoped and causal: nothing at or after the slot
 // being generated is visible to them.
-import type { TSchema } from "@earendil-works/pi-ai"
+import { Type, type TSchema } from "@earendil-works/pi-ai"
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Effect } from "effect"
@@ -67,6 +67,16 @@ export const frozenTool = (tool: RolloutTool<never>): FrozenTool => ({
   effect: tool.effect,
   label: tool.label
 })
+
+/** The output contract is part of the offered toolset and its frozen snapshot too. */
+export const sendMessageDefinition = {
+  name: "send_message",
+  label: "Sent the message",
+  description:
+    "Sends your reply: the next message of the story, written as it should appear. Call it once, when the reply is ready; it ends your turn.",
+  parameters: Type.Object({ message: Type.String({ description: "The message, exactly as it should appear." }) }),
+  effect: "read"
+} satisfies FrozenTool
 
 /** Per-result cap on what a tool sends back, with the marker telling the model to narrow it. */
 const RESULT_CHARS = 16_000

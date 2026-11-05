@@ -994,6 +994,13 @@ const prefill = (assembly: Assembly) => {
   const id = type === "impersonate" ? "prefill.impersonation" : "prefill.assistant"
   const text = raw ? presetText(assembly, id, raw).text.trimEnd() : ""
   if (!text) return
+  if (assembly.request.agent && type !== "impersonate") {
+    assembly.issues.push({
+      kind: "prefill_dropped",
+      message: "The preset's prefill wasn't sent: the reply mode uses tools."
+    })
+    return
+  }
   if (assembly.model && assembly.model.prefill !== "none" && !assembly.model.continueUnavailable) {
     assembly.prefill = text
   } else {
@@ -1578,7 +1585,7 @@ const composeStage = sync("compose", (assembly) => {
     else delete assembly.tailCard
   } else delete assembly.tailCard
   // Examples keep their own handling: parsed per card into example chats, named in a group.
-  const examples0 = characters.flatMap((card) =>
+  const examples0 = cast.characters.flatMap((card) =>
     group ? exampleLines(assembly, card, modelName(card.doc), true) : exampleLines(assembly, card, names.char, false)
   )
   let examples: Array<Array<ChatLine>> = examples0
@@ -1969,14 +1976,25 @@ const composeStage = sync("compose", (assembly) => {
     group: cast.characters.length > 1 ? cast.characters.map((c) => modelName(c.doc)) : []
   }
   const cost = (built: ReturnType<typeof compose>) => {
-    const messages = built.messages.filter((message) => message.content)
+    const all = assembly.tailCard
+      ? [
+          ...built.messages,
+          {
+            role: "system" as const,
+            content: assembly.tailCard.text,
+            pieces: [assembly.tailCard.piece],
+            kind: "volatile" as const
+          }
+        ]
+      : built.messages
+    const messages = all.filter((message) => message.content)
     const processed = postProcess(doc.squash ? squash(messages) : messages, doc.postprocess, postNames)
     const tokens = (messages: ReadonlyArray<StMessage>) =>
       limitImageEstimates(messages, assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES).reduce(
         (sum, message) => sum + tokensOf(message),
         0
       )
-    return 3 + Math.max(tokens(built.messages), tokens(processed))
+    return 3 + Math.max(tokens(all), tokens(processed))
   }
   const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, false, false))
   const contextBudgetInfo = (nonHistoryTokens: number) => ({
