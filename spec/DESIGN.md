@@ -1,3 +1,5 @@
+**Built 2026-11-05 (branchrows):** The current-branch group classification (§2.1), split-relative branch additions (§3.2), and selected-row rename (§10.1) decisions are implemented and obsolete as implementation requirements; see ARCHITECTURE §3.8 and §12.
+
 **Built 2026-11-05 (castorder):** The chat-row character order in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §3.8.
 
 **Built 2026-11-04 (faceplus3):** The portrait visibility decision in §10.1 supersedes faceplus2’s slot rule and is implemented; see ARCHITECTURE §12.
@@ -218,6 +220,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 ## 2. Chats and participants
 
 ### 2.1 A chat is its own object
+
+- **[D]** (owner, 2026-11-05, branchrows) “At least showing the latest used branch's set means it's a set of characters that's actually currently in the chat.” A chat keeps its current branch's representation. Home's Group chats and the Chats tab's Group chats filter both require two or more characters on that branch. **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
 - **[D] Phone drawer and character sheet** (coordinator correction, 2026-11-04): “on phone, opening a character from the left menu drawer must close that drawer”, while “the new chat's character card sheet still opens as before”. The left drawer’s **Close the menu** and the character sheet’s **Close** are separate controls. **Built; obsolete as an implementation requirement** (nostartchat; ARCHITECTURE §12).
 - **[D] Phone new-chat arrival** (coordinator, 2026-11-04): “On phone, starting a new chat with a character must land the user on the new chat with its greeting visible, as the removed header picker did; a character sheet or drawer left open over it is the regression.” **Superseded by the coordinator’s drawer/sheet clarification below.**
 - **[D] Header chat action** (owner, 2026-11-04): “This is making me think we should remove the "start a chat" affordance on the top header. It's tempting to keep, because it is a fundamental action, and having it always visible makes some sense. But visually it fits quite poorly on the header, and clicking it and getting this kind of little dropdown selector feels kind of awkward, even more so when the same thing exists in a bigger more permanent form right under it on the same column.” **Built; obsolete as an implementation requirement** (nostartchat; ARCHITECTURE §12).
@@ -392,6 +396,9 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 - **[D]** Generating with different models and upstreams at the same time is required. The model is chosen per generation and recorded on the version **[P]**. **Built** per-generation model recording (ARCHITECTURE §12, §15).
 
 ### 3.2 Branches
+
+- **[D]** (owner, 2026-11-05, branchrows) “I do think showing new characters is useful. The issue is though, added relative to what?” … “It should be relative to the split point, that actually identifies a branch.” … “I don't know about crossing someone out. I think it would look bad … In some sense characters only really get added.” Branch rows show characters with participation after their split who were absent from the parent's cast at the split. Small portraits follow a leading “+”, two fully visible with the overflow count tucked behind; hover names the additions. No removal portraits, no portraits without additions, none for the original line. **Built; obsolete as an implementation requirement**, ARCHITECTURE §3.8 and §12.
+- **[P]** (branchrows, 2026-11-05; implemented) Store the added ids with shell fork summaries, using the inherited bounded event view for the baseline and retained swipe participation after the base. Summary format 6 recomputes earlier rows; existing stamps and lineage invalidation apply.
 - **[D]** A branch is an explicit fork of the path. It's what you choose when you want the continuation to differ, and it never happens as a side effect of swiping.
 - **[D]** A named branch is one the user promoted into its own identity; an ST file's name never names one (owner, 2026-11-01). An unnamed branch, imported or made here, is labelled by where it splits off, the time first ("Split 12 Jan 2025, 21:40 at #14"), with its last message's time and preview beside it; the chat's own name is its group's or its root chat's, never a branch file's. An imported chat opens on the branch ST last had open, else the one with the latest message. The left panel lists each chat once, "⑂ 12" listing its branches in the panel (crumbs back), named and pinned first, then by last message; the open chat's branches sit at the panel's foot, collapsible, for switching without leaving the list; no accordion rows. Implemented in ARCHITECTURE §12 and §13.
 
@@ -1049,6 +1056,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D]** (owner, 2026-11-05, branchrows) “If we put the pencil, the button has to be far smaller than it normally is to fit the layout and the title text size. It CANNOT make the card taller. Moreover, I am thinking about whether we want it on every branch, or just the selected one. Probably the latter.” Only the selected left-panel branch row has a small pencil after its name, opening the shared inline rename with Enter/Escape and confirm/cancel, without changing row height. **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
+- **[P]** (branchrows, 2026-11-05; implemented) The existing registered branch-list surface uses compact `InlineRename`, the `NameFork` RPC and existing `SetForkName` worker operation. An invisible copy preserves the title's measured height while the editor replaces it.
 
 - **[D]** (owner, 2026-11-05): “Change the character order.” In chat rows and home/group tiles sharing shell fork rows, characters follow their latest message on that branch, then silent members in join order; card swaps retain character identity and personas stay excluded. Header faces and Cast keep join order.
 

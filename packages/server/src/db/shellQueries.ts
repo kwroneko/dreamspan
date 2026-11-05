@@ -28,7 +28,7 @@ SELECT g.fork_id, s.id, s.depth, s.chat_id, s.parent_slot_id,
   JOIN versions v ON v.id = CASE WHEN g.has_overrides THEN ${shownInSql("g.fork_id", "s")}
     ELSE s.selected_version_id END ORDER BY s.depth, s.id`
 
-export const shellEventsQuery = `SELECT f.id AS fork_id, e.chat_id, e.slot_id, e.scope, e.key, e.value_json
+export const shellEventsQuery = `SELECT f.id AS fork_id, e.fork_id AS source_fork_id, e.chat_id, e.slot_id, e.scope, e.key, e.value_json
   FROM json_each(?) j CROSS JOIN forks f ON f.id = j.value CROSS JOIN chats c ON c.id = f.chat_id
   CROSS JOIN state_events e ON e.chat_id = c.id
   LEFT JOIN slots s ON s.id = e.slot_id

@@ -9,6 +9,7 @@ import { Button } from "./Button.tsx"
 import { Icon } from "./Icon.tsx"
 
 export function InlineRename({
+  compact = false,
   value,
   label,
   onRename,
@@ -28,6 +29,8 @@ export function InlineRename({
   maxLength,
   onEditingChange
 }: {
+  /** Fit a branch title without increasing its height. */
+  compact?: boolean
   /** The name as it is, what the field starts with. */
   value: string
   /** What's renamed, for the controls' names: "Rename <label>". */
@@ -151,14 +154,17 @@ export function InlineRename({
             data-layout-overlay={
               lastLine ? "Pencil follows the text inside the blank part of a multiline heading's box" : undefined
             }
-            className={`size-7! shrink-0 ${lastLine ? "absolute" : ""}`}
+            className={`${compact ? "size-5! [&_svg]:size-3!" : "size-7!"} shrink-0 ${lastLine ? "absolute" : ""}`}
             onClick={() => setTyped(value)}
           />
         )}
       </span>
     )
-  return (
-    <span data-renaming="" className={`flex min-w-0 flex-1 items-center gap-1 ${className}`}>
+  const editor = (
+    <span
+      data-renaming=""
+      className={`flex min-w-0 flex-1 items-center gap-1 ${compact ? "absolute inset-x-0 top-0 h-5 [&_button]:size-5! [&_button_svg]:size-3!" : ""} ${className}`}
+    >
       <SearchHighlights value={typed} ranges={highlights} className="flex max-w-controls flex-1">
         <Input
           aria-label={fieldLabel ?? `New name for ${label}`}
@@ -180,7 +186,7 @@ export function InlineRename({
               setTyped(null)
             }
           }}
-          className={`h-8 min-w-0 flex-1 ${inputClassName}`}
+          className={`h-8 min-w-0 flex-1 ${compact ? "h-5! px-1! py-0! text-sm!" : ""} ${inputClassName}`}
         />
       </SearchHighlights>
       <IconButton
@@ -197,5 +203,16 @@ export function InlineRename({
         onClick={() => setTyped(null)}
       />
     </span>
+  )
+  return compact ? (
+    <span className={`relative block min-w-0 ${className}`}>
+      <span aria-hidden="true" className="invisible flex min-w-0 items-center gap-0.5">
+        {children ?? value}
+        <span className="size-5 shrink-0" />
+      </span>
+      {editor}
+    </span>
+  ) : (
+    editor
   )
 }

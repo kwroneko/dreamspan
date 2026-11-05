@@ -803,3 +803,34 @@ main:has(> [data-fill]) {
     display: none;
   }
 }
+
+[data-added-portraits] > .branch-added-overflow {
+  width: auto;
+  min-width: 1.25rem;
+  margin-inline-start: -0.75rem;
+  padding-inline: 0.625rem 0.125rem;
+  box-shadow: 0 0 0 2px var(--fork-row-background);
+}
+
+.branch-list-row > [data-row-text] {
+  grid-column: 1 / 3;
+  grid-row: 1;
+}
+.branch-list-row:has([data-added-portraits]) > [data-row-text] {
+  grid-column: 2;
+}
+.branch-list-row > [data-branch-pin] {
+  grid-column: 3;
+  grid-row: 1;
+}
+@container fork-row (width < 16rem) {
+  .branch-list-row > [data-added-portraits] {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    justify-self: start;
+  }
+  .branch-list-row:has([data-added-portraits]) > [data-row-text] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}

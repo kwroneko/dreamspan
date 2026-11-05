@@ -21,8 +21,8 @@ import { settleSummaries } from "./summaryValidity.ts"
 import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
-// Recompute rows that predate branch-local speaking order.
-export const FORK_SUMMARY_FORMAT = 5
+// Recompute rows that predate split-relative participation.
+export const FORK_SUMMARY_FORMAT = 6
 
 /**
  * What the shell shows of a fork: ids only, the cast with every card, binned or not, and the
@@ -42,6 +42,7 @@ export interface ForkSummary {
    */
   readonly split: { readonly at: number; readonly after: number } | null
   readonly cast: ReadonlyArray<string>
+  readonly added: ReadonlyArray<string>
   readonly joined: ReadonlyArray<string>
   readonly departed: ReadonlyArray<string>
   readonly activity: ReadonlyArray<{
@@ -66,7 +67,7 @@ type Slot = {
   participants: string
   human_authors: string
 }
-type Event = FoldableEvent & { fork_id: string; chat_id: string; slot_id: string | null }
+type Event = FoldableEvent & { fork_id: string; source_fork_id: string | null; chat_id: string; slot_id: string | null }
 
 /** The stamps a summary of a fork of `chatId` is valid at, read before anything they guard. */
 export const summaryStamps = (sql: SqlClient.SqlClient, userId: string) =>
@@ -127,6 +128,7 @@ export const computeForkSummaries = (
     )
     const raw = yield* sql.unsafe<{
       fork_id: string
+      source_fork_id: string | null
       chat_id: string
       slot_id: string | null
       scope: string
@@ -205,6 +207,22 @@ export const computeForkSummaries = (
       }
       const onPath = new Set(path.map((s) => s.id))
       const applicable = (eventsByFork.get(record.id) ?? []).filter((e) => e.slot_id === null || onPath.has(e.slot_id))
+      // The child's bounded lineage retains the parent's cast as of the split. Own
+      // events at the base (including branch-wide swaps) must not change that baseline.
+      const baseIndex = record.base_slot_id === null ? -1 : path.findIndex((s) => s.id === record.base_slot_id)
+      const before = new Set(path.slice(0, baseIndex + 1).map((s) => s.id))
+      const inherited = applicable.filter(
+        (e) => e.source_fork_id !== record.id && (e.slot_id === null || before.has(e.slot_id))
+      )
+      const splitState = foldState([
+        ...inherited.filter((e) => !branchOwned.has(e.data.key)),
+        ...inherited.filter((e) => branchOwned.has(e.data.key))
+      ])
+      const added = new Set<string>()
+      if (record.parent_fork_id !== null && (record.base_slot_id === null || baseIndex >= 0))
+        for (const slot of path.slice(baseIndex + 1))
+          for (const id of JSON.parse(slot.participants) as Array<string>)
+            if (!splitState.participants.includes(id)) added.add(id)
       const branch = applicable.filter((e) => branchOwned.has(e.data.key))
       const positional = new Map<string, Array<Event>>()
       for (const e of applicable) {
@@ -280,6 +298,7 @@ export const computeForkSummaries = (
         cast: state.participants
           .filter((id) => !state.playedByMe.includes(id))
           .sort((a, b) => (lastSpoke.get(b) ?? 0) - (lastSpoke.get(a) ?? 0)),
+        added: [...added],
         joined: [...joined],
         departed: [...joined].filter((id) => !state.participants.includes(id)),
         activity: [...activity.values()].map((a) => ({
@@ -362,11 +381,11 @@ export const storeSummaries = (sql: SqlClient.SqlClient, userId: string, chats: 
     if (kept.length === 0) return
     const rows = `[${kept.map((c) => `[${JSON.stringify(c.chatId)},${c.stamp},${c.userStamp},${c.forks}]`).join(",")}]`
     yield* sql`INSERT OR REPLACE INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, messages,
-        leaf, end_at, split_at, split_after, cast_json, joined_json, departed_json, activity_json)
+        leaf, end_at, split_at, split_after, cast_json, joined_json, departed_json, activity_json, added_json)
       SELECT f.id, f.chat_id, ${FORK_SUMMARY_FORMAT}, c.value ->> 1, c.value ->> 2, s.value ->> 'preview',
         s.value ->> 'messages', s.value ->> 'leaf', s.value ->> 'endAt', s.value ->> '$.split.at',
         s.value ->> '$.split.after', s.value -> 'cast', s.value -> 'joined',
-        s.value -> 'departed', s.value -> 'activity'
+        s.value -> 'departed', s.value -> 'activity', s.value -> 'added'
       FROM json_each(${rows}) c CROSS JOIN json_each(c.value, '$[3]') s
       CROSS JOIN forks f ON f.id = s.value ->> 'forkId' AND f.chat_id = c.value ->> 0`
   })

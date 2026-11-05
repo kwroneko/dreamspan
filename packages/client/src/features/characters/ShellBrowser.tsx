@@ -9,6 +9,9 @@ import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, FailureView, useAction } from "../../actions.tsx"
+import type { ForkId } from "@rp/shared/chat.ts"
+import { InlineRename } from "../../ui/InlineRename.tsx"
+import { forksChanged } from "../chat/forks.ts"
 import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"
 import { useSession } from "../../session.ts"
 import { rememberedPanel } from "../chat/ChatPanels.tsx"
@@ -176,6 +179,113 @@ function BranchesButton({ fork, entity = null }: { fork: ShellFork; entity?: Ent
   )
 }
 
+/** Branch-list content shares the row's open target without nesting rename controls in it. */
+function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; open: () => void }) {
+  const action = useAction()
+  const label = shellBranchLabel(fork)
+  const addedNames = `Added characters: ${fork.added.map((c) => c.name).join(", ")}`
+  return (
+    <div
+      data-fork-row
+      onClick={(event) => {
+        if (!(event.target as HTMLElement).closest("button, input, [data-added-portraits]")) open()
+      }}
+      className={`fork-row branch-list-row @container/fork-row relative grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${here ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
+    >
+      {fork.added.length > 0 && (
+        <Tooltip label={addedNames}>
+          <span
+            data-added-portraits
+            data-row-portraits
+            tabIndex={0}
+            aria-label={addedNames}
+            data-layout-audit-ignore="overlap: The overflow count is tucked behind the second full portrait; gap: The count tile intentionally overlaps the second portrait"
+            className="relative flex shrink-0 items-center gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <span aria-hidden="true" className="text-xs text-muted">
+              +
+            </span>
+            {fork.added.slice(0, 2).map((c) => (
+              <Avatar
+                key={c.entityId}
+                id={c.entityId}
+                name={c.name}
+                mediaId={c.avatarMediaId}
+                crop={c.avatarCrop}
+                size="xs"
+              />
+            ))}
+            <PortraitOverflow remaining={fork.added.length - 2} size="xs" className="branch-added-overflow" />
+          </span>
+        </Tooltip>
+      )}
+      <div data-row-text className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1 text-sm">
+          {here ? (
+            <InlineRename
+              compact
+              value={fork.named ? fork.name : ""}
+              label={`branch ${label}`}
+              hint="Renames this branch."
+              allowEmpty
+              maxLength={100}
+              className="max-w-full"
+              onRename={async (name) => {
+                const result = await action.run(
+                  (client) => client("NameFork", { forkId: fork.forkId as ForkId, name }),
+                  ["chats"]
+                )
+                if (result.ok) forksChanged(fork.chat.id)
+                return result.ok
+              }}
+            >
+              <span data-chat-title className="line-clamp-2 min-w-0 font-medium [overflow-wrap:anywhere]">
+                {label}
+              </span>
+            </InlineRename>
+          ) : (
+            <span data-chat-title className="line-clamp-2 min-w-0 font-medium [overflow-wrap:anywhere]">
+              {label}
+            </span>
+          )}
+          {fork.current && fork.branches > 1 && <Badge>opens here</Badge>}
+        </div>
+        <Tooltip
+          label={`Opens this branch${here ? ", shown now" : ""}.${fork.current && fork.branches > 1 ? ` ${OPENS_HERE_HINT}` : ""}`}
+        >
+          <button
+            type="button"
+            onClick={open}
+            aria-label={`Open branch ${label}`}
+            aria-current={here ? "page" : undefined}
+            data-chat-id={fork.chat.id}
+            data-fork-id={fork.forkId}
+            className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {fork.preview && (
+              <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">{fork.preview}</span>
+            )}
+            <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
+              Last message {formatMoment(fork.endAt ?? fork.createdAt)}
+            </span>
+          </button>
+        </Tooltip>
+      </div>
+      <span data-branch-pin>
+        <PinButton fork={fork} />
+      </span>
+      {action.error && (
+        <span
+          role="alert"
+          className="absolute inset-x-2 top-full z-10 rounded border border-danger bg-surface p-1 text-xs text-danger"
+        >
+          {action.error.message}
+        </span>
+      )}
+    </div>
+  )
+}
+
 export function ForkRow({
   fork,
   scopeChat = false,
@@ -198,6 +308,7 @@ export function ForkRow({
   entity?: EntityId | null
 }) {
   const open = useOpenFork(fork, scopeChat)
+  if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
   // rows of several chats mix, as pins do, the chat's name, with a named branch's name after it

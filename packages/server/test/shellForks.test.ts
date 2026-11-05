@@ -11,6 +11,62 @@ import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 const layer = () => serverLayer(testConfig({ dbWorkers: "bundle" }), Generator.none)
 
 describe("the shell read in parts", () => {
+  it.live("home groups and chat filters both use the current branch's cast", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const a = yield* api.CreateCard({ label: "First", name: "First" })
+      const b = yield* api.CreateCard({ label: "Second", name: "Second" })
+      const { chat } = yield* api.StartChat({
+        cards: [a.entityId, b.entityId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "Root", speakerEntityId: null }
+      })
+      const original = (yield* api.ListForks({ chatId: chat.id }))[0]!
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: original.id, atSlotId: original.tipSlotId })
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        forkId: fork.id,
+        slotId: original.tipSlotId,
+        change: { _tag: "Leave", entityId: b.entityId }
+      })
+      const view = {
+        entity: null,
+        chat: null,
+        search: "",
+        sort: "recent" as const,
+        sections: [{ id: "groups" as const, limit: 100 }]
+      }
+      assert.strictEqual((yield* api.GetShellForks(view)).sections[0]!.total, 0)
+      assert.strictEqual(
+        (yield* api.GetShellForks({
+          ...view,
+          sections: [{ id: "chats", limit: 100 }],
+          browse: { filter: "groups", sort: "recent", reversed: false }
+        })).sections[0]!.total,
+        0
+      )
+      yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          forkId: original.id,
+          parentSlotId: original.tipSlotId,
+          content: "Original continues",
+          branch: false
+        })
+      )
+      assert.strictEqual((yield* api.GetShellForks(view)).sections[0]!.total, 1)
+      assert.strictEqual(
+        (yield* api.GetShellForks({
+          ...view,
+          sections: [{ id: "chats", limit: 100 }],
+          browse: { filter: "groups", sort: "recent", reversed: false }
+        })).sections[0]!.total,
+        1
+      )
+    }).pipe(Effect.provide(layer()))
+  )
+
   it.live("pages each list, searches, and answers a write at once", () =>
     Effect.gen(function* () {
       const api = yield* client()

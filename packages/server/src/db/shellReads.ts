@@ -28,7 +28,10 @@ import type { ReadOps } from "./ops.ts"
 import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
 
-type Fork = { -readonly [K in keyof Omit<ShellFork, "cast">]: Omit<ShellFork, "cast">[K] } & { cast: Array<CastCard> }
+type Fork = { -readonly [K in keyof Omit<ShellFork, "cast" | "added">]: Omit<ShellFork, "cast" | "added">[K] } & {
+  cast: Array<CastCard>
+  added: Array<CastCard>
+}
 type Activity = ShellFork["activity"][number]
 
 /** What every shell read is made of: the cards, each fork row newest first, and what it had to walk. */
@@ -45,12 +48,13 @@ interface ShellState {
 const trusted = { disableChecks: true } as const
 
 /** A fork's row on the wire: its cast by id, which the read's `people` describe. */
-const wire = (f: Fork) => new ShellFork({ ...f, cast: f.cast.map((c) => c.entityId) }, trusted)
+const wire = (f: Fork) =>
+  new ShellFork({ ...f, cast: f.cast.map((c) => c.entityId), added: f.added.map((c) => c.entityId) }, trusted)
 
 /** The cards a set of fork rows names, once. */
 const peopleOf = (forks: ReadonlyArray<Fork>) => {
   const people = new Map<string, CastCard>()
-  for (const f of forks) for (const c of f.cast) people.set(c.entityId, c)
+  for (const f of forks) for (const c of [...f.cast, ...f.added]) people.set(c.entityId, c)
   return [...people.values()]
 }
 
@@ -185,7 +189,11 @@ const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection):
       return byLast(scoped.filter((f) => !peer(f)))
     case "groups": {
       // The home grid's direction toggle turns the order round (oldest first, Z to A).
-      const sorted = sortBy(perChat(scoped.filter((f) => f.cast.length > 1)), view.sort, "chat")
+      const sorted = sortBy(
+        perChat(scoped).filter((f) => f.cast.length > 1),
+        view.sort,
+        "chat"
+      )
       return view.reversed === true ? sorted.reverse() : sorted
     }
     case "card":
@@ -280,7 +288,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
             s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
             CASE WHEN s.fork_id IS NOT NULL
-              THEN '[' || s.cast_json || ',' || s.joined_json || ',' || s.departed_json || ',' || s.activity_json || ']' END AS lists
+              THEN '[' || s.cast_json || ',' || s.joined_json || ',' || s.departed_json || ',' || s.activity_json || ',' || s.added_json || ']' END AS lists
           FROM chats c CROSS JOIN forks f ON f.chat_id = c.id LEFT JOIN fork_summaries s ON s.fork_id = f.id
           WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
       const records = joinedRows as unknown as ReadonlyArray<ForkRow>
@@ -311,11 +319,12 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             ((row.s_stamp !== row.shell_stamp || row.s_user_stamp !== userStamp) && !importing(row))
           )
             continue
-          const [cast, joined, departed, activity] = JSON.parse(row.lists) as [
+          const [cast, joined, departed, activity, added] = JSON.parse(row.lists) as [
             Array<string>,
             Array<string>,
             Array<string>,
-            ForkSummary["activity"]
+            ForkSummary["activity"],
+            Array<string>
           ]
           stored.set(row.id, {
             forkId: row.id,
@@ -327,6 +336,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             split:
               row.split_at === null || row.split_after === null ? null : { at: row.split_at, after: row.split_after },
             cast,
+            added,
             joined,
             departed,
             activity
@@ -344,6 +354,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             endAt: null,
             split: null,
             cast: [],
+            added: [],
             joined: [],
             departed: [],
             activity: []
@@ -399,6 +410,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           chatRecentAt: 0,
           branches: 0,
           cast,
+          added: s.added.flatMap((id) => byCard.get(id) ?? []),
           joined: s.joined as Array<EntityId>,
           departed: s.departed as Array<EntityId>,
           activity: s.activity as Array<Activity>

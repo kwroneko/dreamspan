@@ -20,6 +20,9 @@ export const migrations = {
       FROM user_prefs WHERE user_id = drafts.user_id AND key = 'display'), 0)
       WHERE target_kind = 'composer'`,
     `UPDATE user_prefs SET value_json = json_remove(value_json, '$.guidance') WHERE key = 'display'`
+  ]),
+  "0003_branch_added_characters": runAll([
+    `ALTER TABLE fork_summaries ADD COLUMN added_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(added_json))`
   ])
 }
 

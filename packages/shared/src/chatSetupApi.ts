@@ -165,6 +165,8 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   branches: Schema.Int,
   /** Present characters the model writes, by id; `ShellLibrary.people` describes each once. */
   cast: Schema.Array(EntityId),
+  /** Characters with participation after the split, absent from its inherited cast. */
+  added: Schema.Array(EntityId),
   joined: Schema.Array(EntityId),
   departed: Schema.Array(EntityId),
   activity: Schema.Array(

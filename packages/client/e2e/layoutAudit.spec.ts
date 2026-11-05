@@ -875,6 +875,7 @@ test.describe("synthetic library and every app surface", () => {
             ["character", `&character=${cardId}`],
             ["branches", `&character=${cardId}&forks=${chatId}`]
           ]) {
+            if (process.env.LAYOUT_AUDIT_BRANCH_ROWS_ONLY === "1" && scope !== "branches") continue
             await go(`sidebar-before-${scope}`, `/?side=chats${query}`)
             await showAppNavigation(page)
             await audit(`sidebar-scope-${scope}`)

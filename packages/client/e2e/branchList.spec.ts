@@ -80,8 +80,8 @@ for (const width of [1440, 390]) {
     await expect(rows.nth(1)).toHaveAccessibleName(/^Open branch Split 12 Jan 2025.* at #4$/)
     await expect(rows.nth(2)).toHaveAccessibleName("Open branch Original")
     // The chat opens on the branch ST last had open, marked as such, though another is newer.
-    await expect(rows.nth(1)).toContainText("opens here")
-    await expect(rows.nth(0)).not.toContainText("opens here")
+    await expect(rows.nth(1).locator("../..")).toContainText("opens here")
+    await expect(rows.nth(0).locator("../..")).not.toContainText("opens here")
     await expect(rows.nth(1)).toContainText("Last message 12 Jan 2025")
     await expect(rows.nth(1)).toContainText("Group: they head home.")
     await shot(page, "branches", width)

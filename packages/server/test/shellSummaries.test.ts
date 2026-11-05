@@ -90,6 +90,78 @@ const setup = Effect.gen(function* () {
 })
 
 describe("shell fork summaries", () => {
+  it.live("records only participation added after each branch's own split", () =>
+    Effect.gen(function* () {
+      const t = yield* setup
+      const { writer, userId, harbor, mira, tam, append, check, makeCard } = t
+      const main = harbor.currentForkId!
+      const late = yield* makeCard("Late")
+      const silent = yield* makeCard("Silent")
+      const swapped = yield* writer.ForkCard({
+        userId,
+        refId: mira.ref.id,
+        name: "Swapped",
+        nickname: "Swapped",
+        characterVersion: "2"
+      })
+      const event = (forkId: ForkId, slotId: SlotId, data: Parameters<typeof writer.AddStateEvent>[0]["data"]) =>
+        writer.AddStateEvent({ userId, chatId: harbor.id, forkId, slotId, versionId: null, scope: null, data })
+      const root = yield* append(harbor.id, null, "Root", mira.entityId, main)
+      yield* event(main, root.slotId, { key: "participant.join", value: { entity: tam.entityId } })
+      const before = yield* append(harbor.id, root.slotId, "Before split", mira.entityId, main)
+      const branch = (yield* writer.CreateFork({
+        userId,
+        chatId: harbor.id,
+        fromForkId: main,
+        atSlotId: before.slotId
+      })).fork
+      const additions = (shell: Read, id: string) => shell.forks.find((f) => f.forkId === id)!.added
+      yield* event(branch.id, before.slotId, { key: "participant.join", value: { entity: silent.entityId } })
+      assert.deepStrictEqual(additions(yield* check("no participation", [harbor.id]), branch.id), [])
+      yield* event(branch.id, before.slotId, { key: "participant.leave", value: { entity: silent.entityId } })
+      yield* event(branch.id, before.slotId, { key: "participant.join", value: { entity: late.entityId } })
+      const own = yield* append(harbor.id, before.slotId, "After split", mira.entityId, branch.id)
+      let shell = yield* check("join after split", [harbor.id])
+      assert.deepStrictEqual(additions(shell, main), [])
+      assert.deepStrictEqual(additions(shell, branch.id), [late.entityId])
+      // A later parent join must not rewrite the branch's split-time cast.
+      yield* event(main, before.slotId, { key: "participant.join", value: { entity: late.entityId } })
+      shell = yield* check("parent changes after split", [harbor.id])
+      assert.deepStrictEqual(additions(shell, branch.id), [late.entityId])
+      const child = (yield* writer.CreateFork({
+        userId,
+        chatId: harbor.id,
+        fromForkId: branch.id,
+        atSlotId: own.slotId
+      })).fork
+      yield* event(child.id, own.slotId, { key: "participant.join", value: { entity: silent.entityId } })
+      yield* append(harbor.id, own.slotId, "Nested participation", mira.entityId, child.id)
+      shell = yield* check("branch of branch", [harbor.id])
+      assert.deepStrictEqual(additions(shell, child.id), [silent.entityId])
+      // A swap alone establishes no participation; its first swipe does, even unselected.
+      yield* event(branch.id, own.slotId, {
+        key: "card.swap",
+        value: { replaces: mira.entityId, entity: swapped.entityId }
+      })
+      shell = yield* check("swap without writing", [harbor.id])
+      assert.deepStrictEqual(additions(shell, branch.id), [late.entityId])
+      yield* writer.AddVersion({
+        userId,
+        forkId: branch.id,
+        slotId: own.slotId,
+        version: t.version("Alternative", swapped.entityId),
+        select: false,
+        commitDraft: null
+      })
+      shell = yield* check("unselected participation", [harbor.id])
+      assert.includeMembers([...additions(shell, branch.id)], [late.entityId, swapped.entityId])
+      assert.deepStrictEqual(additions(shell, child.id), [silent.entityId])
+      yield* event(branch.id, own.slotId, { key: "participant.leave", value: { entity: late.entityId } })
+      shell = yield* check("departures retain additions", [harbor.id])
+      assert.includeMembers([...additions(shell, branch.id)], [late.entityId, swapped.entityId])
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("orders characters by branch messages, preserves silent join order and follows swaps", () =>
     Effect.gen(function* () {
       const { writer, userId, mira, tam, makeCard, newChat, append, check } = yield* setup

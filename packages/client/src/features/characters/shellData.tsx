@@ -22,7 +22,10 @@ import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
 import type { CardSort } from "./cardRecency.ts"
 
 /** A fork row with its cast's cards, which the wire names once in `people`. */
-export type ShellFork = Omit<ShellForkRow, "cast"> & { readonly cast: ReadonlyArray<CastCard> }
+export type ShellFork = Omit<ShellForkRow, "cast" | "added"> & {
+  readonly cast: ReadonlyArray<CastCard>
+  readonly added: ReadonlyArray<CastCard>
+}
 /** The shell's cards (GetShellCards): home, the grids and the card pages read them. */
 export type ShellLibrary = ShellCards
 
@@ -46,7 +49,11 @@ const withCast = (data: ShellForks): ReadonlyMap<ShellSection, ShellRows> => {
       section.id,
       {
         total: section.total,
-        rows: section.rows.map((f) => ({ ...f, cast: f.cast.flatMap((id) => people.get(id) ?? []) }))
+        rows: section.rows.map((f) => ({
+          ...f,
+          cast: f.cast.flatMap((id) => people.get(id) ?? []),
+          added: f.added.flatMap((id) => people.get(id) ?? [])
+        }))
       }
     ])
   )
