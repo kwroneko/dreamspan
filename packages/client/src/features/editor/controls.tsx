@@ -19,6 +19,7 @@ import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { ReplayNotice } from "./ReplayNotice.tsx"
 import { FieldRevert, linesText } from "./FieldRevert.tsx"
 import { CardTextEditor } from "./CardTextEditor.tsx"
+import { type FieldViewExtra, fieldViews } from "./fieldViews.ts"
 import type { CallResult } from "./caller.ts"
 import { draftLabel } from "./fields.ts"
 import { type EditorStore, useDirty, useEditorKind, useEditorState, useHasHistory, useText, useValue } from "./store.ts"
@@ -130,11 +131,17 @@ export function TextField({
   hint,
   aside,
   autoFocus,
-  flash
+  flash,
+  labelEnd,
+  replaced = false
 }: {
   store: EditorStore
   path: FieldPath
   label: string
+  /** At the end of its label's row: the tabs of a field a note replaces (`fieldViews`). */
+  labelEnd?: ReactNode
+  /** The text a note sends in place of a prompt (DESIGN §4.2): its box glows. */
+  replaced?: boolean
   rows?: number
   about?: ReactNode
   description?: ReactNode
@@ -187,99 +194,136 @@ export function TextField({
   }
   // Its own controls, in the strip inside the box (ui/FieldFrame.tsx; owner, 2026-11-02).
   const status = <FieldStatus store={store} field={field} aside={aside} />
-  const tools = (
-    <>
-      <FieldEditHistory store={store} field={field} label={label} />
-      {/* Open large (owner, 2026-11-02): every multi-line prose field. The code editor's box
+  // Features' views around the field (`fieldViews`), each rendering the one inside it.
+  const views = useSyncExternalStore(fieldViews.subscribe, fieldViews.snapshot, fieldViews.snapshot).entries
+  const body = (extra: FieldViewExtra = {}) => {
+    const end = extra.labelEnd ?? labelEnd
+    const tools = (
+      <>
+        {extra.tools}
+        <FieldEditHistory store={store} field={field} label={label} />
+        {/* Open large (owner, 2026-11-02): every multi-line prose field. The code editor's box
           (card, preset and note text) has its own, in `ui/CodeEditorView`. */}
-      {rows !== undefined && !card && !mono && !readOnly && (
-        <IconButton
-          data-layout-overlay="Expand action sits above the field in its label row"
-          data-layout-audit-ignore="inset: Expand action belongs to the field label, outside the editable box"
-          label={`Open ${label} large`}
-          hint={`Opens ${label} large over the page, to write in a bigger box; it's the same text.`}
-          icon="expand"
-          className={chromeButton}
-          onClick={() => setLarge(true)}
-        />
-      )}
-    </>
-  )
-  return (
-    <div ref={target} className="relative flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1">
-      {large && (
-        <LargeField
-          store={store}
-          path={path}
-          field={field}
-          label={label}
-          onClose={() => setLarge(false)}
-          returnFocus={() => target.current?.querySelector<HTMLElement>("textarea")?.focus()}
-        />
-      )}
-      <Field
-        label={labelHidden ? label : <FieldLabel label={label} />}
-        description={description}
-        labelHidden={labelHidden}
-        about={about ?? hint}
-        aboutLabel={label}
+        {rows !== undefined && !card && !mono && !readOnly && (
+          <IconButton
+            data-layout-overlay="Expand action sits above the field in its label row"
+            data-layout-audit-ignore="inset: Expand action belongs to the field label, outside the editable box"
+            label={`Open ${label} large`}
+            hint={`Opens ${label} large over the page, to write in a bigger box; it's the same text.`}
+            icon="expand"
+            className={chromeButton}
+            onClick={() => setLarge(true)}
+          />
+        )}
+      </>
+    )
+    return (
+      <div
+        ref={target}
+        data-replaced-field={replaced || undefined}
+        className="relative flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1"
       >
-        <SearchHighlights value={value} ranges={highlights}>
-          {rows === undefined ? (
-            <Input
-              {...props}
-              tools={tools}
-              status={status}
-              onChange={(event) => store.setText(path, event.currentTarget.value)}
-            />
-          ) : card ? (
-            <CardTextEditor
-              store={store}
-              field={field}
-              path={path}
-              value={value}
-              label={label}
-              rows={rows}
-              fullHeight={kind === "preset"}
-              mono={mono}
-              readOnly={readOnly}
-              source={source}
-              tools={tools}
-              status={status}
-              autoFocus={autoFocus}
-              flash={flash}
-              onChange={(value) => store.setText(path, value)}
-              onBlur={props.onBlur}
-            />
-          ) : (
-            <Textarea
-              {...props}
-              // Prose has them; a pattern (mono) doesn't.
-              textActions={!mono}
-              tools={
-                <>
-                  {tools}
-                  {!readOnly && (
-                    <FieldRevert
-                      store={store}
-                      path={path}
-                      value={value}
-                      onChange={(value) => store.setText(path, value)}
-                    />
-                  )}
-                </>
-              }
-              status={status}
-              rows={rows}
-              className={`resize-y ${fit ? "max-h-[min(60vh,32rem)] min-h-0! field-sizing-content" : ""} ${props.className}`}
-              onChange={(event) => store.setText(path, event.currentTarget.value)}
-            />
-          )}
-        </SearchHighlights>
-      </Field>
-      <FieldTools store={store} field={field} label={label} history={false} />
-    </div>
-  )
+        {large && (
+          <LargeField
+            store={store}
+            path={path}
+            field={field}
+            label={label}
+            onClose={() => setLarge(false)}
+            returnFocus={() => target.current?.querySelector<HTMLElement>("textarea")?.focus()}
+          />
+        )}
+        <Field
+          label={labelHidden ? label : <FieldLabel label={label} />}
+          description={description}
+          labelHidden={labelHidden}
+          about={about ?? hint}
+          aboutLabel={label}
+          {...(end === undefined ? {} : { labelEnd: end })}
+        >
+          <SearchHighlights value={value} ranges={highlights}>
+            {rows === undefined ? (
+              <Input
+                {...props}
+                tools={tools}
+                status={status}
+                onChange={(event) => store.setText(path, event.currentTarget.value)}
+              />
+            ) : card ? (
+              <CardTextEditor
+                store={store}
+                field={field}
+                path={path}
+                value={value}
+                label={label}
+                rows={rows}
+                fullHeight={kind === "preset"}
+                mono={mono}
+                readOnly={readOnly}
+                source={source}
+                tools={tools}
+                status={status}
+                autoFocus={autoFocus}
+                flash={flash}
+                onChange={(value) => store.setText(path, value)}
+                onBlur={props.onBlur}
+              />
+            ) : (
+              <Textarea
+                {...props}
+                // Prose has them; a pattern (mono) doesn't.
+                textActions={!mono}
+                tools={
+                  <>
+                    {tools}
+                    {!readOnly && (
+                      <FieldRevert
+                        store={store}
+                        path={path}
+                        value={value}
+                        onChange={(value) => store.setText(path, value)}
+                      />
+                    )}
+                  </>
+                }
+                status={status}
+                rows={rows}
+                className={`resize-y ${fit ? "max-h-[min(60vh,32rem)] min-h-0! field-sizing-content" : ""} ${props.className}`}
+                onChange={(event) => store.setText(path, event.currentTarget.value)}
+              />
+            )}
+          </SearchHighlights>
+        </Field>
+        <FieldTools store={store} field={field} label={label} history={false} />
+      </div>
+    )
+  }
+  let render: (extra?: FieldViewExtra) => ReactNode = body
+  for (const view of views) {
+    const inner = render
+    const View = view.component
+    render = (outer = {}) => (
+      <View
+        key={view.id}
+        store={store}
+        path={path}
+        label={label}
+        rows={rows}
+        render={(more = {}) =>
+          inner({
+            tools: (
+              <>
+                {outer.tools}
+                {more.tools}
+              </>
+            ),
+            ...((more.labelEnd ?? outer.labelEnd) === undefined ? {} : { labelEnd: more.labelEnd ?? outer.labelEnd })
+          })
+        }
+      />
+    )
+  }
+  return render()
 }
 
 /** One text field at the size of the screen, over the page; the same draft as the field in place. */

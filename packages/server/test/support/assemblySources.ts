@@ -11,6 +11,7 @@ import { Effect, Layer, Scope } from "effect"
 import { type Assembler, makeAssembler } from "../../src/assembler/assembler.ts"
 import { AssemblySources, type PositionedEvent } from "../../src/assembler/pipeline.ts"
 import {
+  type AgentAssembly,
   type ContextSnapshot,
   type HistoryEntry,
   type ModelInput,
@@ -182,6 +183,8 @@ export const assembleFixture = (
     readonly summaryJob?: ContextSnapshot["summaryJob"]
     /** An assembler of the test's own, to register plugin parts in a scope of its own. */
     readonly assembler?: Assembler
+    /** An agent reply mode's changes (card-swap's tail card, its instructions). */
+    readonly agent?: AgentAssembly
   } = {}
 ) =>
   (options.assembler ?? assembler())
@@ -192,6 +195,7 @@ export const assembleFixture = (
       ...(options.loreFallback ? { loreFallback: options.loreFallback } : {}),
       ...(options.summarizing ? { summarizing: true } : {}),
       ...(options.summaryJob ? { summaryJob: options.summaryJob } : {}),
+      ...(options.agent ? { agent: options.agent } : {}),
       random: options.random ?? (() => 0.5)
     })
     .pipe(Effect.provide(fixtureSources(fixture)))

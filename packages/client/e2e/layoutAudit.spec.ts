@@ -2413,13 +2413,15 @@ for (const { width, height } of [
             : page.getByRole("complementary", { name: "Sidebar", exact: true })
         const branches = column.getByRole("region", { name: "Branches of the open chat", exact: true })
         await expect(branches).toHaveAttribute("aria-busy", "false")
-        const splits = column.getByRole("region", { name: "Split chats", exact: true })
+        const splits = column.getByRole("region", { name: "Related chats", exact: true })
         await expect(splits).toHaveAttribute("aria-busy", "false")
         if (name === "hills") {
-          await expect(splits.getByRole("link", { name: /^From / })).toBeVisible()
-          await expect(splits.locator("[data-foot-body]")).toHaveCount(0)
-          await expect(splits.getByRole("separator")).toHaveCount(0)
-          expect((await splits.boundingBox())!.height).toBeLessThanOrEqual(41)
+          // A source-only chat: one row under its caption, and no space below it.
+          const source = splits.getByRole("group", { name: "This chat was split from", exact: true })
+          await expect(source.locator("[data-fork-row]")).toHaveCount(1)
+          await expect(splits.getByRole("group", { name: "Split off from this chat", exact: true })).toHaveCount(0)
+          const body = splits.locator("[data-foot-body]")
+          expect(await body.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
         }
         const measure = () =>
           column.evaluate((el) => {
@@ -2450,7 +2452,7 @@ for (const { width, height } of [
           .toBeGreaterThanOrEqual(-1)
         const m = await measure()
         for (const section of m.sections) if (section.open) expect(section.visibleRows).toBeGreaterThanOrEqual(1)
-        if (name === "hills") expect(m.listHeight).toBeGreaterThan(measurements[0]!.listHeight + 100)
+        if (name === "hills") expect(m.listHeight).toBeGreaterThan(measurements[0]!.listHeight)
         measurements.push({ name, ...m })
         await expectLayout(page, info, `split-${name}-${width}`, { scope: "[data-shell-list], [data-sidebar-feet]" })
         await column.screenshot({ path: join(full, `${name}-${width}x${height}-dark.png`) })

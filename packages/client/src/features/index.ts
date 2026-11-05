@@ -15,12 +15,14 @@ import * as characters from "./characters/index.ts"
 import * as chat from "./chat/index.tsx"
 import * as insertMessage from "./chat/insertMessage/index.tsx"
 import * as connections from "./connections/index.ts"
+import * as decisions from "./decisions/index.tsx"
 import * as credentials from "./credentials.tsx"
 import * as editor from "./editor/index.tsx"
 import * as firstRun from "./firstRun/index.tsx"
 import * as library from "./library/index.ts"
 import * as login from "./login.tsx"
 import * as network from "./network.tsx"
+import * as noteOverrides from "./noteOverrides/index.tsx"
 import * as pickers from "./pickers/index.tsx"
 import * as regex from "./regex/index.tsx"
 import * as notices from "./notices.tsx"
@@ -46,11 +48,13 @@ export const registerFeatures = () => {
   library.register()
   editor.register()
   chat.register()
+  noteOverrides.register()
   pickers.register()
   insertMessage.register()
   snippets.register()
   bin.register()
   connections.register()
+  decisions.register()
   firstRun.register()
   costs.register()
   credentials.register()

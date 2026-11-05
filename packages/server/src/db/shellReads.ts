@@ -592,7 +592,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           forkId: current.id as ForkId,
           rootForkId: id as ForkId,
           title: titles.get(id)!,
-          slotId: (markers.has(id) ? (root?.base_slot_id ?? null) : null) as SlotId | null
+          slotId: (markers.has(id) ? (root?.base_slot_id ?? null) : null) as SlotId | null,
+          split: markers.has(id) ? (stored.get(id)?.split ?? null) : null
         })
         if (markers.has(id)) {
           let parent = root?.parent_fork_id ?? null

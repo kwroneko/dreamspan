@@ -132,6 +132,9 @@ for (const theme of ["light", "dark"] as const) {
     await page.keyboard.press("ArrowDown")
     await expect(explanation(page)).toHaveText(/Opens this note in the main column/)
     await beside(menu, explanation(page))
+    // Disabled, it still says why: this note replaces nothing (DESIGN §4.2).
+    await page.keyboard.press("ArrowDown")
+    await expect(explanation(page)).toHaveText("This note doesn't replace a prompt.")
     await page.keyboard.press("ArrowDown")
     await expect(explanation(page)).toHaveText(/Shows this note.s saved revisions/)
     await page.keyboard.press("ArrowDown")

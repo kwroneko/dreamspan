@@ -9,11 +9,28 @@ import { Effect } from "effect"
 import { book, draftField, importFile, saveField, seedPresetFork } from "./support/forkMerge.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
-import { asUser } from "./support/rpc.ts"
-import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
+import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+// Reuse this synthetic user's session: repeated fixture RPCs must not exhaust login limits.
+let session: Promise<string> | undefined
+const sessionCookie = () => (session ??= loginCookie(server(), ADMIN.handle, ADMIN.password))
+const admin = async <A>(use: (api: Client) => Effect.Effect<A, unknown>) =>
+  withCookie(server(), await sessionCookie(), use)
+const signIn = async (page: Page) => {
+  const cookie = await sessionCookie()
+  const at = cookie.indexOf("=")
+  await page.context().addCookies([
+    {
+      name: cookie.slice(0, at),
+      value: cookie.slice(at + 1),
+      url: server().url,
+      httpOnly: true,
+      sameSite: "Strict"
+    }
+  ])
+}
 const shots = process.env.FORK_MERGE_ARTIFACTS
 
 /** A screenshot (when asked for) and, under LAYOUT_AUDIT, the audit of that surface. */
@@ -40,7 +57,7 @@ for (const width of [1440, 390])
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await signIn(page)
       const { fork, parent } = await seedPresetFork(server(), ` ${width} ${theme}`)
       await page.goto(`${server().url}/library/${fork.id}`)
 
@@ -101,7 +118,7 @@ test("unsaved fields refuse the merge until saved or reverted, and an older pare
   page
 }) => {
   test.setTimeout(120_000)
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const { fork } = await seedPresetFork(server(), " drafts")
   await admin((api) => draftField(api, fork.id, ["prompts", "identifier=main", "content"], "UNSAVED NIGHT TEXT"))
   await page.goto(`${server().url}/library/${fork.id}`)
@@ -130,7 +147,7 @@ test("unsaved fields refuse the merge until saved or reverted, and an older pare
 
 test("a stale comparison keeps the choices and compares again", async ({ page }) => {
   test.setTimeout(120_000)
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const { fork } = await seedPresetFork(server(), " stale")
   await page.goto(`${server().url}/library/${fork.id}`)
   await notice(page).getByRole("button", { name: "Review and merge" }).click()
@@ -146,6 +163,10 @@ test("a stale comparison keeps the choices and compares again", async ({ page })
   await expect(failed).toBeVisible()
   await failed.getByRole("button", { name: "Compare again" }).click()
   await expect(failed).toHaveCount(0)
+  await expect(rows.nth(0).getByRole("textbox")).toHaveValue("Write {{char}}'s next reply, harbour at night.")
+  // Carried choices must become a draft of this comparison even without another edit.
+  await page.reload()
+  await notice(page).getByRole("button", { name: "Review and merge" }).click()
   await expect(rows.nth(0).getByRole("textbox")).toHaveValue("Write {{char}}'s next reply, harbour at night.")
   await dialog.getByRole("button", { name: "Merge", exact: true }).click()
   await expect(dialog).toHaveCount(0)
@@ -163,7 +184,7 @@ for (const width of [1440, 390])
   test(`a lorebook fork merges from the chat's side panel and shows its family ${width}`, async ({ page }, info) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width, height: 900 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await signIn(page)
     const lore = await importFile(
       page.request,
       server(),
@@ -266,7 +287,7 @@ const cardFile = (description: string, scenario: string, entry: string) => ({
 
 test("a card merges a new version of its file instead of replacing it", async ({ page }, info) => {
   test.setTimeout(120_000)
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const card = await importFile(
     page.request,
     server(),
@@ -309,7 +330,7 @@ test("a card fork in a chat offers its parent's changes; one marked by hand expl
   page
 }) => {
   test.setTimeout(120_000)
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await signIn(page)
   const seed = await admin((api) =>
     Effect.gen(function* () {
       const card = yield* api.CreateCard({ label: "Gull", name: "Gull" })
@@ -338,4 +359,145 @@ test("a card fork in a chat offers its parent's changes; one marked by hand expl
   await page.goto(`${server().url}/library/${seed.stray.id}`)
   await expect(notice(page)).toContainText("marked as a fork by hand")
   await expect(notice(page).getByRole("button")).toHaveCount(0)
+})
+
+test("a refused choices draft keeps the review open without announcing a merge", async ({ page }, info) => {
+  await signIn(page)
+  const { fork } = await seedPresetFork(server(), " draft refusal")
+  let refuse = true
+  let commits = 0
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+      if (request?.tag === "CommitForkMerge") commits++
+      if (refuse && request?.tag === "SaveUserDraft") {
+        socket.send(
+          JSON.stringify({
+            _tag: "Exit",
+            requestId: request.id,
+            exit: {
+              _tag: "Failure",
+              cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Synthetic draft refusal" } }]
+            }
+          })
+        )
+      } else upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  await page.goto(`${server().url}/library/${fork.id}`)
+  await notice(page).getByRole("button", { name: "Review and merge" }).click()
+  const dialog = page.getByRole("dialog", { name: `Merge into ${fork.label}` })
+  await dialog.getByRole("radio", { name: "Take parent's version" }).check()
+  await expect(dialog.getByRole("alert")).toBeVisible()
+  await dialog.getByRole("button", { name: "Merge", exact: true }).click()
+  await expect(dialog.getByRole("button", { name: "Merge", exact: true })).toBeEnabled()
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole("alert")).toBeVisible()
+  await expect(page.getByText(`Merged into ${fork.label}`, { exact: true })).toHaveCount(0)
+  expect(commits).toBe(0)
+  await capture(page, info, dialog, "merge-draft-refused")
+  refuse = false
+  await dialog.getByRole("button", { name: "Merge", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(commits).toBe(1)
+})
+
+test("merge waits for saved exclusions to load after reopening", async ({ page }, info) => {
+  await signIn(page)
+  const lore = await importFile(
+    page.request,
+    server(),
+    "draft-load.json",
+    book("Draft load", [
+      { uid: 0, comment: "Harbour", content: "Calm water." },
+      { uid: 1, comment: "Lighthouse", content: "An oil lamp." }
+    ])
+  )
+  const fork = await admin((api) =>
+    Effect.gen(function* () {
+      const fork = yield* api.ForkVariant({ refId: lore.id, label: "Draft load fork", subtitle: "", moveDrafts: false })
+      yield* saveField(api, lore.id, ["entries", "uid=0", "content"], "Rough water.")
+      yield* saveField(api, lore.id, ["entries", "uid=1", "content"], "A gas lamp.")
+      return fork
+    })
+  )
+  await page.goto(`${server().url}/library/${fork.id}`)
+  await notice(page).getByRole("button", { name: "Review and merge" }).click()
+  const dialog = page.getByRole("dialog", { name: `Merge into ${fork.label}` })
+  const rows = dialog.getByRole("list", { name: "Changes to merge" }).locator(":scope > li")
+  await rows.filter({ hasText: "Lighthouse" }).getByRole("switch", { name: "Take" }).click()
+  const status = await admin((api) => api.ForkMergeStatus({ refId: fork.id }))
+  const targetId = `merge:${fork.id}:${status.baseRevisionId}:${status.ref.headRevisionId}:${status.versions[0]!.id}`
+  const ownerId = await admin((api) => Effect.map(api.Whoami(), (user) => user.id))
+  await expect
+    .poll(() =>
+      admin((api) => Effect.map(api.GetUserDraft({ ownerId, targetId, field: "Merge choices" }), (d) => d?.content))
+    )
+    .toContain("uid=1")
+  let release: (() => void) | undefined
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request =
+        typeof data === "string" ? (JSON.parse(data) as { tag?: string; payload?: { targetId?: string } }) : null
+      if (request?.tag === "GetUserDraft" && request.payload?.targetId === targetId) release = () => upstream.send(data)
+      else upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  await page.reload()
+  await notice(page).getByRole("button", { name: "Review and merge" }).click()
+  await expect.poll(() => !!release).toBe(true)
+  await expect(dialog.getByRole("button", { name: "Merge", exact: true })).not.toBeEnabled()
+  await capture(page, info, dialog, "merge-choices-loading")
+  release!()
+  await expect(rows.filter({ hasText: "Lighthouse" }).getByRole("switch", { name: "Take" })).not.toBeChecked()
+  await dialog.getByRole("button", { name: "Merge", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  const [head] = await admin((api) => api.ListRevisions({ refId: fork.id, limit: 1 }))
+  const doc = await admin((api) => api.GetRevision({ refId: fork.id, revisionId: head!.id }))
+  expect((doc.entries as Array<{ content: string }>).map((e) => e.content)).toEqual(["Rough water.", "An oil lamp."])
+})
+
+test("held preset changes refuse review with Save and Revert", async ({ page }, info) => {
+  await signIn(page)
+  const { fork } = await seedPresetFork(server(), " held")
+  await admin((api) => draftField(api, fork.id, ["~held"], JSON.stringify({ deleted: ["nsfw"] })))
+  await page.goto(`${server().url}/library/${fork.id}`)
+  await notice(page).getByRole("button", { name: "Review and merge" }).click()
+  const dialog = page.getByRole("dialog", { name: `Merge into ${fork.label}` })
+  const unsaved = dialog.getByRole("status").filter({ hasText: "unsaved changes" })
+  await expect(unsaved.getByRole("button", { name: "Revert", exact: true })).toBeVisible()
+  await capture(page, info, dialog, "merge-held-unsaved")
+  await unsaved.getByRole("button", { name: "Revert", exact: true }).click()
+  await expect(dialog.getByRole("list", { name: "Changes to merge" }).locator(":scope > li")).toHaveCount(2)
+})
+
+test("held preset changes disable Undo merge at the head", async ({ page }, info) => {
+  await signIn(page)
+  const { fork } = await seedPresetFork(server(), " held undo")
+  await admin((api) =>
+    Effect.gen(function* () {
+      const preview = yield* api.PreviewForkMerge({ refId: fork.id })
+      yield* api.CommitForkMerge({
+        refId: fork.id,
+        theirsRevisionId: preview.theirsRevisionId,
+        baseRevisionId: preview.baseRevisionId,
+        expectedRowVersion: preview.ref.rowVersion,
+        selection: { excluded: [], resolutions: preview.conflicts.map((c) => ({ path: c.path, value: c.theirs })) },
+        message: null
+      })
+      yield* draftField(api, fork.id, ["~held"], JSON.stringify({ deleted: ["nsfw"] }))
+    })
+  )
+  await page.goto(`${server().url}/library/${fork.id}`)
+  await page.getByRole("button", { name: "History", exact: true }).first().click()
+  const undo = page
+    .getByRole("dialog", { name: "History", exact: true })
+    .getByRole("button", { name: "Undo merge", exact: true })
+  await expect(undo).toBeDisabled()
+  await expect(undo).toHaveAccessibleDescription("Save or revert the unsaved changes first.")
+  await capture(page, info, page.getByRole("dialog", { name: "History", exact: true }), "merge-held-undo")
 })

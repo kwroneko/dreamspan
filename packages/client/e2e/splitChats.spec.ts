@@ -26,16 +26,25 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/chats/${seed.chatId}?fork=${seed.original}`)
       if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
       await showAppNavigation(page)
-      const splits = page.getByRole("region", { name: "Split chats", exact: true })
+      const splits = page.getByRole("region", { name: "Related chats", exact: true })
+      const source = splits.getByRole("group", { name: "This chat was split from", exact: true })
+      const splitOff = splits.getByRole("group", { name: "Split off from this chat", exact: true })
       const branches = page.getByRole("region", { name: "Branches of the open chat", exact: true })
       const chats = page.getByRole("region", { name: "Chats", exact: true })
-      await expect(splits.getByRole("button", { name: "Split off (3)", exact: true })).toBeVisible()
+      await expect(splits.getByRole("button", { name: "Related chats (3)", exact: true })).toBeVisible()
+      await expect(source).toHaveCount(0)
+      await expect(splitOff.locator("[data-fork-row]")).toHaveCount(3)
       await expect(branches.getByRole("button", { name: /^Open branch / })).toHaveCount(2)
       await splits.getByRole("button", { name: "Open chat Split demo · Harbor", exact: true }).click()
       await showAppNavigation(page)
-      await expect(splits.getByRole("button", { name: "Split off (1)", exact: true })).toBeVisible()
-      const parent = splits.getByRole("link", { name: "From “Split demo · Journeys”", exact: true })
+      await expect(splits.getByRole("button", { name: "Related chats (2)", exact: true })).toBeVisible()
+      const parent = source.getByRole("button", { name: "Open chat Split demo · Journeys", exact: true })
       await expect(parent).toBeVisible()
+      await expect(source.locator("[data-row-relation]")).toHaveText(/^Shares messages #1–2 · split /)
+      await expect(
+        splitOff.getByRole("button", { name: "Open chat Split demo · Lighthouse", exact: true })
+      ).toBeVisible()
+      await expect(splitOff.locator("[data-row-relation]")).toHaveText(/^Shares messages #1–3 · split /)
       await expect(branches.getByRole("button", { name: /^Open branch / })).toHaveCount(2)
       const selected = chats.locator(`button[data-chat-id="${seed.harbor}"]`)
       await expect(selected).toHaveAttribute("aria-current", "page")
@@ -43,23 +52,26 @@ for (const width of [1440, 390])
       // A shorter split list retains the same reserved height.
       await parent.click()
       await showAppNavigation(page)
-      await expect(splits.getByRole("button", { name: "Split off (3)", exact: true })).toBeVisible()
+      await expect(splits.getByRole("button", { name: "Related chats (3)", exact: true })).toBeVisible()
       await expect(chats.locator(`button[data-chat-id="${seed.chatId}"]`)).toHaveAttribute("aria-current", "page")
-      await expect(splits.getByRole("link", { name: /^From / })).toHaveCount(0)
+      await expect(source).toHaveCount(0)
       // The same links are available in the history, and follow the unchanged branch tree.
       await hideAppNavigation(page)
       await expect(
-        page.locator("[data-split-divider]").filter({ hasText: "Split into its own chat here" })
+        page.locator("[data-split-divider]").filter({ hasText: "Split off from this chat here" })
       ).toBeVisible()
       await page.locator("[data-split-divider]").getByRole("link", { name: "Split demo · Harbor", exact: true }).click()
       await expect(
-        page.locator("[data-split-divider]").filter({ hasText: "Split from “Split demo · Journeys” here" })
+        page
+          .locator("[data-split-divider]")
+          .filter({ hasText: "This chat was split from “Split demo · Journeys” here" })
       ).toBeVisible()
       await showAppNavigation(page)
       await splits.getByRole("button", { name: "Open chat Split demo · Lighthouse", exact: true }).click()
       await showAppNavigation(page)
-      await expect(splits.getByRole("link", { name: "From “Split demo · Harbor”", exact: true })).toBeVisible()
-      await expect(splits.getByRole("button", { name: /^Split off / })).toHaveCount(0)
+      await expect(source.getByRole("button", { name: "Open chat Split demo · Harbor", exact: true })).toBeVisible()
+      await expect(splits.getByRole("button", { name: "Related chats (1)", exact: true })).toBeVisible()
+      await expect(splitOff).toHaveCount(0)
     })
   }
 
@@ -77,16 +89,17 @@ test("split action acts on the branch shown and supports undo", async ({ page })
     .getByRole("button", { name: "Make its own chat", exact: true })
     .click()
   await expect(page.getByText("Branch is now its own chat", { exact: true })).toBeVisible()
+  // The window's height may leave Related chats collapsed to its header: check the count and its source row.
+  const related = page.getByRole("region", { name: "Related chats", exact: true })
+  await expect(related.getByRole("button", { name: "Related chats (1)", exact: true })).toBeVisible()
   await expect(
-    page
-      .getByRole("region", { name: "Split chats", exact: true })
-      .getByRole("link", { name: "From “Split demo · Harbor”", exact: true })
-  ).toBeVisible()
+    related.locator(`[aria-label="This chat was split from"] button[data-chat-id="${seed.groupId}"]`)
+  ).toHaveCount(1)
   await page.getByRole("button", { name: "Undo", exact: true }).click()
   await expect(
     page
-      .getByRole("region", { name: "Split chats", exact: true })
-      .getByRole("button", { name: "Split off (1)", exact: true })
+      .getByRole("region", { name: "Related chats", exact: true })
+      .getByRole("button", { name: "Related chats (2)", exact: true })
   ).toBeVisible()
 })
 
@@ -129,7 +142,7 @@ for (const width of [1440, 390])
   }
 
 for (const width of [1440, 390]) {
-  test(`header-only and absent splits give space to Chats at ${width}`, async ({ page }) => {
+  test(`small and absent related chats give space to Chats at ${width}`, async ({ page }) => {
     await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreateChat({ title: "No split sizing" }))
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)

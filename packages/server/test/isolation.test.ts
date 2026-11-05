@@ -942,6 +942,49 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.notInclude(theirs, owner.connectionId)
       })
   },
+  ListDecisionPoints: {
+    probe: (actor) =>
+      Effect.gen(function* () {
+        const points = (yield* actor.api.ListDecisionPoints()).map((point) => point.id)
+        assert.deepStrictEqual(points, ["lore", "presence"])
+      })
+  },
+  GetDecisionSettings: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetDecisionSettings({
+          connectionId: owner.connectionId,
+          model: owner.modelId,
+          points: { lore: { on: true, threshold: 0.7 } }
+        })
+        assert.include(
+          (yield* owner.api.GetDecisionSettings()).map((s) => s.connectionId),
+          owner.connectionId
+        )
+        assert.notInclude(
+          (yield* actor.api.GetDecisionSettings()).map((s) => s.connectionId),
+          owner.connectionId
+        )
+      })
+  },
+  SetDecisionSettings: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.SetDecisionSettings({ connectionId: owner.connectionId, model: null, points: {} }),
+          "NotFound"
+        )
+        // Nor another user's model on one's own connection.
+        yield* refused(
+          actor.api.SetDecisionSettings({ connectionId: actor.connectionId, model: owner.modelId, points: {} }),
+          "NotFound"
+        )
+        assert.notInclude(
+          (yield* actor.api.GetDecisionSettings()).map((s) => s.connectionId),
+          owner.connectionId
+        )
+      })
+  },
   GetGenerationDefaults: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -1859,6 +1902,34 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
       Effect.gen(function* () {
         yield* refused(actor.api.GetRolloutSteps({ versionId: owner.chat.generatingId }), "NotFound")
         assert.deepStrictEqual(yield* owner.api.GetRolloutSteps({ versionId: owner.chat.generatingId }), [])
+      })
+  },
+  GetRunTranscript: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetRunTranscript({ versionId: owner.chat.generatingId }), "NotFound")
+        assert.deepStrictEqual(yield* owner.api.GetRunTranscript({ versionId: owner.chat.generatingId }), {
+          tools: [],
+          entries: []
+        })
+      })
+  },
+  // The registered modes and tools: the same for everyone, nobody's data.
+  ListReplyModes: {
+    probe: (actor) =>
+      Effect.gen(function* () {
+        const modes = yield* actor.api.ListReplyModes({})
+        assert.include(
+          modes.modes.map((m) => m.id),
+          "plain"
+        )
+      })
+  },
+  ListActivity: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.ListActivity({ chatId: owner.chat.chatId }), "NotFound")
+        assert.isArray((yield* owner.api.ListActivity({ chatId: owner.chat.chatId })).rows)
       })
   },
   GetRunContext: {

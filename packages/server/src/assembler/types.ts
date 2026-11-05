@@ -9,12 +9,12 @@ import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import type { matchLorebooks } from "./lorebook.ts"
-import type { NoteDoc } from "@rp/shared/docs/note.ts"
+import { type NoteDoc, type ReplaceableCardField, replacesInPlace } from "@rp/shared/docs/note.ts"
 import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/docs/preset.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 47
+export const ASSEMBLER_VERSION = 49
 
 export type Role = "system" | "user" | "assistant"
 
@@ -84,7 +84,10 @@ export type LoreRecord =
   | {
       readonly status: "activated"
       readonly step: number
-      readonly why: ReturnType<typeof matchLorebooks>["activated"][number]["why"] | { readonly kind: "pinned" }
+      readonly why:
+        | ReturnType<typeof matchLorebooks>["activated"][number]["why"]
+        | { readonly kind: "pinned" }
+        | { readonly kind: "decision"; readonly probability: number }
     }
   | { readonly status: "skipped"; readonly step: number; readonly reason: string }
 
@@ -259,6 +262,34 @@ export interface CardOverride {
   readonly status: "replaced" | "forbidden" | "disabled" | "missing"
 }
 
+/**
+ * A preset prompt or card field a note replaces, as assembly resolved it (DESIGN §4.2;
+ * spec/NOTE-OVERRIDES.md): a card field's `card` is the card that fills the character's place on
+ * this path.
+ */
+export type ResolvedTarget =
+  | { readonly kind: "preset_prompt"; readonly identifier: string }
+  | { readonly kind: "card_field"; readonly card: string; readonly field: ReplaceableCardField }
+
+/**
+ * What became of a note that replaces something (the `replacements` stage):
+ * - `replaced`: sent in the prompt's place; `own_position`: sent at its own placement, the prompt left out
+ * - `not_due`: its condition doesn't hold this turn, so the prompt is sent as it is
+ * - `forbidden`: a card's note, and the preset prompt forbids overrides
+ * - `missing`: the selected preset has no such prompt, or no card fills the place
+ * - `disabled`: the prompt is switched off in the preset, so nothing goes there
+ * - `conflict`: another note replaces it already (one note per target), so this one does nothing
+ */
+export interface NoteReplacement {
+  readonly entity: string
+  readonly revision: string
+  readonly target: ResolvedTarget
+  readonly ownPosition: boolean
+  status: "replaced" | "own_position" | "not_due" | "forbidden" | "missing" | "disabled" | "conflict"
+  /** The piece its text was sent as, in the prompt's place. */
+  piece?: number
+}
+
 /** What an agent reply mode changes in its context (spec/AGENTIC.md §6). */
 export interface AgentAssembly {
   /** Told the model with the end of the request: its tools, and how to give its reply. */
@@ -267,10 +298,26 @@ export interface AgentAssembly {
   readonly cardsAtTail: boolean
 }
 
+/** What decision models decided for this context (spec/AGENTIC.md §7): the lorebook entries admitted. */
+export interface DecisionAssembly {
+  /** `<book>:<uid>` of each entry admitted, with the model's probability. */
+  readonly lore: ReadonlyArray<{ readonly entry: string; readonly probability: number }>
+}
+
+/** What the `lore` decision point asks about: the entries the keys left out that have a question. */
+export interface LoreDecisionInput {
+  readonly candidates: ReadonlyArray<{ readonly key: string; readonly title: string; readonly question: string }>
+  readonly recent: ReadonlyArray<{ readonly from: string; readonly text: string }>
+}
+
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
   /** An agent reply's assembly options, for a rebuild. */
   readonly agentAssembly?: AgentAssembly
+  /** The decision models' admissions, for a rebuild (spec/AGENTIC.md §7). */
+  readonly decisionAssembly?: DecisionAssembly
+  /** The `lore` decision point's input; AssembleContext takes it out before the snapshot is stored. */
+  readonly loreDecision?: LoreDecisionInput
   readonly contextBudget?: ContextBudget
   /** The preset's reply-section setting a reply is parsed with; absent for summaries. */
   readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings
@@ -351,6 +398,8 @@ export interface ContextSnapshot {
   }
   /** The speaker's card prompts and what became of them; absent when it has none. */
   readonly cardOverrides?: ReadonlyArray<CardOverride>
+  /** The notes that replace a prompt or card field and what became of them; absent when none does. */
+  readonly noteReplacements?: ReadonlyArray<NoteReplacement>
   /** Enabled preset prompts their condition left out this turn; absent in older snapshots. */
   readonly skippedPrompts?: ReadonlyArray<Source>
   /** The path's images the request leaves out and why (`images` stage); absent in older snapshots. */
@@ -627,6 +676,7 @@ export const characterNoteText = (notes: ReadonlyArray<NoteInput> | undefined, c
       (note) =>
         card !== undefined &&
         noteCard(note.doc) === card &&
+        !replacesInPlace(note.doc) &&
         (note.doc.placement.mode === "depth" || note.doc.placement.mode === "tail")
     )
     .toSorted((a, b) => (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))

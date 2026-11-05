@@ -29,6 +29,8 @@ import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { ImageEstimate } from "./imageTokens.tsx"
 import { requestStatusText } from "./requestWords.ts"
 import { useTitle } from "../shell.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { runInspectorSections } from "./presentation.tsx"
 
 /** How much of a collapsed message shows. */
 const PREVIEW = 200
@@ -62,7 +64,9 @@ const activationText = (activation: SourceActivation): string => {
         ? "constant entry"
         : activation.why.kind === "pinned"
           ? "pinned above the history until its start moves"
-          : `keyword “${activation.why.primaryKey}”${activation.why.secondaryKeys.length ? `; ${activation.why.logic ?? "and_any"}: ${activation.why.secondaryKeys.map((key) => `“${key}”`).join(", ")}` : ""}`
+          : activation.why.kind === "decision"
+            ? `the decision model judged it relevant (${Math.round(activation.why.probability * 100)}%)`
+            : `keyword “${activation.why.primaryKey}”${activation.why.secondaryKeys.length ? `; ${activation.why.logic ?? "and_any"}: ${activation.why.secondaryKeys.map((key) => `“${key}”`).join(", ")}` : ""}`
   const notes =
     activation.why.kind === "keys" && activation.why.notes?.length
       ? `; found in the note${activation.why.notes.length > 1 ? "s" : ""} ${activation.why.notes.map((note) => `“${note}”`).join(", ")}`
@@ -711,6 +715,7 @@ function Inspector({ run }: { run: RunContext }) {
         )}
       </section>
       <NotSent run={run} />
+      <SlotOutlet slot={runInspectorSections} props={{ run }} />
       <Card>
         <CardHeader
           title="Usage"

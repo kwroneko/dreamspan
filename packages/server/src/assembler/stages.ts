@@ -33,7 +33,8 @@ import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { cachePrefixDigests, placeBreakpoints, summaryLevelOf } from "./breakpoints.ts"
 import { DEFAULT_MAX_IMAGES, imagesStage, messageImagesOf } from "./images.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
-import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
+import { cardFieldKey, replacementFor, replacementsStage } from "./replacements.ts"
+import { cardFields, makeMacroEnvironment, type MacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
 import {
   applyScripts,
   compile,
@@ -822,7 +823,12 @@ const cardNewlines = (assembly: Assembly, piece: number): Text => {
 }
 
 /** A card field as ST's baseChatReplace gives it: trimmed, expanded without card fields, no carriage returns. */
-const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["doc"], names?: Partial<Names>): Text => {
+const ownCardText = (
+  assembly: Assembly,
+  card: CardInput,
+  field: keyof CardInput["doc"],
+  names?: Partial<Names>
+): Text => {
   const env = need(assembly, "macros")
   const raw = String(card.doc[field] ?? "").trim()
   const piece = env.piece(`card:${card.entity}:${String(field)}`, cardSource(assembly, card, String(field)), raw, {
@@ -830,6 +836,68 @@ const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["d
     ...(names ? { names } : {})
   })
   return cardNewlines(assembly, piece)
+}
+
+/**
+ * A card field this turn: the note that replaces it in this chat, in its place (DESIGN §4.2),
+ * expanded and cleaned as the field would be; else the field itself.
+ */
+const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["doc"], names?: Partial<Names>): Text =>
+  withReplacement(
+    assembly,
+    cardFieldKey(card.entity, String(field)),
+    () => ownCardText(assembly, card, field, names),
+    { withoutCard: true, ...(names ? { names } : {}) },
+    (piece) => cardNewlines(assembly, piece)
+  ) ?? ownCardText(assembly, card, field, names)
+
+type PieceOptions = NonNullable<Parameters<MacroEnvironment["piece"]>[3]>
+
+/**
+ * A target's text this turn (DESIGN §4.2; spec/NOTE-OVERRIDES.md §3): the replacing note's in its
+ * place, `{{original}}` the target's own text; nothing when the note goes at its own position;
+ * else the target's own (`own`). A target whose note has a condition comes and goes with the
+ * turn, due or not, so it's volatile either way.
+ */
+const withReplacement = <T extends Text | null>(
+  assembly: Assembly,
+  key: string,
+  own: () => T,
+  options: PieceOptions = {},
+  finish: (piece: number) => Text = (piece) => ({ text: need(assembly, "macros").text(piece), piece })
+): Text | T => {
+  const found = replacementFor(assembly, key)
+  if (!found) return own()
+  const env = need(assembly, "macros")
+  const { note, record } = found
+  const changing = conditioned(note)
+  if (changing) env.potentialVariableWrite()
+  if (record.status === "not_due" || record.status === "disabled") {
+    const text = own()
+    if (text && changing) env.markVolatile(text.piece)
+    return text
+  }
+  if (record.status === "own_position") {
+    const piece = env.verbatim(`replaced:${key}`, noteSource(assembly, note), "")
+    record.piece = piece
+    return { text: "", piece }
+  }
+  const raw = note.doc.content.trim()
+  const originalText = /\{\{\s*original\s*\}\}/i.test(raw) ? own() : undefined
+  const original = originalText === undefined ? undefined : (originalText?.text ?? "")
+  const owner = noteCard(note.doc)
+  const ownerCard =
+    owner === null
+      ? undefined
+      : [...need(assembly, "cast").characters, ...need(assembly, "cast").personas].find((c) => c.entity === owner)
+  const piece = env.piece(`note:${note.entity}:${key}`, noteSource(assembly, note), raw, {
+    ...options,
+    ...(ownerCard && !key.startsWith("card:") ? { names: { ...options.names, char: modelName(ownerCard.doc) } } : {}),
+    ...(original === undefined ? {} : { original })
+  })
+  if (changing || (originalText && env.isVolatile(originalText.piece))) env.markVolatile(piece)
+  record.piece = piece
+  return finish(piece)
 }
 
 const presetText = (
@@ -899,10 +967,12 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
       else if (condition !== "always") skipped.push(presetSource(assembly, prompt.identifier, condition))
     }
     if (!allowed && entry.identifier !== "main") continue
-    const text =
+    const own = () =>
       allowed && prompt.content
         ? presetText(assembly, prompt.identifier, prompt.content, {}, condition === "always" ? undefined : condition)
         : null
+    // A note may replace it in this chat (DESIGN §4.2).
+    const text = allowed ? withReplacement(assembly, `preset:${prompt.identifier}`, own) : null
     const summary = text !== null && hasSummary(assembly, text.piece)
     collection.push({
       identifier: prompt.identifier,
@@ -949,6 +1019,9 @@ const override = (
 ) => {
   // An empty card prompt does nothing, and isn't worth showing in the editors.
   if (!text.text) return
+  // A note that replaces the prompt in this chat wins over the card's (DESIGN §4.2).
+  const noted = replacementFor(assembly, `preset:${identifier}`)?.record.status
+  if (noted === "replaced" || noted === "own_position") return
   const at = collection.findIndex((p) => p.identifier === identifier)
   const status =
     at === -1
@@ -1188,21 +1261,45 @@ const summaryText = (assembly: Assembly, note: NoteInput): Text | null => {
   if (!content) return null
   const { template } = note.doc
   const formatted = template ? template.replace(/\{\{summary\}\}/gi, () => content) : `Summary: ${content}`
-  const env = need(assembly, "macros")
-  const piece = env.piece(`note:${note.entity}`, noteSource(assembly, note), formatted)
-  const text = env.text(piece).trim()
-  return { text, piece }
+  const expanded = noteText(assembly, note, null, formatted)
+  return expanded ? { ...expanded, text: expanded.text.trim() } : null
 }
 
 /** A note's text, expanded: a card's with `{{char}}` bound to the card, the chat's with the chat's bindings. */
-const noteText = (assembly: Assembly, note: NoteInput, owner: CardInput | null): Text | null => {
+const noteText = (
+  assembly: Assembly,
+  note: NoteInput,
+  owner: CardInput | null,
+  content = note.doc.content.trim()
+): Text | null => {
   const env = need(assembly, "macros")
-  const piece = env.piece(
-    `note:${note.entity}`,
-    noteSource(assembly, note),
-    note.doc.content.trim(),
-    owner ? { withoutCard: true, names: { char: modelName(owner.doc) } } : {}
+  const replacing = [...(assembly.replacements?.values() ?? [])].find(
+    (r) => r.note === note && r.record.status === "own_position"
   )
+  let original: Text | null | undefined
+  if (replacing && /\{\{\s*original\s*\}\}/i.test(content)) {
+    const target = replacing.record.target
+    if (target.kind === "preset_prompt") {
+      const prompt = need(assembly, "preset").doc.prompts.find((p) => p.identifier === target.identifier)
+      original = prompt ? presetText(assembly, target.identifier, prompt.content) : null
+    } else {
+      const cast = need(assembly, "cast")
+      const card = [...cast.characters, ...cast.personas].find((c) => c.entity === target.card)
+      original = card
+        ? ownCardText(
+            assembly,
+            card,
+            target.field,
+            cast.personas.includes(card) ? { user: modelName(card.doc) } : { char: modelName(card.doc) }
+          )
+        : null
+    }
+  }
+  const piece = env.piece(`note:${note.entity}`, noteSource(assembly, note), content, {
+    ...(owner ? { withoutCard: true, names: { char: modelName(owner.doc) } } : {}),
+    ...(original === undefined ? {} : { original: original?.text ?? "" })
+  })
+  if (original && env.isVolatile(original.piece)) env.markVolatile(piece)
   const text = env.text(piece)
   return { text, piece }
 }
@@ -1553,16 +1650,23 @@ const composeStage = sync("compose", (assembly) => {
         assembly,
         card,
         null,
-        card.doc.description
-          ? (() => {
-              const piece = env.piece(
-                `card:${card.entity}:description`,
-                cardSource(assembly, card, "description"),
-                card.doc.description
-              )
-              return cardNewlines(assembly, piece)
-            })()
-          : null
+        withReplacement(
+          assembly,
+          cardFieldKey(card.entity, "description"),
+          () =>
+            card.doc.description
+              ? cardNewlines(
+                  assembly,
+                  env.piece(
+                    `card:${card.entity}:description`,
+                    cardSource(assembly, card, "description"),
+                    card.doc.description
+                  )
+                )
+              : null,
+          {},
+          (piece) => cardNewlines(assembly, piece)
+        )
       )
     markers = {
       definitions: null,
@@ -1686,6 +1790,33 @@ const composeStage = sync("compose", (assembly) => {
     assembly.cardOverrides = []
     override(assembly, collection, disabled, "main", overrides.main, speaker)
     override(assembly, collection, disabled, "jailbreak", overrides.jailbreak, speaker)
+  }
+
+  // A conditional replacement changes its target's slot even when its text is empty,
+  // or a skipped Main note lets the card override it. Keep that boundary on the slot.
+  for (const { note, record } of assembly.replacements?.values() ?? []) {
+    if (!conditioned(note) || !["replaced", "own_position", "not_due"].includes(record.status)) continue
+    const target = record.target
+    let identifier: string
+    if (target.kind === "preset_prompt") identifier = target.identifier
+    else {
+      const card = [...cast.characters, ...cast.personas].find((c) => c.entity === target.card)
+      if (!card) continue
+      if (target.field === "system_prompt" || target.field === "post_history_instructions") {
+        if (card !== speaker) continue
+        identifier = target.field === "system_prompt" ? "main" : "jailbreak"
+      } else if (target.field === "mes_example") identifier = "dialogueExamples"
+      else {
+        if (card === atTail) continue
+        identifier = definitions
+          ? "charDefinitions"
+          : cast.personas.includes(card)
+            ? "personaDescription"
+            : { description: "charDescription", personality: "charPersonality", scenario: "scenario" }[target.field]
+      }
+    }
+    const index = collection.findIndex((p) => p.identifier === identifier)
+    if (index >= 0) collection[index] = { ...collection[index]!, barrier: true }
   }
 
   const previous = previousStart(assembly)
@@ -2593,6 +2724,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   rolesStage,
   mergeLayoutStage,
   noteGateStage,
+  replacementsStage,
   loreScanStage,
   loreActivationStage,
   endOfRequestStage,

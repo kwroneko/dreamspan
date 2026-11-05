@@ -138,7 +138,8 @@ export const ContextIssue = Schema.Struct({
     "layout_ignored",
     "cache_breakpoints",
     "role_projection_missing",
-    "merge_layout_missing"
+    "merge_layout_missing",
+    "note_replacement"
   ]),
   message: Schema.String
 })

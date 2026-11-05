@@ -77,7 +77,7 @@ export interface EditorState {
 const KEEPALIVE_LIMIT = 64 * 1024
 
 /** Channels besides each field's own: the documents changed, or which fields are dirty. */
-const STRUCTURE = "structure"
+export const STRUCTURE = "structure"
 const DRAFTS = "drafts"
 
 export class EditorStore {
