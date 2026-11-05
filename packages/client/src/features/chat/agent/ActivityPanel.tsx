@@ -3,7 +3,7 @@
 // was, how it ended, the model, when, its tokens and cost, and links to where it can be looked at
 // (a summary's request, or the reply a judgment was about). Agent replies are reached from their
 // message instead. Read in pages of 50 (`ListActivity`), again whenever the summaries change.
-import type { ActivityRow } from "@rp/shared/agent.ts"
+import type { ActivityCursor, ActivityRow } from "@rp/shared/agent.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
 import type { RequestStatus } from "@rp/shared/usage.ts"
 import { Link } from "@tanstack/react-router"
@@ -67,6 +67,7 @@ function Row({ row, session, onJump }: { row: ActivityRow; session: ChatSession;
           <Link
             to="/chats/$chatId/summaries/$summaryId/request"
             params={{ chatId: session.id, summaryId: row.summaryId }}
+            search={row.summaryRevisionId === null ? {} : { revision: row.summaryRevisionId }}
             className="w-fit text-xs text-accent underline-offset-2 hover:underline"
           >
             Open request
@@ -90,7 +91,7 @@ function Row({ row, session, onJump }: { row: ActivityRow; session: ChatSession;
 
 export function ActivityPanel({ session, view, active, onJump }: PanelProps) {
   const [rows, setRows] = useState<ReadonlyArray<ActivityRow> | null>(null)
-  const [before, setBefore] = useState<number | null>(null)
+  const [before, setBefore] = useState<ActivityCursor | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   // The summaries changing is what adds a row here; read again then, and when the tab is shown.

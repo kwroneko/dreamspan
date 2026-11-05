@@ -10,7 +10,8 @@ import { AUTO_POLICY, planReply, replyPolicies } from "../src/features/chat/repl
 
 // rpc.ts reads the page's location when imported.
 vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
-const { ChatSession, liveReasoning, liveSections, liveText } = await import("../src/features/chat/session.ts")
+const { ChatSession, liveReasoning, liveSections, liveSteps, liveText } =
+  await import("../src/features/chat/session.ts")
 
 const chatId = "chat-1" as ChatId
 const chat = {
@@ -487,6 +488,45 @@ describe("ChatSession", () => {
     receive({ _tag: "Delta", versionId: reply.id, offset: 8, text: " t" })
     flush()
     expect(registry.get(liveText(reply.id))).toBe("The tide turned.")
+    s.dispose()
+  })
+
+  it("keeps steps on their version across swipes and clears only the run that stops", async () => {
+    const { s, registry, answers, receive } = session()
+    const opening = s.open(null)
+    answers[0]!(window([first, second]))
+    await opening
+    const steps = [{ kind: "thinking", text: "Check the bridge." }] as const
+    receive({ _tag: "Steps", versionId: reply.id, steps })
+    // Another tab selects a different version of the slot while the original keeps running.
+    const swipe = version("v3", "s2", "complete", "Another reply.")
+    receive({ _tag: "Slot", entry: { ...second, rowVersion: 2, version: swipe, versionCount: 2 } })
+    const updated = [{ kind: "thinking", text: "Check the bridge and lantern." }] as const
+    receive({ _tag: "Steps", versionId: reply.id, steps: updated })
+    expect(s.snapshot().entries.at(-1)?.version.id).toBe(swipe.id)
+    expect(registry.get(liveSteps(swipe.id))).toBeNull()
+    expect(registry.get(liveSteps(reply.id))).toEqual(updated)
+    receive({ _tag: "Version", version: { ...reply, status: "stopped" } as Version })
+    expect(registry.get(liveSteps(reply.id))).toBeNull()
+    expect(s.snapshot().entries.at(-1)?.version.id).toBe(swipe.id)
+    s.dispose()
+  })
+
+  it("seeds steps on reload and replaces them on reconnect even when the transcript got shorter", async () => {
+    const { s, registry, answers, receive } = session()
+    const steps = [{ kind: "thinking", text: "Check the bridge." }] as const
+    receive({ _tag: "Hello", live: [{ versionId: reply.id, text: "", steps }] })
+    answers[0]!(window([first, second]))
+    await vi.waitFor(() => expect(s.snapshot().entries).toHaveLength(2))
+    expect(registry.get(liveSteps(reply.id))).toEqual(steps)
+    receive({ _tag: "Hello", live: [{ versionId: reply.id, text: "", steps: [] }] })
+    expect(registry.get(liveSteps(reply.id))).toEqual([])
+    answers[1]!(window([first, second]))
+    await Promise.resolve()
+    receive({ _tag: "Hello", live: [] })
+    expect(registry.get(liveSteps(reply.id))).toBeNull()
+    answers[2]!(window([first, entry("s2", "s1", { ...reply, status: "stopped" } as Version)]))
+    await Promise.resolve()
     s.dispose()
   })
 

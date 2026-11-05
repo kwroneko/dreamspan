@@ -125,7 +125,7 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
-import { ActivityPage, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
+import { ActivityCursor, ActivityPage, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import { ConnectionDecisions, DecisionPointSetting } from "@rp/shared/decisions.ts"
@@ -3321,7 +3321,7 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** A chat's model work that made no message, from the ledger, newest first (agentReads.ts). */
   Rpc.make("ListActivity", {
-    payload: { userId: UserId, chatId: ChatId, before: Schema.optionalKey(Schema.Number), limit: Schema.Int },
+    payload: { userId: UserId, chatId: ChatId, before: Schema.optionalKey(ActivityCursor), limit: Schema.Int },
     success: ActivityPage,
     error: Schema.Union([NotFound, StorageError])
   }),
