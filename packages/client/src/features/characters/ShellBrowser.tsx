@@ -234,7 +234,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
         </Tooltip>
       )}
       <div data-row-text className="min-w-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-1 text-sm">
+        <div data-branch-title-line className="flex h-5 min-w-0 items-center gap-x-1 text-sm">
           {here ? (
             <InlineRename
               compact
@@ -243,7 +243,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
               hint="Renames this branch."
               allowEmpty
               maxLength={100}
-              className="w-full max-w-full"
+              className="min-w-0 flex-1"
               placeholder="Branch name"
               onRename={async (name) => {
                 const result = await action.run(
@@ -254,16 +254,20 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
                 return result.ok
               }}
             >
-              <span data-chat-title className="line-clamp-2 min-w-0 font-medium [overflow-wrap:anywhere]">
+              <span data-chat-title className="min-w-0 flex-1 truncate font-medium">
                 {label}
               </span>
             </InlineRename>
           ) : (
-            <span data-chat-title className="line-clamp-2 min-w-0 font-medium [overflow-wrap:anywhere]">
+            <span data-chat-title className="min-w-0 flex-1 truncate font-medium">
               {label}
             </span>
           )}
-          {fork.current && fork.branches > 1 && <Badge>opens here</Badge>}
+          {fork.current && fork.branches > 1 && (
+            <span data-opens-here className="flex shrink-0">
+              <Badge>opens here</Badge>
+            </span>
+          )}
         </div>
         <Tooltip
           label={`Opens this branch${here ? ", shown now" : ""}.${fork.current && fork.branches > 1 ? ` ${OPENS_HERE_HINT}` : ""}`}
@@ -286,7 +290,10 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
           </button>
         </Tooltip>
       </div>
-      <span data-branch-pin>
+      <span
+        data-branch-pin
+        data-layout-overlay="Pin occupies the preview’s reserved end padding below the full-width title"
+      >
         <PinButton fork={fork} branch />
       </span>
       {action.error && (

@@ -146,10 +146,59 @@ for (const theme of ["light", "dark"] as const)
       await blank.getByRole("button", { name: /^Rename branch / }).click()
       expect((await blank.boundingBox())!.height).toBe(blankHeight)
       expect((await blank.getByRole("textbox").boundingBox())!.width).toBeGreaterThan(
-        (await blank.locator("[data-row-text]").boundingBox())!.width - 65
+        (await blank.locator("[data-renaming]").boundingBox())!.width - 50
       )
       await expect(blank.getByRole("textbox")).toHaveValue("")
       await expect(blank.getByRole("textbox")).toHaveAttribute("placeholder", "Branch name")
       await panel.screenshot({ path: info.outputPath(`rename-empty-${size}-${theme}.png`) })
       await expectLayout(page, info, `rename-empty-${size}-${theme}`, { scope: "[data-fork-row]" })
+      const longName = "A very long branch name that keeps going beyond the available title space on every panel width"
+      await blank.getByRole("textbox").fill(longName)
+      await blank.getByRole("button", { name: "Save the name", exact: true }).click()
+      await expect(blank.locator("[data-chat-title]")).toHaveText(longName)
+      await expect(blank.locator("[data-opens-here]")).toHaveText("opens here")
+      const metrics = await blank.evaluate((root) => {
+        const line = root.querySelector<HTMLElement>("[data-branch-title-line]")!
+        const title = line.querySelector<HTMLElement>("[data-chat-title]")!
+        const pencil = line.querySelector<HTMLButtonElement>("button")!
+        const chip = line.querySelector<HTMLElement>("[data-opens-here]")!
+        const rect = (el: HTMLElement) => {
+          const b = el.getBoundingClientRect()
+          return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }
+        }
+        const height = () => root.getBoundingClientRect().height
+        const both = height()
+        const boxes = [rect(title), rect(pencil), rect(chip)]
+        pencil.style.display = "none"
+        const chipOnly = height()
+        chip.style.display = "none"
+        const neither = height()
+        pencil.style.removeProperty("display")
+        const pencilOnly = height()
+        chip.style.removeProperty("display")
+        return {
+          both,
+          chipOnly,
+          pencilOnly,
+          neither,
+          boxes,
+          line: rect(line),
+          clipped: title.scrollWidth > title.clientWidth,
+          ellipsis: getComputedStyle(title).textOverflow
+        }
+      })
+      expect(metrics.clipped).toBe(true)
+      expect(metrics.ellipsis).toBe("ellipsis")
+      expect(metrics.chipOnly).toBe(metrics.both)
+      expect(metrics.pencilOnly).toBe(metrics.both)
+      expect(metrics.neither).toBe(metrics.both)
+      for (const box of metrics.boxes) {
+        expect(box.top).toBeGreaterThanOrEqual(metrics.line.top)
+        expect(box.bottom).toBeLessThanOrEqual(metrics.line.bottom)
+      }
+      expect(metrics.boxes[0]!.right).toBeLessThanOrEqual(metrics.boxes[1]!.left)
+      expect(metrics.boxes[1]!.right).toBeLessThanOrEqual(metrics.boxes[2]!.left)
+      await info.attach("long title geometry", { body: JSON.stringify(metrics), contentType: "application/json" })
+      await panel.screenshot({ path: info.outputPath(`long-title-${size}-${theme}.png`) })
+      await expectLayout(page, info, `long-title-${size}-${theme}`, { scope: "[data-fork-row]" })
     })

@@ -1062,6 +1062,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 10.1 Web app
 
+- **[D]** (owner, 2026-11-05, splitlink follow-up) “The title line of a branch row never wraps: the title truncates with an ellipsis, and the pencil and the 'opens here' chip stay on that one line after it, at every panel width including phone. Row height must be identical with and without the pencil/chip.” **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
+
+
 - **[D]** (owner, 2026-11-05, splitlink) “Every row that shows a last-message preview (branch rows, chat rows, the header's branch list) uses the latest message on that branch that has text, skipping empty and failed ones; only when the branch has no message with text, show ‘No messages yet’ in the same two-line slot, so row height never changes.” **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
 - **[D]** (owner, 2026-11-05, splitlink) “While renaming, the field takes the full width of the title line (✓ and ✕ stay at its end) at the row's normal title text size; it is prefilled with the branch's own name when it has one and empty otherwise, with the faint placeholder ‘Branch name’; the row's height does not change.” **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
 - **[P]** (splitlink, 2026-11-05; implemented) Infer missing imported navigation targets from shared display-path ranges; use existing reader operations and compact InlineRename. Summary format 7 invalidates cached previews.

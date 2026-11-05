@@ -871,8 +871,18 @@ test.describe("synthetic library and every app surface", () => {
           return
         }
         if (process.env.LAYOUT_AUDIT_SPLITLINK_ONLY === "1") {
-          const forks = await admin((api) => api.ListForks({ chatId }))
-          const branch = forks.find((f) => f.parentForkId !== null)!
+          const branch = await admin((api) =>
+            Effect.gen(function* () {
+              const forks = yield* api.ListForks({ chatId })
+              const parent = forks.find((f) => f.current)!
+              const { fork } = yield* api.CreateFork({ chatId, fromForkId: parent.id, atSlotId: parent.tipSlotId })
+              yield* api.NameFork({
+                forkId: fork.id,
+                name: "A very long branch name that keeps going beyond the available title space on every panel width"
+              })
+              return fork
+            })
+          )
           await go("splitlink-branch", `/chats/${chatId}?fork=${branch.id}&side=chats&forks=${chatId}`)
           await showAppNavigation(page)
           await audit("splitlink-rows", "[data-fork-row]")
