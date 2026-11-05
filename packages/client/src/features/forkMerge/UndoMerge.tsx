@@ -8,7 +8,7 @@ import { useState } from "react"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { useCaller } from "../editor/caller.ts"
-import { type EditorStore, useEditorState } from "../editor/store.ts"
+import { type EditorStore, useEditorState, useHeld } from "../editor/store.ts"
 import { statusQuery } from "./status.ts"
 
 export function UndoMerge({ store, revision }: { store: EditorStore; revision: Revision }) {
@@ -17,6 +17,7 @@ export function UndoMerge({ store, revision }: { store: EditorStore; revision: R
 
 function UndoMergeButton({ store, revision }: { store: EditorStore; revision: Revision }) {
   const state = useEditorState(store)
+  const held = useHeld(store)
   const ref = state.snapshot!.ref
   const result = useAtomValue(statusQuery(ref.id))
   const call = useCaller()
@@ -31,7 +32,7 @@ function UndoMergeButton({ store, revision }: { store: EditorStore; revision: Re
       ? "This merge was already undone."
       : ref.headRevisionId !== revision.id
         ? "Only the latest revision's merge can be undone; restore an earlier revision instead."
-        : state.dirty > 0
+        : state.dirty > 0 || held !== ""
           ? "Save or revert the unsaved changes first."
           : null
   const undo = async () => {

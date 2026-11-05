@@ -9,7 +9,7 @@ import { hasSchema, validateDoc } from "@rp/shared/editing.ts"
 import type { PresetPrompt } from "@rp/shared/docs/preset.ts"
 import type { Doc, EntityKind, RefId, RevisionId } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { useSession } from "../../session.ts"
@@ -29,7 +29,7 @@ import { changedFields, fieldLabel } from "../editor/fields.ts"
 import { openEditorStore, refreshOpenEditors } from "../editor/openEditors.ts"
 import { promptLabel } from "../editor/promptLabel.ts"
 import { SaveRevision } from "../editor/SaveRevision.tsx"
-import { EditorStore, useEditorState } from "../editor/store.ts"
+import { EditorStore, useEditorState, useHeld } from "../editor/store.ts"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { kindWord, linkedByHand, revisionsLine, sourceOf } from "./status.ts"
 
@@ -244,6 +244,14 @@ function MergeReview({
     "Merge choices",
     carried
   )
+  // Carried picks are displayed as the new comparison's starting value. Keep them in
+  // its own draft too, even if the user reloads without changing another control.
+  const seeded = useRef(false)
+  useEffect(() => {
+    if (!durable.ready || seeded.current) return
+    seeded.current = true
+    if (carried !== NO_PICKS && durable.text === carried) durable.setText(carried)
+  }, [durable, carried])
   const picks = readPicks(durable.text)
   const setPicks = (next: Picks) => durable.setText(JSON.stringify(next))
   const [error, setError] = useState<AppError | null>(null)
@@ -321,7 +329,7 @@ function MergeReview({
     setError(null)
     setPending(true)
     let failure: AppError | null = null
-    await durable.commit(durable.text, async () => {
+    const committed = await durable.commit(durable.text, async () => {
       const result = await call(
         (client) =>
           client("CommitForkMerge", {
@@ -339,18 +347,47 @@ function MergeReview({
     })
     setPending(false)
     if (failure) return setError(failure)
+    if (!committed) return
     await store.refresh()
     await refreshOpenEditors()
     showToast({ title: `Merged into ${label}` })
     onClose()
   }
   const stale = error !== null && ["StaleWrite", "EditRefused"].includes(error.tag)
-  const blocked =
-    unresolved > 0
+  const blocked = !durable.ready
+    ? "Wait for your saved choices to load."
+    : unresolved > 0
       ? `Choose a version for each conflict first (${unresolved} left).`
       : outcome && "problem" in outcome
         ? outcome.problem
         : null
+
+  const actions = (
+    <DialogActions>
+      <Button hint="Closes this review without merging." onClick={onClose}>
+        Cancel
+      </Button>
+      <Button
+        variant="primary"
+        pending={pending}
+        disabled={blocked !== null}
+        focusableWhenDisabled
+        hint={blocked ?? `Makes a revision of ${label} with the changes taken.`}
+        onClick={() => void merge()}
+      >
+        Merge
+      </Button>
+    </DialogActions>
+  )
+  if (!durable.ready)
+    return (
+      <>
+        {header}
+        <UserDraftStatus draft={durable} />
+        <p className="text-sm text-muted">Reading your saved choices…</p>
+        {actions}
+      </>
+    )
 
   return (
     <>
@@ -485,21 +522,7 @@ function MergeReview({
           ) : undefined
         }
       />
-      <DialogActions>
-        <Button hint="Closes this review without merging." onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          pending={pending}
-          disabled={blocked !== null}
-          focusableWhenDisabled
-          hint={blocked ?? `Makes a revision of ${label} with the changes taken.`}
-          onClick={() => void merge()}
-        >
-          Merge
-        </Button>
-      </DialogActions>
+      {actions}
     </>
   )
 }
@@ -616,7 +639,8 @@ function MergeBody({
   const call = useCaller()
   const state = useEditorState(store)
   const ref = state.snapshot!.ref
-  const dirty = state.dirty
+  const held = useHeld(store)
+  const dirty = state.dirty + Number(held !== "")
   const [status, setStatus] = useState<Status | null>(null)
   const [parent, setParent] = useState<{ refId: RefId; label: string; subtitle: string } | null>(null)
   const [error, setError] = useState<AppError | null>(null)
@@ -651,7 +675,9 @@ function MergeBody({
     return () => {
       live = false
     }
-  }, [call, refId, status, selected, dirty, want])
+    // Reverting held changes clears the local count before the server ends their draft.
+    // The editor refresh after Save/Revert confirms that completion, even at the same head.
+  }, [call, refId, status, selected, dirty, want, state.snapshot])
   const current = answer?.for === want ? answer : null
   const preview = current?.preview ?? null
 
