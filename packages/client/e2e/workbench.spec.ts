@@ -149,6 +149,43 @@ test("two chats side by side; the side panel follows the frame focused last; it 
   await expect(said(page, "The tide is out")).toBeVisible()
 })
 
+// Half-width frames keep their header and composer readable: the branch picker shows its name
+// or, where there's no room, only its icon (the name in its explanation), never a name cut to a
+// letter; the speaker chip keeps a picture.
+for (const width of [1440, 1024])
+  for (const theme of ["light", "dark"] as const)
+    test(`half-width frames at ${width} ${theme}: header and composer controls stay readable`, async ({ page }) => {
+      test.setTimeout(120_000)
+      await fresh(page, width, theme)
+      await page.goto(`${server().url}/chats/${fixtures.chatA}`)
+      await expect(said(page, "The tide is out")).toBeVisible()
+      if (width === 1440) await openPanel(page, "This chat")
+      await page.getByRole("button", { name: "Split right" }).click()
+      await sidebarChat(page, "Lighthouse night").click()
+      await expect(said(page, "The lamp turns")).toBeVisible()
+      await expect(said(page, "The tide is out")).toBeVisible()
+      const frames = page.locator("[data-frame]")
+      await expect(frames).toHaveCount(2)
+      for (const frame of await frames.all()) {
+        const branch = frame.getByRole("button", { name: /^Branch:.*switch branch$/ })
+        await expect(branch).toBeVisible()
+        // The name is either hidden or wide enough to read (at least 4rem), not "O" or "Orig…".
+        const label = await branch.evaluate((button) => {
+          const name = [...button.querySelectorAll("span")].find((span) => span.classList.contains("truncate"))
+          if (!name || getComputedStyle(name).display === "none") return null
+          return name.getBoundingClientRect().width
+        })
+        if (label !== null) expect(label).toBeGreaterThanOrEqual(64)
+        const speaker = frame.getByRole("button", { name: /^(Speaking as|Playing as) / })
+        await expect(speaker).toBeVisible()
+        const picture = speaker.locator("img, svg, [data-avatar]").first()
+        await expect(picture).toBeVisible()
+        expect((await picture.boundingBox())!.width).toBeGreaterThanOrEqual(14)
+      }
+      await shot(page, `half-frames-${width}-${theme}`)
+      await expectLayout(page, test.info(), `half-frames-${width}-${theme}`, { scope: "[data-frame]" })
+    })
+
 test("a chat beside its preset editor, two preset editors side by side, and a horizontal split", async ({ page }) => {
   test.setTimeout(150_000)
   for (const theme of ["light", "dark"] as const) {

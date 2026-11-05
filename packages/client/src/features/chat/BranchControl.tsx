@@ -352,7 +352,9 @@ export function BranchControl(props: BranchControlProps) {
       trigger={
         <>
           <Icon name="branch" size={14} className="shrink-0" />
-          <span className="truncate">
+          {/* A narrow header (a split frame) keeps the icon, the name moving to the explanation:
+              never a name cut to a letter or two. */}
+          <span className="min-w-16 truncate @max-[32rem]/header:hidden">
             <span className="text-muted @max-[40rem]/header:hidden">Branch: </span>
             {label}
             {off && <span className="text-xs text-muted"> · not where it opens</span>}
@@ -363,11 +365,9 @@ export function BranchControl(props: BranchControlProps) {
       triggerLabel={`Branch: ${label}, ${place}: switch branch`}
       triggerDisabled={!many}
       hint={
-        many
-          ? "Switch to another of this chat’s branches, or rename or delete them."
-          : forks === null
-            ? "Loading branches…"
-            : "No other branches yet."
+        forks === null
+          ? "Loading branches…"
+          : `Branch “${label}”${off ? " (not where the chat opens)" : ""}. ${many ? "Switch to another of this chat’s branches, or rename or delete them." : "No other branches yet."}`
       }
       hintSide="bottom"
       triggerClassName="inline-flex h-8 max-w-72 min-w-0 shrink! items-center gap-1.5 rounded-md border border-border px-2 text-sm text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
