@@ -6,7 +6,8 @@ import { sidebarChatBrowse } from "./ChatBrowseBar.tsx"
 import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import { useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
+import { Link, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
+import { openOnPlainClick } from "../../ui/links.ts"
 import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useMemo, useRef, useState } from "react"
@@ -134,14 +135,21 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean, splitNavigation = fals
   }
   return open
 }
+/** Where a fork's row links: the chat on that fork (a plain click opens it with the panel's place). */
+const forkLink = (fork: ShellFork) => ({
+  to: "/chats/$chatId" as const,
+  params: { chatId: fork.sourceChatId ?? fork.chat.id },
+  search: { fork: fork.forkId }
+})
+
 export function GroupTile({ fork }: { fork: ShellFork }) {
   const open = useOpenFork(fork, true)
   return (
     <div className="tile-toggle-surface relative flex flex-col overflow-hidden rounded-lg border border-border bg-surface">
       <Tooltip label="Opens this chat.">
-        <button
-          type="button"
-          onClick={open}
+        <Link
+          {...forkLink(fork)}
+          onClick={openOnPlainClick(open)}
           data-layout-audit-ignore="inset: Whole group tile is the open control"
           aria-label={`Open chat ${fork.chatName}`}
           className="flex w-full flex-1 flex-col text-left"
@@ -162,7 +170,7 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
             </span>
             {fork.branches > 1 && <span className="mt-auto text-xs text-muted">{fork.branches} branches</span>}
           </span>
-        </button>
+        </Link>
       </Tooltip>
       <span data-layout-overlay="Pin action sits over the group portrait" className="absolute right-2 top-2">
         <PinButton fork={fork} className="tile-toggle bg-surface" />
@@ -365,9 +373,9 @@ export function ForkRow({
             : "Opens the chat on the branch you last used."
         }`}
       >
-        <button
-          type="button"
-          onClick={open}
+        <Link
+          {...forkLink(fork)}
+          onClick={openOnPlainClick(open)}
           aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}`}
           aria-current={here ? "page" : undefined}
           data-chat-id={fork.chat.id}
@@ -439,7 +447,7 @@ export function ForkRow({
               {perFork ? formatMoment(last) : formatWhen(last)}
             </span>
           </span>
-        </button>
+        </Link>
       </Tooltip>
       <div
         data-row-actions
