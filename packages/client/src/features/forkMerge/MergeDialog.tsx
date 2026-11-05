@@ -662,7 +662,8 @@ function MergeBody({
         </DialogActions>
       </>
     )
-  const header = (
+  // A file's merge has no parent and no revision to pick: nothing to head the review with.
+  const header = (parent || !fromFile) && (
     <div className="flex min-w-0 flex-col gap-2">
       {parent && (
         <p className="text-sm">
