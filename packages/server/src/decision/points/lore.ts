@@ -8,10 +8,10 @@ import type { DecisionQuestion } from "@rp/shared/decisions.ts"
 import type { DecisionPoint } from "../engine.ts"
 
 /** At most this many entries are asked about per reply; the highest-ordered first. */
-export const MAX_LORE_QUESTIONS = 32
+const MAX_LORE_QUESTIONS = 32
 
 /** An entry the keywords left out, with the question its author wrote for the decision model. */
-export interface LoreCandidate {
+interface LoreCandidate {
   /** `<book>:<uid>`, as the assembler admits it. */
   readonly key: string
   readonly title: string

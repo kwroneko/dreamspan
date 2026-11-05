@@ -74,7 +74,7 @@ function PointRow({
   )
 }
 
-export function DecisionsSection({ connection, kinds }: ConnectionSectionProps) {
+function DecisionsSection({ connection, kinds }: ConnectionSectionProps) {
   const points = useAtomValue(pointsAtom)
   const settings = useAtomValue(settingsAtom)
   const models = useAtomValue(modelsAtom(connection.id, false))

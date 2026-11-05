@@ -6,24 +6,24 @@ import { Schema } from "effect"
 import { ConnectionId, ModelId } from "./providers.ts"
 
 /** Instructions and criteria may be a string, an object, or an array. */
-export type DecisionText = string | Readonly<Record<string, unknown>> | ReadonlyArray<unknown>
+type DecisionText = string | Readonly<Record<string, unknown>> | ReadonlyArray<unknown>
 
 /** `choice`: pick one option key; `criteria` maps option key → description. */
-export interface ChoiceQuestion {
+interface ChoiceQuestion {
   readonly type: "choice"
   readonly instructions: DecisionText
   readonly criteria: Readonly<Record<string, DecisionText>>
 }
 
 /** `score`: pick one level; `criteria` lists the levels in order. */
-export interface ScoreQuestion {
+interface ScoreQuestion {
   readonly type: "score"
   readonly instructions: DecisionText
   readonly criteria: ReadonlyArray<DecisionText>
 }
 
 /** `noul`: a calibrated probability that the statement holds. */
-export interface NoulQuestion {
+interface NoulQuestion {
   readonly type: "noul"
   readonly instructions: DecisionText
   readonly criteria?: { readonly true?: DecisionText; readonly false?: DecisionText }
@@ -31,7 +31,7 @@ export interface NoulQuestion {
 
 export type DecisionQuestion = ChoiceQuestion | ScoreQuestion | NoulQuestion
 
-export interface ChoiceAnswer {
+interface ChoiceAnswer {
   readonly type: "choice"
   readonly choice: string
   readonly probabilities: Readonly<Record<string, number>>
@@ -39,20 +39,20 @@ export interface ChoiceAnswer {
   readonly confidence: number
 }
 
-export interface ScoreAnswer {
+interface ScoreAnswer {
   readonly type: "score"
   readonly score: number
   readonly probabilities: Readonly<Record<string, number>>
   readonly confidence: number
 }
 
-export interface NoulAnswer {
+interface NoulAnswer {
   readonly type: "noul"
   /** Probability that the statement is true. */
   readonly noul: number
 }
 
-export type DecisionAnswer = ChoiceAnswer | ScoreAnswer | NoulAnswer
+type DecisionAnswer = ChoiceAnswer | ScoreAnswer | NoulAnswer
 export type DecisionAnswers = Readonly<Record<string, DecisionAnswer>>
 
 const isProbability = (value: unknown): value is number =>

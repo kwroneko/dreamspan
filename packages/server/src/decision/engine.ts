@@ -18,10 +18,10 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import { builtinPoints } from "./points/index.ts"
 
 /** The hard deadline of one decision call (AGENTIC §7: 10 s); past it the fallback decides. */
-export const DECISION_TIMEOUT_MS = 10_000
+const DECISION_TIMEOUT_MS = 10_000
 
 /** Where a decision is made: the chat, and the message it decides for. */
-export interface DecisionContext {
+interface DecisionContext {
   readonly userId: UserId
   readonly chatId: ChatId
   readonly slotId: SlotId | null
@@ -31,7 +31,7 @@ export interface DecisionContext {
 }
 
 /** A reply that just completed, for the points that act after one. */
-export interface FinishedReply {
+interface FinishedReply {
   readonly userId: UserId
   readonly chatId: ChatId
   readonly slotId: SlotId
@@ -39,7 +39,7 @@ export interface FinishedReply {
   readonly forkId: ForkId | null
 }
 
-export interface DecisionServices {
+interface DecisionServices {
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
   readonly evaluate: DecisionEngineShape["evaluate"]
@@ -68,9 +68,9 @@ export interface DecisionPoint<I, V> {
 /** A point with its input and verdict types erased, as the registry holds it. */
 export type AnyDecisionPoint = DecisionPoint<never, unknown>
 
-export type DecisionSource = "model" | "heuristic"
+type DecisionSource = "model" | "heuristic"
 
-export interface DecisionOutcome<V> {
+interface DecisionOutcome<V> {
   readonly value: V
   readonly source: DecisionSource
   /** Why the fallback decided: `off`, `nothing_to_ask`, `timeout`, `error`, `malformed`, `low_confidence`, `unavailable`. */

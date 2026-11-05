@@ -17,7 +17,7 @@ const notChat = (): never => {
 /** Chat requests are refused before anything is sent (Providers.stream checks `decide`). */
 const refusedStreams: ProviderStreams = { stream: notChat, streamSimple: notChat }
 
-export const systemOneWire: DecisionWire = {
+const systemOneWire: DecisionWire = {
   decide: async ({ baseUrl, apiKey, headers, fetch, body, signal }) => {
     const response = await fetch(baseUrl, {
       method: "POST",

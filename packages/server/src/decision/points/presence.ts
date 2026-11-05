@@ -16,7 +16,7 @@ import type { DecisionPoint } from "../engine.ts"
 /** A message's text as the state carries it, at most this long (the newest part kept). */
 const MESSAGE_CHARS = 4_000
 
-export interface PresenceCandidate {
+interface PresenceCandidate {
   readonly entity: string
   readonly name: string
   readonly present: boolean

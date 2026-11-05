@@ -137,7 +137,7 @@ export type ProviderEvent =
       readonly cost: Cost | null
     }
 
-export interface DecideRequest {
+interface DecideRequest {
   readonly userId: UserId
   readonly connectionId: ConnectionId
   readonly modelId: ModelId
@@ -150,7 +150,7 @@ export interface DecideRequest {
   }
 }
 
-export interface DecideResult {
+interface DecideResult {
   readonly requestId: LlmRequestId
   /** The response's `answers`, unparsed: the caller checks them against its questions. */
   readonly answers: unknown
