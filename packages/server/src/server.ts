@@ -1,4 +1,5 @@
-import { AuthenticatedSplitChatApi } from "@rp/shared/api.ts"
+import { AuthenticatedChatMergeApi, AuthenticatedSplitChatApi } from "@rp/shared/api.ts"
+import { makeMergeHandlers } from "./api/merges.ts"
 import { makeSplitChatHandlers } from "./api/splitChats.ts"
 import { Commands } from "./commands.ts"
 import { makeHistoryHandlers } from "./api/history.ts"
@@ -135,6 +136,7 @@ const CoreHandlers = AppCoreApi.toLayer(
 const Handlers = Layer.mergeAll(
   CoreHandlers,
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
+  AuthenticatedChatMergeApi.toLayer(makeMergeHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers)
 )

@@ -32,7 +32,8 @@ const VersionOrigin = Schema.Literals([
   "imported",
   "changeset",
   "scratchpad",
-  "duplicate"
+  "duplicate",
+  "merge"
 ])
 
 export class Chat extends Schema.Class<Chat>("Chat")({
@@ -135,7 +136,8 @@ export const ContextIssue = Schema.Struct({
     "last_turn_filled",
     "layout_ignored",
     "cache_breakpoints",
-    "role_projection_missing"
+    "role_projection_missing",
+    "merge_layout_missing"
   ]),
   message: Schema.String
 })

@@ -2,6 +2,7 @@ import { makeStImportPrefix, stImportPrefixHandlers } from "./stImportPrefix.ts"
 import { stateModuleHandlers } from "./stateModules.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeInsertWriteHandlers } from "./insertWrites.ts"
+import { makeMergeWriteHandlers } from "./merges.ts"
 import { makeLcmQueueHandlers } from "./lcmQueue.ts"
 import { makeLcmEnableWriteHandlers } from "./lcmEnableWrites.ts"
 import { makeLcmUiWriteHandlers } from "./lcmUiWrites.ts"
@@ -69,6 +70,7 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
               {
                 ...(yield* makeHistoryWriteHandlers),
                 ...(yield* makeInsertWriteHandlers(bin)),
+                ...(yield* makeMergeWriteHandlers(bin)),
                 ...graph,
                 ...library,
                 ...binOps,
