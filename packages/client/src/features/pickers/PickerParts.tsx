@@ -257,9 +257,10 @@ export function ChatLock({
 }) {
   if (!lock) return null
   return (
-    <div className="flex flex-col gap-1 border-b border-border pb-2">
+    <div className="border-b border-border pb-2">
       <Switch
         compact
+        description={`Picking a ${kind} here changes it for ${lock.locked ? "this chat only" : "every chat"}.`}
         checked={lock.locked}
         disabled={lock.disabled}
         onCheckedChange={lock.change}
@@ -271,7 +272,6 @@ export function ChatLock({
       >
         Lock for this chat
       </Switch>
-      <p className="text-xs text-muted">{lock.locked ? "This chat only" : "Every chat"}</p>
     </div>
   )
 }

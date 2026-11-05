@@ -1326,9 +1326,25 @@ test.describe("synthetic library and every app surface", () => {
             await chip(page).click()
             const toggle = page.getByRole("switch", { name: "Lock for this chat" })
             await expect(toggle).toBeVisible()
+            if (await toggle.isChecked()) await toggle.click()
+            await expect(toggle).not.toBeChecked()
+            await expect(
+              page.getByText(`Picking a ${kind} here changes it for every chat.`, { exact: true })
+            ).toBeVisible()
+            await page.getByRole("dialog").screenshot({
+              path: join(work, `${width}-${theme}-${kind}-unlocked.png`),
+              animations: "disabled"
+            })
             await audit(`lockchat-${kind}-picker`, '[role="dialog"]')
             await toggle.click()
-            await expect(page.getByText("This chat only", { exact: true })).toBeVisible()
+            await expect(toggle).toBeChecked()
+            await expect(
+              page.getByText(`Picking a ${kind} here changes it for this chat only.`, { exact: true })
+            ).toBeVisible()
+            await page.getByRole("dialog").screenshot({
+              path: join(work, `${width}-${theme}-${kind}-locked.png`),
+              animations: "disabled"
+            })
             await audit(`lockchat-${kind}-locked-picker`, '[role="dialog"]')
             await page.keyboard.press("Escape")
           }
