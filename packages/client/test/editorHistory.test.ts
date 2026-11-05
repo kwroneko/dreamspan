@@ -6,6 +6,14 @@ import type { LcmSummary } from "@rp/shared/lcm.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"
 import { MessageDraft } from "../src/features/chat/messageDraft.ts"
 import { SummaryDraft } from "../src/features/chat/summaryDraft.ts"
+import {
+  registerEditorHistory,
+  messageEditorTools,
+  summaryEditorTools,
+  messageTextEditor,
+  summaryTextEditor
+} from "../src/features/chat/editorHistory.tsx"
+import { messageActions } from "../src/features/chat/messageActions.tsx"
 
 const draft = (content: string, rowVersion = 1) =>
   new Draft({
@@ -135,10 +143,7 @@ for (const kind of ["message", "write", "queue", "summary"] as const)
     })
   })
 
-it("editor history and saved amendments are removable registered contributions", async () => {
-  const { registerEditorHistory, messageEditorTools, summaryEditorTools, messageTextEditor, summaryTextEditor } =
-    await import("../src/features/chat/editorHistory.tsx")
-  const { messageActions } = await import("../src/features/chat/messageActions.tsx")
+it("editor history and saved amendments are removable registered contributions", () => {
   const disposers = registerEditorHistory()
   expect(messageTextEditor.get("message.code-editor")).toBeDefined()
   expect(summaryTextEditor.get("summary.code-editor")).toBeDefined()
