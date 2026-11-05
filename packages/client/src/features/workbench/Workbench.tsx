@@ -544,6 +544,7 @@ function TabStrip({
       <div
         role="tablist"
         aria-label="Open tabs"
+        data-layout-audit-ignore="inset: tabs fill the strip edge to edge, as an editor's tab bar does"
         className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none]"
       >
         {tabs.map((tab, index) => {
@@ -566,7 +567,7 @@ function TabStrip({
         {over === tabs.length && <span aria-hidden="true" className="w-0.5 shrink-0 bg-accent" />}
       </div>
       {!phone && (
-        <div className="flex shrink-0 items-center px-1">
+        <div className="flex shrink-0 items-center px-2">
           <FrameMenu frame={frame} layout={layout} store={store} />
         </div>
       )}
@@ -615,8 +616,20 @@ function TabButton({
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
-      {dropBefore && <span aria-hidden="true" className="absolute inset-y-0 left-0 w-0.5 bg-accent" />}
-      {highlighted && <span aria-hidden="true" className="absolute inset-x-0 top-0 h-0.5 bg-accent" />}
+      {dropBefore && (
+        <span
+          aria-hidden="true"
+          data-layout-overlay="Where a dragged tab drops"
+          className="absolute inset-y-0 left-0 w-0.5 bg-accent"
+        />
+      )}
+      {highlighted && (
+        <span
+          aria-hidden="true"
+          data-layout-overlay="The focused frame's tab line"
+          className="absolute inset-x-0 top-0 h-0.5 bg-accent"
+        />
+      )}
       <Tooltip
         label={tab.preview ? `Shows ${title}. Double-click to keep this tab open.` : `Shows ${title}.`}
         side="bottom"
