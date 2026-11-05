@@ -88,7 +88,9 @@ export interface DecisionEngineShape {
   readonly afterReply: (reply: FinishedReply) => Effect.Effect<boolean>
 }
 
-export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngineShape>()("rp/decision/DecisionEngine") {
+export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngineShape>()(
+  "rp/decision/DecisionEngine"
+) {
   /** The engine with the given points (the built-ins by default) and the call deadline. */
   static readonly layerWith = (
     options: { readonly points?: ReadonlyArray<AnyDecisionPoint>; readonly timeoutMs?: number } = {}
@@ -111,7 +113,10 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
             if (on.length === 0) return null
             if (on.length === 1) return on[0]!
             const names = new Map(
-              (yield* reader.ListConnections({ userId })).map((connection) => [connection.id as string, connection.name])
+              (yield* reader.ListConnections({ userId })).map((connection) => [
+                connection.id as string,
+                connection.name
+              ])
             )
             return on.toSorted((a, b) =>
               (names.get(a.connectionId) ?? "").localeCompare(names.get(b.connectionId) ?? "")
@@ -223,9 +228,7 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause)
                 ? Effect.failCause(cause)
-                : Effect.logWarning(`decision ${pointId} fell back`, cause).pipe(
-                    Effect.as(fallback("unavailable"))
-                  )
+                : Effect.logWarning(`decision ${pointId} fell back`, cause).pipe(Effect.as(fallback("unavailable")))
             )
           ) as Effect.Effect<DecisionOutcome<V>>
         }

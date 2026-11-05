@@ -88,43 +88,44 @@ export const layer = Layer.effect(
             // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
             return tool && tool.effect !== "external" ? [tool] : []
           })
-          const assembleWith = (admitted?: { readonly lore: ReadonlyArray<LoreAdmission> }) => reader
-            .AssembleContext({
-              userId,
-              chatId,
-              slotId,
-              versionId,
-              forkId,
-              now: Date.now(),
-              timeZone: "UTC",
-              frozen: null,
-              partialBatch,
-              ...(request.model ? { model: request.model } : {}),
-              ...(admitted ? { decisions: admitted } : {}),
-              ...(plan.assembly || agentic
-                ? {
-                    agent: {
-                      instructions:
-                        plan.assembly?.instructions(
-                          tools.map((t) => t.id),
-                          plan.contract
-                        ) ?? "",
-                      cardsAtTail: plan.assembly?.cardsAtTail ?? false
+          const assembleWith = (admitted?: { readonly lore: ReadonlyArray<LoreAdmission> }) =>
+            reader
+              .AssembleContext({
+                userId,
+                chatId,
+                slotId,
+                versionId,
+                forkId,
+                now: Date.now(),
+                timeZone: "UTC",
+                frozen: null,
+                partialBatch,
+                ...(request.model ? { model: request.model } : {}),
+                ...(admitted ? { decisions: admitted } : {}),
+                ...(plan.assembly || agentic
+                  ? {
+                      agent: {
+                        instructions:
+                          plan.assembly?.instructions(
+                            tools.map((t) => t.id),
+                            plan.contract
+                          ) ?? "",
+                        cardsAtTail: plan.assembly?.cardsAtTail ?? false
+                      }
                     }
-                  }
-                : {})
-            })
-            .pipe(
-              Effect.catchTag("AssemblyFailed", (error) =>
-                Effect.fail(new GenerationFailed({ class: error.reason, message: error.message }))
-              ),
-              Effect.catchTag("NotFound", () =>
-                Effect.fail(
-                  new GenerationFailed({ class: "not_found", message: "The message being generated is gone." })
-                )
-              ),
-              Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("AssembleContext"))
-            )
+                  : {})
+              })
+              .pipe(
+                Effect.catchTag("AssemblyFailed", (error) =>
+                  Effect.fail(new GenerationFailed({ class: error.reason, message: error.message }))
+                ),
+                Effect.catchTag("NotFound", () =>
+                  Effect.fail(
+                    new GenerationFailed({ class: "not_found", message: "The message being generated is gone." })
+                  )
+                ),
+                Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("AssembleContext"))
+              )
           const assemble = assembleWith()
           let assembled = yield* assemble
           // Live text is what's sent (owner, 2026-11-01): what the assembly read and has changed

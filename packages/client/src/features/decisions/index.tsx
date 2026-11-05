@@ -47,7 +47,11 @@ function PointRow({
         checked={setting.on}
         disabled={disabled}
         onCheckedChange={(on) => onChange({ ...setting, on })}
-        hint={setting.on ? `Click to stop asking about ${point.label.toLowerCase()}` : `Click to ask about ${point.label.toLowerCase()}`}
+        hint={
+          setting.on
+            ? `Click to stop asking about ${point.label.toLowerCase()}`
+            : `Click to ask about ${point.label.toLowerCase()}`
+        }
         description={point.description}
       >
         {point.label}

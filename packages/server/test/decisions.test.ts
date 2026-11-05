@@ -213,11 +213,14 @@ describe("decision models", () => {
         "SELECT purpose, status, response_model FROM llm_requests WHERE rollout_id = ?",
         decision!.id
       )
-      assert.deepStrictEqual({ ...ledger }, {
-        purpose: "decision",
-        status: "complete",
-        response_model: "typesafe/jev-1.13-20260917"
-      })
+      assert.deepStrictEqual(
+        { ...ledger },
+        {
+          purpose: "decision",
+          status: "complete",
+          response_model: "typesafe/jev-1.13-20260917"
+        }
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -251,19 +254,16 @@ describe("decision models", () => {
   it.live("presence: a character the model is sure left is away on the reply's version; a user's Mute stays", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const mock = yield* mockWith(
-        (request) => {
-          const questions = (request.body?.questions ?? {}) as Record<string, { instructions: string }>
-          // Wren left; everyone else asked about is still there.
-          return {
-            answers: Object.fromEntries(
-              Object.entries(questions).map(([id, q]) => [id, { noul: q.instructions.startsWith("Wren") ? 0.04 : 0.95 }])
-            ),
-            usage: { input_tokens: 60, output_tokens: 2 }
-          }
-        },
-        "*Wren slips out to the stables.* Mira stays by the fire."
-      )
+      const mock = yield* mockWith((request) => {
+        const questions = (request.body?.questions ?? {}) as Record<string, { instructions: string }>
+        // Wren left; everyone else asked about is still there.
+        return {
+          answers: Object.fromEntries(
+            Object.entries(questions).map(([id, q]) => [id, { noul: q.instructions.startsWith("Wren") ? 0.04 : 0.95 }])
+          ),
+          usage: { input_tokens: 60, output_tokens: 2 }
+        }
+      }, "*Wren slips out to the stables.* Mira stays by the fire.")
       const api = yield* client()
       yield* decisionConnection(api, mock.url, { presence: { on: true, threshold: 0.85 } })
       const { version, chat, characters } = yield* generateReply(api, {
@@ -308,7 +308,6 @@ describe("decision models", () => {
         "SELECT status, slot_id FROM rollouts WHERE kind = 'decision'"
       )
       assert.deepStrictEqual({ ...decision }, { status: "completed", slot_id: version.slotId })
-
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

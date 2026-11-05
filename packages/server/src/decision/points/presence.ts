@@ -106,7 +106,9 @@ export const presencePoint: DecisionPoint<PresenceInput, ReadonlyArray<PresenceC
         range: { _tag: "Bottom" },
         limit: 2
       })
-      const speakers = [...new Set(window.entries.flatMap((e) => (e.version.speakerEntityId ? [e.version.speakerEntityId] : [])))]
+      const speakers = [
+        ...new Set(window.entries.flatMap((e) => (e.version.speakerEntityId ? [e.version.speakerEntityId] : [])))
+      ]
       const speakerCards = speakers.length
         ? yield* reader.CastCards({ userId: reply.userId, entityIds: speakers as Array<EntityId> })
         : []

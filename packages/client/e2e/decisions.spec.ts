@@ -44,9 +44,7 @@ const setup = () =>
     })
   )
 
-test("a decision connection's points stay off until its model is chosen, and keep their settings", async ({
-  page
-}) => {
+test("a decision connection's points stay off until its model is chosen, and keep their settings", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const id = await setup()
   await page.goto(`${server().url}/settings/connections/${id}`)

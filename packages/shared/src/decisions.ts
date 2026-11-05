@@ -87,7 +87,12 @@ export const parseAnswers = (
       const choice = a["choice"]
       if (typeof choice !== "string" || !Object.hasOwn(question.criteria, choice)) return undefined
       if (!isProbability(a["confidence"])) return undefined
-      out[id] = { type: "choice", choice, probabilities: probabilityMap(a["probabilities"]), confidence: a["confidence"] }
+      out[id] = {
+        type: "choice",
+        choice,
+        probabilities: probabilityMap(a["probabilities"]),
+        confidence: a["confidence"]
+      }
     } else {
       const score = typeof a["score"] === "string" ? Number(a["score"]) : a["score"]
       if (typeof score !== "number" || !Number.isInteger(score) || score < 0 || score >= question.criteria.length)

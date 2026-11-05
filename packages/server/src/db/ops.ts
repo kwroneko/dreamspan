@@ -3266,7 +3266,9 @@ export class ReadOps extends RpcGroup.make(
       /** What the `lore` decision point would ask about; absent when no entry the keys left out has a question. */
       loreDecision: Schema.optionalKey(
         Schema.Struct({
-          candidates: Schema.Array(Schema.Struct({ key: Schema.String, title: Schema.String, question: Schema.String })),
+          candidates: Schema.Array(
+            Schema.Struct({ key: Schema.String, title: Schema.String, question: Schema.String })
+          ),
           recent: Schema.Array(Schema.Struct({ from: Schema.String, text: Schema.String }))
         })
       )

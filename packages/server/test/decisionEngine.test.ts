@@ -77,9 +77,9 @@ const harness = (options: {
     Layer.provide([reader, writer, providers])
   )
   const run = (asked = true) =>
-    Effect.flatMap(DecisionEngine, (engine) => engine.evaluate<{ asked: boolean }, string>("probe", { asked }, context)).pipe(
-      Effect.provide(layer)
-    )
+    Effect.flatMap(DecisionEngine, (engine) =>
+      engine.evaluate<{ asked: boolean }, string>("probe", { asked }, context)
+    ).pipe(Effect.provide(layer))
   return { run, started, finished, sent: () => sent }
 }
 

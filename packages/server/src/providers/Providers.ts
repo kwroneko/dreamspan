@@ -1567,7 +1567,8 @@ export const layer = (options: ProvidersOptions = {}) =>
               }
             })
           )
-          if (!allowed) return yield* providerError("budget_held", "The decision request is held at its approved limit.")
+          if (!allowed)
+            return yield* providerError("budget_held", "The decision request is held at its approved limit.")
           const close = (
             outcome: { readonly status: "complete" | "failed" | "aborted"; readonly error: ProviderError | null },
             usage: ReturnType<typeof readDecisionUsage>,

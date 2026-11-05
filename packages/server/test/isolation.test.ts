@@ -953,8 +953,14 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           model: owner.modelId,
           points: { lore: { on: true, threshold: 0.7 } }
         })
-        assert.include((yield* owner.api.GetDecisionSettings()).map((s) => s.connectionId), owner.connectionId)
-        assert.notInclude((yield* actor.api.GetDecisionSettings()).map((s) => s.connectionId), owner.connectionId)
+        assert.include(
+          (yield* owner.api.GetDecisionSettings()).map((s) => s.connectionId),
+          owner.connectionId
+        )
+        assert.notInclude(
+          (yield* actor.api.GetDecisionSettings()).map((s) => s.connectionId),
+          owner.connectionId
+        )
       })
   },
   SetDecisionSettings: {
@@ -969,7 +975,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           actor.api.SetDecisionSettings({ connectionId: actor.connectionId, model: owner.modelId, points: {} }),
           "NotFound"
         )
-        assert.notInclude((yield* actor.api.GetDecisionSettings()).map((s) => s.connectionId), owner.connectionId)
+        assert.notInclude(
+          (yield* actor.api.GetDecisionSettings()).map((s) => s.connectionId),
+          owner.connectionId
+        )
       })
   },
   GetGenerationDefaults: {
