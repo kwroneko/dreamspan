@@ -311,6 +311,64 @@ export const loreActivationStage: AssemblerStage = {
           pinnedOnly: true
         })
       }
+      // Entries a decision model admitted (spec/AGENTIC.md §7), frozen in the request so a rebuild
+      // admits the same: after the keyword ones, in the order activation would give them.
+      let admittedAny = false
+      for (const admission of assembly.request.decisions?.lore ?? []) {
+        const split = admission.entry.lastIndexOf(":")
+        const bookId = admission.entry.slice(0, split)
+        const uid = Number(admission.entry.slice(split + 1))
+        if (lore.some((e) => e.book === bookId && e.entry.uid === uid)) continue
+        const book = inputs.find((b) => b.id === bookId)
+        const entry = book?.doc.entries.find((e) => e.uid === uid && e.enabled)
+        if (!book || !entry || !characterFilterPasses(entry.character_filter, speaker)) continue
+        const content = env.preview(`lore:${book.id}:${entry.uid}:content`, entry.content, optionsFor(book))
+        lore.push({
+          entry: { ...entry, content },
+          piece: scripted(
+            entry,
+            content,
+            record(
+              book.id,
+              entry.uid,
+              { status: "activated", step: 0, why: { kind: "decision", probability: admission.probability } },
+              content
+            )
+          ),
+          book: book.id,
+          revision: book.revision
+        })
+        admittedAny = true
+      }
+      // What the `lore` decision point would ask: enabled entries with a question that nothing
+      // included. Only for a reply's first assembly; the caller asks, then assembles again.
+      if (!assembly.request.decisions && !assembly.request.summaryJob && !assembly.request.rewrite) {
+        const candidates = books
+          .flatMap((book) => book.document.entries.map((entry) => ({ book: book.id, entry })))
+          .filter(
+            ({ book, entry }) =>
+              entry.enabled &&
+              !entry.constant &&
+              (entry.decision_hint ?? "").trim() !== "" &&
+              !lore.some((e) => e.book === book && e.entry.uid === entry.uid) &&
+              characterFilterPasses(entry.character_filter, speaker)
+          )
+          .toSorted((a, b) => b.entry.order - a.entry.order)
+        if (candidates.length > 0)
+          assembly.loreDecision = {
+            candidates: candidates.map(({ book, entry }) => ({
+              key: `${book}:${entry.uid}`,
+              title: entry.comment,
+              question: entry.decision_hint!.trim()
+            })),
+            recent: need(assembly, "projected")
+              .slice(-6)
+              .map((p) => ({
+                from: p.name,
+                text: (assembly.scripted?.get(p.entry.versionId)?.text ?? env.text(p.piece)).slice(-2_000)
+              }))
+          }
+      }
       // A pin takes the place activation would give it, so the pinned blocks stay byte for byte.
       const rank = new Map(
         books
@@ -319,7 +377,7 @@ export const loreActivationStage: AssemblerStage = {
           .map(({ key }, i) => [key, i])
       )
       const rankOf = (e: (typeof lore)[number]) => rank.get(`${e.book}:${e.entry.uid}`) ?? rank.size
-      if (lore.some((e) => e.pinnedOnly)) lore.sort((a, b) => rankOf(a) - rankOf(b))
+      if (admittedAny || lore.some((e) => e.pinnedOnly)) lore.sort((a, b) => rankOf(a) - rankOf(b))
       assembly.lore = lore
       for (const s of result.skipped)
         if (!lore.some((e) => e.pinnedOnly && e.book === s.book && e.entry.uid === s.entry.uid))

@@ -84,7 +84,10 @@ export type LoreRecord =
   | {
       readonly status: "activated"
       readonly step: number
-      readonly why: ReturnType<typeof matchLorebooks>["activated"][number]["why"] | { readonly kind: "pinned" }
+      readonly why:
+        | ReturnType<typeof matchLorebooks>["activated"][number]["why"]
+        | { readonly kind: "pinned" }
+        | { readonly kind: "decision"; readonly probability: number }
     }
   | { readonly status: "skipped"; readonly step: number; readonly reason: string }
 
@@ -267,10 +270,26 @@ export interface AgentAssembly {
   readonly cardsAtTail: boolean
 }
 
+/** What decision models decided for this context (spec/AGENTIC.md §7): the lorebook entries admitted. */
+export interface DecisionAssembly {
+  /** `<book>:<uid>` of each entry admitted, with the model's probability. */
+  readonly lore: ReadonlyArray<{ readonly entry: string; readonly probability: number }>
+}
+
+/** What the `lore` decision point asks about: the entries the keys left out that have a question. */
+export interface LoreDecisionInput {
+  readonly candidates: ReadonlyArray<{ readonly key: string; readonly title: string; readonly question: string }>
+  readonly recent: ReadonlyArray<{ readonly from: string; readonly text: string }>
+}
+
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
   /** An agent reply's assembly options, for a rebuild. */
   readonly agentAssembly?: AgentAssembly
+  /** The decision models' admissions, for a rebuild (spec/AGENTIC.md §7). */
+  readonly decisionAssembly?: DecisionAssembly
+  /** The `lore` decision point's input; AssembleContext takes it out before the snapshot is stored. */
+  readonly loreDecision?: LoreDecisionInput
   readonly contextBudget?: ContextBudget
   /** The preset's reply-section setting a reply is parsed with; absent for summaries. */
   readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings

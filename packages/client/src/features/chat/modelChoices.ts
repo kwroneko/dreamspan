@@ -65,7 +65,13 @@ interface Read {
  */
 export const readModelChoices = (client: AppClient["Service"]) =>
   Effect.gen(function* () {
-    const connections: ReadonlyArray<Connection> = yield* client("ListConnections", undefined)
+    // Connections that answer decision questions write no replies (spec/AGENTIC.md §7): not offered.
+    const decisionKinds = new Set(
+      (yield* client("ListProviderKinds", undefined)).flatMap((kind) => (kind.decisions ? [kind.id as string] : []))
+    )
+    const connections: ReadonlyArray<Connection> = (yield* client("ListConnections", undefined)).filter(
+      (connection) => !decisionKinds.has(connection.kind)
+    )
     const lists = yield* Effect.forEach(
       connections,
       (connection) =>

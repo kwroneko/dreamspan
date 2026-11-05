@@ -254,7 +254,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
 
     InterruptRollouts: () =>
       sql`UPDATE rollouts SET status = 'interrupted', updated_at = ${Date.now()}
-          WHERE status IN ('created', 'running') AND kind = 'generation' RETURNING id`.pipe(
+          WHERE status IN ('created', 'running') AND kind IN ('generation', 'decision') RETURNING id`.pipe(
         Effect.map((rows) => ({ interrupted: rows.length })),
         transaction(sql, "InterruptRollouts")
       ),

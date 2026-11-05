@@ -127,6 +127,7 @@ import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi
 import { RolloutStep } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
+import { ConnectionDecisions, DecisionPointSetting } from "@rp/shared/decisions.ts"
 import {
   Cost,
   LlmRequest,
@@ -2371,6 +2372,58 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** At startup: rollouts a previous process left running are interrupted. */
   Rpc.make("InterruptRollouts", { success: Schema.Struct({ interrupted: Schema.Int }), error: StorageError }),
+  // --- Decision models (spec/AGENTIC.md §7; db/decisions.ts)
+  /** A connection's decision settings, replacing its own; NotFound unless it (and the model) is the user's. */
+  Rpc.make("SetDecisionSettings", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      model: Schema.NullOr(ModelId),
+      points: Schema.Record(Schema.String, DecisionPointSetting)
+    },
+    success: Schema.Array(ConnectionDecisions),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A decision call's rollout (kind `decision`), its state and questions as the snapshot. */
+  Rpc.make("StartDecisionRollout", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      rolloutId: Schema.String,
+      /** The message it decides for: the reply being written, or the one that just finished. */
+      slotId: Schema.NullOr(SlotId),
+      forkId: Schema.NullOr(ForkId),
+      connectionId: ConnectionId,
+      modelId: ModelId,
+      requestClass: Schema.Literals(["interactive", "background"]),
+      snapshot: Schema.String
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Closes a decision rollout with its outcome (JSON: answers, verdict, source) and its ledger rows' usage. */
+  Rpc.make("FinishDecisionRollout", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      status: Schema.Literals(["completed", "stopped", "failed"]),
+      error: Schema.NullOr(Schema.String),
+      result: Schema.String
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** State events a decision attaches to a version of its chat, with the decision as their origin. */
+  Rpc.make("ApplyDecisionEffect", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      versionId: VersionId,
+      events: Schema.Array(StoredStateEventData)
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The account defaults, including its new-chat persona; choices must be owned and live. */
   Rpc.make("SetGenerationDefaults", {
     payload: { userId: UserId, defaults: GenerationDefaults },
@@ -3198,14 +3251,25 @@ export class ReadOps extends RpcGroup.make(
       timeZone: Schema.String,
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String))),
       /** An agent reply's assembly (spec/AGENTIC.md §6). */
-      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, cardsAtTail: Schema.Boolean }))
+      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, cardsAtTail: Schema.Boolean })),
+      /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
+      decisions: Schema.optionalKey(
+        Schema.Struct({ lore: Schema.Array(Schema.Struct({ entry: Schema.String, probability: Schema.Number })) })
+      )
     },
     success: Schema.Struct({
       snapshot: Schema.String,
       generation: Schema.String,
       /** The library entries it read, for `CheckpointLiveText`; message number in `message`. */
       used: Schema.Array(UsedEntry),
-      message: Schema.Int
+      message: Schema.Int,
+      /** What the `lore` decision point would ask about; absent when no entry the keys left out has a question. */
+      loreDecision: Schema.optionalKey(
+        Schema.Struct({
+          candidates: Schema.Array(Schema.Struct({ key: Schema.String, title: Schema.String, question: Schema.String })),
+          recent: Schema.Array(Schema.Struct({ from: Schema.String, text: Schema.String }))
+        })
+      )
     }),
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   }),
@@ -3318,6 +3382,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetTokenCounting", {
     payload: { userId: UserId },
     success: Schema.Array(TokenCountingChoice),
+    error: StorageError
+  }),
+  /** The user's decision settings whose connections are live (db/decisions.ts). */
+  Rpc.make("GetDecisionSettings", {
+    payload: { userId: UserId },
+    success: Schema.Array(ConnectionDecisions),
     error: StorageError
   }),
   /** The user's live presets whose HEAD document lists the lorebook `ref` (`PresetDoc.lorebooks`). */

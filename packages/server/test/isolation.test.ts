@@ -938,6 +938,40 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.notInclude(theirs, owner.connectionId)
       })
   },
+  ListDecisionPoints: {
+    probe: (actor) =>
+      Effect.gen(function* () {
+        const points = (yield* actor.api.ListDecisionPoints()).map((point) => point.id)
+        assert.deepStrictEqual(points, ["lore", "presence"])
+      })
+  },
+  GetDecisionSettings: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetDecisionSettings({
+          connectionId: owner.connectionId,
+          model: owner.modelId,
+          points: { lore: { on: true, threshold: 0.7 } }
+        })
+        assert.include((yield* owner.api.GetDecisionSettings()).map((s) => s.connectionId), owner.connectionId)
+        assert.notInclude((yield* actor.api.GetDecisionSettings()).map((s) => s.connectionId), owner.connectionId)
+      })
+  },
+  SetDecisionSettings: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.SetDecisionSettings({ connectionId: owner.connectionId, model: null, points: {} }),
+          "NotFound"
+        )
+        // Nor another user's model on one's own connection.
+        yield* refused(
+          actor.api.SetDecisionSettings({ connectionId: actor.connectionId, model: owner.modelId, points: {} }),
+          "NotFound"
+        )
+        assert.notInclude((yield* actor.api.GetDecisionSettings()).map((s) => s.connectionId), owner.connectionId)
+      })
+  },
   GetGenerationDefaults: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

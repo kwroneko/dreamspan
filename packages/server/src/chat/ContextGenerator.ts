@@ -16,6 +16,8 @@ import { ChatHub } from "./ChatHub.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { PLAIN_MODE, planTurn } from "../agent/modes.ts"
 import { frozenTool } from "../agent/tools.ts"
+import { DecisionEngine } from "../decision/engine.ts"
+import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
 const serverFailure = (operation: string) => (error: unknown) =>
@@ -35,6 +37,8 @@ export const layer = Layer.effect(
     const providers = yield* Providers
     const config = yield* AppConfig
     const hub = yield* ChatHub
+    // Optional, as decision models are (DESIGN §7.6): without the engine the keywords decide.
+    const decisions = yield* Effect.serviceOption(DecisionEngine)
 
     // Rollouts a previous process left running ended with it; their versions were
     // interrupted the same way (Generations).
@@ -76,7 +80,7 @@ export const layer = Layer.effect(
             // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
             return tool && tool.effect !== "external" ? [tool] : []
           })
-          const assemble = reader
+          const assembleWith = (admitted?: { readonly lore: ReadonlyArray<LoreAdmission> }) => reader
             .AssembleContext({
               userId,
               chatId,
@@ -88,6 +92,7 @@ export const layer = Layer.effect(
               frozen: null,
               partialBatch,
               ...(request.model ? { model: request.model } : {}),
+              ...(admitted ? { decisions: admitted } : {}),
               ...(plan.assembly
                 ? {
                     agent: {
@@ -111,6 +116,7 @@ export const layer = Layer.effect(
               ),
               Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("AssembleContext"))
             )
+          const assemble = assembleWith()
           let assembled = yield* assemble
           // Live text is what's sent (owner, 2026-11-01): what the assembly read and has changed
           // since its last revision gets a revision labelled with this reply, and the reply is
@@ -134,6 +140,18 @@ export const layer = Layer.effect(
             if (cut === 0) break
             hub.publish(chatId, { _tag: "State" })
             assembled = yield* assemble
+          }
+          // Lorebook entries the keys left out but that ask a decision model (spec/AGENTIC.md §7):
+          // only when the user turned the point on for a connection. A yes is assembled in, and
+          // frozen in the snapshot.
+          if (assembled.loreDecision && Option.isSome(decisions)) {
+            const outcome = yield* decisions.value.evaluate<LoreInput, ReadonlyArray<LoreAdmission>>(
+              "lore",
+              assembled.loreDecision,
+              { userId, chatId, slotId, forkId, requestClass: "interactive" }
+            )
+            if (outcome.source === "model" && outcome.value.length > 0)
+              assembled = yield* assembleWith({ lore: outcome.value })
           }
           const generation = JSON.parse(assembled.generation) as Generation
           const { model } = generation

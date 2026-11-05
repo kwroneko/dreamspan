@@ -62,6 +62,8 @@ const activationText = (activation: SourceActivation): string => {
         ? "constant entry"
         : activation.why.kind === "pinned"
           ? "pinned above the history until its start moves"
+          : activation.why.kind === "decision"
+            ? `the decision model judged it relevant (${Math.round(activation.why.probability * 100)}%)`
           : `keyword “${activation.why.primaryKey}”${activation.why.secondaryKeys.length ? `; ${activation.why.logic ?? "and_any"}: ${activation.why.secondaryKeys.map((key) => `“${key}”`).join(", ")}` : ""}`
   const notes =
     activation.why.kind === "keys" && activation.why.notes?.length
