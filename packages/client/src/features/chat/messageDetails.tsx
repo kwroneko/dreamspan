@@ -7,7 +7,7 @@
 // detail registered, defaulting to shown (ST's Chat Timestamps, Model Icons, Message IDs,
 // Message Timer and Message Token Count). The choices are the account's (`messageDetails`).
 import type { PathEntry } from "@rp/shared/chat.ts"
-import { type ComponentProps, type ComponentType, useSyncExternalStore } from "react"
+import { type ComponentProps, type ComponentType, useLayoutEffect, useRef, useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { Switch } from "../../ui/Choice.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
@@ -149,21 +149,46 @@ function ModelIcon({ entry }: MessageDetailProps) {
 }
 
 /**
- * "connection · model" (Version.model) in a narrow header: the connection's name gives way
- * first, down to nothing, so the model's own name is what stays readable. The model's part
- * doesn't shrink (shrinking is shared out, so it would lose a pixel and its end to an ellipsis
- * while the connection's name still showed); it's cut only when it alone is wider than the label.
+ * Uses the header's available width: show "connection · model" in full or hide the
+ * connection entirely, then cut the model only if it alone is too wide. The invisible
+ * full label keeps the intrinsic size stable as the observer switches the connection;
+ * switching the connection does not move the header or cause a sizing loop while streaming.
  */
 function ModelLabel({ model, ...props }: { model: string } & ComponentProps<"span">) {
   const at = model.indexOf(" · ")
+  const measure = useRef<HTMLSpanElement>(null)
+  const connection = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const full = measure.current!
+    const label = full.parentElement!
+    const update = () => {
+      if (connection.current)
+        connection.current.hidden = full.getBoundingClientRect().width > label.getBoundingClientRect().width
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(label)
+    observer.observe(full)
+    return () => observer.disconnect()
+  }, [model])
   return (
     <span
       {...props}
       tabIndex={0}
-      className="flex min-w-0 text-xs whitespace-nowrap text-muted outline-none sm:max-w-64"
+      data-model-label=""
+      className="relative grid min-w-0 overflow-hidden text-xs whitespace-nowrap text-muted outline-none"
     >
-      {at > 0 && <span className="mr-1 min-w-0 truncate">{model.slice(0, at)}&nbsp;· </span>}
-      <span className="max-w-full shrink-0 truncate">{at > 0 ? model.slice(at + 3) : model}</span>
+      <span ref={measure} aria-hidden="true" className="invisible w-max">
+        {model}
+      </span>
+      <span className="absolute inset-0 flex min-w-0">
+        {at > 0 && (
+          <span ref={connection} hidden className="shrink-0">
+            {model.slice(0, at)} ·&nbsp;
+          </span>
+        )}
+        <span className="max-w-full shrink-0 truncate">{at > 0 ? model.slice(at + 3) : model}</span>
+      </span>
     </span>
   )
 }
