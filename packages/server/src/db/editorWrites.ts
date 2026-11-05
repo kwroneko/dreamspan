@@ -687,7 +687,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         return toLibraryRef(note)
       }).pipe(transaction(sql, "CreateCardNote")),
 
-    CreateChatNote: ({ userId, chatId, title, link, forkId }) =>
+    CreateChatNote: ({ userId, chatId, title, link, forkId, replaces, content }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ id: ChatId }>`
           SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -698,7 +698,11 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           kind: "note",
           label,
           subtitle: "",
-          doc: steps.encode(newChatNote(chat.id, label, link)),
+          doc: steps.encode({
+            ...newChatNote(chat.id, label, link),
+            ...(content === undefined ? {} : { content }),
+            ...(replaces === undefined ? {} : { replaces })
+          }),
           schemaVersion: NOTE_SCHEMA_VERSION,
           origin: "user",
           originRef: null,

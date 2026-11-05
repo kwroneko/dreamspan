@@ -107,7 +107,7 @@ import {
   NoteEntry,
   SharedNote
 } from "@rp/shared/editorApi.ts"
-import { NoteDoc } from "@rp/shared/docs/note.ts"
+import { NoteDoc, ReplaceTarget } from "@rp/shared/docs/note.ts"
 import {
   Connection,
   ConnectionId,
@@ -2252,7 +2252,9 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       title: Schema.String,
-      link: Schema.optionalKey(EntityId)
+      link: Schema.optionalKey(EntityId),
+      replaces: Schema.optionalKey(ReplaceTarget),
+      content: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])

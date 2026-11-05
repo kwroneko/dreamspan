@@ -22,9 +22,12 @@ export function Field({
   error,
   children,
   className = "",
-  labelHidden = false
+  labelHidden = false,
+  labelEnd
 }: {
   label: ReactNode
+  /** At the end of the label's row (or a row of its own, the label hidden): the field's tabs, say. */
+  labelEnd?: ReactNode
   /** The label names the control for assistive technology only: what's around it already says. */
   labelHidden?: boolean
   /** Visible state or guidance that must stay beside the control. */
@@ -37,16 +40,27 @@ export function Field({
   children: ReactNode
   className?: string
 }) {
+  const labelRow = about ? (
+    <div className={labelHidden ? "sr-only" : "text-sm leading-5"}>
+      <BaseField.Label className="inline text-sm font-medium text-text">{label}</BaseField.Label>
+      {"\u00a0"}
+      <AboutHint heading={aboutLabel ?? (typeof label === "string" ? label : "this field")}>{about}</AboutHint>
+    </div>
+  ) : (
+    <BaseField.Label className={labelHidden ? "sr-only" : "text-sm font-medium text-text"}>{label}</BaseField.Label>
+  )
   return (
     <BaseField.Root invalid={error ? true : undefined} className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
-      {about ? (
-        <div className={labelHidden ? "sr-only" : "text-sm leading-5"}>
-          <BaseField.Label className="inline text-sm font-medium text-text">{label}</BaseField.Label>
-          {"\u00a0"}
-          <AboutHint heading={aboutLabel ?? (typeof label === "string" ? label : "this field")}>{about}</AboutHint>
+      {labelEnd !== undefined && !labelHidden ? (
+        <div className="flex min-w-0 flex-wrap items-end justify-between gap-x-3 gap-y-1">
+          {labelRow}
+          {labelEnd}
         </div>
       ) : (
-        <BaseField.Label className={labelHidden ? "sr-only" : "text-sm font-medium text-text"}>{label}</BaseField.Label>
+        <>
+          {labelRow}
+          {labelEnd}
+        </>
       )}
       {about && <BaseField.Description hidden>{about}</BaseField.Description>}
       {children}

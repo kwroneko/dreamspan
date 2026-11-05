@@ -5,6 +5,7 @@ import { ChatBrowse, ChatFilterCounts } from "./chatBrowse.ts"
 // anything else is NotFound.
 import { Schema } from "effect"
 import { AvatarCrop } from "./media.ts"
+import { ReplaceTarget } from "./docs/note.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import {
   MessageImages,
@@ -627,7 +628,13 @@ export class ChatSetupApi extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       chatId: ChatId,
       title: Schema.String,
-      link: Schema.optionalKey(EntityId)
+      link: Schema.optionalKey(EntityId),
+      /**
+       * A note that replaces a preset prompt or card field (DESIGN §4.2; spec/NOTE-OVERRIDES.md §4),
+       * starting with this text: the copy of what it replaces, or an agent's changed text.
+       */
+      replaces: Schema.optionalKey(ReplaceTarget),
+      content: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([...Errors])
