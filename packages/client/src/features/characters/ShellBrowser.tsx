@@ -205,6 +205,7 @@ function BranchesButton({ fork, entity = null }: { fork: ShellFork; entity?: Ent
 /** Branch-list content shares the row's open target without nesting rename controls in it. */
 function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; open: () => void }) {
   const action = useAction()
+  const [renaming, setRenaming] = useState(false)
   const label = shellBranchLabel(fork)
   const addedNames = `Added characters: ${fork.added.map((c) => c.name).join(", ")}`
   return (
@@ -252,7 +253,8 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
               hint="Renames this branch."
               allowEmpty
               maxLength={100}
-              className="min-w-0 flex-1"
+              className={renaming ? "min-w-0 flex-1" : "min-w-0"}
+              onEditingChange={setRenaming}
               placeholder="Branch name"
               onRename={async (name) => {
                 const result = await action.run(
@@ -263,7 +265,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
                 return result.ok
               }}
             >
-              <span data-chat-title className="min-w-0 flex-1 truncate font-medium">
+              <span data-chat-title className="min-w-0 truncate font-medium">
                 {label}
               </span>
             </InlineRename>
