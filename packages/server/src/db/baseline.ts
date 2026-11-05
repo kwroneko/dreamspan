@@ -821,6 +821,18 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE INDEX llm_requests_connection ON llm_requests(connection_id, started_at)`,
   `CREATE INDEX llm_requests_running ON llm_requests(status) WHERE status = 'running'`,
   `CREATE INDEX llm_requests_rollout ON llm_requests(rollout_id) WHERE rollout_id IS NOT NULL`,
+  `CREATE TABLE summary_responses (
+    request_id TEXT PRIMARY KEY REFERENCES llm_requests(id) ON DELETE CASCADE,
+    rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,
+    response TEXT NOT NULL
+  ) STRICT`,
+  `CREATE INDEX summary_responses_rollout ON summary_responses(rollout_id)`,
+  `CREATE TRIGGER summary_responses_request_rollout BEFORE INSERT ON summary_responses
+    WHEN (SELECT rollout_id FROM llm_requests WHERE id=NEW.request_id) IS NOT NEW.rollout_id
+    BEGIN SELECT RAISE(ABORT, 'summary response must belong to its request rollout'); END`,
+  `CREATE TRIGGER summary_responses_immutable BEFORE UPDATE ON summary_responses
+    BEGIN SELECT RAISE(ABORT, 'summary responses are immutable'); END`,
+
   `CREATE INDEX llm_requests_version ON llm_requests(version_id) WHERE version_id IS NOT NULL`,
   `CREATE TRIGGER llm_requests_attribution_valid BEFORE INSERT ON llm_requests
     WHEN (NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id) IS NOT NEW.owner_user_id)
@@ -1183,11 +1195,13 @@ export const baseline: ReadonlyArray<string> = [
     id TEXT NOT NULL UNIQUE,
     summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
     content TEXT NOT NULL,
+    rollout_id TEXT REFERENCES rollouts(id),
     token_count INTEGER NOT NULL,
     origin TEXT NOT NULL CHECK (origin IN ('generated', 'user', 'changeset', 'imported')),
     created_at INTEGER NOT NULL
   ) STRICT`,
   `CREATE INDEX summary_revisions_summary ON summary_revisions(summary_id, seq)`,
+  `CREATE INDEX summary_revisions_rollout ON summary_revisions(rollout_id) WHERE rollout_id IS NOT NULL`,
   `CREATE TABLE summary_inputs (
     summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL,
@@ -1378,6 +1392,18 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER summary_revisions_retained BEFORE DELETE ON summary_revisions
       WHEN EXISTS (SELECT 1 FROM chats c JOIN summaries s ON s.chat_id = c.id WHERE s.id = OLD.summary_id)
       BEGIN SELECT RAISE(ABORT, 'summaries and revisions live as long as their chat'); END`,
+  `CREATE TABLE summary_attempts (
+    job_id TEXT NOT NULL REFERENCES summarization_jobs(id) ON DELETE CASCADE,
+    epoch INTEGER NOT NULL,
+    rollout_id TEXT NOT NULL UNIQUE REFERENCES rollouts(id) ON DELETE CASCADE,
+    PRIMARY KEY (job_id, epoch)
+  ) STRICT`,
+  `CREATE TRIGGER summary_attempts_same_chat BEFORE INSERT ON summary_attempts
+    WHEN (SELECT chat_id FROM summarization_jobs WHERE id=NEW.job_id) IS NOT
+      (SELECT chat_id FROM rollouts WHERE id=NEW.rollout_id)
+    BEGIN SELECT RAISE(ABORT, 'summary attempt must belong to its job chat'); END`,
+  `CREATE TRIGGER summary_attempts_immutable BEFORE UPDATE ON summary_attempts
+    BEGIN SELECT RAISE(ABORT, 'summary attempts are immutable'); END`,
   `CREATE INDEX summarization_jobs_rollout ON summarization_jobs(rollout_id)`,
   `CREATE TRIGGER summarization_jobs_rollout_same_chat BEFORE INSERT ON summarization_jobs WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summary rollout must belong to its job chat'); END`,
   `CREATE TRIGGER summarization_jobs_rollout_same_chat_update BEFORE UPDATE OF rollout_id, chat_id ON summarization_jobs WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summary rollout must belong to its job chat'); END`,

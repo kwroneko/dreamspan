@@ -19,11 +19,12 @@ import { client, serverLayer, testConfig } from "./config.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./mockProvider.ts"
 
 /** What a model answers: text, a provider's refusal, or an HTTP failure. */
-export type Reply =
+export type Reply = (
   | { readonly text: string }
   | { readonly refusal: true }
   | { readonly status: number }
   | { readonly tool: { readonly name: string; readonly arguments: Record<string, string | boolean> } }
+) & { readonly usage?: Record<string, unknown> }
 
 export const PLANTED = "PLANTED-REFUSAL"
 
@@ -37,7 +38,8 @@ const reply = (res: ServerResponse, answer: Reply) => {
         id: "refusal",
         object: "chat.completion.chunk",
         model: "synthetic",
-        choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: "content_filter" }]
+        choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: "content_filter" }],
+        ...(answer.usage ? { usage: answer.usage } : {})
       }
     ])
   else if ("tool" in answer)
@@ -74,7 +76,7 @@ const reply = (res: ServerResponse, answer: Reply) => {
         choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
       }
     ])
-  else sse(res, completionChunks([answer.text], { prompt_tokens: 100, completion_tokens: 12 }))
+  else sse(res, completionChunks([answer.text], answer.usage ?? { prompt_tokens: 100, completion_tokens: 12 }))
 }
 
 export const lastText = (request: Recorded) => {

@@ -30,6 +30,7 @@ export class Summary extends Schema.Class<Summary>("Summary")({
   slotCount: Schema.Int,
   revisionNumber: Schema.Int,
   revisionId: SummaryRevisionId,
+  rolloutId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   content: Schema.String,
   tokens: Schema.Int,
   origin: Schema.Literals(["generated", "user", "changeset", "imported"]),
@@ -122,7 +123,9 @@ export const SummaryRevision = Schema.Struct({
   tokens: Schema.Int,
   content: Schema.String,
   createdAt: Schema.Number,
-  selected: Schema.Boolean
+  selected: Schema.Boolean,
+  rolloutId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  requests: Schema.optionalKey(Schema.Array(LlmRequest))
 })
 export type SummaryRevision = typeof SummaryRevision.Type
 
@@ -332,8 +335,15 @@ export const SummaryDraftSave = Schema.Struct({
   /** The revision the text started from. */
   baseRevisionId: Schema.NullOr(SummaryRevisionId)
 })
+export class SummaryAttempt extends Schema.Class<SummaryAttempt>("SummaryAttempt")({
+  rolloutId: Schema.String,
+  request: Schema.NullOr(ContextDisplay),
+  requests: Schema.Array(LlmRequest),
+  responses: Schema.Array(Schema.Struct({ requestId: Schema.String, response: Schema.String }))
+}) {}
+
 /** Stored provenance of the generation, even when the selected text was edited later. */
-export const SummaryDetails = Schema.Struct({
+export class SummaryDetails extends Schema.Class<SummaryDetails>("SummaryDetails")({
   chatId: ChatId,
   forkId: Schema.NullOr(ForkId),
   jobId: Schema.NullOr(Schema.String),
@@ -344,9 +354,17 @@ export const SummaryDetails = Schema.Struct({
   startedAt: Schema.NullOr(Schema.Number),
   endedAt: Schema.NullOr(Schema.Number),
   requests: Schema.Array(LlmRequest),
-  request: Schema.NullOr(ContextDisplay)
-})
-export type SummaryDetails = typeof SummaryDetails.Type
+  request: Schema.NullOr(ContextDisplay),
+  generations: Schema.optionalKey(Schema.Array(SummaryAttempt))
+}) {}
+
+export class SummaryRequestApi extends RpcGroup.make(
+  Rpc.make("GetSummaryRevisionRequest", {
+    payload: { revisionId: SummaryRevisionId },
+    success: SummaryDetails,
+    error: Schema.Union([NotFound, ServerError])
+  })
+) {}
 
 export class LcmApi extends RpcGroup.make(
   Rpc.make("GetSummaryDetails", {

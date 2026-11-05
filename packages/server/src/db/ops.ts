@@ -307,6 +307,7 @@ const OpenLlmRequest = Schema.Struct({
 
 /** Closes a ledger row with what the request produced. */
 const CloseLlmRequest = Schema.Struct({
+  summaryResponse: Schema.optionalKey(Schema.String),
   textEstimate: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, tokenizer: Schema.String })),
   cacheIdentity: Schema.optionalKey(
     Schema.NullOr(
@@ -2467,6 +2468,11 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, view: ShellForksView },
     success: ShellForksRead,
     error: StorageError
+  }),
+  Rpc.make("GetSummaryRevisionRequest", {
+    payload: { userId: UserId, revisionId: SummaryRevisionId },
+    success: SummaryDetails,
+    error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("GetSummaryDetails", {
     payload: { userId: UserId, summaryId: SummaryId },

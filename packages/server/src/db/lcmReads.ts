@@ -6,7 +6,7 @@ import { toLlmRequest, type LlmRequestRow } from "./providers.ts"
 import { inSummaryFork } from "./lcmFork.ts"
 import { effectiveOverride } from "./forkState.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
-import { Summary } from "@rp/shared/lcm.ts"
+import { Summary, SummaryAttempt, SummaryDetails } from "@rp/shared/lcm.ts"
 import { shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Schema } from "effect"
@@ -52,6 +52,7 @@ export const readSummary = (
         content: string
         token_count: number
         origin: Summary["origin"]
+        revision_rollout_id: string | null
         revision_id: string
         revision_number: number
         first_depth: number
@@ -59,7 +60,7 @@ export const readSummary = (
         first_chain: string
         last_chain: string
         images_json: string | null
-      }>`SELECT s.*, max(s.row_version,coalesce(ro.seq,0),coalesce(co.seq,0)) AS row_version, r.id AS revision_id, r.content, r.token_count, r.origin, (SELECT count(*) FROM summary_revisions p WHERE p.summary_id = s.id AND p.seq <= r.seq) AS revision_number, a.depth AS first_depth, b.depth AS last_depth, a.chain_id AS first_chain, b.chain_id AS last_chain
+      }>`SELECT s.*, max(s.row_version,coalesce(ro.seq,0),coalesce(co.seq,0)) AS row_version, r.id AS revision_id, r.rollout_id AS revision_rollout_id, r.content, r.token_count, r.origin, (SELECT count(*) FROM summary_revisions p WHERE p.summary_id = s.id AND p.seq <= r.seq) AS revision_number, a.depth AS first_depth, b.depth AS last_depth, a.chain_id AS first_chain, b.chain_id AS last_chain
           FROM summaries s JOIN chats c ON c.id = s.chat_id
           LEFT JOIN fork_overrides ro ON ro.id=${effectiveOverride(sql, "summary_revision", fork, "s.id")}
           LEFT JOIN fork_overrides co ON co.id=${effectiveOverride(sql, "summary_choice", fork, "s.id")}
@@ -149,6 +150,7 @@ export const readSummary = (
         slotCount: row.slot_count,
         revisionNumber: row.revision_number,
         revisionId: row.revision_id,
+        rolloutId: row.revision_rollout_id,
         content: row.content,
         tokens: row.token_count,
         origin: row.origin,
@@ -170,75 +172,121 @@ export const readSummary = (
   return read(id)
 }
 
+const displayRequest = (sent: string | null): ContextDisplay | null => {
+  const wire = sent ? (JSON.parse(sent) as WireContext) : null
+  // Project the sanitized capture explicitly: transport metadata, digests and raw usage stay in storage.
+  const request: ContextDisplay | null = wire?.display
+    ? {
+        ...wire.display,
+        samplers: wire.samplers,
+        messages: wire.messages.map((message) => ({
+          role: message.role,
+          name: message.name ?? null,
+          content: message.content,
+          ...(message.prefill ? { prefill: message.prefill } : {}),
+          tokens: tokensOf(message),
+          sources: message.sources ?? [],
+          ...(message.parts ? { parts: message.parts } : {}),
+          ...(message.groups ? { groups: message.groups } : {}),
+          breakpoint: message.breakpoint ?? null
+        }))
+      }
+    : null
+
+  return request
+}
+
 export const makeLcmReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  return {
-    GetSummaryDetails: ({ userId, summaryId }) =>
-      Effect.gen(function* () {
-        const [row] = yield* sql<{
-          chat_id: string
-          fork_id: string | null
-          rollout_id: string | null
-          job_id: string | null
-          attempts: number | null
-          model: string | null
-          started_at: number | null
-          completed_at: number | null
-          sent: string | null
-          parts: number
-        }>`SELECT s.chat_id,r.fork_id,s.rollout_id,j.id AS job_id,j.attempts,m.model_key AS model,
+  const details = (userId: UserId, summaryId: string, revisionId?: string) =>
+    Effect.gen(function* () {
+      const [row] = yield* sql<{
+        chat_id: string
+        fork_id: string | null
+        rollout_id: string | null
+        job_id: string | null
+        attempts: number | null
+        model: string | null
+        started_at: number | null
+        completed_at: number | null
+        sent: string | null
+        parts: number
+      }>`SELECT s.chat_id,r.fork_id,r.id AS rollout_id,j.id AS job_id,j.attempts,m.model_key AS model,
           r.started_at,r.completed_at,p.sent_context_json AS sent,
           (SELECT count(*) FROM summary_parents sp WHERE sp.summary_id=s.id) AS parts
           FROM summaries s JOIN chats c ON c.id=s.chat_id
-          LEFT JOIN rollouts r ON r.id=s.rollout_id
+          LEFT JOIN summary_revisions revision ON revision.id=${revisionId ?? null} AND revision.summary_id=s.id
+          LEFT JOIN rollouts r ON r.id=CASE WHEN ${revisionId ?? null} IS NULL THEN s.rollout_id ELSE revision.rollout_id END
           LEFT JOIN rollout_payloads p ON p.rollout_id=r.id
           LEFT JOIN models m ON m.id=r.model_id
-          LEFT JOIN summarization_jobs j ON j.id=(SELECT id FROM summarization_jobs
-            WHERE result_summary_id=s.id ORDER BY created_at DESC,id DESC LIMIT 1)
+          LEFT JOIN summarization_jobs j ON j.id=coalesce((SELECT job_id FROM summary_attempts WHERE rollout_id=r.id),
+            (SELECT id FROM summarization_jobs WHERE result_summary_id=s.id ORDER BY created_at DESC,id DESC LIMIT 1))
           WHERE s.id=${summaryId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL`
-        if (!row) return yield* new NotFound({ entity: "summary", id: summaryId })
-        const requests =
-          row.rollout_id === null
-            ? []
-            : yield* sql<LlmRequestRow>`SELECT * FROM llm_requests
+      if (!row) return yield* new NotFound({ entity: "summary", id: summaryId })
+      const requests =
+        row.rollout_id === null
+          ? []
+          : yield* sql<LlmRequestRow>`SELECT * FROM llm_requests
           WHERE rollout_id=${row.rollout_id} AND owner_user_id=${userId} ORDER BY started_at,id`
-        const wire = row.sent ? (JSON.parse(row.sent) as WireContext) : null
-        // Project the sanitized capture explicitly: transport metadata, digests and raw usage stay in storage.
-        const request: ContextDisplay | null = wire?.display
-          ? {
-              ...wire.display,
-              samplers: wire.samplers,
-              messages: wire.messages.map((message) => ({
-                role: message.role,
-                name: message.name ?? null,
-                content: message.content,
-                ...(message.prefill ? { prefill: message.prefill } : {}),
-                tokens: tokensOf(message),
-                sources: message.sources ?? [],
-                ...(message.parts ? { parts: message.parts } : {}),
-                ...(message.groups ? { groups: message.groups } : {}),
-                breakpoint: message.breakpoint ?? null
-              }))
-            }
-          : null
-        return {
-          chatId: row.chat_id as ChatId,
-          forkId: row.fork_id as ForkId | null,
-          jobId: row.job_id,
-          attempts: row.attempts,
-          parts: row.parts,
-          model:
-            requests.findLast((request) => request.purpose === "summarize" || request.purpose === "condense")
-              ?.model_key ??
-            row.model ??
-            wire?.display?.model?.model ??
-            null,
-          startedAt: row.started_at,
-          endedAt: row.completed_at,
-          requests: requests.map(toLlmRequest),
-          request
-        }
-      }).pipe(query("GetSummaryDetails")),
+      const request = displayRequest(row.sent)
+      const storedAttempts =
+        row.rollout_id === null
+          ? []
+          : yield* sql<{ rollout_id: string; sent: string | null }>`
+          SELECT a.rollout_id,p.sent_context_json AS sent FROM summary_attempts a
+          LEFT JOIN rollout_payloads p ON p.rollout_id=a.rollout_id
+          WHERE a.job_id=(SELECT job_id FROM summary_attempts WHERE rollout_id=${row.rollout_id})
+          AND a.epoch <= (SELECT epoch FROM summary_attempts WHERE rollout_id=${row.rollout_id})
+          ORDER BY a.epoch`
+      const attempts = [...storedAttempts]
+      if (row.rollout_id !== null && !attempts.some((a) => a.rollout_id === row.rollout_id))
+        attempts.push({ rollout_id: row.rollout_id, sent: row.sent })
+      const generations = yield* Effect.forEach(attempts, (attempt) =>
+        Effect.gen(function* () {
+          const ledger = yield* sql<
+            LlmRequestRow & { summary_response: string | null }
+          >`SELECT q.*,s.response AS summary_response FROM llm_requests q
+            LEFT JOIN summary_responses s ON s.request_id=q.id
+            WHERE q.owner_user_id=${userId} AND q.rollout_id=${attempt.rollout_id} ORDER BY q.started_at,q.id`
+          return new SummaryAttempt({
+            rolloutId: attempt.rollout_id,
+            request: displayRequest(attempt.sent),
+            requests: ledger.map(toLlmRequest),
+            responses: ledger.flatMap((q) =>
+              q.summary_response === null ? [] : [{ requestId: q.id, response: q.summary_response }]
+            )
+          })
+        })
+      )
+      return new SummaryDetails({
+        chatId: row.chat_id as ChatId,
+        forkId: row.fork_id as ForkId | null,
+        jobId: row.job_id,
+        attempts: storedAttempts.length || row.attempts,
+        parts: row.parts,
+        model:
+          requests.findLast((request) => request.purpose === "summarize" || request.purpose === "condense")
+            ?.model_key ??
+          row.model ??
+          request?.model?.model ??
+          null,
+        startedAt: row.started_at,
+        endedAt: row.completed_at,
+        requests: requests.map(toLlmRequest),
+        generations,
+        request
+      })
+    })
+  return {
+    GetSummaryDetails: ({ userId, summaryId }) => details(userId, summaryId).pipe(query("GetSummaryDetails")),
+    GetSummaryRevisionRequest: ({ userId, revisionId }) =>
+      Effect.gen(function* () {
+        const [revision] = yield* sql<{ summary_id: string }>`SELECT r.summary_id FROM summary_revisions r
+        JOIN summaries s ON s.id=r.summary_id JOIN chats c ON c.id=s.chat_id
+        WHERE r.id=${revisionId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL`
+        if (!revision) return yield* new NotFound({ entity: "summary revision", id: revisionId })
+        return yield* details(userId, revision.summary_id, revisionId)
+      }).pipe(query("GetSummaryRevisionRequest")),
     GetSummary: ({ userId, summaryId, forkId }) =>
       readSummary(sql, userId, summaryId).pipe(inSummaryFork(sql, userId, summaryId, forkId), query("GetSummary"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
