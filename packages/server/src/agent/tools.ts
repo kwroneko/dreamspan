@@ -13,7 +13,7 @@ import type { Reader, Writer } from "../db/Database.ts"
  * version, so a swipe reverses them. `external`: the library, settings, plugins, which an RP
  * turn never offers (DESIGN §7.3).
  */
-export type EffectClass = "read" | "chat_state" | "external"
+type EffectClass = "read" | "chat_state" | "external"
 
 export interface ToolContext {
   readonly userId: UserId
@@ -69,7 +69,7 @@ export const frozenTool = (tool: RolloutTool<never>): FrozenTool => ({
 })
 
 /** Per-result cap on what a tool sends back, with the marker telling the model to narrow it. */
-export const RESULT_CHARS = 16_000
+const RESULT_CHARS = 16_000
 export const budgetResult = (text: string, limit = RESULT_CHARS) =>
   text.length <= limit
     ? text

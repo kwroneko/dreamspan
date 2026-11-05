@@ -9,7 +9,7 @@ import { Effect } from "effect"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 
 /** One message as the tools show it: its number on the path (from 1), who wrote it, its text. */
-export interface PathMessage {
+interface PathMessage {
   readonly n: number
   readonly speaker: string
   readonly content: string
@@ -26,7 +26,7 @@ const cached = <A, E>(context: ToolContext, key: string, make: Effect.Effect<A, 
   )
 
 /** The messages before the one being generated, oldest first; hidden ones left out. */
-export const pathMessages = (context: ToolContext) =>
+const pathMessages = (context: ToolContext) =>
   cached(
     context,
     "path",
@@ -97,7 +97,7 @@ const matches = (text: string, words: ReadonlyArray<string>) => {
 }
 
 /** About `size` characters around the first word found, marked where it was cut. */
-export const excerpt = (text: string, words: ReadonlyArray<string>, size = 240) => {
+const excerpt = (text: string, words: ReadonlyArray<string>, size = 240) => {
   const flat = text.replace(/\s+/g, " ").trim()
   if (flat.length <= size) return flat
   const at = Math.max(
@@ -125,7 +125,7 @@ export const safely = <E>(tool: string, run: Effect.Effect<ToolOutput, E>): Effe
 
 const tokensOf = (text: string) => Math.ceil(text.length / 4)
 
-export const searchChat: RolloutTool<{
+const searchChat: RolloutTool<{
   readonly query: string
   readonly speaker?: string
   readonly limit?: number
@@ -165,7 +165,7 @@ export const searchChat: RolloutTool<{
     )
 }
 
-export const readMessages: RolloutTool<{ readonly from: number; readonly count?: number }> = {
+const readMessages: RolloutTool<{ readonly from: number; readonly count?: number }> = {
   id: "read_messages",
   label: "Read earlier messages",
   effect: "read",
@@ -244,7 +244,7 @@ const range = (text: string) => {
   return { from, to: Number(found[2] ?? found[1]) }
 }
 
-export const expandSummary: RolloutTool<{ readonly messages: string; readonly max_tokens?: number }> = {
+const expandSummary: RolloutTool<{ readonly messages: string; readonly max_tokens?: number }> = {
   id: "expand_summary",
   label: "Opened a summary",
   effect: "read",
@@ -294,7 +294,7 @@ export const expandSummary: RolloutTool<{ readonly messages: string; readonly ma
     )
 }
 
-export const searchSummaries: RolloutTool<{ readonly query: string; readonly limit?: number }> = {
+const searchSummaries: RolloutTool<{ readonly query: string; readonly limit?: number }> = {
   id: "search_summaries",
   label: "Searched the summaries",
   effect: "read",

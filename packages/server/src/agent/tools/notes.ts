@@ -3,7 +3,8 @@
 // [D]): only a note marked agent-editable, until per-chat permissions exist. Writing and
 // editing notes wait for the note-overrides work, which owns how notes replace text.
 import { Type } from "@earendil-works/pi-ai"
-import type { EntityId, RevisionId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
+import type { RevisionId } from "@rp/shared/library.ts"
 import { foldState, noteSwitches } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { RolloutTool, ToolContext } from "../tools.ts"

@@ -78,7 +78,7 @@ const sendMessageTool = (onSend: (message: string) => boolean): AgentTool => ({
 })
 
 /** The messages the model sees after the frozen request: its turns, tool results and the app's notes. */
-export const liveSuffix = (messages: ReadonlyArray<AgentMessage | Message>): Array<Message> => {
+const liveSuffix = (messages: ReadonlyArray<AgentMessage | Message>): Array<Message> => {
   const start = messages.findIndex((m) => m.role === "rpRequest")
   return messages.slice(start + 1).flatMap((m): Array<Message> => {
     if (m.role === "rpHarness") return [{ role: "user", content: m.content, timestamp: m.timestamp }]

@@ -40,7 +40,7 @@ export const plainMode: OrchestrationMode = {
 }
 
 /** The tools the agent modes offer by default (spec/AGENTIC.md §4.5), as far as they're registered. */
-export const NARRATOR_TOOLS: ReadonlyArray<string> = [
+const NARRATOR_TOOLS: ReadonlyArray<string> = [
   "expand_summary",
   "search_summaries",
   "search_chat",

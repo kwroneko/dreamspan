@@ -2,7 +2,7 @@
 // and afterwards from its transcript.
 import { Schema } from "effect"
 
-export const EffectClass = Schema.Literals(["read", "chat_state", "external"])
+const EffectClass = Schema.Literals(["read", "chat_state", "external"])
 
 /**
  * A step: thinking or intermediate text from a turn that went on to call a tool, or one tool
