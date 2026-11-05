@@ -77,10 +77,10 @@ for (const width of [1440, 390]) {
     await close()
     for (const [ref, title] of [
       [seeded.card, "Fork card"],
-      [seeded.preset, "Make a variant"]
+      [seeded.preset, "Fork"]
     ] as const) {
       await page.goto(`${server().url}/library/${ref.id}`)
-      await page.getByRole("button", { name: ref === seeded.card ? "Fork" : "Make a variant", exact: true }).click()
+      await page.getByRole("button", { name: "Fork", exact: true }).click()
       await expect(page.getByRole("dialog", { name: title, exact: true })).toBeVisible()
       await audit(title)
       await close()

@@ -2,16 +2,17 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // "Import a new version…" of a card (ARCHITECTURE.md §11.1; owner, 2026-11-01: "Cards
 // participate in chats, so it can make sense to replace them with a new version wholesale
 // everywhere"). Pick a file, see what it changes and what the card keeps, then Replace: the
-// file's content becomes the card's next revision, an ordinary one History can undo. There's
-// no Merge here yet: the three-way merge for cards is a later job's.
+// file's content becomes the card's next revision, an ordinary one History can undo. Or Merge:
+// the file goes on the card's import line unchanged and the merge review (forkMerge) picks which
+// of its changes to take, keeping the card's own edits.
 import { AsyncResult } from "effect/reactivity"
 import { useAtomValue } from "@effect/atom-react"
 import type { CardReplacePreview } from "@rp/shared/cardReplace.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
 import { Effect } from "effect"
-import { type ReactNode, useCallback, useMemo, useState } from "react"
+import { lazy, type ReactNode, Suspense, useCallback, useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -28,14 +29,18 @@ import { ValueDiff } from "../editor/diff.tsx"
 import type { FieldChange } from "../editor/fields.ts"
 import { flushOpenEditors, refreshOpenEditors } from "../editor/openEditors.ts"
 import { chatsLine, versionPlan, type VersionPlan } from "./preview.ts"
-import { previewVersion, replaceWithVersion } from "./upload.ts"
+import { previewVersion, replaceWithVersion, stageVersion } from "./upload.ts"
+
+const MergeDialog = lazy(() => import("../forkMerge/MergeDialog.tsx").then((m) => ({ default: m.MergeDialog })))
 
 const EXPLAIN = {
   action:
-    "Replace this card with a new version of its file (PNG, JSON or CHARX): you see what changes first. Its notes, favourite, cutout and chats stay.",
-  pick: "Choose the new version's file. It's only read to compare; nothing is stored until you press Replace.",
+    "Replace this card with a new version of its file (PNG, JSON or CHARX), or merge the file's changes into it: you see what changes first.",
+  pick: "Choose the new version's file. It's only read to compare; nothing is stored until you press Replace or Merge.",
   replace:
     "Make the file's version this card's next revision. Chats that follow the card use it from then on; History can restore the one before.",
+  merge:
+    "Review the file's changes one by one and take the ones you want. The card's own edits stay where the file didn't change them.",
   another: "Pick a different file to compare instead.",
   cancel: "Close without changing anything."
 }
@@ -132,6 +137,8 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
   const [step, setStep] = useState<Step>({ _tag: "Pick" })
   const [problem, setProblem] = useState<string | null>(null)
   const [replaceProblem, setReplaceProblem] = useState<string | null>(null)
+  const [staged, setStaged] = useState<{ revisionId: RevisionId; file: string } | null>(null)
+  const [staging, setStaging] = useState(false)
   const action = useAction()
 
   const read = async (file: File) => {
@@ -178,6 +185,28 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
     showToast({ title: `${label} is now the file's version`, description: "History can restore the one before." })
     onClose()
   }
+
+  const merge = async () => {
+    if (!shown) return
+    setReplaceProblem(null)
+    setStaging(true)
+    const outcome = await stageVersion(shown.file, refId)
+    setStaging(false)
+    if (outcome._tag !== "Done") {
+      setReplaceProblem(outcome._tag === "Failed" ? outcome.message : "Log in again to import a file.")
+      return
+    }
+    const revisionId = outcome.result.library?.stagedRevisionId
+    if (!revisionId) return setReplaceProblem("The file couldn't be set aside for merging.")
+    setStaged({ revisionId, file: shown.file.name })
+  }
+
+  if (staged)
+    return (
+      <Suspense fallback={null}>
+        <MergeDialog refId={refId} theirsRevisionId={staged.revisionId} fromFile={staged.file} onClose={onClose} />
+      </Suspense>
+    )
 
   const warnings = shown?.preview.report.issues.filter((issue) => issue.level === "warning") ?? []
   return (
@@ -294,6 +323,11 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
         {shown && (
           <Button hint={EXPLAIN.another} onClick={() => setStep({ _tag: "Pick" })}>
             Choose another file
+          </Button>
+        )}
+        {shown && (
+          <Button hint={EXPLAIN.merge} pending={staging} disabled={action.pending} onClick={() => void merge()}>
+            Merge…
           </Button>
         )}
         {shown && (

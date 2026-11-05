@@ -18,6 +18,8 @@ import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { revisionActions } from "./editorSlots.ts"
 import type { Caller } from "./caller.ts"
 import { ValueDiff } from "./diff.tsx"
 import { changedFields, fieldLabel, type FieldChange } from "./fields.ts"
@@ -27,7 +29,7 @@ import { type EditorStore, useEditorState, useWorkingDoc } from "./store.ts"
 const isText = (value: unknown) => value === undefined || typeof value === "string"
 
 /** A preset's order, by its prompts' names: "3. Main Prompt · on". */
-const orderLines = (doc: Doc) => (value: unknown) => {
+export const orderLines = (doc: Doc) => (value: unknown) => {
   if (!Array.isArray(value)) return readableLines(value)
   const prompts = new Map(
     ((doc.prompts as ReadonlyArray<PresetPrompt> | undefined) ?? []).map((p) => [
@@ -49,7 +51,7 @@ export type SettingLines = (
   path: ReadonlyArray<string | number>
 ) => ((value: unknown) => ReadonlyArray<string>) | undefined
 
-function FieldComparison({
+export function FieldComparison({
   label,
   change,
   doc,
@@ -379,6 +381,7 @@ export function CardRevisionBrowser({
               }
               originLabel={originBadges[revision.origin]}
               restore={
+                <>
                 <Button
                   className="h-8 px-2"
                   disabled={
@@ -401,6 +404,8 @@ export function CardRevisionBrowser({
                 >
                   Restore to {revisionName(revision.number).toLowerCase()}
                 </Button>
+                <SlotOutlet slot={revisionActions} props={{ store, revision }} />
+                </>
               }
               message={revision.message}
               current={revision.id === head}

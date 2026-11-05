@@ -44,6 +44,20 @@ const paths = {
     "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
     "M18 9a9 9 0 0 1-9 9"
   ],
+  /** Two lines joining: taking a parent's changes into a fork. */
+  merge: [
+    "M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+    "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+    "M6 21V9a9 9 0 0 0 9 9"
+  ],
+  /** A small tree of boxes: a family of forks. */
+  family: [
+    "M17 16h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z",
+    "M3 16h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z",
+    "M10 2h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z",
+    "M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3",
+    "M12 12V8"
+  ],
   /** A path forking off on its own: a branch made its own chat, apart from branch's tree. */
   split: ["M16 3h5v5", "M8 3H3v5", "M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3", "m15 9 6-6"],
   /** A window with a side column: the chat's side panel. */

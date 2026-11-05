@@ -35,7 +35,7 @@ export function ForkDialog({
     `ref:${ref.id}:fork`,
     "Names",
     JSON.stringify({
-      label: ref.kind === "card" ? ref.label : `${ref.label} (variant)`,
+      label: ref.kind === "card" ? ref.label : `${ref.label} (fork)`,
       subtitle: ref.kind === "card" ? ref.subtitle : "",
       nickname: cardNames(state.snapshot!.doc).modelName
     })
@@ -103,7 +103,7 @@ export function ForkDialog({
     <Dialog
       open
       onOpenChange={(open) => !open && !pending && onClose()}
-      title={ref.kind === "card" ? "Fork card" : "Make a variant"}
+      title={ref.kind === "card" ? "Fork card" : "Fork"}
     >
       <UserDraftStatus draft={durable} />
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
@@ -112,7 +112,7 @@ export function ForkDialog({
           about={
             ref.kind === "card"
               ? "Unsaved changes move to the copy; the original returns to its last save."
-              : "The variant receives updates to the original."
+              : "The fork keeps its own content. Later changes to the original can be merged into it."
           }
         >
           <Input value={label} onChange={(event) => setLabel(event.currentTarget.value)} required />
@@ -136,9 +136,9 @@ export function ForkDialog({
           <Checkbox
             checked={moveDrafts}
             onCheckedChange={setMoveDrafts}
-            about="Move the unsaved changes to the new variant. This one returns to its last save."
+            about="Move the unsaved changes to the new fork. This one returns to its last save."
           >
-            Take my unsaved changes to the variant
+            Take my unsaved changes to the fork
           </Checkbox>
         )}
         {clash && (
@@ -158,7 +158,7 @@ export function ForkDialog({
             pending={pending}
             disabled={label.trim() === "" || clash !== null}
           >
-            {ref.kind === "card" ? "Fork card" : "Make the variant"}
+            {ref.kind === "card" ? "Fork card" : "Fork"}
           </Button>
         </DialogActions>
       </form>

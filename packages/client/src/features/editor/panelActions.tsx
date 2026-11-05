@@ -43,12 +43,12 @@ export function PanelVariant({ store }: { store: EditorStore }) {
     <>
       <Button
         className="h-8! px-2!"
-        aria-label="Make a variant"
-        hint="Makes a named copy of this lorebook that receives the original's updates."
+        aria-label="Fork"
+        hint="Makes a named copy of this lorebook to change on its own."
         onClick={() => setOpen(true)}
       >
         <Icon name="branch" />
-        <span className="@max-[30rem]:hidden">Make a variant</span>
+        <span className="@max-[30rem]:hidden">Fork</span>
       </Button>
       {open && <ForkDialog store={store} onClose={() => setOpen(false)} {...(onCreated ? { onCreated } : {})} />}
     </>
