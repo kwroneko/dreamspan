@@ -116,7 +116,12 @@ export const layer = Layer.effect(
           output,
           providers,
           agent: {
-            plan: { strategy: "agent", tools: tools.map((t) => t.id), contract: frozen.contract, turnCap: frozen.turnCap },
+            plan: {
+              strategy: "agent",
+              tools: tools.map((t) => t.id),
+              contract: frozen.contract,
+              turnCap: frozen.turnCap
+            },
             mode: frozen.mode,
             tools,
             offered: frozen.tools,
@@ -129,15 +134,18 @@ export const layer = Layer.effect(
             }
           },
           resolveImages: (input) =>
-            hydrateMessageImages(input, model, (id) => reader.GetMediaFile({ userId: request.userId, mediaId: id }), config.dataDir)
+            hydrateMessageImages(
+              input,
+              model,
+              (id) => reader.GetMediaFile({ userId: request.userId, mediaId: id }),
+              config.dataDir
+            )
         })
         return parsed(request, generation, reply)
       })
 
     const generate = (request: GenerationRequest) =>
-      request.resume
-        ? Stream.unwrap(resumed(request, request.resume))
-        : fresh(request)
+      request.resume ? Stream.unwrap(resumed(request, request.resume)) : fresh(request)
 
     const fresh = (request: GenerationRequest) =>
       Stream.unwrap(

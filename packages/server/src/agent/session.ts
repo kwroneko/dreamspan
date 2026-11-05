@@ -65,7 +65,7 @@ export const WRITE_NOW = "Write the reply now."
 export const SEND_NUDGE = "Send your reply with send_message."
 
 /** A tool result's `details` when a stop cut the call off: resume runs the call again. */
-export const INTERRUPTED = { interrupted: true } as const
+const INTERRUPTED = { interrupted: true } as const
 
 /** The contract's tool (DESIGN §7.2): the message, ending the turn; one a turn. */
 const sendMessageTool = (onSend: (message: string) => boolean): AgentTool => ({
@@ -142,7 +142,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       // A resume offers the definitions its snapshot froze, exactly as they were sent.
       const frozen = (run.offered ?? tools.map(frozenTool)).filter((t) => t.name !== SEND_MESSAGE)
       const piTools: ReadonlyArray<Tool> = [
-        ...frozen.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters as Tool["parameters"] })),
+        ...frozen.map((t) => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters as Tool["parameters"]
+        })),
         ...(sends ? [{ name: sendTool.name, description: sendTool.description, parameters: sendTool.parameters }] : [])
       ]
       const emit = (chunk: GenerationChunk) => void Queue.offerUnsafe(queue, chunk)
@@ -368,7 +372,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             ? seed.slice()
             : [
                 { role: "rpRequest", timestamp: Date.now() },
-                ...(plan.turnCap <= 1 ? [{ role: "rpHarness" as const, content: WRITE_NOW, timestamp: Date.now() }] : [])
+                ...(plan.turnCap <= 1
+                  ? [{ role: "rpHarness" as const, content: WRITE_NOW, timestamp: Date.now() }]
+                  : [])
               ]
         },
         convertToLlm: (messages) => liveSuffix(messages),
@@ -461,15 +467,17 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           const tool = agentTools.find((t) => t.name === call.name)
           const result = tool
             ? yield* Effect.promise(() =>
-                tool
-                  .execute(call.id, call.arguments as never, signal.signal)
-                  .catch((error: unknown) => ({
-                    content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
-                    details: null,
-                    isError: true
-                  }))
+                tool.execute(call.id, call.arguments as never, signal.signal).catch((error: unknown) => ({
+                  content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
+                  details: null,
+                  isError: true
+                }))
               )
-            : { content: [{ type: "text" as const, text: `There's no tool “${call.name}”.` }], details: null, isError: true }
+            : {
+                content: [{ type: "text" as const, text: `There's no tool “${call.name}”.` }],
+                details: null,
+                isError: true
+              }
           agent.state.messages = [
             ...agent.state.messages,
             {

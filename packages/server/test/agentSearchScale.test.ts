@@ -136,7 +136,9 @@ describe("search_chat at scale", () => {
         const rare = yield* median(search(["lighthouse"]))
         // A word most messages have: the newest 200 of thousands of candidates.
         const common = yield* median(search(["tide"]))
-        console.log(`search_chat at ${LENGTH} messages, ${FORKS} forks: rare ${rare.toFixed(1)} ms, common ${common.toFixed(1)} ms`)
+        console.log(
+          `search_chat at ${LENGTH} messages, ${FORKS} forks: rare ${rare.toFixed(1)} ms, common ${common.toFixed(1)} ms`
+        )
         assert.isBelow(rare, 50)
         assert.isBelow(common, 50)
       }).pipe(Effect.provide(serverLayer(config))),

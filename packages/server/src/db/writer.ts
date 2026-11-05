@@ -84,7 +84,7 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
                 ...(yield* makeLcmQueueHandlers),
                 ...(yield* makeLcmUiWriteHandlers),
                 ...(yield* makeLcmEnableWriteHandlers(bin)),
-                ...(yield* makeRolloutWriteHandlers(bin, graph.AddSelectedVersion)),
+                ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
                 ...(yield* makeDecisionWriteHandlers(bin))
               },
               prefix

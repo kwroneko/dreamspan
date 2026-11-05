@@ -96,8 +96,7 @@ const namer = (context: ToolContext, speakerIds: ReadonlyArray<string>) =>
       readonly macroMode: string
       readonly content: string
     }): PathMessage => {
-      const speaker =
-        names.get(message.speakerEntityId ?? "") ?? (message.writer === "human" ? user : "Narrator")
+      const speaker = names.get(message.speakerEntityId ?? "") ?? (message.writer === "human" ? user : "Narrator")
       const content =
         message.macroMode === "template"
           ? message.content.replace(/\{\{char\}\}/gi, speaker).replace(/\{\{user\}\}/gi, user)

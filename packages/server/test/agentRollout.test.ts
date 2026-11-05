@@ -1105,10 +1105,7 @@ describe("agent rollouts", () => {
         ...lookup,
         id: "slow_look_up",
         execute: (context) =>
-          Deferred.succeed(started, context.versionId).pipe(
-            Effect.andThen(Effect.never),
-            Effect.as({ text: "never" })
-          )
+          Deferred.succeed(started, context.versionId).pipe(Effect.andThen(Effect.never), Effect.as({ text: "never" }))
       }
       const registry = yield* ExecutionRegistry
       yield* registry.rolloutTools.register(slow as RolloutTool<never>)

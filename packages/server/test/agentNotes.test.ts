@@ -21,9 +21,21 @@ const chunk = (delta: unknown, finish: string | null) => ({
   choices: [{ index: 0, delta, finish_reason: finish }]
 })
 const call = (id: string, name: string, args: unknown) => [
-  chunk({ role: "assistant", tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] }, null),
+  chunk(
+    {
+      role: "assistant",
+      tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }]
+    },
+    null
+  ),
   chunk({}, "tool_calls"),
-  { id: "cmpl-n", object: "chat.completion.chunk", model: "served-model", choices: [], usage: { prompt_tokens: 9, completion_tokens: 3 } }
+  {
+    id: "cmpl-n",
+    object: "chat.completion.chunk",
+    model: "served-model",
+    choices: [],
+    usage: { prompt_tokens: 9, completion_tokens: 3 }
+  }
 ]
 
 type Script = ReadonlyArray<readonly [string, unknown]>
@@ -34,7 +46,10 @@ const scriptedModel = () => {
   const handler = (request: Recorded, res: ServerResponse) => {
     const done = ((request.body?.messages ?? []) as Array<{ role: string }>).filter((m) => m.role === "tool").length
     const next = script[done]
-    sse(res, next ? call(`call_${done}`, next[0], next[1]) : call(`call_${done}`, "send_message", { message: "Mira nods." }))
+    sse(
+      res,
+      next ? call(`call_${done}`, next[0], next[1]) : call(`call_${done}`, "send_message", { message: "Mira nods." })
+    )
   }
   return { handler, run: (next: Script) => (script = next) }
 }
@@ -75,7 +90,9 @@ const chatNote = (api: Api, chatId: ChatId, title: string, content: string, edit
 
 /** Each tool step's result, in order. */
 const stepResults = (api: Api, versionId: VersionId) =>
-  api.GetRolloutSteps({ versionId }).pipe(Effect.map((steps) => steps.flatMap((s) => (s.kind === "tool" ? [s.result] : []))))
+  api
+    .GetRolloutSteps({ versionId })
+    .pipe(Effect.map((steps) => steps.flatMap((s) => (s.kind === "tool" ? [s.result] : []))))
 
 describe("agent note tools", () => {
   it.live("write_note and edit_note change only what the chat allows, and a swipe takes it back", () => {
@@ -144,7 +161,10 @@ describe("agent note tools", () => {
           )
         )
         return Object.fromEntries(
-          entries.map((e) => [String(e.doc["title"]), [String(e.doc["content"]), switches.get(e.ref.entityId) ?? false]])
+          entries.map((e) => [
+            String(e.doc["title"]),
+            [String(e.doc["content"]), switches.get(e.ref.entityId) ?? false]
+          ])
         )
       })
       assert.deepStrictEqual(yield* notesAt, {
@@ -194,7 +214,9 @@ describe("agent note tools", () => {
           const sent = yield* posted(
             api.SendMessage({ chatId: chat.id, parentSlotId: parent, branch: false, content: "Go on." })
           )
-          const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+          const { entry } = yield* posted(
+            api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
+          )
           yield* eventually(() => finished(events, entry.version.id) !== undefined)
           return { version: entry.version, request: text(chats()[from]!) }
         })
@@ -209,7 +231,12 @@ describe("agent note tools", () => {
         ["edit_card", { character: "Mira", field: "description", find: "Her coat", replace: "A gown" }],
         [
           "edit_card",
-          { character: "Mira", field: "description", find: "She wears a grey travelling coat.", replace: "She wears a red ball gown." }
+          {
+            character: "Mira",
+            field: "description",
+            find: "She wears a grey travelling coat.",
+            replace: "She wears a red ball gown."
+          }
         ]
       ])
       assert.deepStrictEqual(yield* stepResults(api, edit.version.id), [
@@ -222,14 +249,22 @@ describe("agent note tools", () => {
       assert.include(top(after.request), "She hums while she works.")
       assert.notInclude(after.request.join("\n"), "grey travelling coat")
       assert.notStrictEqual(top(after.request), top(before))
-      const tailAt = after.request.findIndex((m) => m.includes("[Mira's current description: She wears a red ball gown.]"))
-      assert.isAbove(tailAt, after.request.findIndex((m) => m.includes("Go on.")), "the costume goes at the tail")
+      const tailAt = after.request.findIndex((m) =>
+        m.includes("[Mira's current description: She wears a red ball gown.]")
+      )
+      assert.isAbove(
+        tailAt,
+        after.request.findIndex((m) => m.includes("Go on.")),
+        "the costume goes at the tail"
+      )
 
       // Changed again: only the tail note changes, so the top of the request stays as it was.
       const again = yield* turn(after.version.slotId as SlotId, [
         ["edit_card", { character: "Mira", field: "description", find: "red ball gown", replace: "muddy ball gown" }]
       ])
-      assert.deepStrictEqual(yield* stepResults(api, again.version.id), ["Changed Mira's description from the next message on."])
+      assert.deepStrictEqual(yield* stepResults(api, again.version.id), [
+        "Changed Mira's description from the next message on."
+      ])
       const later = yield* turn(again.version.slotId as SlotId, [])
       assert.strictEqual(top(later.request), top(after.request))
       assert.include(later.request.join("\n"), "[Mira's current description: She wears a muddy ball gown.]")

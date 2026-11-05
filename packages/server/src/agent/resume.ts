@@ -16,7 +16,7 @@ import type { FrozenTool } from "./tools.ts"
  * reply. `continue`: the transcript ended cleanly between turns. `fresh`: nothing usable was
  * kept; the run starts over from the frozen request.
  */
-export type ResumePolicy = "rerun" | "resample" | "continuation" | "continue" | "fresh"
+type ResumePolicy = "rerun" | "resample" | "continuation" | "continue" | "fresh"
 
 export interface ResumePlan {
   readonly policy: ResumePolicy
@@ -58,16 +58,16 @@ const isInterruptedResult = (m: AgentMessage) =>
   m.role === "toolResult" && (m.details as { interrupted?: unknown } | null | undefined)?.interrupted === true
 
 const callsOf = (messages: ReadonlyArray<AgentMessage>) =>
-  messages.flatMap((m) => (m.role === "assistant" ? m.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])) : []))
+  messages.flatMap((m) =>
+    m.role === "assistant" ? m.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])) : []
+  )
 
 /** The last assistant turn's tool calls that no result answers: what a resume runs first. */
 export const danglingCalls = (messages: ReadonlyArray<AgentMessage>) => {
   const last = messages.findLastIndex((m) => m.role === "assistant")
   if (last < 0) return []
   const turn = messages[last] as AssistantMessage
-  const answered = new Set(
-    messages.slice(last + 1).flatMap((m) => (m.role === "toolResult" ? [m.toolCallId] : []))
-  )
+  const answered = new Set(messages.slice(last + 1).flatMap((m) => (m.role === "toolResult" ? [m.toolCallId] : [])))
   return turn.content.flatMap((p) => (p.type === "toolCall" && !answered.has(p.id) ? [p] : []))
 }
 
@@ -174,7 +174,11 @@ export const planStepResume = (
       // The call runs again with the new arguments, under a new id; later calls of the turn go.
       const content = turn.content
         .slice(0, placed.part + 1)
-        .map((p, i) => (i === placed.part && p.type === "toolCall" ? { ...p, id: newCallId, arguments: edit.arguments as ToolCall["arguments"] } : p))
+        .map((p, i) =>
+          i === placed.part && p.type === "toolCall"
+            ? { ...p, id: newCallId, arguments: edit.arguments as ToolCall["arguments"] }
+            : p
+        )
       kept = [...messages.slice(0, at), { ...turn, content }, ...resultsAfter((id) => before.has(id))]
     } else if (edit === undefined || edit.kind === "result") {
       const results = resultsAfter((id) => before.has(id) || id === part.id).map((m) =>

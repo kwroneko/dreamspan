@@ -38,9 +38,10 @@ export const makeAgentHandlers = Effect.gen(function* () {
     versionId: VersionId,
     forkId: ForkId | null,
     expectedRowVersion: number,
-    plan: (material: { readonly status: string; readonly transcript: string | null }, frozen: Frozen) =>
-      | ResumePlan
-      | StepNotResumable,
+    plan: (
+      material: { readonly status: string; readonly transcript: string | null },
+      frozen: Frozen
+    ) => ResumePlan | StepNotResumable,
     reason: "resume" | "edit"
   ) =>
     Effect.gen(function* () {

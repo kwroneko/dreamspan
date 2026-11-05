@@ -29,14 +29,14 @@ export interface NoteView {
 }
 
 /** Whether the chat lets agent replies change a note: its own override, else the note's flag. */
-export const noteEditable = (state: ChatState, entity: string, doc: Doc) =>
+const noteEditable = (state: ChatState, entity: string, doc: Doc) =>
   state.agentPermissions[permissionKey({ note: entity })!] ?? doc["agent_editable"] === true
 
 /**
  * The chat's state where the reply is being written: the parent's, with the reply's own effects
  * so far (spec/AGENTIC.md §4.3, mid-rollout reads), which apply while it's shown.
  */
-export const stateHere = (context: ToolContext) =>
+const stateHere = (context: ToolContext) =>
   Effect.gen(function* () {
     const { userId, chatId, forkId, slotId, reader } = context
     const events = yield* reader.StateEventsAt({ userId, chatId, slotId, forkId })
@@ -97,7 +97,10 @@ const named = (notes: ReadonlyArray<NoteView>, title: string) => {
   const wanted = title.trim().toLowerCase()
   const found = notes.filter((n) => n.title.trim().toLowerCase() === wanted)
   if (found.length === 1) return found[0]!
-  return { text: found.length ? `Several notes are called “${title}”.` : `No note is called “${title}”.`, isError: true }
+  return {
+    text: found.length ? `Several notes are called “${title}”.` : `No note is called “${title}”.`,
+    isError: true
+  }
 }
 
 /** Why the agent may not change a note, or null when it may. */

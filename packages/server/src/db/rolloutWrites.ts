@@ -6,15 +6,12 @@ import { NotFound, type StaleWrite } from "@rp/shared/errors.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
-import type { Bin } from "./bin.ts"
 import { effectRef } from "./rolloutEffects.ts"
 import { nextSeq } from "./forkState.ts"
-import { makeGraphWrites } from "./graphWrites.ts"
 import type { StorageError, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
-
 
 /** The version write a resume makes first (writes.ts), in the same transaction. */
 type AddSelectedVersion = (
@@ -24,10 +21,9 @@ type AddSelectedVersion = (
   NotFound | StaleWrite | StorageError | SqlError.SqlError
 >
 
-export const makeRolloutWriteHandlers = (bin: Bin, addSelectedVersion: AddSelectedVersion) =>
+export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const graph = makeGraphWrites(sql, bin.drafts)
     return {
       StartResumedVersion: ({
         userId,

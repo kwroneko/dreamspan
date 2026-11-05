@@ -91,7 +91,12 @@ export const editCard: RolloutTool<{
         const fromField = replaceOnce(current, args.find, "")
         // The passage is still in the field: it leaves it, into the tail note.
         if (!("error" in fromField)) {
-          const inPlace = replaceEffects(notes, target, fromField.text.replace(/\n{3,}/g, "\n\n").trim(), `${member.name}'s ${label}`)
+          const inPlace = replaceEffects(
+            notes,
+            target,
+            fromField.text.replace(/\n{3,}/g, "\n\n").trim(),
+            `${member.name}'s ${label}`
+          )
           const tailNote = !args.replace.trim()
             ? []
             : tail === null
@@ -121,10 +126,12 @@ export const editCard: RolloutTool<{
             rolloutId: context.rolloutId,
             toolCallId: context.toolCallId,
             events: [
-              ...[...inPlace.activate, ...(tail && !tail.active && tailNote.length ? [tail.entity] : [])].map((note) => ({
-                key: "note.activate" as const,
-                value: { note }
-              }))
+              ...[...inPlace.activate, ...(tail && !tail.active && tailNote.length ? [tail.entity] : [])].map(
+                (note) => ({
+                  key: "note.activate" as const,
+                  value: { note }
+                })
+              )
             ],
             notes: [...inPlace.notes, ...tailNote],
             result: `Changed ${member.name}'s ${label} from the next message on.`
@@ -140,7 +147,9 @@ export const editCard: RolloutTool<{
               rolloutId: context.rolloutId,
               toolCallId: context.toolCallId,
               events: tail.active ? [] : [{ key: "note.activate", value: { note: tail.entity } }],
-              notes: [{ revise: { note: tail.entity, parent: tail.revision, doc: { ...tail.doc, content: inTail.text } } }],
+              notes: [
+                { revise: { note: tail.entity, parent: tail.revision, doc: { ...tail.doc, content: inTail.text } } }
+              ],
               result: `Changed ${member.name}'s ${label} from the next message on.`
             })
             return { text: result }

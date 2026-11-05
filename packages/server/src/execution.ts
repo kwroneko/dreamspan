@@ -53,7 +53,16 @@ export class ExecutionRegistry extends Context.Service<
       yield* orchestrationModes.register(narratorMode)
       yield* orchestrationModes.register(cardSwapMode)
       const rolloutTools = makeRegistry<RolloutTool<never>>()
-      for (const tool of [...historyTools, lookupLore, listNotes, writeNote, editNote, switchNote, setPresence, editCard] as ReadonlyArray<RolloutTool<never>>)
+      for (const tool of [
+        ...historyTools,
+        lookupLore,
+        listNotes,
+        writeNote,
+        editNote,
+        switchNote,
+        setPresence,
+        editCard
+      ] as ReadonlyArray<RolloutTool<never>>)
         yield* rolloutTools.register(tool)
       const replies = makeRegistry<ReplyOutputStrategy>()
       const summaries = makeRegistry<SummaryStrategy>()

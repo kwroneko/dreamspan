@@ -87,7 +87,13 @@ describe("resume policies", () => {
   })
 
   it("text cut off is continued through a prefill where the model takes one, else resampled", () => {
-    const cut = turn([{ type: "thinking", thinking: "Hm." }, { type: "text", text: "Ansel wa" }], "error")
+    const cut = turn(
+      [
+        { type: "thinking", thinking: "Hm." },
+        { type: "text", text: "Ansel wa" }
+      ],
+      "error"
+    )
     const messages = json([kickoff, turn([call("c1")]), result("c1"), cut])
     const prefilled = planResume(messages, { prefill: true })
     assert.strictEqual(prefilled.policy, "continuation")
@@ -128,7 +134,12 @@ describe("resume policies", () => {
     assert.strictEqual(plan.policy, "rerun")
     assert.deepStrictEqual(roles(plan.transcript), ["rpRequest", "assistant"])
     const content = (plan.transcript[1] as { content: Array<unknown> }).content
-    assert.deepStrictEqual(content.at(-1), { type: "toolCall", id: "new", name: "look_up", arguments: { topic: "pier" } })
+    assert.deepStrictEqual(content.at(-1), {
+      type: "toolCall",
+      id: "new",
+      name: "look_up",
+      arguments: { topic: "pier" }
+    })
     assert.strictEqual(content.length, 2)
     assert.deepStrictEqual(plan.keptCalls, [])
   })
@@ -359,7 +370,10 @@ describe("resuming agent replies", () => {
       assert.strictEqual(kept.at(-1)?.role, "assistant")
       const db = new DatabaseSync(databaseFile(config.dataDir))
       db.exec("PRAGMA busy_timeout = 5000")
-      db.prepare("UPDATE rollout_payloads SET transcript_json = ? WHERE rollout_id = ?").run(JSON.stringify(kept), row.id as string)
+      db.prepare("UPDATE rollout_payloads SET transcript_json = ? WHERE rollout_id = ?").run(
+        JSON.stringify(kept),
+        row.id as string
+      )
       db.prepare("UPDATE rollouts SET status = 'interrupted' WHERE id = ?").run(row.id as string)
       db.close()
 
