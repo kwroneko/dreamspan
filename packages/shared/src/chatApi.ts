@@ -2,6 +2,7 @@
 // selection or a text carry the row version the client saw (StaleWrite otherwise); a new
 // message names the tip it was written under (LeafMoved otherwise).
 import { Schema } from "effect"
+import { RolloutStep } from "./agent.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem, CannotDeleteLastFork } from "./bin.ts"
 import {
@@ -234,6 +235,8 @@ export const ChatEvent = Schema.Union([
    * so far (ARCHITECTURE §12, "Live rewrites"); the text may get shorter.
    */
   Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String, replace: LiveReplace }),
+  /** A generating agent reply's steps, all of them as they stand (spec/AGENTIC.md §5.1). */
+  Schema.TaggedStruct("Steps", { versionId: VersionId, steps: Schema.Array(RolloutStep) }),
   /** Reasoning appended to a generating version at `offset`, as `Delta` is for its text. */
   Schema.TaggedStruct("Reasoning", {
     versionId: VersionId,
@@ -901,7 +904,14 @@ export class ChatApi extends RpcGroup.make(
     payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: Schema.NullOr(SlotId) },
     success: NextContext,
     error: Schema.Union([...Errors])
-  }),
+  })
+) {}
+
+/**
+ * The chat's live updates, in a group (and handler layer) of their own: with the event union
+ * in it, AppCoreApi's handler inference exceeds TypeScript's instantiation depth (TS2589).
+ */
+export class ChatEventsApi extends RpcGroup.make(
   /**
    * Live updates to one chat. Each element is a batch, coalesced on the server per frame
    * (about 16 ms). The first batch starts with Hello.

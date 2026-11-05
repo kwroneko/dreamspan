@@ -5,6 +5,7 @@ import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import type { ReplySections } from "@rp/shared/replySections.ts"
+import type { RolloutStep } from "@rp/shared/agent.ts"
 import { Context, Layer, Option, Schema, type Stream } from "effect"
 
 /** A position in a chat to generate at: a new version of `slotId`, on the path through it. */
@@ -51,6 +52,14 @@ export type GenerationChunk =
    * the reply ends here: a stop, a crash or a failure keeps it. Replaces the last one held.
    */
   | { readonly held: string; readonly into: "body" | "section" }
+  /**
+   * What streamed so far wasn't the reply: the text, reasoning and sections start over from
+   * where the generation began (an agent turn's text that turned out to precede a tool call,
+   * spec/AGENTIC.md §2).
+   */
+  | { readonly restart: true }
+  /** An agent reply's steps so far, all of them (spec/AGENTIC.md §5.1). */
+  | { readonly steps: ReadonlyArray<RolloutStep> }
 
 /** Why a generation failed, as its failed version records it (DESIGN §3.1). */
 export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("GenerationFailed", {

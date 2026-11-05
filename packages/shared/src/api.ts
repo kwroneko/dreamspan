@@ -10,7 +10,8 @@ import { LcmApi, LcmSettingsInvalid, SummaryRequestApi } from "./lcm.ts"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 import { BinItem } from "./bin.ts"
-import { ChatApi } from "./chatApi.ts"
+import { ChatApi, ChatEventsApi } from "./chatApi.ts"
+import { AgentApi } from "./agentApi.ts"
 import { ChatSetupApi } from "./chatSetupApi.ts"
 import { StImportApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
@@ -404,7 +405,15 @@ export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authe
 /** The whole API: what the client calls and the server serves. */
 export class AuthenticatedSplitChatApi extends SplitChatApi.middleware(Authentication) {}
 
+/** The chat's live updates (chatApi.ts), in a layer of their own like the fork merges. */
+export class AuthenticatedChatEventsApi extends ChatEventsApi.middleware(Authentication) {}
+
+/** The agent RPCs (agentApi.ts). */
+export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {}
+
 export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
+  .merge(AuthenticatedChatEventsApi)
+  .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi) {}

@@ -994,6 +994,13 @@ const prefill = (assembly: Assembly) => {
   const id = type === "impersonate" ? "prefill.impersonation" : "prefill.assistant"
   const text = raw ? presetText(assembly, id, raw).text.trimEnd() : ""
   if (!text) return
+  if (assembly.request.agent && type !== "impersonate") {
+    assembly.issues.push({
+      kind: "prefill_dropped",
+      message: "The preset's prefill wasn't sent: the reply mode uses tools."
+    })
+    return
+  }
   if (assembly.model && assembly.model.prefill !== "none" && !assembly.model.continueUnavailable) {
     assembly.prefill = text
   } else {
@@ -1369,11 +1376,13 @@ const composeStage = sync("compose", (assembly) => {
   const disabled = disabledIn(doc)
   const optional = (id: string, text: string, options?: Partial<Names>) =>
     text ? presetText(assembly, id, text, options) : null
-  const characters = cast.characters
-  const group = characters.length > 1
   // The speaking card, a card the user plays included (owner 2026-10-28: its prompts apply on an
   // impersonation turn, as ST passes the character's prompts for every generation type).
   const speaker = cast.speaker
+  // Card-swap (DESIGN §5.2): the speaking character's card goes at the tail, the others stay.
+  const atTail = assembly.request.agent?.cardsAtTail && speaker && cast.characters.includes(speaker) ? speaker : null
+  const characters = atTail ? cast.characters.filter((card) => card !== atTail) : cast.characters
+  const group = cast.characters.length > 1
   const own = (card: CardInput) => ({ char: modelName(card.doc) })
 
   // The speaker's card prompts, as ST's group generation takes them, expanded with the card's
@@ -1566,8 +1575,17 @@ const composeStage = sync("compose", (assembly) => {
       )
     }
   }
+  if (atTail) {
+    const tailText = (a: Assembly, card: CardInput, name: keyof CardInput["doc"], n?: Partial<Names>) =>
+      name === "description" || name === "personality" || name === "scenario"
+        ? field(card, name)
+        : cardText(a, card, name, n)
+    const block = cardBlock(assembly, atTail, tailText, wrap, cardNotes(assembly, atTail, atTail))
+    if (block) assembly.tailCard = block
+    else delete assembly.tailCard
+  } else delete assembly.tailCard
   // Examples keep their own handling: parsed per card into example chats, named in a group.
-  const examples0 = characters.flatMap((card) =>
+  const examples0 = cast.characters.flatMap((card) =>
     group ? exampleLines(assembly, card, modelName(card.doc), true) : exampleLines(assembly, card, names.char, false)
   )
   let examples: Array<Array<ChatLine>> = examples0
@@ -1958,14 +1976,25 @@ const composeStage = sync("compose", (assembly) => {
     group: cast.characters.length > 1 ? cast.characters.map((c) => modelName(c.doc)) : []
   }
   const cost = (built: ReturnType<typeof compose>) => {
-    const messages = built.messages.filter((message) => message.content)
+    const all = assembly.tailCard
+      ? [
+          ...built.messages,
+          {
+            role: "system" as const,
+            content: assembly.tailCard.text,
+            pieces: [assembly.tailCard.piece],
+            kind: "volatile" as const
+          }
+        ]
+      : built.messages
+    const messages = all.filter((message) => message.content)
     const processed = postProcess(doc.squash ? squash(messages) : messages, doc.postprocess, postNames)
     const tokens = (messages: ReadonlyArray<StMessage>) =>
       limitImageEstimates(messages, assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES).reduce(
         (sum, message) => sum + tokensOf(message),
         0
       )
-    return 3 + Math.max(tokens(built.messages), tokens(processed))
+    return 3 + Math.max(tokens(all), tokens(processed))
   }
   const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, false, false))
   const contextBudgetInfo = (nonHistoryTokens: number) => ({
@@ -2330,6 +2359,17 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
       const text = presetText(assembly, identifier, content)
       return text.text.trim() === "" ? [] : [text]
     })
+    // An agent reply's instructions come last, so the prefix is the plain reply's (spec/AGENTIC.md §6).
+    const instructions = assembly.request.agent?.instructions.trim()
+    if (instructions)
+      parts.push({
+        text: instructions,
+        piece: need(assembly, "macros").verbatim(
+          "agent:instructions",
+          { kind: "assembler", what: "Agent instructions" },
+          instructions
+        )
+      })
     if (parts.length === 0) return
     return {
       role: "user",
@@ -2364,6 +2404,13 @@ const messagesStage = sync("messages", (assembly) => {
     }
   })
   messages = messages.filter((m) => m.content)
+  if (assembly.tailCard)
+    messages.push({
+      role: "system",
+      content: assembly.tailCard.text,
+      pieces: [assembly.tailCard.piece],
+      kind: "volatile"
+    })
   if (doc.squash) messages = squash(messages)
   messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
   // DESIGN §2.2 requires one separate final user message, even in merging/single modes.

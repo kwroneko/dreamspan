@@ -214,7 +214,9 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     versionId: string | null,
     scope: FoldableEvent["scope"],
     data: WritableStateEvent,
-    forkId: string | null = null
+    forkId: string | null = null,
+    /** Who wrote it: the user, or a rollout's tool call (spec/AGENTIC.md §4.3). */
+    origin: { readonly origin: "user" | "rollout"; readonly ref: string | null } = { origin: "user", ref: null }
   ) =>
     Effect.gen(function* () {
       if (data.key === "lcm.settings" && (slotId !== null || versionId !== null || scope !== null))
@@ -312,7 +314,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         key: data.key,
         scope,
         value_json: JSON.stringify(data.value),
-        origin: "user",
+        origin: origin.origin,
+        ...(origin.ref === null ? {} : { origin_ref: origin.ref }),
         created_at: Date.now()
       })}`
       return { id, seq: next!.n }

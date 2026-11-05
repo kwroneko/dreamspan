@@ -1,4 +1,5 @@
-import { AuthenticatedSplitChatApi } from "@rp/shared/api.ts"
+import { AuthenticatedAgentApi, AuthenticatedChatEventsApi, AuthenticatedSplitChatApi } from "@rp/shared/api.ts"
+import { makeAgentHandlers } from "./api/agent.ts"
 import { makeSplitChatHandlers } from "./api/splitChats.ts"
 import { Commands } from "./commands.ts"
 import { makeHistoryHandlers } from "./api/history.ts"
@@ -38,7 +39,7 @@ import {
 import { RpcSerialization, RpcServer, type RpcGroup } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
-import { makeChatHandlers } from "./api/chats.ts"
+import { makeChatEventHandlers, makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import { makeEditorHandlers, makeGalleryHandlers, makeForkMergeHandlers } from "./api/editor.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
@@ -137,6 +138,8 @@ const Handlers = Layer.mergeAll(
   CoreHandlers,
   AuthenticatedSummaryRequestApi.toLayer(makeSummaryRequestHandlers),
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
+  AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
+  AuthenticatedAgentApi.toLayer(makeAgentHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers)
 )

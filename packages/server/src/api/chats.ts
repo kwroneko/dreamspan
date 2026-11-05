@@ -876,9 +876,20 @@ export const makeChatHandlers = Effect.gen(function* () {
     GetNextContext: ({ chatId, leafSlotId, forkId }) =>
       Effect.flatMap(userId, (id) => warmth.next(id, chatId, leafSlotId ?? null, forkId ?? null)).pipe(
         internal("GetNextContext")
-      ),
+      )
+  } satisfies Partial<Parameters<typeof AppApi.of>[0]>
+  return handlers
+})
 
-    SubscribeChat: ({ chatId }) =>
+/** ChatEventsApi's handler, served by its own layer (its note). */
+export const makeChatEventHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const hub = yield* ChatHub
+  const warmth = yield* CacheWarmth
+  const generations = yield* Generations
+  const userId = Effect.map(CurrentUser, (user) => user.id)
+  return {
+    SubscribeChat: ({ chatId }: { readonly chatId: ChatId }) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const id = yield* userId
@@ -890,6 +901,5 @@ export const makeChatHandlers = Effect.gen(function* () {
           return Stream.fromQueue(queue)
         }).pipe(internal("SubscribeChat"))
       )
-  } satisfies Partial<Parameters<typeof AppApi.of>[0]>
-  return handlers
+  }
 })

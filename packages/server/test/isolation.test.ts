@@ -1807,6 +1807,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
       refused(actor.api.SubscribeChat({ chatId: owner.chat.chatId }).pipe(Stream.runHead), "NotFound")
   },
   // --- The request inspector (inspectorApi.ts).
+  GetRolloutSteps: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetRolloutSteps({ versionId: owner.chat.generatingId }), "NotFound")
+        assert.deepStrictEqual(yield* owner.api.GetRolloutSteps({ versionId: owner.chat.generatingId }), [])
+      })
+  },
   GetRunContext: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -3917,6 +3924,27 @@ const storage: Record<
         summaryId: owner.summary.id,
         revisionId: owner.summary.revisionId,
         expectedRowVersion: 1
+      }),
+      "NotFound"
+    ),
+  ApplyRolloutEffect: (_reader, actor, owner, writer) =>
+    refused(
+      writer.ApplyRolloutEffect({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        toolCallId: "call_1",
+        events: [],
+        result: "Done."
+      }),
+      "NotFound"
+    ),
+  SaveRolloutTranscript: (_reader, actor, owner, writer) =>
+    refused(
+      writer.SaveRolloutTranscript({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        transcript: "[]",
+        steps: 0
       }),
       "NotFound"
     ),

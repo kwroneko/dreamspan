@@ -506,7 +506,9 @@ export const baseline: ReadonlyArray<string> = [
     updated_at INTEGER NOT NULL,
     completed_at INTEGER
   , context_issues_json TEXT
-    CHECK (context_issues_json IS NULL OR json_valid(context_issues_json)), history_start_slot_id TEXT, history_start_depth INTEGER, history_depth INTEGER, fork_id TEXT) STRICT`,
+    CHECK (context_issues_json IS NULL OR json_valid(context_issues_json)), history_start_slot_id TEXT, history_start_depth INTEGER, history_depth INTEGER, fork_id TEXT,
+    -- Agent rollouts (spec/AGENTIC.md §9): tool calls so far, and the orchestration mode it ran in.
+    step_count INTEGER NOT NULL DEFAULT 0 CHECK (step_count >= 0), mode TEXT) STRICT`,
   `CREATE INDEX rollouts_chat ON rollouts(chat_id, created_at DESC)`,
   `CREATE INDEX rollouts_slot ON rollouts(slot_id) WHERE slot_id IS NOT NULL`,
   `CREATE INDEX rollouts_live ON rollouts(status, updated_at) WHERE status IN ('created', 'running', 'interrupted')`,
@@ -521,6 +523,13 @@ export const baseline: ReadonlyArray<string> = [
     entries_json TEXT NOT NULL CHECK (json_valid(entries_json)),
     message_offset INTEGER NOT NULL DEFAULT 0 CHECK (message_offset IN (0, 1))
   ) STRICT`,
+  `CREATE TABLE rollout_receipts (
+    rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,
+    tool_call_id TEXT NOT NULL,
+    result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (rollout_id, tool_call_id)
+  ) STRICT, WITHOUT ROWID`,
   `CREATE TABLE rollout_branches (
     rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,
     branch_no INTEGER NOT NULL CHECK (branch_no >= 1),
