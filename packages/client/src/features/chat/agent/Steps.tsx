@@ -264,6 +264,10 @@ export function StepsBadge({ entry }: { entry: PathEntry; session: ChatSession; 
         data-steps-badge=""
         onClick={(event) => {
           setChosen({ open: !open, streaming })
+          if (streaming) {
+            const steps: ReasoningDisplay = open ? "collapsed" : "expanded"
+            if (steps !== viewer.prefs.steps) void viewer.change({ steps })
+          }
           if (!open) {
             const panel = event.currentTarget.closest("article")?.querySelector("[data-steps-panel]")
             requestAnimationFrame(() => panel?.scrollIntoView({ block: "nearest" }))
