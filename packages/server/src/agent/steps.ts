@@ -37,34 +37,48 @@ export const stepsOf = (
   messages: ReadonlyArray<AgentMessage>,
   tools: ReadonlyArray<FrozenTool>,
   final: boolean
-): Array<RolloutStep> => {
+): Array<RolloutStep> => placedSteps(messages, tools, final).map((p) => p.step)
+
+/** A step, with where it is in the transcript: its message and the part of that message. */
+export interface PlacedStep {
+  readonly step: RolloutStep
+  readonly message: number
+  readonly part: number
+}
+
+/** `stepsOf`, with each step's place (resume.ts edits a step there). */
+export const placedSteps = (
+  messages: ReadonlyArray<AgentMessage>,
+  tools: ReadonlyArray<FrozenTool>,
+  final: boolean
+): Array<PlacedStep> => {
   const meta = new Map(tools.map((t) => [t.name, t]))
   const results = new Map<string, { readonly text: string; readonly isError: boolean }>()
   for (const m of messages)
     if (m.role === "toolResult") results.set(m.toolCallId, { text: resultText(m.content), isError: m.isError })
-  const plain = messages.findLastIndex(
-    (m) => m.role === "assistant" && !m.content.some((p) => p.type === "toolCall") && m.stopReason !== "error"
-  )
+  // A turn cut off in its text (a stop, an error) was the message being written: never a step.
+  const plain = messages.findLastIndex((m) => m.role === "assistant" && !m.content.some((p) => p.type === "toolCall"))
   const sent = messages.findLastIndex(
     (m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && p.name === SEND_MESSAGE)
   )
   // A message sent after a plain turn (one the app asked to be sent) makes that turn a step.
   const lastPlain = sent > plain ? -1 : plain
-  const steps: Array<RolloutStep> = []
+  const steps: Array<PlacedStep> = []
   messages.forEach((m, index) => {
     if (m.role !== "assistant" || index === lastPlain) return
     // A turn that sends the message first, with no text, keeps its thinking as the message's.
     const first = m.content.find((p) => p.type === "toolCall")
     const reasoningOfMessage =
       first?.name === SEND_MESSAGE && !m.content.some((p) => p.type === "text" && p.text.trim())
-    for (const part of m.content) {
+    m.content.forEach((part, at) => {
+      const place = (step: RolloutStep) => steps.push({ step, message: index, part: at })
       if (part.type === "thinking" && part.thinking.trim() && !reasoningOfMessage)
-        steps.push({ kind: "thinking", text: part.thinking })
-      else if (part.type === "text" && part.text.trim()) steps.push({ kind: "text", text: part.text })
+        place({ kind: "thinking", text: part.thinking })
+      else if (part.type === "text" && part.text.trim()) place({ kind: "text", text: part.text })
       else if (part.type === "toolCall" && part.name !== SEND_MESSAGE) {
         const result = results.get(part.id)
         const tool = meta.get(part.name)
-        steps.push({
+        place({
           kind: "tool",
           id: part.id,
           tool: part.name,
@@ -76,7 +90,7 @@ export const stepsOf = (
           effect: tool?.effect ?? "read"
         })
       }
-    }
+    })
   })
   return steps
 }

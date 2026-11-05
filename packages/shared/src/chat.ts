@@ -33,7 +33,9 @@ const VersionOrigin = Schema.Literals([
   "imported",
   "changeset",
   "scratchpad",
-  "duplicate"
+  "duplicate",
+  /** An agent reply carried on from a stopped one (`sourceVersionId`; spec/AGENTIC.md §4.2). */
+  "resumed"
 ])
 
 export class Chat extends Schema.Class<Chat>("Chat")({

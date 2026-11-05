@@ -271,6 +271,11 @@ export interface AgentAssembly {
 export interface ContextSnapshot {
   /** An agent reply's assembly options, for a rebuild. */
   readonly agentAssembly?: AgentAssembly
+  /**
+   * An agent reply's lorebooks as assembly read them (attached, the preset's, cards' embedded
+   * ones, `card:<entity>` with the card's revision), for its lookup_lore tool.
+   */
+  readonly agentLore?: ReadonlyArray<{ readonly id: string; readonly entity: string; readonly revision: string }>
   readonly contextBudget?: ContextBudget
   /** The preset's reply-section setting a reply is parsed with; absent for summaries. */
   readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings

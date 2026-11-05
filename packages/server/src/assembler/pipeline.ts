@@ -398,6 +398,10 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       // How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md).
       ...(request.summaryJob ? {} : { replySections: replySectionsOf(preset.doc) }),
       ...(request.agent ? { agentAssembly: request.agent } : {}),
+      // The books an agent's lookup_lore reads: those this context's lore came from (AGENTIC §4.5).
+      ...(request.agent && assembly.lorebooks?.length
+        ? { agentLore: assembly.lorebooks.map(({ id, entity, revision }) => ({ id, entity, revision })) }
+        : {}),
       inputs: {
         chatId: target.chatId,
         slotId: target.slotId,

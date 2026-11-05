@@ -385,7 +385,8 @@ export const baseline: ReadonlyArray<string> = [
     reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)),
     frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
     origin TEXT NOT NULL CHECK (origin IN
-      ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')),
+      ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate',
+        'resumed')),
     source_version_id TEXT REFERENCES versions(id),
     greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)),
     direction TEXT,

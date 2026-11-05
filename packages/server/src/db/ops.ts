@@ -124,7 +124,7 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
-import { RolloutStep } from "@rp/shared/agent.ts"
+import { NotResumable, RolloutStep } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import {
@@ -2369,6 +2369,31 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * A resumed agent reply (spec/AGENTIC.md §4.2), in one transaction: a new generating version
+   * of `versionId`'s slot, selected in the fork, sourced from it, with origin `resumed`; its
+   * rollout, a child of the stopped one, with the same frozen snapshot, model and mode and the
+   * transcript kept; the stopped version's state events copied, of its tool calls only those of
+   * `keptCalls`, with their receipts; and the discarded tail as a `rollout_branches` row. Refused
+   * (`NotResumable`) while another resume of the version is still being written.
+   */
+  Rpc.make("StartResumedVersion", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      expectedRowVersion: Schema.Int,
+      rolloutId: Schema.String,
+      version: NewVersion,
+      transcript: Schema.String,
+      steps: Schema.Int,
+      keptCalls: Schema.Array(Schema.String),
+      /** What was cut, and why (`resume`, `edit`); none when nothing was. */
+      branch: Schema.NullOr(Schema.Struct({ reason: Schema.String, messages: Schema.String }))
+    },
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
+    error: Schema.Union([NotFound, StaleWrite, NotResumable, StorageError])
+  }),
   /** At startup: rollouts a previous process left running are interrupted. */
   Rpc.make("InterruptRollouts", { success: Schema.Struct({ interrupted: Schema.Int }), error: StorageError }),
   /** The account defaults, including its new-chat persona; choices must be owned and live. */
@@ -3236,6 +3261,81 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("RolloutSteps", {
     payload: { userId: UserId, versionId: VersionId },
     success: Schema.Array(RolloutStep),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The agent's `search_chat` over full-text search (agentReads.ts, spec/AGENTIC.md §4.5): the
+   * messages on the path to `leafSlotId` in the fork, as the fork shows them, whose text has a
+   * word starting with each of `tokens` (all of them; none: any), newest first, before display
+   * position `before` when given; hidden and unfinished ones left out, template messages
+   * (greetings) always, for the caller to fill in and match. Null when the fork places inserted
+   * messages, whose numbering the display path gives: the caller reads the path instead.
+   */
+  Rpc.make("SearchChat", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      tokens: Schema.Array(Schema.String),
+      before: Schema.NullOr(Schema.Int),
+      limit: Schema.Int
+    },
+    success: Schema.NullOr(
+      Schema.Array(
+        Schema.Struct({
+          position: Schema.Int,
+          speakerEntityId: Schema.NullOr(Schema.String),
+          writer: Schema.String,
+          macroMode: Schema.String,
+          content: Schema.String
+        })
+      )
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The agent's `lookup_lore` (agentReads.ts, spec/AGENTIC.md §4.5): the enabled entries of the
+   * lorebooks the rollout's context was assembled with (its snapshot's `agentLore`), named by
+   * `entry` (a title or uid), or holding every word of `query` (case aside) in their keys, title or
+   * text, those matching by key first. Reads only: what's admitted to the context is the assembler's.
+   */
+  Rpc.make("LookupLore", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      query: Schema.NullOr(Schema.String),
+      entry: Schema.NullOr(Schema.String),
+      limit: Schema.Int
+    },
+    success: Schema.Struct({
+      books: Schema.Int,
+      entries: Schema.Array(
+        Schema.Struct({
+          book: Schema.String,
+          uid: Schema.Int,
+          title: Schema.String,
+          keys: Schema.Array(Schema.String),
+          content: Schema.String
+        })
+      )
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * What resuming an agent reply needs of its run (agentReads.ts): the rollout, its status and
+   * mode, the frozen snapshot and the transcript as last saved, and the version's own status.
+   */
+  Rpc.make("RolloutMaterial", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Struct({
+      rolloutId: Schema.String,
+      status: Schema.String,
+      versionStatus: Schema.String,
+      mode: Schema.NullOr(Schema.String),
+      snapshot: Schema.String,
+      transcript: Schema.NullOr(Schema.String)
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Generation time and tokens of the user's versions (inspectorReads.ts); others are left out. */

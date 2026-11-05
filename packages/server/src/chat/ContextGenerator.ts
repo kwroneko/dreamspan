@@ -7,7 +7,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Cause, Effect, Exit, Layer, Option, Stream } from "effect"
-import type { Generation } from "../assembler/types.ts"
+import { type ContextSnapshot, type Generation, generationOf } from "../assembler/types.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Providers } from "../providers/Providers.ts"
 import { GenerationFailed, type GenerationRequest, Generator } from "./Generator.ts"
@@ -15,7 +15,8 @@ import { throughParse } from "./replySections.ts"
 import { ChatHub } from "./ChatHub.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { PLAIN_MODE, planTurn } from "../agent/modes.ts"
-import { frozenTool } from "../agent/tools.ts"
+import type { OutputContract } from "../agent/modes.ts"
+import { type FrozenTool, frozenTool } from "../agent/tools.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
 const serverFailure = (operation: string) => (error: unknown) =>
@@ -41,7 +42,99 @@ export const layer = Layer.effect(
     const { interrupted } = yield* writer.InterruptRollouts()
     if (interrupted > 0) yield* Effect.logWarning(`${interrupted} rollouts were interrupted by the last shutdown`)
 
+    const finishing = (request: GenerationRequest, rolloutId: string) => (exit: Exit.Exit<unknown, unknown>) =>
+      writer
+        .FinishRollout({
+          userId: request.userId,
+          rolloutId,
+          versionId: request.versionId,
+          status: Exit.isSuccess(exit) ? "completed" : Cause.hasInterruptsOnly(exit.cause) ? "stopped" : "failed",
+          error: Exit.isFailure(exit)
+            ? Option.getOrNull(
+                Option.map(Cause.findErrorOption(exit.cause), (e) =>
+                  e instanceof GenerationFailed ? e.message : String(e)
+                )
+              )
+            : null
+        })
+        .pipe(Effect.catch((error) => Effect.logError(`closing rollout ${rolloutId} failed`, error)))
+
+    /** The registered reply parsers, in order, over a strategy's chunks (replySections.ts). */
+    const parsed = (
+      request: GenerationRequest,
+      generation: Generation,
+      reply: Stream.Stream<import("./Generator.ts").GenerationChunk, GenerationFailed>
+    ) =>
+      execution.replyParsers
+        .list()
+        .flatMap((parser) => {
+          const parse = parser.create({ request, generation })
+          return parse ? [{ parse, fresh: () => parser.create({ request, generation })! }] : []
+        })
+        .reduce((stream, { parse, fresh }) => throughParse(stream, parse, fresh), reply)
+
+    /**
+     * A resumed agent reply (spec/AGENTIC.md §4.2): no assembly. The stopped run's frozen
+     * snapshot is the request, its frozen tools are what's offered, and its transcript goes on,
+     * so every request is the one the stopped run would have sent.
+     */
+    const resumed = (request: GenerationRequest, resume: NonNullable<GenerationRequest["resume"]>) =>
+      Effect.gen(function* () {
+        const snapshot = JSON.parse(resume.snapshot) as ContextSnapshot & {
+          readonly agent?: {
+            readonly mode: string
+            readonly contract: OutputContract
+            readonly turnCap: number
+            readonly tools: ReadonlyArray<FrozenTool>
+          }
+        }
+        const generation = generationOf(snapshot)
+        const { model } = generation
+        const frozen = snapshot.agent
+        if (model === null || frozen === undefined)
+          return yield* new GenerationFailed({ class: "unavailable", message: "This reply can't be resumed." })
+        const { rolloutId } = resume
+        yield* Effect.addFinalizer(finishing(request, rolloutId))
+        const outputStrategy = execution.replies.get("reply")
+        const strategy = execution.replyStrategies.get("agent")
+        if (!outputStrategy || !strategy)
+          return yield* new GenerationFailed({ class: "unavailable", message: "Reply strategy is unavailable." })
+        const output = outputStrategy.create({ prefix: null, request, generation, rolloutId })
+        // A tool no longer registered is still offered as frozen; calling it is a tool error.
+        const tools = frozen.tools.flatMap((t) => {
+          const tool = execution.rolloutTools.get(t.name)
+          return tool && tool.effect !== "external" ? [tool] : []
+        })
+        const reply = strategy.run({
+          request,
+          generation,
+          rolloutId,
+          output,
+          providers,
+          agent: {
+            plan: { strategy: "agent", tools: tools.map((t) => t.id), contract: frozen.contract, turnCap: frozen.turnCap },
+            mode: frozen.mode,
+            tools,
+            offered: frozen.tools,
+            reader,
+            writer,
+            resume: {
+              transcript: resume.transcript,
+              ...(resume.continuation === undefined ? {} : { continuation: resume.continuation })
+            }
+          },
+          resolveImages: (input) =>
+            hydrateMessageImages(input, model, (id) => reader.GetMediaFile({ userId: request.userId, mediaId: id }), config.dataDir)
+        })
+        return parsed(request, generation, reply)
+      })
+
     const generate = (request: GenerationRequest) =>
+      request.resume
+        ? Stream.unwrap(resumed(request, request.resume))
+        : fresh(request)
+
+    const fresh = (request: GenerationRequest) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const { userId, chatId, slotId, versionId } = request
@@ -144,22 +237,7 @@ export const layer = Layer.effect(
             })
           }
           const rolloutId = uuidv7()
-          const finish = (exit: Exit.Exit<unknown, unknown>) =>
-            writer
-              .FinishRollout({
-                userId,
-                rolloutId,
-                versionId,
-                status: Exit.isSuccess(exit) ? "completed" : Cause.hasInterruptsOnly(exit.cause) ? "stopped" : "failed",
-                error: Exit.isFailure(exit)
-                  ? Option.getOrNull(
-                      Option.map(Cause.findErrorOption(exit.cause), (e) =>
-                        e instanceof GenerationFailed ? e.message : String(e)
-                      )
-                    )
-                  : null
-              })
-              .pipe(Effect.catch((error) => Effect.logError(`closing rollout ${rolloutId} failed`, error)))
+          const finish = finishing(request, rolloutId)
           // Opened and closed as a resource of the stream's scope: once it's open, it's closed
           // whenever and however the generation ends, a stop before the first token included.
           yield* Effect.acquireRelease(
@@ -219,14 +297,7 @@ export const layer = Layer.effect(
             resolveImages: (input) =>
               hydrateMessageImages(input, model, (id) => reader.GetMediaFile({ userId, mediaId: id }), config.dataDir)
           })
-          // The registered reply parsers, in order: the leading tagged sections (replySections.ts).
-          return execution.replyParsers
-            .list()
-            .flatMap((parser) => {
-              const parse = parser.create({ request, generation })
-              return parse ? [{ parse, fresh: () => parser.create({ request, generation })! }] : []
-            })
-            .reduce((stream, { parse, fresh }) => throughParse(stream, parse, fresh), reply)
+          return parsed(request, generation, reply)
         })
       )
 

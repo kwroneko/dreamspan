@@ -2,6 +2,7 @@ import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.t
 import { agentReplyStrategy } from "./agent/strategy.ts"
 import { historyTools } from "./agent/tools/history.ts"
 import { listNotes, switchNote } from "./agent/tools/notes.ts"
+import { lookupLore } from "./agent/tools/lore.ts"
 import { setPresence } from "./agent/tools/presence.ts"
 import { cardSwapMode, narratorMode, plainMode, type OrchestrationMode } from "./agent/modes.ts"
 import type { RolloutTool } from "./agent/tools.ts"
@@ -51,7 +52,7 @@ export class ExecutionRegistry extends Context.Service<
       yield* orchestrationModes.register(narratorMode)
       yield* orchestrationModes.register(cardSwapMode)
       const rolloutTools = makeRegistry<RolloutTool<never>>()
-      for (const tool of [...historyTools, listNotes, switchNote, setPresence] as ReadonlyArray<RolloutTool<never>>)
+      for (const tool of [...historyTools, lookupLore, listNotes, switchNote, setPresence] as ReadonlyArray<RolloutTool<never>>)
         yield* rolloutTools.register(tool)
       const replies = makeRegistry<ReplyOutputStrategy>()
       const summaries = makeRegistry<SummaryStrategy>()

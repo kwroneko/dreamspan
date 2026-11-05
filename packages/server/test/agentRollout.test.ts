@@ -4,7 +4,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Type } from "@earendil-works/pi-ai"
 import type { VersionId } from "@rp/shared/chat.ts"
-import { Effect } from "effect"
+import { Deferred, Effect, Fiber } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import type { ServerResponse } from "node:http"
 import { databaseFile } from "../src/db/connection.ts"
@@ -14,7 +14,7 @@ import { ExecutionRegistry } from "../src/execution.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
-import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
+import { anthropicSse, completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
 const read = (dataDir: string, versionId: VersionId) => {
   const db = new DatabaseSync(databaseFile(dataDir), { readOnly: true })
@@ -378,6 +378,7 @@ describe("agent rollouts", () => {
         "search_summaries",
         "search_chat",
         "read_messages",
+        "lookup_lore",
         "list_notes",
         "switch_note",
         "set_presence"
@@ -491,6 +492,190 @@ describe("agent rollouts", () => {
           ["call_b", true]
         ]
       )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("send_message text goes through the reply parsers: its leading section is stored apart", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((_request, res) =>
+            sse(res, toolCallChunks("send_message", { message: "<thinking>Plan: wave.</thinking>\n\nAnsel waves." }))
+          )
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        presetFields: {
+          reply_sections: { enabled: true, pairs: [{ open: "<thinking>", close: "</thinking>" }], send_back: 0 }
+        },
+        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+      })
+      assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
+      assert.strictEqual(version.content, "Ansel waves.")
+      assert.deepStrictEqual(version.replySections, {
+        sections: [{ lead: "", open: "<thinking>", text: "Plan: wave.", close: "</thinking>" }],
+        gap: "\n\n"
+      })
+      const of = (tag: string) =>
+        events.flatMap((e) => (e._tag === tag && "text" in e && e.versionId === version.id ? [e.text] : []))
+      assert.strictEqual(of("Section").join(""), "Plan: wave.")
+      assert.notInclude(of("Delta").join(""), "<thinking>")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("Anthropic: a tool round trip, with a tail cache breakpoint on the rollout's last message", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      yield* registry.rolloutTools.register(lookup as RolloutTool<never>)
+      yield* registry.orchestrationModes.register({
+        ...registry.orchestrationModes.get("narrator")!,
+        plan: () => ({ strategy: "agent", tools: ["look_up"], contract: "final_text", turnCap: 4 })
+      })
+      const start = {
+        type: "message_start",
+        message: {
+          id: "msg_1",
+          type: "message",
+          role: "assistant",
+          model: "mock-model",
+          content: [],
+          stop_reason: null,
+          usage: { input_tokens: 10, output_tokens: 1 }
+        }
+      }
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const messages = (request.body?.messages ?? []) as Array<{ content: Array<{ type: string }> | string }>
+            const last = messages.at(-1)?.content
+            const answered = Array.isArray(last) && last.some((b) => b.type === "tool_result")
+            anthropicSse(
+              res,
+              answered
+                ? [
+                    start,
+                    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+                    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Ansel waves." } },
+                    { type: "content_block_stop", index: 0 },
+                    { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } },
+                    { type: "message_stop" }
+                  ]
+                : [
+                    start,
+                    {
+                      type: "content_block_start",
+                      index: 0,
+                      content_block: { type: "tool_use", id: "toolu_1", name: "look_up", input: {} }
+                    },
+                    {
+                      type: "content_block_delta",
+                      index: 0,
+                      delta: { type: "input_json_delta", partial_json: '{"topic":"lighthouse"}' }
+                    },
+                    { type: "content_block_stop", index: 0 },
+                    { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 5 } },
+                    { type: "message_stop" }
+                  ]
+            )
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "anthropic", baseUrl: mock.url, apiKey: "sk-ant-made-up-for-tests-0000" },
+        model: { cacheBreakpoints: "explicit" },
+        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+      })
+      assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
+      assert.strictEqual(version.content, "Ansel waves.")
+      type Block = { type: string; text?: string; id?: string; tool_use_id?: string; cache_control?: unknown }
+      type Body = { tools?: Array<{ name: string }>; messages: Array<{ role: string; content: Array<Block> }> }
+      const bodies = mock
+        .requests()
+        .filter((r) => r.path.startsWith("/v1/messages"))
+        .map((r) => r.body as unknown as Body)
+      assert.strictEqual(bodies.length, 2)
+      const [first, second] = bodies as [Body, Body]
+      assert.deepStrictEqual(
+        first.tools?.map((t) => t.name),
+        ["look_up"]
+      )
+      // The prefix is the first request's, then the tool turn and its result.
+      const strip = (blocks: Array<Block>) => blocks.map(({ cache_control: _, ...b }) => b)
+      assert.deepStrictEqual(
+        second.messages.slice(0, first.messages.length).map((m) => [m.role, strip(m.content)]),
+        first.messages.map((m) => [m.role, strip(m.content)])
+      )
+      const suffix = second.messages.slice(first.messages.length)
+      assert.deepStrictEqual(
+        suffix.map((m) => [m.role, m.content.map((b) => b.type)]),
+        [
+          ["assistant", ["tool_use"]],
+          ["user", ["tool_result"]]
+        ]
+      )
+      assert.strictEqual(suffix[1]!.content[0]!.tool_use_id, "toolu_1")
+      // The tail breakpoint: the tool result carries a cache marker, so the next request reads this one.
+      assert.isDefined(suffix[1]!.content.at(-1)!.cache_control, JSON.stringify(second.messages))
+      const markers = JSON.stringify(second).match(/cache_control/g) ?? []
+      assert.isAtMost(markers.length, 4, "Anthropic's limit of four markers")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a stop while a tool runs leaves the rollout stopped, with the transcript flushed", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const started = yield* Deferred.make<VersionId>()
+      const slow: RolloutTool<{ readonly topic: string }> = {
+        ...lookup,
+        id: "slow_look_up",
+        execute: (context) =>
+          Deferred.succeed(started, context.versionId).pipe(
+            Effect.andThen(Effect.never),
+            Effect.as({ text: "never" })
+          )
+      }
+      const registry = yield* ExecutionRegistry
+      yield* registry.rolloutTools.register(slow as RolloutTool<never>)
+      yield* registry.orchestrationModes.register({
+        ...registry.orchestrationModes.get("narrator")!,
+        plan: () => ({ strategy: "agent", tools: ["slow_look_up"], contract: "both", turnCap: 4 })
+      })
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((_request, res) => sse(res, toolCallChunks("slow_look_up", { topic: "lighthouse" })))
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const stopper = yield* Deferred.await(started).pipe(
+        Effect.andThen((versionId) => api.StopGeneration({ versionId })),
+        Effect.forkScoped
+      )
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+      })
+      yield* Fiber.join(stopper)
+      assert.strictEqual(version.status, "stopped")
+      assert.strictEqual(mock.requests().filter((r) => r.path === "/v1/chat/completions").length, 1)
+      const db = read(config.dataDir, version.id)
+      assert.deepInclude(db.rollout, { status: "stopped", step_count: 1 })
+      const transcript = db.transcript!.filter((m) => m.role !== "system")
+      assert.deepStrictEqual(
+        transcript.map((m) => m.role),
+        ["rpRequest", "assistant", "toolResult"]
+      )
+      // The call that was cut off is marked, so a resume runs it again.
+      assert.deepInclude(transcript[2], { toolCallId: "call_1", isError: true, details: { interrupted: true } })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

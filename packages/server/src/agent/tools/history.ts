@@ -49,40 +49,80 @@ const pathMessages = (context: ToolContext) =>
         older = window.older
         first = false
       }
-      // The user's messages without a speaker are the persona's they play there.
-      const { playedByMe } = foldState(
-        yield* context.reader.StateEventsAt({
-          userId: context.userId,
-          chatId: context.chatId,
-          slotId: context.leafSlotId,
-          forkId: context.forkId
-        })
+      const name = yield* namer(
+        context,
+        entries.flatMap((e) => (e.version.speakerEntityId ? [e.version.speakerEntityId] : []))
       )
-      const persona = playedByMe.at(-1) ?? null
-      const speakers = [
-        ...new Set([
-          ...entries.flatMap((e) => (e.version.speakerEntityId ? [e.version.speakerEntityId] : [])),
-          ...(persona ? [persona] : [])
-        ])
-      ]
-      const cards = speakers.length
-        ? yield* context.reader.CastCards({ userId: context.userId, entityIds: speakers as Array<EntityId> })
-        : []
-      const names = new Map(cards.map((card) => [card.entityId as string, card.modelName ?? card.name]))
-      const user = (persona && names.get(persona)) ?? "User"
       return entries.flatMap((entry): Array<PathMessage> => {
         const { version } = entry
         if (entry.contextExcluded || version.status !== "complete" || !version.content.trim()) return []
-        const speaker = names.get(version.speakerEntityId ?? "") ?? (version.writer === "human" ? user : "Narrator")
-        // A template message (a greeting) as the model read it: its names filled in [P: only these two].
-        const content =
-          version.macroMode === "template"
-            ? version.content.replace(/\{\{char\}\}/gi, speaker).replace(/\{\{user\}\}/gi, user)
-            : version.content
-        return [{ n: (entry.position ?? entry.depth) + 1, speaker, content }]
+        return [name({ ...version, n: (entry.position ?? entry.depth) + 1 })]
       })
     })
   )
+
+/**
+ * Names the messages' speakers as the model knows them: a card's name, the persona the user
+ * plays there for the user's own messages without one. A template message (a greeting) is
+ * shown as the model read it, its names filled in [P: only these two].
+ */
+const namer = (context: ToolContext, speakerIds: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const { playedByMe } = foldState(
+      yield* context.reader.StateEventsAt({
+        userId: context.userId,
+        chatId: context.chatId,
+        slotId: context.leafSlotId,
+        forkId: context.forkId
+      })
+    )
+    const persona = playedByMe.at(-1) ?? null
+    const speakers = [...new Set([...speakerIds, ...(persona ? [persona] : [])])]
+    const cards = speakers.length
+      ? yield* context.reader.CastCards({ userId: context.userId, entityIds: speakers as Array<EntityId> })
+      : []
+    const names = new Map(cards.map((card) => [card.entityId as string, card.modelName ?? card.name]))
+    const user = (persona && names.get(persona)) ?? "User"
+    return (message: {
+      readonly n: number
+      readonly speakerEntityId: string | null
+      readonly writer: string
+      readonly macroMode: string
+      readonly content: string
+    }): PathMessage => {
+      const speaker =
+        names.get(message.speakerEntityId ?? "") ?? (message.writer === "human" ? user : "Narrator")
+      const content =
+        message.macroMode === "template"
+          ? message.content.replace(/\{\{char\}\}/gi, speaker).replace(/\{\{user\}\}/gi, user)
+          : message.content
+      return { n: message.n, speaker, content }
+    }
+  })
+
+/**
+ * The messages before the one being generated that full-text search finds for `words`, newest
+ * first (reader `SearchChat`); null where the fork places inserted messages, so the path is read.
+ */
+const searched = (context: ToolContext, words: ReadonlyArray<string>, before: number | undefined) =>
+  Effect.gen(function* () {
+    if (context.leafSlotId === null) return [] as ReadonlyArray<PathMessage>
+    const rows = yield* context.reader.SearchChat({
+      userId: context.userId,
+      chatId: context.chatId,
+      forkId: context.forkId,
+      leafSlotId: context.leafSlotId,
+      tokens: words.flatMap((w) => w.match(/[\p{L}\p{N}]+/gu) ?? []),
+      before: before === undefined ? null : before - 1,
+      limit: 200
+    })
+    if (rows === null) return null
+    const name = yield* namer(
+      context,
+      rows.flatMap((r) => (r.speakerEntityId ? [r.speakerEntityId] : []))
+    )
+    return rows.filter((r) => r.content.trim()).map((r) => name({ ...r, n: r.position + 1 }))
+  })
 
 /** The words of a query, for matching every one of them, case aside. */
 const wordsOf = (query: string) =>
@@ -150,14 +190,14 @@ const searchChat: RolloutTool<{
         const words = wordsOf(query)
         if (words.length === 0) return { text: "Give some words to search for.", isError: true }
         const who = speaker?.trim().toLowerCase()
-        const hits = (yield* pathMessages(context))
+        const found = (yield* searched(context, words, before_message)) ?? (yield* pathMessages(context)).toReversed()
+        const hits = found
           .filter(
             (m) =>
               (before_message === undefined || m.n < before_message) &&
               (!who || m.speaker.toLowerCase() === who) &&
               matches(m.content, words)
           )
-          .toReversed()
           .slice(0, Math.min(limit, 20))
         if (hits.length === 0) return { text: `No earlier messages match “${query}”.` }
         return { text: hits.map((m) => `Message ${m.n}, ${m.speaker}: ${excerpt(m.content, words)}`).join("\n") }
