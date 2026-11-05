@@ -415,6 +415,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.SetCardFavourite({ entityId: owner.editor.cardEntityId, favourite: true }), "NotFound")
   },
+  GetSummaryRevisionRequest: {
+    probe: (actor, owner) =>
+      refused(actor.api.GetSummaryRevisionRequest({ revisionId: owner.summary.revisionId }), "NotFound")
+  },
   GetSummaryDetails: {
     probe: (actor, owner) => refused(actor.api.GetSummaryDetails({ summaryId: owner.summary.id }), "NotFound")
   },
@@ -3828,6 +3832,11 @@ const storage: Record<
         inputs: [{ slotId: owner.chat.slotId, versionId: owner.chat.versionId, amendCount: 0 }],
         children: []
       }),
+      "NotFound"
+    ),
+  GetSummaryRevisionRequest: (reader, actor, owner) =>
+    refused(
+      reader.GetSummaryRevisionRequest({ userId: actor.user.id, revisionId: owner.summary.revisionId }),
       "NotFound"
     ),
   GetSummaryDetails: (reader, actor, owner) =>

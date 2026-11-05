@@ -10,6 +10,7 @@ import { SqlClient } from "effect/sql"
 import { lineageValidator, selectSummaryLayer } from "./lcmLayer.ts"
 import { insertedOnPath, pathView, type LcmView } from "./lcmDisplay.ts"
 import { positionOf, type PathPiece } from "./displayPath.ts"
+import { toLlmRequest, type LlmRequestRow } from "./providers.ts"
 import { readSummary } from "./lcmReads.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
@@ -202,9 +203,14 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           token_count: number
           content: string
           created_at: number
-        }>`SELECT id, origin, token_count, content, created_at FROM summary_revisions WHERE summary_id = ${summaryId} OR summary_id IN (
+          rollout_id: string | null
+        }>`SELECT id, origin, token_count, content, created_at, rollout_id FROM summary_revisions WHERE summary_id = ${summaryId} OR summary_id IN (
           SELECT result_summary_id FROM summarization_jobs WHERE source_summary_id=${summaryId} AND status='complete'
         ) ORDER BY seq`
+        const requests = rows.some((r) => r.rollout_id !== null)
+          ? yield* sql<LlmRequestRow & { rollout_id: string }>`SELECT * FROM llm_requests WHERE owner_user_id=${userId}
+              AND rollout_id IN (SELECT value FROM json_each(${JSON.stringify(rows.flatMap((r) => (r.rollout_id ? [r.rollout_id] : [])))})) ORDER BY started_at,id`
+          : []
         return rows.map((r, n) => ({
           id: r.id as never,
           number: n + 1,
@@ -212,7 +218,9 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           tokens: r.token_count,
           content: r.content,
           createdAt: r.created_at,
-          selected: r.id === head.revisionId
+          selected: r.id === head.revisionId,
+          rolloutId: r.rollout_id,
+          requests: requests.filter((q) => q.rollout_id === r.rollout_id).map(toLlmRequest)
         }))
       }).pipe(inSummaryFork(sql, userId, summaryId, forkId), query("ListSummaryRevisions")),
 

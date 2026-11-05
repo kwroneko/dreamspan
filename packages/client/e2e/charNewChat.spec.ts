@@ -68,7 +68,7 @@ for (const width of [390, 1440]) {
       await page.getByRole("button", { name: "Send", exact: true }).click()
       await expect(page).toHaveURL(/\/chats\//)
       expect(new URL(page.url()).pathname).not.toBe(`/chats/${old.chat.id}`)
-      await expect(page.getByText(content, { exact: true })).toBeVisible()
+      await expect(page.getByRole("article").getByText(content, { exact: true })).toBeVisible()
       // A group/chat scope (also with a retained character breadcrumb) is a branch list.
       for (const query of [`forks=${group.chat.id}`, `forks=${group.chat.id}&character=${card.entityId}`, ""]) {
         await page.goto(`${server().url}/?side=chats&${query}`)

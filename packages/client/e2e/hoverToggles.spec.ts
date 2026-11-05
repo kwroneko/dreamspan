@@ -45,6 +45,13 @@ const reveal = async (page: Page, surface: Locator, toggle: Locator, opener: Loc
   await opener.focus()
   await expect(toggle).toHaveCSS("opacity", "1")
   await page.keyboard.press("Tab")
+  // Chat rows also expose their portrait-stack explanation in the tab order.
+  if (
+    await surface
+      .locator("[tabindex='0'][aria-label^='Characters:']")
+      .evaluateAll((nodes) => nodes.some((node) => node === document.activeElement))
+  )
+    await page.keyboard.press("Tab")
   await expect(toggle).toBeFocused()
   expect(await toggle.boundingBox()).toEqual(box)
 }

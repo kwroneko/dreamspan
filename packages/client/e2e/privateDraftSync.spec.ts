@@ -27,6 +27,62 @@ const refuseDraftSaves = async (page: Page, refuse: () => boolean, onRefusal?: (
   })
 }
 
+test("the summarization instruction waits for its draft read before editing", async ({ page }) => {
+  const stored = "An instruction saved before this editor opens."
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const ownerId = (yield* api.Whoami()).id
+      const address = { ownerId, targetId: "Settings → Chats", field: "Summarization instruction" }
+      const draft = yield* api.GetUserDraft(address)
+      yield* api.SaveUserDraft({
+        ...address,
+        content: stored,
+        draftId: draft?.id ?? null,
+        expectedRowVersion: draft?.rowVersion ?? null,
+        expectedSession: draft?.session ?? null
+      })
+    })
+  )
+  let hold = true
+  const reads: Array<() => void> = []
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = String(data)
+      if (hold && request.includes('"tag":"GetUserDraft"') && request.includes('"field":"Summarization instruction"'))
+        reads.push(() => upstream.send(data))
+      else upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(server().url + "/settings/chats")
+  await expect.poll(() => reads.length > 0).toBe(true)
+  await expect(page.getByRole("switch", { name: "New chats summarize older messages", exact: true })).toBeEnabled()
+  const box = page.getByLabel("Summarization instruction", { exact: true })
+  await expect(box).toBeDisabled()
+  hold = false
+  for (const forward of reads) forward()
+  await expect(box).toBeEditable()
+  await expect(box).toHaveValue(stored)
+  await box.fill("Replace the loaded instruction.")
+  await expect(box).toHaveValue("Replace the loaded instruction.")
+  await expect
+    .poll(() =>
+      asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const ownerId = (yield* api.Whoami()).id
+          return (yield* api.GetUserDraft({
+            ownerId,
+            targetId: "Settings → Chats",
+            field: "Summarization instruction"
+          }))?.content
+        })
+      )
+    )
+    .toBe("Replace the loaded instruction.")
+})
+
 for (const scheme of ["light", "dark"] as const)
   for (const width of [1440, 390]) {
     test(`open private drafts refresh and resolve conflicts across devices at ${width} (${scheme})`, async ({

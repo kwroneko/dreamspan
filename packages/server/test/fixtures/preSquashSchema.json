@@ -812,6 +812,18 @@
     },
     {
       "type": "index",
+      "name": "summary_responses_rollout",
+      "tbl_name": "summary_responses",
+      "sql": "CREATE INDEX summary_responses_rollout ON summary_responses(rollout_id)"
+    },
+    {
+      "type": "index",
+      "name": "summary_revisions_rollout",
+      "tbl_name": "summary_revisions",
+      "sql": "CREATE INDEX summary_revisions_rollout ON summary_revisions(rollout_id) WHERE rollout_id IS NOT NULL"
+    },
+    {
+      "type": "index",
       "name": "summary_revisions_summary",
       "tbl_name": "summary_revisions",
       "sql": "CREATE INDEX summary_revisions_summary ON summary_revisions(summary_id, seq)"
@@ -1214,6 +1226,12 @@
     },
     {
       "type": "table",
+      "name": "summary_attempts",
+      "tbl_name": "summary_attempts",
+      "sql": "CREATE TABLE summary_attempts ( job_id TEXT NOT NULL REFERENCES summarization_jobs(id) ON DELETE CASCADE, epoch INTEGER NOT NULL, rollout_id TEXT NOT NULL UNIQUE REFERENCES rollouts(id) ON DELETE CASCADE, PRIMARY KEY (job_id, epoch) ) STRICT"
+    },
+    {
+      "type": "table",
       "name": "summary_inputs",
       "tbl_name": "summary_inputs",
       "sql": "CREATE TABLE summary_inputs ( summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, slot_id TEXT NOT NULL REFERENCES slots(id), version_id TEXT REFERENCES versions(id), amend_count INTEGER NOT NULL DEFAULT 0 CHECK (amend_count >= 0), PRIMARY KEY (summary_id, ordinal) ) STRICT, WITHOUT ROWID"
@@ -1232,9 +1250,15 @@
     },
     {
       "type": "table",
+      "name": "summary_responses",
+      "tbl_name": "summary_responses",
+      "sql": "CREATE TABLE summary_responses ( request_id TEXT PRIMARY KEY REFERENCES llm_requests(id) ON DELETE CASCADE, rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE, response TEXT NOT NULL ) STRICT"
+    },
+    {
+      "type": "table",
       "name": "summary_revisions",
       "tbl_name": "summary_revisions",
-      "sql": "CREATE TABLE summary_revisions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, content TEXT NOT NULL, token_count INTEGER NOT NULL, origin TEXT NOT NULL CHECK (origin IN ('generated', 'user', 'changeset', 'imported')), created_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE summary_revisions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, content TEXT NOT NULL, rollout_id TEXT REFERENCES rollouts(id), token_count INTEGER NOT NULL, origin TEXT NOT NULL CHECK (origin IN ('generated', 'user', 'changeset', 'imported')), created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
@@ -2558,6 +2582,18 @@
     },
     {
       "type": "trigger",
+      "name": "summary_attempts_immutable",
+      "tbl_name": "summary_attempts",
+      "sql": "CREATE TRIGGER summary_attempts_immutable BEFORE UPDATE ON summary_attempts BEGIN SELECT RAISE(ABORT, 'summary attempts are immutable'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "summary_attempts_same_chat",
+      "tbl_name": "summary_attempts",
+      "sql": "CREATE TRIGGER summary_attempts_same_chat BEFORE INSERT ON summary_attempts WHEN (SELECT chat_id FROM summarization_jobs WHERE id=NEW.job_id) IS NOT (SELECT chat_id FROM rollouts WHERE id=NEW.rollout_id) BEGIN SELECT RAISE(ABORT, 'summary attempt must belong to its job chat'); END"
+    },
+    {
+      "type": "trigger",
       "name": "summary_inputs_chain",
       "tbl_name": "summary_inputs",
       "sql": "CREATE TRIGGER summary_inputs_chain BEFORE INSERT ON summary_inputs WHEN NOT EXISTS ( SELECT 1 FROM summaries s JOIN slots i ON i.id = NEW.slot_id WHERE s.id = NEW.summary_id AND s.level = 1 AND NEW.ordinal >= 0 AND NEW.ordinal < s.slot_count AND NOT EXISTS (SELECT 1 FROM slot_parents p WHERE p.slot_id = NEW.slot_id) AND NEW.ordinal = coalesce((SELECT ordinal + 1 FROM summary_inputs WHERE summary_id = s.id ORDER BY ordinal DESC LIMIT 1), 0) AND CASE WHEN NEW.ordinal = 0 THEN NEW.slot_id = s.first_slot_id WHEN i.parent_slot_id = (SELECT slot_id FROM summary_inputs WHERE summary_id = s.id AND ordinal = NEW.ordinal - 1) THEN 1 ELSE EXISTS (WITH RECURSIVE up(id, parent_slot_id, inserted, depth) AS ( SELECT id, parent_slot_id, inserted, depth FROM slots WHERE id = (SELECT slot_id FROM summary_inputs WHERE summary_id = NEW.summary_id AND ordinal = NEW.ordinal - 1) UNION ALL SELECT a.id, a.parent_slot_id, a.inserted, a.depth FROM slots a JOIN up ON a.id = up.parent_slot_id WHERE up.inserted = 1 AND up.depth > (SELECT depth FROM slots WHERE id = NEW.slot_id) ) SELECT 1 FROM up WHERE up.inserted = 1 AND up.id <> NEW.slot_id AND up.parent_slot_id IS i.parent_slot_id AND (i.inserted = 0 OR up.id > i.id)) END ) BEGIN SELECT RAISE(ABORT, 'summary inputs must follow their declared chain in order'); END"
@@ -2669,6 +2705,18 @@
       "name": "summary_reruns_same_chat",
       "tbl_name": "summary_reruns",
       "sql": "CREATE TRIGGER summary_reruns_same_chat BEFORE INSERT ON summary_reruns WHEN (NEW.summary_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.summary_id) IS NOT NEW.chat_id) OR (NEW.job_id IS NOT NULL AND (SELECT chat_id FROM summarization_jobs WHERE id = NEW.job_id) IS NOT NEW.chat_id) BEGIN SELECT RAISE(ABORT, 'a rerun request must name something in its own chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "summary_responses_immutable",
+      "tbl_name": "summary_responses",
+      "sql": "CREATE TRIGGER summary_responses_immutable BEFORE UPDATE ON summary_responses BEGIN SELECT RAISE(ABORT, 'summary responses are immutable'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "summary_responses_request_rollout",
+      "tbl_name": "summary_responses",
+      "sql": "CREATE TRIGGER summary_responses_request_rollout BEFORE INSERT ON summary_responses WHEN (SELECT rollout_id FROM llm_requests WHERE id=NEW.request_id) IS NOT NEW.rollout_id BEGIN SELECT RAISE(ABORT, 'summary response must belong to its request rollout'); END"
     },
     {
       "type": "trigger",

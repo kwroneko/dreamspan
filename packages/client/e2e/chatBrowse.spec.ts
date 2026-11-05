@@ -27,7 +27,7 @@ test.beforeAll(async () => {
         yield* api.RenameChat({ chatId: started.chat.id, name })
         if (name === "Zulu solo") {
           chatId = started.chat.id
-          yield* api.PinFork({ forkId: started.chat.currentForkId!, pinned: true })
+          yield* api.SetChatPin({ chatId: started.chat.id, leaf: null, pinned: true })
           yield* api.CreateFork({
             chatId: started.chat.id,
             fromForkId: null,
