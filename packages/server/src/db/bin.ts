@@ -105,6 +105,7 @@ const versionBytes = (v: string) =>
 
 /** What deleting a chat for good frees besides its versions, each part selected by chat id. */
 const chatRecordBytes = [
+  `SELECT ${bytes("p.response")} AS n FROM summary_responses p JOIN rollouts r ON r.id=p.rollout_id WHERE r.chat_id = ?`,
   `SELECT ${bytes("value_json")} AS n FROM state_events WHERE chat_id = ?`,
   `SELECT ${bytes("error")} + ${bytes("cache_observed_json")} FROM rollouts WHERE chat_id = ?`,
   `SELECT ${bytes("p.context_snapshot_json")} + ${bytes("p.transcript_json")} + ${bytes("p.sent_context_json")}

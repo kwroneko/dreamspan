@@ -380,3 +380,14 @@ export const makeLcmHandlers = Effect.gen(function* () {
       ).pipe(internal("DiscardSummaryDraft"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
 })
+
+/** Kept in a small handler layer to stay below TypeScript's RPC union instantiation limit. */
+export const makeSummaryRequestHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  return {
+    GetSummaryRevisionRequest: (params) =>
+      Effect.flatMap(CurrentUser, (user) => reader.GetSummaryRevisionRequest({ userId: user.id, ...params })).pipe(
+        internal("GetSummaryRevisionRequest")
+      )
+  } satisfies Partial<Parameters<typeof AppApi.of>[0]>
+})

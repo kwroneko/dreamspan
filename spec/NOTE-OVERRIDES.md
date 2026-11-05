@@ -51,7 +51,7 @@ The owner's rule for every placement below: no invented space or rows. Each sits
 - **[P] Composition** (`withReplacement` in `stages.ts`) sends the note's text in the target's place, as a piece whose source is the note (so the request inspector names it), expanded as the target would be (a card field's bindings, trimmed and cleaned as fields are); a card's note replacing a preset prompt has `{{char}}` as its card. A note at its own position leaves an empty piece. A note's condition makes the target volatile, due or not.
 - **[P] Card prompt overrides:** a note replacing `main` or `jailbreak` wins over the speaking card's system prompt or post-history instructions; a note replacing the card's `system_prompt` field changes the override's text.
 - **For Phase 4 (agent tools):** to change a card or prompt in a chat, create a note with `replaces` (and `content`, and `placement` with `own_position` for text going elsewhere), and turn it on at the version that produced it. `CreateChatNote` takes `replaces` and `content` for this. Nothing else in assembly needs to know; disabling the `replacements` stage turns the feature off (notes then go at their own placements).
-- **[P] Version:** `ASSEMBLER_VERSION` 47.
+- **[P] Version:** `ASSEMBLER_VERSION` 48 (47 is Phase 4's agent replies). Agent replies assemble through the same stages, so a card-swap reply's tail card takes a replacing note as the card's place does; `RebuildContext` replays it from the snapshot's pinned notes.
 
 ## 4. The cache-breakpoint display
 

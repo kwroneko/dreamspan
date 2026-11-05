@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 47
+export const ASSEMBLER_VERSION = 48
 
 export type Role = "system" | "user" | "assistant"
 
@@ -287,8 +287,18 @@ export interface NoteReplacement {
   piece?: number
 }
 
+/** What an agent reply mode changes in its context (spec/AGENTIC.md §6). */
+export interface AgentAssembly {
+  /** Told the model with the end of the request: its tools, and how to give its reply. */
+  readonly instructions: string
+  /** Card-swap: the speaker's card goes at the tail instead of with the others (DESIGN §5.2). */
+  readonly cardsAtTail: boolean
+}
+
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
+  /** An agent reply's assembly options, for a rebuild. */
+  readonly agentAssembly?: AgentAssembly
   readonly contextBudget?: ContextBudget
   /** The preset's reply-section setting a reply is parsed with; absent for summaries. */
   readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings

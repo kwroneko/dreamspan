@@ -1,5 +1,6 @@
 // The message graph as the rest of the app sees it (DATA-MODEL.md §4).
 import { Schema } from "effect"
+import { StepsSummary } from "./agent.ts"
 import { AvatarCrop } from "./media.ts"
 import { idSchema } from "./id.ts"
 import { StoredRewrite, VersionRewrite } from "./regexScripts.ts"
@@ -237,6 +238,8 @@ export class Version extends Schema.Class<Version>("Version")({
    * recorded. The request inspector reads it whole (inspectorApi.ts).
    */
   context: Schema.NullOr(Schema.Struct({ issues: Schema.Array(ContextIssue) })),
+  /** An agent rollout's tool calls and run time (spec/AGENTIC.md §5.1); absent without steps. */
+  steps: Schema.optionalKey(StepsSummary),
   /**
    * Optimistic concurrency for amending a user-written version: one more than the number
    * of times it was amended, counted from its kept history (version_history).

@@ -44,7 +44,7 @@ export function PanelVariant({ store }: { store: EditorStore }) {
       <Button
         className="h-8! px-2!"
         aria-label="Make a variant"
-        hint="Makes a named copy of this lorebook that receives the original's updates."
+        hint="Makes a named copy of this lorebook with its own changes."
         onClick={() => setOpen(true)}
       >
         <Icon name="branch" />

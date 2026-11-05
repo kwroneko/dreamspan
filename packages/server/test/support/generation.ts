@@ -59,6 +59,8 @@ export const generateReply = (
     readonly mira?: Partial<CardDoc>
     /** The connection's Token counts set to its own provider (off by default, DESIGN §11). */
     readonly countWithProvider?: boolean
+    /** Chat-wide state events set before the reply: a reply mode, say. */
+    readonly state?: ReadonlyArray<StateEventData>
   }
 ) =>
   Effect.gen(function* () {
@@ -136,6 +138,7 @@ export const generateReply = (
     const state = (data: StateEventData) =>
       writer.AddStateEvent({ userId, chatId: chat.id, slotId: null, versionId: null, scope: null, data })
     yield* state({ key: "played_by_me.set", value: { entities: [tobin.entityId as EntityId] } })
+    for (const data of options.state ?? []) yield* state(data)
     const events: Array<ChatEvent> = []
     yield* api.SubscribeChat({ chatId: chat.id }).pipe(
       Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),

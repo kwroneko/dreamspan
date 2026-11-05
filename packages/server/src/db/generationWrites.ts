@@ -104,6 +104,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       connectionId,
       modelId,
       snapshot,
+      mode,
       issues,
       variables,
       frozenMessages
@@ -141,6 +142,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           slot_id: slotId,
           leaf_slot_id: leafSlotId,
           role: "narrator",
+          mode: mode ?? null,
           connection_id: connectionId,
           model_id: modelId,
           request_class: "interactive",
@@ -209,6 +211,13 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         yield* ownedRollout(userId, rolloutId)
         yield* sql`UPDATE rollout_payloads SET sent_context_json = ${wire} WHERE rollout_id = ${rolloutId}`
       }).pipe(transaction(sql, "RecordSentContext")),
+
+    SaveRolloutTranscript: ({ userId, rolloutId, transcript, steps }) =>
+      Effect.gen(function* () {
+        yield* ownedRollout(userId, rolloutId)
+        yield* sql`UPDATE rollout_payloads SET transcript_json = ${transcript} WHERE rollout_id = ${rolloutId}`
+        yield* sql`UPDATE rollouts SET step_count = ${steps}, updated_at = ${Date.now()} WHERE id = ${rolloutId}`
+      }).pipe(transaction(sql, "SaveRolloutTranscript")),
 
     FinishRollout: ({ userId, rolloutId, versionId, status, error }) =>
       Effect.gen(function* () {

@@ -2,12 +2,12 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { Doc, RefId } from "@rp/shared/library.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { textField } from "@rp/shared/editing.ts"
+import { HELD_FIELD, textField } from "@rp/shared/editing.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import type { MergeSelection } from "@rp/shared/forkMerge.ts"
 import * as Database from "../src/db/Database.ts"
 import { docHash, searchText } from "../src/db/documents.ts"
-import { cardDoc } from "./support/docs.ts"
+import { cardDoc, presetDoc } from "./support/docs.ts"
 import { testWorkers } from "./support/bundles.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -227,6 +227,68 @@ describe("explicit library merges", () => {
       )
       assert.strictEqual(
         (yield* writer.MergeFollowed({ userId, refId: child.id }).pipe(Effect.flip))._tag,
+        "RefOperationRefused"
+      )
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("cleared preset structural drafts allow merging; empty text drafts still refuse", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, edit } = yield* setup
+      const parent = (yield* writer.CreateEntity({
+        userId,
+        kind: "preset",
+        label: "Synthetic preset",
+        subtitle: "",
+        doc: presetDoc(),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })).ref
+      const child = yield* writer.ForkRef({ userId, refId: parent.id, label: "Child", subtitle: "" })
+      yield* edit(parent.id, presetDoc([{ identifier: "main", content: "New parent text." }]))
+      const held = yield* writer.SaveDraft({
+        userId,
+        key: new DraftKey({ targetKind: "entity_field", targetId: child.id, field: HELD_FIELD }),
+        content: JSON.stringify({ deleted: ["main"] }),
+        images: [],
+        baseRevision: child.headRevisionId,
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+      assert.strictEqual(
+        (yield* reader.PreviewForkMerge({ userId, refId: child.id }).pipe(Effect.flip))._tag,
+        "RefOperationRefused"
+      )
+      yield* writer.SaveDraft({
+        userId,
+        key: held.key,
+        content: "",
+        images: [],
+        baseRevision: child.headRevisionId,
+        draftId: held.id,
+        expectedRowVersion: held.rowVersion,
+        expectedSession: held.session
+      })
+      const preview = yield* reader.PreviewForkMerge({ userId, refId: child.id })
+      assert.strictEqual(preview.ref.id, child.id)
+      yield* writer.SaveDraft({
+        userId,
+        key: new DraftKey({
+          targetKind: "entity_field",
+          targetId: child.id,
+          field: textField(["prompts", "identifier=main", "content"])
+        }),
+        content: "",
+        images: [],
+        baseRevision: child.headRevisionId,
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+      assert.strictEqual(
+        (yield* reader.PreviewForkMerge({ userId, refId: child.id }).pipe(Effect.flip))._tag,
         "RefOperationRefused"
       )
     }).pipe(Effect.provide(database()))

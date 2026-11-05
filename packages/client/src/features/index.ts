@@ -5,6 +5,7 @@ import * as snippets from "./snippets/index.tsx"
 import * as gallery from "./gallery/index.tsx"
 import * as cardRename from "./cardRename/index.tsx"
 import * as cardForks from "./cardForks/index.tsx"
+import * as forkMerge from "./forkMerge/index.tsx"
 import * as cardSources from "./cardSources/index.tsx"
 import * as cardExport from "./cardExport/index.tsx"
 import * as cardImport from "./cardImport/index.tsx"
@@ -31,6 +32,7 @@ import * as status from "./status.tsx"
 
 export const registerFeatures = () => {
   cardForks.register()
+  forkMerge.register()
   cardRename.register()
   gallery.register()
   cardSources.register()

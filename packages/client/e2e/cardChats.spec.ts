@@ -164,7 +164,7 @@ test("a first message typed before the chat exists survives leaving it, and goes
   // Sent, the chat has it, and a new chat with Fen starts empty.
   await page.getByRole("button", { name: /^Send/ }).click()
   await expect(page).toHaveURL(/\/chats\//)
-  await expect(page.getByText(text)).toBeVisible()
+  await expect(page.getByRole("article", { name: "Your message", exact: true }).getByText(text)).toBeVisible()
   await page.goto(`${server().url}/cards/${fen}/chat`)
   await expect(page.getByRole("heading", { name: "Fen" })).toBeVisible()
   await page.waitForTimeout(500)

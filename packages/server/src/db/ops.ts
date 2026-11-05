@@ -1,4 +1,5 @@
-import { SplitChats } from "@rp/shared/splitChat.ts"
+import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
+import { EditRefused } from "@rp/shared/editorApi.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
@@ -124,6 +125,7 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import { RolloutStep } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import {
@@ -307,6 +309,7 @@ const OpenLlmRequest = Schema.Struct({
 
 /** Closes a ledger row with what the request produced. */
 const CloseLlmRequest = Schema.Struct({
+  summaryResponse: Schema.optionalKey(Schema.String),
   textEstimate: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, tokenizer: Schema.String })),
   cacheIdentity: Schema.optionalKey(
     Schema.NullOr(
@@ -462,9 +465,9 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError, BinChanged])
   }),
   Rpc.make("SetSplitChat", {
-    payload: { userId: UserId, forkId: ForkId, split: Schema.Boolean },
-    success: Schema.Void,
-    error: Schema.Union([NotFound, StorageError])
+    payload: { userId: UserId, ...SetSplitChatFields },
+    success: ChatId,
+    error: Schema.Union([NotFound, StorageError, EditRefused])
   }),
   Rpc.make("ChangeBinLimit", {
     payload: { userId: UserId, ...BinLimitChange.fields },
@@ -2301,6 +2304,8 @@ export class WriteOps extends RpcGroup.make(
       connectionId: ConnectionId,
       modelId: ModelId,
       snapshot: Schema.String,
+      /** The orchestration mode it ran in, when not plain (spec/AGENTIC.md §6). */
+      mode: Schema.optionalKey(Schema.String),
       /** The snapshot's issues, kept on the rollout for its version to show. */
       issues: Schema.Array(ContextIssue),
       variables: Schema.Array(
@@ -2341,6 +2346,30 @@ export class WriteOps extends RpcGroup.make(
       status: Schema.Literals(["completed", "stopped", "failed"]),
       error: Schema.NullOr(Schema.String)
     },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * An agent rollout's transcript as it stands (spec/AGENTIC.md §3.3): the whole of it, replacing
+   * what was saved, and its step count (tool calls) for the version's badge.
+   */
+  /**
+   * A chat-state tool call's state events, attached to the rollout's version, with its receipt
+   * (rolloutWrites.ts). Receipted already: nothing is written, and the first result comes back.
+   */
+  Rpc.make("ApplyRolloutEffect", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      events: Schema.Array(StoredStateEventData),
+      result: Schema.String
+    },
+    success: Schema.Struct({ result: Schema.String, replayed: Schema.Boolean }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SaveRolloutTranscript", {
+    payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -2469,6 +2498,11 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, view: ShellForksView },
     success: ShellForksRead,
     error: StorageError
+  }),
+  Rpc.make("GetSummaryRevisionRequest", {
+    payload: { userId: UserId, revisionId: SummaryRevisionId },
+    success: SummaryDetails,
+    error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("GetSummaryDetails", {
     payload: { userId: UserId, summaryId: SummaryId },
@@ -3171,7 +3205,9 @@ export class ReadOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       now: Schema.Number,
       timeZone: Schema.String,
-      frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)))
+      frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String))),
+      /** An agent reply's assembly (spec/AGENTIC.md §6). */
+      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, cardsAtTail: Schema.Boolean }))
     },
     success: Schema.Struct({
       snapshot: Schema.String,
@@ -3203,6 +3239,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("RunContext", {
     payload: { userId: UserId, versionId: VersionId },
     success: RunContext,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** An agent reply's steps, from its stored transcript (agentReads.ts); empty for a plain one. */
+  Rpc.make("RolloutSteps", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Array(RolloutStep),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Generation time and tokens of the user's versions (inspectorReads.ts); others are left out. */

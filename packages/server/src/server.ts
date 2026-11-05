@@ -1,4 +1,5 @@
-import { AuthenticatedSplitChatApi } from "@rp/shared/api.ts"
+import { AuthenticatedAgentApi, AuthenticatedChatEventsApi, AuthenticatedSplitChatApi } from "@rp/shared/api.ts"
+import { makeAgentHandlers } from "./api/agent.ts"
 import { makeSplitChatHandlers } from "./api/splitChats.ts"
 import { Commands } from "./commands.ts"
 import { makeHistoryHandlers } from "./api/history.ts"
@@ -7,7 +8,7 @@ import { ExecutionRegistry } from "./execution.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
 import { SummaryChecks } from "./lcm/OutputChecks.ts"
 import { Summarizer } from "./lcm/Summarizer.ts"
-import { makeLcmHandlers } from "./api/lcm.ts"
+import { makeLcmHandlers, makeSummaryRequestHandlers } from "./api/lcm.ts"
 // Composition of the HTTP server: the RPC endpoint over a WebSocket, login and logout,
 // a health route, and the client build served as a single-page app.
 import { createServer } from "node:http"
@@ -21,6 +22,7 @@ import {
   type AppRpcs,
   AppCoreApi,
   AuthenticatedGalleryApi,
+  AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
   CurrentUser,
   Health
@@ -37,7 +39,7 @@ import {
 import { RpcSerialization, RpcServer, type RpcGroup } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
-import { makeChatHandlers } from "./api/chats.ts"
+import { makeChatEventHandlers, makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import { makeEditorHandlers, makeGalleryHandlers, makeForkMergeHandlers } from "./api/editor.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
@@ -134,7 +136,10 @@ const CoreHandlers = AppCoreApi.toLayer(
 
 const Handlers = Layer.mergeAll(
   CoreHandlers,
+  AuthenticatedSummaryRequestApi.toLayer(makeSummaryRequestHandlers),
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
+  AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
+  AuthenticatedAgentApi.toLayer(makeAgentHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers)
 )
