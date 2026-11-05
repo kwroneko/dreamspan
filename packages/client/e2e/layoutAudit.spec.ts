@@ -902,7 +902,7 @@ test.describe("synthetic library and every app surface", () => {
           // Merging another chat (spec/CHAT-MERGE.md §7): the dialog, the timeline entry, the setting.
           const source = await admin((api) =>
             Effect.gen(function* () {
-              const made = yield* api.CreateChat({ title: `Merge source with a long title at ${width} ${theme}` })
+              const made = yield* api.CreateChat({ title: `Merge source with a long title at ${width} ${theme} ${Date.now()}` })
               let parent: SlotId | null = null
               for (const content of ["The far docks wake under a grey sky.", "Cranes swing over the quiet water."]) {
                 const sent: { readonly _tag: string; readonly entry?: { readonly slotId: SlotId } } =

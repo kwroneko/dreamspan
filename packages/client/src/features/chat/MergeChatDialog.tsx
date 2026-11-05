@@ -130,7 +130,10 @@ function SourcePicker({
           onChange={(event) => setSearch(event.currentTarget.value)}
         />
       </Field>
-      <ul aria-label="Chats" className="flex max-h-48 min-w-0 flex-col overflow-y-auto rounded-md border border-border">
+      <ul
+        aria-label="Chats"
+        className="flex max-h-48 min-w-0 flex-col gap-0.5 overflow-y-auto rounded-md border border-border p-2"
+      >
         {chats === null && (
           <li className="flex items-center gap-2 p-2 text-sm text-muted">
             <Spinner /> Loading chats…
@@ -144,7 +147,7 @@ function SourcePicker({
                 type="button"
                 aria-pressed={chosenChat === chat.id}
                 onClick={() => pick(chat)}
-                className="flex w-full min-w-0 items-center justify-between gap-2 px-3 py-2 text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:font-medium"
+                className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:font-medium"
               >
                 <span className="min-w-0 truncate">{chat.title || "Untitled chat"}</span>
                 {chat.id === chatId && <span className="shrink-0 text-xs text-muted">This chat</span>}

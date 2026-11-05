@@ -5,7 +5,7 @@ import type { BinItem } from "@rp/shared/bin.ts"
 import type { PathEntry } from "@rp/shared/chat.ts"
 import type { MergedMessage, MergeInfo } from "@rp/shared/mergeApi.ts"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -38,6 +38,7 @@ export function MergedChatRow({
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<ReadonlyArray<MergedMessage>>([])
   const [done, setDone] = useState(false)
+  const started = useRef(false)
   const [error, setError] = useState<AppError | null>(null)
   const reader = useAction()
   const pager = useAction()
@@ -63,11 +64,16 @@ export function MergedChatRow({
     setMessages((shown) => [...shown, ...result.value])
     if (result.value.length < PAGE) setDone(true)
   }
-  const toggle = () => {
-    const next = !open
-    setOpen(next)
-    if (next && messages.length === 0) void more()
-  }
+  const toggle = () => setOpen((shown) => !shown)
+  // The first page once it's open and the merge is known, whichever comes last.
+  const mergeId = info?.id ?? null
+  useEffect(() => {
+    if (!open || mergeId === null || started.current) return
+    started.current = true
+    void more()
+    // `more` reads the current state; it runs once per row.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mergeId])
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
   const toast = (outcome: Outcome<BinItem>) => {
     report(outcome)

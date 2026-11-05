@@ -154,6 +154,12 @@ it.live(
           samples.push({ operation, ms: median(times) })
           return result as A
         })
+      // A model whose window holds the merged section, as a long-context model's does.
+      const wide = yield* h.api.AddUserModel({
+        connectionId: h.connection.id,
+        key: "wide-model",
+        overrides: { context: 200_000, settings: { samplers: { openai_max_context: 200_000, openai_max_tokens: 512 } } }
+      })
       const assembleAfter = (leaf: { slotId: SlotId; version: { id: VersionId } }) =>
         Effect.map(
           h.reader.AssembleContext({
@@ -164,7 +170,8 @@ it.live(
             versionId: leaf.version.id,
             now: 1,
             timeZone: "UTC",
-            frozen: null
+            frozen: null,
+            model: { connection: h.connection.id, model: wide.id }
           }),
           ({ snapshot }) => JSON.parse(snapshot) as ContextSnapshot
         )
@@ -224,18 +231,18 @@ it.live(
       assert.strictEqual(far.messages, 3_000)
       assert.isAbove(far.leftOut, 0)
       assert.isAtMost(far.tokens, far.budget + 200)
+      const all = yield* time(
+        "preview unrelated, all included",
+        3,
+        h.reader.PreviewChatMerge({ ...farRequest, includeLeftOut: true })
+      )
+      assert.strictEqual(all.leftOut, 3_000 - far.verbatim)
       const farMade = yield* time(
         "merge unrelated mid-history",
         1,
         h.writer.MergeChat({ ...farRequest, title: far.sourceTitle, framing: null, digest: far.digest })
       )
       assert.strictEqual(farMade.position, 2_800)
-      const all = yield* time(
-        "preview unrelated, all included",
-        3,
-        h.reader.PreviewChatMerge({ ...farRequest, at: null, start: null, includeLeftOut: true })
-      )
-      assert.strictEqual(all.leftOut, 3_000 - far.verbatim)
       yield* time("assemble after two merges", 3, assembleAfter(reply))
       yield* time(
         "merged messages page",
