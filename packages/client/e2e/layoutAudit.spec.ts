@@ -870,6 +870,22 @@ test.describe("synthetic library and every app surface", () => {
           await audit("default-speaker-picker")
           return
         }
+        if (process.env.LAYOUT_AUDIT_SPLITLINK_ONLY === "1") {
+          const forks = await admin((api) => api.ListForks({ chatId }))
+          const branch = forks.find((f) => f.parentForkId !== null)!
+          await go("splitlink-branch", `/chats/${chatId}?fork=${branch.id}&side=chats&forks=${chatId}`)
+          await showAppNavigation(page)
+          await audit("splitlink-rows", "[data-fork-row]")
+          const pencil = page.getByRole("button", { name: /^Rename branch / }).first()
+          await pencil.click()
+          await expect(page.getByPlaceholder("Branch name")).toBeVisible()
+          await audit("splitlink-rename", "[data-fork-row]")
+          await page.getByPlaceholder("Branch name").press("Escape")
+          await hideAppNavigation(page)
+          await page.getByRole("button", { name: /switch branch/ }).click()
+          await audit("splitlink-header", '[role="dialog"]')
+          return
+        }
         if (process.env.LAYOUT_AUDIT_SIDEBAR_ONLY === "1") {
           for (const [scope, query] of [
             ["all", ""],

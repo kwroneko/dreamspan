@@ -22,7 +22,7 @@ export const shellSlotsQuery = `WITH RECURSIVE views AS MATERIALIZED (
 SELECT g.fork_id, s.id, s.depth, s.chat_id, s.parent_slot_id,
   s.created_at, CASE WHEN CASE WHEN g.has_overrides THEN ${slotDeletedInSql("g.fork_id", "s")}
     ELSE s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL END THEN 1 END AS deleted_at,
-  v.speaker_entity_id AS speaker, CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at,
+  v.status, v.speaker_entity_id AS speaker, CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at,
   substr(v.content, 1, 160) AS preview, ${slotParticipantsSql("s")} AS participants, ${slotHumanAuthorsSql("s")} AS human_authors
   FROM segments g CROSS JOIN slots s ON s.chat_id = g.chat_id AND s.chain_id = g.chain_id AND s.depth BETWEEN g.lo AND g.hi
   JOIN versions v ON v.id = CASE WHEN g.has_overrides THEN ${shownInSql("g.fork_id", "s")}
@@ -58,6 +58,6 @@ export const shellPlainForksQuery = `SELECT f.id FROM json_each(?) j CROSS JOIN 
  */
 export const shellTreeQuery = `SELECT NULL AS fork_id, s.id, s.depth, s.chat_id, s.parent_slot_id, s.created_at,
   CASE WHEN s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL THEN 1 END AS deleted_at,
-  v.speaker_entity_id AS speaker, CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at,
+  v.status, v.speaker_entity_id AS speaker, CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at,
   substr(v.content, 1, 160) AS preview, ${slotParticipantsSql("s")} AS participants, ${slotHumanAuthorsSql("s")} AS human_authors
   FROM json_each(?) j CROSS JOIN slots s ON s.chat_id = j.value JOIN versions v ON v.id = s.selected_version_id`

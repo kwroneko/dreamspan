@@ -72,13 +72,15 @@ export class Fork extends Schema.Class<Fork>("Fork")({
   parentForkId: Schema.NullOr(ForkId),
   /** The message it was made at; null when it starts at the first message. */
   baseSlotId: Schema.NullOr(SlotId),
+  /** Navigation target, including inferred imported split points (ListForks). */
+  startSlotId: Schema.optionalKey(Schema.NullOr(SlotId)),
   /** Where its path ends; null before its first message. */
   tipSlotId: Schema.NullOr(SlotId),
   name: Schema.NullOr(Schema.String),
   pinnedAt: Schema.NullOr(Schema.Number),
   createdAt: Schema.Number,
   lastChattedAt: Schema.NullOr(Schema.Number),
-  /** The start of its tip's text; empty without one. */
+  /** Latest usable message preview on the branch; empty without text. */
   tipExcerpt: Schema.String,
   /** It's the chat's current fork (`Chat.currentForkId`). */
   current: Schema.Boolean,

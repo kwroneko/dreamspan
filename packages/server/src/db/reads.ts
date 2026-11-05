@@ -20,7 +20,7 @@ import { SqlClient } from "effect/sql"
 import { toBinItem, toRecoveredText } from "./bin.ts"
 import { binItemBranches, binItemForks } from "./binForks.ts"
 import { reachableSlot } from "./graphReachability.ts"
-import { forkColumns, forkRecency, forkThrough, withDisplayEnd } from "./forks.ts"
+import { branchStart, lastText, forkColumns, forkRecency, forkThrough } from "./forks.ts"
 import {
   displayEndOf,
   displayLength,
@@ -872,14 +872,20 @@ export const makeReadHandlers = Effect.gen(function* () {
         const rows = yield* sql<Parameters<typeof toFork>[0]>`
           SELECT ${sql.literal(forkColumns("f"))} FROM forks f WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL
           ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
-        // Each fork's tip text is the last message it shows (an inserted one can follow the tip).
-        const ends = yield* Effect.forEach(rows, (row) => withDisplayEnd(sql, row))
         // Where each parts from its parent and its last message's time, as the shell lists them.
         const summaries = yield* chatForkSummaries(sql, userId, chatId, rows)
-        return ends.map((row) => {
-          const s = summaries.get(row.id)
-          return new Fork({ ...toFork(row), split: s?.split ?? null, endAt: s?.endAt ?? null })
-        })
+        return yield* Effect.forEach(rows, (row) =>
+          Effect.gen(function* () {
+            const s = summaries.get(row.id)
+            return new Fork({
+              ...toFork(row),
+              startSlotId: (yield* branchStart(sql, row)) as SlotId | null,
+              tipExcerpt: (yield* lastText(sql, chatId, row.id, row.tip_slot_id))?.text.slice(0, 160) ?? "",
+              split: s?.split ?? null,
+              endAt: s?.endAt ?? null
+            })
+          })
+        )
       }).pipe(query("ListForks")),
 
     // The siblings SwitchBranch counts, in its order, with each one's name and first words.

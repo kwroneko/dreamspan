@@ -90,6 +90,37 @@ const setup = Effect.gen(function* () {
 })
 
 describe("shell fork summaries", () => {
+  it.live("previews skip empty and failed messages, with an empty fallback", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, harbor, append, version, check } = yield* setup
+      const main = harbor.currentForkId!
+      const root = yield* append(harbor.id, null, "Latest text", null, main)
+      const empty = yield* append(harbor.id, root.slotId, " \n\t", null, main)
+      yield* writer.AppendMessage({
+        userId,
+        chatId: harbor.id,
+        forkId: main,
+        parentSlotId: empty.slotId,
+        branch: false,
+        version: new NewVersion({
+          ...version("Failed partial", null),
+          status: "failed",
+          error: { class: "test", message: "Failed generation" }
+        }),
+        commitDraft: null
+      })
+      const shell = yield* check("empty and failed", [harbor.id])
+      assert.strictEqual(shell.forks.find((f) => f.forkId === main)!.preview, "Latest text")
+      assert.strictEqual((yield* reader.ListForks({ userId, chatId: harbor.id }))[0]!.tipExcerpt, "Latest text")
+      assert.strictEqual((yield* reader.ChatSummaries({ userId, chatIds: [harbor.id] }))[0]!.last!.text, "Latest text")
+      const blank = yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: null })
+      yield* append(harbor.id, null, "", null, blank.fork.id)
+      const noText = yield* check("no text", [harbor.id])
+      assert.strictEqual(noText.forks.find((f) => f.forkId === blank.fork.id)!.preview, "")
+      assert.strictEqual((yield* reader.ChatSummaries({ userId, chatIds: [harbor.id] }))[0]!.last, null)
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("records only participation added after each branch's own split", () =>
     Effect.gen(function* () {
       const t = yield* setup

@@ -128,12 +128,10 @@ function Row({
                 with {others.join(", ")}
               </span>
             )}
-            {summary?.last && (
-              <span className="truncate text-sm text-muted">
-                {speaker ? <span className="text-text">{speaker}: </span> : null}
-                {summary.last.text.replace(/\s+/g, " ")}
-              </span>
-            )}
+            <span className="line-clamp-2 min-h-10 text-sm text-muted">
+              {speaker ? <span className="text-text">{speaker}: </span> : null}
+              {summary?.last?.text.replace(/\s+/g, " ") || "No messages yet"}
+            </span>
             {(unseen > 0 || unfinished) && (
               <span className="mt-0.5 flex gap-1.5 text-xs">
                 {unseen > 0 && (

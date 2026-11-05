@@ -22,7 +22,7 @@ import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
 // Recompute rows that predate split-relative participation.
-export const FORK_SUMMARY_FORMAT = 6
+export const FORK_SUMMARY_FORMAT = 7
 
 /**
  * What the shell shows of a fork: ids only, the cast with every card, binned or not, and the
@@ -64,6 +64,7 @@ type Slot = {
   at: number
   depth: number
   preview: string
+  status: string
   participants: string
   human_authors: string
 }
@@ -184,7 +185,7 @@ export const computeForkSummaries = (
             : yield* sql<Slot>`
               SELECT ${record.id} AS fork_id, s.id, s.chat_id, s.parent_slot_id, s.created_at, s.depth,
                 CASE WHEN ${slotDeletedIn(sql, record.id, "s")} THEN 1 END AS deleted_at,
-                v.speaker_entity_id AS speaker, substr(v.content, 1, 160) AS preview,
+                v.status, v.speaker_entity_id AS speaker, substr(v.content, 1, 160) AS preview,
                 ${sql.literal(slotParticipantsSql("s"))} AS participants,
                 ${sql.literal(slotHumanAuthorsSql("s"))} AS human_authors,
                 CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at
@@ -237,6 +238,7 @@ export const computeForkSummaries = (
       const activity = new Map<string, { entityId: EntityId; at: number; slot: string }>()
       const lastSpoke = new Map<string, number>()
       let endpoint: Slot | undefined
+      let preview = ""
       let messages = 0
       // What it shares: its parent's path while that's live, else the history up to its base.
       const parent = record.parent_fork_id === null ? undefined : parentPaths.get(record.parent_fork_id)
@@ -258,6 +260,7 @@ export const computeForkSummaries = (
         if (shared !== null && split === null && !shared(s)) split = { at: s.created_at, after: messages }
         messages++
         endpoint = s
+        if (s.status !== "failed" && s.preview.trim()) preview = s.preview
         state = foldState(positional.get(s.id) ?? [], state)
         const record = (entity: string, at: number) => {
           if (at >= (activity.get(entity)?.at ?? -Infinity))
@@ -289,7 +292,7 @@ export const computeForkSummaries = (
       summaries.push({
         forkId: record.id,
         chatId: record.chat_id,
-        preview: endpoint?.preview ?? "",
+        preview,
         messages,
         leaf: endpoint?.id ?? null,
         endAt: endpoint?.at ?? null,

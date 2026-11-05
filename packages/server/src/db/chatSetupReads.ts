@@ -22,7 +22,7 @@ import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { currentForkSql, forkAt, selectedInSql, shownInSql, slotDeletedInSql } from "./forkState.ts"
-import { lastShown } from "./forks.ts"
+import { lastShown, lastText } from "./forks.ts"
 import { displayLength, pathPieces, placedInsertions } from "./displayPath.ts"
 
 /** A card's binding from the payload's, without the nulls; undefined for none. */
@@ -276,7 +276,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               chatId,
               cast,
               messages: positions ?? (leaf ? leaf.depth + 1 : 0),
-              last: leaf ? { speaker: leaf.speaker as EntityId | null, writer: leaf.writer, text: leaf.text } : null
+              last: (yield* lastText(sql, chatId, chat.fork, chat.leaf)) as ChatSummary["last"]
             })
           )
         }

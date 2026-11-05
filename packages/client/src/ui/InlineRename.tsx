@@ -17,6 +17,7 @@ export function InlineRename({
   allowEmpty = false,
   className = "",
   inputClassName = "",
+  placeholder,
   hint = "Rename",
   fieldLabel,
   goTo,
@@ -43,6 +44,7 @@ export function InlineRename({
   allowEmpty?: boolean
   className?: string
   inputClassName?: string
+  placeholder?: string
   /** The pencil's tooltip: what the name is, when that isn't obvious ("Rename" by default). */
   hint?: ReactNode
   /** The field's accessible name while renaming ("New name for <label>" by default). */
@@ -170,6 +172,7 @@ export function InlineRename({
           aria-label={fieldLabel ?? `New name for ${label}`}
           ref={input}
           value={typed}
+          placeholder={placeholder}
           maxLength={maxLength}
           autoFocus
           onFocus={(event) => {

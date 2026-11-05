@@ -48,7 +48,8 @@ for (const theme of ["light", "dark"] as const)
           yield* make("Quiet checkpoint", 0)
           yield* make("One companion", 1)
           const selected = yield* make("Three companions", 3)
-          return { chat, selected }
+          const blank = (yield* api.CreateFork({ chatId: chat.id, fromForkId: selected.id, atSlotId: null })).fork
+          return { chat, selected, blank }
         })
       )
       await page.setViewportSize({ width: size === "phone" ? 390 : 1440, height: 900 })
@@ -102,6 +103,14 @@ for (const theme of ["light", "dark"] as const)
       await selected.getByRole("button", { name: "Rename branch Three companions", exact: true }).click()
       const input = selected.getByRole("textbox", { name: "New name for branch Three companions" })
       await expect(input).toBeVisible()
+      await expect(input).toHaveValue("Three companions")
+      await expect(input).toHaveAttribute("placeholder", "Branch name")
+      const inputBox = (await input.boundingBox())!
+      const titleBox = (await selected.locator("[data-row-text]").boundingBox())!
+      expect(inputBox.width).toBeGreaterThan(titleBox.width - 65)
+      expect(await input.evaluate((el) => getComputedStyle(el).fontSize)).toBe("14px")
+      await panel.screenshot({ path: info.outputPath(`rename-open-${size}-${theme}.png`) })
+      await expectLayout(page, info, `rename-open-${size}-${theme}`, { scope: "[data-fork-row]" })
       const editingHeight = (await selected.boundingBox())!.height
       expect(editingHeight).toBe(height)
       await info.attach("row heights", {
@@ -125,4 +134,22 @@ for (const theme of ["light", "dark"] as const)
       await expect(row("Saved companions")).toBeVisible()
       await expectLayout(page, info, `branch-list-${size}-${theme}`, { scope: "[data-fork-row]" })
       await panel.screenshot({ path: info.outputPath(`renamed-${size}-${theme}.png`) })
+      const blank = panel.locator(`[data-fork-row]`).filter({ has: page.locator(`[data-fork-id="${data.blank.id}"]`) })
+      await expect(blank).toContainText("No messages yet")
+      const previewHeight = await blank
+        .locator(".line-clamp-2.text-xs")
+        .evaluate((el) => el.getBoundingClientRect().height)
+      expect(previewHeight).toBe(32)
+      await blank.getByRole("button", { name: /^Open branch / }).click()
+      if (size === "phone") await page.getByRole("button", { name: "Chats and menu" }).click()
+      const blankHeight = (await blank.boundingBox())!.height
+      await blank.getByRole("button", { name: /^Rename branch / }).click()
+      expect((await blank.boundingBox())!.height).toBe(blankHeight)
+      expect((await blank.getByRole("textbox").boundingBox())!.width).toBeGreaterThan(
+        (await blank.locator("[data-row-text]").boundingBox())!.width - 65
+      )
+      await expect(blank.getByRole("textbox")).toHaveValue("")
+      await expect(blank.getByRole("textbox")).toHaveAttribute("placeholder", "Branch name")
+      await panel.screenshot({ path: info.outputPath(`rename-empty-${size}-${theme}.png`) })
+      await expectLayout(page, info, `rename-empty-${size}-${theme}`, { scope: "[data-fork-row]" })
     })

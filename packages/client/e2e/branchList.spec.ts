@@ -11,6 +11,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { writeStBranchFamilies } from "./support/stFiles.ts"
 
 const server = serverPerFile(withAdmin)
@@ -157,3 +158,37 @@ for (const width of [1440, 390]) {
     await shot(page, "branch-menu", width)
   })
 }
+
+for (const width of [1440, 390])
+  test(`imported and nested branch start links at ${width}`, async ({ page }, info) => {
+    const data = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const chats = yield* api.ListChats({ limit: 100, before: null })
+        for (const chat of chats) {
+          const forks = yield* api.ListForks({ chatId: chat.id })
+          const imported = forks.find((f) => f.parentForkId !== null && f.baseSlotId === null && f.startSlotId)
+          if (!imported) continue
+          const nested = (yield* api.CreateFork({
+            chatId: chat.id,
+            fromForkId: imported.id,
+            atSlotId: imported.tipSlotId
+          })).fork
+          return { chat, imported, nested }
+        }
+        throw new Error("No imported branch")
+      })
+    )
+    await page.setViewportSize({ width, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    for (const fork of [data.imported, data.nested]) {
+      await page.goto(`${server().url}/chats/${data.chat.id}?fork=${fork.id}`)
+      await page.getByRole("button", { name: /switch branch/ }).click()
+      const jump = page.getByRole("button", { name: "Go to where this branch starts", exact: true })
+      await expect(jump).toBeVisible()
+      await expectLayout(page, info, `branch-header-${width}-${fork.id}`, { scope: '[role="dialog"]' })
+      await page.getByRole("dialog").screenshot({ path: info.outputPath(`header-${width}-${fork.id}.png`) })
+      await jump.click()
+      const target = fork.id === data.imported.id ? data.imported.startSlotId : data.imported.tipSlotId
+      await expect(page.locator(`article[data-slot="${target}"]`)).toBeInViewport()
+    }
+  })

@@ -137,7 +137,7 @@ function BranchRow({
               {formatMoment(branchLastAt(fork))}
             </span>
           </span>
-          <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
+          <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
             {fork.tipExcerpt || "No messages yet"}
           </span>
         </button>
@@ -220,7 +220,7 @@ function BranchList({
     // The old URL names the branch that went: keep the panel, follow the latest branch.
     if (isShown) void navigate({ to: ".", search: keepPanel, replace: true })
   }
-  const start = shown?.baseSlotId ?? null
+  const start = shown?.startSlotId ?? shown?.baseSlotId ?? null
   const latest = forks.find((f) => f.current)
   // ST's "Back to parent chat": the branch this one was made from, while it's live.
   const parent = shown?.parentForkId ? forks.find((f) => f.id === shown.parentForkId) : undefined

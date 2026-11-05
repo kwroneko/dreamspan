@@ -243,7 +243,8 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
               hint="Renames this branch."
               allowEmpty
               maxLength={100}
-              className="max-w-full"
+              className="w-full max-w-full"
+              placeholder="Branch name"
               onRename={async (name) => {
                 const result = await action.run(
                   (client) => client("NameFork", { forkId: fork.forkId as ForkId, name }),
@@ -276,9 +277,9 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
             data-fork-id={fork.forkId}
             className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
-            {fork.preview && (
-              <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">{fork.preview}</span>
-            )}
+            <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
+              {fork.preview || "No messages yet"}
+            </span>
             <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
               Last message {formatMoment(fork.endAt ?? fork.createdAt)}
             </span>
@@ -410,9 +411,9 @@ export function ForkRow({
                 · {fork.messages.toLocaleString()} {fork.messages === 1 ? "message" : "messages"}
               </span>
             )}
-            {fork.preview && (
-              <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">{fork.preview}</span>
-            )}
+            <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
+              {fork.preview || "No messages yet"}
+            </span>
             <span data-row-when className="mt-auto text-xs text-muted">
               {perFork ? "Last message " : ""}
               {perFork ? formatMoment(last) : formatWhen(last)}

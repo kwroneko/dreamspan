@@ -399,6 +399,9 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 
 ### 3.2 Branches
 
+- **[D]** (owner, 2026-11-05, splitlink) “Every branch other than the one the chat started on has a start point, so the link must show for all of them, including imported branches and branches of branches, and must scroll to the split message.” Hover explanation stays as it is. **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
+
+
 - **[D]** (owner, 2026-11-05, branchrows) “I do think showing new characters is useful. The issue is though, added relative to what?” … “It should be relative to the split point, that actually identifies a branch.” … “I don't know about crossing someone out. I think it would look bad … In some sense characters only really get added.” Branch rows show characters with participation after their split who were absent from the parent's cast at the split. Small portraits follow a leading “+”, two fully visible with the overflow count tucked behind; hover names the additions. No removal portraits, no portraits without additions, none for the original line. **Built; obsolete as an implementation requirement**, ARCHITECTURE §3.8 and §12.
 - **[P]** (branchrows, 2026-11-05; implemented) Store the added ids with shell fork summaries, using the inherited bounded event view for the baseline and retained swipe participation after the base. Summary format 6 recomputes earlier rows; existing stamps and lineage invalidation apply.
 - **[D]** A branch is an explicit fork of the path. It's what you choose when you want the continuation to differ, and it never happens as a side effect of swiping.
@@ -1058,6 +1061,11 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D]** (owner, 2026-11-05, splitlink) “Every row that shows a last-message preview (branch rows, chat rows, the header's branch list) uses the latest message on that branch that has text, skipping empty and failed ones; only when the branch has no message with text, show ‘No messages yet’ in the same two-line slot, so row height never changes.” **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
+- **[D]** (owner, 2026-11-05, splitlink) “While renaming, the field takes the full width of the title line (✓ and ✕ stay at its end) at the row's normal title text size; it is prefilled with the branch's own name when it has one and empty otherwise, with the faint placeholder ‘Branch name’; the row's height does not change.” **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
+- **[P]** (splitlink, 2026-11-05; implemented) Infer missing imported navigation targets from shared display-path ranges; use existing reader operations and compact InlineRename. Summary format 7 invalidates cached previews.
+
 
 - **[D] Branch and chat pins** (owner, 2026-11-04): “Currently you can pin any branch, and it becomes listed among pinned chats. This feels somewhat odd, you go straight from a branch being one of many under a chat, to it being pinned at the global top level among a few chats.” “Usually, you'd want to pin a branch *above others* somehow, because it's one of the main branches of conversation you want to remember/continue and separate it from the rest, which could be a long list kept for historical reasons.” (Owner, 2026-11-05, approving branch-row pins within their chat and chat-row pins globally): “Yes, this should obviously be done.” Pinned branches precede named branches, then the rest, each by last message. Global Pinned lists chats once, opening their current branch. Existing pinned branches retain their local pin and pin their chat globally. Both pins explain their action on hover/focus. **Built; obsolete as an implementation requirement**, ARCHITECTURE §12.
 - **[P]** (pinsplit, 2026-11-05; implemented) Keep branch pin storage; migration 0004 rebuilds the unused chat pin table with one row per user/chat and carries existing branch pins over. Existing registered shell rows select the corresponding pin operation.

@@ -63,6 +63,52 @@ export const withDisplayEnd = <
     return { ...row, tip_excerpt: text?.excerpt ?? row.tip_excerpt }
   })
 
+/** Latest selected message with usable text, in display order. */
+export const lastText = Effect.fn("lastText")(function* (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  forkId: string,
+  tip: string | null
+) {
+  const pieces = yield* pathPieces(sql, chatId, forkId, tip)
+  const ranges = pieces.map((p) => [
+    p.chainId,
+    p.kind === "inserted" ? p.depth : p.lo,
+    p.kind === "inserted" ? p.depth : p.hi
+  ])
+  const [row] = yield* sql<{ speaker: string | null; writer: string; text: string }>`
+    SELECT v.speaker_entity_id AS speaker, v.writer, substr(v.content, 1, 240) AS text
+    FROM json_each(${JSON.stringify(ranges)}) p CROSS JOIN slots s
+      ON s.chat_id = ${chatId} AND s.chain_id = p.value ->> 0 AND s.depth BETWEEN p.value ->> 1 AND p.value ->> 2
+    JOIN versions v ON v.id = ${shownIn(sql, forkId, "s")}
+    WHERE NOT ${slotDeletedIn(sql, forkId, "s")} AND v.status <> 'failed' AND length(trim(v.content, char(9) || char(10) || char(13) || ' ')) > 0
+    ORDER BY cast(p.key AS INTEGER) DESC, s.depth DESC LIMIT 1`
+  return row ?? null
+})
+
+/** Imported forks may have no recorded base: locate their last shared message. */
+export const branchStart = Effect.fn("branchStart")(function* (sql: SqlClient.SqlClient, fork: ForkRow) {
+  if (fork.base_slot_id !== null) return fork.base_slot_id
+  if (fork.parent_fork_id === null) return null
+  const [parent] = yield* sql<ForkRow>`SELECT * FROM forks WHERE id = ${fork.parent_fork_id}`
+  const own = yield* pathPieces(sql, fork.chat_id, fork.id, fork.tip_slot_id)
+  const other = parent ? yield* pathPieces(sql, parent.chat_id, parent.id, parent.tip_slot_id) : []
+  let shared: { chain: string; depth: number } | undefined
+  for (const p of own)
+    for (const q of other) {
+      const lo = Math.max(p.kind === "run" ? p.lo : p.depth, q.kind === "run" ? q.lo : q.depth)
+      const hi = Math.min(p.kind === "run" ? p.hi : p.depth, q.kind === "run" ? q.hi : q.depth)
+      if (p.chainId === q.chainId && lo <= hi) shared = { chain: p.chainId, depth: hi }
+    }
+  const first = own[0]
+  const target =
+    shared ?? (first ? { chain: first.chainId, depth: first.kind === "run" ? first.lo : first.depth } : null)
+  if (!target) return null
+  const [slot] = yield* sql<{ id: string }>`SELECT id FROM slots WHERE chat_id = ${fork.chat_id}
+    AND chain_id = ${target.chain} AND depth = ${target.depth}`
+  return slot?.id ?? null
+})
+
 /** Whether `slotId` is on the path from the root to `tipSlotId`. */
 export const onPath = (sql: SqlClient.SqlClient, chatId: string, tipSlotId: string | null, slotId: string) =>
   tipSlotId === null
