@@ -4,7 +4,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { ServerResponse } from "node:http"
-import { foldState } from "@rp/shared/state.ts"
+import { textField, valueField } from "@rp/shared/editing.ts"
+import type { RefId } from "@rp/shared/library.ts"
+import { foldState, noteSwitches } from "@rp/shared/state.ts"
 import { DatabaseSync } from "node:sqlite"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -159,6 +161,91 @@ describe("agent read tools", () => {
       const swipe = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
       yield* eventually(() => finished(events, swipe.version.id) !== undefined)
       assert.deepStrictEqual(yield* absentAt, [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("list_notes lists the chat's notes; switch_note changes only one the agent may change", () => {
+    const config = testConfig()
+    let phase: "plain" | "notes" = "plain"
+    return Effect.gen(function* () {
+      const notesScript: ReadonlyArray<readonly [string, unknown]> = [
+        ["list_notes", {}],
+        ["switch_note", { note: "Locked", on: false }],
+        ["switch_note", { note: "weather", on: false }],
+        ["send_message", { message: "Rain stops." }]
+      ]
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const done = ((request.body?.messages ?? []) as Array<{ role: string }>).filter(
+              (m) => m.role === "tool"
+            ).length
+            if (phase === "plain") return sse(res, call(`call_${done}`, "send_message", { message: "Hi." }))
+            const [name, args] = notesScript[Math.min(done, notesScript.length - 1)]!
+            sse(res, call(`call_${done}`, name, args))
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, events, chat } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+      })
+      // Two chat notes, on: one the agent may change, one it may not.
+      const note = (title: string, content: string, editable: boolean) =>
+        Effect.gen(function* () {
+          const ref = yield* api.CreateChatNote({ chatId: chat.id, title })
+          const save = (field: string, value: string) =>
+            Effect.gen(function* () {
+              const opened = yield* api.OpenEditor({ refId: ref.id as RefId })
+              const existing = opened.drafts.find((d) => d.key.field === field)
+              yield* api.SaveEditorDraft({
+                draftId: null,
+                expectedSession: null,
+                refId: ref.id as RefId,
+                field,
+                content: value,
+                expectedRowVersion: existing?.rowVersion ?? null,
+                baseRevisionId: existing?.status === "active" ? null : opened.ref.headRevisionId
+              })
+            })
+          yield* save(textField(["content"]), content)
+          if (editable) yield* save(valueField(["agent_editable"]), "true")
+          const opened = yield* api.OpenEditor({ refId: ref.id as RefId })
+          yield* api.CommitEditorDrafts({
+            refId: ref.id as RefId,
+            expectedRowVersion: opened.ref.rowVersion,
+            fields: opened.drafts
+              .filter((d) => d.status === "active")
+              .map((d) => ({ field: d.key.field, draftId: d.id, expectedRowVersion: d.rowVersion })),
+            message: null
+          })
+          return ref
+        })
+      const weather = yield* note("Weather", "It rains all day.", true)
+      yield* note("Locked", "Mira owes Tobin.", false)
+      const reader = yield* Reader
+      const me = yield* api.Whoami()
+      const shown = Effect.map(reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId }), (e) =>
+        noteSwitches(e).get(weather.entityId)
+      )
+      const before = yield* shown
+
+      phase = "notes"
+      const { entry } = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      const swipe = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+      yield* eventually(() => finished(events, swipe.version.id) !== undefined)
+      const steps = yield* api.GetRolloutSteps({ versionId: swipe.version.id })
+      const results = steps.map((s) => (s.kind === "tool" ? s.result : null))
+      assert.include(results[0] ?? "", "“Weather” (the chat's; ")
+      assert.include(results[0] ?? "", "you may change it")
+      assert.notInclude(results[0]?.split("\n").find((l) => l.startsWith("“Locked”")) ?? "", "you may change it")
+      assert.strictEqual(results[1], "You may not change “Locked”.")
+      assert.strictEqual(results[2], "“Weather” is off from the next message on.")
+      assert.isFalse(yield* shown)
+      assert.notStrictEqual(before, false)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
