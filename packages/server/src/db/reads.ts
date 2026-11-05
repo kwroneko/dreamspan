@@ -20,7 +20,7 @@ import { SqlClient } from "effect/sql"
 import { toBinItem, toRecoveredText } from "./bin.ts"
 import { binItemBranches, binItemForks } from "./binForks.ts"
 import { reachableSlot } from "./graphReachability.ts"
-import { branchStart, lastText, forkColumns, forkRecency, forkThrough } from "./forks.ts"
+import { branchStart, forkColumns, forkRecency, forkThrough } from "./forks.ts"
 import {
   displayEndOf,
   displayLength,
@@ -880,7 +880,7 @@ export const makeReadHandlers = Effect.gen(function* () {
             return new Fork({
               ...toFork(row),
               startSlotId: (yield* branchStart(sql, row)) as SlotId | null,
-              tipExcerpt: (yield* lastText(sql, chatId, row.id, row.tip_slot_id))?.text.slice(0, 160) ?? "",
+              tipExcerpt: s?.preview ?? "",
               split: s?.split ?? null,
               endAt: s?.endAt ?? null
             })

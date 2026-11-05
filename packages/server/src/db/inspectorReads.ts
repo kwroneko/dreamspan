@@ -25,6 +25,15 @@ import { query } from "./tx.ts"
 
 const unique = <A>(list: ReadonlyArray<A>) => [...new Set(list)]
 
+// Source metadata is a bounded batch of ids, not a walk of the chat. Keep the
+// ids outside the joins: SQLite otherwise chose the chat's slot index for IN.
+export const sourceOrdinalsQuery = `SELECT v.id, v.ordinal FROM json_each(?) j
+  CROSS JOIN versions v ON v.id = j.value CROSS JOIN slots s ON s.id = v.slot_id
+  CROSS JOIN chats c ON c.id = s.chat_id WHERE c.id = ? AND c.owner_user_id = ?`
+export const sourceDepthsQuery = `SELECT s.id, s.depth FROM json_each(?) j
+  CROSS JOIN slots s ON s.id = j.value CROSS JOIN chats c ON c.id = s.chat_id
+  WHERE c.id = ? AND c.owner_user_id = ?`
+
 /**
  * Names for the sources of these snapshots' pieces: cards and notes by the revision they
  * were read at, preset prompts by the preset revision's names, messages by their place.
@@ -72,9 +81,11 @@ export const describer = (
     const ordinals =
       versions.length === 0
         ? []
-        : yield* sql<{ id: string; ordinal: number }>`
-            SELECT v.id, v.ordinal FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
-            WHERE v.id IN ${sql.in(versions)} AND c.id = ${chatId} AND c.owner_user_id = ${userId}`
+        : yield* sql.unsafe<{ id: string; ordinal: number }>(sourceOrdinalsQuery, [
+            JSON.stringify(versions),
+            chatId,
+            userId
+          ])
     const ordinalOf = new Map(ordinals.map((row) => [row.id, row.ordinal]))
     const presets = unique(sources.flatMap((s) => (s.kind === "preset" && s.revision !== null ? [s.revision] : [])))
     const prompts =
@@ -91,9 +102,7 @@ export const describer = (
     const depths =
       slots.length === 0
         ? []
-        : yield* sql<{ id: string; depth: number }>`
-            SELECT s.id, s.depth FROM slots s JOIN chats c ON c.id = s.chat_id
-            WHERE s.id IN ${sql.in(slots)} AND c.id = ${chatId} AND c.owner_user_id = ${userId}`
+        : yield* sql.unsafe<{ id: string; depth: number }>(sourceDepthsQuery, [JSON.stringify(slots), chatId, userId])
     const depthOf = new Map(depths.map((row) => [row.id, row.depth]))
     // A message is numbered by its position as the request read it (in a fork with
     // insertions, its display position, spec/MESSAGE-INSERT.md §3.2), which its pinned history
