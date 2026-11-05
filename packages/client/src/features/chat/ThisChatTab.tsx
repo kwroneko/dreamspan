@@ -322,6 +322,49 @@ export function RolesSetting({ session }: { session: ChatSession }) {
   )
 }
 
+/**
+ * How merged chats are laid out for the model (spec/CHAT-MERGE.md §4), shown once the chat has
+ * a merge in the messages loaded, or a layout chosen.
+ */
+export function MergeLayoutSetting({ session }: { session: ChatSession }) {
+  const { cast } = useCast()
+  const view = useSyncExternalStore(session.subscribe, session.snapshot)
+  const [error, setError] = useState<AppError | null>(null)
+  const merged = view.entries.some((entry) => entry.version.origin === "merge")
+  if (!cast || (!merged && cast.mergeLayout === undefined)) return null
+  const layout = cast.mergeLayout ?? "parallel"
+  const options = cast.mergeLayouts ?? []
+  const unknown = options.some((option) => option.id === layout) ? null : layout
+  const change = async (next: CastChange) => {
+    const outcome = await session.changeCast(next)
+    setError(outcome.ok ? null : outcome.error)
+  }
+  return (
+    <section aria-label="Merged chats" className="flex flex-col gap-2">
+      <Fieldset legend="Merged chats" about="Where the model reads the messages of chats merged into this one.">
+        <RadioGroup
+          aria-label="Merged chats"
+          value={layout}
+          onValueChange={(next) => void change({ _tag: "MergeLayout", layout: next })}
+          options={[
+            ...(unknown
+              ? [
+                  {
+                    value: unknown,
+                    label: `${unknown} (not installed)`,
+                    description: "Sent in parallel until it's back."
+                  }
+                ]
+              : []),
+            ...options.map(({ id, label, description }) => ({ value: id, label, description }))
+          ]}
+        />
+      </Fieldset>
+      <Problem error={error} />
+    </section>
+  )
+}
+
 export function ThisChatTab({ session }: { session: ChatSession; active: boolean }) {
   return (
     <div className="flex flex-col gap-6">
