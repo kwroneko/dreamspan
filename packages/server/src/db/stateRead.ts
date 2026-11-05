@@ -62,7 +62,7 @@ export const stateEventsOnPath = (
  * `stateEventsOnPath` on the fork's display path (spec/MESSAGE-INSERT.md §3.1): in a fork that
  * places insertions, the events through `slotId` in display order, so an inserted message's
  * events fold between those of the messages around it. Without insertions it's
- * `stateEventsOnPath`, after one index probe per lineage entry.
+ * `stateEventsOnPath`, after one walk of the fork's lineage by parent.
  */
 export const stateEventsThrough = (
   sql: SqlClient.SqlClient,

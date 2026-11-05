@@ -1,7 +1,11 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { nextSeq, shownIn } from "./forkState.ts"
+import { labelVisibleSql, nextSeq, shownIn, withFork, type ForkRef } from "./forkState.ts"
 import { type PathPiece, windowPieces } from "./displayPath.ts"
+
+/** SQL: whether the `history_changes` row in scope, made in a fork, is in fork `fork`'s lineage. */
+const historyVisible = (sql: SqlClient.SqlClient, fork: ForkRef) =>
+  withFork(sql, fork, (f) => labelVisibleSql(f, "history_changes.fork_id", "history_changes.label"))
 
 /** Sparse durable reductions; ordinary appends never enter this index. */
 export const historyRevision = (
@@ -15,9 +19,7 @@ export const historyRevision = (
   WITH RECURSIVE changes AS MATERIALIZED (
     SELECT slot_id, depth, revision FROM history_changes INDEXED BY history_changes_depth
     WHERE chat_id = ${chatId} AND depth < ${before}
-      AND (fork_id = '' OR EXISTS (SELECT 1 FROM forks f CROSS JOIN json_each(f.lineage_json) l
-        WHERE f.id = ${fork} AND l.value ->> 0 = history_changes.fork_id
-          AND history_changes.seq <= coalesce(l.value ->> 1, 9223372036854775807)))
+      AND (fork_id = '' OR ${historyVisible(sql, fork)})
       AND EXISTS (SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL)
   ), path(id, depth) AS MATERIALIZED (
     SELECT id, depth FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND EXISTS (SELECT 1 FROM changes)
@@ -44,9 +46,7 @@ export const displayHistoryRevision = (
   WITH changes AS MATERIALIZED (
     SELECT slot_id, revision FROM history_changes INDEXED BY history_changes_depth
     WHERE chat_id = ${chatId} AND depth < ${before}
-      AND (fork_id = '' OR EXISTS (SELECT 1 FROM forks f CROSS JOIN json_each(f.lineage_json) l
-        WHERE f.id = ${fork} AND l.value ->> 0 = history_changes.fork_id
-          AND history_changes.seq <= coalesce(l.value ->> 1, 9223372036854775807)))
+      AND (fork_id = '' OR ${historyVisible(sql, fork)})
       AND EXISTS (SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL)
   ), w(chain_id, lo, hi) AS (
     SELECT value ->> 0, value ->> 1, value ->> 2 FROM json_each(${windowPieces(pieces, 0, before - 1)})
