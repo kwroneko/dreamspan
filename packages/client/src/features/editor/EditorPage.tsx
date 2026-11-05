@@ -58,13 +58,13 @@ import { SearchDialog } from "./SearchDialog.tsx"
 import { lorebookScopes, presetScopes } from "./searchScopes.ts"
 import { BookName } from "./LorebookPanelEditor.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
-import { UpdateDialog } from "./UpdateDialog.tsx"
+import { editorActions, editorNotices } from "./editorSlots.ts"
 
 const CARD_BOOK = ["character_book"]
 
 const KINDS: Record<string, string> = { card: "card", preset: "preset", note: "note", lorebook: "lorebook" }
 
-type Open = "history" | "search" | "fork" | "update" | null
+type Open = "history" | "search" | "fork" | null
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
@@ -395,12 +395,15 @@ export function Editor({
               {ref.kind !== "card" ? (
                 ref.kind !== "note" &&
                 ref.refKind !== "chat_override" && (
-                  <Button
-                    hint="A named copy with its own changes, which still gets this one's updates."
-                    onClick={() => setOpen("fork")}
-                  >
-                    Make a variant
-                  </Button>
+                  <>
+                    <Button
+                      hint="A named copy with its own changes. Later changes to this one can be merged into it."
+                      onClick={() => setOpen("fork")}
+                    >
+                      Make a variant
+                    </Button>
+                    <SlotOutlet slot={editorActions} props={{ store }} />
+                  </>
                 )
               ) : (
                 // What's used less, grouped; each opens its own dialog.
@@ -470,23 +473,7 @@ export function Editor({
             <p>{notice}</p>
           </Alert>
         )}
-        {ref.updateAvailable && (
-          <Alert
-            tone="warning"
-            title={
-              ref.refKind === "upstream"
-                ? "A newer version of the file was imported"
-                : "What this variant follows changed"
-            }
-            actions={
-              <Button hint="Opens the source update for review." onClick={() => setOpen("update")}>
-                Review the update
-              </Button>
-            }
-          >
-            <p>It isn't in this {KINDS[ref.kind]} yet.</p>
-          </Alert>
-        )}
+        <SlotOutlet slot={editorNotices} props={{ store }} />
 
         {bookOnly && <SlotOutlet slot={cardEditorSections} props={{ store, call }} only={CARD_LOREBOOK_SECTION} />}
         {ref.kind === "card" && !bookOnly && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
@@ -529,6 +516,7 @@ export function Editor({
                     <span>Make a variant</span>
                   </Button>
                 )}
+                <SlotOutlet slot={editorActions} props={{ store }} />
               </>
             }
           />
@@ -542,7 +530,6 @@ export function Editor({
 
         {open === "history" && <RevisionsDialog store={store} call={call} onClose={() => setOpen(null)} />}
         {open === "fork" && <ForkDialog store={store} onClose={() => setOpen(null)} />}
-        {open === "update" && <UpdateDialog store={store} call={call} onClose={() => setOpen(null)} />}
       </div>
     </SearchNavigation>
   )

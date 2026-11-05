@@ -28,7 +28,8 @@ render("Original text")
 </script></body></html>`
 
 let server: ViteDevServer
-test.beforeAll(async () => {
+test.beforeAll(async ({ browser }) => {
+  test.setTimeout(180_000)
   server = await createServer({
     configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
     root: fileURLToPath(new URL("..", import.meta.url)),
@@ -51,6 +52,16 @@ test.beforeAll(async () => {
     ]
   })
   await server.listen()
+  // Compile the probe before timing composition, as the other Vite-backed specs do.
+  const warm = await browser.newPage()
+  try {
+    await warm.goto(`${server.resolvedUrls!.local[0]}composition.html`)
+    await expect(warm.getByRole("textbox", { name: "Composition probe", exact: true })).toBeVisible({
+      timeout: 120_000
+    })
+  } finally {
+    await warm.close()
+  }
 })
 test.afterAll(async () => {
   await server?.close()

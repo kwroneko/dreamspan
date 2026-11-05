@@ -1,5 +1,5 @@
 import { TokenizerInfo } from "./generation.ts"
-import { Placement } from "./docs/note.ts"
+import { Placement, REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
 // The request inspector and the cache-warmth estimate (DESIGN §5.5, §7.4), merged into AppApi.
 import { SelectiveLogic } from "./docs/lorebook.ts"
 import { Schema } from "effect"
@@ -376,6 +376,25 @@ export const SummaryFill = Schema.Struct({
 })
 export type SummaryFill = typeof SummaryFill.Type
 
+/** A note that replaces a prompt or card field in the open chat, as the editors show it. */
+export const NoteReplacementView = Schema.Struct({
+  note: RefId,
+  title: Schema.String,
+  /** The card whose note it is; null for the chat's own. */
+  card: Schema.NullOr(Schema.String),
+  target: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("preset_prompt"), identifier: Schema.String }),
+    Schema.Struct({
+      kind: Schema.Literal("card_field"),
+      card: Schema.String,
+      field: Schema.Literals(REPLACEABLE_CARD_FIELDS)
+    })
+  ]),
+  ownPosition: Schema.Boolean,
+  status: Schema.Literals(["replaced", "own_position", "not_due", "forbidden", "missing", "disabled", "conflict"])
+})
+export type NoteReplacementView = typeof NoteReplacementView.Type
+
 export const PresetContext = Schema.Struct({
   blocks: Schema.Array(
     Schema.Struct({ identifier: Schema.String, tokens: Schema.Int, labels: Schema.Array(Schema.String) })
@@ -398,6 +417,12 @@ export const PresetContext = Schema.Struct({
   notes: Schema.Array(
     Schema.Struct({ ref: RefId, title: Schema.String, placement: Placement, due: Schema.optionalKey(Schema.Boolean) })
   ),
+  /**
+   * The notes on in this chat that replace a preset prompt or card field (DESIGN §4.2), and what
+   * became of each (`NoteReplacement` in the assembler): a card field's `card` is the card that
+   * fills the character's place on the branch. Absent when none does.
+   */
+  replacements: Schema.optionalKey(Schema.Array(NoteReplacementView)),
   /**
    * What `{{summary}}` fills in for this chat (DESIGN §8 [P]): the prompts of the preset that hold
    * it, and the summaries when summarization is on and has some, else the switched-on summary notes.

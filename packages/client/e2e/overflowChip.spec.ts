@@ -77,7 +77,7 @@ for (const width of [1440, 390])
       if (await page.getByRole("button", { name: "Close the panel", exact: true }).isVisible()) await closePanel(page)
       await shoot("header", header)
       if (width === 1440) {
-        const chip = header.getByText("+2", { exact: true })
+        const chip = header.locator("[data-portrait-overflow]")
         const tile = header.locator("[data-portrait]").first()
         await expect(chip).toBeVisible()
         await shoot("header-stack", chip.locator(".."))

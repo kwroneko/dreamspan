@@ -90,6 +90,75 @@ const setup = Effect.gen(function* () {
 })
 
 describe("shell fork summaries", () => {
+  it.live("fork exclusion and lineage compaction preserve every existing fork summary", () =>
+    Effect.gen(function* () {
+      const t = yield* setup
+      const { writer, reader, userId, harbor, append, check } = t
+      const main = harbor.currentForkId!
+      const root = yield* append(harbor.id, null, "Root", null, main)
+      const tip = yield* append(harbor.id, root.slotId, "Tip", null, main)
+      // Inherited selection overrides also exercise batched dense summaries
+      // once the chain grows, alongside the other chat's plain fork.
+      yield* writer.AddVersion({
+        userId,
+        slotId: tip.slotId,
+        forkId: main,
+        version: t.version("A selected alternative", null),
+        select: true,
+        commitDraft: null
+      })
+      const anchor = yield* reader.GetSlot({ userId, slotId: root.slotId, forkId: main })
+      yield* writer.InsertMessage({
+        userId,
+        chatId: harbor.id,
+        forkId: main,
+        anchorSlotId: root.slotId,
+        expectedRowVersion: anchor.entry.rowVersion,
+        body: { _tag: "Write", speaker: null, content: "Between root and tip" }
+      })
+      yield* check("before fork", [harbor.id])
+      const onlyNew = (forkId: ForkId) =>
+        Effect.gen(function* () {
+          const read = yield* reader.ShellLibrary({ userId })
+          assert.deepStrictEqual(
+            read.fresh.flatMap((chat) => (JSON.parse(chat.forks) as Array<{ forkId: string }>).map((f) => f.forkId)),
+            [forkId],
+            "placing or excluding an insertion in a new fork must not invalidate existing forks"
+          )
+          yield* check("new fork only", [harbor.id])
+        })
+      // Forking at the anchor must write insert=0: the insertion follows the base.
+      const early = yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: root.slotId })
+      yield* onlyNew(early.fork.id)
+      let parent = main
+      for (let n = 1; n < 64; n++)
+        parent = (yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: parent, atSlotId: tip.slotId }))
+          .fork.id
+      yield* check("before compaction", [harbor.id])
+      // The 65th lineage entry copies the parent's effective insertion row.
+      const compacted = yield* writer.CreateFork({
+        userId,
+        chatId: harbor.id,
+        fromForkId: parent,
+        atSlotId: tip.slotId
+      })
+      yield* onlyNew(compacted.fork.id)
+      // Normal replies reach their forks by structural chain intervals even
+      // when other messages in the chat have insertions.
+      const reply = yield* append(harbor.id, tip.slotId, "A new reply", null, main)
+      yield* onlyNew(main)
+      yield* writer.AddVersion({
+        userId,
+        slotId: reply.slotId,
+        forkId: main,
+        version: t.version("Another take", null),
+        select: true,
+        commitDraft: null
+      })
+      yield* onlyNew(main)
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("previews skip empty and failed messages, with an empty fallback", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, harbor, append, version, check } = yield* setup
@@ -423,7 +492,8 @@ describe("shell fork summaries", () => {
       yield* t.append(harbor.id, a.slotId, "On the new fork.", mira.entityId, made.fork.id)
       yield* check("append to a fork", [harbor.id])
       const forkItem = yield* writer.DeleteFork({ userId, forkId: made.fork.id })
-      shell = yield* check("fork deleted", [harbor.id])
+      // Only the deleted fork changed; the surviving fork keeps its summary.
+      shell = yield* check("fork deleted", [])
       assert.strictEqual(shell.forks.filter((f) => f.chat.id === harbor.id).length, 1)
       yield* writer.RestoreBinItem({ userId, itemId: forkItem.id })
       shell = yield* check("fork restored", [harbor.id])

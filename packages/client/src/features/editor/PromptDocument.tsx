@@ -399,6 +399,20 @@ function PromptBlock({
     ) : (
       name
     )
+  // A note replaces it in the open chat (DESIGN §4.2): said on the row, closed too.
+  const noted = context?.replacements?.find(
+    (r) =>
+      r.target.kind === "preset_prompt" &&
+      r.target.identifier === entry.identifier &&
+      (r.status === "replaced" || r.status === "own_position" || r.status === "not_due")
+  )
+  const replacedBadge = !prompt.marker && noted && (
+    <Tooltip label={`The note “${noted.title}” replaces this prompt in this chat.`}>
+      <span tabIndex={0} data-prompt-replaced>
+        <Badge tone="accent">replaced in this chat</Badge>
+      </span>
+    </Tooltip>
+  )
   const summary = !prompt.marker && /\{\{summary\}\}/i.test(content) && context?.summary && (
     <Tooltip label="Shows what the summary note macro sends.">
       <span tabIndex={0}>
@@ -573,6 +587,7 @@ function PromptBlock({
             className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2 self-start min-h-8"
           >
             {aboveBreakpoint && <VolatileBadge names={volatileMacros(content)} />}
+            {replacedBadge}
             {summary}
             {!prompt.marker && <SendBadges prompt={prompt} />}
             <TokenCount prompt={prompt} content={content} context={context} />
@@ -592,18 +607,21 @@ function PromptBlock({
           </span>
         )}
       </BlockHeader>
-      {column && !prompt.marker && (open || summary || (aboveBreakpoint && volatileMacros(content).length > 0)) && (
-        <div data-prompt-info className="flex flex-wrap items-center gap-2 px-3 pb-2">
-          {aboveBreakpoint && <VolatileBadge names={volatileMacros(content)} />}
-          {summary}
-          {open && (
-            <>
-              <SendBadges prompt={prompt} />
-              <TokenCount prompt={prompt} content={content} context={context} />
-            </>
-          )}
-        </div>
-      )}
+      {column &&
+        !prompt.marker &&
+        (open || summary || replacedBadge || (aboveBreakpoint && volatileMacros(content).length > 0)) && (
+          <div data-prompt-info className="flex flex-wrap items-center gap-2 px-3 pb-2">
+            {aboveBreakpoint && <VolatileBadge names={volatileMacros(content)} />}
+            {replacedBadge}
+            {summary}
+            {open && (
+              <>
+                <SendBadges prompt={prompt} />
+                <TokenCount prompt={prompt} content={content} context={context} />
+              </>
+            )}
+          </div>
+        )}
       {open && optionsOpen && (
         <BlockOptions>
           <PromptOptions store={store} path={path} prompt={prompt} />

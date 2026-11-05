@@ -8,7 +8,7 @@ import { ExecutionRegistry } from "./execution.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
 import { SummaryChecks } from "./lcm/OutputChecks.ts"
 import { Summarizer } from "./lcm/Summarizer.ts"
-import { makeLcmHandlers } from "./api/lcm.ts"
+import { makeLcmHandlers, makeSummaryRequestHandlers } from "./api/lcm.ts"
 // Composition of the HTTP server: the RPC endpoint over a WebSocket, login and logout,
 // a health route, and the client build served as a single-page app.
 import { createServer } from "node:http"
@@ -22,6 +22,7 @@ import {
   type AppRpcs,
   AppCoreApi,
   AuthenticatedGalleryApi,
+  AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
   CurrentUser,
   Health
@@ -135,6 +136,7 @@ const CoreHandlers = AppCoreApi.toLayer(
 
 const Handlers = Layer.mergeAll(
   CoreHandlers,
+  AuthenticatedSummaryRequestApi.toLayer(makeSummaryRequestHandlers),
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
   AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),

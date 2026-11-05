@@ -18,6 +18,8 @@ import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { revisionActions } from "./editorSlots.ts"
 import type { Caller } from "./caller.ts"
 import { ValueDiff } from "./diff.tsx"
 import { changedFields, fieldLabel, type FieldChange } from "./fields.ts"
@@ -49,7 +51,7 @@ export type SettingLines = (
   path: ReadonlyArray<string | number>
 ) => ((value: unknown) => ReadonlyArray<string>) | undefined
 
-function FieldComparison({
+export function FieldComparison({
   label,
   change,
   doc,
@@ -379,28 +381,30 @@ export function CardRevisionBrowser({
               }
               originLabel={originBadges[revision.origin]}
               restore={
-                <Button
-                  className="h-8 px-2"
-                  disabled={
-                    revision.id === head ||
-                    restoringId !== null ||
-                    (selected?.id === revision.id && (!selectedDoc || clash !== null))
-                  }
-                  aria-label={selected?.id === revision.id && clash ? "Restore" : undefined}
-                  focusableWhenDisabled
-                  hint={
-                    revision.id === head
-                      ? "This is the latest revision"
-                      : restoringId
-                        ? "A revision is being restored"
-                        : selected?.id === revision.id && clash
-                          ? clash
-                          : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
-                  }
-                  onClick={() => void restore(revision)}
-                >
-                  Restore to {revisionName(revision.number).toLowerCase()}
-                </Button>
+                <>
+                  <Button
+                    className="h-8 px-2"
+                    disabled={
+                      revision.id === head ||
+                      restoringId !== null ||
+                      (selected?.id === revision.id && (!selectedDoc || clash !== null))
+                    }
+                    focusableWhenDisabled
+                    hint={
+                      revision.id === head
+                        ? "This is the latest revision"
+                        : restoringId
+                          ? "A revision is being restored"
+                          : selected?.id === revision.id && clash
+                            ? clash
+                            : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
+                    }
+                    onClick={() => void restore(revision)}
+                  >
+                    Restore to {revisionName(revision.number).toLowerCase()}
+                  </Button>
+                  <SlotOutlet slot={revisionActions} props={{ store, revision }} />
+                </>
               }
               message={revision.message}
               current={revision.id === head}
