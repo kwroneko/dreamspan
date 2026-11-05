@@ -68,7 +68,8 @@ describe("an agent reply's steps", () => {
     const call: TranscriptEntry = {
       role: "assistant",
       parts: [{ type: "toolCall", id: "c1", name: "search_chat", args: { query: "bridge" } }],
-      stopReason: "toolUse"
+      stopReason: "toolUse",
+      toolsOffered: true
     }
     const result: TranscriptEntry = {
       role: "toolResult",
@@ -78,7 +79,12 @@ describe("an agent reply's steps", () => {
       isError: false
     }
     const nudge: TranscriptEntry = { role: "app", text: "Write the reply now." }
-    const answer: TranscriptEntry = { role: "assistant", parts: [{ type: "text", text: "Done." }], stopReason: "stop" }
+    const answer: TranscriptEntry = {
+      role: "assistant",
+      parts: [{ type: "text", text: "Done." }],
+      stopReason: "stop",
+      toolsOffered: true
+    }
     expect(turnsOf([call, result, nudge, answer])).toEqual([
       { added: [], answer: call },
       { added: [result, nudge], answer }
