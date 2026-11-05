@@ -526,8 +526,25 @@ export interface HistoryImage extends RequestImage {
 export const historyLeafOf = (target: Target) =>
   target.historyLeaf === undefined ? target.parentSlotId : target.historyLeaf
 
+/**
+ * A merge's join message (spec/CHAT-MERGE.md §2): what the layout needs of its `chat_merges`
+ * row. Read with the entry and pinned with it, so a rebuild lays it out the same way.
+ */
+export interface HistoryMerge {
+  readonly id: string
+  readonly title: string
+  /** The merge's own framing line; null: the preset's. */
+  readonly framing: string | null
+  /** The destination message the parallel span starts at; null: directly before the join. */
+  readonly start: string | null
+  /** The source's cast at the merge, by the names the model knows them by. */
+  readonly cast: ReadonlyArray<string>
+}
+
 /** One message of the path, as assembly reads it. */
 export interface HistoryEntry {
+  /** A merge's join message (spec/CHAT-MERGE.md); absent on any other message. */
+  readonly merge?: HistoryMerge
   readonly images?: ReadonlyArray<HistoryImage>
   readonly slotId: string
   readonly versionId: string

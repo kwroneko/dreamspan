@@ -31,6 +31,8 @@ export interface FixtureMessage {
   readonly replySections?: ReplySections
   /** A template whose variable writes are recorded already. */
   readonly written?: boolean
+  /** A merge's join message (spec/CHAT-MERGE.md): its merge, as the history read carries it. */
+  readonly merge?: HistoryEntry["merge"]
 }
 
 export interface AssemblyFixture {
@@ -80,6 +82,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     inContext: m.inContext ?? (m.content.length > 0 || (m.images?.length ?? 0) > 0),
     ...(m.images === undefined ? {} : { images: m.images }),
     ...(m.replySections === undefined ? {} : { replySections: m.replySections }),
+    ...(m.merge === undefined ? {} : { merge: m.merge }),
     sentAt: 0,
     versions: 1,
     selectedOrdinal: 0

@@ -1,3 +1,4 @@
+import { builtinMergeLayouts, makeMergeLayoutRegistry, mergeSectionsTransform, type MergeLayoutRegistry } from "./merges.ts"
 import { builtinTextCounters, type TextTokenCounter } from "../providers/textCounters.ts"
 import { builtinSourceDescriptors, type SourceDescriptor } from "./sourceDescriptors.ts"
 import {
@@ -55,6 +56,8 @@ export interface Assembler {
   readonly transforms: TransformRegistry
   readonly macros: MacroRegistry
   readonly projections: ProjectionRegistry
+  /** How merged chats reach the model (`merge-layout` stage, spec/CHAT-MERGE.md §4). */
+  readonly mergeLayouts: MergeLayoutRegistry
   /** What an image costs per provider and model (ARCHITECTURE §15, image tokens). */
   readonly textCounters: Registry<TextTokenCounter>
   readonly imageTokens: Registry<ImageTokenRule>
@@ -119,6 +122,10 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   yield* summaryInstructions.register(condensationInstruction)
   yield* summaryStyles.register(defaultSummaryStyle)
   yield* transforms.register(makeSummaryRequestTransform(summaryInstructions))
+  // After the instruction is written: summaries over a merge get a section per line.
+  yield* transforms.register(mergeSectionsTransform)
+  const mergeLayouts = makeMergeLayoutRegistry()
+  for (const layout of builtinMergeLayouts) yield* mergeLayouts.register(layout)
   const projections = makeProjectionRegistry()
   const textCounters = makeRegistry<TextTokenCounter>()
   for (const counter of builtinTextCounters.filter((c) => !c.remote)) yield* textCounters.register(counter)
@@ -141,6 +148,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
     transforms,
     macros,
     projections,
+    mergeLayouts,
     imageTokens,
     textCounters,
     scriptSources,
@@ -158,7 +166,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
     assemble: (request) =>
       withAssemblyModules(
         assembler,
-        assemble(stages, { ...request, macros, projections, imageTokens, scriptSources }, transforms)
+        assemble(stages, { ...request, macros, projections, mergeLayouts, imageTokens, scriptSources }, transforms)
       ),
     rewrite: (request, options, items) =>
       Effect.map(assembler.prepareRewrite(request, options), (prepared) => prepared.run(items)),
@@ -168,7 +176,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
         Effect.gen(function* () {
           const assembly = yield* assembleThrough(
             stages,
-            { ...request, macros, projections, imageTokens, scriptSources, rewrite: options },
+            { ...request, macros, projections, mergeLayouts, imageTokens, scriptSources, rewrite: options },
             "scripts"
           )
           const side = rewriteSide(assembly, options)

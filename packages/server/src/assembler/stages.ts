@@ -1,3 +1,4 @@
+import { mergeLayoutStage } from "./merges.ts"
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
@@ -1057,6 +1058,9 @@ const chatLine = (
   const text = scripted.text.replace(/\r/gm, "") || (projected.entry.images?.length ? "[Image]" : "")
   const pieces = [projected.piece]
   const images = projected.entry.images?.length ? { images: projected.entry.images } : {}
+  // A merged chat's section and join (assembler/merges.ts): system text, as summaries are sent.
+  if (projected.system)
+    return { role: "system", content: text, pieces, kind: scripted.volatile ? "volatile" : "history" }
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
     content: prefix ? `${projected.name}: ${text}` : text,
@@ -2540,6 +2544,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   resolveStage,
   imageTokensStage,
   rolesStage,
+  mergeLayoutStage,
   noteGateStage,
   loreScanStage,
   loreActivationStage,
