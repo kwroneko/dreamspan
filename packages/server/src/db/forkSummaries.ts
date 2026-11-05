@@ -21,8 +21,8 @@ import { settleSummaries } from "./summaryValidity.ts"
 import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
-// Recompute rows that predate retained-swipe invalidation and human-author activity.
-export const FORK_SUMMARY_FORMAT = 4
+// Recompute rows that predate branch-local speaking order.
+export const FORK_SUMMARY_FORMAT = 5
 
 /**
  * What the shell shows of a fork: ids only, the cast with every card, binned or not, and the
@@ -217,6 +217,7 @@ export const computeForkSummaries = (
       let state = foldState(positional.get("") ?? [])
       const joined = new Set<string>()
       const activity = new Map<string, { entityId: EntityId; at: number; slot: string }>()
+      const lastSpoke = new Map<string, number>()
       let endpoint: Slot | undefined
       let messages = 0
       // What it shares: its parent's path while that's live, else the history up to its base.
@@ -244,11 +245,28 @@ export const computeForkSummaries = (
           if (at >= (activity.get(entity)?.at ?? -Infinity))
             activity.set(entity, { entityId: entity as EntityId, at, slot: s.id })
         }
-        if (s.speaker !== null) record(s.speaker, s.at)
+        if (s.speaker !== null) {
+          record(s.speaker, s.at)
+          lastSpoke.set(s.speaker, messages)
+        }
         for (const author of JSON.parse(s.human_authors) as Array<{ entity: string; at: number }>)
           record(author.entity, author.at)
       }
-      state = foldState(branch, state)
+      for (const event of branch) {
+        const { data } = event
+        if (
+          data.key === "card.swap" &&
+          data.value.entity !== data.value.replaces &&
+          state.participants.includes(data.value.replaces)
+        ) {
+          const rank = lastSpoke.get(data.value.replaces)
+          if (rank !== undefined) {
+            lastSpoke.set(data.value.entity, Math.max(rank, lastSpoke.get(data.value.entity) ?? 0))
+            lastSpoke.delete(data.value.replaces)
+          }
+        }
+        state = foldState([event], state)
+      }
       const present = state.participants.filter((id) => !state.playedByMe.includes(id) && !state.absent.includes(id))
       summaries.push({
         forkId: record.id,
@@ -259,7 +277,9 @@ export const computeForkSummaries = (
         endAt: endpoint?.at ?? null,
         split: shared === null ? null : (split ?? { at: record.created_at, after: messages }),
         // Every card, binned or not: the read keeps those it can show.
-        cast: state.participants.filter((id) => !state.playedByMe.includes(id)),
+        cast: state.participants
+          .filter((id) => !state.playedByMe.includes(id))
+          .sort((a, b) => (lastSpoke.get(b) ?? 0) - (lastSpoke.get(a) ?? 0)),
         joined: [...joined],
         departed: [...joined].filter((id) => !state.participants.includes(id)),
         activity: [...activity.values()].map((a) => ({

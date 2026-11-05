@@ -1,3 +1,5 @@
+**Built 2026-11-05 (castorder):** The chat-row character order in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §3.8.
+
 **Built 2026-11-04 (faceplus3):** The portrait visibility decision in §10.1 supersedes faceplus2’s slot rule and is implemented; see ARCHITECTURE §12.
 
 **Built 2026-11-04 (leftsearch):** The left-panel name-filter decision in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
@@ -1047,6 +1049,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D]** (owner, 2026-11-05): “Change the character order.” In chat rows and home/group tiles sharing shell fork rows, characters follow their latest message on that branch, then silent members in join order; card swaps retain character identity and personas stay excluded. Header faces and Cast keep join order.
 
 - **[D]** (owner, 2026-11-04; faceplus4): "the + cards are invisible on a selected chat". Keep the +N tile visibly a tile in every row state and both themes, including the header and other occurrences. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12). **[P]** Give the shared tile an edge using the existing semantic border token.
 

@@ -90,6 +90,70 @@ const setup = Effect.gen(function* () {
 })
 
 describe("shell fork summaries", () => {
+  it.live("orders characters by branch messages, preserves silent join order and follows swaps", () =>
+    Effect.gen(function* () {
+      const { writer, userId, mira, tam, makeCard, newChat, append, check } = yield* setup
+      const silent = yield* makeCard("Silent")
+      const persona = yield* makeCard("Persona")
+      const chat = yield* newChat("Cast order", [mira.entityId, tam.entityId, silent.entityId, persona.entityId])
+      const main = chat.currentForkId!
+      yield* writer.AddStateEvent({
+        userId,
+        chatId: chat.id,
+        forkId: main,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "played_by_me.set", value: { entities: [persona.entityId] } }
+      })
+      const order = (shell: Read, forkId = main) => shell.forks.find((f) => f.forkId === forkId)!.cast
+      assert.deepStrictEqual(order(yield* check("silent", [chat.id])), [mira.entityId, tam.entityId, silent.entityId])
+      const first = yield* append(chat.id, null, "Tam speaks", tam.entityId, main)
+      assert.deepStrictEqual(order(yield* check("Tam", [chat.id])), [tam.entityId, mira.entityId, silent.entityId])
+      const second = yield* append(chat.id, first.slotId, "Mira speaks", mira.entityId, main)
+      const third = yield* append(chat.id, second.slotId, "Tam again", tam.entityId, main)
+      const fourth = yield* append(chat.id, third.slotId, "Persona speaks", persona.entityId, main)
+      assert.deepStrictEqual(order(yield* check("distinct and persona", [chat.id])), [
+        tam.entityId,
+        mira.entityId,
+        silent.entityId
+      ])
+      const { fork: branch } = yield* writer.CreateFork({
+        userId,
+        chatId: chat.id,
+        fromForkId: main,
+        atSlotId: second.slotId
+      })
+      const branchTurn = yield* append(chat.id, second.slotId, "Silent speaks on branch", silent.entityId, branch.id)
+      let shell = yield* check("branch", [chat.id])
+      assert.deepStrictEqual(order(shell), [tam.entityId, mira.entityId, silent.entityId])
+      assert.deepStrictEqual(order(shell, branch.id), [silent.entityId, mira.entityId, tam.entityId])
+      const replacement = yield* writer.ForkCard({
+        userId,
+        refId: tam.ref.id,
+        name: "Tam variant",
+        nickname: "Tam variant",
+        characterVersion: "2"
+      })
+      yield* writer.AddStateEvent({
+        userId,
+        chatId: chat.id,
+        forkId: main,
+        slotId: fourth.slotId,
+        versionId: null,
+        scope: null,
+        data: { key: "card.swap", value: { entity: replacement.entityId, replaces: tam.entityId } }
+      })
+      shell = yield* check("swap retains recency", [chat.id])
+      assert.deepStrictEqual(order(shell), [replacement.entityId, mira.entityId, silent.entityId])
+      assert.deepStrictEqual(order(shell, branch.id), [silent.entityId, mira.entityId, tam.entityId])
+      // A newer turn advances only that fork; every check also verifies stored-summary reuse.
+      yield* append(chat.id, branchTurn.slotId, "Tam replies on branch", tam.entityId, branch.id)
+      shell = yield* check("branch reply", [chat.id])
+      assert.deepStrictEqual(order(shell, branch.id), [tam.entityId, silent.entityId, mira.entityId])
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("recomputes persisted summaries from before retained-swipe invalidation", () => {
     const dataDir = tempDir("shell-old-summary")
     return Effect.gen(function* () {
@@ -100,7 +164,7 @@ describe("shell fork summaries", () => {
       // Its stamps still match on startup, so only the format can invalidate it.
       yield* fixtureSql(dataDir, [
         {
-          sql: "UPDATE fork_summaries SET format = 3, preview = 'Obsolete cached preview', joined_json = '[]' WHERE chat_id = ?",
+          sql: "UPDATE fork_summaries SET format = 4, preview = 'Obsolete cached preview', joined_json = '[]' WHERE chat_id = ?",
           params: [t.harbor.id]
         }
       ])
