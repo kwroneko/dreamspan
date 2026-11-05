@@ -1,3 +1,5 @@
+import { useSplitChats } from "../chat/splitChats.ts"
+import { requestSplitReveal, useSplitReveal } from "../chat/splitReveal.ts"
 import type { ChatBrowse } from "@rp/shared/chatBrowse.ts"
 import { useChatBrowse } from "./useChatBrowse.ts"
 import { sidebarChatBrowse } from "./ChatBrowseBar.tsx"
@@ -7,7 +9,7 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { AsyncView, ErrorAlert, FailureView, useAction } from "../../actions.tsx"
 import type { ForkId } from "@rp/shared/chat.ts"
 import { InlineRename } from "../../ui/InlineRename.tsx"
@@ -96,7 +98,7 @@ export function PinButton({
  * Opens a fork in the middle. A pick in the left panel keeps the panel where it is (its scope
  * travels in the URL); `scopeChat` scopes it to the fork's chat, as a group tile does.
  */
-function useOpenFork(fork: ShellFork, scopeChat: boolean) {
+function useOpenFork(fork: ShellFork, scopeChat: boolean, splitNavigation = false) {
   const navigate = useNavigate()
   // Read at the click: subscribing would re-render every row with each switch of the chat panel's tab.
   const router = useRouter()
@@ -105,6 +107,7 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
   const wide = useWide()
   const open = () => {
     navigation.picked()
+    if (splitNavigation) requestSplitReveal(fork.chat.id)
     // A list changes only the middle. Keep a character tab while that character is in the
     // chat, played by the model or by the user; else This chat.
     const inUrl = (router.state.location.search as { panel?: unknown }).panel
@@ -113,10 +116,16 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
     const panel = id !== null && (!fork.joined.includes(id) || fork.departed.includes(id)) ? "chat" : previous
     void navigate({
       to: "/chats/$chatId",
-      params: { chatId: fork.chat.id },
+      params: { chatId: fork.sourceChatId ?? fork.chat.id },
       search: {
         ...sidebarCleared,
-        ...scopeSearch(scopeChat ? { entity: null, chat: fork.chat.id } : navigation.scope),
+        ...scopeSearch(
+          splitNavigation
+            ? { entity: null, chat: null }
+            : scopeChat
+              ? { entity: null, chat: fork.chat.id }
+              : navigation.scope
+        ),
         ...(navigation.grid && !scopeChat ? { side: "characters" } : {}),
         fork: fork.forkId,
         ...(panel ? { panel } : {})
@@ -250,7 +259,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
                   (client) => client("NameFork", { forkId: fork.forkId as ForkId, name }),
                   ["chats"]
                 )
-                if (result.ok) forksChanged(fork.chat.id)
+                if (result.ok) forksChanged(fork.sourceChatId ?? fork.chat.id)
                 return result.ok
               }}
             >
@@ -311,6 +320,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
 export function ForkRow({
   fork,
   scopeChat = false,
+  splitNavigation = false,
   details = false,
   here = false,
   perFork = false,
@@ -319,6 +329,7 @@ export function ForkRow({
 }: {
   fork: ShellFork
   scopeChat?: boolean
+  splitNavigation?: boolean
   details?: boolean
   /** The row is this fork (a chat's branches), not its chat (a list of chats). */
   perFork?: boolean
@@ -329,7 +340,7 @@ export function ForkRow({
   /** The character the list is scoped to, kept when "⑂ 12" lists a chat's branches. */
   entity?: EntityId | null
 }) {
-  const open = useOpenFork(fork, scopeChat)
+  const open = useOpenFork(fork, scopeChat, splitNavigation)
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
@@ -459,7 +470,8 @@ export function OpenChatBranches() {
       return true
     }
   })
-  const chatId = (params.chatId ?? null) as ChatId | null
+  const split = useSplitChats((params.chatId ?? null) as ChatId | null, shown)
+  const chatId = split?.group.id ?? ((params.chatId ?? null) as ChatId | null)
   const forks = useShellForks({
     entity: null,
     chat: chatId,
@@ -473,7 +485,12 @@ export function OpenChatBranches() {
   })
   const rows = [...forks.section("pinnedBranches").rows, ...forks.section("peers").rows, ...forks.section("other").rows]
   const visible = chatId !== null && !grid && scope.chat !== chatId && rows.length > 0
-  const { ref, height, min, max, change, reset } = useBranchHeight(userId, visible)
+  const { ref, height, min, max, change, reset } = useBranchHeight(
+    userId,
+    visible,
+    "branch",
+    !!split && (split.parent !== null || split.children.length > 0)
+  )
   if (!visible) return null
   const toggle = () => {
     setExpanded(!expanded)
@@ -508,7 +525,9 @@ export function OpenChatBranches() {
       )}
       {/* The same 8 px gutters as the list above (layoutlint), so these rows line up with its rows. */}
       <div className="flex max-w-controls min-w-0 items-center gap-1 px-2">
-        <Tooltip label={expanded ? "Hides the open chat's branches." : "Shows the open chat's branches here."}>
+        <Tooltip
+          label={expanded ? "Click to hide the open chat's branches." : "Click to show the open chat's branches here."}
+        >
           <button
             type="button"
             aria-expanded={expanded}
@@ -603,6 +622,7 @@ export function PinnedChats({
   const [localSort, setSort] = useState<ShellSort>("recent")
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
+  const selected = useSplitChats((params.chatId ?? null) as ChatId | null, shown)?.group.id ?? params.chatId
   const sort = sortBy ?? localSort
   const [limit, setLimit] = useState(PAGE_ROWS)
   const action = useAction()
@@ -641,11 +661,7 @@ export function PinnedChats({
       {open && (
         <>
           {pins.rows.map((fork) => (
-            <ForkRow
-              key={`${fork.chat.id}/${fork.forkId}`}
-              fork={fork}
-              here={fork.chat.id === params.chatId && (shown ? fork.forkId === shown : fork.current)}
-            />
+            <ForkRow key={`${fork.chat.id}/${fork.forkId}`} fork={fork} here={fork.chat.id === selected} />
           ))}
           <ShowMore shown={pins.rows.length} total={pins.total} onMore={() => setLimit((n) => n + PAGE_ROWS)} />
         </>
@@ -680,6 +696,9 @@ function Browser({ data }: { data: ShellLibrary }) {
   const setSearch = (search: string) => setBrowse({ search })
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
+  const selected = useSplitChats((params.chatId ?? null) as ChatId | null, shown)?.group.id ?? params.chatId
+  const listRef = useRef<HTMLDivElement>(null)
+  useSplitReveal(listRef, selected)
   const card = [...data.cards, ...data.personas].find((c) => c.card.entityId === scope.entity)
   const cardLabel = card ? card.card.label : "Character not found"
   const needle = search.trim().toLowerCase()
@@ -724,7 +743,7 @@ function Browser({ data }: { data: ShellLibrary }) {
               perFork={kind === "chat"}
               branchOnly={kind === "chat"}
               entity={scope.entity}
-              here={f.chat.id === params.chatId && (kind !== "chat" || (shown ? f.forkId === shown : f.current))}
+              here={f.chat.id === selected && (kind !== "chat" || (shown ? f.forkId === shown : f.current))}
             />
           ))}
           <ShowMore shown={rows.length} total={total} onMore={() => more(id)} />
@@ -809,7 +828,11 @@ function Browser({ data }: { data: ShellLibrary }) {
       )}
       {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups includePersonas />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
-      <div data-shell-list className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
+      <div
+        ref={listRef}
+        data-shell-list
+        className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
+      >
         {grid ? (
           // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
           browse.filter === "groups" ? (

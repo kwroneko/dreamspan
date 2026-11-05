@@ -1,3 +1,4 @@
+import { useSplitChats } from "./splitChats.ts"
 // A chat's branches as the header lists them (DESIGN §3.2; the forks of
 // spec/FORK-INDEPENDENCE-DELTA.md, which the UI calls branches): every live fork, with its
 // name (`forkLabel`), its last message's first words and time. Read with `ListForks` when the
@@ -126,8 +127,13 @@ export function useChatForks(session: ChatSession, view: ChatView): ChatForks {
             ...pending.map((m) => m.fork).reverse(),
             ...read.forks.map((f) => (f.current && pending.some((m) => m.fork.current) ? { ...f, current: false } : f))
           ]
+  const split = useSplitChats(session.id, view.forkId)
+  const grouped =
+    split && forks
+      ? forks.filter((f) => split.forkIds.includes(f.id)).map((f) => ({ ...f, current: f.id === split.group.forkId }))
+      : forks
   const shownId = view.forkId ?? chat?.currentForkId ?? null
-  return { forks, shown: forks?.find((f) => f.id === shownId), reload: () => setAgain((n) => n + 1) }
+  return { forks: grouped, shown: grouped?.find((f) => f.id === shownId), reload: () => setAgain((n) => n + 1) }
 }
 
 // The ⋯ menu's "Branches…": a request the open chat's branch control answers.

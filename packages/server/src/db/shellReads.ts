@@ -1,3 +1,7 @@
+import { splitChatMarkers, splitGroups } from "./splitChats.ts"
+import type { SplitChatLink } from "@rp/shared/splitChat.ts"
+import { NotFound } from "./ops.ts"
+import type { ForkId } from "@rp/shared/chat.ts"
 // The shell's library: cards, forks and who is in each. Runs in a reader worker. Each fork's
 // walk is kept in `fork_summaries` (db/forkSummaries.ts); a read computes only the chats whose
 // summaries are stale and returns them for the caller to store, so its cost is the cards and
@@ -36,6 +40,9 @@ type Activity = ShellFork["activity"][number]
 
 /** What every shell read is made of: the cards, each fork row newest first, and what it had to walk. */
 interface ShellState {
+  readonly links: ReadonlyMap<string, SplitChatLink>
+  readonly parents: ReadonlyMap<string, string>
+  readonly splitChatIds: ReadonlySet<string>
   readonly cards: ReadonlyArray<ShellCard>
   readonly personas: ReadonlyArray<ShellCard>
   readonly forks: ReadonlyArray<Fork>
@@ -288,9 +295,10 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         split_at: number | null
         split_after: number | null
         parent_fork_id: string | null
+        base_slot_id: string | null
         lists: string | null
       }>`
-          SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, f.parent_fork_id,
+          SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, f.parent_fork_id, f.base_slot_id,
             c.title, c.current_fork_id, c.created_at AS chat_created_at, coalesce(c.added_at, c.created_at) AS chat_added_at,
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
             s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
@@ -382,11 +390,59 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         list.push(summary)
         fresh.set(summary.chatId, list)
       }
+      const markers = yield* splitChatMarkers(sql, userId)
+      const ancestry = yield* sql<{
+        id: string
+        chat_id: string
+        parent_fork_id: string | null
+        deleted_at: number | null
+      }>`
+        SELECT f.id, f.chat_id, f.parent_fork_id, f.deleted_at FROM forks f JOIN chats c ON c.id = f.chat_id
+        WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+      const groups = splitGroups(ancestry, markers)
+      const ancestors = new Map(ancestry.map((f) => [f.id, f]))
+      const byFork = new Map(joinedRows.map((r) => [r.id, r]))
+      const groupCurrent = new Map<string, (typeof joinedRows)[number]>()
+      for (const record of joinedRows) {
+        const id = groups.get(record.id)!
+        const previous = groupCurrent.get(id)
+        const recency = (r: typeof record) => Math.max(r.created_at, r.last_chatted_at ?? 0)
+        if (
+          !previous ||
+          recency(record) > recency(previous) ||
+          (recency(record) === recency(previous) && record.id > previous.id)
+        )
+          groupCurrent.set(id, record)
+      }
+      // Preserve an imported chat's explicitly selected branch when it is still in its group.
+      for (const record of joinedRows)
+        if (record.id === record.current_fork_id && groups.get(record.id) === record.chat_id)
+          groupCurrent.set(record.chat_id, record)
+      const titles = new Map<string, string>()
+      for (const [id, current] of groupCurrent) {
+        const root = byFork.get(id)
+        const cast = stored.get(current.id)!.cast.flatMap((card) => byCard.get(card) ?? [])
+        const original = chatName(importState(current.title).title, cast).name
+        titles.set(
+          id,
+          markers.has(id)
+            ? (root?.name ?? `${original} — ${new Date(root!.created_at).toLocaleString("en-GB", { timeZone: "UTC" })}`)
+            : original
+        )
+        if (markers.has(id) && root?.pinned_at !== null) pinnedChats.add(id)
+      }
       // A chat's Recent is the latest of its forks' (below), and how many forks it has.
       const chatRecent = new Map<string, number>()
       const branchCount = new Map<string, number>()
       const forks: Array<Fork> = joinedRows.map((record) => {
-        const row = chatById.get(record.chat_id)!
+        const physical = chatById.get(record.chat_id)!
+        const groupId = groups.get(record.id)!
+        const row = {
+          ...physical,
+          id: groupId,
+          current_fork_id: groupCurrent.get(groupId)!.id,
+          created_at: markers.has(groupId) ? byFork.get(groupId)!.created_at : physical.created_at
+        }
         const s = stored.get(record.id)!
         const cast = s.cast.flatMap((id) => byCard.get(id) ?? [])
         // Its last shown message; without one, its chat's start (an imported chat's ST date,
@@ -399,17 +455,18 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         branchCount.set(row.id, (branchCount.get(row.id) ?? 0) + 1)
         return {
           forkId: record.id,
+          sourceChatId: record.chat_id as ChatId,
           preview: s.preview,
           messages: s.messages,
           chat: { id: row.id as ChatId, title: row.title, createdAt: row.created_at },
           leaf: s.leaf as SlotId | null,
           name: record.name ?? chatName(importState(row.title).title, cast).name,
-          chatName: chatName(importState(row.title).title, cast).name,
+          chatName: titles.get(groupId)!,
           named: record.name !== null,
           current: record.id === row.current_fork_id,
           pinned: record.pinned_at !== null,
-          chatPinned: pinnedChats.has(record.chat_id),
-          original: record.parent_fork_id === null,
+          chatPinned: pinnedChats.has(groupId),
+          original: record.id === groupId,
           split: s.split,
           createdAt: record.created_at,
           addedAt: row.added_at,
@@ -500,7 +557,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                   ...(c.avatarCrop ? { avatarCrop: c.avatarCrop } : {}),
                   chats: m.persona ? new Set(used.map((f) => f.chat.id)).size : used.length,
                   lastMessageAt: spoke[0]?.a.at ?? (m.persona ? recent : null),
-                  latestChatId: (latest?.chat.id as ChatId) ?? null
+                  latestChatId: (latest?.sourceChatId as ChatId) ?? null
                 },
                 trusted
               ),
@@ -512,7 +569,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                 open === undefined
                   ? null
                   : {
-                      chatId: open.chat.id,
+                      chatId: open.sourceChatId!,
                       forkId: open.forkId,
                       leaf: open.leaf,
                       slot: (turn(open)?.slot as SlotId | undefined) ?? null
@@ -525,7 +582,36 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       const [prefs] = yield* sql<{
         pins_collapsed: number
       }>`SELECT pins_collapsed FROM shell_preferences WHERE user_id = ${userId}`
+      const links = new Map<string, SplitChatLink>()
+      const parents = new Map<string, string>()
+      for (const [id, current] of groupCurrent) {
+        const root = byFork.get(id)
+        links.set(id, {
+          id: id as ChatId,
+          chatId: current.chat_id as ChatId,
+          forkId: current.id as ForkId,
+          rootForkId: id as ForkId,
+          title: titles.get(id)!,
+          slotId: (markers.has(id) ? (root?.base_slot_id ?? null) : null) as SlotId | null
+        })
+        if (markers.has(id)) {
+          let parent = root?.parent_fork_id ?? null
+          while (parent !== null) {
+            const ancestor = ancestors.get(parent)
+            if (!ancestor) break
+            const parentGroup = groups.get(ancestor.id)
+            if (ancestor.deleted_at === null && parentGroup !== undefined && groupCurrent.has(parentGroup)) {
+              parents.set(id, parentGroup)
+              break
+            }
+            parent = ancestor.parent_fork_id
+          }
+        }
+      }
       const state: ShellState = {
+        links,
+        parents,
+        splitChatIds: new Set(ancestry.filter((f) => markers.has(f.id)).map((f) => f.chat_id)),
         cards: shellCards.filter((c) => !byCard.get(c.card.entityId)!.persona),
         personas: shellCards.filter((c) => byCard.get(c.card.entityId)!.persona),
         forks,
@@ -559,6 +645,29 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         pinsCollapsed: state.pinsCollapsed,
         fresh: state.fresh
       })).pipe(query("ShellCards")),
+    GetSplitChats: ({ userId, chatId, forkId }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ current_fork_id: string | null }>`SELECT current_fork_id FROM chats
+          WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const state = yield* shellState(userId, false)
+        const shown = state.forks.find(
+          (f) => f.sourceChatId === chatId && f.forkId === (forkId ?? chat.current_fork_id)
+        )
+        if (!shown) return yield* new NotFound({ entity: "branch", id: forkId ?? chatId })
+        const group = state.links.get(shown.chat.id)!
+        const parentId = state.parents.get(group.id)
+        return {
+          group,
+          parent: parentId ? (state.links.get(parentId) ?? null) : null,
+          children: [...state.parents].flatMap(([child, parent]) =>
+            parent === group.id ? [state.links.get(child)!] : []
+          ),
+          forkIds: state.forks.filter((f) => f.chat.id === group.id).map((f) => f.forkId as ForkId),
+          hasSplits: state.splitChatIds.has(chatId),
+          canSplit: shown.forkId !== group.rootForkId
+        }
+      }).pipe(query("GetSplitChats")),
     ShellForks: ({ userId, view }) =>
       Effect.map(shellState(userId, false), (state) => {
         const sections = view.sections.map(({ id, limit }) => {

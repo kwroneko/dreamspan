@@ -17,6 +17,8 @@ import { popupOpen } from "../../ui/openPopups.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export interface ChatCommandContext {
+  readonly splitRootId?: string | undefined
+  readonly hasSplitGroups?: boolean | undefined
   readonly session: ChatSession
   readonly view: ChatView
   readonly onHistory: () => void

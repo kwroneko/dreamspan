@@ -5,7 +5,7 @@ import { Summarizer } from "../lcm/Summarizer.ts"
 // so a crash keeps most of it. Stopping one keeps its text; a failure becomes a failed
 // version with its cause. Everything here runs on the main thread and never blocks it:
 // text arrives in chunks, and storage is a message to the writer worker.
-import type { ChatId, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effect"
@@ -83,7 +83,7 @@ export class Generations extends Context.Service<
       readonly sections?: string
     }>
     /** The versions generating in a chat. */
-    readonly runningIn: (chatId: ChatId) => Array<VersionId>
+    readonly runningIn: (chatId: ChatId, forkIds?: ReadonlyArray<ForkId>) => Array<VersionId>
     /** After a write moved the send queue: starts the reply it posted, and publishes what changed. */
     readonly continueQueue: (userId: UserId, outcome: typeof QueueOutcome.Type) => Effect.Effect<void>
   }
@@ -534,9 +534,14 @@ export class Generations extends Context.Service<
               ...(entry.shown.reasoning ? { reasoning: entry.shown.reasoning } : {}),
               ...(entry.shown.sections ? { sections: entry.shown.sections } : {})
             })),
-        runningIn: (chatId) =>
+        runningIn: (chatId, forkIds) =>
           [...running.values()]
-            .filter((entry) => entry.request.chatId === chatId)
+            .filter(
+              (entry) =>
+                entry.request.chatId === chatId &&
+                (forkIds === undefined ||
+                  (entry.request.forkId !== undefined && forkIds.includes(entry.request.forkId)))
+            )
             .map((entry) => entry.request.versionId)
       })
     })

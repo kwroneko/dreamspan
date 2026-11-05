@@ -753,6 +753,14 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const item = yield* writer.DeleteChat({ userId: id, chatId })
+        if (item.kind === "branch") {
+          const forks = item.origin.forkIds as ReadonlyArray<ForkId>
+          yield* Effect.forEach(generations.runningIn(chatId, forks), (versionId) =>
+            Effect.ignore(generations.stop(id, versionId))
+          )
+          yield* afterDelete(id, chatId)
+          return item
+        }
         yield* stopDeleted(id, chatId)
         // After the stopped versions, the subscriptions end.
         hub.close(chatId, { _tag: "Deleted" })

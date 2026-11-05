@@ -1,3 +1,5 @@
+import { SplitChatDivider } from "./SplitChatDivider.tsx"
+import { messageStream } from "./presentation.tsx"
 import { MacroBindings } from "./MacroBindings.tsx"
 import { registerImages } from "./images.tsx"
 import { registerTimelineTransforms } from "./timelineContributions.tsx"
@@ -98,6 +100,7 @@ const RolesSetting = deferred<Parameters<typeof import("./ThisChatTab.tsx").Role
 )
 
 export const registerPresentation = () => [
+  messageStream.register({ id: "chat.split-divider", order: 30, component: SplitChatDivider }),
   ...registerTimelineTransforms(),
   chatBranchControls.register({ id: "chat.branches", order: 10, component: BranchControl }),
   messagePreviews.register({ id: "history.message-preview", order: 10, component: HistoryMessagePreview }),

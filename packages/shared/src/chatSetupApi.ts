@@ -136,6 +136,8 @@ export class ShellCard extends Schema.Class<ShellCard>("ShellCard")({
 }) {}
 export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   forkId: Schema.String,
+  /** Physical chat for navigation; chat.id is the derived sidebar group. */
+  sourceChatId: Schema.optionalKey(ChatId),
   preview: Schema.String,
   messages: Schema.Int,
   /** Only what the rows show; the chat's own record is read when it opens. */

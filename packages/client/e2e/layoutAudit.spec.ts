@@ -1,3 +1,4 @@
+import { seedSplitChats } from "./support/splitChats.ts"
 import { centerHeaderTests } from "./support/centerHeaders.ts"
 // Run before UI approval: LAYOUT_AUDIT=1 PLAYWRIGHT_WORKERS=1 npx playwright test -c
 // packages/client/playwright.config.ts e2e/layoutAudit.spec.ts --project=chromium
@@ -2282,3 +2283,50 @@ test.describe("revision dialogs", () => {
         }
       })
 })
+
+// Split groups use the app's operations and the same list rows as ordinary chats.
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`split chats layout ${width} ${theme}`, async ({ page }, info) => {
+      const local = await startServer(withAdmin)
+      try {
+        const splitCookie = await loginCookie(local, ADMIN.handle, ADMIN.password)
+        const splitSeed = await withCookie(local, splitCookie, seedSplitChats)
+        await apiLogin(page.request, local, ADMIN.handle, ADMIN.password)
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.goto(`${local.url}/chats/${splitSeed.chatId}?fork=${splitSeed.market}`)
+        if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
+        await showAppNavigation(page)
+        const splitSection = page.getByRole("region", { name: "Split chats", exact: true })
+        const branchSection = page.getByRole("region", { name: "Branches of the open chat", exact: true })
+        await expect(
+          splitSection.getByRole("link", { name: "From “Split demo · Journeys”", exact: true })
+        ).toBeVisible()
+        for (const state of ["expanded", "branches-collapsed", "both-collapsed", "split-collapsed"] as const) {
+          if (state === "branches-collapsed" || state === "split-collapsed")
+            await branchSection.getByRole("button", { name: /^Branches of / }).click()
+          if (state === "both-collapsed")
+            await splitSection.getByRole("button", { name: "Split off (1)", exact: true }).click()
+          await expectLayout(page, info, `split-${width}-${theme}-${state}`, {
+            scope: 'section[aria-label="Split chats"]'
+          })
+          await expectLayout(page, info, `branches-${width}-${theme}-${state}`, {
+            scope: 'section[aria-label="Branches of the open chat"]'
+          })
+          await expectLayout(page, info, `chats-${width}-${theme}-${state}`, { scope: "[data-shell-list]" })
+          await page.screenshot({ path: info.outputPath(`split-${width}-${theme}-${state}.png`) })
+        }
+        await hideAppNavigation(page)
+        await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+        await page.getByRole("menuitem", { name: "Delete chat", exact: true }).click()
+        await expect(page.getByRole("dialog", { name: /^Delete / })).toContainText("Moves 2 branches to the bin.")
+        await expectLayout(page, info, `split-delete-${width}-${theme}`, { scope: '[role="dialog"]' })
+        await page
+          .getByRole("dialog", { name: /^Delete / })
+          .screenshot({ path: info.outputPath(`split-delete-${width}-${theme}.png`) })
+      } finally {
+        await local.stop()
+      }
+    })
+  }
