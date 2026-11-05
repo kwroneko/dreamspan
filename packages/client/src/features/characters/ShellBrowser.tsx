@@ -204,7 +204,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
       onClick={(event) => {
         if (!(event.target as HTMLElement).closest("button, input, [data-added-portraits]")) open()
       }}
-      className={`fork-row branch-list-row @container/fork-row relative grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${here ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
+      className={`fork-row branch-list-row @container/fork-row relative grid w-full max-w-controls min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${here ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
     >
       {fork.added.length > 0 && (
         <Tooltip label={addedNames}>

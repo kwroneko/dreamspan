@@ -60,7 +60,7 @@ for (const theme of ["light", "dark"] as const)
     const grip = page.getByRole("separator", { name: "Resize sidebar", exact: true })
     const geometry: Record<string, unknown> = {}
     const capture = async (scene: string, size: string) => {
-      const rows = sidebar.locator("div:has(> [data-chat-id])")
+      const rows = sidebar.locator("[data-fork-row]")
       await expect(rows.first()).toBeVisible()
       const boxes = await rows.evaluateAll((nodes) =>
         nodes.map((node) => {
