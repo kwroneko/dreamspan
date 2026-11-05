@@ -63,7 +63,9 @@ const own: ReadonlyArray<FixtureMessage> = [
 ]
 
 const sent = (fx: AssemblyFixture) =>
-  Effect.map(assembleFixture(fx), (snapshot) => snapshot.request.messages.map((m) => ({ role: m.role, content: m.content })))
+  Effect.map(assembleFixture(fx), (snapshot) =>
+    snapshot.request.messages.map((m) => ({ role: m.role, content: m.content }))
+  )
 
 describe("merge layouts", () => {
   it.effect("parallel span: the section opens the destination's parallel span, the marker sits at the join", () =>
@@ -76,7 +78,10 @@ describe("merge layouts", () => {
       assert.strictEqual(messages[section]!.role, "system")
       assert.include(String(messages[section]!.content), "Meanwhile, in parallel with what follows: Docks, with Kai.")
       assert.strictEqual(section + 1, market)
-      assert.isAbove(marker, messages.findIndex((m) => String(m.content).includes("haggles")))
+      assert.isAbove(
+        marker,
+        messages.findIndex((m) => String(m.content).includes("haggles"))
+      )
       assert.strictEqual(messages[marker]!.role, "system")
     })
   )
@@ -86,7 +91,10 @@ describe("merge layouts", () => {
       const messages = yield* sent(fixture([...own, join("slot-2")], [layout("join")]))
       expect(messages).toMatchSnapshot()
       const section = messages.findIndex((m) => String(m.content).includes("Kai: The rain"))
-      assert.isAbove(section, messages.findIndex((m) => String(m.content).includes("haggles")))
+      assert.isAbove(
+        section,
+        messages.findIndex((m) => String(m.content).includes("haggles"))
+      )
       assert.include(String(messages[section + 1]!.content), "joins this chat")
     })
   )
@@ -102,19 +110,21 @@ describe("merge layouts", () => {
     })
   )
 
-  it.effect("an unknown layout falls back to parallel with an issue; the preset's templates and the merge's line apply", () =>
-    Effect.gen(function* () {
-      const snapshot = yield* assembleFixture(
-        fixture([...own, join("slot-2", "Elsewhere: {{title}} ({{cast}})")], [layout("gone")], {
-          merge_join_prompt: "<join {{title}}>"
-        } as never)
-      )
-      assert.isTrue(snapshot.issues.some((issue) => issue.kind === "merge_layout_missing"))
-      const contents = snapshot.request.messages.map((m) => String(m.content))
-      assert.isTrue(contents.some((c) => c.startsWith("Elsewhere: Docks (Kai)")))
-      assert.isTrue(contents.some((c) => c.includes("<join Docks>")))
-      assert.isTrue(snapshot.pieces.some((p) => p.source.kind === "merge/join"))
-    })
+  it.effect(
+    "an unknown layout falls back to parallel with an issue; the preset's templates and the merge's line apply",
+    () =>
+      Effect.gen(function* () {
+        const snapshot = yield* assembleFixture(
+          fixture([...own, join("slot-2", "Elsewhere: {{title}} ({{cast}})")], [layout("gone")], {
+            merge_join_prompt: "<join {{title}}>"
+          } as never)
+        )
+        assert.isTrue(snapshot.issues.some((issue) => issue.kind === "merge_layout_missing"))
+        const contents = snapshot.request.messages.map((m) => String(m.content))
+        assert.isTrue(contents.some((c) => c.startsWith("Elsewhere: Docks (Kai)")))
+        assert.isTrue(contents.some((c) => c.includes("<join Docks>")))
+        assert.isTrue(snapshot.pieces.some((p) => p.source.kind === "merge/join"))
+      })
   )
 
   it.effect("a message before the join never sees the merged chat", () =>
@@ -133,37 +143,39 @@ describe("merge layouts", () => {
   )
 
   for (const withPreset of [true, false])
-    it.effect(`a summary over a join asks for one section per line (${withPreset ? "with" : "without"} the preset)`, () =>
-      Effect.gen(function* () {
-        const snapshot = yield* assembleFixture(fixture([...own, join("slot-2")]), {
-          summarizing: true,
-          summaryJob: {
-            id: "synthetic-summary",
-            clipTokens: 1000,
-            inputs: [],
-            tail: "Summarize the material.",
-            style: "direct",
-            withPreset
-          }
+    it.effect(
+      `a summary over a join asks for one section per line (${withPreset ? "with" : "without"} the preset)`,
+      () =>
+        Effect.gen(function* () {
+          const snapshot = yield* assembleFixture(fixture([...own, join("slot-2")]), {
+            summarizing: true,
+            summaryJob: {
+              id: "synthetic-summary",
+              clipTokens: 1000,
+              inputs: [],
+              tail: "Summarize the material.",
+              style: "direct",
+              withPreset
+            }
+          })
+          const last = String(snapshot.request.messages.at(-1)!.content)
+          assert.include(last, "Summarize the material.")
+          assert.include(last, "one section per line")
+          assert.include(last, "“Docks”")
+          // The merged text is part of the material the summary reads.
+          assert.isTrue(snapshot.request.messages.some((m) => String(m.content).includes("Kai: The rain")))
+          const plain = yield* assembleFixture(fixture(own), {
+            summarizing: true,
+            summaryJob: {
+              id: "synthetic-summary",
+              clipTokens: 1000,
+              inputs: [],
+              tail: "Summarize the material.",
+              style: "direct",
+              withPreset
+            }
+          })
+          assert.strictEqual(String(plain.request.messages.at(-1)!.content), "Summarize the material.")
         })
-        const last = String(snapshot.request.messages.at(-1)!.content)
-        assert.include(last, "Summarize the material.")
-        assert.include(last, "one section per line")
-        assert.include(last, "“Docks”")
-        // The merged text is part of the material the summary reads.
-        assert.isTrue(snapshot.request.messages.some((m) => String(m.content).includes("Kai: The rain")))
-        const plain = yield* assembleFixture(fixture(own), {
-          summarizing: true,
-          summaryJob: {
-            id: "synthetic-summary",
-            clipTokens: 1000,
-            inputs: [],
-            tail: "Summarize the material.",
-            style: "direct",
-            withPreset
-          }
-        })
-        assert.strictEqual(String(plain.request.messages.at(-1)!.content), "Summarize the material.")
-      })
     )
 })

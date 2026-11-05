@@ -1713,10 +1713,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           [mine, theirs],
           [theirs, mine]
         ] as const)
-          yield* refused(
-            actor.api.PreviewChatMerge({ ...into, at: null, source, includeLeftOut: false }),
-            "NotFound"
-          )
+          yield* refused(actor.api.PreviewChatMerge({ ...into, at: null, source, includeLeftOut: false }), "NotFound")
       })
   },
   MergeChat: {
@@ -1751,10 +1748,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   },
   MergeMessages: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.MergeMessages({ chatId: owner.chat.chatId, mergeId: "none", offset: 0, limit: 10 }),
-        "NotFound"
-      )
+      refused(actor.api.MergeMessages({ chatId: owner.chat.chatId, mergeId: "none", offset: 0, limit: 10 }), "NotFound")
   },
   SetSplitChat: {
     probe: (actor, owner) => refused(actor.api.SetSplitChat({ forkId: owner.chat.forkId, split: true }), "NotFound")

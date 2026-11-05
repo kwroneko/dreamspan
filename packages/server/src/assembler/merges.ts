@@ -46,7 +46,7 @@ export const makeMergeLayoutRegistry = (): MergeLayoutRegistry => makeRegistry<M
  * beside it, from the span's start; when the start isn't among the messages read (summarized
  * or cut), before the first one read. An empty span puts it right before the join.
  */
-export const parallelLayout: MergeLayout = {
+const parallelLayout: MergeLayout = {
   id: "parallel",
   label: "Parallel span",
   description:
@@ -61,7 +61,7 @@ export const parallelLayout: MergeLayout = {
 }
 
 /** Block at the join: the whole section where the merge is, then the marker. */
-export const joinLayout: MergeLayout = {
+const joinLayout: MergeLayout = {
   id: "join",
   label: "Block at the join",
   description: "The merged chat's messages go in one block where the merge is, after this chat's own messages.",

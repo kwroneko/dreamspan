@@ -192,6 +192,7 @@ describe("pinned message actions", () => {
       "message.insert-above",
       "message.insert-below",
       "message.duplicate",
+      "message.merge",
       "message.visibility",
       "message.context",
       "message.original-text",

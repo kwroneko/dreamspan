@@ -110,9 +110,12 @@ const setup = (dataDir: string) =>
     const joined = (chatId: ChatId, slotId: string) =>
       readOnly(
         Effect.map(
-          Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ entity: string }>`
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) => sql<{ entity: string }>`
             SELECT value_json ->> 'entity' AS entity FROM state_events
-            WHERE chat_id = ${chatId} AND slot_id = ${slotId} AND key = 'participant.join'`),
+            WHERE chat_id = ${chatId} AND slot_id = ${slotId} AND key = 'participant.join'`
+          ),
           (rows) => rows.map((r) => r.entity)
         )
       )
@@ -252,7 +255,12 @@ describe("merging another chat", () => {
         const t = yield* setup(dataDir)
         const home = yield* t.chat("Harbor", [t.mira])
         const [, , p3] = yield* t.many(home, t.mira, ["p1", "p2", "p3"])
-        const made = yield* t.writer.CreateFork({ userId: t.userId, chatId: home.chatId, fromForkId: home.forkId, atSlotId: p3! })
+        const made = yield* t.writer.CreateFork({
+          userId: t.userId,
+          chatId: home.chatId,
+          fromForkId: home.forkId,
+          atSlotId: p3!
+        })
         const side = { chatId: home.chatId, forkId: made.fork.id as ForkId }
         yield* t.many(side, t.kai, ["s1", "s2"])
         yield* t.many(home, t.mira, ["m1"])
@@ -287,7 +295,12 @@ describe("merging another chat", () => {
         const away = yield* t.chat("Docks", [t.kai])
         const [h1, h2] = yield* t.many(home, t.mira, ["h1", "h2", "h3"])
         yield* t.many(away, t.kai, ["d1"])
-        const before = yield* t.writer.CreateFork({ userId: t.userId, chatId: home.chatId, fromForkId: home.forkId, atSlotId: h1! })
+        const before = yield* t.writer.CreateFork({
+          userId: t.userId,
+          chatId: home.chatId,
+          fromForkId: home.forkId,
+          atSlotId: h1!
+        })
         const seen = yield* t.preview({ ...home, at: h2!, source: away })
         assert.strictEqual(seen.at.number, 2)
         const made = yield* t.merge({ ...home, at: h2!, source: away })

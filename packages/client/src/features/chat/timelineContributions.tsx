@@ -66,9 +66,9 @@ export const registerTimelineTransforms = () => [
     id: "timeline.merges",
     order: 5,
     transform: (rows) =>
-      rows.some((row) => row.entry?.version.origin === "merge")
+      rows.some((row) => row.entry?.version?.origin === "merge")
         ? rows.map((row) =>
-            row.entry?.version.origin === "merge"
+            row.entry?.version?.origin === "merge"
               ? {
                   ...row,
                   estimate: 64,

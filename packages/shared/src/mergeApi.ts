@@ -44,7 +44,7 @@ export const MergeRequest = Schema.Struct({
 })
 export type MergeRequest = typeof MergeRequest.Type
 
-export const MergeCastMember = Schema.Struct({
+const MergeCastMember = Schema.Struct({
   entity: EntityId,
   name: Schema.String,
   avatarMediaId: Schema.NullOr(Schema.String),

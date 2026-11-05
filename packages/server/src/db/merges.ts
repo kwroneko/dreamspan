@@ -43,8 +43,8 @@ import { type ChatRow, toChat } from "./rows.ts"
 import { query, transaction } from "./tx.ts"
 
 /** The budget's bounds (spec §3): a short span still lets something through; a long one has a ceiling. */
-export const MERGE_BUDGET_MIN = 4_000
-export const MERGE_BUDGET_MAX = 50_000
+const MERGE_BUDGET_MIN = 4_000
+const MERGE_BUDGET_MAX = 50_000
 
 interface ForkRow {
   readonly id: string
@@ -79,7 +79,7 @@ interface MergedRow {
   readonly included: "verbatim" | "summarized" | "left_out"
 }
 
-export interface MergePlan {
+interface MergePlan {
   readonly preview: ChatMergePreview
   readonly fork: ForkRow
   readonly at: { readonly id: string; readonly depth: number; readonly lane_id: string }
@@ -192,7 +192,7 @@ const summaryText = (from: number, to: number, content: string) =>
   `<summary from="${from}" to="${to}">\n${content}\n</summary>`
 
 /** What a merge of `request.source` into `request.forkId` below `request.at` brings (spec §3). */
-export const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeRequest) =>
+const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeRequest) =>
   Effect.gen(function* () {
     yield* ownedChat(sql, userId, request.chatId)
     const fork = yield* liveFork(sql, request.chatId, request.forkId)
