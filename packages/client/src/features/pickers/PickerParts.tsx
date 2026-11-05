@@ -259,11 +259,6 @@ export function ChatLock({
   return (
     <div className="border-b border-border pb-2">
       <Switch
-        description={
-          <span className="block text-xs">
-            {`Picking a ${kind} here changes it for ${lock.locked ? "this chat only" : "every chat"}.`}
-          </span>
-        }
         checked={lock.locked}
         disabled={lock.disabled}
         onCheckedChange={lock.change}
