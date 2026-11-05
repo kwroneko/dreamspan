@@ -245,9 +245,13 @@ export function MergeChatDialog({
   ]
   const atNumber = preview?.at.number ?? null
   const startItems = [
-    { value: AT_JOIN, label: "Where it's merged", description: "Nothing in this chat ran beside it." },
+    {
+      value: AT_JOIN,
+      label: atNumber === null ? "From the message it follows" : `From #${atNumber}, the message it follows`,
+      description: "Only the message it's merged after ran beside it."
+    },
     ...positions
-      .filter((entry) => atNumber === null || positionOf(entry) + 1 <= atNumber)
+      .filter((entry) => atNumber !== null && positionOf(entry) + 1 < atNumber)
       .map((entry) => ({
         value: entry.slotId as string,
         label: `From #${positionOf(entry) + 1} · ${firstWords(entry.version.content)}`
