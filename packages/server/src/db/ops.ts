@@ -2363,6 +2363,25 @@ export class WriteOps extends RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       events: Schema.Array(StoredStateEventData),
+      /**
+       * Notes the call writes (spec/AGENTIC.md §4.3), before its events: `create` makes a chat
+       * note (an agent's, `origin: generation`) and turns it on, `revise` makes a revision of a
+       * note on `parent` and binds it; both attached to the version, from the next message on.
+       */
+      notes: Schema.optionalKey(
+        Schema.Array(
+          Schema.Union([
+            Schema.Struct({ create: Schema.Record(Schema.String, Schema.Unknown) }),
+            Schema.Struct({
+              revise: Schema.Struct({
+                note: EntityId,
+                parent: Schema.String,
+                doc: Schema.Record(Schema.String, Schema.Unknown)
+              })
+            })
+          ])
+        )
+      ),
       result: Schema.String
     },
     success: Schema.Struct({ result: Schema.String, replayed: Schema.Boolean }),
@@ -3309,6 +3328,28 @@ export class ReadOps extends RpcGroup.make(
    * `entry` (a title or uid), or holding every word of `query` (case aside) in their keys, title or
    * text, those matching by key first. Reads only: what's admitted to the context is the assembler's.
    */
+  /**
+   * The cards an agent reply's tools may name (spec/AGENTIC.md §4.6), each as the chat uses it
+   * (`bindings`, else the chat's override, else the library entry, as ChatCards picks it): its
+   * name, the text of each field a note can replace, and the fields its card lets agents change.
+   */
+  Rpc.make("AgentCards", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      entityIds: Schema.Array(EntityId),
+      bindings: CardBindings
+    },
+    success: Schema.Array(
+      Schema.Struct({
+        entityId: EntityId,
+        name: Schema.String,
+        fields: Schema.Record(Schema.String, Schema.String),
+        editableFields: Schema.Array(Schema.String)
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("LookupLore", {
     payload: {
       userId: UserId,

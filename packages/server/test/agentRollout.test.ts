@@ -790,8 +790,11 @@ describe("agent rollouts", () => {
         "read_messages",
         "lookup_lore",
         "list_notes",
+        "write_note",
+        "edit_note",
         "switch_note",
-        "set_presence"
+        "set_presence",
+        "edit_card"
       ]
       assert.deepStrictEqual(
         (first!.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),

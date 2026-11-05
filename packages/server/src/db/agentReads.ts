@@ -12,6 +12,8 @@ import { shownIn, slotDeletedIn } from "./forkState.ts"
 import { forkThrough } from "./forks.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { pathSegments } from "./pathSegments.ts"
+import { makeLibraryQueries } from "./library.ts"
+import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { query } from "./tx.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
@@ -19,7 +21,36 @@ const FEW = 2000
 
 export const makeAgentReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+  const lib = makeLibraryQueries(sql)
   return {
+    AgentCards: ({ userId, chatId, entityIds, bindings }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ readonly n: number }>`
+          SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (chat?.n !== 1) return yield* new NotFound({ entity: "chat", id: chatId })
+        const cards = []
+        for (const entityId of [...new Set(entityIds)].slice(0, 200)) {
+          const library = yield* lib.cardLibraryRef(userId, entityId)
+          if (library === null) continue
+          const bound = bindings[entityId]
+          const binding =
+            bound && (bound.ref !== null || bound.revision !== null)
+              ? { ref: bound.ref ?? undefined, revision: bound.revision ?? undefined }
+              : undefined
+          const used = yield* lib.cardInChat(userId, chatId, entityId, binding)
+          const doc = yield* lib.loadDoc(used?.revisionId ?? library.head_revision_id)
+          const text = (v: unknown) => (typeof v === "string" ? v : "")
+          const editable = Array.isArray(doc["agent_editable_fields"]) ? doc["agent_editable_fields"] : []
+          cards.push({
+            entityId,
+            name: text(doc["nickname"]) || text(doc["name"]),
+            fields: Object.fromEntries(REPLACEABLE_CARD_FIELDS.map((f) => [f, text(doc[f])])),
+            editableFields: editable.filter((f): f is string => typeof f === "string")
+          })
+        }
+        return cards
+      }).pipe(query("AgentCards")),
+
     RolloutSteps: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{

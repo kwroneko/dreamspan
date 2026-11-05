@@ -76,7 +76,7 @@ export interface LibrarySteps {
     readonly subtitle: string
     readonly doc: EncodedDoc
     readonly schemaVersion: number
-    readonly origin: "user" | "import"
+    readonly origin: "user" | "import" | "generation"
     readonly originRef: string | null
     readonly sourcePath: string | null
     readonly sourceHash: string | null
