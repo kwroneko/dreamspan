@@ -1,3 +1,4 @@
+import { exercisePhoneFooters } from "./support/phoneFooters.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -173,3 +174,11 @@ for (const width of [1440, 390]) {
     }
   })
 }
+
+test("auto-collapsed phone footers open on click and close on the next click", async ({ page }, info) => {
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.SetChatPin({ chatId: seed.groupId, leaf: null, pinned: false })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await exercisePhoneFooters(page, info, `${server().url}/chats/${seed.chatId}?fork=${seed.original}&side=chats`)
+})

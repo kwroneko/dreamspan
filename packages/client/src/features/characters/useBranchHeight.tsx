@@ -32,7 +32,8 @@ const FootContext = createContext<State | null>(null)
 export function SidebarFeet({ children }: { children: ReactNode }) {
   const userId = useSession().user.id
   const ref = useRef<HTMLDivElement>(null)
-  const [available, setAvailable] = useState(0)
+  const [available, setAvailable] = useState({ normal: 0, focused: 0 })
+  const [focused, setFocused] = useState<FootKind | null>(null)
   const [presence, setPresence] = useState<FootPresence>({ branch: "absent", split: "absent" })
   const [preferred, setPreferred] = useState(
     () =>
@@ -57,7 +58,16 @@ export function SidebarFeet({ children }: { children: ReactNode }) {
       const last = rows[2]
       const threeRows =
         list && last ? last.getBoundingClientRect().bottom - list.getBoundingClientRect().top + list.scrollTop : 322
-      setAvailable(Math.max(0, parent.clientHeight - controls - 8 - threeRows))
+      const first = rows[0]
+      const oneRow =
+        list && first ? first.getBoundingClientRect().bottom - list.getBoundingClientRect().top + list.scrollTop : 126
+      setAvailable((previous) => {
+        const next = {
+          normal: Math.max(0, parent.clientHeight - controls - 8 - threeRows),
+          focused: Math.max(0, parent.clientHeight - controls - 8 - oneRow)
+        }
+        return previous.normal === next.normal && previous.focused === next.focused ? previous : next
+      })
       const next = Object.fromEntries(
         (["branch", "split"] as const).map((kind) => {
           const section = ref.current?.querySelector<HTMLElement>(`[data-foot-section="${kind}"]`)
@@ -82,7 +92,13 @@ export function SidebarFeet({ children }: { children: ReactNode }) {
       content.disconnect()
     }
   }, [])
-  const layout = sidebarFootLayout(available, preferred, expanded, presence)
+  const effectiveExpanded = focused ? { branch: focused === "branch", split: focused === "split" } : expanded
+  const layout = sidebarFootLayout(
+    focused ? available.focused : available.normal,
+    preferred,
+    effectiveExpanded,
+    presence
+  )
   const change = (kind: FootKind, value: number | null) => {
     const next =
       value === null ? FOOT_DEFAULT[kind] : Math.round(Math.max(FOOT_MIN[kind], Math.min(layout.max[kind], value)))
@@ -90,8 +106,11 @@ export function SidebarFeet({ children }: { children: ReactNode }) {
     write(heightKey(kind, userId), value === null ? null : String(next))
   }
   const toggle = (kind: FootKind) => {
-    const next = !expanded[kind]
-    setExpanded((previous) => ({ ...previous, [kind]: next }))
+    const next = layout.collapsed[kind]
+    const nextExpanded = { ...expanded, [kind]: next }
+    const normal = sidebarFootLayout(available.normal, preferred, nextExpanded, presence)
+    setFocused(next && (focused !== null || normal.collapsed[kind]) ? kind : null)
+    setExpanded(nextExpanded)
     write(openKey(kind, userId), next ? "open" : "collapsed")
   }
   return (

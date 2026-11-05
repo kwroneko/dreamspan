@@ -92,19 +92,10 @@ export function SplitChatSection() {
         className="flex h-8 max-w-controls min-w-0 shrink-0 items-center gap-2 px-2 text-xs font-semibold"
       >
         {split.children.length > 0 && (
-          <Tooltip
-            label={
-              expanded && collapsed
-                ? "More height is needed to show a complete split chat row."
-                : open
-                  ? "Click to hide split chats."
-                  : "Click to show split chats."
-            }
-          >
+          <Tooltip label={open ? "Click to hide split chats." : "Click to show split chats."}>
             <button
               type="button"
               aria-expanded={open}
-              disabled={expanded && collapsed}
               onClick={toggle}
               className="flex shrink-0 items-center gap-1 rounded px-1 py-1 outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
             >

@@ -532,18 +532,11 @@ export function OpenChatBranches() {
       {/* The same 8 px gutters as the list above (layoutlint), so these rows line up with its rows. */}
       <div data-foot-header className="flex max-w-controls min-w-0 shrink-0 items-center gap-1 px-2">
         <Tooltip
-          label={
-            expanded && collapsed
-              ? "More height is needed to show a complete branch row."
-              : open
-                ? "Click to hide the open chat's branches."
-                : "Click to show the open chat's branches here."
-          }
+          label={open ? "Click to hide the open chat's branches." : "Click to show the open chat's branches here."}
         >
           <button
             type="button"
             aria-expanded={open}
-            disabled={expanded && collapsed}
             onClick={toggle}
             className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs font-semibold text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
           >

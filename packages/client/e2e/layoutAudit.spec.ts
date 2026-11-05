@@ -1,3 +1,4 @@
+import { exercisePhoneFooters } from "./support/phoneFooters.ts"
 import { seedSplitChats } from "./support/splitChats.ts"
 import { centerHeaderTests } from "./support/centerHeaders.ts"
 // Run before UI approval: LAYOUT_AUDIT=1 PLAYWRIGHT_WORKERS=1 npx playwright test -c
@@ -2378,3 +2379,15 @@ for (const { width, height } of [
     }
   })
 }
+
+test("phone footer click overrides height collapse", async ({ page }, info) => {
+  const local = await startServer(withAdmin)
+  try {
+    const cookie = await loginCookie(local, ADMIN.handle, ADMIN.password)
+    const seed = await withCookie(local, cookie, seedSplitChats)
+    await apiLogin(page.request, local, ADMIN.handle, ADMIN.password)
+    await exercisePhoneFooters(page, info, `${local.url}/chats/${seed.chatId}?fork=${seed.original}&side=chats`, true)
+  } finally {
+    await local.stop()
+  }
+})
