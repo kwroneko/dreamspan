@@ -1,3 +1,4 @@
+import { WorkbenchLayoutJson } from "@rp/shared/workbenchApi.ts"
 import { SplitChats } from "@rp/shared/splitChat.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
@@ -2391,6 +2392,12 @@ export class WriteOps extends RpcGroup.make(
     success: DisplayPrefs,
     error: StorageError
   }),
+  /** Saves the center column's layout (key `workbench` of `user_prefs`). */
+  Rpc.make("SetWorkbenchLayout", {
+    payload: { userId: UserId, layout: WorkbenchLayoutJson },
+    success: Schema.Void,
+    error: StorageError
+  }),
   /**
    * Records that a one-time notice was shown for `key` (the impersonation notice: a preset's
    * ref). Answers whether this call recorded it, so of two tabs only one shows it.
@@ -3345,6 +3352,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
   /** The user's display choices; the defaults where none are stored. */
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
+  /** The center column's saved layout, if any. */
+  Rpc.make("GetWorkbenchLayout", {
+    payload: { userId: UserId },
+    success: Schema.NullOr(WorkbenchLayoutJson),
+    error: StorageError
+  }),
   // --- Branches (DESIGN §3.2) and forks.
   /** The live forks of a chat of the user's, most recently current first. */
   Rpc.make("ListForks", {

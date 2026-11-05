@@ -1252,6 +1252,22 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.deepStrictEqual(yield* actor.api.GetDisplayPrefs({}), before)
       })
   },
+  GetWorkbenchLayout: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetWorkbenchLayout({})
+        yield* owner.api.SetWorkbenchLayout({ layout: JSON.stringify({ owner: true }) })
+        assert.deepStrictEqual(yield* actor.api.GetWorkbenchLayout({}), before)
+      })
+  },
+  SetWorkbenchLayout: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetWorkbenchLayout({})
+        yield* actor.api.SetWorkbenchLayout({ layout: JSON.stringify({ actor: true }) })
+        assert.deepStrictEqual(yield* owner.api.GetWorkbenchLayout({}), before)
+      })
+  },
   ImpersonationNotice: {
     // It reads only the caller's own current preset, and marks only the caller's notices.
     probe: (actor, owner) =>

@@ -9,6 +9,7 @@ import { query, transaction } from "./tx.ts"
 
 const KEY = "display"
 const NOTICES = "notices"
+const WORKBENCH = "workbench"
 
 /** Reasoning streams open until the user folds it during a run (DESIGN §7.4). */
 const DEFAULTS = DEFAULT_DISPLAY_PREFS
@@ -28,7 +29,14 @@ const read = (sql: SqlClient.SqlClient, userId: UserId) =>
 export const makeDisplayPrefsReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    GetDisplayPrefs: ({ userId }) => read(sql, userId).pipe(query("GetDisplayPrefs"))
+    GetDisplayPrefs: ({ userId }) => read(sql, userId).pipe(query("GetDisplayPrefs")),
+    GetWorkbenchLayout: ({ userId }) =>
+      sql<{
+        value_json: string
+      }>`SELECT value_json FROM user_prefs WHERE user_id = ${userId} AND key = ${WORKBENCH}`.pipe(
+        Effect.map(([row]) => row?.value_json ?? null),
+        query("GetWorkbenchLayout")
+      )
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })
 
@@ -63,6 +71,13 @@ export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
           ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
         return yield* read(sql, userId)
       }).pipe(transaction(sql, "SetDisplayPrefs")),
+    // The client repairs what it reads, so the text is stored as written (the API checks it's JSON).
+    SetWorkbenchLayout: ({ userId, layout }) =>
+      sql`INSERT INTO user_prefs (user_id, key, value_json) VALUES (${userId}, ${WORKBENCH}, ${layout})
+          ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`.pipe(
+        Effect.asVoid,
+        transaction(sql, "SetWorkbenchLayout")
+      ),
     // One-time notices, by notice, as the keys they were shown for (key `notices`).
     MarkNoticeShown: ({ userId, notice, key }) =>
       Effect.gen(function* () {

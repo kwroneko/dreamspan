@@ -21,6 +21,7 @@ import {
   type AppRpcs,
   AppCoreApi,
   AuthenticatedGalleryApi,
+  AuthenticatedWorkbenchApi,
   AuthenticatedForkMergeApi,
   CurrentUser,
   Health
@@ -40,6 +41,7 @@ import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import { makeEditorHandlers, makeGalleryHandlers, makeForkMergeHandlers } from "./api/editor.ts"
+import { makeWorkbenchHandlers } from "./api/workbench.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeBinHandlers } from "./api/bin.ts"
 import { makeComposerHandlers } from "./api/composer.ts"
@@ -136,7 +138,8 @@ const Handlers = Layer.mergeAll(
   CoreHandlers,
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
-  AuthenticatedGalleryApi.toLayer(makeGalleryHandlers)
+  AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
+  AuthenticatedWorkbenchApi.toLayer(makeWorkbenchHandlers)
 )
 
 /**

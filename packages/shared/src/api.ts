@@ -19,6 +19,7 @@ import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import { EditorApi, ForkMergeApi, GalleryApi } from "./editorApi.ts"
+import { WorkbenchApi } from "./workbenchApi.ts"
 import {
   AccountRejected,
   Forbidden,
@@ -400,11 +401,14 @@ export const AuthenticatedForkMergeApi = ForkMergeApi.middleware(Authentication)
 
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
 
+export const AuthenticatedWorkbenchApi = WorkbenchApi.middleware(Authentication)
+
 /** The whole API: what the client calls and the server serves. */
 export class AuthenticatedSplitChatApi extends SplitChatApi.middleware(Authentication) {}
 
 export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedGalleryApi)
+  .merge(AuthenticatedWorkbenchApi)
   .merge(AuthenticatedSplitChatApi) {}
 
 /**
