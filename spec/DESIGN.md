@@ -264,6 +264,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 2.2 Personas, speakers and writers
 
+- **[D] 2026-11-05 (casttabscroll)** Owner: "Clicking on cast tabs scrolls to the description for some reason". Ordinary cast-tab opening starts at the top; explicit reveal and search Go to retain their requested destination. Implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
+
 - **[D]** (owner, 2026-11-04): "The new add to chat button in add characters is approved." **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 
 - **[D]** **Add-grid insets and metadata** (coordinator review, 2026-11-04): "The grid must sit inside the same horizontal insets as the Find by name field above it." "There is a large empty gap between the filter row and the grid; match the spacing used between the other rows." "Every tile shows a bare '1' line under the name, which says nothing to the user. Find what it is: drop it if it is a version or internal value, or label it if it is meaningful." **Built; obsolete as an implementation requirement** (ARCHITECTURE §12): the bare line is the character version and is omitted in this grid; search and grid align and use the same row gap.

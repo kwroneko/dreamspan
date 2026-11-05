@@ -559,19 +559,12 @@ export function CardEditor({
     // An explicit external reveal chooses once; subsequent user tab choices must win.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial, reveal])
-  // Opened again on another tab (the panel's Lorebooks list opening this card's book): it decides.
-  const [lastInitial, setLastInitial] = useState(initial)
-  if (initial !== lastInitial) {
-    setLastInitial(initial)
-  }
-  // Opened again on a tab from elsewhere (Show the whole card): the tabs come into view.
+  // Only an explicit reveal scrolls past the card header. Effect replay (StrictMode or
+  // Suspense reconnecting) is not a navigation request.
   const root = useRef<HTMLDivElement>(null)
-  const mounted = useRef(false)
   useEffect(() => {
     const element = root.current
-    const show = mounted.current || reveal
-    mounted.current = true
-    if (!show || !element) return
+    if (!reveal || !element) return
     // The tab's panel loads after this and the page grows: it's kept in view while it does,
     // until the user scrolls or a moment has passed.
     const scroll = () => element.scrollIntoView({ block: "start" })
@@ -587,7 +580,7 @@ export function CardEditor({
       stop()
       for (const event of events) window.removeEventListener(event, stop, { capture: true })
     }
-  }, [lastInitial, reveal])
+  }, [initial, reveal])
   // Search's Go to opens the tab that holds the field it goes to.
   const match = useContext(SearchNavigation)
   useEffect(() => {
