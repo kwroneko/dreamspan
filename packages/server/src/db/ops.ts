@@ -2637,9 +2637,20 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("ShellCards", { payload: { userId: UserId }, success: ShellCardsRead, error: StorageError }),
+  /** Bounded post-write refreshes; null asks the caller to use the background read. */
+  Rpc.make("ShellCardsLive", {
+    payload: { userId: UserId },
+    success: Schema.NullOr(ShellCardsRead),
+    error: StorageError
+  }),
   Rpc.make("ShellForks", {
     payload: { userId: UserId, view: ShellForksView },
     success: ShellForksRead,
+    error: StorageError
+  }),
+  Rpc.make("ShellForksLive", {
+    payload: { userId: UserId, view: ShellForksView },
+    success: Schema.NullOr(ShellForksRead),
     error: StorageError
   }),
   Rpc.make("GetSummaryRevisionRequest", {

@@ -567,12 +567,12 @@ export class ChatSession {
   private chatsTimer: ReturnType<typeof setTimeout> | null = null
   private chatsInvalidate: (() => void) | null = null
 
-  /** Has the lists of chats read again a second after the first change since they last were. */
+  /** Refreshes legacy chat/group lists and split links after a burst. Shell rows stream independently. */
   private chatsChanged(services: Context.Context<Reactivity.Reactivity>) {
     this.chatsInvalidate = () => {
       this.chatsTimer = null
       this.chatsInvalidate = null
-      Context.get(services, Reactivity.Reactivity).invalidateUnsafe(["chats"])
+      Context.get(services, Reactivity.Reactivity).invalidateUnsafe(["chat-lists"])
     }
     this.chatsTimer ??= setTimeout(() => this.chatsInvalidate?.(), CHATS_REREAD_MS)
   }
@@ -601,8 +601,7 @@ export class ChatSession {
                 Reactivity.Reactivity
               ).invalidateUnsafe([`chat-notes:${this.chatId}`])
             }
-            // The lists of chats (the left panel's, at 0.1 to 0.5 s a read at the owner's scale)
-            // read again once the chat has changed, at most once a second, and not for the Hello
+            // The legacy paged chat list reads again after a change, at most once a second, not for the Hello
             // that opens it: the lists were just read, and opening a chat changes none of them.
             const opening = this.hellos === 0 && batch.every((event) => event._tag === "Hello")
             if (

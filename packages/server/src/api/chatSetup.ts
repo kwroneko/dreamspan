@@ -11,12 +11,13 @@ import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { Cast, type CastChange, ChatNote, ShellCards, ShellForks, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
-import { Effect, Option } from "effect"
+import { Effect, Option, Queue, Semaphore, Stream } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import type { ChatSummaries } from "../db/forkSummaries.ts"
+import { shellCardsUpdate, shellForksUpdate } from "@rp/shared/shellUpdates.ts"
 import { freezeTemplate } from "../chat/macros.ts"
 import { internal } from "./internal.ts"
 
@@ -94,7 +95,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   /** Stores the summaries a shell read computed, after answering, in parts so other writes go between them. */
-  const storeFresh = (id: UserId, fresh: ReadonlyArray<ChatSummaries>) =>
+  const storeFresh = (id: UserId, fresh: ReadonlyArray<ChatSummaries>, wait = false) =>
     fresh.length === 0
       ? Effect.void
       : Effect.forEach(
@@ -103,9 +104,40 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           { discard: true }
         ).pipe(
           Effect.catchCause((cause) => Effect.logWarning("StoreForkSummaries failed", cause)),
-          Effect.forkIn(scope),
+          (effect) => (wait ? effect : Effect.forkIn(effect, scope)),
           Effect.asVoid
         )
+
+  // Subscribe before the first read. A one-place signal coalesces bursts without
+  // dropping a change that arrives during a read; no streamed token triggers this.
+  const shellGates = new Map<UserId, Semaphore.Semaphore>()
+  const watchShell = <A, E>(read: (id: UserId, live: boolean) => Effect.Effect<A, E>) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const id = yield* userId
+        let initial = true
+        const gate = shellGates.get(id) ?? Semaphore.makeUnsafe(1)
+        shellGates.set(id, gate)
+        const signals = yield* Queue.dropping<void>(1)
+        yield* Effect.addFinalizer(() => Queue.shutdown(signals))
+        yield* hub.listen(() => {
+          Queue.offerUnsafe(signals, undefined)
+        })
+        return Stream.concat(Stream.succeed(undefined), Stream.fromQueue(signals)).pipe(
+          Stream.mapEffect(() => {
+            const reading = read(id, !initial).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  initial = false
+                })
+              )
+            )
+            return initial ? reading : gate.withPermit(reading)
+          }),
+          Stream.changesWith((a, b) => JSON.stringify(a) === JSON.stringify(b))
+        )
+      })
+    )
 
   /**
    * The fold of the chat's state after `slotId`, with every card it names, by the name and
@@ -254,6 +286,56 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           Effect.map(({ fresh: _, ...cards }) => new ShellCards(cards, { disableChecks: true }))
         )
       ).pipe(internal("GetShellCards")),
+    WatchShellCards: () => {
+      let previous: ShellCards | undefined
+      return watchShell((id, live) =>
+        (live
+          ? reader
+              .ShellCardsLive({ userId: id })
+              .pipe(
+                Effect.flatMap((answer) =>
+                  answer === null ? reader.ShellCards({ userId: id }) : Effect.succeed(answer)
+                )
+              )
+          : reader.ShellCards({ userId: id })
+        ).pipe(
+          Effect.tap(({ fresh }) => storeFresh(id, fresh, live)),
+          Effect.map(({ fresh: _, ...cards }) => new ShellCards(cards, { disableChecks: true })),
+          internal("WatchShellCards")
+        )
+      ).pipe(
+        Stream.map((next) => {
+          const update = shellCardsUpdate(previous, next)
+          previous = next
+          return update
+        })
+      )
+    },
+    WatchShellForks: (view) => {
+      let previous: ShellForks | undefined
+      return watchShell((id, live) =>
+        (live
+          ? reader
+              .ShellForksLive({ userId: id, view })
+              .pipe(
+                Effect.flatMap((answer) =>
+                  answer === null ? reader.ShellForks({ userId: id, view }) : Effect.succeed(answer)
+                )
+              )
+          : reader.ShellForks({ userId: id, view })
+        ).pipe(
+          Effect.tap(({ fresh }) => storeFresh(id, fresh, live)),
+          Effect.map(({ fresh: _, ...forks }) => new ShellForks(forks, { disableChecks: true })),
+          internal("WatchShellForks")
+        )
+      ).pipe(
+        Stream.map((next) => {
+          const update = shellForksUpdate(previous, next)
+          previous = next
+          return update
+        })
+      )
+    },
     GetShellForks: (view) =>
       Effect.flatMap(userId, (id) =>
         reader.ShellForks({ userId: id, view }).pipe(

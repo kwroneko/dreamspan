@@ -34,6 +34,7 @@ import {
   AuthenticatedWorkbenchApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
+  AuthenticatedShellUpdatesApi,
   CurrentUser,
   Health
 } from "@rp/shared/api.ts"
@@ -147,6 +148,12 @@ const CoreHandlers = AppCoreApi.toLayer(
 
 const Handlers = Layer.mergeAll(
   CoreHandlers,
+  AuthenticatedShellUpdatesApi.toLayer(
+    Effect.map(makeChatSetupHandlers, ({ WatchShellCards, WatchShellForks }) => ({
+      WatchShellCards,
+      WatchShellForks
+    }))
+  ),
   AuthenticatedSummaryRequestApi.toLayer(makeSummaryRequestHandlers),
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
   AuthenticatedChatMergeApi.toLayer(makeMergeHandlers),

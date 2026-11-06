@@ -15,6 +15,8 @@ import { openOnPlainClick } from "../../ui/links.ts"
 import { OPEN_BESIDE_HINT, OpenBesideButton, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
+import { Effect, Schedule, Stream } from "effect"
+import { applyShellCards, applyShellForks } from "@rp/shared/shellUpdates.ts"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
@@ -35,7 +37,21 @@ export type ShellLibrary = ShellCards
 const SHELL_KEYS = ["chats", "library", "pins", "favourites"]
 
 /** Kept while the app runs: every screen reads it, and a remount mustn't cancel and send it again. */
-export const shellAtom = Atom.keepAlive(AppClient.query("GetShellCards", undefined, { reactivityKeys: SHELL_KEYS }))
+export const shellAtom = Atom.keepAlive(
+  AppClient.runtime.factory.withReactivity(SHELL_KEYS)(
+    AppClient.runtime.atom(
+      Stream.unwrap(
+        Effect.map(AppClient, (client) =>
+          client("WatchShellCards", undefined).pipe(
+            Stream.retry(Schedule.spaced("1 second")),
+            Stream.scan(() => ({ cards: [], personas: [], pinsCollapsed: false }) as ShellCards, applyShellCards),
+            Stream.drop(1)
+          )
+        )
+      )
+    )
+  )
+)
 
 /** Every card the lists browse: the characters, then the persona folder's (each `persona`), for `browseCards`. */
 export const browsable = (data: ShellLibrary) => [...data.cards, ...data.personas]
@@ -64,10 +80,27 @@ const withCast = (data: ShellForks): ReadonlyMap<ShellSection, ShellRows> => {
 /** One atom per view, by its JSON: each screen's lists are read with only the rows they show. */
 const shellForksAtom = Atom.family((key: string) =>
   Atom.mapResult(
-    AppClient.query("GetShellForks", JSON.parse(key) as ShellForksView, {
-      reactivityKeys: SHELL_KEYS,
-      timeToLive: "2 minutes"
-    }),
+    AppClient.runtime.factory.withReactivity(SHELL_KEYS)(
+      AppClient.runtime.atom(
+        Stream.unwrap(
+          Effect.map(AppClient, (client) =>
+            client("WatchShellForks", JSON.parse(key) as ShellForksView).pipe(
+              Stream.retry(Schedule.spaced("1 second")),
+              Stream.scan(
+                () =>
+                  ({
+                    sections: [],
+                    people: [],
+                    filterCounts: { all: 0, pinned: 0, groups: 0, solo: 0, branches: 0 }
+                  }) as ShellForks,
+                applyShellForks
+              ),
+              Stream.drop(1)
+            )
+          )
+        )
+      )
+    ),
     (data) => ({ rows: withCast(data), filterCounts: data.filterCounts })
   )
 )

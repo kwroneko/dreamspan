@@ -399,6 +399,37 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         }
       )
   },
+  WatchShellCards: {
+    probe: (actor, owner) =>
+      actor.api.WatchShellCards().pipe(
+        Stream.take(1),
+        Stream.runForEach((data) =>
+          Effect.sync(() => assert.isFalse([...data.cards, ...data.personas].some((c) => c.card.refId === owner.refId)))
+        )
+      )
+  },
+  WatchShellForks: {
+    probe: (actor, owner) =>
+      actor.api
+        .WatchShellForks({
+          entity: null,
+          chat: owner.chat.chatId,
+          search: "",
+          sort: "recent",
+          sections: [{ id: "all", limit: 100 }]
+        })
+        .pipe(
+          Stream.take(1),
+          Stream.runForEach((data) =>
+            Effect.sync(() => {
+              assert.deepStrictEqual(data.sections[0]!.rows, [])
+              assert.deepStrictEqual(data.sections[0]!.order, [])
+              assert.strictEqual(data.sections[0]!.total, 0)
+              assert.deepStrictEqual(data.people, [])
+            })
+          )
+        )
+  },
   SetChatPin: {
     probe: (actor, owner) =>
       refused(actor.api.SetChatPin({ chatId: owner.chat.chatId, leaf: owner.chat.slotId, pinned: true }), "NotFound")

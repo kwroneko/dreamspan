@@ -14,7 +14,7 @@ import { BinItem } from "./bin.ts"
 import { ChatApi, ChatEventsApi } from "./chatApi.ts"
 import { AgentApi } from "./agentApi.ts"
 import { DecisionApi } from "./decisionApi.ts"
-import { ChatSetupApi } from "./chatSetupApi.ts"
+import { ChatSetupApi, ShellUpdatesApi } from "./chatSetupApi.ts"
 import { StImportApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
 import { ComposerApi } from "./composerApi.ts"
@@ -406,6 +406,7 @@ export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
 export const AuthenticatedWorkbenchApi = WorkbenchApi.middleware(Authentication)
+export const AuthenticatedShellUpdatesApi = ShellUpdatesApi.middleware(Authentication)
 
 /** The whole API: what the client calls and the server serves. */
 export class AuthenticatedSplitChatApi extends SplitChatApi.middleware(Authentication) {}
@@ -429,7 +430,8 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedWorkbenchApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
-  .merge(AuthenticatedChatMergeApi) {}
+  .merge(AuthenticatedChatMergeApi)
+  .merge(AuthenticatedShellUpdatesApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

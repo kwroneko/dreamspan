@@ -8,7 +8,7 @@ const reads = Atom.family((key: string) =>
   key === ""
     ? Atom.make(AsyncResult.initial<SplitChats>())
     : AppClient.query("GetSplitChats", JSON.parse(key) as { chatId: ChatId; forkId: ForkId | null }, {
-        reactivityKeys: ["chats", "pins", "library"],
+        reactivityKeys: ["chats", "chat-lists", "pins", "library"],
         timeToLive: "2 minutes"
       })
 )
