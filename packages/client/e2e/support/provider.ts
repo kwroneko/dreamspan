@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net"
 
 export interface FakeProvider {
   readonly baseUrl: string
+  readonly listings: number
   /** The bearer tokens received, in order. */
   readonly keys: ReadonlyArray<string>
   /** The chat completion requests received, parsed, in order. */
@@ -22,10 +23,15 @@ const chunk = (body: Record<string, unknown>) =>
   `data: ${JSON.stringify({ id: "fake", object: "chat.completion.chunk", model: "fake-small", ...body })}\n\n`
 
 export const startProvider = async (
-  options: { holdAfterText?: boolean; /** Streamed instead of REPLY. */ reply?: string } = {}
+  options: {
+    holdAfterText?: boolean
+    /** Streamed instead of REPLY. */ reply?: string
+    models?: ReadonlyArray<{ id: string; name: string; context_length: number }>
+  } = {}
 ): Promise<FakeProvider> => {
   const reply = options.reply ?? REPLY
   const keys: Array<string> = []
+  let listings = 0
   const completions: Array<FakeProvider["completions"][number]> = []
   let holding = false
   let holdingText = options.holdAfterText ?? false
@@ -53,10 +59,11 @@ export const startProvider = async (
     const auth = request.headers.authorization
     if (auth?.startsWith("Bearer ")) keys.push(auth.slice(7))
     if (request.url === "/v1/models") {
+      listings++
       response.writeHead(200, { "content-type": "application/json" })
       response.end(
         JSON.stringify({
-          data: [
+          data: options.models ?? [
             { id: "fake-small", name: "Fake Small", context_length: 32768 },
             { id: "fake-large", name: "Fake Large", context_length: 131072, max_model_len: 131072 }
           ]
@@ -80,6 +87,9 @@ export const startProvider = async (
   const { port } = server.address() as AddressInfo
   return {
     baseUrl: `http://127.0.0.1:${port}/v1`,
+    get listings() {
+      return listings
+    },
     keys,
     completions,
     hold: () => {

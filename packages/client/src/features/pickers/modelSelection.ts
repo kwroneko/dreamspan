@@ -2,7 +2,7 @@
 // composer's chip and the Model tab.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
-import { useSyncExternalStore } from "react"
+import { useMemo, useSyncExternalStore } from "react"
 import { useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { type ModelChoice, modelValue, parseModelValue, useModelChoiceList } from "../chat/modelChoices.ts"
@@ -13,6 +13,7 @@ const modelUseAtom = AppClient.query("ListModelUse", undefined, {
   reactivityKeys: ["models", "settings"],
   timeToLive: "400 millis"
 })
+const unused: ReadonlyMap<string, number> = new Map()
 
 export interface ModelSelection {
   /** False until the account's choice and the model lists are read. */
@@ -35,20 +36,13 @@ export interface ModelSelection {
 export function useModelSelection(session: ChatSession | null): ModelSelection {
   const action = useAction()
   const defaults = useAtomValue(defaultsAtom)
-  const use = useAtomValue(modelUseAtom)
-  const refreshUse = useAtomRefresh(modelUseAtom)
+  const { used, refresh: refreshUse } = useModelUse(session)
   useRefreshOnContext(session, defaultsAtom)
-  useRefreshOnContext(session, modelUseAtom)
   const view = useSyncExternalStore(session?.subscribe ?? (() => () => {}), session?.snapshot ?? (() => null))
   const locked = view?.cast?.model != null
   const chosen = view?.cast?.model ?? (AsyncResult.isSuccess(defaults) ? defaults.value.model : undefined)
   const value = chosen ? modelValue(chosen.connection, chosen.model) : null
   const { choices, loaded } = useModelChoiceList(true, value)
-  const used = new Map(
-    AsyncResult.isSuccess(use)
-      ? use.value.map((row) => [modelValue(row.connectionId, row.modelId), row.lastUsedAt])
-      : []
-  )
   return {
     ...(session
       ? {
@@ -75,4 +69,20 @@ export function useModelSelection(session: ChatSession | null): ModelSelection {
     refresh: refreshUse,
     error: action.error
   }
+}
+
+/** Recent replies are shared by every picker, including restricted decision lists. */
+export function useModelUse(session: ChatSession | null = null) {
+  const result = useAtomValue(modelUseAtom)
+  const refresh = useAtomRefresh(modelUseAtom)
+  useRefreshOnContext(session, modelUseAtom)
+  const entries = AsyncResult.isSuccess(result) ? result.value : undefined
+  const used = useMemo(
+    () =>
+      entries?.length
+        ? new Map(entries.map((row) => [modelValue(row.connectionId, row.modelId), row.lastUsedAt]))
+        : unused,
+    [entries]
+  )
+  return { used, refresh }
 }

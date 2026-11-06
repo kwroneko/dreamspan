@@ -3,7 +3,7 @@
 // first, and the line under each name says when it was edited, used or archived.
 import { LibraryRef } from "@rp/shared/library.ts"
 import { describe, expect, it } from "vitest"
-import { modelDetail, modelsInOrder } from "../src/features/pickers/modelList.ts"
+import { matchesModel, modelDetail, modelRows, modelsInOrder } from "../src/features/pickers/modelList.ts"
 import { presetDetail, presetsInView, selectablePresets } from "../src/features/pickers/presetList.ts"
 
 const day = 86_400_000
@@ -75,6 +75,45 @@ describe("the preset lists", () => {
 })
 
 describe("the model list", () => {
+  it("finds names, ids and provider prefixes with punctuation-tolerant fuzzy words", () => {
+    const model = {
+      value: "c1 m1",
+      label: "Router · anthropic/claude-3.1",
+      name: "Café storyteller",
+      modelKey: "anthropic/claude-3.1"
+    }
+    for (const query of ["cafe", "anth cld31", "anthropic.claude/3-1", "story teller", "CLAUDE 31"])
+      expect(matchesModel(model, query), query).toBe(true)
+    expect(matchesModel(model, "gemini")).toBe(false)
+    // Digits must not be pieced together across repeated id/name fields.
+    expect(
+      matchesModel(
+        {
+          value: "c m",
+          label: "Router · qwen/story-0008-v3.1",
+          name: "Storyteller 0008",
+          modelKey: "qwen/story-0008-v3.1"
+        },
+        "story 0038"
+      )
+    ).toBe(false)
+  })
+  it("keeps pins and recent models across connections before the grouped catalog, and filters every section", () => {
+    const rows = modelRows(models, "name", "", "", { "c2 m1": true }, used)
+    expect(rows.map((row) => ("heading" in row ? row.heading : row.model.value))).toEqual([
+      "Pinned",
+      "c2 m1",
+      "Recent",
+      "c1 m3",
+      "Local",
+      "c1 m2"
+    ])
+    expect(
+      modelRows(models, "name", "small", "c1", { "c2 m1": true }, used).map((row) =>
+        "heading" in row ? row.heading : row.model.value
+      )
+    ).toEqual(["c1 m2"])
+  })
   const models = [
     { value: "c2 m1", label: "Zeta · big" },
     { value: "c1 m2", label: "Local · small" },

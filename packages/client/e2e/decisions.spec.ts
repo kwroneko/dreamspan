@@ -55,8 +55,8 @@ test("a decision connection's points stay off until its model is chosen, and kee
   await expect(presence).toBeDisabled()
   await expect(page.getByText("Choose the decision model to turn decisions on.")).toBeVisible()
 
-  await page.getByRole("combobox", { name: "Decision model" }).click()
-  await page.getByRole("option", { name: "typesafe/jev-1.13" }).click()
+  await page.getByRole("button", { name: "Decision model", exact: true }).click()
+  await page.getByRole("radio", { name: /typesafe\/jev-1.13$/ }).click()
   await expect(lore).toBeEnabled()
   await expect(lore).not.toBeChecked()
   await lore.click()

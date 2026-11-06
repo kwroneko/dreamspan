@@ -1,7 +1,7 @@
 // The user's models as picker items, "connection · model", for the places that choose one.
-import type { Connection, Model } from "@rp/shared/providers.ts"
+import { resolveModel, type Connection, type Model } from "@rp/shared/providers.ts"
 import { Cause, Effect, Exit } from "effect"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { type ActionResult, useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { describeCause } from "../../errors.ts"
@@ -10,6 +10,12 @@ import type { AppClient } from "../../rpc.ts"
 export interface ModelChoice {
   readonly value: string
   readonly label: string
+  readonly description?: string
+  readonly connectionId?: string
+  readonly connectionName?: string
+  readonly modelKey?: string
+  readonly name?: string
+  readonly hidden?: boolean
 }
 
 export const modelValue = (connection: string, model: string) => `${connection} ${model}`
@@ -48,7 +54,10 @@ const failureMessage = (cause: Cause.Cause<unknown>) =>
  * Loaded once `enabled` turns true. Hidden models are left out, except `current` (a `modelValue`),
  * which is still in use and named as hidden.
  */
-export function useModelChoices(enabled: boolean, current: string | null = null): ReadonlyArray<ModelChoice> {
+export function useModelChoices(
+  enabled: boolean,
+  current: string | ReadonlyArray<string> | null = null
+): ReadonlyArray<ModelChoice> {
   return useModelChoiceList(enabled, current).choices
 }
 
@@ -87,6 +96,10 @@ export const readModelChoices = (client: AppClient["Service"]) =>
           ? exit.value.map((model: Model) => ({
               value: modelValue(connection.id, model.id),
               label: `${connection.name} · ${model.key}`,
+              connectionId: connection.id,
+              connectionName: connection.name,
+              modelKey: model.key,
+              name: resolveModel(model.key, model.upstream, model.overrides).name.value,
               hidden: model.hidden
             }))
           : []
@@ -113,16 +126,22 @@ export const readModelChoices = (client: AppClient["Service"]) =>
 const lastReads = new Map<string, Read>()
 let reading: { readonly userId: string; readonly done: Promise<ActionResult<Read>> } | null = null
 
-export function useModelChoiceList(enabled: boolean, current: string | null = null): ModelChoiceList {
+export function useModelChoiceList(
+  enabled: boolean,
+  current: string | ReadonlyArray<string> | null = null
+): ModelChoiceList {
   const action = useAction()
   const userId = useSession().user.id
   const [ownRead, setRead] = useState<Read | null>(null)
   // Until this one's read lands, the last read, if there is one.
   const read = ownRead ?? (enabled ? (lastReads.get(userId) ?? null) : null)
-  const missing = read !== null && current !== null && !read.models.some((model) => model.value === current)
+  const currentKey = typeof current === "string" ? current : (current ?? []).join("\n")
+  const currentValues = useMemo(() => (currentKey ? currentKey.split("\n") : []), [currentKey])
+  const missing =
+    read === null ? null : (currentValues.find((value) => !read.models.some((model) => model.value === value)) ?? null)
   // A model missing from the list is looked for once more, not on every render.
   const [lookedFor, setLookedFor] = useState<string | null>(null)
-  if (missing && lookedFor !== current) setLookedFor(current)
+  if (missing && lookedFor !== missing) setLookedFor(missing)
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     if (!enabled) return
@@ -144,6 +163,17 @@ export function useModelChoiceList(enabled: boolean, current: string | null = nu
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once when enabled, once per missing model, and per retry
   }, [enabled, lookedFor, attempt])
+  const choices = useMemo(
+    () =>
+      (read?.models ?? []).flatMap(({ hidden, ...choice }) =>
+        !hidden
+          ? [choice]
+          : currentValues.includes(choice.value)
+            ? [{ ...choice, hidden: true, label: `${choice.label} (hidden)`, name: `${choice.name} (hidden)` }]
+            : []
+      ),
+    [read, currentValues]
+  )
   return {
     loaded: read !== null,
     connections: read?.connections ?? 0,
@@ -153,8 +183,6 @@ export function useModelChoiceList(enabled: boolean, current: string | null = nu
       setRead(null)
       setAttempt((n) => n + 1)
     },
-    choices: (read?.models ?? []).flatMap(({ hidden, ...choice }) =>
-      !hidden ? [choice] : choice.value === current ? [{ ...choice, label: `${choice.label} (hidden)` }] : []
-    )
+    choices
   }
 }

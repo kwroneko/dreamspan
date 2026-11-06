@@ -3,16 +3,19 @@ import { ChatLock } from "./PickerParts.tsx"
 // Name or Used, when each model last wrote a reply under its name, and Manage connections… at
 // the end, where models come from. The body is the registered `model.picker` entry.
 import { Link } from "@tanstack/react-router"
-import { type ReactNode, useId, useRef, useState } from "react"
+import { type ReactNode, useCallback, useId, useMemo, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
 import { Icon } from "../../ui/Icon.tsx"
+import { Field } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { type PickerBodyProps, PickerList, PickerPopover, PickerSearch, pickerRowClass } from "./PickerParts.tsx"
-import { MODEL_SORTS, type ModelSort, modelDetail, modelTime, modelsInOrder } from "./modelList.ts"
-import type { ModelSelection } from "./modelSelection.ts"
+import { type PickerBodyProps, PickerPopover, PickerSearch, pickerRowClass } from "./PickerParts.tsx"
+import { MODEL_SORTS, type ModelSort, modelConnection, modelRows, modelsInOrder } from "./modelList.ts"
+import { type ModelSelection, useModelUse } from "./modelSelection.ts"
+import type { ModelChoice } from "../chat/modelChoices.ts"
+import { VirtualModelList } from "./VirtualModelList.tsx"
 
 export interface ModelPickerProps extends PickerBodyProps {
   readonly selection: ModelSelection
@@ -35,71 +38,162 @@ export function ConnectionsLink({ className, children }: { className: string; ch
 }
 
 export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPickerProps) {
-  const { prefs, change } = useViewPrefs()
+  const { prefs, change, error, ready } = useViewPrefs()
   const [query, setQuery] = useState("")
+  const [connection, setConnection] = useState("")
+  // A pin never moves the button under the pointer. Its new place applies on reopening.
+  const [orderPins, setOrderPins] = useState<Readonly<Record<string, boolean>> | null>(ready ? prefs.modelPins : null)
+  if (orderPins === null && ready) setOrderPins(prefs.modelPins)
   const search = useRef<HTMLInputElement>(null)
   const listId = useId()
-  const { models, used, value } = selection
-  const q = query.trim()
-  const shown = modelsInOrder(prefs.modelSort, query, models, used)
+  const { models, value } = selection
+  const used = useMemo(() => {
+    const merged = new Map(selection.used)
+    for (const [id, at] of Object.entries(prefs.modelRecent)) merged.set(id, Math.max(at, merged.get(id) ?? 0))
+    return merged
+  }, [selection.used, prefs.modelRecent])
+  const catalog = useMemo(() => models.filter((model) => model.value.includes(" ")), [models])
+  const choices = useMemo(() => models.filter((model) => !model.value.includes(" ")), [models])
+  const connections = useMemo(
+    () =>
+      [
+        ...new Map(
+          catalog.map((model) => {
+            const entry = modelConnection(model)
+            return [entry.id, entry]
+          })
+        ).values()
+      ].sort((a, b) => a.name.localeCompare(b.name)),
+    [catalog]
+  )
+  const ordered = useMemo(() => modelsInOrder(prefs.modelSort, "", catalog, used), [prefs.modelSort, catalog, used])
+  const rows = useMemo(
+    () => modelRows(ordered, prefs.modelSort, query, connection, orderPins ?? prefs.modelPins, used, true),
+    [ordered, prefs.modelSort, query, connection, orderPins, prefs.modelPins, used]
+  )
+  const choose = useCallback(
+    (next: string) => {
+      if (next.includes(" ")) {
+        const at = Date.now()
+        void change({ modelRecent: { ...prefs.modelRecent, [next]: at } }, { modelRecent: { [next]: at } })
+      }
+      onChosen()
+      if (next !== value) void selection.choose(next)
+    },
+    [change, prefs.modelRecent, onChosen, value, selection]
+  )
   return (
-    <>
+    <div data-model-picker="" className="flex min-h-0 flex-col gap-2">
       <ChatLock lock={selection.lock} kind="model" />
-      {models.length > 0 && (
-        <>
-          <PickerSearch
-            label="Find a model"
-            placeholder="Find by connection or model"
-            value={query}
-            onChange={setQuery}
-            inputRef={focus === "search" ? focusRef : search}
-            controls={listId}
-          />
-          <Segmented<ModelSort>
-            label="Sort models"
-            value={prefs.modelSort}
-            onValueChange={(modelSort) => void change({ modelSort })}
-            options={MODEL_SORTS}
-          />
-        </>
-      )}
-      <PickerList
+      <Field label="Find a model" labelHidden className="shrink-0">
+        <PickerSearch
+          label="Find a model"
+          placeholder="Search name, id or provider"
+          value={query}
+          onChange={setQuery}
+          inputRef={focus === "search" ? focusRef : search}
+          controls={listId}
+        />
+      </Field>
+      <label className="flex shrink-0 items-center gap-2 text-sm">
+        <span>Connection</span>
+        <Tooltip label="Show models from one connection, or all connections">
+          <select
+            aria-label="Connection"
+            value={connection}
+            onChange={(event) => setConnection(event.target.value)}
+            className="h-9 min-w-0 flex-1 rounded-md border border-border bg-surface px-2 text-text outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <option value="">All connections</option>
+            {connections.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </Tooltip>
+      </label>
+      <Segmented<ModelSort>
+        label="Sort models"
+        value={prefs.modelSort}
+        onValueChange={(modelSort) => void change({ modelSort })}
+        options={MODEL_SORTS}
+      />
+      {choices.map((choice) => (
+        <Tooltip key={choice.value} label={choice.description ?? `Choose ${choice.label}`}>
+          <button type="button" className={pickerRowClass} onClick={() => choose(choice.value)}>
+            {choice.label}
+          </button>
+        </Tooltip>
+      ))}
+      <VirtualModelList
+        key={`${query}:${connection}:${prefs.modelSort}`}
         id={listId}
-        title="Model"
-        items={shown.map((model) => ({
-          value: model.value,
-          label: model.label,
-          detail: modelDetail(used.get(model.value)),
-          tooltip: (
-            <span className="flex flex-col">
-              <span>
-                {model.value === value
-                  ? `In use for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`
-                  : `Use this model for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`}
-              </span>
-              <span>{modelTime(used.get(model.value))}</span>
-            </span>
-          )
-        }))}
-        value={value ?? ""}
-        onChoose={(next) => {
-          onChosen()
-          if (next !== value) void selection.choose(next)
-        }}
+        rows={rows}
+        value={value}
+        used={used}
+        pins={prefs.modelPins}
+        pinsReady={ready}
+        onChoose={choose}
         focusRef={focus === "current" ? focusRef : undefined}
-        fallbackFocus={search}
-        empty={
-          models.length === 0
-            ? "No connection lists a model yet. Add a connection, and its models show here."
-            : `Nothing is called “${q}”.`
+        onPin={(id) =>
+          void change(
+            { modelPins: { ...prefs.modelPins, [id]: !prefs.modelPins[id] } },
+            { modelPins: { [id]: !prefs.modelPins[id] } }
+          )
         }
       />
-      <ErrorAlert error={selection.error} />
+      {models.length === 0 && (
+        <p className="text-sm text-muted">
+          No connection lists a model yet. Add a connection, and its models show here.
+        </p>
+      )}
+      <ErrorAlert error={selection.error ?? error} />
       <ConnectionsLink className={pickerRowClass}>
         <Icon name={models.length === 0 ? "plus" : "sliders"} size={14} />
         {models.length === 0 ? "Add a connection…" : "Manage connections…"}
       </ConnectionsLink>
-    </>
+    </div>
+  )
+}
+
+/** A settings field uses the same replaceable picker, with its own list and write. */
+export function ModelSelect({
+  items,
+  value,
+  onValueChange,
+  placeholder = "None",
+  ariaLabel = "Choose a model"
+}: {
+  items: ReadonlyArray<ModelChoice>
+  value: string | null
+  onValueChange: (value: string) => void
+  placeholder?: string
+  ariaLabel?: string
+}) {
+  const { used, refresh } = useModelUse()
+  const current = items.find((item) => item.value === value)
+  const selection: ModelSelection = {
+    loaded: true,
+    value,
+    current,
+    models: items.filter((item) => !item.hidden || item.value === value),
+    used,
+    choose: async (next) => {
+      onValueChange(next)
+      return true
+    },
+    refresh,
+    error: null
+  }
+  return (
+    <ModelPickerPopover
+      selection={selection}
+      trigger={<span className="truncate">{current?.label ?? placeholder}</span>}
+      triggerLabel={ariaLabel}
+      hint="Choose a model from your connections"
+      side="bottom"
+    />
   )
 }
 
@@ -121,6 +215,8 @@ export function ModelPickerPopover({
   side?: "top" | "bottom"
   footer?: (close: () => void) => ReactNode
 }) {
+  // Read account pins and sort while the host loads its model lists, before opening.
+  useViewPrefs()
   return (
     <PickerPopover
       title="Model"

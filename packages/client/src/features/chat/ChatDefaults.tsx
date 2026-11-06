@@ -1,3 +1,4 @@
+import { ModelSelect } from "../pickers/ModelPicker.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
@@ -52,7 +53,9 @@ function ChatDefaultsContent() {
   const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
   const models = useModelChoices(
     true,
-    defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
+    [defaults?.model, defaults?.judge, defaults?.lcm?.fallback].flatMap((model) =>
+      model ? [modelValue(model.connection, model.model)] : []
+    )
   )
   const [presets, setPresets] = useState<{ live: ReadonlyArray<LibraryRef>; archived: ReadonlyArray<LibraryRef> }>({
     live: [],
@@ -144,7 +147,8 @@ function ChatDefaultsContent() {
               ) : undefined
             }
           >
-            <Select
+            <ModelSelect
+              ariaLabel="Default model"
               items={items}
               value={defaults ? choice(defaults.model) : null}
               placeholder="None"
@@ -169,7 +173,8 @@ function ChatDefaultsContent() {
             label="Refusal judge"
             about="Detect refusals in replies and summaries with this model. None catches only refusals reported by the provider."
           >
-            <Select
+            <ModelSelect
+              ariaLabel="Refusal judge"
               items={items}
               value={defaults ? choice(defaults.judge) : null}
               placeholder="None"
@@ -237,7 +242,8 @@ export function SummaryDefaults({
       <CardHeader title="Summaries" />
       <section aria-label="Models for summaries" className="flex flex-col gap-4">
         <Field label="Fallback summarizer" about="Tried once when a summary keeps failing on its own model.">
-          <Select
+          <ModelSelect
+            ariaLabel="Fallback summarizer"
             items={items}
             value={defaults ? choice(defaults.lcm?.fallback) : null}
             placeholder="None"

@@ -114,6 +114,11 @@ const displayFields = {
   presetSort: PresetSort,
   /** How model lists sort (the composer's picker and the Model tab's). */
   modelSort: Schema.Literals(["name", "used"]),
+  /** Model choices keyed by the connection/model pair, shared by all model pickers. */
+  modelPins: Schema.Record(Schema.String, Schema.Boolean).check(Schema.isMaxProperties(500)),
+  modelRecent: Schema.Record(Schema.String, Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))).check(
+    Schema.isMaxProperties(100)
+  ),
   /**
    * "Only keep one image open at a time" (owner, 2026-11-02): a portrait's click replaces the
    * one beside the chat instead of opening on top of it.
@@ -149,6 +154,8 @@ export const DisplayPrefsChange = Schema.Struct({
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
   presetSort: Schema.optionalKey(displayFields.presetSort),
   modelSort: Schema.optionalKey(displayFields.modelSort),
+  modelPins: Schema.optionalKey(displayFields.modelPins),
+  modelRecent: Schema.optionalKey(displayFields.modelRecent),
   singlePortrait: Schema.optionalKey(displayFields.singlePortrait),
   /** Merged by id with what's stored, so a write names only the choices it changes. */
   messageToolbar: Schema.optionalKey(displayFields.messageToolbar),
@@ -173,6 +180,8 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   chatWidth: CHAT_WIDTH.default,
   presetSort: "name",
   modelSort: "name",
+  modelPins: {},
+  modelRecent: {},
   singlePortrait: false,
   messageToolbar: {},
   dismissedInfo: {},

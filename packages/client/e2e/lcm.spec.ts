@@ -365,8 +365,13 @@ for (const [name, viewport] of [
       const dialog = page.getByRole("region", { name: "Models for summaries" })
       const pick = async (select: Locator, option: string | RegExp) => {
         await select.click()
-        await page.getByRole("listbox").getByRole("option", { name: option }).click()
-        await expect(page.getByRole("listbox")).toHaveCount(0)
+        if (option === "None") await page.getByRole("button", { name: "None", exact: true }).click()
+        else
+          await page
+            .getByRole("radiogroup", { name: "Model", exact: true })
+            .getByRole("radio", { name: option })
+            .click()
+        await expect(page.getByRole("radiogroup", { name: "Model", exact: true })).toHaveCount(0)
       }
       await pick(page.getByLabel("Refusal judge", { exact: true }), /fake-small/)
       await pick(dialog.getByLabel("Fallback summarizer", { exact: true }), /fake-small/)

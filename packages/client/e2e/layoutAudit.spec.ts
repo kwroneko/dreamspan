@@ -25,10 +25,38 @@ import { modelChip, nextChip, presetChip } from "./support/strip.ts"
 import { portraitPng } from "./support/portrait.ts"
 import { writeScaleFolder } from "./support/stScaleFolder.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
+import { modelCatalog } from "./support/modelCatalog.ts"
 
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
+
+test.describe("model picker catalog layout", () => {
+  let server: TestServer
+  let catalog: Awaited<ReturnType<typeof modelCatalog>>
+  let chatId: string
+  test.beforeAll(async () => {
+    server = await startServer()
+    catalog = await modelCatalog()
+    chatId = (await withCookie(server, "", catalog.seed)).chat.id
+  })
+  test.afterAll(async () => {
+    await catalog?.stop()
+    await server?.stop()
+  })
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const)
+      test(`${width} ${theme}`, async ({ page }, info) => {
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.goto(`${server.url}/chats/${chatId}`)
+        await modelChip(page).click()
+        await expect(page.getByRole("radiogroup", { name: "Model", exact: true })).toBeVisible()
+        await expectLayout(page, info, `model-picker-${width}-${theme}`, { scope: "[data-model-picker]" })
+        await page.getByRole("searchbox", { name: "Find a model", exact: true }).fill("story2998")
+        await expectLayout(page, info, `model-filtered-${width}-${theme}`, { scope: "[data-model-picker]" })
+      })
+})
 
 test.use({
   reducedMotion: "reduce",
