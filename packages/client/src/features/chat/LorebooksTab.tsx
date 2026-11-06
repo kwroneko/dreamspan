@@ -422,6 +422,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
             {...(chosenShown.edit.note ? { note: chosenShown.edit.note } : {})}
             onClose={() => setSelected(null)}
             onOpenLarge={() => openLarge(chosenShown)}
+            largeHref={workspace.href(chosenShown.edit.ref, chosenShown.focus)}
           />
         </div>
       )}

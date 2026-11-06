@@ -111,10 +111,10 @@ for (const width of [1440, 1024, 390]) {
     // Every tile opens the full center editor, including a character already in the chat.
     const originalUrl = new URL(page.url())
     if (width === 390) originalUrl.searchParams.delete("panel")
-    await section(page).getByRole("button", { name: "Open Mira", exact: true }).click()
-    const editor = page.getByRole("dialog", { name: "Card editor", exact: true })
+    await section(page).getByRole("link", { name: "Open Mira", exact: true }).click()
+    const editor = page.getByRole("region", { name: "Card editor", exact: true })
     await expect(editor).toBeVisible()
-    await expect(page).toHaveURL(/editor=/)
+    await expect(page).toHaveURL(/\/library\//)
     await editor.getByRole("button", { name: "Close", exact: true }).click()
     await expect(editor).toHaveCount(0)
     await expect(page).toHaveURL(originalUrl.toString())
@@ -126,7 +126,7 @@ for (const width of [1440, 1024, 390]) {
     await expect(mira).toHaveAttribute("aria-disabled", "true")
     await expect(mira).toHaveText("In this chat")
     const tile = mira.locator("xpath=ancestor::div[contains(@class, 'tile-toggle-surface')]")
-    const openTile = tile.getByRole("button", { name: "Open Mira", exact: true })
+    const openTile = tile.getByRole("link", { name: "Open Mira", exact: true })
     const [outerBox, openBox, footerBox] = await Promise.all([
       tile.boundingBox(),
       openTile.boundingBox(),
@@ -176,7 +176,7 @@ for (const width of [1440, 1024, 390]) {
     await search.fill("")
 
     await section(page)
-      .getByRole("button", { name: `Open ${one}`, exact: true })
+      .getByRole("link", { name: `Open ${one}`, exact: true })
       .focus()
     await page.keyboard.press("Enter")
     await expect(editor).toBeVisible()

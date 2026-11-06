@@ -306,7 +306,7 @@ for (const width of [1440, 390])
       await page.keyboard.press("Escape")
 
       if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
-      const sidebarChat = page.getByRole("button", { name: "Open chat Harbour notebook", exact: true }).first()
+      const sidebarChat = page.getByRole("link", { name: "Open chat Harbour notebook", exact: true }).first()
       await expect(sidebarChat).toBeVisible()
       const shellRow = sidebarChat.locator("..")
       results.sidebar = await measure(shellRow.getByRole("button", { name: /^Pin / }), shellRow, sidebarChat)

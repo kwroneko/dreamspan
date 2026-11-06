@@ -94,8 +94,8 @@ const openBook = async (page: Page, panel: Locator, tag: string) => {
 }
 
 const openLarge = async (page: Page, editor: Locator) => {
-  await editor.getByRole("button", { name: "Large editor", exact: true }).click()
-  const large = page.getByRole("dialog", { name: "Lorebook editor", exact: true })
+  await editor.getByRole("link", { name: "Large editor", exact: true }).click()
+  const large = page.getByRole("region", { name: "Lorebook editor", exact: true })
   await expect(large.getByRole("list", { name: "Entries" })).toBeVisible()
   return large
 }
@@ -151,7 +151,7 @@ for (const width of [390, 1024, 1440, 1920])
     const { panel } = await setUp(page, tag, width)
     const editor = await openBook(page, panel, tag)
     // Title row: the name, then the icon buttons.
-    await expect(editor.getByRole("button", { name: "Large editor", exact: true })).toBeVisible()
+    await expect(editor.getByRole("link", { name: "Large editor", exact: true })).toBeVisible()
     await expect(editor.getByRole("button", { name: "Close the lorebook", exact: true })).toBeVisible()
     // Editing row: Add entry, the save cluster beside it, then Search and replace.
     const editing = editor.getByRole("toolbar", { name: "Editing", exact: true })

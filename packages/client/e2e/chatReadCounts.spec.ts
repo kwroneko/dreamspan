@@ -161,13 +161,13 @@ test("chat navigation shares reads and still refreshes after writes", async ({ p
     await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
   }
   const navigate = async (id: string) => {
-    await page.locator(`button[data-chat-id="${id}"]`).first().click()
+    await page.locator(`[data-chat-id="${id}"]`).first().click()
     await expect(page).toHaveURL(new RegExp(`/chats/${id}`))
     await ready()
   }
   for (let i = 0; i < (work ? 5 : 1); i++) {
     await page.goto(`${server().url}/?side=chats`)
-    await expect(page.locator(`button[data-chat-id="${fixture.chats[0]}"]`).first()).toBeVisible()
+    await expect(page.locator(`[data-chat-id="${fixture.chats[0]}"]`).first()).toBeVisible()
     await settle()
     const opened = await measure("open chat", () => navigate(fixture.chats[0]!))
     if (!process.env.READ_COUNTS_RECORD) {
@@ -198,35 +198,35 @@ test("chat navigation shares reads and still refreshes after writes", async ({ p
     await openPanel(page, "Prompt preset")
     await settle()
     await measure("large preset", async () => {
-      await page.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
+      await page.getByRole("link", { name: "Open the preset in the large editor", exact: true }).click()
       await expect(
-        page.getByRole("dialog", { name: "Preset editor", exact: true }).getByRole("heading", { level: 1 })
+        page.getByRole("region", { name: "Preset editor", exact: true }).getByRole("heading", { level: 1 })
       ).toBeVisible()
     })
     await page
-      .getByRole("dialog", { name: "Preset editor", exact: true })
+      .getByRole("region", { name: "Preset editor", exact: true })
       .getByRole("button", { name: "Close", exact: true })
       .click()
     const lore = await openPanel(page, "Lorebooks")
     await lore.getByRole("button", { name: /^Read-count-book/ }).click()
     const region = lore.getByRole("region", { name: "Lorebook Read-count-book", exact: true })
-    await expect(region.getByRole("button", { name: "Large editor", exact: true })).toBeVisible()
+    await expect(region.getByRole("link", { name: "Large editor", exact: true })).toBeVisible()
     await settle()
     await measure("large lorebook", async () => {
-      await region.getByRole("button", { name: "Large editor", exact: true }).click()
+      await region.getByRole("link", { name: "Large editor", exact: true }).click()
       await expect(
-        page.getByRole("dialog", { name: "Lorebook editor", exact: true }).getByRole("heading", { level: 1 })
+        page.getByRole("region", { name: "Lorebook editor", exact: true }).getByRole("heading", { level: 1 })
       ).toBeVisible()
     })
     await page
-      .getByRole("dialog", { name: "Lorebook editor", exact: true })
+      .getByRole("region", { name: "Lorebook editor", exact: true })
       .getByRole("button", { name: "Close", exact: true })
       .click()
   }
   // Both lists are already mounted: a write must invalidate the shared library query.
   await openPanel(page, "Prompt preset")
-  await page.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
-  const editor = page.getByRole("dialog", { name: "Preset editor", exact: true })
+  await page.getByRole("link", { name: "Open the preset in the large editor", exact: true }).click()
+  const editor = page.getByRole("region", { name: "Preset editor", exact: true })
   await editor.getByRole("button", { name: "Rename Read-count-preset", exact: true }).click()
   await editor.getByRole("textbox", { name: "New name for Read-count-preset", exact: true }).fill("Read-count renamed")
   await page.keyboard.press("Enter")

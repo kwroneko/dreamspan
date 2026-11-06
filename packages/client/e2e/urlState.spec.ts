@@ -83,7 +83,8 @@ test.beforeEach(async ({ page }) => {
 })
 const open = async (page: Page, extra = "") => {
   await page.goto(`${server().url}/chats/${chat}?fork=${fork}${extra}`)
-  await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
+  // A link from before tabs (`?editor=`) opens the editor in a tab of its own, over the chat's.
+  if (!extra.includes("editor=")) await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
 }
 const reload = async (page: Page) => {
   const url = page.url()
@@ -144,10 +145,10 @@ test("preset overlay: focused prompt, expansion and revision-history dialog relo
   await open(page)
   const panel = await openPanel(page, "Prompt preset")
   await openPresetAt(page, panel, "Main Prompt")
-  await expect(page.getByRole("dialog", { name: "Preset editor", exact: true })).toBeVisible()
-  await expect(page).toHaveURL(/editor=/)
+  await expect(page.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/\/library\//)
   await reload(page)
-  const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
+  const overlay = page.getByRole("region", { name: "Preset editor", exact: true })
   await expect(overlay).toBeVisible()
   await expect(overlay.locator('[data-prompt="main"]')).toBeVisible()
   await overlay.getByRole("button", { name: "History", exact: true }).click()
@@ -170,9 +171,9 @@ test("lorebook panel and overlay: opened book, entry and filter reload; stale en
   await editor.getByRole("button", { name: /Open Harbor/ }).click()
   await reload(page)
   await expect(editor.getByRole("group", { name: /^Lorebook entry / })).toBeVisible()
-  await editor.getByRole("button", { name: "Large editor", exact: true }).click()
+  await editor.getByRole("link", { name: "Large editor", exact: true }).click()
   await reload(page)
-  await expect(page.getByRole("dialog", { name: "Lorebook editor", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Lorebook editor", exact: true })).toBeVisible()
   const url = new URL(page.url())
   url.searchParams.set(`entries:${book}::entry`, JSON.stringify("999999"))
   await page.goto(url.href)
@@ -184,7 +185,7 @@ test("card overlay: item and sub-tab restore from a copied link; missing ref is 
   browser
 }) => {
   await open(page, `&editor=${cardRef}`)
-  const overlay = page.getByRole("dialog", { name: "Card editor", exact: true })
+  const overlay = page.getByRole("region", { name: "Card editor", exact: true })
   await overlay.getByRole("tab", { name: "Metadata", exact: true }).click()
   const url = page.url()
   await reload(page)
@@ -196,7 +197,7 @@ test("card overlay: item and sub-tab restore from a copied link; missing ref is 
     await copied.goto(url)
     await expect(
       copied
-        .getByRole("dialog", { name: "Card editor", exact: true })
+        .getByRole("region", { name: "Card editor", exact: true })
         .getByRole("tab", { name: "Metadata", exact: true })
     ).toHaveAttribute("aria-selected", "true")
   } finally {
@@ -244,7 +245,7 @@ test("library: kind, search, filter, sort, direction and view reload, with histo
 
 test("settings: section path survives reload and Back/Forward", async ({ page }) => {
   await page.goto(`${server().url}/settings/chats`)
-  await expect(page.getByRole("heading", { name: "Chats", exact: true })).toBeVisible()
+  await expect(page.getByRole("main").getByRole("heading", { name: "Chats", exact: true })).toBeVisible()
   await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Interface", exact: true }).click()
   await reload(page)
   await expect(page).toHaveURL(/\/settings\/interface$/)

@@ -1299,6 +1299,30 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.deepStrictEqual(yield* actor.api.GetDisplayPrefs({}), before)
       })
   },
+  GetWorkbenchLayout: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetWorkbenchLayout({ device: "d" })
+        yield* owner.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ owner: true }) })
+        assert.deepStrictEqual(yield* actor.api.GetWorkbenchLayout({ device: "d" }), before)
+      })
+  },
+  SetWorkbenchLayout: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetWorkbenchLayout({ device: "d" })
+        yield* actor.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ actor: true }) })
+        assert.deepStrictEqual(yield* owner.api.GetWorkbenchLayout({ device: "d" }), before)
+      })
+  },
+  ForgetWorkbenchLayouts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ owner: true }) })
+        yield* actor.api.ForgetWorkbenchLayouts({})
+        assert.strictEqual(yield* owner.api.GetWorkbenchLayout({ device: "d" }), JSON.stringify({ owner: true }))
+      })
+  },
   ImpersonationNotice: {
     // It reads only the caller's own current preset, and marks only the caller's notices.
     probe: (actor, owner) =>

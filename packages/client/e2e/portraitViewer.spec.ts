@@ -178,8 +178,8 @@ test("header portrait clicks toggle open then closed, shared with messages, the 
   await expect(viewer).toHaveCount(0)
 
   // The full editor over a chat keeps its header accessible beside the image column.
-  await tab.getByRole("button", { name: "Open Tall in the full editor", exact: true }).click()
-  const editor = page.getByRole("dialog", { name: "Card editor", exact: true })
+  await tab.getByRole("link", { name: "Open Tall in the full editor", exact: true }).click()
+  const editor = page.getByRole("region", { name: "Card editor", exact: true })
   await twice(
     editor.locator("[data-card-header-portrait]").getByRole("button", { name: "View Tall's picture", exact: true })
   )

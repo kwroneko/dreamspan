@@ -4,27 +4,23 @@ import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import {
   createContext,
-  lazy,
   type ReactNode,
-  Suspense,
   useContext,
   useEffect,
   useEffectEvent,
-  useMemo,
+  useRef,
   useState,
   useSyncExternalStore
 } from "react"
 import { useSession } from "../../session.ts"
 import { UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
-import { ColumnOverlay } from "../../ui/ColumnOverlay.tsx"
-import { Loading } from "../../ui/Spinner.tsx"
+import { CastContext, type CastView } from "../chat/cast.ts"
+import type { ChatSession, ChatView } from "../chat/session.ts"
+import { useTabRegion, useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
 import { useCaller } from "./caller.ts"
-import { CARD_LOREBOOK_FOCUS } from "./cardSections.ts"
 import { browserEnv } from "./backup.ts"
-import { EditorStore, useEditorState } from "./store.ts"
-import { type WorkspaceViewProps, workspaceViews } from "./workspaceViews.ts"
-
-const Editor = lazy(() => import("./EditorPage.tsx").then((m) => ({ default: m.Editor })))
+import { EditorStore } from "./store.ts"
+import { boundEditorSurroundings, workspaceViews } from "./workspaceViews.ts"
 /** The chat the workspace is in, for what a card's save offers after it (a rename in the history). */
 interface WorkspaceChat {
   readonly chatId: string
@@ -32,15 +28,18 @@ interface WorkspaceChat {
 }
 /**
  * The library entries edited from a chat: one store each, shared by the panel's tab and the
- * full editor, which opens over the chat's column (a preset, or a card from its panel tab).
+ * full editor, which opens in a tab of its own beside the chat (a preset, or a card from its
+ * panel tab).
  */
 interface Workspace {
   /** A chat's own note is edited at its position, so its store is that position's. */
   store: (ref: RefId, chatNote?: ChatNotePosition) => EditorStore
   edits: { tracker: UnsavedTracker; stores: ReadonlyMap<string, EditorStore> }
+  /** Opens an entry's editor in its own tab (features/workbench), beside the chat. */
   open: (ref: RefId, focus?: string) => void
+  /** That tab's URL, for the opener's link. */
+  href: (ref: RefId, focus?: string) => string
   close: () => void
-  selection: { ref: RefId; focus?: string | undefined } | null
   context: PresetContext | null | undefined
   chat: WorkspaceChat | undefined
 }
@@ -61,12 +60,15 @@ export function PresetWorkspace({
   children,
   context,
   chat,
+  live,
   compact = false,
   onOpen
 }: {
   children: ReactNode
   context?: PresetContext | null | undefined
   chat?: WorkspaceChat | undefined
+  /** The chat's session and cast, lent to the editor tabs opened from it. */
+  live?: { session: ChatSession; cast: CastView } | undefined
   /** On a phone the full editor takes the side panel's place. */
   compact?: boolean
   onOpen?: () => void
@@ -76,35 +78,33 @@ export function PresetWorkspace({
   const [stores] = useState(() => new Map<string, EditorStore>())
   const [edits] = useState(() => new UnsavedTracker())
   useEffect(() => () => edits.dispose(), [edits])
-  const search = useSearch({ strict: false }) as Record<string, unknown>
+  const workbench = useWorkbench()
+  const tab = useWorkbenchTab()
   const navigate = useNavigate()
-  const selection = useMemo<Workspace["selection"]>(
-    () =>
-      typeof search.editor === "string" && search.editor
-        ? { ref: search.editor as RefId, ...(typeof search.focus === "string" ? { focus: search.focus } : {}) }
-        : null,
-    [search.editor, search.focus]
-  )
-  const setSelection = (next: Workspace["selection"]) =>
+  const search = useSearch({ strict: false }) as Record<string, unknown>
+  const href = (ref: RefId, focus?: string) => editorHref(ref, focus, chat)
+  const open = (ref: RefId, focus?: string) => {
+    // The chat it's opened from stays open beside its editor.
+    if (tab) workbench?.pin(tab.tabId)
+    if (compact) onOpen?.()
+    if (workbench) workbench.open(href(ref, focus))
+    else void navigate({ href: href(ref, focus) })
+  }
+  // A link from before tabs (`?editor=`): the editor opens in its own tab beside the chat.
+  const legacy = typeof search.editor === "string" && search.editor ? (search.editor as RefId) : null
+  const legacyFocus = typeof search.focus === "string" ? search.focus : undefined
+  const openLegacy = useEffectEvent(() => {
+    if (!legacy) return
     void navigate({
       to: ".",
-      search: (prev: Record<string, unknown>) => ({
-        ...prev,
-        editor: next?.ref,
-        focus: next?.focus,
-        editorDialog: undefined,
-        ...(next ? { [`cardBook:${next.ref}`]: undefined } : {}),
-        ...(compact && next ? { panel: undefined } : {})
-      }),
-      state: (prev) => ({ ...prev, ...(compact && next ? { chatPanel: true } : {}) }),
+      search: (prev: Record<string, unknown>) => ({ ...prev, editor: undefined, focus: undefined }),
+      replace: true,
       resetScroll: false
-    })
-  const notifyOpen = useEffectEvent(() => onOpen?.())
-  // Also reconcile when an already open editor crosses into the phone layout: otherwise
-  // the side panel becomes a modal sheet over it and makes the editor inert.
+    }).then(() => open(legacy, legacyFocus))
+  })
   useEffect(() => {
-    if (selection !== null) notifyOpen()
-  }, [selection, compact])
+    if (legacy) openLegacy()
+  }, [legacy])
   const store = (ref: RefId, chatNote?: ChatNotePosition) => {
     const key = chatNote ? `${ref}\n${chatNote.chatId}\n${chatNote.forkId ?? ""}\n${chatNote.slotId ?? ""}` : ref
     let value = stores.get(key)
@@ -115,99 +115,174 @@ export function PresetWorkspace({
     }
     return value
   }
+  const workspace: Workspace = {
+    store,
+    edits: { tracker: edits, stores },
+    context,
+    chat,
+    open,
+    href,
+    close: () => {}
+  }
+  // An editor tab opened from this chat edits through the same stores.
+  const holder = useRef<LiveChat | null>(null)
+  useEffect(() => {
+    holder.current = live ? { workspace, ...live } : null
+  })
+  const chatId = chat?.chatId
+  useEffect(() => {
+    if (!chatId || !holder.current) return
+    return publishLive(chatId, holder)
+  }, [chatId, holder])
+  useEffect(liveChanged, [context, live?.cast, chat?.forkId])
+  return <Context value={workspace}>{children}</Context>
+}
+
+// --- The chats open in the workbench, for editor tabs opened from them.
+
+interface LiveChat {
+  readonly workspace: Workspace
+  readonly session: ChatSession
+  readonly cast: CastView
+}
+const liveChats = new Map<string, { readonly current: LiveChat | null }>()
+const liveListeners = new Set<() => void>()
+/** What each chat lent at the last change: a stable snapshot between changes. */
+let liveShown = new Map<string, LiveChat | null>()
+const liveChanged = () => {
+  liveShown = new Map([...liveChats].map(([id, holder]) => [id, holder.current]))
+  for (const listener of liveListeners) listener()
+}
+const publishLive = (chatId: string, holder: { readonly current: LiveChat | null }) => {
+  liveChats.set(chatId, holder)
+  liveChanged()
+  return () => {
+    if (liveChats.get(chatId) !== holder) return
+    liveChats.delete(chatId)
+    liveChanged()
+  }
+}
+const subscribeLive = (listener: () => void) => {
+  liveListeners.add(listener)
+  return () => void liveListeners.delete(listener)
+}
+const useLiveChat = (chatId: string) => useSyncExternalStore(subscribeLive, () => liveShown.get(chatId) ?? null)
+
+/**
+ * An editor, named as a region: in a workbench tab the tab is the region, so its header (the
+ * switcher, Save, Close) is inside it; elsewhere this section is.
+ */
+export function Region({ label, className, children }: { label: string; className: string; children: ReactNode }) {
+  const inTab = useTabRegion(label)
+  return inTab ? (
+    <div className={className}>{children}</div>
+  ) : (
+    <section aria-label={label} className={className}>
+      {children}
+    </section>
+  )
+}
+
+/**
+ * An editor opened from a chat scrolls on its own, below the tab's header, with the padding
+ * and the sticky toolbar's place the chat's large editors had (searchNavigation.ts).
+ */
+export function BoundScroll({ children }: { children: ReactNode }) {
   return (
-    <Context
-      value={{
-        store,
-        edits: { tracker: edits, stores },
-        context,
-        chat,
-        selection,
-        close: () => setSelection(null),
-        open: (ref, focus) => {
-          setSelection({ ref, focus })
-        }
-      }}
+    <div
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-(--scroll-pad) [--scroll-pad:0.75rem] sm:[--scroll-pad:1rem]"
+      data-testid="preset-scroll"
+      data-preset-scroll
     >
       {children}
+    </div>
+  )
+}
+
+/** An entry's editor, as a tab of its own: bound to the chat it's opened from (live.ts). */
+export const editorHref = (ref: RefId, focus: string | undefined, chat: WorkspaceChat | undefined) => {
+  const params = new URLSearchParams()
+  if (focus) params.set("focus", focus)
+  if (chat) {
+    params.set("chat", chat.chatId)
+    if (chat.forkId) params.set("chatFork", chat.forkId)
+  }
+  const query = params.toString()
+  return `/library/${encodeURIComponent(ref)}${query ? `?${query}` : ""}`
+}
+
+/**
+ * The editor in a tab opened from a chat: the chat's stores, preset context and cast while that
+ * chat is open in the workbench, so the panel and the editor show the same text.
+ */
+export function ChatBoundEditor({
+  refId,
+  focus,
+  chatId,
+  onClose,
+  children
+}: {
+  refId: RefId
+  focus: string | undefined
+  chatId: string
+  onClose: (() => void) | undefined
+  children: (bound: {
+    store: EditorStore | undefined
+    context: PresetContext | null | undefined
+    current: WorkspaceChat | undefined
+    session: ChatSession | undefined
+  }) => ReactNode
+}) {
+  const live = useLiveChat(chatId)
+  const views = useSyncExternalStore(workspaceViews.subscribe, workspaceViews.snapshot, workspaceViews.snapshot)
+  if (!live) return children({ store: undefined, context: undefined, current: undefined, session: undefined })
+  const registered = focus === undefined ? undefined : views.entries.find((v) => v.id === focus)
+  const content = registered ? (
+    <Region label={registered.label} className="flex min-h-0 flex-1 flex-col">
+      <BoundScroll>
+        <LiveView
+          session={live.session}
+          render={(view) => <registered.component refId={refId} onClose={onClose} session={live.session} view={view} />}
+        />
+      </BoundScroll>
+    </Region>
+  ) : (
+    children({
+      store: live.workspace.store(refId),
+      context: live.workspace.context,
+      current: live.workspace.chat,
+      session: live.session
+    })
+  )
+  return (
+    <Context value={live.workspace}>
+      <CastContext value={live.cast}>
+        <Surroundings cast={live.cast}>{content}</Surroundings>
+      </CastContext>
     </Context>
   )
 }
 
-export function PresetOverlayHost({
-  page = false,
-  session,
-  view
-}: { page?: boolean } & Pick<WorkspaceViewProps, "session" | "view">) {
-  const workspace = usePresetWorkspace()
-  const selection = workspace?.selection
-  const views = useSyncExternalStore(workspaceViews.subscribe, workspaceViews.snapshot, workspaceViews.snapshot)
-  if (!selection) return null
-  // A feature's own view for this focus (a snippet's, a note's), in place of the library editor.
-  const registered = selection.focus === undefined ? undefined : views.entries.find((v) => v.id === selection.focus)
-  if (registered)
-    return (
-      <ColumnOverlay page={page} onClose={workspace.close} label={registered.label}>
-        <div
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-(--scroll-pad) [--scroll-pad:0.75rem] sm:[--scroll-pad:1rem]"
-          data-testid="preset-scroll"
-        >
-          <registered.component
-            key={selection.ref}
-            refId={selection.ref}
-            onClose={workspace.close}
-            session={session}
-            view={view}
-          />
-        </div>
-      </ColumnOverlay>
+/** The chat's surroundings for its editor's tab (`boundEditorSurroundings`). */
+function Surroundings({ cast, children }: { cast: CastView; children: ReactNode }) {
+  const snapshot = useSyncExternalStore(
+    boundEditorSurroundings.subscribe,
+    boundEditorSurroundings.snapshot,
+    boundEditorSurroundings.snapshot
+  )
+  return [...snapshot.entries]
+    .sort((a, b) => b.order - a.order)
+    .reduce<ReactNode>(
+      (inner, entry) => (
+        <entry.component key={entry.id} cast={cast}>
+          {inner}
+        </entry.component>
+      ),
+      children
     )
-  return <WorkspaceOverlay workspace={workspace} selection={selection} page={page} />
 }
 
-function WorkspaceOverlay({
-  workspace,
-  selection,
-  page
-}: {
-  workspace: Workspace
-  selection: NonNullable<Workspace["selection"]>
-  page: boolean
-}) {
-  const store = workspace.store(selection.ref)
-  const kind = useEditorState(store).snapshot?.ref.kind
-  return (
-    <ColumnOverlay
-      page={page}
-      onClose={workspace.close}
-      label={
-        // A card opened on its own book is that book's editor.
-        kind === "lorebook" || (kind === "card" && selection.focus === CARD_LOREBOOK_FOCUS)
-          ? "Lorebook editor"
-          : kind === "card"
-            ? "Card editor"
-            : kind === "note"
-              ? "Note editor"
-              : "Preset editor"
-      }
-    >
-      <div
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-(--scroll-pad) [--scroll-pad:0.75rem] sm:[--scroll-pad:1rem]"
-        data-testid="preset-scroll"
-        data-preset-scroll
-      >
-        <Suspense fallback={<Loading label="Opening the editor…" />}>
-          <Editor
-            key={selection.ref}
-            refId={selection.ref}
-            suppliedStore={store}
-            context={workspace.context}
-            focus={selection.focus}
-            current={workspace.chat}
-            onClose={workspace.close}
-          />
-        </Suspense>
-      </div>
-    </ColumnOverlay>
-  )
+function LiveView({ session, render }: { session: ChatSession; render: (view: ChatView) => ReactNode }) {
+  const view = useSyncExternalStore(session.subscribe, session.snapshot)
+  return render(view)
 }

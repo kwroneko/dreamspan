@@ -219,7 +219,7 @@ for (const theme of ["light", "dark"] as const)
       await grip.focus()
       await page.keyboard.press(mode === "stacked" ? "Home" : "End")
       const row = page.locator(`[data-fork-row]:has([data-chat-id="${chat.id}"])`).first()
-      const open = row.getByRole("button", { name: `Open chat Harbour cast 6`, exact: true })
+      const open = row.getByRole("link", { name: `Open chat Harbour cast 6`, exact: true })
       for (const state of ["rest", "hover", "focus", "selected", "selected-hover"] as const) {
         await page.mouse.move(0, 0)
         await page.locator(":focus").evaluateAll((nodes) => nodes.forEach((node) => (node as HTMLElement).blur()))

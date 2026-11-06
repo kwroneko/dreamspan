@@ -369,7 +369,7 @@ function ChatHeaderFrame({
           layout, leaving out the faces, the pin and the rename pencil (the side panel has the cast,
           the chat lists the pin, ⋯ has Rename), and the branch control gives up room before the
           name does. */}
-      <CenterHeader>
+      <CenterHeader endControls={false}>
         {/* The desktop's hidden sidebar comes back from here. */}
         <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
         <Tooltip label="All chats">

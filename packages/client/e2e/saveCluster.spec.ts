@@ -226,7 +226,7 @@ for (const width of [1440, 390])
     await check(
       "preset",
       preset,
-      preset.getByRole("button", { name: "Open the preset in the large editor", exact: true }),
+      preset.getByRole("link", { name: "Open the preset in the large editor", exact: true }),
       async () => {
         await preset.getByRole("button", { name: "Expand Main Prompt", exact: true }).click()
         await typeInto(preset.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }), " Slowly.")
@@ -236,7 +236,7 @@ for (const width of [1440, 390])
     const lore = await openPanel(page, "Lorebooks")
     await lore.getByRole("button", { name: new RegExp(`^Tides ${width}`) }).click()
     const editor = lore.getByRole("region", { name: `Lorebook Tides ${width}` })
-    await check("lorebook", editor, editor.getByRole("button", { name: "Large editor", exact: true }), () =>
+    await check("lorebook", editor, editor.getByRole("link", { name: "Large editor", exact: true }), () =>
       switchAll(editor, "Disable all")
     )
     // A note: Save in its header, beside its menu.

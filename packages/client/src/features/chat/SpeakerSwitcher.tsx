@@ -499,6 +499,9 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
                 crop={(view.cards.get(speaker) ?? names.get(speaker))?.avatarCrop}
                 size="chip"
               />
+            ) : compact ? (
+              // Without a persona and without room for "You", the chip still shows who speaks.
+              <Icon name="person" size={16} className="mx-0.5 text-muted" />
             ) : (
               <span aria-hidden="true" className="size-1" />
             )}

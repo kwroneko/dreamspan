@@ -1,4 +1,5 @@
 import type { Draft } from "@rp/shared/drafts.ts"
+import { useSidePanelPlace } from "../workbench/tab.tsx"
 import { greetingPick } from "@rp/shared/greetings.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
@@ -242,6 +243,7 @@ function Pending({
   // The side panel: the saved chat's, its tab in the URL and remembered the same way.
   const urlPanel = useIsPanelTab(navigationSearch.panel) ? navigationSearch.panel! : null
   const { panel, show, wide } = usePanel(urlPanel, view)
+  const place = useSidePanelPlace(wide)
   const title = pendingTitle(pending, state)
   const prefs = viewPrefs.prefs
 
@@ -446,10 +448,9 @@ function Pending({
                   Guidance
                 </span>
               )}
-              <label htmlFor="composer" className="sr-only">
-                {guidance ? "Guidance" : "Message"}
-              </label>
+              {/* Named on itself, not by a label's `for`: two frames can each show a composer. */}
               <AutoGrowTextarea
+                aria-label={guidance ? "Guidance" : "Message"}
                 id="composer"
                 data-testid="composer"
                 value={text}
@@ -484,10 +485,11 @@ function Pending({
             </StripRow>
           </div>
         </div>
-        {panel !== null && (
+        {panel !== null && place.show && (
           <ChatSidePanel
             tab={panel}
             wide={wide}
+            host={place.host}
             title={title}
             onTab={show}
             onClose={() => show(null)}

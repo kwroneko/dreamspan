@@ -37,11 +37,13 @@ import { Alert } from "../../ui/Surface.tsx"
 import { TooltipProvider } from "../../ui/Tooltip.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { useLookingAt } from "../notices.tsx"
+import { useSidePanelPlace, useTabFocused, useTabMeta } from "../workbench/tab.tsx"
+import { tabPortrait } from "./tabPortrait.tsx"
 import { useSession } from "../../session.ts"
 import { CastContext, castView } from "./cast.ts"
 import { ChatSidePanel, type PanelTab, rememberPanel, usePanel } from "./ChatPanels.tsx"
 import { ChatHeader } from "./ChatHeader.tsx"
-import { chatDisplayName } from "./chatTitle.ts"
+import { castCharacters, chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -685,9 +687,13 @@ function ChatSurface({
     },
     [session, navigate, show, withPanel, wide, slot, branchFork, userId]
   )
-  useChatCommandKeys({ session, view, onHistory: () => show("history"), onJump: jump })
+  // Two chats side by side: the keys are the focused one's.
+  const focused = useTabFocused()
+  useChatCommandKeys({ session, view, onHistory: () => show("history"), onJump: jump }, focused)
   const title = chatDisplayName(view)
-  const panelOpen = panel !== null
+  const place = useSidePanelPlace(wide)
+  const panelOpen = panel !== null && place.show
+  useTabMeta(undefined, tabPortrait(castCharacters(view)))
   return (
     <ChatSurfaceProviders session={session} cast={cast} view={view} wide={wide} onOpenPanel={show}>
       <CastContext value={cast}>
@@ -766,6 +772,7 @@ function ChatSurface({
             <ChatSidePanel
               tab={panel}
               wide={wide}
+              host={place.host}
               title={title}
               onTab={show}
               onClose={() => show(null)}

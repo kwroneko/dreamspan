@@ -26,7 +26,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
-import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Button, buttonClass, LinkButton } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -449,12 +449,13 @@ export function SharedBanner({
             </Tooltip>
           )}
           {workspace && (
-            <Button
-              hint="Opens the shared note over the chat, where it stays while the side panel changes"
-              onClick={() => workspace.open(note.ref.id, SNIPPET_FOCUS)}
+            <LinkButton
+              hint="Opens the shared note in a tab beside the chat, where it stays while the side panel changes"
+              href={workspace.href(note.ref.id, SNIPPET_FOCUS)}
+              onOpen={() => workspace.open(note.ref.id, SNIPPET_FOCUS)}
             >
               Large editor
-            </Button>
+            </LinkButton>
           )}
           <Button hint="Replaces the shared link with a local copy." onClick={onUnlink}>
             Unlink

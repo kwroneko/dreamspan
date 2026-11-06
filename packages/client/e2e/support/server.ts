@@ -7,6 +7,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { type APIRequestContext, test } from "@playwright/test"
 
+import { forgetWorkbench } from "./rpc.ts"
 import { serverReadyModule } from "./serverReady.ts"
 
 const root = resolve(import.meta.dirname, "../../../..")
@@ -156,4 +157,5 @@ export const apiLogin = async (request: APIRequestContext, server: TestServer, h
     headers: { origin: server.url }
   })
   if (response.status() !== 204) throw new Error(`login as ${handle} failed: ${response.status()}`)
+  await forgetWorkbench(server, (response.headers()["set-cookie"] ?? "").split(";")[0]!)
 }

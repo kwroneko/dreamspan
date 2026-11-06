@@ -4,6 +4,7 @@ import { Button as BaseButton } from "@base-ui/react/button"
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 import { type ComponentProps, type ReactNode, useId } from "react"
 import { Spinner } from "./Spinner.tsx"
+import { openOnPlainClick } from "./links.ts"
 
 type Variant = "primary" | "secondary" | "ghost" | "danger"
 
@@ -17,6 +18,63 @@ const variants: Record<Variant, string> = {
 /** For links that look like buttons. */
 export const buttonClass = (variant: Variant = "secondary") =>
   `inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium whitespace-nowrap outline-none transition-colors select-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus-visible:ring-offset-canvas disabled:pointer-events-none disabled:opacity-50 data-disabled:pointer-events-none data-disabled:opacity-50 ${variants[variant]}`
+
+/**
+ * A `Button` that's a link, for what opens in the center column (owner, 2026-11-05: it opens
+ * in a new browser tab too): a plain click runs `onOpen`.
+ */
+export function LinkButton({
+  href,
+  onOpen,
+  hint,
+  variant = "secondary",
+  className = "",
+  children,
+  "aria-label": label
+}: {
+  href: string
+  onOpen: () => void
+  hint: ReactNode
+  variant?: Variant
+  className?: string
+  children: ReactNode
+  "aria-label"?: string
+}) {
+  const id = useId()
+  return (
+    <>
+      <BaseTooltip.Root>
+        <BaseTooltip.Trigger
+          render={
+            <a
+              href={href}
+              aria-label={label}
+              aria-describedby={id}
+              className={`${buttonClass(variant)} ${className}`}
+              onClick={openOnPlainClick(onOpen)}
+            >
+              {children}
+            </a>
+          }
+        />
+        <BaseTooltip.Portal>
+          <BaseTooltip.Positioner
+            data-layout-overlay="Tooltip floats above the page"
+            side="top"
+            sideOffset={6}
+            collisionPadding={8}
+            className="pointer-events-none z-50"
+          >
+            <BaseTooltip.Popup className={tooltipPopupClass}>{hint}</BaseTooltip.Popup>
+          </BaseTooltip.Positioner>
+        </BaseTooltip.Portal>
+      </BaseTooltip.Root>
+      <span id={id} hidden>
+        {hint}
+      </span>
+    </>
+  )
+}
 
 /** The tooltip popup's look, shared with `Tooltip`. */
 export const tooltipPopupClass =

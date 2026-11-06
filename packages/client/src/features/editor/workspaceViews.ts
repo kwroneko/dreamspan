@@ -4,8 +4,9 @@
 // registered under that `focus`, it's shown in place of the library editor, so a plugin can
 // add, replace or disable one.
 import type { RefId } from "@rp/shared/library.ts"
-import type { ComponentType } from "react"
+import type { ComponentType, ReactNode } from "react"
 import { makeRegistry } from "../../registry.ts"
+import type { CastView } from "../chat/cast.ts"
 import type { ChatSession, ChatView } from "../chat/session.ts"
 
 export interface WorkspaceViewProps {
@@ -33,3 +34,14 @@ export const workspaceViews = makeRegistry<WorkspaceView>()
 export const NOTE_FOCUS = "note"
 /** The view for a snippet opened large (`features/snippets/SnippetLarge.tsx`). */
 export const SNIPPET_FOCUS = "snippet"
+
+/**
+ * What surrounds an editor opened from a chat, in its own tab: the chat's portrait column
+ * (features/chat), so a picture opens beside the editor as it does beside the chat. Applied
+ * outermost first by `order`.
+ */
+export const boundEditorSurroundings = makeRegistry<{
+  readonly id: string
+  readonly order: number
+  readonly component: ComponentType<{ readonly cast: CastView; readonly children: ReactNode }>
+}>()

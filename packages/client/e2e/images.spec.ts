@@ -50,7 +50,7 @@ for (const width of [1440, 390]) {
       expect(new Set(requests).size).toBeLessThan(150)
       await page
         .getByRole("main")
-        .getByRole("button", { name: /^Open Synthetic 001(?: · .*)?$/ })
+        .getByRole("link", { name: /^Open Synthetic 001(?: · .*)?$/ })
         .click()
       const portrait = page.locator("main img").first()
       await expect(portrait).toHaveAttribute("src", /&w=(96|192|384|768)&crop=\w+$/)

@@ -10,6 +10,7 @@ import { useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { focusComposer } from "./composerFocus.ts"
 import { nameOf, useCast } from "./cast.ts"
 import { composerControls, type ComposerControlContext } from "./composerControls.tsx"
 import { messageActions, viewOf } from "./messageActions.tsx"
@@ -106,7 +107,7 @@ export const useGuidanceEdit = (session: ChatSession) => {
 
 const editGuidance = (session: ChatSession, entry: PathEntry) => {
   guidanceEditor(session).open(entry, session.snapshot().forkId)
-  document.getElementById("composer")?.focus()
+  focusComposer()
 }
 
 /** The guidance a reply was written with, under it, with New version… to write another with it changed. */

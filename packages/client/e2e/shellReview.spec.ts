@@ -33,7 +33,7 @@ test("Groups opens its forks after navigating home from an unrelated character",
   await page.goto(server().url)
   await page
     .getByRole("main")
-    .getByRole("button", { name: `Open ${a.label}`, exact: true })
+    .getByRole("link", { name: `Open ${a.label}`, exact: true })
     .click()
   await expect(page.getByRole("navigation", { name: "Chat breadcrumbs" })).toContainText("Alone")
   await page
@@ -44,7 +44,7 @@ test("Groups opens its forks after navigating home from an unrelated character",
     .getByRole("group", { name: "Show", exact: true })
     .getByRole("button", { name: "Groups", exact: true })
     .click()
-  await page.getByRole("main").getByRole("button", { name: "Open chat Bee and Cee", exact: true }).click()
+  await page.getByRole("main").getByRole("link", { name: "Open chat Bee and Cee", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${group.chat.id}`))
   await expect(page.getByRole("tab", { name: "This chat", exact: true })).toHaveAttribute("aria-selected", "true")
   await expect(page.getByRole("link", { name: "Edit card", exact: true })).toHaveCount(0)
@@ -79,7 +79,7 @@ test("home pins discard an unrelated remembered character tab", async ({ page })
   await page.goto(server().url)
   await page
     .getByRole("main")
-    .getByRole("button", { name: `Open ${a.label}`, exact: true })
+    .getByRole("link", { name: `Open ${a.label}`, exact: true })
     .click()
   await expect(page.getByRole("navigation", { name: "Chat breadcrumbs" })).toContainText("Pinned Alone")
   await page
@@ -89,7 +89,7 @@ test("home pins discard an unrelated remembered character tab", async ({ page })
   await page
     .getByRole("main")
     .getByRole("region", { name: "Pinned chats", exact: true })
-    .getByRole("button", { name: "Open chat Pinned Bee and Cee", exact: true })
+    .getByRole("link", { name: "Open chat Pinned Bee and Cee", exact: true })
     .click()
   await expect(page).toHaveURL(new RegExp(`/chats/${group.chat.id}`))
   await expect(page.getByRole("tab", { name: "This chat", exact: true })).toHaveAttribute("aria-selected", "true")
@@ -117,7 +117,7 @@ test("a character that left without speaking is listed under Was in", async ({ p
   await page.setViewportSize({ width: 1440, height: 1000 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
-  await page.getByRole("main").getByRole("button", { name: "Open Silent departed", exact: true }).click()
+  await page.getByRole("main").getByRole("link", { name: "Open Silent departed", exact: true }).click()
   await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
 
   await expect(page.getByRole("region", { name: "Was in", exact: true })).toBeVisible()
@@ -144,7 +144,7 @@ test("a silent present character played by the user is not classified as departe
   await page.setViewportSize({ width: 1440, height: 1000 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
-  await page.getByRole("main").getByRole("button", { name: "Open Silent present", exact: true }).click()
+  await page.getByRole("main").getByRole("link", { name: "Open Silent present", exact: true }).click()
   await expect(page.getByRole("region", { name: "With others", exact: true })).toBeVisible()
   await expect(page.getByRole("region", { name: "Was in", exact: true })).toHaveCount(0)
 })
@@ -175,7 +175,7 @@ test("home pins keep a remembered tab for a character the user plays there", asy
   await page.goto(server().url)
   await page
     .getByRole("main")
-    .getByRole("button", { name: `Open ${played.label}`, exact: true })
+    .getByRole("link", { name: `Open ${played.label}`, exact: true })
     .click()
   await expect(page.getByRole("tab", { name: played.label, exact: true })).toHaveAttribute("aria-selected", "true")
   await page
@@ -185,7 +185,7 @@ test("home pins keep a remembered tab for a character the user plays there", asy
   await page
     .getByRole("main")
     .getByRole("region", { name: "Pinned chats", exact: true })
-    .getByRole("button", { name: "Open chat Played pair", exact: true })
+    .getByRole("link", { name: "Open chat Played pair", exact: true })
     .click()
   await expect(page.getByRole("tab", { name: played.label, exact: true })).toHaveAttribute("aria-selected", "true")
 })
