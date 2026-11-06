@@ -51,7 +51,7 @@ What presence can't express yet, **[P]** with the reason:
 
 - **[D]** (owner, 2026-11-06) "Yes, but I am not sure this wording is always what we want. One important case: two entirely separate storylines, that are 1 on 1 chats, merge. What do we say then?"
 
-**[P] Proposal, for the owner to confirm.** In a separate context, the messages its character wasn't present for are left out. A gap line replaces a stretch only where the character was present before it and after it, within its own storyline. Everything else is someone else's past, and nothing is said by default:
+**[D]** (owner, 2026-11-06, confirming the proposal below: "Ok") In a separate context, the messages its character wasn't present for are left out. A gap line replaces a stretch only where the character was present before it and after it, within its own storyline. Everything else is someone else's past, and nothing is said by default:
 - before the character's first message in the chat (it hadn't arrived);
 - a merged-in storyline the character was never part of;
 - after its last message, when it's away at the tip (the line appears once it's back).
@@ -244,8 +244,7 @@ The two decision points:
 
 ### 8.2 Decisions for the owner
 
-1. **Gap lines** (§2.2, proposed). A line only where the character was present before and after a stretch of its own storyline; nothing said for a merged-in storyline it was never in, nor before it arrived; the wording is preset text with `{{absentCount}}` and `{{absentNames}}`, plus an optional join line at a merge point, empty by default. Confirm or change the rule and the default wording.
-2. **A shared past** (§2.4, Open). Whether separate contexts should also offer "Storylines rejoin here": everything before that message summarized once for everyone (one cache prefix, Wren learns the inn scene as a summary), separate recent history after it, and the same for merged chats. Default meanwhile: parallel contexts with their own summaries.
-3. **How a narrator's context shows diverged storylines** (§6, Open). Options a–d; my lean is a (labelled runs in path order) within a chat and c (the merge's section) for merged chats.
+1. **A shared past** (§2.4, Open). Whether separate contexts should also offer "Storylines rejoin here": everything before that message summarized once for everyone (one cache prefix, Wren learns the inn scene as a summary), separate recent history after it, and the same for merged chats. Default meanwhile: parallel contexts with their own summaries.
+2. **How a narrator's context shows diverged storylines** (§6, Open). Options a–d; my lean is a (labelled runs in path order) within a chat and c (the merge's section) for merged chats.
 
 Turn picking with decision models (§5) is written as proposed, not listed: both points are opt-in, and the only proposal is that, with separate contexts, a decision-set away shows on the timeline with Undo.
