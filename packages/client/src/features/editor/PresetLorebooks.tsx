@@ -6,7 +6,7 @@
 // changes); a book's switch is live, as a prompt's is, and Save cuts a revision.
 import type { PresetLorebook } from "@rp/shared/docs/preset.ts"
 import type { LibraryRef, RefId } from "@rp/shared/library.ts"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
@@ -33,6 +33,7 @@ export function PresetLorebooks({
 }) {
   const books = useValue<ReadonlyArray<PresetLorebook> | undefined>(store, ["lorebooks"]) ?? NONE
   const library = useLibraryLorebooks()
+  const navigate = useNavigate()
   const [adding, setAdding] = useState(false)
   const byId = new Map((library ?? []).map((ref) => [ref.id as string, ref]))
   const attach = (ref: LibraryRef) => {
@@ -109,6 +110,11 @@ export function PresetLorebooks({
           title="Attach a lorebook"
           lorebooks={(library ?? []).filter((ref) => !books.some((book) => book.id === ref.id))}
           onPick={attach}
+          onCreate={(ref) => {
+            attach(ref)
+            if (onOpen) onOpen(ref.id)
+            else void navigate({ to: "/library/$refId", params: { refId: ref.id } })
+          }}
           onClose={() => setAdding(false)}
         />
       ) : (

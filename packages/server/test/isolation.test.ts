@@ -2371,6 +2371,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) => refused(actor.api.OpenEditor({ refId: owner.editor.cardRefId }), "NotFound")
   },
   CreatePreset: { createOnly: "makes a new prompt preset for the caller" },
+  CreateLorebook: { createOnly: "makes a new lorebook for the caller" },
   CreateCard: { createOnly: "makes a new card for the caller" },
   SaveEditorDraft: {
     probe: (actor, owner) =>

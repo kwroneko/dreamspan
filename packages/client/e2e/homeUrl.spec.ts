@@ -7,10 +7,14 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 test.setTimeout(120_000)
+test.beforeEach(async () => {
+  await admin((api) =>
+    api.SetDisplayPrefs({ prefs: { homeCards: { sort: "recent", reversed: false, withPersonas: false } } })
+  )
+})
 
-let userId = ""
 test.beforeAll(async () => {
-  userId = await admin((api) =>
+  await admin((api) =>
     Effect.gen(function* () {
       const alice = yield* api.CreateCard({ label: "Alice", name: "Alice" })
       const bob = yield* api.CreateCard({ label: "Bob", name: "Bob" })
@@ -24,7 +28,6 @@ test.beforeAll(async () => {
       })
       yield* api.RenameChat({ chatId: group.chat.id, name: "Alice and Bob" })
       yield* api.SetChatPin({ chatId: group.chat.id, leaf: group.chat.activeLeafSlotId, pinned: true })
-      return (yield* api.GetSession()).user.id
     })
   )
 })
@@ -40,7 +43,7 @@ const search = (page: Page) => main(page).getByRole("searchbox", { name: "Search
 const historyLength = (page: Page) => page.evaluate(() => history.length)
 
 for (const width of [1440, 390]) {
-  test(`${width}: every home choice reloads and a copied link wins over device memory`, async ({ page, browser }) => {
+  test(`${width}: every home choice reloads and a copied link wins over account memory`, async ({ page, browser }) => {
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(server().url)
@@ -72,9 +75,8 @@ for (const width of [1440, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 900 } })
     try {
       await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
-      await context.addInitScript(
-        ({ key }) => localStorage.setItem(key, JSON.stringify({ sort: "added", reversed: false })),
-        { key: `rp.cards.home.${userId}` }
+      await admin((api) =>
+        api.SetDisplayPrefs({ prefs: { homeCards: { sort: "added", reversed: false, withPersonas: false } } })
       )
       const copied = await context.newPage()
       await copied.goto(link)
@@ -118,11 +120,11 @@ for (const width of [1440, 390]) {
   })
 }
 
-test("bare visits keep the existing device sort; bad parameters use defaults", async ({ page }) => {
+test("bare visits keep the account sort; bad parameters use defaults", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ sort: "added", reversed: true })), {
-    key: `rp.cards.home.${userId}`
-  })
+  await admin((api) =>
+    api.SetDisplayPrefs({ prefs: { homeCards: { sort: "added", reversed: true, withPersonas: false } } })
+  )
   await page.goto(server().url)
   await expect(sort(page, "Added")).toHaveAttribute("aria-pressed", "true")
   await expect(main(page).getByRole("button", { name: "Order: Oldest first", exact: true })).toBeVisible()

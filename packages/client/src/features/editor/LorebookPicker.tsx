@@ -1,15 +1,16 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 // A search over the library's lorebooks, to add one to a chat or attach one to a preset.
 import type { LibraryRef } from "@rp/shared/library.ts"
-import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
+import { NewDocumentDialog } from "./NewDocument.tsx"
 
 export function LorebookPicker({
   title,
   lorebooks,
   onPick,
+  onCreate,
   onClose
 }: {
   /** "Add a lorebook", "Attach a lorebook". */
@@ -17,9 +18,12 @@ export function LorebookPicker({
   /** The books that can be picked: those not there yet. */
   lorebooks: ReadonlyArray<LibraryRef>
   onPick: (ref: LibraryRef) => void
+  /** Attaches the newly created book and opens its editor. */
+  onCreate: (ref: LibraryRef) => Promise<void | boolean> | void | boolean
   onClose: () => void
 }) {
   const [query, setQuery] = useState("")
+  const [making, setMaking] = useState(false)
   const id = useId()
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   const shown = lorebooks.filter((ref) =>
@@ -45,15 +49,7 @@ export function LorebookPicker({
         autoFocus
       />
       {lorebooks.length === 0 ? (
-        <p className="text-sm text-muted">
-          Every lorebook in the library is here already, or there are none:{" "}
-          <Tooltip label="Opens lorebook import.">
-            <Link to="/library" className="text-accent hover:underline">
-              import one in the library
-            </Link>
-          </Tooltip>
-          .
-        </p>
+        <p className="text-sm text-muted">No more lorebooks to add.</p>
       ) : shown.length === 0 ? (
         <p className="text-sm text-muted">No lorebook matches “{query}”.</p>
       ) : (
@@ -74,6 +70,19 @@ export function LorebookPicker({
           ))}
         </ul>
       )}
+      <Button hint="Creates a lorebook, adds it to this list and opens its editor." onClick={() => setMaking(true)}>
+        New lorebook…
+      </Button>
+      <NewDocumentDialog
+        kind="lorebook"
+        open={making}
+        onOpenChange={setMaking}
+        onCreated={async (ref) => {
+          const done = await onCreate(ref)
+          if (done !== false) setMaking(false)
+          return done
+        }}
+      />
     </section>
   )
 }

@@ -135,6 +135,9 @@ const displayFields = {
   snippetSort: DocumentSort,
   /** The card editor's header switcher's sort, direction and Include personas. */
   cardSwitcher: CardSwitcherView,
+  sidebarCards: CardSwitcherView,
+  homeCards: CardSwitcherView,
+  castCards: CardSwitcherView,
   /**
    * "Only keep one image open at a time" (owner, 2026-11-02): a portrait's click replaces the
    * one beside the chat instead of opening on top of it.
@@ -174,6 +177,9 @@ export const DisplayPrefsChange = Schema.Struct({
   noteSort: Schema.optionalKey(displayFields.noteSort),
   snippetSort: Schema.optionalKey(displayFields.snippetSort),
   cardSwitcher: Schema.optionalKey(displayFields.cardSwitcher),
+  sidebarCards: Schema.optionalKey(displayFields.sidebarCards),
+  homeCards: Schema.optionalKey(displayFields.homeCards),
+  castCards: Schema.optionalKey(displayFields.castCards),
   singlePortrait: Schema.optionalKey(displayFields.singlePortrait),
   /** Merged by id with what's stored, so a write names only the choices it changes. */
   messageToolbar: Schema.optionalKey(displayFields.messageToolbar),
@@ -202,6 +208,9 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   noteSort: "name",
   snippetSort: "name",
   cardSwitcher: { sort: "recent", reversed: false, withPersonas: false },
+  sidebarCards: { sort: "recent", reversed: false, withPersonas: false },
+  homeCards: { sort: "recent", reversed: false, withPersonas: false },
+  castCards: { sort: "recent", reversed: false, withPersonas: false },
   singlePortrait: false,
   messageToolbar: {},
   dismissedInfo: {},

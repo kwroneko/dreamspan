@@ -5,6 +5,7 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { PRESET_SCHEMA_VERSION, promptPreset } from "@rp/shared/docs/preset.ts"
 import { builtinPreset } from "../db/assemblySources.ts"
 import { CARD_SCHEMA_VERSION } from "@rp/shared/docs/card.ts"
+import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import { newCardDoc, parseField, validateDoc } from "@rp/shared/editing.ts"
 import { EditRefused, type ForkMergeApi, InvalidDocument, SavedRef } from "@rp/shared/editorApi.ts"
@@ -149,12 +150,38 @@ export const makeEditorHandlers = Effect.gen(function* () {
         return ref
       }).pipe(settle("CreatePreset")),
 
-    CreateCard: ({ label, name, nickname, version }) =>
+    CreateLorebook: ({ label }) =>
+      Effect.gen(function* () {
+        const doc: LorebookDoc = {
+          schema_version: LOREBOOK_SCHEMA_VERSION,
+          name: label,
+          description: "",
+          scan_depth: null,
+          token_budget: null,
+          recursive_scanning: null,
+          extensions: {},
+          entries: []
+        }
+        const { ref } = yield* writer.CreateEntity({
+          userId: yield* userId,
+          kind: "lorebook",
+          label,
+          subtitle: "",
+          doc,
+          schemaVersion: LOREBOOK_SCHEMA_VERSION,
+          origin: "user",
+          sourcePath: null
+        })
+        return ref
+      }).pipe(settle("CreateLorebook")),
+
+    CreateCard: ({ label, name, nickname, version, description, persona }) =>
       Effect.gen(function* () {
         const valid = validateDoc("card", {
           ...newCardDoc(name),
           nickname: nickname ?? "",
-          character_version: version ?? ""
+          character_version: version ?? "",
+          description: description ?? ""
         })
         if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
         const { ref } = yield* writer.CreateEntity({
@@ -165,7 +192,8 @@ export const makeEditorHandlers = Effect.gen(function* () {
           doc: valid.doc,
           schemaVersion: CARD_SCHEMA_VERSION,
           origin: "user",
-          sourcePath: null
+          sourcePath: null,
+          tags: persona ? ["persona"] : []
         })
         return ref
       }).pipe(settle("CreateCard")),

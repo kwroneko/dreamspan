@@ -34,6 +34,7 @@ import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { browseCards, mixesPersonas } from "./cardBrowse.tsx"
 import { useSidebarBrowse } from "./useSidebarBrowse.ts"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
+import { NewCardButton } from "../editor/NewCard.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
 import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
@@ -934,6 +935,11 @@ function Browser({ data }: { data: ShellLibrary }) {
         />
       )}
       {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups includePersonas />}
+      {grid && browse.filter === "personas" && (
+        <div>
+          <NewCardButton persona />
+        </div>
+      )}
       {grid && browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
       <div

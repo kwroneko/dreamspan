@@ -23,6 +23,8 @@ import { Tabs } from "../../ui/Tabs.tsx"
 import { nameOf, useCast } from "./cast.ts"
 import { ChevronIcon } from "./icons.tsx"
 import type { Outcome } from "./session.ts"
+import { NewCardDialog } from "../editor/NewCard.tsx"
+import { Button } from "../../ui/Button.tsx"
 
 type SwitcherTab = "members" | "personas" | "all"
 
@@ -262,6 +264,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   const defaultPersona = useDefaultPersona()
   const defaultLabel = pending && persona && speaker !== null && speaker === defaultPersona ? " (default)" : ""
   const [open, setOpen] = useState(false)
+  const [making, setMaking] = useState(false)
   const [tab, setTab] = useState<SwitcherTab>("personas")
   const [all, setAll] = useState<ReadonlyArray<CastCard> | null>(null)
   const [query, setQuery] = useState("")
@@ -472,114 +475,131 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       />
     )
   return (
-    <Popover
-      open={open}
-      onOpenChange={openChange}
-      initialFocus={search}
-      // Two sections at the composer: room for the cast and the personas under it.
-      wide={personas !== undefined}
-      triggerLabel={
-        persona ? `Playing as ${name}${defaultLabel}. Change your persona` : `Speaking as ${name}. Change the speaker`
-      }
-      hint={persona ? `You play ${name} ({{user}}). Change who you play` : `Speaking as ${name}. Change who's speaking`}
-      triggerClassName={
-        trigger
-          ? buttonClass("secondary")
-          : `inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-raised py-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus ${compact ? "pr-1.5 pl-1" : "max-w-44 pr-2.5 pl-1"}`
-      }
-      title={persona ? "Your persona" : "Speak as"}
-      trigger={
-        trigger ?? (
-          <>
-            {speaker !== null ? (
-              <Avatar
-                id={speaker}
-                name={name}
-                mediaId={(view.cards.get(speaker) ?? names.get(speaker))?.avatarMediaId ?? null}
-                crop={(view.cards.get(speaker) ?? names.get(speaker))?.avatarCrop}
-                size="chip"
-              />
-            ) : compact ? (
-              // Without a persona and without room for "You", the chip still shows who speaks.
-              <Icon name="person" size={16} className="mx-0.5 text-muted" />
-            ) : (
-              <span aria-hidden="true" className="size-1" />
-            )}
-            {!compact && (
-              <span className="min-w-0 truncate">
-                {name}
-                {defaultLabel}
-              </span>
-            )}
-            <ChevronIcon up />
-          </>
-        )
-      }
-    >
-      <Input
-        ref={search}
-        type="search"
-        role="combobox"
-        aria-label={
-          persona
-            ? "Find a card to play as"
-            : personas
-              ? "Find someone to speak as, or a persona"
-              : "Find someone in this chat to speak as"
+    <>
+      <Popover
+        open={open}
+        onOpenChange={openChange}
+        initialFocus={search}
+        // Two sections at the composer: room for the cast and the personas under it.
+        wide={personas !== undefined}
+        triggerLabel={
+          persona ? `Playing as ${name}${defaultLabel}. Change your persona` : `Speaking as ${name}. Change the speaker`
         }
-        aria-expanded="true"
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={options.length > 0 ? `${listId}-${active}` : undefined}
-        placeholder={persona ? "Find a card by name" : "Find by name"}
-        autoComplete="off"
-        value={query}
-        onChange={(event) => {
-          setQuery(event.currentTarget.value)
-          setActive(0)
-        }}
-        onKeyDown={onKeyDown}
-        className="shrink-0"
-      />
-      {persona ? (
-        <Tabs
-          label="Cards to play as"
-          value={tab}
-          onValueChange={(next) => {
-            setTab(next)
+        hint={
+          persona ? `You play ${name} ({{user}}). Change who you play` : `Speaking as ${name}. Change who's speaking`
+        }
+        triggerClassName={
+          trigger
+            ? buttonClass("secondary")
+            : `inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-raised py-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus ${compact ? "pr-1.5 pl-1" : "max-w-44 pr-2.5 pl-1"}`
+        }
+        title={persona ? "Your persona" : "Speak as"}
+        trigger={
+          trigger ?? (
+            <>
+              {speaker !== null ? (
+                <Avatar
+                  id={speaker}
+                  name={name}
+                  mediaId={(view.cards.get(speaker) ?? names.get(speaker))?.avatarMediaId ?? null}
+                  crop={(view.cards.get(speaker) ?? names.get(speaker))?.avatarCrop}
+                  size="chip"
+                />
+              ) : compact ? (
+                // Without a persona and without room for "You", the chip still shows who speaks.
+                <Icon name="person" size={16} className="mx-0.5 text-muted" />
+              ) : (
+                <span aria-hidden="true" className="size-1" />
+              )}
+              {!compact && (
+                <span className="min-w-0 truncate">
+                  {name}
+                  {defaultLabel}
+                </span>
+              )}
+              <ChevronIcon up />
+            </>
+          )
+        }
+      >
+        <Input
+          ref={search}
+          type="search"
+          role="combobox"
+          aria-label={
+            persona
+              ? "Find a card to play as"
+              : personas
+                ? "Find someone to speak as, or a persona"
+                : "Find someone in this chat to speak as"
+          }
+          aria-expanded="true"
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={options.length > 0 ? `${listId}-${active}` : undefined}
+          placeholder={persona ? "Find a card by name" : "Find by name"}
+          autoComplete="off"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.currentTarget.value)
             setActive(0)
           }}
-          onPointerActivate={() => search.current?.focus()}
-          tabs={[
-            ...(pending
-              ? []
-              : [{ value: "members" as const, label: "Members", panel: tab === "members" ? list : null }]),
-            { value: "personas", label: "Personas", panel: tab === "personas" ? list : null },
-            { value: "all", label: "All cards", panel: tab === "all" ? list : null }
-          ]}
+          onKeyDown={onKeyDown}
+          className="shrink-0"
         />
-      ) : personas === undefined && shown.length === 0 && typed !== "" && addToChat ? (
-        <>
-          {list}
-          <p className="px-1 text-sm">{addToChat}</p>
-        </>
-      ) : (
-        list
-      )}
-      {onNone && (
-        <Tooltip label="Uses no persona for this chat.">
-          <button
-            type="button"
+        {persona ? (
+          <Tabs
+            label="Cards to play as"
+            value={tab}
+            onValueChange={(next) => {
+              setTab(next)
+              setActive(0)
+            }}
+            onPointerActivate={() => search.current?.focus()}
+            tabs={[
+              ...(pending
+                ? []
+                : [{ value: "members" as const, label: "Members", panel: tab === "members" ? list : null }]),
+              { value: "personas", label: "Personas", panel: tab === "personas" ? list : null },
+              { value: "all", label: "All cards", panel: tab === "all" ? list : null }
+            ]}
+          />
+        ) : personas === undefined && shown.length === 0 && typed !== "" && addToChat ? (
+          <>
+            {list}
+            <p className="px-1 text-sm">{addToChat}</p>
+          </>
+        ) : (
+          list
+        )}
+        {onNone && (
+          <Tooltip label="Uses no persona for this chat.">
+            <button
+              type="button"
+              onClick={() => {
+                openChange(false)
+                onNone()
+              }}
+              className="shrink-0 rounded-md px-2 py-1.5 text-left text-sm text-muted outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              No persona
+            </button>
+          </Tooltip>
+        )}
+        {(persona || personas) && (
+          <Button
+            hint="Opens a form to create a persona and edit it."
             onClick={() => {
               openChange(false)
-              onNone()
+              setAll(null)
+              setMaking(true)
             }}
-            className="shrink-0 rounded-md px-2 py-1.5 text-left text-sm text-muted outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
           >
-            No persona
-          </button>
-        </Tooltip>
-      )}
-    </Popover>
+            New persona…
+          </Button>
+        )}
+      </Popover>
+      {(persona || personas) && <NewCardDialog persona open={making} onOpenChange={setMaking} />}
+    </>
   )
 })
