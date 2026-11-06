@@ -63,7 +63,7 @@ for (const width of [1440, 390])
         const measurement = await heading.evaluate((node) => {
           const box = node.getBoundingClientRect()
           const style = getComputedStyle(node)
-          const button = node.closest("button")!
+          const button = node.closest(".fork-row-open")!
           const row = button.parentElement!
           const rowBox = row.getBoundingClientRect()
           const dateBox = row.querySelector("[data-row-when]")!.getBoundingClientRect()

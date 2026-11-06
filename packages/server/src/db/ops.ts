@@ -1,4 +1,4 @@
-import { WorkbenchLayoutJson } from "@rp/shared/workbenchApi.ts"
+import { WorkbenchDevice, WorkbenchLayoutJson } from "@rp/shared/workbenchApi.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
@@ -2476,12 +2476,17 @@ export class WriteOps extends RpcGroup.make(
     success: DisplayPrefs,
     error: StorageError
   }),
-  /** Saves the center column's layout (key `workbench` of `user_prefs`). */
+  /**
+   * Saves a device's center column layout (key `workbench:<device>` of `user_prefs`). An account
+   * keeps the layouts of its most recently saving devices only.
+   */
   Rpc.make("SetWorkbenchLayout", {
-    payload: { userId: UserId, layout: WorkbenchLayoutJson },
+    payload: { userId: UserId, device: WorkbenchDevice, layout: WorkbenchLayoutJson },
     success: Schema.Void,
     error: StorageError
   }),
+  /** Forgets every device's center column layout of the user. */
+  Rpc.make("ForgetWorkbenchLayouts", { payload: { userId: UserId }, success: Schema.Void, error: StorageError }),
   /**
    * Records that a one-time notice was shown for `key` (the impersonation notice: a preset's
    * ref). Answers whether this call recorded it, so of two tabs only one shows it.
@@ -3480,9 +3485,9 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
   /** The user's display choices; the defaults where none are stored. */
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
-  /** The center column's saved layout, if any. */
+  /** A device's saved center column layout, if any. */
   Rpc.make("GetWorkbenchLayout", {
-    payload: { userId: UserId },
+    payload: { userId: UserId, device: WorkbenchDevice },
     success: Schema.NullOr(WorkbenchLayoutJson),
     error: StorageError
   }),

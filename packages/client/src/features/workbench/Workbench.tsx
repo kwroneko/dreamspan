@@ -44,6 +44,7 @@ import {
   type Split,
   type Tab
 } from "./model.ts"
+import { deviceId } from "./device.ts"
 import { WorkbenchStore } from "./store.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
 
@@ -63,7 +64,7 @@ const savedFor = Atom.family((_userId: string) =>
   AppClient.runtime.atom(
     Effect.gen(function* () {
       const client = yield* AppClient
-      return yield* client("GetWorkbenchLayout", {})
+      return yield* client("GetWorkbenchLayout", { device: deviceId() })
     })
   )
 )
@@ -95,7 +96,7 @@ function WorkbenchFor({ userId, saved }: { userId: string; saved: unknown }) {
         userId,
         router.history,
         saved,
-        (layout) => void call((client) => client("SetWorkbenchLayout", { layout }))
+        (layout) => void call((client) => client("SetWorkbenchLayout", { device: deviceId(), layout }))
       )
   )
   useEffect(() => store.start(), [store])
