@@ -1,166 +1,192 @@
-# Character context: shared and own-turn definitions, knowledge scopes
+# Character context: own-turn notes, card-swap rotation, knowledge from presence
 
-**Status**: Proposed, 2026-11-06 (job `chardefs`, design study, no code). Everything here is **[P]** unless it cites a **[D]**. It is a delta from master `df2cdffa` (ARCHITECTURE §15 "Card definitions", "Cache breakpoints", §16 "Agent rollouts"; spec/AGENTIC.md; spec/CHAT-MERGE.md) and from reference-harness `latest` (`9b385944`). Costs are calculations on synthetic sizes with the prices in pi-ai 1.0.3's bundled catalog (the app's own price source), not provider measurements. No chat logs or card definitions were read.
+**Status**: Proposed, revised 2026-11-06 after the owner's corrections (job `chardefs`, design only, no code). Everything here is **[P]** unless it cites a **[D]** or is marked **Open**. It is a delta from master `a53d198f` (ARCHITECTURE §3.8 "Participation requires an authored version", §15 "Card definitions", "With the definitions", "Replacements", "Cache breakpoints", §16 "Agent rollouts" and "Decision models"; spec/AGENTIC.md; spec/CHAT-MERGE.md), from reference-harness `latest` (`9b385944`) and from SillyTavern's public source at `06bde939` (2026-09-14). Costs are calculations on synthetic sizes with the prices in pi-ai 1.0.3's bundled catalog (the app's own price source), not provider measurements. No chat logs or card definitions were read.
 
-## 1. The problem (owner, 2026-11-06, relayed by the coordinator)
+## 1. What this is for, and when
 
-- **[D]** The main value of an agent per character is that each agent has its own definitions and only its own. Today every card's definitions are always in the context, for caching. So every agent knows everything about every character (no information asymmetry), and, worse, the descriptions mix and influence each other.
-- **[D]** Chats don't work like real life: some context must be shared. Physical descriptions are needed even when writing other characters' turns, so some definitions sit in shared definitions.
-- **[D]** A candidate: don't swap card definitions; move the "internal" ones into card notes at the end of the context that apply only for the current speaker. It works in ordinary single-model chats too, whatever merging or branching does. Its costs: (1) at the end, causally, they can override character changes that happened in the conversation, as the model reads it; (2) caching is reduced, and they would be constant cache writes.
-- **[D]** Expiry of the whole chat's cache only becomes a problem when timelines diverge.
-- **[D]** Knowledge scopes (decided earlier as a mechanism): each message has the set of characters who know it. Divergence and merges create stretches that only some know. Perma-merging stays (no carrying two timelines forever). Options include never converging, or converging at the summary layer. Blindness cuts both ways. It enables storylines that are otherwise impossible. It breaks a narrator-style model that lacks the information, and a character rejoining without context can make the model invent what's missing. This style also needs each agent to write only its own part, which conflicts with storytelling that isn't turn-based. It may be a tradeoff.
-- **[D]** Already settled elsewhere: card definitions sit at the top of the context, and swapping them per turn busts the cache (§3.5, §5.2). Modes that move definitions into the tail and swap them per speaker are "later, not now; the layout must allow it" (§5.0). Cards are written as a premise for the start of the prompt (§4.1a).
+- **[D]** (owner, 2026-11-06) "The default would be as it stands, with every character at once. In most cases that's going to be the right choice. It costs the least and the LLM has full context of everything. It doesn't scale as well with too many characters and doesn't separate them too well, which is why *sometimes* you might want to separate them."
 
-**What is built today.** In `plain` and `narrator` modes, every cast card's definitions are in the prefix. `card-swap` (`cardsAtTail`, `assembler/stages.ts:1484`) takes the speaker's card out of the definitions and sends it before the end of the request. That makes the prefix depend on the speaker, so each change of speaker reads a different cached prefix, or rewrites everything after the definitions when that speaker's prefix has expired (§3, last rows). A card's system prompt and post-history instructions already apply only on that card's turn (they replace Main and post-history, as in ST). With overrides allowed, a group's Main therefore changes with the speaker. The built-in preset forbids this.
+So nothing in this spec changes a chat by default. Every cast card's definitions stay where the preset puts them, on every turn, and requests stay byte-identical to today (compatibility contract, DESIGN §1 [D]). The rest is for the chats where the user wants characters kept apart:
 
-**reference-harness** isolates agents fully. Each agent has its own workspace prompt (`src/workspace/prompt.ts:57–110`), its own timeline with siblings' messages as `user` rows (`spec/MULTI-AGENT-SUPPORT.md:143–148`, `:322–328`), its own summaries (optional `summaries_from` mirroring, `:659–706`) and so its own cache prefix. There is no shared prompt part and no per-message audience. The per-agent tail goes after breakpoint (c) (`cache-breakpoints.ts:29–31`). The delta proposed here: **one shared prefix for all characters, and per-speaker text only after the history breakpoint.** reference-harness's model costs a full prefix per agent. RP groups also need the shared physical descriptions, which reference-harness has no place for.
-
-## 2. How a card gets its shared and own-turn parts
-
-**Words.** *Shared*: sent on every turn, in the cached prefix. *Own-turn*: sent only when that character is the speaker. In the UI it is "only on <name>'s turns", because "private" already means "not exported" for notes (ARCHITECTURE §8).
-
-**[D]** (owner, 2026-11-06) "Card fields have nothing to do with this. You can't split this unless you do something like edit the card with an LLM. Usually 'description' contains everything. We could invent a concept of a card having a public and a private part of its def, but it would be non-standard. This requires the user to adapt the card either way." So the fields aren't the split. Every option below needs the user to adapt the card. Until they do, a card is entirely shared and requests are byte-identical to today (compatibility contract, DESIGN §1 [D]).
-
-**(a) Own-turn card notes** (the owner's original idea). The user writes card notes, or moves passages into them, with the existing settings: condition "on its card's turn", place "start of the tail". The block in §3 is simply the speaker's own-turn notes, so it needs no new marker and no hidden wrapper ("no hidden note kinds", DESIGN §4.1 [D]): the framing of §4 is text in the note, prefilled by the action below and editable.
-- **Move to an own-turn note**, on a selection in Description (or any card prompt field), in one card save: a new own-turn note holding the passage, plus a card note replacing Description with the text minus that passage. This is the note-replacement mechanism, already built for chat notes. DESIGN §4.2 [D] says every kind of note can replace prompts, including card notes; [P] this needs a card note that targets its own card's field. The Description itself stays untouched, so an update of the card or a re-import still merges into it, and the replacement note shows the conflict as any replaced field does (the As replaced / Original tabs).
-- Round trip: an ST export keeps the full Description, so ST users get the whole card. Exportable notes already travel in `extensions.rp_harness.notes`. **Delta:** export has to keep the self-referring condition ("its card's turn": no library id is needed) and the self-replacement target, which export drops today ("conditions stay behind"). It also has to skip own-turn notes when picking the note that becomes ST's `depth_prompt`, or ST would send the passage twice.
-- Cost to the user: one selection and one click per passage. Notes are already where stashing, per-chat switches, conditions, agent edits and history live.
-
-**(b) A public/private split as a card extension.** For example, `extensions.rp_harness.definition_parts: { public, private, of: <hash of the description it was made from> }`. Assembly sends `public` in the prefix and `private` on the card's turn. Non-standard, and it duplicates what notes do. Round trip: an ST export writes `description = public + "\n\n" + private`, so ST still sees everything, and the parts go in the extension. On import, if the description's hash still matches `of`, the split is used. If the card was edited in ST since, the split is stale: the card imports as fully shared, with an import warning and an offer to redo the split. A second, invisible place for definition text would need its own editor, counts, history and merge rules, which notes already have.
-
-**(c) An LLM-assisted split** (a helper over (a) or (b), not a mechanism). **Suggest a split…** in the card editor sends the card's prompt fields, only when pressed, to a model the user picks in that dialog (provider-send consent: nothing is sent otherwise, nothing runs in the background). It asks which passages are inner life (personality, secrets, voice) and which others need (looks, public role). The result is shown as a diff of the actions (a) would take, each passage with a tick. The user reviews and accepts, which makes the same card save as (a). The request is a rollout with its ledger row, so it shows in Activity with its cost.
-
-**Recommendation: (a), with (c) as a later helper.** (a) uses card notes, which users already know, round-trips with a small export delta, and has no second home for definition text. (b) only adds a non-standard format. (c) makes (a) quick for long cards.
-
-What goes where, as guidance for the user and for (c)'s instruction: looks, public role and relationships everyone knows stay in the Description. Inner life, secrets and voice go to own-turn notes. Example messages carry the voice. In a group, kept in place, they mix voices; moved into an own-turn note, they're only the speaker's. A card's system prompt and post-history instructions already apply only on its turn. Lorebook entries can already be limited to a speaker (ARCHITECTURE §15 "speaker filters").
-
-- **Per chat**: a switch in This chat, "Own-turn notes: only on their turns / on every turn" (branch-owned state key `cards.own_turn`). "On every turn" sends them with everyone's definitions, today's omniscient mix.
-- **ST groups** default to sending only the speaker's card ("Swap character cards", `group_generation_mode` in ST's public `group-chats.js`; not re-checked in this job). The importer doesn't map it today. **[P]** When it does, a swap-mode group's chats use the rebuilt `card-swap` (§3).
-
-## 3. Where the own-turn block goes, and what it costs
-
-With (a), the block is the speaker's own-turn notes at their own place. Default: "start of the tail", a note position that already exists relative to the preset's sections (DESIGN §4.1 [D]), so the preset keeps the layout (§5.0 [D]) and no marker is added. A speaker without own-turn notes sends nothing. The costs below are the same for (b).
-
-**Sizes** (owner data shape, synthetic): preset prefix 5,000 tokens; cards 3,000 each (1,000 shared, 2,000 own-turn); summary layer 16,000; recent messages 16,000 (about 40 messages of 400); per reply, the newest message (400) and the preset's tail (1,000); 20 swipes per turn (owner: 20–50). That gives contexts of 44k, 50k and 56k tokens today for 2, 4 and 6 characters. Each cell below is **¢ per new reply / per swipe / per turn (1 reply + 20 swipes)**, for 4 characters. Prices ($ per million tokens input / cache read / cache write): Sonnet 5.5 2 / 0.20 / 2.50; Opus 5.5 4 / 0.20 / 5; Bedrock `us.` Sonnet 5.5 2.20 / 0.22 / 2.75 (`global.` is the direct price); GPT-5.6 Terra 2 / 0.20 / 2.50 (the catalog lists a write price); GPT-5.5 5 / 0.50 / none (writes at the input price). Direct OpenAI caching is automatic, with no markers.
-
-| Placement | Sonnet 5.5 | Opus 5.5 | Bedrock Sonnet 5.5 | GPT-5.6 Terra | GPT-5.5 |
-|---|---|---|---|---|---|
-| Today: every card whole in the prefix | 1.33 / 1.01 / 21.5 | 1.68 / 1.01 / 21.8 | 1.46 / 1.11 / 23.6 | 1.33 / 1.01 / 21.5 | 3.15 / 2.52 / 53.5 |
-| **A. Start of the tail, cached with the reply** | 1.67 / 0.89 / **19.4** | 2.52 / 0.89 / 20.3 | 1.84 / 0.98 / 21.4 | 1.67 / 0.89 / 19.4 | 3.75 / 2.22 / 48.1 |
-| B. Start of the tail, never cached | 1.52 / 1.43 / 30.1 | 2.22 / 2.03 / 42.8 | 1.67 / 1.57 / 33.1 | n/a (automatic) | n/a |
-| C. Four messages deep | 2.04 / 0.89 / 19.8 | 3.29 / 0.89 / 21.0 | 2.24 / 0.98 / 21.8 | 2.04 / 0.89 / 19.8 | 4.47 / 2.22 / 48.9 |
-| Card-swap as built, speaker's prefix still cached | 2.30 / 1.01 / 22.5 | 3.70 / 1.01 / 23.9 | 2.53 / 1.11 / 24.7 | 2.30 / 1.01 / 22.5 | 5.04 / 2.52 / 55.4 |
-| Card-swap as built, speaker's prefix expired | 12.6 / 1.01 / 32.8 | 25.2 / 1.01 / 45.4 | 13.9 / 1.11 / 36.0 | 12.6 / 1.01 / 32.8 | 25.2 / 2.52 / 75.6 |
-
-Group size, Sonnet 5.5, per turn: 2 characters, today 19.0¢ and A 18.6¢; 6 characters, today 24.0¢ and A 20.3¢. Per new reply A costs more (2: 1.21¢ → 1.63¢; 6: 1.45¢ → 1.71¢). Every swipe costs less, because the prefix no longer carries the others' own-turn parts.
-
-What the table says:
-- **The "constant cache writes" are real but small.** A writes the 2,000-token block with every new reply (+0.34¢ on Sonnet 5.5 with 4 characters). The tail and newest message are already written today by the final checkpoint (pi-ai marks the last message; ARCHITECTURE §15 "(d)"). Swipes of the same reply read the block back at 0.1×. With the owner's swipe counts, A is **cheaper than today** at every group size and on every provider.
-- **Leaving the block uncached (B) is a loss**, contrary to the coordinator's idea. Dropping the final checkpoint makes every swipe pay the tail at full price. B wins only with fewer than one swipe per three replies (break-even about 0.3 swipes a reply on Sonnet 5.5). On OpenAI and local models there's nothing to drop: caching is automatic or by prefix.
-- **No per-agent caches.** Everything before the block is the same for every speaker: one prefix, one summary layer, one history checkpoint. Only the tail differs by speaker, and it is rewritten each reply anyway. This holds for plain, narrator and per-character modes, as long as the history is the same (§6).
-- **C (deeper)** adds the four newest messages (~1,600 tokens) to what each new reply writes. Chats that already have a note at depth 4 or more pay nothing extra: the history checkpoint already sits above the deepest in-chat note.
-- **Card-swap as built** rewrites summaries and history whenever the speaker's prefix has expired (5 minutes on Anthropic, more than 10× the cost of a new reply). With rotating speakers and long swipe sessions, that's common. **Recommendation:** rebuild `card-swap` to send *every* card's definitions only on that card's turn, at the tail, and none in the prefix. The prefix then never varies by speaker. It costs the same as A with the whole card as the block, and needs no adaptation of the cards.
-- **Bedrock without lookback** (owner: Bedrock has no lookback): A and C don't touch the history checkpoint, and the built exact-position repeat (`historyStart.state.cacheHistory`) covers it as today. Bedrock differs only for diverged views (§6).
-- **Anthropic 1-hour TTL** (writes at 2× input per Anthropic's documentation, not in the catalog, not checked here): it matters only for diverged views, where an agent's own cache must outlive other characters' turns.
-
-**Local models** (llama.cpp, LM Studio, MLX reuse the longest common prefix with the previous prompt; no money, only time). Tokens re-read per new reply when the speaker changes, and seconds at an assumed 500 and 2,000 tokens/s of prompt processing:
-
-| | Today | A | C | Card-swap as built |
-|---|---|---|---|---|
-| Re-read tokens | 1,400 | 3,400 | 5,000 | 42,400 |
-| at 500 / 2,000 tok/s | 3 s / 0.7 s | 7 s / 1.7 s | 10 s / 2.5 s | 85 s / 21 s |
-
-Swipes re-read nothing in all four. A server slot holds one prompt, so per-agent prefixes on a local model would need one slot per agent, with memory growing with the number of agents. A needs one.
-
-## 4. Recency: the block's late place can override what the story changed
-
-The risk: the card says Mira distrusts Tobin; 300 messages later she trusts him. The block, read last, pulls her back. Mitigations, combinable:
-
-| Mitigation | Effect | Cost | Default |
-|---|---|---|---|
-| **Framing**, as text in the note that Move to an own-turn note prefills: "[Background on {{char}}, as the story began. Where the story since then shows {{char}} differently, the story wins.]" | Cheap and visible. Helps more with strong models | None | **On** (prefilled, editable) |
-| **Current state over the card's text.** An own-turn note is already at the tail, so a change in the story is a revision of that note in this chat: by the user, or by `edit_note` when the note is agent-editable (§4.1a [D]). Revisions are chat state, so a swipe undoes them | The block says who the character is now | A tail edit, free for the cache | On |
-| **Depth N** (option C), the note's existing depth placement | Messages after it can override it causally | ~400 tokens written per reply per message of depth | Off; any note can be set to "depth N" |
-| **Start, not end, of the tail** | The preset's rules and the newest message come after it | None | **On** (A) |
-| Automatic state refresh: the summary pass also proposes updated current-state notes | Keeps state current without an agent | Output tokens on the summary request, which already has consent | **Later**, opt-in |
-
-## 5. How it fits each reply mode
-
-| Mode | Definitions | History seen | Notes |
-|---|---|---|---|
-| `plain` | shared + the speaker's own-turn block | the whole history (merged view) | Works now, alone, with no agents ([D] candidate) |
-| `narrator` (one agent, all cards) | shared + speaker's block. A switch, "The narrator sees every character's own-turn parts", adds every block to the tail, bringing back the mixing and a larger tail | merged view (coordinator's point) | The narrator stays omniscient about events, which avoids the blind-narrator failure |
-| `card-swap` | rebuilt: every card whole on its own turn, at the tail; nothing in the prefix | merged view | Fixes the prefix rewrite on speaker change (§3); works on unadapted cards |
-| `per-character` (Phase 7) | the same as `plain` for definitions. **Refines** §7.1 [D] "only its own card": its own card's own-turn parts, plus everyone's shared parts, per the 2026-11-06 [D] | its knowledge scope (§6) | Tools follow the scope: `search_chat`, `read_messages`, `expand_summary` and `list_notes` never return what the agent doesn't know, nor other characters' own-turn notes |
-
-Non-turn-based scenes are the tradeoff the owner named. Per-character mode writes only one character's part per message (§7.2 [D]: one message per turn). For scene-wide prose, pick narrator. **[P]** A card can be marked **Narrator** in the cast: in per-character mode its turns use the merged view and see every block. Characters then act blind and the narrator ties the scene together.
-
-## 6. Knowledge scopes and convergence
-
-**Who knows a message.** Default: everyone in the cast at that message. That is today's behaviour, and it isn't derived from Mute, which in plain RP means only "doesn't talk" (DESIGN §3.5 [D]). Asymmetry comes from explicit state, all of it state events, so it follows the messages and a swipe takes back what a reply set:
-- **Scene scope** `scope.set { knowers | everyone }`, positional: "From here, only Mira and Tobin are in this scene." Set by the user from the timeline or the cast, by `set_presence`-like tool calls, or by the `presence` decision point (opt-in).
-- **One message** `scope.message { knowers }`, attached to its version: a whisper, a letter.
-- **Merged sections**: a merged chat's section is known to the source's cast (CHAT-MERGE §4, already specified for per-character agents).
-- **Telling** `scope.tell { who, stretch }` at a position: from there on, `who` knows that stretch (an explicit perma-merge).
-
-**Views.** Merged view (plain, narrator, Narrator cards): everything, with scoped stretches labelled in the history ("[Only Mira and Tobin were here]"). Scoped view (per-character mode, and plain as an option "Write each turn from the speaker's knowledge"): unknown messages are left out, and each gap is replaced by one line, "[Wren wasn't present for 14 messages here]". The model then knows something happened instead of inventing continuity. That is the rejoin mitigation.
-
-**Cost of diverged views.** A scoped view matches the shared prefix up to the first message the agent doesn't know. After that, the agent has its own cached history. Sonnet 5.5, 4 characters, a gap in the recent window: 1.95¢ per new reply when the agent's own cache is still warm (it spoke within the TTL; Anthropic's 20-block lookback finds its previous checkpoint). It's 5.35¢ when that cache has expired and the whole recent window is written again, against 1.67¢ for A. Bedrock: 2.14¢ / 5.88¢. Bedrock also needs the exact-position repeat digest kept per view, not per path. This is the owner's "a problem when timelines diverge": it is bounded by how long a divergence stays in the recent window.
-
-**Convergence options:**
-
-| Option | What later turns see | Cache | Story effect |
-|---|---|---|---|
-| **1. At the summary layer, labelled** | Once the stretch is summarized, one shared summary for everyone, with "who was there" per section (a registered summary transform, like `merge-sections`) | One shared layer; divergence lives only in the recent window | Soft asymmetry: the facts reach the model, flagged as unknown to some. Can leak |
-| 2. Never ("Keep secret") | The stretch's summaries carry `summaries.audience_json` and go only to the knowers, in their tail after the own-turn block ("What only you know", labelled by range). Summary chunks are cut at scope boundaries (DESIGN §7.1 [P]) | Shared prefix intact; the knowers' tail grows by those summaries, written per reply | Hard asymmetry for good. The rejoin line keeps the others from inventing it |
-| 3. Telling | From the point chosen, the stretch is in that character's view | Their view converges there | User or agent controls it |
-| 4. On rejoin (automatic Tell when an absent character speaks again) | As 3 | As 3 | Unrealistic: rejoining isn't learning. Not proposed |
-
-**Recommendation:** 1 by default, 2 as a per-scope switch ("Keep this secret from the others"), and 3 as an action, which is the perma-merge the owner keeps. A secret's summaries never enter the shared layer. That keeps the "no two timelines forever" rule: only small labelled summaries are carried.
-
-## 7. What the user sees and controls
-
-Every control has its hover explanation, and nothing is reachable only by key (owner rules).
-- **Card editor, Definition tab** (side panel and full editor, full parity): **Move to an own-turn note** appears in a prompt field's strip when text is selected, without moving other buttons ("Moves the selected text into a note sent only on Mira's turns; the field keeps its text, replaced by a note without it"). The field then shows its As replaced / Original tabs, as replaced fields already do. **Suggest a split…** ((c), later) sits in the tab's actions and opens the model picker and the reviewed diff. The four-row header stays as decided; the Definition tab shows "~1,000 every turn · ~2,000 only on Mira's turns".
-- **Card's Notes tab**: own-turn notes are ordinary notes. Their header line already says "Start of tail · on Mira's turns".
-- **Cast tab**: per character, a small eye mark when it has own-turn parts; a **Narrator** switch (per-character mode); **Set scene…** ("Only these characters see what's said from here").
-- **This chat**: "Own-turn parts" (only on their turns / every turn); in narrator mode, "The narrator sees every character's own-turn parts"; "Write each turn from the speaker's knowledge" (plain).
-- **Chat view**: a scope marker row where a scene scope starts or ends ("Only Mira and Tobin from here", with faces); on scoped messages a small eye-slash icon whose hover names who knows them; a **Keep secret** / **Tell…** pair on the marker's menu; in scoped views the gap line shows in the inspector, not the timeline.
-- **Inspector**: the block is its own piece, "Mira's own definitions (sent only on Mira's turns)". On other turns, "Not sent: only on Mira's turns", as condition-skipped prompts already show (DESIGN §7.4 [D]).
-- **Cache estimate**: the next-reply warning names the block when it changed the tail size ("~2,000 tokens written with each new reply, reused by its swipes").
-
-## 8. Schema impact
-
-No table changes for the definitions. Scopes need state keys and one existing column.
-- (a) needs no new document field. A card note may target its own card's field (§2), and export keeps the "its card's turn" condition and that target in `extensions.rp_harness.notes`. (b), if chosen, would add `extensions.rp_harness.definition_parts`.
-- State keys (`@rp/shared/state.ts`): `cards.own_turn` (branch-owned), `narrator.sees_own_turn` (branch-owned), `scope.set`, `scope.message` (version-attached), `scope.tell`, `scope.secret`. The assembler folds them along the path, as it already folds every event on the path (`StateEventsAt`), so knowers need no per-version column.
-- `summaries.audience_json` (in the baseline, unused) is written only for "Keep secret" stretches. The schema forecast flags it for a projection once views filter on it. Proposed: keep the JSON, since layer reads are bounded (≤ 300) and filtered in memory; add a projection only if a query ever filters summaries by audience.
-- Snapshot only: the exact-position repeat digest keyed by view (`cacheHistory[viewKey]`), for diverged views on exact-only routes.
-- **BASELINE unchanged** by this study. Phase A changes no SQL schema.
-
-## 9. Phased plan
-
-| Unit | What | Depends on |
+| The user wants | Use | What changes in the request |
 |---|---|---|
-| A1 | Card notes replacing their own card's field; Move to an own-turn note (one card save, framing prefilled); the export delta (condition and target kept, own-turn notes never become `depth_prompt`); inspector pieces, counts; requests byte-identical for unadapted cards (test); e2e at 1440/390, light/dark, layout audit | noteoverrides (built) |
-| A2 | `card-swap` rebuilt (every card on its own turn, none in the prefix); the `cards.own_turn` chat switch | — |
-| B1 | Own-turn notes agent-editable by default when made by the move action [P]; the story-wins framing in agent instructions | A1, AGENTIC U5 (built) |
-| C1 | Scope state keys, timeline markers, Set scene / Tell / Keep secret, merged-view labels, merged sections' knowers | — |
-| C2 | Labelled convergence (summary transform); "Keep secret" summaries with audience into the knowers' tail; chunks cut at scope boundaries | C1, LCM |
-| D1 | Per-character mode (AGENTIC §6): scoped views with gap lines, per-view repeat digests, tools filtered by scope, Narrator cards | A1, C1, C2 |
-| Later | (c) Suggest a split (sent only on press, to the model picked); automatic state refresh on the summary pass; ST group swap-mode import mapping | A1 |
+| One character's inner life (secrets, voice) not to colour the others' turns, in an ordinary chat | **Own-turn notes** on that card (§2) | That passage is sent only on its character's turns, at the note's place |
+| ST's "Swap character cards": only the speaker's card in the definitions | **Card-swap** (§4) | The preset's definition positions hold only the speaker's card |
+| Characters who don't know what happened while they were away | **Per-character agents** (§5), the optional Phase 7 mode | Each agent sees only the messages its character was present for |
 
-Order: A1 and A2 first. They're useful alone in plain chats. B1 and C1 can run in parallel, then C2, then D1.
+These are independent. Own-turn notes work in every mode. Knowledge separation exists only for per-character agents.
 
-## 10. Decisions for the owner
+- **[D]** (owner, 2026-11-06, relayed by the coordinator; still holds) The value of an agent per character is mainly that each has its own definitions, and the descriptions of several characters mix and influence each other. Some definitions must stay shared: physical descriptions are needed even when writing other characters' turns. Moving "internal" definitions into card notes sent only for the current speaker works in ordinary single-model chats too; its costs are recency (read late, they can override what the story changed) and caching.
 
-1. **Default place of the own-turn block.** Recommended: start of the tail, cached with the reply (A). With 20–50 swipes, uncached (B) costs about 50% more per turn; "N messages deep" stays an option.
-2. **How a card gets its own-turn parts** (the user adapts the card in every option). Recommended: (a) own-turn card notes, with "Move to an own-turn note" cutting a passage from the Description through a replacement note, so the card's own text stays whole and exports to ST unchanged. (c), the LLM-assisted split, comes later as a helper proposing (a), sent only on press to the model the user picks. Not (b): a non-standard public/private extension that goes stale when the card is edited in ST.
-3. **Rebuild card-swap** to send every card only on its own turn, none in the prefix, so the prefix never changes with the speaker. Recommended: yes.
-4. **Narrator mode's definitions.** Recommended: shared plus the speaker's block only, with a per-chat switch to show every block.
-5. **Per-character agents see others' shared parts** (a refinement of §7.1's "only its own card"). Recommended: yes, as the 2026-11-06 point implies.
-6. **Default knowers.** Recommended: everyone in the cast, unless a scene scope or message scope says otherwise, never derived from Mute.
-7. **Convergence.** Recommended: at the summary layer with "who was there" labels by default; "Keep secret" per scope; "Tell…" as the explicit merge; no automatic convergence on rejoin.
-8. **Plain mode and scopes.** Recommended: merged view with labels by default; "Write each turn from the speaker's knowledge" as an option.
-9. **Gap lines in scoped views** ("[Wren wasn't present for 14 messages here]"). Recommended: yes, always.
-10. **UI word.** Recommended: "Only on <name>'s turns" / "own-turn", not "private", which already means "not exported".
+**What is built today.** In `plain` and `narrator` modes every cast card's definitions are in the prefix. `card-swap` (`cardsAtTail`) takes the speaker's card out of the definitions and sends it as a system message just before the end of the request; §4 replaces that. A card's system prompt and post-history instructions already apply only on its turn (they replace Main and post-history, as in ST, unless the prompt forbids overrides). Card notes can already replace their own card's fields (`replaces: { kind: "card_field", field }`, ARCHITECTURE §15 "Replacements") and carry the condition "on its card's turn".
+
+**reference-harness** isolates agents fully: each agent has its own workspace prompt (`src/workspace/prompt.ts:57–110`), its own timeline with siblings' messages as `user` rows (`spec/MULTI-AGENT-SUPPORT.md:143–148`, `:322–328`) and its own summaries, either summarized natively or mirrored wholesale from one donor agent (`summaries_from`, §10b). It has no shared definitions, which RP groups need for physical descriptions. The deltas here: own-turn notes in a shared prompt for single-model chats (§2), and per-character agents whose summaries are shared up to where their views diverge, instead of all-or-nothing mirroring (§5.3).
+
+## 2. Own-turn notes
+
+**Words.** *Own-turn*: sent only when that character is the speaker. The UI says "only on <name>'s turns", because "private" already means "not exported" for notes (ARCHITECTURE §8).
+
+- **[D]** (owner, 2026-11-06) "Card fields have nothing to do with this. You can't split this unless you do something like edit the card with an LLM. Usually 'description' contains everything. We could invent a concept of a card having a public and a private part of its def, but it would be non-standard. This requires the user to adapt the card either way."
+- **[D]** (owner, 2026-11-06) "This was already decided. The only way to do it is notes. The other surface doesn't work. There's no public/private part in the spec. If we were to use card extensions, we'd use them to specify the card notes and their configuration, since that's actually general purpose." Own-turn card notes are the mechanism. There is no public/private card extension. Card notes already travel in `extensions.rp_harness.notes`.
+
+### 2.1 Move to an own-turn note
+
+On a selection in Description (or any card prompt field), one card save makes two card notes:
+1. An **own-turn note** holding the passage, with the condition "on its card's turn".
+2. A **replacement note** for that field: the field's text without the passage, sent in the field's place (`replaces: { kind: "card_field", field }`, built). The Description itself stays untouched, so an update of the card or a re-import still merges into it, and the field shows its As replaced / Original tabs, as any replaced field does.
+
+Until the user does this, a card is entirely shared. Cost to the user: one selection and one click per passage.
+
+**Where the own-turn note goes.**
+- **[D]** (owner, 2026-11-06) "Why would this be predetermined? This is what the prompt preset is literally for." Own-turn notes are notes. They go where note positions and the preset put them. There is no fixed place for them.
+- **[P]** The new note gets the placement **With the definitions** (built for card notes: at the top of its card's part of the `charDescription` marker or of the Definitions marker, inside the card's wrapper). The passage therefore stays wherever the preset puts that card's definitions, and only its condition is new. The preset editor already lists these notes in its "With definitions" slot. To put it elsewhere, the user picks any other note position (start of the tail, depth N, a section) in the note's editor, as for any note. The move action doesn't ask.
+- What each place costs is information for the cache estimate, not a choice the app makes (§4.1). With the definitions, the start of the request differs by speaker: the card editor already warns for a conditioned note there ("its piece is volatile"), and the cache estimate names the cost (§4.1).
+
+**A chat that wants everything at once again** switches both notes off in that chat (Notes tab; card notes already have per-chat switches), and the original Description is sent. **[P]** The Notes tab shows the pair as "Moved from Description" with one switch for both, so the passage is never sent twice or not at all.
+
+**What goes where**, as guidance in the move action's explanation and for §2.2's instruction: looks, public role and relationships everyone knows stay in the Description. Inner life, secrets and voice go to own-turn notes. Example messages carry the voice: kept, they mix voices in a group; moved into an own-turn note, they're only the speaker's. Lorebook entries can already be limited to a speaker (ARCHITECTURE §15 "speaker filters").
+
+### 2.2 Suggest a split (later helper)
+
+**Suggest a split…** in the card editor sends the card's prompt fields, only when pressed, to a model the user picks in that dialog (provider-send consent: nothing is sent otherwise, nothing runs in the background). It asks which passages are inner life and which others need. The result is a diff of the moves §2.1 would make, each passage with a tick; accepting makes the same card save. The request is a rollout with its ledger row, so it shows in Activity with its cost.
+
+### 2.3 Recency
+
+An own-turn note placed late (start of the tail, or in the chat) is read after the story, so it can pull a character back to how the card described them: the card says Mira distrusts Tobin; 300 messages later she trusts him. At "With the definitions" this is no worse than the card itself. Mitigations, for the user to apply where they place the note:
+- **Framing text** in the note, offered by the note editor's position hint when the note is moved below the history: "[Background on {{char}}, as the story began. Where the story since then shows {{char}} differently, the story wins.]"
+- **Current state over the card's text.** A change in the story is a revision of that note in this chat, by the user or by `edit_note` when the note is agent-editable (DESIGN §4.1a [D]). Revisions are chat state, so a swipe undoes them.
+- **Later, opt-in:** the summary pass also proposes updated current-state notes (output tokens on the summary request, which already has consent).
+
+## 3. ST interop
+
+- **[D]** (owner, 2026-11-06) "This doesn't really solve the issue of interoperability. The user will be editing notes and not the card, so exporting it will show the original description. The UI probably will help make it clear enough so they're not surprised, but this isn't really 'solving' it. ST cards just don't have this functionality."
+
+ST gets the original Description. An ST export writes the card's own fields, and ST has no notes, conditions or replacements, so ST sends the whole Description on every turn, with the moved passage still in it and without any edits made to the notes since. The notes travel in `extensions.rp_harness.notes` for this app only; ST ignores them. Re-importing the file into this app brings the notes back.
+
+Export deltas (`importer/exporters.ts` `withNotes`), so the round trip into this app keeps the setup: export keeps the self-referring condition ("its card's turn", no library id needed) and the self-replacement target, which export drops today ("conditions stay behind"). It never picks an own-turn note or a replacement note as the note that becomes ST's `depth_prompt`, or ST would send the passage twice.
+
+**[P] The export UI.** When the card has notes that replace its fields, every Export… menu (ARCHITECTURE §11.4 "Export with unsaved changes" lists them) shows a notice before the file is written, with the app's "?" help:
+> "Mira's Description is replaced here by notes. SillyTavern will get the original Description, which still has every passage you moved, and none of your later note edits. The notes go in the file for this app."
+
+Two buttons: **Export** and **Open the notes**. No option flattens the notes into the Description, because ST would then send every passage on every turn anyway; that is the original Description's behaviour. The card editor's Definition tab shows the same fact in its token line ("~1,000 every turn · ~2,000 only on Mira's turns · SillyTavern gets the original").
+
+## 4. Card-swap: rotation only
+
+- **[D]** (owner, 2026-11-06) "Swap mode still shows the persona on ST. With this configuration as described the LLM would quite literally never see it. … If a user wants card defs to be shown at the end, this can be done by editing the prompt preset. It's the rotation that can't be expressed that way… Why do we have to go out of our way to seemingly override the user's preset choices."
+
+**Target behaviour** (the parallel `cardswap` job builds it): card-swap is rotation only. The preset's card-definition positions hold only the current speaker's card, as in ST's "Swap character cards". Nothing moves to the tail. The persona and everything else are unchanged. Concretely:
+- The per-field markers (`charDescription`, `charPersonality`, `scenario`, `dialogueExamples`, and `{{description}}`, `{{personality}}`, `{{scenario}}` in preset text) and the Definitions marker are filled from the speaker's card alone, still in its `<Name>…</Name>` wrapper (DESIGN §5.0 [D]). The other characters' cards are not sent at those positions.
+- Card notes "With the definitions" follow their card: only the speaker's are sent there.
+- Unchanged: the persona's description at `personaDescription` or in Definitions; the speaker's system prompt and post-history overrides (as in every mode); card notes at other positions (they follow their own conditions); lorebooks (the Lorebooks tab decides which books are in, as in every mode); the chat's history, summaries and notes.
+- A persona speaking (Write for, impersonation): the persona has no character card to rotate in. **[P]** The definition positions keep the last character card that spoke, so a persona turn doesn't change the prefix.
+
+**What ST does** (public source, `06bde939`):
+- `group_generation_mode` is `SWAP: 0`, `APPEND: 1`, `APPEND_DISABLED: 2` (`public/scripts/group-chats.js:129–133`), shown as "Swap character cards", "Join character cards (exclude muted)", "Join character cards (include muted)" (`public/index.html:6268–6272`). Swap is the default (`group-chats.js:1808`, `group?.generation_mode ?? group_generation_mode.SWAP`).
+- In swap mode `getGroupCharacterCardsLazy` returns `null` (`group-chats.js:501`, `!group?.generation_mode`), so `getCharacterCardFieldsLazy` (`public/script.js:3402–3468`) fills description, personality, scenario (the chat's scenario override first) and example messages from the current speaker's card only. Join modes concatenate every member's fields with the join prefix and suffix (`group-chats.js:547–570`).
+- The persona description is filled in every mode (`script.js:3412`, `power_user.persona_description`). The system prompt and post-history instructions are the speaker's in every mode (`script.js:3413–3421`).
+- Character's Notes (`depth_prompt`): in swap mode `getGroupDepthPrompts` returns nothing (`group-chats.js:439–441`), so only the speaker's own note is sent (`script.js:4474–4486`). Join modes send every member's, muted ones left out unless speaking (`group-chats.js:454`).
+- Character lorebooks are the speaker's in every mode (`getCharacterLore` reads `this_chid`, `public/scripts/world-info.js:4475–4491`); swap mode doesn't change them.
+
+**A documented difference.** ST's swap mode also drops the other members' Character's Notes. Here an imported Character's Note is a card note that follows its own condition; the user gives it "on its card's turn" for ST's behaviour. **[P]** When the importer maps a swap-mode ST group (it doesn't map `generation_mode` today), the group's chats get card-swap and the imported Character's Notes of its members get that condition in those chats.
+
+**Cache.** The start of the request then differs by speaker. That is the user's choice; the cache estimate shows it (§4.1). Moving the definitions to the tail is a preset edit, open to any mode.
+
+### 4.1 Costs, for the cache estimate
+
+These figures are information: the cache estimate's next-reply warning uses the same arithmetic on the real request ("Mira's turn starts differently from Tobin's: ~36,400 tokens are written again when Mira's copy has expired, about 9¢ on this model").
+
+**Sizes** (owner data shape, synthetic): preset prefix 5,000 tokens; 4 characters with cards of 3,000 each (1,000 shared, 2,000 in own-turn notes when adapted); summary layer 16,000; recent messages 16,000 (about 40 of 400); per reply, the newest message (400) and the preset's tail (1,000); 20 swipes per turn (owner: 20–50). Speaker-dependent rows assume the speaker last spoke 4 replies ago (3 messages, 1,200 tokens, are new to its copy) and that the preset's 5,000 tokens before the definitions stay shared and warm. Each cell is **¢ per new reply / per swipe / per turn (1 reply + 20 swipes)**. Prices ($ per million tokens input / cache read / cache write): Sonnet 5.5 2 / 0.20 / 2.50; Opus 5.5 4 / 0.20 / 5; Bedrock `us.` Sonnet 5.5 2.20 / 0.22 / 2.75; GPT-5.6 Terra 2 / 0.20 / 2.50; GPT-5.5 5 / 0.50 / none (writes at the input price). Direct OpenAI caching is automatic, with no markers.
+
+| Layout | Sonnet 5.5 | Opus 5.5 | Bedrock Sonnet 5.5 | GPT-5.6 Terra | GPT-5.5 |
+|---|---|---|---|---|---|
+| Every card whole in the prefix (the default) | 1.33 / 1.01 / 21.5 | 1.68 / 1.01 / 21.8 | 1.46 / 1.11 / 23.6 | 1.33 / 1.01 / 21.5 | 3.15 / 2.52 / 53.5 |
+| Own-turn notes with the definitions, speaker's copy cached | 1.49 / 0.89 / 19.2 | 2.14 / 0.89 / 19.9 | 1.63 / 0.98 / 21.2 | 1.49 / 0.89 / 19.2 | 3.39 / 2.22 / 47.8 |
+| Own-turn notes with the definitions, speaker's copy expired | 9.95 / 0.89 / 27.7 | 19.8 / 0.89 / 37.6 | 10.9 / 0.98 / 30.5 | 9.95 / 0.89 / 27.7 | 19.9 / 2.22 / 64.4 |
+| Own-turn notes at the start of the tail | 1.67 / 0.89 / 19.4 | 2.52 / 0.89 / 20.3 | 1.84 / 0.98 / 21.4 | 1.67 / 0.89 / 19.4 | 3.75 / 2.22 / 48.2 |
+| Own-turn notes 4 messages deep | 2.04 / 0.89 / 19.8 | 3.29 / 0.89 / 21.0 | 2.24 / 0.98 / 21.8 | 2.04 / 0.89 / 19.8 | 4.47 / 2.22 / 48.9 |
+| Card-swap rotation, speaker's copy cached | 1.43 / 0.83 / 18.0 | 2.08 / 0.83 / 18.6 | 1.57 / 0.91 / 19.8 | 1.43 / 0.83 / 18.0 | 3.24 / 2.07 / 44.6 |
+| Card-swap rotation, speaker's copy expired | 9.20 / 0.83 / 25.8 | 18.3 / 0.83 / 34.9 | 10.1 / 0.91 / 28.3 | 9.20 / 0.83 / 25.8 | 18.4 / 2.07 / 59.8 |
+
+What the warning should say, from the table:
+- **A speaker-dependent start** (own-turn notes with the definitions, card-swap) is cheap while each speaker's copy is warm, and costs 6–9× a cached reply when it has expired (5 minutes on Anthropic by default). With rotating speakers and 20–50 swipes per turn, the other speakers' copies often expire before their turn. The warning names the speaker and the tokens.
+- **Own-turn notes at the start of the tail** never vary the start: they are written with each new reply (+0.34¢ on Sonnet 5.5) and read back by its swipes, so with the owner's swipe counts they cost less per turn than today. Removing the final checkpoint so the tail is never cached costs more (30.1¢ per turn on Sonnet 5.5), so the app keeps it.
+- **4 messages deep** adds the four newest messages to what each reply writes; nothing extra when a note at that depth or deeper already exists.
+- **Bedrock without lookback** (owner: Bedrock has no lookback): the "cached" rows need the exact-position repeat (`historyStart.state.cacheHistory`) kept per speaker for a speaker-dependent start; otherwise every change of speaker pays the "expired" row.
+- **Local models** (llama.cpp, LM Studio, MLX reuse the longest common prefix with the previous prompt; no money, only time). Tokens re-read per new reply when the speaker changes: today 1,400; own-turn notes at the start of the tail 3,400; 4 deep 5,000; with the definitions 39,400; card-swap rotation 36,400 (at 500 / 2,000 tokens/s of prompt processing: 3 s / 0.7 s, 7 s / 1.7 s, 10 s / 2.5 s, 79 s / 20 s, 73 s / 18 s). Swipes re-read nothing.
+
+## 5. Per-character agents: knowledge from presence
+
+Plain mode and narrator mode are one model with full context: everything on the path, every card. Knowledge separation exists only for per-character agents (the optional Phase 7 mode, AGENTIC §6).
+- **[D]** (owner, 2026-11-06) On whether narrator mode sees everything: "This is not even a question." It does.
+- **[D]** (owner, 2026-11-06) On plain mode with scenes or labels: "What?". Plain mode is one model with full context; there are no knowledge views in it.
+- **[D]** (owner, 2026-11-06) Own-turn notes are independent of knowledge separation: "You can do the part of showing parts of character defs at the end only for some characters without any of this."
+
+### 5.1 Who knows a message
+
+- **[D]** (owner, 2026-11-06) "When a message is generated, a certain set of characters is present. That's what the presence marker originally referred to. Those characters can see the message. The story doesn't have to be branching, since a character could be 'gone' without their actions being narrated in a specific branch. If there are different branches of conversation, however, logically different characters may be part of them. A merged in chat only had those characters present."
+- This matches DESIGN §7.1 [D] ("sees history only for the periods it was present") and §3.5 [D] (a character counts as in a chat only once a message or swipe was generated with it present).
+
+So the knowers of a message are the characters present when its selected version was generated. That is already recorded: each version pins its cast (`versions.cast_json` plus its speaker, ARCHITECTURE §3.8 "Participation requires an authored version"). Branches need nothing more: each branch's versions record their own casts. A merged-in chat's messages are known to the characters present in the source when they were generated: **[P]** in an agent's view, a merge join's section is filtered message by message by the source versions' own casts, not by the join version's cast (which is the destination's).
+
+What presence can't express yet, **[P]** with the reason:
+- **Gone but still in the cast.** The owner's case: a character is gone without that being narrated. Today a version's cast counts muted members (Mute only stops a character talking, DESIGN §3.5 [D]; it may still be in the scene), and the only other way out is leaving the cast, which also takes the card out of the other agents' shared definitions (a rewrite of every prefix) and out of the chat. So "gone" needs its own state: an **away** mark on a cast member, separate from Mute, recorded in the version's cast snapshot so the message knows who was away. Who sets it is Open (§5.4). This needs a schema change (the snapshot is a list of ids today), made when the mode is built.
+- **A message meant for one** (a whisper, a letter) while everyone is present. Later, only if wanted: an audience on that one version.
+- Not needed: a "Tell" action. A character learns about a stretch in the story itself, in a message it is present for.
+
+### 5.2 Gap lines
+
+- **[D]** (owner, 2026-11-06) "Yes, but I am not sure this wording is always what we want. One important case: two entirely separate storylines, that are 1 on 1 chats, merge. What do we say then?"
+
+**[P] Proposal, for the owner to confirm.** In an agent's view, the messages its character wasn't present for are left out. A gap line replaces a stretch only where the character was present before it and after it, within its own storyline. Everything else is someone else's past, and nothing is said by default:
+- before the character's first message in the chat (it hadn't arrived);
+- a merged-in storyline the character was never part of;
+- after its last message, when it's away at the tip (the line appears once it's back).
+
+The wording is preset text (a utility prompt next to the merge framing, with the app's editable default) and uses macros: `{{absentCount}}` (messages left out), `{{absentNames}}` (the characters present in that stretch). Default: "[{{char}} wasn't present for {{absentCount}} messages here, in which {{absentNames}} took part.]" An optional **join line**, empty by default, is sent at a merge point when the merged storyline is new to the character: for example "[From here, {{char}}'s story continues together with {{mergedNames}}'s.]" Both are system messages without a name, as summaries and merge markers are.
+
+Example: Mira, Tobin and Wren are present for messages 1–40; Wren is away for 41–54 and back at 55. Wren's agent sees 1–40, then "[Wren wasn't present for 14 messages here, in which Mira and Tobin took part.]", then 55 onwards. Mira's agent sees everything. Second example: a 1:1 chat with Mira is merged into a 1:1 chat with Tobin at message 80. Tobin's agent sees its own 1–80 and nothing of Mira's chat: no gap line, because Tobin was never in it. With the join line set, it sees "[From here, Tobin's story continues together with Mira's.]" at the merge point.
+
+### 5.3 Summaries per view
+
+- **[D]** (owner, 2026-11-06) "With per-character agents, context is different for different agents. You essentially have a parallel chat context for each of them. So each of them would get different summaries, if their chats diverge. This could be optimized in such a way that summaries are shared up to the point where there's a shared prefix. The idea of sharing a summary for everyone isn't stupid but the issue is that if this is fine then why separate the chats in the first place?"
+
+So there is no shared summary layer for everyone. **[P]** Each agent's view is summarized like a chat of its own: up to the first message where two views differ, they hold the same messages, so they share the same summaries (one summary pass, one cached summary layer). Summary chunks are cut at that point (DESIGN §7.1 [P], "cut at presence boundaries"). After it, each view gets its own summaries of its own messages, stored with the view's character set in `summaries.audience_json` (in the baseline, unused). Views that rejoin later (everyone present again) still differ in what they hold before that point, so their summaries stay separate. Delta from reference-harness: its `summaries_from` mirrors one donor's whole tiling or none; here sharing stops exactly where the views diverge.
+
+Cost: a summary pass per diverged view, on the chat's summary connection (summary requests already have consent). A view's cached prefix matches the shared one up to its first difference; after that the agent has its own cache. Sonnet 5.5, 4 characters, a gap in the recent window: about 1.95¢ per new reply while the agent's own cache is warm, 5.35¢ when it has expired (from the first draft's model). Bedrock also needs the exact-position repeat kept per view.
+
+### 5.4 Who marks a character gone (Open)
+
+The built **presence** decision point ("Who is in the scene", opt-in per decision connection) runs after each reply in a chat with at least two characters the user doesn't play. It asks a small model, over the last two messages and the names, whether each character is still in the scene at the end of the latest message, and marks those it thinks are gone as away (today that is Mute: they aren't picked to reply). The owner said the idea was that "per-character agents can leave as an action that changes the state": the character's own agent decides to leave (the built `set_presence` tool is the closest thing). **Open**: which of these sets "away" for knowledge (§5.1), and whether the decision point stays, changes, or goes. Not decided here.
+
+### 5.5 What each agent sees
+
+| | Definitions | History | Summaries |
+|---|---|---|---|
+| `plain` (default) | every card, as the preset puts them; own-turn notes only on their character's turn | everything on the path | the chat's |
+| `narrator` | the same as `plain` | everything | the chat's |
+| `card-swap` | the speaker's card at the definition positions (§4) | everything | the chat's |
+| `per-character` | its own card and own-turn notes; the other cast cards' shared text (their Description after any replacement note; an unadapted card whole). Open (§7, item 3) | its view (§5.1), with gap lines (§5.2) | its view's (§5.3) |
+
+Tools follow the view: `search_chat`, `read_messages`, `expand_summary` and `list_notes` never return what the agent's character wasn't present for, nor other characters' own-turn notes.
+
+## 6. Schema impact
+
+- Own-turn notes and card-swap rotation: no table change. Export carries the condition and the replacement target inside `extensions.rp_harness.notes`.
+- Knowledge (per-character mode, later): `versions.cast_json` (built) gives the knowers. The away mark (§5.1) changes the cast snapshot's shape when it is built. `summaries.audience_json` (in the baseline) holds a view's character set. The exact-position repeat digest is kept per view (`cacheHistory[viewKey]`), in the snapshot only.
+- **BASELINE unchanged** by this study.
+
+## 7. What's left
+
+### 7.1 Build plan
+
+1. **Move to an own-turn note** (next; needs no decision). In the card editor's Definition tab (side panel and full editor), select a passage of Mira's Description and press the button in the field's strip. One save makes the own-turn note (condition "on Mira's turns", placement With the definitions) and the replacement note. What the model sees: on Mira's turns, the whole Description as before; on Tobin's turns, Mira's Description without the passage. The token line shows "~1,000 every turn · ~2,000 only on Mira's turns". Includes the export deltas and the export notice (§3), the "Moved from Description" pair in the Notes tab, the inspector piece "Not sent: only on Mira's turns" on other turns (DESIGN §7.4 [D]), and a test that an unadapted card's requests are byte-identical.
+2. **Card-swap rotation** (the `cardswap` job, in progress). With card-swap chosen, a reply by Tobin sends Tobin's card at the preset's definition positions and no other character's; the persona is still there. The next reply by Mira sends Mira's card there instead.
+3. **The cache estimate names a speaker-dependent start** (with 1 or 2). Before a reply whose start differs from the last speaker's, the warning by the composer says which speaker and how many tokens are written again if that speaker's copy has expired (§4.1).
+4. **Per-character agents** (Phase 7, optional; after AGENTIC's mode work). Each character's agent gets its view (§5.1), gap lines (§5.2), per-view summaries (§5.3) and filtered tools. Example: Wren's agent, back at message 55, sees 1–40, the gap line and 55 onwards, and its summaries cover only those.
+5. **Later**: Suggest a split (§2.2); state refresh on the summary pass (§2.3); mapping ST swap-mode groups on import (§4); one-message audiences (§5.1).
+
+### 7.2 Decisions for the owner
+
+1. **Who marks a character gone, for what they know** (Open, §5.4). When Wren walks out at message 41 without saying so, something has to record that Wren is away, so Wren's agent later doesn't see 41–54. Either the presence decision point (after each reply, a small model reads the last two messages and marks Wren away), or Wren's own agent choosing to leave as an action (a tool call that sets Wren away), or both. And: is "away" a new mark separate from Mute (my default, §5.1: Mute keeps meaning "doesn't talk, may still be there"), so a muted character still sees the scene and an away one doesn't?
+2. **Gap lines** (§5.2, proposed). A line only where the character was present before and after a stretch of its own storyline; nothing said for a merged-in storyline it was never in, nor before it arrived; the wording is preset text with `{{absentCount}}` and `{{absentNames}}`, plus an optional join line at a merge point, empty by default. Confirm or change the rule and the default wording.
+3. **What a per-character agent sees of the others' cards** (§5.5). Tobin's agent, writing Tobin's turn: does it get Mira's shared text (her Description after her replacement note, so her looks but not her moved secrets), or nothing of Mira's card, as DESIGN §7.1's "only its own card" says? My default: the shared text, since physical descriptions are needed for others' turns (the 2026-11-06 point); an unadapted card is then sent whole.
