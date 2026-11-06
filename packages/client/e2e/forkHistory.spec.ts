@@ -99,7 +99,7 @@ for (const width of [1440, 390])
       expect(mainPrompt(theirs.doc)).toBe("Write {{char}}'s next reply in the harbour.")
 
       // The link opens the original, closing History.
-      await marker.getByRole("link", { name: parent.label }).click()
+      await history.getByText(/^Forked here from/).getByRole("link", { name: parent.label }).click()
       await expect(history).toHaveCount(0)
       await expect(page).toHaveURL(new RegExp(`/library/${parent.id}$`))
     })
