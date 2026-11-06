@@ -6,10 +6,11 @@
 // connection (owner rule: provider sends are opt-in per connection). Each call is a rollout of
 // kind `decision` with its ledger rows, so the Activity panel lists it with tokens and cost.
 // Points are a registry: a plugin adds one, or replaces or removes a built-in, by its id.
-import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { type DecisionAnswers, type DecisionQuestion, parseAnswers } from "@rp/shared/decisions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import type { FoldableEvent } from "@rp/shared/state.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Cause, Context, Effect, Exit, Layer, Option } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
@@ -17,7 +18,7 @@ import { Providers } from "../providers/Providers.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { builtinPoints } from "./points/index.ts"
 
-/** The hard deadline of one decision call (AGENTIC §7: 10 s); past it the fallback decides. */
+/** The hard deadline of one decision call (AGENTIC §7: 10 s), unless the point sets its own; past it the fallback decides. */
 const DECISION_TIMEOUT_MS = 10_000
 
 /** Where a decision is made: the chat, and the message it decides for. */
@@ -39,6 +40,20 @@ interface FinishedReply {
   readonly forkId: ForkId | null
 }
 
+/** A reply about to be written, for the points that act before one (its speaker, say). */
+interface StartingReply {
+  readonly userId: UserId
+  readonly chatId: ChatId
+  readonly slotId: SlotId
+  readonly versionId: VersionId
+  readonly forkId: ForkId | null
+  readonly parentSlotId: SlotId | null
+  /** The version as its generation read it when it started. */
+  readonly version: Version
+  /** The chat's state events at the reply's parent. */
+  readonly events: ReadonlyArray<FoldableEvent>
+}
+
 interface DecisionServices {
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
@@ -53,6 +68,8 @@ export interface DecisionPoint<I, V> {
   readonly description: string
   /** How sure the model must be, 0.5..1, unless the user sets it. */
   readonly defaultThreshold: number
+  /** Its own call deadline, for a point a reply waits on (the engine's otherwise). */
+  readonly timeoutMs?: number
   /** The questions for this input; none means there's nothing to ask, and nothing is sent. */
   readonly questions: (input: I) => Readonly<Record<string, DecisionQuestion>>
   /** The state the questions read (a small object of named fields, newest messages kept). */
@@ -63,6 +80,8 @@ export interface DecisionPoint<I, V> {
   readonly fallback: (input: I) => V
   /** For a point that acts after each completed reply: gathers its input, evaluates, applies; true when it changed something. */
   readonly afterReply?: (reply: FinishedReply, services: DecisionServices) => Effect.Effect<boolean>
+  /** For a point that acts before a reply is written: true when it changed the reply's message. */
+  readonly beforeReply?: (reply: StartingReply, services: DecisionServices) => Effect.Effect<boolean, unknown>
 }
 
 /** A point with its input and verdict types erased, as the registry holds it. */
@@ -86,6 +105,11 @@ export interface DecisionEngineShape {
   readonly evaluate: <I, V>(pointId: string, input: I, context: DecisionContext) => Effect.Effect<DecisionOutcome<V>>
   /** Runs every point that acts after a reply, each on its own; failures are only logged. True when one changed the chat. */
   readonly afterReply: (reply: FinishedReply) => Effect.Effect<boolean>
+  /**
+   * Runs every point that acts before a reply, in turn, before its context is built; a failure is
+   * only logged (the reply goes on as it was), a stop stops it. True when one changed the message.
+   */
+  readonly beforeReply: (reply: StartingReply) => Effect.Effect<boolean>
 }
 
 export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngineShape>()(
@@ -103,7 +127,6 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
         const providers = yield* Providers
         const points = makeRegistry<AnyDecisionPoint>()
         for (const point of options.points ?? builtinPoints) yield* points.register(point)
-        const timeoutMs = options.timeoutMs ?? DECISION_TIMEOUT_MS
 
         /** The connection that answers this point: the first, by name, with it on and a model chosen. */
         const answering = (userId: UserId, pointId: string) =>
@@ -136,6 +159,7 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
             reason,
             ...(rolloutId ? { rolloutId } : {})
           })
+          const timeoutMs = options.timeoutMs ?? point.timeoutMs ?? DECISION_TIMEOUT_MS
           return Effect.gen(function* () {
             const entry = yield* answering(context.userId, pointId)
             // Off for every connection: nothing is built, nothing is sent.
@@ -269,7 +293,22 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
               )
           ).pipe(Effect.map((changed) => changed.some(Boolean)))
 
-        return DecisionEngine.of({ points, evaluate, afterReply })
+        const beforeReply: DecisionEngineShape["beforeReply"] = (reply) =>
+          Effect.forEach(
+            points.list().filter((point) => point.beforeReply),
+            (point) =>
+              point.beforeReply!(reply, { reader, writer, evaluate }).pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause as Cause.Cause<never>)
+                    : Effect.logWarning(`decision point ${point.id} before a reply failed`, cause).pipe(
+                        Effect.as(false)
+                      )
+                )
+              )
+          ).pipe(Effect.map((changed) => changed.some(Boolean)))
+
+        return DecisionEngine.of({ points, evaluate, afterReply, beforeReply })
       })
     )
 

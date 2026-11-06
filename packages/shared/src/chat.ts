@@ -167,12 +167,29 @@ export type RecordedGeneration = typeof RecordedGeneration.Type
 export const ModelRef = Schema.Struct({ provider: Schema.String, model: Schema.String })
 export type ModelRef = typeof ModelRef.Type
 
+/**
+ * How a reply's speaker was chosen, when Auto chose it (DESIGN §2.3): `auto`, the chat's reply
+ * order; `decision`, the decision model's "Who replies next" (spec/AGENTIC.md §7), with how sure
+ * it was and the name it was asked about. Absent: someone chose the speaker.
+ */
+export const SpeakerPick = Schema.Union([
+  Schema.Struct({ by: Schema.Literal("auto") }),
+  Schema.Struct({
+    by: Schema.Literal("decision"),
+    confidence: Schema.Number,
+    name: Schema.String,
+    rolloutId: Schema.String
+  })
+])
+export type SpeakerPick = typeof SpeakerPick.Type
+
 export class Version extends Schema.Class<Version>("Version")({
   id: VersionId,
   slotId: SlotId,
   ordinal: Schema.Int,
   status: VersionStatus,
   speakerEntityId: Schema.NullOr(EntityId),
+  speakerPick: Schema.optionalKey(SpeakerPick),
   writer: Writer,
   content: Schema.String,
   images: Schema.optionalKey(MessageImages),
@@ -305,6 +322,8 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
 /** What a new version is made of; the server fills in ids, ordinals and times. */
 export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   speakerEntityId: Schema.NullOr(EntityId),
+  /** A reply whose speaker Auto picked: the decision model may choose another before it's written. */
+  speakerPick: Schema.optional(SpeakerPick),
   writer: Writer,
   content: Schema.String,
   images: Schema.optionalKey(MessageImages),

@@ -277,11 +277,13 @@ export const planReply = (
   if (noReplies && picked === null) {
     const posted = typedText(input) || hasImages
     const asked = posted ? null : (next?.id ?? null)
-    return { next, replier: asked, round: [], reply: asked !== null }
+    return { next, replier: asked, round: [], reply: asked !== null, auto: false }
   }
   return {
     next,
     replier: picked ?? next?.id ?? null,
+    /** Auto picked the replier (and the round): the decision model's "Who replies next" may choose others. */
+    auto: picked === null && next !== null,
     /** Who replies after the replier, in turn: none for a pick (ST's force talk) or one at a time. */
     round: picked !== null || oneReplyAtATime(cast) ? [] : [...(next?.then ?? [])],
     reply: picked !== null || next !== null || policy?.unnamedReply?.(cast) === true

@@ -29,6 +29,10 @@ export interface ReplyChoice {
   readonly onPick: (pick: ReplyPick) => void
   /** The turn order isn't read yet: who's next shows as "…", not "no one". */
   readonly loading?: boolean
+  /** The decision model picks Auto's replies ("Who replies next" is on, with two or more to choose from). */
+  readonly decides?: boolean
+  /** The decision model picked who wrote the latest reply, and how sure it was. */
+  readonly lastPick?: { readonly name: string; readonly confidence: number }
 }
 
 /** Whether there's anyone to choose between, for ▶. */
@@ -42,7 +46,9 @@ export function NextReplyChip({
   picked,
   noReplies = false,
   onPick,
-  loading = false
+  loading = false,
+  decides = false,
+  lastPick
 }: ReplyChoice) {
   const view = useCast()
   // No one is a choice even with one character; with none, only to go back to Auto.
@@ -54,8 +60,13 @@ export function NextReplyChip({
   // The whole round, in turn: the chip says "Next: Mira, Tobin, Wren", the hint as a sentence.
   const all = replier === null ? [] : [replier, ...round].map(name)
   const chipWho = all.length > 1 ? all.join(", ") : who
-  const detail = replyPolicyOf(view.cast)?.autoDetail ?? "Picked by the chat's reply order"
+  const policyDetail = replyPolicyOf(view.cast)?.autoDetail ?? "Picked by the chat's reply order"
+  const detail = decides ? "Picked by the decision model; if it can't decide, by the chat's reply order" : policyDetail
   const auto = next === null ? [] : [next.id, ...(picked === null && !off ? round : (next.then ?? []))].map(name)
+  const modelPicks = decides && picked === null && !off && replier !== null
+  const last = lastPick
+    ? `The decision model picked ${lastPick.name} for the last reply (${Math.round(lastPick.confidence * 100)}%). `
+    : ""
   return (
     <ChoiceChip<EntityId | typeof AUTO | typeof NO_ONE>
       disabled={disabled}
@@ -68,14 +79,18 @@ export function NextReplyChip({
         disabled
           ? "Choose who replies next when a character can reply."
           : off
-            ? "No one replies to what you send, until you choose otherwise here."
+            ? `${last}No one replies to what you send, until you choose otherwise here.`
             : picked !== null
-              ? `${who} replies next: your pick, for one reply`
+              ? `${last}${who} replies next: your pick, for one reply`
               : replier === null
-                ? "No one is picked to reply"
-                : all.length > 1
-                  ? `${listNames(all)} reply next, in turn. ${detail}`
-                  : `${who} replies next. ${detail}`
+                ? `${last}No one is picked to reply`
+                : modelPicks
+                  ? `${last}The decision model picks who replies next; if it can't decide, ${
+                      all.length > 1 ? `${listNames(all)} reply, in turn` : `${who} replies`
+                    }. ${policyDetail}`
+                  : all.length > 1
+                    ? `${last}${listNames(all)} reply next, in turn. ${detail}`
+                    : `${last}${who} replies next. ${detail}`
       }
       title="Who replies next"
       chip={

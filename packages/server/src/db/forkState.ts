@@ -356,7 +356,7 @@ export const insertFork = (
  * in the picker is the original's, and its star and picker flag are the fork's on the original,
  * the rows `sf` and `pf` (null: none), else their own.
  */
-export const shownVersionColumns = `v.id, v.slot_id, o.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
+export const shownVersionColumns = `v.id, v.slot_id, o.ordinal, v.status, v.speaker_entity_id, v.speaker_pick_json, v.writer, v.content,
   v.macro_mode, v.origin, v.source_version_id, v.direction, coalesce(pf.flag, v.hidden) AS hidden,
   coalesce(sf.flag, v.starred) AS starred, v.created_at, v.error_json, v.mark, v.frozen_macros, v.rollout_id,
   v.reasoning, v.reply_sections, v.rewrite_json, v.recorded_model_json,

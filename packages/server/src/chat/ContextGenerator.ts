@@ -169,6 +169,25 @@ export const layer = Layer.effect(
           const events = yield* reader
             .StateEventsAt({ userId, chatId, slotId: parent, forkId })
             .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("StateEventsAt")))
+          // Points that act before the reply is written (spec/AGENTIC.md §7): "Who replies next" may
+          // give a reply Auto picked another speaker, which every tab hears before its first word.
+          if (Option.isSome(decisions)) {
+            const changed = yield* decisions.value.beforeReply({
+              userId,
+              chatId,
+              slotId,
+              versionId,
+              forkId,
+              parentSlotId: parent,
+              version: slot.entry.version,
+              events
+            })
+            if (changed)
+              yield* reader.GetSlot({ userId, slotId, forkId }).pipe(
+                Effect.tap(({ entry }) => Effect.sync(() => hub.publish(chatId, { _tag: "Slot", entry }))),
+                Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetSlot"))
+              )
+          }
           const state = foldState(events)
           const planned = planTurn(execution.orchestrationModes, state)
           if ("unavailable" in planned)

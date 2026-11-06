@@ -55,9 +55,11 @@ const queuedRewrite = (row: QueuedRow): StoredRewrite | undefined =>
         rawReasoning: null
       }
 
-const reply = (speakerEntityId: EntityId | null, direction: string | null) =>
+const reply = (speakerEntityId: EntityId | null, direction: string | null, autoPick = false) =>
   new NewVersion({
     speakerEntityId,
+    // Auto's pick: the decision model's "Who replies next" may choose another before it's written.
+    ...(autoPick && speakerEntityId !== null ? { speakerPick: { by: "auto" as const } } : {}),
     writer: "model",
     content: "",
     status: "generating",
@@ -267,7 +269,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         }
         const next = yield* append(
           replyParent,
-          first!.kind === "message" ? reply(replySpeaker, null) : reply(speaker, first!.direction)
+          first!.kind === "message"
+            ? reply(replySpeaker, null, first!.auto_pick === 1)
+            : reply(speaker, first!.direction, first!.auto_pick === 1)
         )
         posted.push(next.slotId)
         yield* sql`DELETE FROM queued_messages WHERE id IN ${sql.in(ids.slice(0, entries.length - waiting.length + 1))}`
@@ -285,7 +289,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       forkId: string,
       members: ReadonlyArray<EntityId>,
       seq: number,
-      at: number
+      at: number,
+      autoPick: boolean
     ) =>
       Effect.forEach(
         members,
@@ -305,6 +310,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             direction: null,
             round: 1,
             held: 0,
+            auto_pick: autoPick ? 1 : 0,
             created_at: at,
             updated_at: at
           })}`,
@@ -423,7 +429,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         direction,
         commitDraft,
         rewrite,
-        round
+        round,
+        autoPick
       }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
@@ -489,12 +496,13 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
                 no_reply: kind === "message" && noReply === true ? 1 : 0,
                 direction: kind === "generate" && direction !== null && direction.trim() !== "" ? direction : null,
+                auto_pick: autoPick === true && (kind === "generate" || noReply !== true) ? 1 : 0,
                 created_at: at,
                 updated_at: at
               })} RETURNING *`
               // The rest of the round waits behind it: postQueued moves each on to the reply before.
               if (kind === "generate" || noReply !== true)
-                yield* queueRound(chatId, parentSlotId, fork.id, round ?? [], next!.n + 1, at)
+                yield* queueRound(chatId, parentSlotId, fork.id, round ?? [], next!.n + 1, at, autoPick === true)
               // The text waits in the queue now, and comes back to the composer if withdrawn.
               const { draft, recovered } = yield* bin.drafts.commit(userId, commitDraft, {
                 // The composer's, or the insertion editor's below the tip, whose insertion is an append
@@ -523,14 +531,14 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             version:
               kind === "message"
                 ? userMessage(content, speakerEntityId, images, rewrite)
-                : reply(speakerEntityId, direction),
+                : reply(speakerEntityId, direction, autoPick === true),
             commitDraft
           })
           // A reply posted now: the rest of its round waits for it.
           if (kind === "generate" && (round ?? []).length > 0) {
             const [next] = yield* sql<{ n: number }>`
               SELECT coalesce(max(seq), -1) + 1 AS n FROM queued_messages WHERE chat_id = ${chatId}`
-            yield* queueRound(chatId, result.slotId, result.forkId, round ?? [], next!.n, Date.now())
+            yield* queueRound(chatId, result.slotId, result.forkId, round ?? [], next!.n, Date.now(), autoPick === true)
             return { _tag: "Posted" as const, result, queue: yield* chatQueue(sql, chatId) }
           }
           return {

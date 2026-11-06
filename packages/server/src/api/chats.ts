@@ -157,11 +157,13 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly direction: string | null
       /** Who replies after its reply, in turn (DESIGN §2.3). */
       readonly round?: ReadonlyArray<EntityId> | undefined
+      /** The reply's speaker and the round's are Auto's picks, which the decision model may change. */
+      readonly autoPick?: boolean | undefined
       readonly composer: { readonly draftId: string; readonly session: number } | undefined
     }
   ) =>
     Effect.gen(function* () {
-      const { composer, round, ...send } = params
+      const { composer, round, autoPick, ...send } = params
       // What the user sends goes through the scripts first, as ST's sendMessageAsUser.
       const written =
         params.kind === "message"
@@ -180,6 +182,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         content: written.content,
         ...(written.rewrite ? { rewrite: written.rewrite } : {}),
         ...(round === undefined || round.length === 0 ? {} : { round }),
+        ...(autoPick === true ? { autoPick } : {}),
         // The composer draft the text was taken from (DESIGN §6.2).
         commitDraft: composer === undefined ? null : { draftId: composer.draftId, session: composer.session }
       })
@@ -296,6 +299,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       imageDraftIds,
       reply,
       round,
+      autoPick,
       composer
     }) =>
       Effect.flatMap(userId, (id) =>
@@ -313,13 +317,14 @@ export const makeChatHandlers = Effect.gen(function* () {
           ...(reply === false ? { noReply: true } : {}),
           direction: null,
           round,
+          autoPick,
           composer
         })
       ).pipe(internal("SendMessage")),
 
     // Once the version is written, its generation starts even if the caller has gone:
     // otherwise it would stay `generating` with nothing behind it.
-    Generate: ({ chatId, forkId, parentSlotId, branch, speakerEntityId, direction, round, composer }) =>
+    Generate: ({ chatId, forkId, parentSlotId, branch, speakerEntityId, direction, round, autoPick, composer }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -334,6 +339,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           replySpeakerEntityId: null,
           direction: direction ?? null,
           round,
+          autoPick,
           composer
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),

@@ -1453,7 +1453,9 @@ export class ChatSession {
     images?: import("@rp/shared/chat.ts").MessageImages,
     imageDraftIds?: readonly string[],
     /** Who replies after `replySpeaker`, in turn: the rest of the round (DESIGN §2.3). */
-    round: ReadonlyArray<EntityId> = []
+    round: ReadonlyArray<EntityId> = [],
+    /** Auto picked `replySpeaker` and the round: the decision model may choose others (DESIGN §2.3). */
+    autoPick = false
   ): Promise<{
     readonly sent: boolean
     readonly outcome: Outcome<unknown>
@@ -1478,6 +1480,7 @@ export class ChatSession {
           // Queued with no one to reply, it posts alone, as it does at once.
           ...(reply ? {} : { reply: false }),
           ...(reply && round.length > 0 ? { round } : {}),
+          ...(reply && autoPick ? { autoPick } : {}),
           ...(composer === undefined ? {} : { composer: commitOf(composer) })
         })
       ),
@@ -1493,7 +1496,7 @@ export class ChatSession {
     if (!reply) return { sent: true, outcome: result, draft, recovered }
     return {
       sent: true,
-      outcome: await this.generate(result.value.entry.slotId, replySpeaker, "", undefined, round),
+      outcome: await this.generate(result.value.entry.slotId, replySpeaker, "", undefined, round, autoPick),
       draft,
       recovered
     }
@@ -1509,7 +1512,9 @@ export class ChatSession {
     direction = "",
     composer?: ComposerSource,
     /** Who replies after this one, in turn: the rest of the round (DESIGN §2.3). */
-    round: ReadonlyArray<EntityId> = []
+    round: ReadonlyArray<EntityId> = [],
+    /** Auto picked `speaker` and the round: the decision model may choose others (DESIGN §2.3). */
+    autoPick = false
   ): Promise<Outcome<SendResult>> {
     await beforeReply()
     const result = await this.queueSnapshot(
@@ -1522,6 +1527,7 @@ export class ChatSession {
           speakerEntityId: speaker,
           ...(direction.trim() === "" ? {} : { direction }),
           ...(round.length > 0 ? { round } : {}),
+          ...(autoPick ? { autoPick } : {}),
           ...(composer === undefined ? {} : { composer: commitOf(composer) })
         })
       ),

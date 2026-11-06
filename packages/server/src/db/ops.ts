@@ -1730,7 +1730,9 @@ export class WriteOps extends RpcGroup.make(
        * Who replies after its reply, in turn (DESIGN §2.3): queued as the round's entries behind
        * that reply. A send at the fork's tip first drops the round already queued there.
        */
-      round: Schema.optionalKey(Schema.Array(EntityId))
+      round: Schema.optionalKey(Schema.Array(EntityId)),
+      /** The reply's speaker and the round's are Auto's picks: the decision model may change each (DESIGN §2.3). */
+      autoPick: Schema.optionalKey(Schema.Boolean)
     },
     success: Schema.Union([
       /** `queue`: the chat's queue, when the post queued the rest of a round behind it. */
@@ -2485,6 +2487,24 @@ export class WriteOps extends RpcGroup.make(
       result: Schema.String
     },
     success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The decision model's "Who replies next" (spec/AGENTIC.md §7): the speaker of a reply Auto
+   * picked, changed before anything is written. False when the reply has text by now, or isn't
+   * Auto's pick.
+   */
+  Rpc.make("PickSpeaker", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      versionId: VersionId,
+      speakerEntityId: EntityId,
+      /** The name the model was asked about, and how sure it was. */
+      name: Schema.String,
+      confidence: Schema.Number
+    },
+    success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** State events a decision attaches to a version of its chat, with the decision as their origin. */

@@ -26,6 +26,8 @@ export interface QueuedRow {
   /** 1: a reply of a round; `held` 1: its round stopped, waiting for Continue round. */
   readonly round: number
   readonly held: number
+  /** 1: the reply's speaker is Auto's pick, which the decision model may change (DESIGN §2.3). */
+  readonly auto_pick: number
   readonly row_version: number
   readonly created_at: number
 }

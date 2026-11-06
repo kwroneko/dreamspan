@@ -35,6 +35,7 @@ import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDr
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 import { requestCastAdd } from "./castAddState.ts"
+import { useDecisionPointOn } from "../decisions/index.tsx"
 
 /** A phone's width, the composers' compact layout's breakpoint. */
 const COMPACT_WIDTH = 640
@@ -326,6 +327,17 @@ export function Composer({
   // Only known when the window reaches the leaf; otherwise the server takes the message anyway.
   const leaf = view.newer === null ? view.entries.at(-1) : undefined
   const leafGenerating = leaf?.version.status === "generating"
+  // "Who replies next" (DESIGN §2.3): with it on, the decision model picks Auto's replies when it
+  // has two or more present characters to choose from, but whoever spoke last (the server's rule).
+  const nextDecisionOn = useDecisionPointOn("next")
+  const lastSpeaker = draftText.trim() !== "" || hasImages ? speaker : (leaf?.version.speakerEntityId ?? null)
+  const decides =
+    nextDecisionOn &&
+    replyPlan.auto &&
+    (cast?.participants.filter((id) => !cast.playedByMe.includes(id) && !cast.absent.includes(id) && id !== lastSpeaker)
+      .length ?? 0) >= 2
+  const leafPick = leaf?.version.speakerPick
+  const lastPick = leafPick?.by === "decision" ? { name: leafPick.name, confidence: leafPick.confidence } : undefined
   const recent = useMemo(
     () =>
       recentSpeakers(view.entries, 4)
@@ -451,7 +463,8 @@ export function Composer({
           plan.reply,
           captured?.images,
           captured?.ids,
-          plan.round
+          plan.round,
+          plan.auto
         )
         accepted = sent
         report(outcome)
@@ -467,7 +480,14 @@ export function Composer({
   const replyNow = async () => {
     if (busy || !ready || replier === null || choice.draftId === null) return
     setBusy(true)
-    const outcome = await session.generate(session.snapshot().leafSlotId, replier, "", undefined, replyPlan.round)
+    const outcome = await session.generate(
+      session.snapshot().leafSlotId,
+      replier,
+      "",
+      undefined,
+      replyPlan.round,
+      replyPlan.auto
+    )
     report(outcome)
     if (outcome.ok) replied(choice.draftId)
     setBusy(false)
@@ -590,6 +610,8 @@ export function Composer({
       picked: pickedReply,
       noReplies: choice.noReplies,
       loading: turnEntries === null,
+      decides,
+      ...(lastPick ? { lastPick } : {}),
       // Auto and No one stay until another choice; a character is picked for one reply on top.
       onPick: (pick) =>
         void choices
