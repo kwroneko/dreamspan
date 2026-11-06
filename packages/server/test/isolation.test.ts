@@ -1302,17 +1302,25 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   GetWorkbenchLayout: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        const before = yield* actor.api.GetWorkbenchLayout({})
-        yield* owner.api.SetWorkbenchLayout({ layout: JSON.stringify({ owner: true }) })
-        assert.deepStrictEqual(yield* actor.api.GetWorkbenchLayout({}), before)
+        const before = yield* actor.api.GetWorkbenchLayout({ device: "d" })
+        yield* owner.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ owner: true }) })
+        assert.deepStrictEqual(yield* actor.api.GetWorkbenchLayout({ device: "d" }), before)
       })
   },
   SetWorkbenchLayout: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        const before = yield* owner.api.GetWorkbenchLayout({})
-        yield* actor.api.SetWorkbenchLayout({ layout: JSON.stringify({ actor: true }) })
-        assert.deepStrictEqual(yield* owner.api.GetWorkbenchLayout({}), before)
+        const before = yield* owner.api.GetWorkbenchLayout({ device: "d" })
+        yield* actor.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ actor: true }) })
+        assert.deepStrictEqual(yield* owner.api.GetWorkbenchLayout({ device: "d" }), before)
+      })
+  },
+  ForgetWorkbenchLayouts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ owner: true }) })
+        yield* actor.api.ForgetWorkbenchLayouts({})
+        assert.strictEqual(yield* owner.api.GetWorkbenchLayout({ device: "d" }), JSON.stringify({ owner: true }))
       })
   },
   ImpersonationNotice: {
@@ -1920,6 +1928,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.deepStrictEqual(yield* owner.api.GetRolloutSteps({ versionId: owner.chat.generatingId }), [])
       })
   },
+  // Resuming another user's reply is refused as if it weren't there; the owner's, which
+  // isn't an agent reply, as not resumable.
+  ResumeVersion: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const versionId = owner.chat.generatingId
+        yield* refused(actor.api.ResumeVersion({ versionId, expectedRowVersion: 0 }), "NotFound")
+        yield* refused(owner.api.ResumeVersion({ versionId, expectedRowVersion: 0 }), "NotResumable")
+      })
+  },
+  ResumeFromStep: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const versionId = owner.chat.generatingId
+        yield* refused(actor.api.ResumeFromStep({ versionId, step: 0, expectedRowVersion: 0 }), "NotFound")
+      })
+  },
   GetRunTranscript: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -1939,6 +1964,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           modes.modes.map((m) => m.id),
           "plain"
         )
+      })
+  },
+  GetAgentPermissions: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetAgentPermissions({ chatId: owner.chat.chatId, slotId: null }), "NotFound")
+        assert.isArray((yield* owner.api.GetAgentPermissions({ chatId: owner.chat.chatId, slotId: null })).cards)
       })
   },
   ListActivity: {

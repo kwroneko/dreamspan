@@ -3,7 +3,8 @@
 // rows a window and StateEventsAt visit, which mustn't grow with the chat's length. The chat has
 // 200 forks, lineages 40 deep, 20,000 selection overrides, 10,000 stars and the chat's first
 // fork's copies of its last messages, so a window read in a fork mustn't grow with those
-// either. Rows are counted, not timed: a clock fails on a loaded host.
+// either; and a chain of 160 more below the deepest, which mustn't grow with depth (fork
+// labels, spec/FORK-COST.md). Rows are counted, not timed: a clock fails on a loaded host.
 import { DatabaseSync } from "node:sqlite"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
@@ -30,6 +31,9 @@ const OVERRIDES_PER_FORK = 100
 const STARS_PER_FORK = 50
 /** The deepest fork of the chain: its selections near the tip pick the second versions there. */
 const DEEP_FORK = `c-${LINEAGE_DEPTH - 1}`
+/** The end of a chain of forks below the deepest that choose nothing: 200 deep, it shows what that one shows. */
+const DEEPER = 160
+const DEEPEST_FORK = `d-${DEEPER}`
 /**
  * The last messages that have a second version (`w-…`), which the deepest fork selects, and a
  * copy of the first (`x-…`) that the chat's first fork shows in its place (an amend).
@@ -114,8 +118,9 @@ const build = (length: number) => {
         alternate.run(`w-p-${length - j}`, `p-${length - j}`)
         copy.run(`x-p-${length - j}`, `p-${length - j}`, `v-p-${length - j}`, chat.id)
       }
-      const forkRow = db.prepare(`INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, created_at, lineage_json)
-        VALUES (?, ?, ?, ?, 1, ?)`)
+      // Written in seq order, so the label triggers place every row as the writes would.
+      const forkRow = db.prepare(`INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, created_at)
+        VALUES (?, ?, ?, ?, 1)`)
       const override = db.prepare(`INSERT INTO fork_overrides
         (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id)
         VALUES (?, ?, ?, ?, 'select', ?, ?, ?, ?)`)
@@ -126,7 +131,6 @@ const build = (length: number) => {
         (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, flag)
         VALUES (?, ?, ?, ?, 'star', ?, ?, ?, 1)`)
       let state = 0
-      const lineages = new Map<string, Array<[string, number | null]>>([[chat.id, [[chat.id, null]]]])
       const choose = (fork: string, n: number) => {
         for (let k = 0; k < OVERRIDES_PER_FORK; k++) {
           const near = k < ALTERNATES
@@ -145,16 +149,14 @@ const build = (length: number) => {
           }
       }
       const fork = (id: string, parent: string, n: number) => {
-        const inherited = lineages.get(parent)!.slice(1)
-        const lineage: Array<[string, number | null]> = [[id, null], [parent, state], ...inherited]
-        lineages.set(id, lineage)
-        forkRow.run(id, chat.id, parent, state, JSON.stringify(lineage))
+        forkRow.run(id, chat.id, parent, state)
         choose(id, n)
       }
       choose(chat.id, 0)
       for (let k = 1; k < LINEAGE_DEPTH; k++) fork(`c-${k}`, k === 1 ? chat.id : `c-${k - 1}`, k)
       for (let k = LINEAGE_DEPTH; k < FORKS; k++)
         fork(`f-${k}`, k % 2 ? chat.id : `c-${(k % (LINEAGE_DEPTH - 1)) + 1}`, k)
+      for (let k = 1; k <= DEEPER; k++) forkRow.run(`d-${k}`, chat.id, k === 1 ? DEEP_FORK : `d-${k - 1}`, state)
       db.prepare("UPDATE chats SET state_seq = ? WHERE id = ?").run(state, chat.id)
       db.exec("COMMIT")
       const { n } = db
@@ -200,8 +202,9 @@ const visits = (f: Fixture, statement: (sql: SqlClient.SqlClient) => Statement.S
         count++
         return 1
       })
-      for (const table of ["slots", "versions", "state_events", "forks", "fork_overrides"])
+      for (const table of ["slots", "versions", "state_events", "forks", "fork_overrides", "fork_labels"])
         db.exec(`CREATE TEMP VIEW ${table} AS SELECT * FROM main.${table} WHERE visit(rowid)`)
+      db.exec(`CREATE TEMP VIEW fork_steps AS SELECT * FROM main.fork_steps WHERE visit(kind)`)
       const counted = text.replaceAll(/\bslots (\w+) INDEXED BY/g, "main.slots $1 INDEXED BY")
       const rows = db.prepare(counted).all(...(params as Array<string | number | null>))
       return { rows: rows.length, visited: count }
@@ -299,6 +302,7 @@ describe("paths by chain segment", () => {
             return {
               tipWindow: yield* visits(f, (sql) => pathWindow(sql, f.chatId, tip, 200)),
               forkTipWindow: yield* visits(f, (sql) => pathWindow(sql, f.chatId, tip, 200, DEEP_FORK)),
+              deepestTipWindow: yield* visits(f, (sql) => pathWindow(sql, f.chatId, tip, 200, DEEPEST_FORK)),
               forkBranchyWindow: yield* visits(f, (sql) =>
                 pathWindow(sql, f.chatId, "p-1100" as SlotId, 200, DEEP_FORK)
               ),
@@ -319,10 +323,13 @@ describe("paths by chain segment", () => {
         assert.deepStrictEqual(large.forkTipWindow, small.forkTipWindow)
         assert.deepStrictEqual(large.forkBranchyWindow, small.forkBranchyWindow)
         assert.strictEqual(small.forkTipWindow.rows, 200)
-        // Per slot: the fork's row and at most one override lookup per lineage entry for each
-        // of the selection, the copy shown for it and its two flags, never the chat's 30,000
-        // overrides.
-        assert.isBelow(small.forkTipWindow.visited, small.tipWindow.visited + 200 * (1 + 4 * LINEAGE_DEPTH))
+        // Per slot, for each of the selection, the copy shown for it and its two flags: one
+        // step, its override and the fork's label, never the chat's 30,000 overrides or the
+        // fork's 40 ancestors.
+        assert.isAtMost(small.forkTipWindow.visited, small.tipWindow.visited + 200 * 4 * 3)
+        // 200 forks deep, the same rows as 40 deep.
+        assert.deepStrictEqual(small.deepestTipWindow, small.forkTipWindow)
+        assert.deepStrictEqual(large.deepestTipWindow, large.forkTipWindow)
         assert.deepStrictEqual(large.events, small.events)
         assert.strictEqual(small.tipWindow.rows, 200)
         assert.strictEqual(small.branchyWindow.rows, 200)
@@ -344,19 +351,13 @@ describe("paths by chain segment", () => {
         }>
       ).map((row) => row.detail)
       db.close()
-      // Only the segments, the events found and a fork's lineage (for an event attached to
-      // a version: its selection there, and the copy standing in for it; and whether its message
-      // is deleted there) are scanned, never a
-      // table; the lineage's overrides are found by index.
+      // Only the segments and the events found are scanned, never a table. An event's
+      // visibility is a range check on its writer's label, and each per-fork value it needs (its
+      // version's selection there, the copy standing in for it, whether its message is deleted
+      // there) is one probe of the step function at the fork's label (db/forkLabels.ts).
       assert.deepStrictEqual(
         plan.filter((step) => step.startsWith("SCAN")),
-        [
-          "SCAN g",
-          "SCAN g",
-          "SCAN ev",
-          "SCAN vl VIRTUAL TABLE INDEX 1:",
-          ...Array<string>(4).fill("SCAN el VIRTUAL TABLE INDEX 1:")
-        ],
+        ["SCAN g", "SCAN g", "SCAN ev"],
         plan.join("\n")
       )
       assert.includeMembers(
@@ -365,7 +366,7 @@ describe("paths by chain segment", () => {
           "SEARCH e USING INDEX state_events_chain (chat_id=? AND slot_chain_id=? AND slot_depth>? AND slot_depth<?)",
           "SEARCH e USING INDEX state_events_position (chat_id=? AND slot_id=?)",
           "SEARCH s USING INDEX sqlite_autoindex_slots_1 (id=?) LEFT-JOIN",
-          "SEARCH eo USING INDEX fork_overrides_point (fork_id=? AND kind=? AND target_id=? AND seq<?)"
+          "SEARCH fx_s USING PRIMARY KEY (kind=? AND target_id=? AND label<?)"
         ],
         plan.join("\n")
       )
@@ -462,12 +463,10 @@ describe("paths by chain segment", () => {
         ).map((row) => row.detail)
         db.close()
         assert.include(plan, "SEARCH o USING INDEX fork_overrides_point (fork_id=? AND kind=?)", plan.join("\n"))
-        // Scans only of the lineage's JSON and of the window function's own subquery.
+        // Scans only of the lineage walk (one row per ancestor) and of the window function's own
+        // subquery.
         assert.deepStrictEqual(
-          plan.filter(
-            (step) =>
-              step.startsWith("SCAN") && !step.includes("VIRTUAL TABLE") && !/^SCAN (e\b|\(subquery-\d+\))/.test(step)
-          ),
+          plan.filter((step) => step.startsWith("SCAN") && !/^SCAN (e\b|l\b|lineage\b|\(subquery-\d+\))/.test(step)),
           [],
           plan.join("\n")
         )
@@ -501,20 +500,9 @@ const withInsertions = (f: Fixture) => {
       const lane = (db.prepare("SELECT id FROM lanes WHERE chat_id = ?").get(f.chatId) as { id: string }).id
       let { state } = db.prepare("SELECT state_seq AS state FROM chats WHERE id = ?").get(f.chatId) as { state: number }
       db.prepare(
-        `INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, created_at, lineage_json, base_slot_id,
-          tip_slot_id) VALUES (?, ?, ?, ?, 1, ?, ?, ?)`
-      ).run(
-        INSERT_FORK,
-        f.chatId,
-        f.chatId,
-        state,
-        JSON.stringify([
-          [INSERT_FORK, null],
-          [f.chatId, state]
-        ]),
-        `p-${f.length}`,
-        `p-${f.length}`
-      )
+        `INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, created_at, base_slot_id,
+          tip_slot_id) VALUES (?, ?, ?, ?, 1, ?, ?)`
+      ).run(INSERT_FORK, f.chatId, f.chatId, state, `p-${f.length}`, `p-${f.length}`)
       const version = db.prepare(`INSERT INTO versions
         (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (?, ?, 0, 'complete', 'human', 'Inserted', 'verbatim', 'user_written', 1, 1)`)

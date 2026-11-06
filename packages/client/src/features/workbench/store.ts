@@ -14,6 +14,10 @@ import {
   allTabs,
   closeFrame,
   closeTab,
+  closeTabs,
+  type CloseWhich,
+  maximizeFrame,
+  stickTab,
   findTab,
   focusFrame,
   focusTab,
@@ -24,9 +28,11 @@ import {
   initialLayout,
   type Layout,
   moveTab,
+  neighbours,
   newId,
   type OpenOptions,
   openTab,
+  openTabAt,
   pinTab,
   resizeSplit,
   restoreLayout,
@@ -89,6 +95,10 @@ export class WorkbenchStore {
   private applying = false
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribe: (() => void) | null = null
+  /** Tabs closed in this page, the last first, for Reopen closed tab (at most 20). */
+  private closed: Array<{ readonly href: string; readonly frameId: string | undefined }> = []
+  /** Tabs whose views have changes not yet saved (`UnsavedTracker`), for the tab's dot. */
+  private readonly unsavedTabs = new Set<string>()
 
   readonly userId: string
   private readonly browser: RouterHistory
@@ -222,8 +232,8 @@ export class WorkbenchStore {
 
   private fromTab(tabId: string, href: string, action: Action) {
     const key = itemKey(href)
-    // Became an item another tab has open (a replace): that tab shows it instead.
-    const twin = allTabs(this.layout).find((t) => t.id !== tabId && itemKey(t.href) === key)
+    // Became an item another tab of its frame has open (a replace): that tab shows it instead.
+    const twin = frameOfTab(this.layout, tabId)?.tabs.find((t) => t.id !== tabId && itemKey(t.href) === key)
     if (twin) {
       const next = focusTab(setTabHref(closeTab(this.layout, tabId), twin.id, href), twin.id)
       this.apply(twin.id, href, {}, "REPLACE")
@@ -300,20 +310,19 @@ export class WorkbenchStore {
   /** Opens an item (model.ts `openTab`), at its URL's history state. */
   open(href: string, options: OpenOptions & { state?: HistoryState; mirror?: Action } = {}) {
     const { state, mirror = "PUSH", ...rest } = options
-    const next = openTab(this.layout, href, itemKey, { ...rest, id: rest.id ?? newId("t") })
-    const opened = allTabs(next).find((t) => itemKey(t.href) === itemKey(href))!
+    const { layout: next, tabId } = openTabAt(this.layout, href, itemKey, { ...rest, id: rest.id ?? newId("t") })
     // A tab already mounted (the item's own, or the preview taking it) navigates in place.
-    if (findTab(this.layout, opened.id)) this.apply(opened.id, href, state ?? {}, "PUSH")
+    if (findTab(this.layout, tabId)) this.apply(tabId, href, state ?? {}, "PUSH")
     else {
-      if (state && Object.keys(state).length > 0) this.initialState.set(opened.id, state)
+      if (state && Object.keys(state).length > 0) this.initialState.set(tabId, state)
       // Back inside the new tab (an Import page's own Back) returns to where it was opened.
       const from = focusedTab(this.layout)
       const fromHref = from && (this.histories.get(from.id)?.location.href ?? from.href)
-      if (fromHref && itemKey(fromHref) !== itemKey(href)) this.openedFrom.set(opened.id, fromHref)
+      if (fromHref && itemKey(fromHref) !== itemKey(href)) this.openedFrom.set(tabId, fromHref)
     }
     // Opening pushes a place in the browser's history, so Back returns to what was shown.
     this.set(next, mirror)
-    return opened.id
+    return tabId
   }
 
   focusTab(tabId: string) {
@@ -325,39 +334,95 @@ export class WorkbenchStore {
   pin(tabId: string) {
     this.set(pinTab(this.layout, tabId))
   }
-  /** The tab with this item, kept open (a double click where it was opened). */
+  /** The tab with this item, kept open (a double click where it was opened): the focused one's. */
   pinItem(href: string) {
     const key = itemKey(href)
-    const tab = allTabs(this.layout).find((t) => itemKey(t.href) === key)
+    const focused = focusedTab(this.layout)
+    const tab =
+      focused && itemKey(focused.href) === key ? focused : allTabs(this.layout).find((t) => itemKey(t.href) === key)
     if (tab) this.pin(tab.id)
   }
   close(tabId: string) {
-    this.set(closeTab(this.layout, tabId))
+    this.closing(closeTab(this.layout, tabId))
   }
   closeOthers(tabId: string) {
-    const frame = frameOfTab(this.layout, tabId)
-    if (!frame) return
-    let next = this.layout
-    for (const t of frame.tabs) if (t.id !== tabId) next = closeTab(next, t.id)
-    this.set(focusTab(next, tabId))
+    this.closeTabs(tabId, "others")
+  }
+  /** Close others, to the right, all, or saved, in the tab's frame; pinned tabs stay. */
+  closeTabs(tabId: string, which: CloseWhich) {
+    this.closing(closeTabs(this.layout, tabId, which, (id) => this.unsavedTabs.has(id)))
   }
   closeFrame(frameId: string) {
-    this.set(closeFrame(this.layout, frameId))
+    this.closing(closeFrame(this.layout, frameId))
   }
+  /** Sets a layout that closed tabs, remembering them for Reopen closed tab. */
+  private closing(next: Layout) {
+    const kept = new Set(allTabs(next).map((t) => t.id))
+    const gone = frames(this.layout.root).flatMap((f) =>
+      f.tabs.filter((t) => !kept.has(t.id)).map((t) => ({ href: t.href, frameId: f.id }))
+    )
+    this.closed = [...gone.reverse(), ...this.closed].slice(0, 20)
+    this.set(next)
+  }
+  get canReopen() {
+    return this.closed.length > 0
+  }
+  /** Opens the tab closed last again, in its frame if that's still there (kept). */
+  reopenClosed() {
+    const [last, ...rest] = this.closed
+    if (!last) return
+    this.closed = rest
+    const frame = this.frames().some((f) => f.id === last.frameId) ? last.frameId : undefined
+    this.open(last.href, { preview: false, ...(frame ? { frame } : {}) })
+  }
+  stick(tabId: string, sticky: boolean) {
+    this.set(stickTab(this.layout, tabId, sticky))
+  }
+  /** Shows a frame alone, or every frame again (`null`). */
+  maximize(frameId: string | null) {
+    this.set(maximizeFrame(this.layout, frameId))
+  }
+  setUnsaved(tabId: string, unsaved: boolean) {
+    if (this.unsavedTabs.has(tabId) === unsaved) return
+    if (unsaved) this.unsavedTabs.add(tabId)
+    else this.unsavedTabs.delete(tabId)
+    for (const listener of this.metaListeners) listener()
+  }
+  isUnsaved = (tabId: string) => this.unsavedTabs.has(tabId)
+  /** Splits a frame; the new frame shows the shown tab's item too, at the same place. */
   split(frameId: string, direction: Direction) {
-    this.set(splitFrame(this.layout, frameId, direction))
+    const frame = this.frames().find((f) => f.id === frameId)
+    const shown = frame?.active ? this.histories.get(frame.active) : undefined
+    const copyId = newId("t")
+    if (shown) this.initialState.set(copyId, clean(shown.location.state))
+    this.set(splitFrame(this.layout, frameId, direction, { copyId }))
   }
   move(tabId: string, frameId: string, index?: number) {
-    this.set(moveTab(this.layout, tabId, frameId, index))
+    this.set(moveTab(this.layout, tabId, frameId, index, itemKey))
   }
-  /** Moves a tab into a new frame beside its own. */
-  moveToSplit(tabId: string, direction: Direction) {
-    const frame = frameOfTab(this.layout, tabId)
+  /**
+   * Opens an item to the side (VS Code's Open to the Side): in the frame on the right of the
+   * focused one, else in a new frame there. Kept, as a deliberate open.
+   */
+  openBeside(href: string) {
+    const focused = focusedFrame(this.layout)
+    let frame = neighbours(this.layout, focused.id).right
+    if (!frame) {
+      frame = newId("f")
+      this.layout = splitFrame(this.layout, focused.id, "row", { newFrameId: frame, empty: true })
+    }
+    return this.open(href, { frame, preview: false })
+  }
+  /**
+   * Moves a tab into a new frame beside a frame (its own by default): `before` puts it on the
+   * left or above, as a tab dropped on that edge does.
+   */
+  moveToSplit(tabId: string, direction: Direction, frameId?: string, before = false) {
+    const frame = frameId ? this.frames().find((f) => f.id === frameId) : frameOfTab(this.layout, tabId)
     if (!frame) return
     const id = newId("f")
-    let next = splitFrame(focusTab(this.layout, tabId), frame.id, direction, id)
-    if (!findTab(next, tabId) || frameOfTab(next, tabId)?.id !== id) next = moveTab(next, tabId, id)
-    this.set(next)
+    const next = splitFrame(focusTab(this.layout, tabId), frame.id, direction, { newFrameId: id, before, empty: true })
+    this.set(moveTab(next, tabId, id, undefined, itemKey))
   }
   resize(splitId: string, sizes: ReadonlyArray<number>) {
     this.set(resizeSplit(this.layout, splitId, sizes), "REPLACE", 400)

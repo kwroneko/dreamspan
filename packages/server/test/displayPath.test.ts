@@ -21,7 +21,7 @@ import {
   positionOf,
   type SlotPlace
 } from "../src/db/displayPath.ts"
-import { insertFork, LINEAGE_CAP, slotDeletedIn, writeInsert, writeOverride } from "../src/db/forkState.ts"
+import { insertFork, slotDeletedIn, writeInsert, writeOverride } from "../src/db/forkState.ts"
 import { migrations } from "../src/db/migrations.ts"
 import type { ForkRow } from "../src/db/rows.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -258,14 +258,14 @@ describe("the display path", () => {
     }).pipe(Effect.provide(layer()))
   )
 
-  it.effect("survives lineage compaction past the cap", () =>
+  it.effect("holds through a 70-deep chain of forks, which copies nothing", () =>
     Effect.gen(function* () {
       const w = yield* world
       const chatId = yield* w.newChat
       const ops = operations(w, chatId)
       let current = chatId
       let previous = yield* ops.append(current)
-      for (let i = 0; i < LINEAGE_CAP + 6; i++) {
+      for (let i = 0; i < 70; i++) {
         const next = yield* ops.append(current)
         yield* ops.insert(current, previous)
         if (i % 3 === 0) yield* ops.insert(current, null)
@@ -273,11 +273,13 @@ describe("the display path", () => {
         current = yield* ops.forkAt(current, i % 2 === 0 ? next : previous)
         if (i % 2 === 0) previous = next
       }
-      yield* ops.check("compacted")
+      yield* ops.check("deep")
+      // The deepest fork holds at most the row its own fork point wrote; nothing it inherits
+      // from the 70 forks above was copied into it.
       const [row] = yield* w.sql<{
         n: number
-      }>`SELECT json_array_length(lineage_json) AS n FROM forks WHERE id = ${current}`
-      assert.isAtMost(row!.n, LINEAGE_CAP)
+      }>`SELECT count(*) AS n FROM fork_overrides WHERE fork_id = ${current}`
+      assert.isAtMost(row!.n, 1)
     }).pipe(Effect.provide(layer()))
   )
 

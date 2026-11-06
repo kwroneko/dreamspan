@@ -19,12 +19,18 @@ export const makeWorkbenchHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const userId = Effect.map(CurrentUser, (user) => user.id)
   return {
-    GetWorkbenchLayout: () =>
-      Effect.flatMap(userId, (id) => reader.GetWorkbenchLayout({ userId: id })).pipe(internal("GetWorkbenchLayout")),
+    GetWorkbenchLayout: ({ device }) =>
+      Effect.flatMap(userId, (id) => reader.GetWorkbenchLayout({ userId: id, device })).pipe(
+        internal("GetWorkbenchLayout")
+      ),
     // Only an object is kept: anything else is dropped, not stored.
-    SetWorkbenchLayout: ({ layout }) =>
+    SetWorkbenchLayout: ({ device, layout }) =>
       Effect.flatMap(userId, (id) =>
-        isJsonObject(layout) ? writer.SetWorkbenchLayout({ userId: id, layout }) : Effect.void
-      ).pipe(internal("SetWorkbenchLayout"))
+        isJsonObject(layout) ? writer.SetWorkbenchLayout({ userId: id, device, layout }) : Effect.void
+      ).pipe(internal("SetWorkbenchLayout")),
+    ForgetWorkbenchLayouts: () =>
+      Effect.flatMap(userId, (id) => writer.ForgetWorkbenchLayouts({ userId: id })).pipe(
+        internal("ForgetWorkbenchLayouts")
+      )
   } satisfies Parameters<typeof WorkbenchApi.of>[0]
 })

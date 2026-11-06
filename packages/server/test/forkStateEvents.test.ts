@@ -6,12 +6,14 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
-import { LINEAGE_CAP } from "../src/db/forkState.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc, docFor } from "./support/docs.ts"
 import { eventually, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+
+/** A chain of forks deeper than tests otherwise make: fork labels have no cap. */
+const DEEP = 70
 
 const config = testConfig()
 const setup = Effect.gen(function* () {
@@ -359,27 +361,21 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("lineage compaction preserves event identities, bounded visibility and suppression", () =>
+  it.effect("a deep chain of forks keeps event identities, bounded visibility and suppression", () =>
     Effect.gen(function* () {
       const { main, b, a, swap, fork, state, add, card, parent, chatId } = yield* setup
       const event = yield* swap(main)
       let current = main
       // Each generation writes once, keeping every lineage bound nonzero.
-      for (let i = 0; i <= LINEAGE_CAP; i++) {
+      for (let i = 0; i <= DEEP; i++) {
         yield* add(current, null, { key: "macro.binding", value: { name: "generation", value: String(i) } })
         current = yield* fork(current, a.slotId)
       }
       assert.deepStrictEqual((yield* state(current, a.slotId)).participants, [card.entityId])
-      assert.strictEqual((yield* state(current, a.slotId)).macroBindings.generation, String(LINEAGE_CAP))
+      assert.strictEqual((yield* state(current, a.slotId)).macroBindings.generation, String(DEEP))
       yield* add(main, b.slotId, { key: "card.swap", value: { entity: parent.entityId, replaces: card.entityId } })
       assert.deepStrictEqual((yield* state(current, a.slotId)).participants, [card.entityId])
-      const snapshots = yield* fixtureSql(
-        config.dataDir,
-        [{ sql: "SELECT event_id FROM fork_event_snapshots WHERE event_id = ?", params: [event.id] }],
-        { readOnly: true }
-      )
-      assert.isAbove(snapshots[0]!.length, 0)
-      // The original event id remains usable after compaction.
+      // The original event is the one suppressed at the end of the chain: nothing was copied.
       yield* fixtureSql(config.dataDir, [
         { sql: "UPDATE chats SET state_seq = state_seq + 1 WHERE id = ?", params: [chatId] },
         {

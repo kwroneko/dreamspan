@@ -1073,9 +1073,8 @@ describe("fork-scoped state events", () => {
     expect(() => insert("zero", c.chatId, 0)).toThrow(/CHECK/)
     insert("scoped", c.chatId, 1)
     expect(() => run("UPDATE state_events SET fork_seq = 2 WHERE id = 'scoped'")).toThrow(/immutable/)
-    expect(() => run("INSERT INTO fork_event_snapshots VALUES (?, 'scoped')", other.chatId)).toThrow(/fork chat/)
-    run("INSERT INTO fork_event_snapshots VALUES (?, 'scoped')", c.chatId)
-    expect(() => run("UPDATE fork_event_snapshots SET fork_id = ?", other.chatId)).toThrow(/immutable/)
+    // It carries its fork's place in the fork tree, set when written and kept (db/forkLabels.ts).
+    expect(() => run("UPDATE state_events SET fork_label = x'05' WHERE id = 'scoped'")).toThrow(/fork label/)
     expect(() =>
       run(
         `INSERT INTO fork_overrides(id,chat_id,fork_id,seq,kind,target_id,flag)

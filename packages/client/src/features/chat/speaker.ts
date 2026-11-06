@@ -7,6 +7,7 @@
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { useSyncExternalStore } from "react"
+import { focusComposer } from "./composerFocus.ts"
 import type { ChatSession, Outcome } from "./session.ts"
 
 export interface ChoiceState {
@@ -183,5 +184,5 @@ export const useComposerChoice = (session: ChatSession): ChoiceState => {
 /** Makes `id` the composer's speaker and puts the cursor in the composer ("Write as"). */
 export const writeAs = (session: ChatSession, id: EntityId) => {
   void composerChoice(session).change({ speaker: id })
-  document.getElementById("composer")?.focus({ preventScroll: true })
+  focusComposer({ preventScroll: true })
 }

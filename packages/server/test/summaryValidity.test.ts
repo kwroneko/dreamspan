@@ -38,20 +38,18 @@ const setup = Effect.gen(function* () {
   yield* slot("x", "a", 2)
   yield* slot("y", "b", 3)
   yield* slot("o1", null, 0, "other", "o")
-  yield* sql`UPDATE forks SET tip_slot_id = 'c', lineage_json = '[["main",null]]' WHERE id = 'main'`
-  yield* sql`UPDATE forks SET tip_slot_id = 'o1', lineage_json = '[["other",null]]' WHERE id = 'other'`
-  const fork = (id: string, tip: string) =>
-    sql`INSERT INTO forks (id, chat_id, tip_slot_id, created_at, lineage_json)
-      VALUES (${id}, 'main', ${tip}, 1, ${JSON.stringify([
-        [id, null],
-        ["main", 5]
-      ])})`
-  yield* fork("X", "x")
-  yield* fork("Y", "y")
+  yield* sql`UPDATE forks SET tip_slot_id = 'c' WHERE id = 'main'`
+  yield* sql`UPDATE forks SET tip_slot_id = 'o1' WHERE id = 'other'`
+  // Written before X and Y were made, as their numbers say.
   yield* sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id)
     VALUES ('old', 'main', 'main', 3, 'select', 'a', 'a', 1, 'v-a')`
   yield* sql`INSERT INTO state_events (id, chat_id, slot_id, seq, key, value_json, origin, created_at, fork_id, fork_seq)
     VALUES ('ev', 'main', 'b', 0, 'var.set', '{}', 'user', 1, 'main', 2)`
+  const fork = (id: string, tip: string) =>
+    sql`INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, tip_slot_id, created_at)
+      VALUES (${id}, 'main', 'main', 5, ${tip}, 1)`
+  yield* fork("X", "x")
+  yield* fork("Y", "y")
 
   /** Every fork's summary valid at its chat's stamp now, and nothing noted. */
   const allValid = Effect.gen(function* () {
@@ -89,8 +87,8 @@ describe("per-fork summary validity", () => {
             assert.strictEqual(row!.n, expectedTouches)
           })
         assert.deepStrictEqual(yield* reached(move("c", 0)), ["X"])
-        yield* sql`INSERT INTO forks (id, chat_id, parent_fork_id, tip_slot_id, created_at, lineage_json)
-          VALUES ('child', 'main', 'X', 'c', 1, '[["child",null],["X",5],["main",5]]')`
+        yield* sql`INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, tip_slot_id, created_at)
+          VALUES ('child', 'main', 'X', 5, 'c', 1)`
         assert.deepStrictEqual(yield* reached(move("x", 1)), ["X", "child"])
       })
     )
@@ -152,7 +150,6 @@ describe("per-fork summary validity", () => {
         assert.deepStrictEqual(yield* reached(override("s1", "main", 10, "select")), ["main"])
         assert.deepStrictEqual(yield* reached(override("s2", "X", 11, "delete_slot")), ["X"])
         assert.deepStrictEqual(yield* reached(sql`UPDATE fork_overrides SET flag = 1, seq = 12 WHERE id = 'old'`), all)
-        assert.deepStrictEqual(yield* reached(sql`DELETE FROM fork_overrides WHERE id = 's1'`), ["main"])
         // Kinds the summaries don't read move nothing; insertion placement is fork-owned.
         assert.deepStrictEqual(yield* reached(override("h1", "Y", 13, "hide")), [])
         yield* Effect.andThen(
@@ -170,8 +167,7 @@ describe("per-fork summary validity", () => {
         assert.deepStrictEqual(yield* reached(sql`UPDATE slots SET created_at = 7 WHERE id = 'c'`), ["main"])
         // Inserted-slot changes still conservatively reach the whole chat.
         assert.deepStrictEqual(yield* reached(sql`UPDATE slots SET created_at = 8 WHERE id = 'i'`), all)
-        yield* sql`DELETE FROM fork_overrides WHERE id = 'i1'`
-        // State events: in one fork, chat-wide, or removed (other forks may hold it in snapshots).
+        // State events: in one fork, chat-wide, or removed.
         const event = (id: string, fork: string | null, seq: number | null) =>
           sql`INSERT INTO state_events (id, chat_id, slot_id, seq, key, value_json, origin, created_at, fork_id, fork_seq)
             VALUES (${id}, 'main', 'b', 1, 'var.set', '{}', 'user', 1, ${fork}, ${seq})`
@@ -179,10 +175,6 @@ describe("per-fork summary validity", () => {
         assert.deepStrictEqual(yield* reached(event("e2", "main", 4)), all)
         assert.deepStrictEqual(yield* reached(event("e3", null, null)), all)
         assert.deepStrictEqual(yield* reached(sql`DELETE FROM state_events WHERE id = 'e1'`), all)
-        assert.deepStrictEqual(
-          yield* reached(sql`INSERT INTO fork_event_snapshots (fork_id, event_id) VALUES ('main', 'ev')`),
-          all
-        )
         // A fork's own row: that fork.
         assert.deepStrictEqual(yield* reached(sql`UPDATE forks SET deleted_at = 1 WHERE id = 'X'`), ["X"])
       })

@@ -41,9 +41,7 @@ for (const width of [1440, 390])
       const parent = source.getByRole("link", { name: "Open chat Split demo · Journeys", exact: true })
       await expect(parent).toBeVisible()
       await expect(source.locator("[data-row-relation]")).toHaveText(/^Shares messages #1–2 · split /)
-      await expect(
-        splitOff.getByRole("link", { name: "Open chat Split demo · Lighthouse", exact: true })
-      ).toBeVisible()
+      await expect(splitOff.getByRole("link", { name: "Open chat Split demo · Lighthouse", exact: true })).toBeVisible()
       await expect(splitOff.locator("[data-row-relation]")).toHaveText(/^Shares messages #1–3 · split /)
       await expect(branches.getByRole("button", { name: /^Open branch / })).toHaveCount(2)
       const selected = chats.locator(`[data-chat-id="${seed.harbor}"]`)
@@ -92,9 +90,9 @@ test("split action acts on the branch shown and supports undo", async ({ page })
   // The window's height may leave Related chats collapsed to its header: check the count and its source row.
   const related = page.getByRole("region", { name: "Related chats", exact: true })
   await expect(related.getByRole("button", { name: "Related chats (1)", exact: true })).toBeVisible()
-  await expect(
-    related.locator(`[aria-label="This chat was split from"] [data-chat-id="${seed.groupId}"]`)
-  ).toHaveCount(1)
+  await expect(related.locator(`[aria-label="This chat was split from"] [data-chat-id="${seed.groupId}"]`)).toHaveCount(
+    1
+  )
   await page.getByRole("button", { name: "Undo", exact: true }).click()
   await expect(
     page

@@ -728,10 +728,10 @@ describe("window reads", () => {
           return rows.map((row) => row.detail)
         }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })))
         // Each slot's selection, the replacement shown for it, the two flags on it, its
-        // deletion and hide, and the deletion of each of its swipes (in the count) each read the
-        // fork's lineage (its own JSON, a few entries) and look each entry's override up by
-        // index (forkState.ts). Hiding also looks up range overrides by fork/kind and
-        // membership by slot/run. SQLite scans the small union of matching candidates.
+        // deletion and hide, and the deletion of each of its swipes (in the count) are each one
+        // probe of the fork's step function at its label (forkState.ts, db/forkLabels.ts), whatever
+        // the fork's depth. Hiding also finds the range hides covering the slot by its membership
+        // in runs; SQLite scans the small union of those candidates.
         assert.deepStrictEqual(
           plan
             .filter((step) => step.startsWith("SCAN") && !["SCAN d", "SCAN deleted_chain"].includes(step))
@@ -739,31 +739,26 @@ describe("window reads", () => {
           [
             "SCAN g",
             "SCAN g",
-            ...Array<string>(4).fill("SCAN el VIRTUAL TABLE INDEX 1:"),
             "SCAN visibility candidates",
-            ...Array<string>(3).fill("SCAN el VIRTUAL TABLE INDEX 1:"),
             // Only the ordered attachments of this version are scanned, via its primary key.
-            "SCAN a",
-            "SCAN el VIRTUAL TABLE INDEX 1:",
-            // Each of its images taken out of the context in the fork: one lineage read per image.
-            "SCAN el VIRTUAL TABLE INDEX 1:"
+            "SCAN a"
           ],
           plan.join("\n")
         )
         assert.include(plan, "SEARCH version_attachments USING PRIMARY KEY (version_id=?)", plan.join("\n"))
-        assert.lengthOf(
-          plan.filter(
-            (step) =>
-              step === "SEARCH eo USING INDEX fork_overrides_point (fork_id=? AND kind=? AND target_id=? AND seq<?)"
-          ),
-          8,
+        const probes = plan.filter(
+          (step) => step === "SEARCH fx_s USING PRIMARY KEY (kind=? AND target_id=? AND label<?)"
+        )
+        assert.isAtLeast(probes.length, 8, plan.join("\n"))
+        assert.strictEqual(
+          plan.filter((step) => step === "SEARCH fx_l USING INDEX sqlite_autoindex_fork_labels_1 (fork_id=?)").length,
+          probes.length,
           plan.join("\n")
         )
         assert.includeMembers(
           plan,
           [
-            "SEARCH eo USING INDEX fork_overrides_point (fork_id=? AND kind=?)",
-            "SEARCH es USING COVERING INDEX lcm_enable_slots_slot (slot_id=? AND shown=? AND run_id=?)",
+            "SEARCH fx_es USING COVERING INDEX lcm_enable_slots_slot (slot_id=? AND shown=?)",
             "SEARCH s USING INDEX sqlite_autoindex_slots_1 (id=?)",
             "SEARCH ph USING INDEX sqlite_autoindex_slots_1 (id=?)",
             "SEARCH s USING INDEX slots_chain (chain_id=? AND depth>? AND depth<?)"

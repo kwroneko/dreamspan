@@ -9,7 +9,11 @@ import { query, transaction } from "./tx.ts"
 
 const KEY = "display"
 const NOTICES = "notices"
-const WORKBENCH = "workbench"
+/** A device's layout is key `workbench:<device>`; keys between these two bounds are all of them. */
+const WORKBENCH = "workbench:"
+const WORKBENCH_END = "workbench;"
+/** Devices whose layouts an account keeps; past it, the one that saved least recently goes. */
+const MAX_WORKBENCH_DEVICES = 20
 
 /** Reasoning streams open until the user folds it during a run (DESIGN §7.4). */
 const DEFAULTS = DEFAULT_DISPLAY_PREFS
@@ -30,11 +34,10 @@ export const makeDisplayPrefsReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
     GetDisplayPrefs: ({ userId }) => read(sql, userId).pipe(query("GetDisplayPrefs")),
-    GetWorkbenchLayout: ({ userId }) =>
-      sql<{
-        value_json: string
-      }>`SELECT value_json FROM user_prefs WHERE user_id = ${userId} AND key = ${WORKBENCH}`.pipe(
-        Effect.map(([row]) => row?.value_json ?? null),
+    GetWorkbenchLayout: ({ userId, device }) =>
+      sql<{ layout: string | null }>`SELECT json_extract(value_json, '$.layout') AS layout FROM user_prefs
+          WHERE user_id = ${userId} AND key = ${WORKBENCH + device}`.pipe(
+        Effect.map(([row]) => row?.layout ?? null),
         query("GetWorkbenchLayout")
       )
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
@@ -71,12 +74,23 @@ export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
           ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
         return yield* read(sql, userId)
       }).pipe(transaction(sql, "SetDisplayPrefs")),
-    // The client repairs what it reads, so the text is stored as written (the API checks it's JSON).
-    SetWorkbenchLayout: ({ userId, layout }) =>
-      sql`INSERT INTO user_prefs (user_id, key, value_json) VALUES (${userId}, ${WORKBENCH}, ${layout})
-          ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`.pipe(
+    // The client repairs what it reads, so the layout is stored as written (the API checks it's a
+    // JSON object), beside `at`: the account's count of layout saves when it was saved, which
+    // orders the devices for pruning without a clock.
+    SetWorkbenchLayout: ({ userId, device, layout }) =>
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO user_prefs (user_id, key, value_json)
+          SELECT ${userId}, ${WORKBENCH + device}, json_object('at', coalesce(max(json_extract(value_json, '$.at')), 0) + 1, 'layout', json(${layout}))
+          FROM user_prefs WHERE user_id = ${userId} AND key > ${WORKBENCH} AND key < ${WORKBENCH_END}
+          ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
+        yield* sql`DELETE FROM user_prefs WHERE user_id = ${userId} AND key > ${WORKBENCH} AND key < ${WORKBENCH_END}
+          AND key NOT IN (SELECT key FROM user_prefs WHERE user_id = ${userId} AND key > ${WORKBENCH} AND key < ${WORKBENCH_END}
+            ORDER BY json_extract(value_json, '$.at') DESC LIMIT ${MAX_WORKBENCH_DEVICES})`
+      }).pipe(transaction(sql, "SetWorkbenchLayout")),
+    ForgetWorkbenchLayouts: ({ userId }) =>
+      sql`DELETE FROM user_prefs WHERE user_id = ${userId} AND key > ${WORKBENCH} AND key < ${WORKBENCH_END}`.pipe(
         Effect.asVoid,
-        transaction(sql, "SetWorkbenchLayout")
+        transaction(sql, "ForgetWorkbenchLayouts")
       ),
     // One-time notices, by notice, as the keys they were shown for (key `notices`).
     MarkNoticeShown: ({ userId, notice, key }) =>

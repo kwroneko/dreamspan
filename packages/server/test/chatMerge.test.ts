@@ -7,6 +7,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { MergeRequest } from "@rp/shared/mergeApi.ts"
+import { foldState } from "@rp/shared/state.ts"
 import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
 import { databaseFile } from "../src/db/connection.ts"
@@ -17,6 +18,7 @@ import { sharedPrefix } from "../src/db/merges.ts"
 import { docFor } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
+import { completeFixture } from "./support/lcmFixtures.ts"
 
 const said = (speaker: EntityId | null, content: string, writer: "human" | "model" = "model") =>
   new NewVersion({
@@ -350,6 +352,278 @@ describe("merging another chat", () => {
         assert.match(seen.section, /^\[\d+ earlier messages of “Docks” not included\.\]/)
         const all = yield* t.preview({ ...home, at: null, source: away, includeLeftOut: true })
         assert.strictEqual(all.section.split("\n\n").length, 150)
+      })
+    )
+  )
+
+  it.live("keeps the merge cast positional and restores deleted joins independently of later forks", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* setup(dataDir)
+        const home = yield* t.chat("Harbor", [t.mira])
+        const away = yield* t.chat("Docks", [t.kai])
+        const [h1, h2, h3] = yield* t.many(home, t.mira, ["h1", "h2", "h3"])
+        yield* t.many(away, t.kai, ["d1"])
+        yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          ...home,
+          slotId: h3!,
+          versionId: null,
+          scope: null,
+          data: { key: "participant.join", value: { entity: t.kai } }
+        })
+        const made = yield* t.merge({ ...home, at: h2!, source: away })
+        const cast = (forkId: ForkId, slotId: SlotId) =>
+          Effect.map(
+            t.reader.StateEventsAt({
+              userId: t.userId,
+              chatId: home.chatId,
+              forkId,
+              slotId
+            }),
+            (events) => foldState(events).participants
+          )
+        assert.deepStrictEqual(yield* cast(home.forkId, h1!), [t.mira])
+        assert.deepStrictEqual(yield* cast(home.forkId, made.slotId), [t.mira, t.kai])
+        const later = yield* t.writer.CreateFork({
+          userId: t.userId,
+          chatId: home.chatId,
+          fromForkId: home.forkId,
+          atSlotId: made.slotId
+        })
+        const bin = yield* t.writer.DeleteMessage({ userId: t.userId, slotId: made.slotId, forkId: home.forkId })
+        assert.deepStrictEqual(yield* cast(home.forkId, h2!), [t.mira])
+        assert.deepStrictEqual(yield* cast(later.fork.id, made.slotId), [t.mira, t.kai])
+        yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: bin.id })
+        assert.deepStrictEqual(yield* cast(home.forkId, made.slotId), [t.mira, t.kai])
+        assert.deepStrictEqual(
+          (yield* t.shows(home.forkId, home.chatId)).map((m) => m.content),
+          ["h1", "h2", "Kai: d1", "h3"]
+        )
+        yield* t.many(away, t.kai, ["d2"])
+        assert.deepStrictEqual(
+          (yield* t.shows(home.forkId, home.chatId)).map((m) => m.content),
+          ["h1", "h2", "Kai: d1", "h3"]
+        )
+      })
+    )
+  )
+
+  it.live("does not re-import a source's own join after its transcript was edited", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* setup(dataDir)
+        const home = yield* t.chat("Harbor", [t.mira])
+        const away = yield* t.chat("Docks", [t.kai])
+        const third = yield* t.chat("Market", [t.mira])
+        yield* t.many(home, t.mira, ["h1"])
+        yield* t.many(away, t.kai, ["d1"])
+        yield* t.many(third, t.mira, ["market"])
+        const nested = yield* t.merge({ ...away, at: null, source: third })
+        const original = yield* t.reader.GetSlot({ userId: t.userId, slotId: nested.slotId, forkId: away.forkId })
+        const edited = yield* t.writer.ApplyHistoryEdits({
+          userId: t.userId,
+          title: "Edit the merged transcript",
+          applications: [
+            {
+              ...away,
+              edits: [
+                {
+                  kind: "version_replace",
+                  targetId: original.entry.version.id,
+                  beforeId: original.entry.version.id,
+                  before: original.entry.version.content,
+                  after: "Edited market transcript"
+                }
+              ]
+            }
+          ]
+        })
+        const seen = yield* t.preview({ ...home, at: null, source: away })
+        assert.strictEqual(seen.messages, 1)
+        assert.include(seen.section, "[1 chat merged into “Docks” not included.]")
+        assert.notInclude(seen.section, "Edited market transcript")
+        const undo = yield* t.writer.UndoHistoryEdit({
+          userId: t.userId,
+          ...away,
+          changesetId: edited.changesetIds[0]!
+        })
+        assert.strictEqual(undo.undone, 1)
+        assert.strictEqual((yield* t.shows(away.forkId, away.chatId)).at(-1)!.content, "Mira: market")
+        assert.strictEqual((yield* t.preview({ ...home, at: null, source: away })).messages, 1)
+      })
+    )
+  )
+
+  it.live("treats a different swipe in the shared slots as divergence", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* setup(dataDir)
+        const home = yield* t.chat("Harbor", [t.mira])
+        const [p1, p2] = yield* t.many(home, t.mira, ["common", "main telling"])
+        const fork = yield* t.writer.CreateFork({
+          userId: t.userId,
+          chatId: home.chatId,
+          fromForkId: home.forkId,
+          atSlotId: p2!
+        })
+        const side = { chatId: home.chatId, forkId: fork.fork.id as ForkId }
+        yield* t.writer.AddVersion({
+          userId: t.userId,
+          slotId: p2!,
+          forkId: side.forkId,
+          version: said(t.mira, "side telling"),
+          select: true,
+          commitDraft: null
+        })
+        yield* t.many(side, t.mira, ["side continuation"])
+        yield* t.many(home, t.mira, ["main continuation"])
+        const seen = yield* t.preview({ ...home, at: null, source: side })
+        assert.strictEqual(seen.shared, 1)
+        assert.strictEqual(seen.from, 2)
+        assert.strictEqual(seen.section, "Mira: side telling\n\nMira: side continuation")
+        assert.strictEqual(seen.start?.slotId, p2)
+        assert.strictEqual((yield* t.shows(home.forkId, home.chatId))[0]!.id, p1)
+      })
+    )
+  )
+
+  it.live("refuses same-length source edits after preview", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* setup(dataDir)
+        const home = yield* t.chat("Harbor", [t.mira])
+        const away = yield* t.chat("Docks", [t.kai])
+        yield* t.many(home, t.mira, ["h1"])
+        const [slotId] = yield* t.many(away, t.kai, ["d1"])
+        const request = { ...home, at: null, source: away, includeLeftOut: false }
+        const seen = yield* t.preview(request)
+        yield* t.writer.AddVersion({
+          userId: t.userId,
+          slotId: slotId!,
+          forkId: away.forkId,
+          version: said(t.kai, "d2"),
+          select: true,
+          commitDraft: null
+        })
+        assert.include(
+          yield* refusal(
+            t.writer.MergeChat({
+              userId: t.userId,
+              ...request,
+              title: "Docks",
+              framing: null,
+              digest: seen.digest
+            })
+          ),
+          "MergeChanged"
+        )
+      })
+    )
+  )
+
+  it.live("keeps summary ranges aligned with the copied source messages", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* setup(dataDir)
+        const home = yield* t.chat("Harbor", [t.mira])
+        const away = yield* t.chat("Docks", [t.kai])
+        yield* t.many(home, t.mira, ["h1"])
+        yield* t.many(
+          away,
+          t.kai,
+          ["d1", "d2", "d3", "d4"].map((x) => x + "x".repeat(8000))
+        )
+        const path = yield* t.reader.GetPath({ userId: t.userId, ...away, leafSlotId: null, limit: 10 })
+        const inputs = path.entries
+          .slice(0, 2)
+          .map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: 0 }))
+        yield* completeFixture(dataDir, t.writer, t.userId, away.chatId, inputs, [], "First two source messages.")
+        const seen = yield* t.preview({ ...home, at: null, source: away })
+        assert.strictEqual(seen.summaries, 1)
+        assert.include(seen.section, '<summary from="1" to="2">')
+        const made = yield* t.merge({ ...home, at: null, source: away })
+        const info = yield* t.reader.GetMerge({ userId: t.userId, chatId: home.chatId, slotId: made.slotId })
+        const copied = yield* t.reader.MergeMessages({
+          userId: t.userId,
+          chatId: home.chatId,
+          mergeId: info.id,
+          offset: 0,
+          limit: 50
+        })
+        assert.deepStrictEqual(
+          copied.filter((m) => m.kind === "message").map((m) => m.included),
+          ["summarized", "summarized", "left_out", "verbatim"]
+        )
+      })
+    )
+  )
+
+  for (const summarizedMessages of [2, 3])
+    it.live(`uses the requested source fork summary over ${summarizedMessages} messages`, () =>
+      run((dataDir) =>
+        Effect.gen(function* () {
+          const t = yield* setup(dataDir)
+          const home = yield* t.chat("Harbor", [t.mira])
+          const away = yield* t.chat("Docks", [t.kai])
+          yield* t.many(home, t.mira, ["h1"])
+          const ids = yield* t.many(
+            away,
+            t.kai,
+            ["d1", "d2", "d3", "d4"].map((x) => x + "x".repeat(8000))
+          )
+          const path = yield* t.reader.GetPath({ userId: t.userId, ...away, leafSlotId: null, limit: 10 })
+          const inputs = path.entries
+            .slice(0, summarizedMessages)
+            .map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: 0 }))
+          const summary = yield* completeFixture(
+            dataDir,
+            t.writer,
+            t.userId,
+            away.chatId,
+            inputs,
+            [],
+            "Original source summary."
+          )
+          const fork = yield* t.writer.CreateFork({
+            userId: t.userId,
+            chatId: away.chatId,
+            fromForkId: away.forkId,
+            atSlotId: ids.at(-1)!
+          })
+          yield* t.writer.EditSummary({
+            userId: t.userId,
+            summaryId: summary.id,
+            forkId: fork.fork.id,
+            content: "Other fork's summary.",
+            expectedRowVersion: summary.rowVersion,
+            commitDraft: null
+          })
+          const seen = yield* t.preview({ ...home, at: null, source: away })
+          assert.strictEqual(seen.summaries, 1)
+          assert.strictEqual(seen.leftOut, 3 - summarizedMessages)
+          assert.include(seen.section, "Original source summary.")
+          assert.notInclude(seen.section, "Other fork's summary.")
+        })
+      )
+    )
+
+  it.live("reports a summary rewrite only when the merge goes inside its range", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* setup(dataDir)
+        const home = yield* t.chat("Harbor", [t.mira])
+        const away = yield* t.chat("Docks", [t.kai])
+        const [h1, h2] = yield* t.many(home, t.mira, ["h1", "h2", "h3"])
+        yield* t.many(away, t.kai, ["d1"])
+        const path = yield* t.reader.GetPath({ userId: t.userId, ...home, leafSlotId: null, limit: 10 })
+        const inputs = path.entries
+          .slice(0, 2)
+          .map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: 0 }))
+        yield* completeFixture(dataDir, t.writer, t.userId, home.chatId, inputs, [], "First two home messages.")
+        const inside = yield* t.preview({ ...home, at: h1!, source: away })
+        assert.deepStrictEqual(inside.rewrites && [inside.rewrites.from, inside.rewrites.to], [1, 2])
+        assert.isNull((yield* t.preview({ ...home, at: h2!, source: away })).rewrites)
       })
     )
   )

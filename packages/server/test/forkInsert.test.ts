@@ -12,7 +12,7 @@ import { SqlClient } from "effect/sql"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { pathPieces } from "../src/db/displayPath.ts"
-import { LINEAGE_CAP, shownIn, slotDeletedIn } from "../src/db/forkState.ts"
+import { shownIn, slotDeletedIn } from "../src/db/forkState.ts"
 import type { InsertBody } from "@rp/shared/messagesApi.ts"
 import { docFor } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -573,7 +573,7 @@ describe("inserting messages in forks", () => {
   )
 
   it.live(
-    "keeps every fork's view through lineage compaction past the cap",
+    "keeps every fork's view through a 70-deep chain of forks",
     () =>
       run((dataDir) =>
         Effect.gen(function* () {
@@ -581,7 +581,7 @@ describe("inserting messages in forks", () => {
           let previous = yield* t.append(t.main, null, "m0", "human")
           let current = t.main
           const expected = ["m0"]
-          for (let i = 0; i < LINEAGE_CAP + 4; i++) {
+          for (let i = 0; i < 70; i++) {
             const next = yield* t.append(current, previous, `m${i + 1}`)
             yield* t.insert(current, previous, `x${i}`)
             expected.push(`m${i + 1}`)
@@ -590,7 +590,7 @@ describe("inserting messages in forks", () => {
             previous = next
           }
           assert.deepStrictEqual(yield* t.shows(current), expected)
-          // Past the cap, a fork at a message still leaves its gap behind.
+          // Deep in the chain, a fork at a message still leaves its gap behind.
           const anchor = (yield* t.entry(previous, current)).parentSlotId!
           const atAnchor = yield* t.fork(current, anchor)
           assert.deepStrictEqual(yield* t.shows(atAnchor), expected.slice(0, -2))

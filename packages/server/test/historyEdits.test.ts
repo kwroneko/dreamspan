@@ -1014,12 +1014,13 @@ describe("history edits with inserted messages", () => {
         const without = yield* forkAt(f.main, f.first.slotId)
         let descendant = f.main
         for (let i = 0; i < 70; i++) descendant = yield* forkAt(descendant, x)
-        const [lineage] = yield* fixtureSql(
+        // Seventy forks down, nothing was copied into the deepest.
+        const [own] = yield* fixtureSql(
           config.dataDir,
-          [{ sql: "SELECT json_array_length(lineage_json) AS n FROM forks WHERE id=?", params: [descendant] }],
+          [{ sql: "SELECT count(*) AS n FROM fork_overrides WHERE fork_id=?", params: [descendant] }],
           { readOnly: true }
         )
-        assert.isBelow(lineage![0]!.n as number, 64)
+        assert.strictEqual(own![0]!.n, 0)
         assert.deepStrictEqual(yield* f.text(descendant), ["Aria meets ARIA and aria.", "Inserted Ari line"])
         assert.deepStrictEqual(yield* f.text(before), ["Aria meets ARIA and aria.", "Inserted Aria line"])
         assert.isFalse((yield* scan(f, without, search)).some((h) => h.slotId === x))

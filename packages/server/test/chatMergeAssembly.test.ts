@@ -7,6 +7,8 @@ import { importStPreset } from "../src/formats/preset.ts"
 import type { PositionedEvent } from "../src/assembler/pipeline.ts"
 import { assembleFixture, type AssemblyFixture, type FixtureMessage } from "./support/assemblySources.ts"
 import { cardDoc } from "./support/docs.ts"
+import { studyModel } from "./support/cacheStudy.ts"
+import { cachePrefixDigests } from "../src/assembler/breakpoints.ts"
 
 const transcript = ["Kai: The rain came in over the docks.", "Ana: We wait under the awning."].join("\n\n")
 
@@ -141,6 +143,37 @@ describe("merge layouts", () => {
       assert.isFalse(plain.pieces.some((p) => p.source.kind === "merge/join"))
     })
   )
+
+  for (const mode of ["parallel", "join"])
+    it.effect(`keeps byte-identical cache checkpoints as history grows (${mode})`, () =>
+      Effect.gen(function* () {
+        const fx = {
+          ...fixture([...own, join("slot-2")], [layout(mode)]),
+          model: { ...studyModel, cacheLayout: { lookback: false, summarySplit: true } }
+        }
+        const before = yield* assembleFixture(fx)
+        const after = yield* assembleFixture({
+          ...fx,
+          historyStart: before.historyStart,
+          messages: [...fx.messages, { side: "user", content: "The next morning." }]
+        })
+        const digests = cachePrefixDigests(after.request.messages)
+        const history = after.request.breakpoints.filter((b) => b.reason === "history")
+        assert.isTrue(history.some((b) => digests[b.message] === before.historyStart?.state?.cacheHistory))
+        const changed = yield* assembleFixture({
+          ...fx,
+          historyStart: before.historyStart,
+          messages: fx.messages.map((m) => (m.merge ? { ...m, content: "Kai: A different telling." } : m))
+        })
+        assert.isFalse(
+          changed.request.breakpoints.some(
+            (b) =>
+              b.reason === "history" &&
+              cachePrefixDigests(changed.request.messages)[b.message] === before.historyStart?.state?.cacheHistory
+          )
+        )
+      })
+    )
 
   for (const withPreset of [true, false])
     it.effect(

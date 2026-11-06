@@ -12,8 +12,10 @@ import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
-import { LINEAGE_CAP } from "../src/db/forkState.ts"
 import { testWorkers } from "./support/bundles.ts"
+
+/** A chain of forks deeper than tests otherwise make: fork labels have no cap. */
+const DEEP = 70
 
 const database = (dataDir = tempDir("bin"), binLimits?: BinLimits) =>
   Database.layer({
@@ -881,32 +883,35 @@ describe("the bin with inserted messages (spec/MESSAGE-INSERT.md §3.1)", () => 
     }).pipe(Effect.provide(database(dir)))
   })
 
-  it.live("restore, fork deletion, purge and eviction preserve inherited insertions after lineage compaction", () => {
-    const dir = tempDir("bin")
-    return Effect.gen(function* () {
-      const t = yield* inserting()
-      const x = yield* t.insert(t.main, t.a.slotId, "x")
-      const top = yield* t.insert(t.main, null, "top")
-      let descendant = t.main
-      for (let i = 0; i < LINEAGE_CAP; i++) descendant = yield* t.fork(descendant, t.b.slotId)
-      const gone = yield* t.del(t.main, x)
-      yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: gone.id })
-      const branch = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
-      assert.strictEqual(branch.origin.messages, 1)
-      assert.strictEqual(branch.byteSize, Buffer.byteLength("c"))
-      yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: branch.id })
-      const again = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
-      yield* t.writer.PurgeBinItem({ userId: t.userId, itemId: again.id })
-      assert.deepStrictEqual(yield* t.shows(descendant), ["top", "root", "a", "x", "b"])
-      yield* t.del(descendant, x)
-      yield* t.del(descendant, top) // evicts x's item; the intermediate forks retain its text.
-      assert.deepStrictEqual(slotRow(dir, x).contents, ["x"])
-      assert.deepStrictEqual(slotRow(dir, top).contents, ["top"])
-      assert.deepStrictEqual(yield* t.shows(descendant), ["root", "a", "b"])
-    }).pipe(
-      Effect.provide(database(dir, { deletedItems: 1, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
-    )
-  })
+  it.live(
+    "restore, fork deletion, purge and eviction preserve inherited insertions through a deep chain of forks",
+    () => {
+      const dir = tempDir("bin")
+      return Effect.gen(function* () {
+        const t = yield* inserting()
+        const x = yield* t.insert(t.main, t.a.slotId, "x")
+        const top = yield* t.insert(t.main, null, "top")
+        let descendant = t.main
+        for (let i = 0; i < DEEP; i++) descendant = yield* t.fork(descendant, t.b.slotId)
+        const gone = yield* t.del(t.main, x)
+        yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: gone.id })
+        const branch = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
+        assert.strictEqual(branch.origin.messages, 1)
+        assert.strictEqual(branch.byteSize, Buffer.byteLength("c"))
+        yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: branch.id })
+        const again = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
+        yield* t.writer.PurgeBinItem({ userId: t.userId, itemId: again.id })
+        assert.deepStrictEqual(yield* t.shows(descendant), ["top", "root", "a", "x", "b"])
+        yield* t.del(descendant, x)
+        yield* t.del(descendant, top) // evicts x's item; the intermediate forks retain its text.
+        assert.deepStrictEqual(slotRow(dir, x).contents, ["x"])
+        assert.deepStrictEqual(slotRow(dir, top).contents, ["top"])
+        assert.deepStrictEqual(yield* t.shows(descendant), ["root", "a", "b"])
+      }).pipe(
+        Effect.provide(database(dir, { deletedItems: 1, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
+      )
+    }
+  )
 
   it.live(
     "an inserted message deleted in its fork comes back in its gap, without moving the tip or making a fork",

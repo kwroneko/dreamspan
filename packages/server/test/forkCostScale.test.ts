@@ -264,6 +264,25 @@ for (const [messages, branches] of shapes) {
               }),
               3
             )
+            // What a first reply reads before its request: the summary plan, then the context.
+            yield* repeated(
+              "first-reply-reads",
+              depth,
+              Effect.andThen(
+                reader.PlanSummaries({ userId, chatId, forkId, leafSlotId: tip, reason: "reply" }),
+                reader.AssembleContext({
+                  userId,
+                  chatId,
+                  forkId,
+                  slotId: tip,
+                  versionId: fixture.main.at(-1)!.selected as VersionId,
+                  now: Date.now(),
+                  timeZone: "UTC",
+                  frozen: null
+                })
+              ),
+              3
+            )
           })
         yield* reads(shallow, 1)
         const ttft = (forkId: ForkId, depth: number) =>
@@ -289,8 +308,8 @@ for (const [messages, branches] of shapes) {
             yield* eventually(() => finished(events, generated.entry.version.id)?.status === "complete", 120_000)
           }).pipe(Effect.scoped)
         yield* ttft(shallow, 1)
-        // Each chain link is a real CreateFork. Positive state_seq ensures the lineage
-        // cannot collapse away empty bounds. Record both genealogy depth and actual length.
+        // Each chain link is a real CreateFork. Record its genealogy depth, its label's length
+        // and that nothing was copied into it (fork labels: no cap, no compaction).
         if (
           (branches === 200 && messages < 5000) ||
           (messages === 5000 && branches === 600) ||
@@ -305,9 +324,9 @@ for (const [messages, branches] of shapes) {
                 config.dataDir,
                 [
                   {
-                    sql: `SELECT json_array_length(lineage_json) AS lineage,
+                    sql: `SELECT (SELECT length(point) FROM fork_labels l WHERE l.fork_id=f.id) AS label,
               (SELECT count(*) FROM fork_overrides o WHERE o.fork_id=f.id) AS copiedOverrides,
-              (SELECT count(*) FROM fork_event_snapshots e WHERE e.fork_id=f.id) AS copiedEvents FROM forks f WHERE id=?`,
+              (SELECT count(*) FROM history_changes h WHERE h.fork_id=f.id) AS copiedReductions FROM forks f WHERE id=?`,
                     params: [parent]
                   }
                 ],
@@ -315,12 +334,9 @@ for (const [messages, branches] of shapes) {
               )
               const row = rows![0]!
               lineageRows.push({ depth, ...row })
-              assert.isAtMost(Number(row.lineage), 64)
-              if (depth === 63) assert.strictEqual(row.lineage, 64)
-              if (depth === 64) {
-                assert.strictEqual(row.lineage, 1)
-                assert.isAbove(Number(row.copiedOverrides), messages)
-              }
+              assert.strictEqual(row.label, depth + 1)
+              assert.strictEqual(row.copiedOverrides, 0)
+              assert.strictEqual(row.copiedReductions, 0)
               console.log("FORKCOST_LINEAGE", depth, JSON.stringify(row))
               const shell = yield* measure("chain-summary-computation", depth, reader.ShellLibrary({ userId }))
               const stale = shell.fresh.flatMap((c) => JSON.parse(c.forks)).length
@@ -328,7 +344,21 @@ for (const [messages, branches] of shapes) {
               console.log("FORKCOST_STALE", depth, stale)
               yield* measure("chain-summary-persistence", depth, store(shell.fresh))
             }
-            if (depth === 63) {
+            if (depth === 200) {
+              // Making a fork costs the same at every depth: no link of the chain copies.
+              const links = samples.filter((s) => s.operation === "CreateFork-chain")
+              console.log(
+                "FORKCOST_CHAIN",
+                messages,
+                branches,
+                JSON.stringify({
+                  first: median(links.filter((s) => s.depth <= 10).map((s) => s.ms)),
+                  last: median(links.filter((s) => s.depth > 190).map((s) => s.ms)),
+                  max: Math.max(...links.map((s) => s.ms))
+                })
+              )
+            }
+            if (depth === 63 || depth === 200) {
               yield* reads(parent, depth)
               yield* ttft(parent, depth)
               const afterReply = yield* measure(
@@ -339,6 +369,10 @@ for (const [messages, branches] of shapes) {
               yield* store(afterReply.fresh)
             }
           }
+          // A deep fork's first reply reads what a shallow one's does (spec/FORK-COST.md §3).
+          const firstReply = (depth: number) =>
+            median(samples.filter((s) => s.operation === "first-reply-reads" && s.depth === depth).map((s) => s.ms))
+          for (const depth of [63, 200]) assert.isBelow(firstReply(depth), 1.5 * firstReply(1) + 50)
         }
         yield* repeated("splitchat-marker", 1, writer.SetSplitChat({ userId, forkId: shallow, split: true }), 3)
         yield* repeated("splitchat-read", 1, reader.GetSplitChats({ userId, chatId, forkId: shallow }), 3)
