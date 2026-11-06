@@ -59,7 +59,7 @@ test("the header names the chat as people do and switches branches from anywhere
   await branches.click()
   const list = page.getByRole("list", { name: "Branches" })
   await expect(list.getByRole("listitem")).toHaveCount(2)
-  await list.getByRole("button", { name: /^Original/ }).click()
+  await list.getByRole("link", { name: /^Original/ }).click()
   await expect(message(page, "The fog rolls in.")).toBeVisible()
   await expect(message(page, "We wait for the tide.")).toHaveCount(0)
   await expect(branches).toHaveAccessibleName(/Branch: Original, 2 of 2, not the one the chat opens on/)

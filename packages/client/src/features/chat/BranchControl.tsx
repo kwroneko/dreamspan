@@ -18,6 +18,7 @@ import { Sheet } from "../../ui/Sheet.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { openOnPlainClick } from "../../ui/links.ts"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { sidebarCleared } from "../characters/shellData.tsx"
 import {
@@ -58,6 +59,7 @@ function BranchRow({
   label,
   shown,
   only,
+  link,
   onSwitch,
   onRename,
   onPin,
@@ -67,6 +69,8 @@ function BranchRow({
   label: string
   shown: boolean
   only: boolean
+  /** Where the row's link goes: a middle or modified click opens the branch in a new tab. */
+  link: { readonly chatId: string; readonly search: Readonly<Record<string, string>> }
   onSwitch: () => void
   onRename: (name: string) => Promise<boolean>
   onPin: () => void
@@ -79,7 +83,7 @@ function BranchRow({
       data-fork={fork.id}
       data-branch-row
       onClick={(event) => {
-        // The title line isn't inside the open button (its pencil is a button of its own).
+        // The title line isn't inside the open link (its pencil is a button of its own).
         const target = event.target as HTMLElement
         if (event.currentTarget.contains(target) && !target.closest("button, input, a")) onSwitch()
       }}
@@ -115,11 +119,15 @@ function BranchRow({
           )}
         </div>
         <Tooltip label={`Opens this branch${shown ? ", shown now" : ""}.`}>
-          <button
-            type="button"
+          <Link
+            to="/chats/$chatId"
+            params={{ chatId: link.chatId }}
+            search={link.search}
+            // Marked current only when it is the branch shown, not whenever the chat's path matches.
+            activeOptions={{ exact: true, includeSearch: true }}
             aria-current={shown || undefined}
             aria-label={`${label}${shown ? ", shown" : ""}${fork.current ? ", the chat opens here" : ""}${pinned ? ", pinned" : ""}: ${fork.tipExcerpt.slice(0, 80) || "no messages"}`}
-            onClick={onSwitch}
+            onClick={openOnPlainClick(onSwitch)}
             className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
             <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
@@ -128,7 +136,7 @@ function BranchRow({
             <span data-row-when className="block text-xs text-muted tabular-nums">
               Last message {formatMoment(branchLastAt(fork))}
             </span>
-          </button>
+          </Link>
         </Tooltip>
       </div>
       <div
@@ -225,12 +233,15 @@ function BranchList({
   const live = forks.length
   const ordered = orderBranches(forks)
   const groups = new Set(ordered.map(branchGroup))
+  // The URL names a branch only while it isn't the one the chat opens on.
+  const linkSearch = (fork: Fork) =>
+    fork.id === view.chat?.currentForkId ? keepPanel : { ...keepPanel, fork: fork.id }
   const open = (fork: Fork) => {
     onDone()
     if (fork.id === shown?.id) return
     void navigate({
       to: ".",
-      search: fork.id === view.chat?.currentForkId ? keepPanel : { ...keepPanel, fork: fork.id }
+      search: linkSearch(fork)
     })
   }
   const rename = async (fork: Fork, name: string) => {
@@ -289,6 +300,7 @@ function BranchList({
                 label={label}
                 shown={fork.id === shown?.id}
                 only={live <= 1}
+                link={{ chatId: session.id, search: linkSearch(fork) }}
                 onSwitch={() => open(fork)}
                 onRename={(name) => rename(fork, name)}
                 onPin={() => void pin(fork)}
@@ -440,6 +452,7 @@ export function BranchControl(props: BranchControlProps) {
       side="bottom"
       align="end"
       wide
+      tall
     >
       {body}
     </Popover>

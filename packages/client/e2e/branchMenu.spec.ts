@@ -137,6 +137,20 @@ test("the menu pins, renames and opens branches, and keeps unavailable footer ac
   // Grouped as the left panel groups them, the shown branch marked.
   await expect(dialog.getByRole("heading", { name: "Pinned branches" })).toBeVisible()
   await expect(list.locator("[aria-current]")).toBeInViewport()
+  // The menu takes the height below the header: at 900 px, five rows and two headings or more show in full.
+  const shownRows = await dialog.locator("[data-branch-scroll]").evaluate((scroller) => {
+    const box = scroller.getBoundingClientRect()
+    return [...scroller.querySelectorAll("[data-branch-row]")].filter((row) => {
+      const r = row.getBoundingClientRect()
+      return r.top >= box.top - 1 && r.bottom <= box.bottom + 1
+    }).length
+  })
+  expect(shownRows).toBeGreaterThanOrEqual(5)
+  const popup = (await dialog.boundingBox())!
+  expect(popup.y + popup.height).toBeLessThanOrEqual(900 - 8)
+  // Rows are links: a middle or modified click opens the branch in a new tab.
+  const href = await list.locator("[data-branch-row]:not(:has([aria-current])) a").first().getAttribute("href")
+  expect(href).toMatch(/\/chats\/[^?]+(\?fork=.+)?$/)
   const unpinned = list.locator("[data-branch-row]").filter({ hasNot: page.locator("[aria-pressed=true]") })
   const row = list.locator(`[data-fork="${await unpinned.last().getAttribute("data-fork")}"]`)
   const label = (await row.locator("[data-branch-title-line]").innerText()).replace(/opens here$/, "").trim()
@@ -152,12 +166,12 @@ test("the menu pins, renames and opens branches, and keeps unavailable footer ac
   await row.getByRole("textbox", { name: `Name of branch ${label}` }).fill("Tide pools")
   await row.getByRole("button", { name: "Save the name", exact: true }).click()
   await expect(list.getByRole("heading", { name: "Named branches" })).toBeVisible()
-  await expect(list.getByRole("button", { name: /^Tide pools/ })).toBeVisible()
+  await expect(list.getByRole("link", { name: /^Tide pools/ })).toBeVisible()
   // The footer's actions stay where they are; one that doesn't apply is greyed.
   for (const name of ["Back to the branch the chat opens on", "Go to where this branch starts"])
     await expect(dialog.getByRole("button", { name, exact: true })).toBeEnabled()
   await expect(dialog.getByRole("link", { name: "Show in the left panel" })).toBeVisible()
-  await list.getByRole("button", { name: /^Tide pools/ }).click()
+  await list.getByRole("link", { name: /^Tide pools/ }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByRole("button", { name: /^Branch: Tide pools/ })).toBeVisible()
 })
