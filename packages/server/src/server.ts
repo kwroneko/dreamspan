@@ -35,6 +35,7 @@ import {
   AuthenticatedWorkbenchApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
+  AuthenticatedShellUpdatesApi,
   CurrentUser,
   Health
 } from "@rp/shared/api.ts"
@@ -153,6 +154,12 @@ const CoreHandlers = AppCoreApi.toLayer(
 
 const Handlers = Layer.mergeAll(
   CoreHandlers,
+  AuthenticatedShellUpdatesApi.toLayer(
+    Effect.map(makeChatSetupHandlers, ({ WatchShellCards, WatchShellForks }) => ({
+      WatchShellCards,
+      WatchShellForks
+    }))
+  ),
   AuthenticatedSummaryRequestApi.toLayer(makeSummaryRequestHandlers),
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
   AuthenticatedChatMergeApi.toLayer(makeMergeHandlers),
@@ -494,7 +501,9 @@ export const serverWith = <E>(
     AppConfig | Database.Reader | Database.Writer | Providers.Providers | Summarizer | ChatHub
   >,
   summaries = Summarizer.layer,
-  formats = FormatsLive
+  formats = FormatsLive,
+  /** The decision engine: the development server may give every point another deadline (tests). */
+  decisions = DecisionEngine.layer
 ) =>
   HttpRouter.serve(
     Layer.mergeAll(
@@ -526,7 +535,7 @@ export const serverWith = <E>(
           // The refusal judge registers itself with the summary checks the summarizer runs.
           Layer.provideMerge(RefusalJudge.layer.pipe(Layer.provideMerge(SummaryChecks.layer))),
           // Decision models (spec/AGENTIC.md §7): asked only for the points a user turned on.
-          Layer.provideMerge(DecisionEngine.layer),
+          Layer.provideMerge(decisions),
           // Last, so the summarizer can tell open chats that their summaries changed.
           Layer.provideMerge(ChatHub.layer)
         )

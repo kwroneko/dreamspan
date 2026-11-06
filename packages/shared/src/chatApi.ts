@@ -514,6 +514,11 @@ export class ChatApi extends RpcGroup.make(
        * the send started (DESIGN §2.3). Posted at once, the client's Generate carries it.
        */
       round: Schema.optionalKey(Schema.Array(EntityId)),
+      /**
+       * If it's queued: `replySpeakerEntityId` and the round are Auto's picks, so the decision
+       * model's "Who replies next", when the user turned it on, may choose another for each.
+       */
+      autoPick: Schema.optionalKey(Schema.Boolean),
       composer: ComposerCommit
     },
     success: SendResult,
@@ -538,6 +543,11 @@ export class ChatApi extends RpcGroup.make(
        * server behind it. Any Send or Generate at the fork's tip ends the round already there.
        */
       round: Schema.optionalKey(Schema.Array(EntityId)),
+      /**
+       * `speakerEntityId` and the round are Auto's picks: the decision model's "Who replies
+       * next", when the user turned it on, may choose another for each (DESIGN §2.3).
+       */
+      autoPick: Schema.optionalKey(Schema.Boolean),
       composer: ComposerCommit
     },
     success: SendResult,

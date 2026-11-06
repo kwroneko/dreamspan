@@ -1730,7 +1730,9 @@ export class WriteOps extends RpcGroup.make(
        * Who replies after its reply, in turn (DESIGN §2.3): queued as the round's entries behind
        * that reply. A send at the fork's tip first drops the round already queued there.
        */
-      round: Schema.optionalKey(Schema.Array(EntityId))
+      round: Schema.optionalKey(Schema.Array(EntityId)),
+      /** The reply's speaker and the round's are Auto's picks: the decision model may change each (DESIGN §2.3). */
+      autoPick: Schema.optionalKey(Schema.Boolean)
     },
     success: Schema.Union([
       /** `queue`: the chat's queue, when the post queued the rest of a round behind it. */
@@ -2487,6 +2489,33 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * The decision model's "Who replies next" (spec/AGENTIC.md §7): the speaker of a reply Auto
+   * picked, changed before anything is written. False when the reply has text by now, or isn't
+   * Auto's pick.
+   */
+  Rpc.make("PickSpeaker", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      versionId: VersionId,
+      speakerEntityId: EntityId,
+      /** The name the model was asked about, and how sure it was. */
+      name: Schema.String,
+      confidence: Schema.Number
+    },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A reply whose speaker the decision model was to choose, once it didn't (nothing to ask, or no
+   * answer sure enough): Auto's pick stands, and the reply shows it. False when already settled.
+   */
+  Rpc.make("SettleSpeaker", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
   /** State events a decision attaches to a version of its chat, with the decision as their origin. */
   Rpc.make("ApplyDecisionEffect", {
     payload: {
@@ -2653,9 +2682,20 @@ export class ReadOps extends RpcGroup.make(
     error: StorageError
   }),
   Rpc.make("ShellCards", { payload: { userId: UserId }, success: ShellCardsRead, error: StorageError }),
+  /** Bounded post-write refreshes; null asks the caller to use the background read. */
+  Rpc.make("ShellCardsLive", {
+    payload: { userId: UserId },
+    success: Schema.NullOr(ShellCardsRead),
+    error: StorageError
+  }),
   Rpc.make("ShellForks", {
     payload: { userId: UserId, view: ShellForksView },
     success: ShellForksRead,
+    error: StorageError
+  }),
+  Rpc.make("ShellForksLive", {
+    payload: { userId: UserId, view: ShellForksView },
+    success: Schema.NullOr(ShellForksRead),
     error: StorageError
   }),
   Rpc.make("GetSummaryRevisionRequest", {

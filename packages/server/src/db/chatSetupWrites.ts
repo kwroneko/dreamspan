@@ -55,9 +55,11 @@ const queuedRewrite = (row: QueuedRow): StoredRewrite | undefined =>
         rawReasoning: null
       }
 
-const reply = (speakerEntityId: EntityId | null, direction: string | null) =>
+const reply = (speakerEntityId: EntityId | null, direction: string | null, autoPick = false) =>
   new NewVersion({
     speakerEntityId,
+    // Auto's pick: the decision model's "Who replies next" may choose another before it's written.
+    ...(autoPick && speakerEntityId !== null ? { speakerPick: { by: "auto" as const } } : {}),
     writer: "model",
     content: "",
     status: "generating",
@@ -267,25 +269,35 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         }
         const next = yield* append(
           replyParent,
-          first!.kind === "message" ? reply(replySpeaker, null) : reply(speaker, first!.direction)
+          first!.kind === "message"
+            ? reply(replySpeaker, null, first!.auto_pick === 1)
+            : reply(speaker, first!.direction, first!.auto_pick === 1)
         )
         posted.push(next.slotId)
         yield* sql`DELETE FROM queued_messages WHERE id IN ${sql.in(ids.slice(0, entries.length - waiting.length + 1))}`
         const rest = waiting.slice(1).map((entry) => entry.id)
         if (rest.length > 0)
-          yield* sql`UPDATE queued_messages SET reply_slot_id = ${next.slotId}, fork_id = ${forkId}, updated_at = ${Date.now()}
+          // A round queued before its first reply existed starts at this one.
+          yield* sql`UPDATE queued_messages SET reply_slot_id = ${next.slotId}, fork_id = ${forkId},
+              round_start_slot_id = CASE WHEN round = 1 THEN coalesce(round_start_slot_id, ${next.slotId}) END,
+              updated_at = ${Date.now()}
             WHERE id IN ${sql.in(rest)}`
         return { posted, next: { slotId: next.slotId, versionId: next.version.id as VersionId, forkId: next.forkId } }
       })
 
-    /** A round's later replies (DESIGN §2.3), each a `generate` entry waiting behind `replySlotId` in order. */
+    /**
+     * A round's later replies (DESIGN §2.3), each a `generate` entry waiting behind `replySlotId` in order.
+     * `startSlotId`: the round's first reply, null while it waits in the queue itself.
+     */
     const queueRound = (
       chatId: string,
       replySlotId: string,
       forkId: string,
       members: ReadonlyArray<EntityId>,
       seq: number,
-      at: number
+      at: number,
+      autoPick: boolean,
+      startSlotId: string | null
     ) =>
       Effect.forEach(
         members,
@@ -305,6 +317,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             direction: null,
             round: 1,
             held: 0,
+            auto_pick: autoPick ? 1 : 0,
+            round_start_slot_id: startSlotId,
             created_at: at,
             updated_at: at
           })}`,
@@ -423,7 +437,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         direction,
         commitDraft,
         rewrite,
-        round
+        round,
+        autoPick
       }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
@@ -489,12 +504,13 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
                 no_reply: kind === "message" && noReply === true ? 1 : 0,
                 direction: kind === "generate" && direction !== null && direction.trim() !== "" ? direction : null,
+                auto_pick: autoPick === true && (kind === "generate" || noReply !== true) ? 1 : 0,
                 created_at: at,
                 updated_at: at
               })} RETURNING *`
               // The rest of the round waits behind it: postQueued moves each on to the reply before.
               if (kind === "generate" || noReply !== true)
-                yield* queueRound(chatId, parentSlotId, fork.id, round ?? [], next!.n + 1, at)
+                yield* queueRound(chatId, parentSlotId, fork.id, round ?? [], next!.n + 1, at, autoPick === true, null)
               // The text waits in the queue now, and comes back to the composer if withdrawn.
               const { draft, recovered } = yield* bin.drafts.commit(userId, commitDraft, {
                 // The composer's, or the insertion editor's below the tip, whose insertion is an append
@@ -523,14 +539,23 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             version:
               kind === "message"
                 ? userMessage(content, speakerEntityId, images, rewrite)
-                : reply(speakerEntityId, direction),
+                : reply(speakerEntityId, direction, autoPick === true),
             commitDraft
           })
           // A reply posted now: the rest of its round waits for it.
           if (kind === "generate" && (round ?? []).length > 0) {
             const [next] = yield* sql<{ n: number }>`
               SELECT coalesce(max(seq), -1) + 1 AS n FROM queued_messages WHERE chat_id = ${chatId}`
-            yield* queueRound(chatId, result.slotId, result.forkId, round ?? [], next!.n, Date.now())
+            yield* queueRound(
+              chatId,
+              result.slotId,
+              result.forkId,
+              round ?? [],
+              next!.n,
+              Date.now(),
+              autoPick === true,
+              result.slotId
+            )
             return { _tag: "Posted" as const, result, queue: yield* chatQueue(sql, chatId) }
           }
           return {

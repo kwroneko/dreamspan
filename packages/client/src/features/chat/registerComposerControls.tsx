@@ -46,8 +46,10 @@ function GuidanceToggle({
 /** ▶ beside "Next": who's next replies at once, with nothing sent from you (ST's force talk). */
 function ReplyNow({ reply, replier, busy, ready, invoke }: ComposerControlContext & { readonly invoke: () => void }) {
   const view = useCast()
-  const name = nameOf(view, replier)
-  const label = name ? `${name} replies now` : "No one to reply"
+  // With the decision model choosing (DESIGN §2.3), Auto's pick is only its fallback: not named.
+  const chooses = reply.decides === true && reply.picked === null && replier !== null
+  const name = chooses ? null : nameOf(view, replier)
+  const label = chooses ? "Reply now" : name ? `${name} replies now` : "No one to reply"
   return (
     <Tooltip
       label={
@@ -55,9 +57,11 @@ function ReplyNow({ reply, replier, busy, ready, invoke }: ComposerControlContex
           ? "Choose between characters when at least two can reply."
           : busy
             ? "Wait for the current reply."
-            : name
-              ? `${label}, with nothing sent from you`
-              : label
+            : chooses
+              ? "A reply now, with nothing sent from you; the decision model chooses who."
+              : name
+                ? `${label}, with nothing sent from you`
+                : label
       }
     >
       <Button

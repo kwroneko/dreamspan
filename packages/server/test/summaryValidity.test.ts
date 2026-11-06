@@ -75,6 +75,19 @@ const run = <A, E>(body: Effect.Effect<A, E, SqlClient.SqlClient>) =>
   body.pipe(Effect.provide(writerConnection(join(tempDir("summary-validity"), "db.sqlite"))))
 
 describe("per-fork summary validity", () => {
+  it.effect("multiple new alternatives cannot hide each other's new participation", () =>
+    run(
+      Effect.gen(function* () {
+        const { sql, reached } = yield* setup
+        yield* sql`INSERT INTO entities(id, owner_user_id, kind, created_at) VALUES ('speaker', 'u', 'card', 1)`
+        const add = (id: string, ordinal: number) => sql`INSERT INTO version_records
+        (id, slot_id, ordinal, status, writer, speaker_entity_id, content, macro_mode, origin, created_at, updated_at)
+        VALUES (${id}, 'a', ${ordinal}, 'complete', 'model', 'speaker', 'x', 'verbatim', 'generated', 1, 1)`
+        assert.deepStrictEqual(yield* reached(Effect.andThen(add("new1", 1), add("new2", 2))), [...FORKS].sort())
+        assert.deepStrictEqual(yield* reached(add("new3", 3)), [])
+      })
+    )
+  )
   it.effect("a tip move walks descendant paths only when the fork has children", () =>
     run(
       Effect.gen(function* () {
@@ -112,12 +125,12 @@ describe("per-fork summary validity", () => {
         yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
           VALUES ('v-a2', 'a', 1, 'complete', 'human', 'swipe', 'verbatim', 'user_written', 1, 1)`
         assert.deepStrictEqual(yield* reached(sql`DELETE FROM versions WHERE id = 'v-a2'`), all)
-        // A retained swipe contributes participation/activity on every path through its slot.
+        // An anonymous alternative with no new cast contributes no participation/activity.
         // A new slot is on no path until a fork's tip moves to it, which reaches that fork.
         assert.deepStrictEqual(
           yield* reached(sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin,
             created_at, updated_at) VALUES ('v-a3', 'a', 2, 'complete', 'human', 'swipe', 'verbatim', 'user_written', 1, 1)`),
-          all
+          []
         )
         assert.deepStrictEqual(yield* reached(slot("d", "c", 4)), [])
         assert.deepStrictEqual(

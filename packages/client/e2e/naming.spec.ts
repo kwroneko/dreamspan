@@ -110,7 +110,10 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Send", exact: true }).click()
     await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
     const replies = page.getByRole("article", { name: "Reply" })
-    await expect(replies).toHaveCount(5)
+    // Four greetings, the message and the reply to it. A phone mounts only the messages in view
+    // and two beyond (clientperf): the reply is read at the end, the greetings from the top.
+    await expect(replies.last()).toContainText("#6")
+    await page.getByTestId("messages").evaluate((list) => list.scrollTo({ top: 0 }))
     for (let i = 0; i < previews.length; i++) await expect(replies.nth(i)).toContainText(previews[i]!)
     await page.goto(`${server().url}/chats`)
     const row = page
