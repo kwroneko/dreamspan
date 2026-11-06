@@ -6,6 +6,7 @@ import { registerDisplay } from "./registerDisplay.tsx"
 import { registerPresentation } from "./registerPresentation.tsx"
 import { registerComposerControls } from "./registerComposerControls.tsx"
 import { registerMessageActions } from "./registerMessageActions.tsx"
+import { registerCompositionActions } from "./compositionActions.tsx"
 import { registerRewrites } from "./rewrites.tsx"
 import { registerGuidanceEdit } from "./guidanceEdit.tsx"
 import { registerReasoningActions } from "./reasoningActions.tsx"
@@ -71,6 +72,7 @@ export const register = () => {
   registerPresentation()
   registerComposerControls()
   registerMessageActions()
+  registerCompositionActions()
   registerRewrites()
   registerGuidanceEdit()
   registerReasoningActions()

@@ -229,6 +229,21 @@ const paths = {
   snippet: ["m16 18 6-6-6-6", "m8 6-6 6 6 6"],
   /** The snippet brackets around a text cursor: the selection to a snippet. */
   snippetSelection: ["m17 16 5-4-5-4", "m7 8-5 4 5 4", "M10 8h4", "M10 16h4", "M12 8v8"],
+  /** A page with a plus: text added to your own version of a message. */
+  versionAdd: [
+    "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+    "M14 2v4a2 2 0 0 0 2 2h4",
+    "M9 15h6",
+    "M12 18v-6"
+  ],
+  /** The page around a text cursor: the selection added to your own version. */
+  versionAddSelection: [
+    "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+    "M14 2v4a2 2 0 0 0 2 2h4",
+    "M10 11h4",
+    "M10 19h4",
+    "M12 11v8"
+  ],
   /** Opens something large: a field over the page. */
   expand: ["M15 3h6v6", "M9 21H3v-6", "m21 3-7 7", "m3 21 7-7"],
   guidance: [

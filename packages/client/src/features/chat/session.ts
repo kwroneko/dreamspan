@@ -26,6 +26,7 @@ import type { Cast, CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { ComposerChoice } from "@rp/shared/composerApi.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { NotFound } from "@rp/shared/errors.ts"
+import type { Draft } from "@rp/shared/drafts.ts"
 import type {
   BranchSwitch,
   ChatEvent,
@@ -148,6 +149,8 @@ type LiveDelta = { readonly offset: number; readonly text: string; readonly repl
  */
 export type ChatSeed = Pick<ChatView, "chat" | "forkId" | "leafSlotId" | "entries" | "older" | "newer" | "cast">
 const seeds = new Map<ChatId, ChatSeed>()
+/** Every open view of a chat in this tab: the workbench can show one chat in two frames. */
+const viewsOf = new Map<ChatId, Set<ChatSession>>()
 export const seedChat = (chatId: ChatId, seed: ChatSeed) => void seeds.set(chatId, seed)
 
 export class ChatSession {
@@ -234,6 +237,9 @@ export class ChatSession {
     const seed = requestedFork === null ? seeds.get(chatId) : undefined
     if (seed !== undefined)
       this.view = { ...this.view, ...seed, follow: seed.newer === null, opened: 1, loading: false }
+    const peers = viewsOf.get(chatId) ?? new Set<ChatSession>()
+    peers.add(this)
+    viewsOf.set(chatId, peers)
   }
 
   // --- For React (useSyncExternalStore)
@@ -634,6 +640,7 @@ export class ChatSession {
 
   dispose() {
     this.disposed = true
+    viewsOf.get(this.chatId)?.delete(this)
     this.positionGeneration++
     this.castBatch = null
     // Text typed in a message editor and not saved yet goes to the server on the way out.
@@ -839,12 +846,45 @@ export class ChatSession {
     return editor
   }
 
-  closeEditor(editor: MessageDraft) {
+  closeEditor(editor: MessageDraft, share = true) {
     const key = editorKey(editor.target)
     if (this.editors.get(key) !== editor) return
     this.editors.delete(key)
+    this.editorSubscriptions.get(key)?.()
+    this.editorSubscriptions.delete(key)
     if (editor.target._tag === "Edit") this.editSlots.delete(editor.target.versionId)
     this.editorsChanged()
+    // Saved as a version or cancelled: the chat's other views close it too.
+    if (share) for (const peer of this.peers(editor.target)) peer.peerClosed(key)
+  }
+
+  // --- The user's own version of a message (composition.ts), in every view of the chat.
+
+  /** The chat's other views in this tab (the workbench's frames), for the composition's draft. */
+  private peers(target: MessageDraftTarget): ReadonlyArray<ChatSession> {
+    if (target._tag !== "Write") return []
+    return [...(viewsOf.get(this.chatId) ?? [])].filter((peer) => peer !== this && !peer.disposed)
+  }
+
+  /** The server's answer to this view's composition: its other views show the same text. */
+  shareDraft(target: MessageDraftTarget, draft: Draft) {
+    for (const peer of this.peers(target)) peer.peerDraft(target, draft)
+  }
+
+  private peerDraft(target: MessageDraftTarget, draft: Draft) {
+    const key = editorKey(target)
+    const open = this.editors.get(key)
+    if (open) return open.adopt(draft)
+    if (draft.status !== "active") return
+    const editor = new MessageDraft(this, this.userId, target, draft.content, draft)
+    editor.mirror = true
+    this.trackEditor(editor)
+    this.editorsChanged()
+  }
+
+  private peerClosed(key: MessageEditorKey) {
+    const open = this.editors.get(key)
+    if (open?.settled) this.closeEditor(open, false)
   }
 
   private async refreshEditors() {

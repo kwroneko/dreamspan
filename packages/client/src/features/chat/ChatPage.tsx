@@ -52,6 +52,7 @@ import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
 import { boundaryIndex, placeOf } from "./summaryBoundary.ts"
+import { LET_GO } from "./composition.ts"
 
 interface ReadingPosition {
   key: string
@@ -339,12 +340,15 @@ function MessageList({
     }
     list.addEventListener("wheel", onWheel, { passive: true })
     list.addEventListener("touchmove", letGo, { passive: true })
+    // A control inside asks, before its action changes the length of what's above it (composition.ts).
+    list.addEventListener(LET_GO, letGo)
     list.addEventListener("keydown", onKey)
     list.addEventListener("pointerdown", onPointerDown)
     list.addEventListener("scroll", onScroll, { passive: true, capture: true })
     return () => {
       list.removeEventListener("wheel", onWheel)
       list.removeEventListener("touchmove", letGo)
+      list.removeEventListener(LET_GO, letGo)
       list.removeEventListener("keydown", onKey)
       list.removeEventListener("pointerdown", onPointerDown)
       list.removeEventListener("scroll", onScroll, { capture: true })

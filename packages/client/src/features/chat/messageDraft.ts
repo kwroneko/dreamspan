@@ -16,6 +16,7 @@ import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, dropCopy, keepCopy, makeCopy, pendingOf, type ReplayConflict } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"
+import { appended } from "./composition.ts"
 
 /** How long typing pauses before the text is saved. */
 const SAVE_DELAY_MS = 400
@@ -72,6 +73,8 @@ export interface MessageDraftView {
    */
   readonly images?: MessageImages | undefined
   readonly imagesBusy?: boolean
+  /** Text just added to the end (`append`): the box marks it briefly and scrolls to it. */
+  readonly added?: { readonly at: number; readonly length: number } | undefined
 }
 
 /** What the text a save sends was typed on (§3.10, "a field's base"): the draft as the tab had it. */
@@ -237,6 +240,7 @@ export class MessageDraft {
         this.sending.delete(copy)
         if (replayed.ok) {
           this.draft = replayed.value
+          this.share(replayed.value)
           this.opened = true
           await this.acknowledgeBase(copy, save.payload, replayed.value)
           if (this.pending === copy && this.local === copy.content) {
@@ -378,6 +382,50 @@ export class MessageDraft {
     this.timer = setTimeout(() => void this.save(), SAVE_DELAY_MS)
   }
 
+  /**
+   * Adds text to the end, after a blank line (the composition, composition.ts): once the saved
+   * text is read, so it's added to what's there. Saved as typing is.
+   */
+  async append(text: string) {
+    await this.open()
+    if (!this.opened) return
+    const { next, at, length } = appended(this.view.text, text)
+    this.setText(next)
+    this.set({ added: { at, length } })
+  }
+
+  /**
+   * The draft as another view of the same chat in this tab saved it (the workbench's two
+   * frames, session.ts `shareDraft`): shown here unless text typed here isn't saved yet,
+   * whose own save then meets it as any other tab's text.
+   */
+  adopt(draft: Draft) {
+    if (this.local !== null || this.pending !== null) return
+    if (this.draft !== null && this.draft.id === draft.id && this.draft.rowVersion >= draft.rowVersion) return
+    this.draft = draft
+    this.opened = true
+    this.base = baseOf(draft)
+    this.observedDeletion = null
+    this.set({
+      loading: false,
+      text: draft.status === "active" ? draft.content : this.view.text,
+      images: draft.status === "active" ? draft.images : this.view.images
+    })
+  }
+
+  /** The server's answer, for the chat's other views (a session without them: none to tell). */
+  private share(draft: Draft) {
+    this.session.shareDraft?.(this.target, draft)
+  }
+
+  /** Opened because another view of the chat opened it: it doesn't take focus here. */
+  mirror = false
+
+  /** Nothing typed here waits for the server. */
+  get settled() {
+    return this.local === null && this.pending === null
+  }
+
   /** Saves what was typed now. Saves run one at a time, after a replay. */
   async save(): Promise<void> {
     this.cancelTimer()
@@ -403,6 +451,7 @@ export class MessageDraft {
       }
       // The server has exactly the text sent: what's typed from it is on the draft as it is now.
       this.draft = result.value
+      this.share(result.value)
       const exact = await this.acknowledgeBase(copy, payload, result.value)
       if (this.local === sent && this.view.images === sentImages) {
         this.base = baseOf(result.value)
@@ -493,6 +542,7 @@ export class MessageDraft {
         return false
       }
       this.draft = result.value
+      this.share(result.value)
       this.base = baseOf(result.value)
       // Typing during the restore stays in the box, with its browser copy on the new base.
       if (this.local !== null) this.keep(this.local)
@@ -540,6 +590,7 @@ export class MessageDraft {
     )
     if (result.ok) {
       this.draft = result.value
+      this.share(result.value)
       // Our own acknowledged Cancel precedes this later typing. Refile it on that
       // acknowledged deletion, so recovery never confuses it with the cancelled text.
       if (this.local !== null) {
