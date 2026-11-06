@@ -289,7 +289,8 @@ for (const width of [1440, 390])
       results.branches = await measure(
         branchRow.getByRole("button", { name: /^Delete/ }),
         branchRow,
-        branchRow.getByRole("button").first()
+        // Its text block: the title line leads with the name, its pencil after it.
+        branchRow.locator("[data-row-text]")
       )
       await shot("branch-picker")
       await page.keyboard.press("Escape")
