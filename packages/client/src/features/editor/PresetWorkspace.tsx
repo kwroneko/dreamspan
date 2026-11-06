@@ -87,7 +87,7 @@ export function PresetWorkspace({
     // The chat it's opened from stays open beside its editor.
     if (tab) workbench?.pin(tab.tabId)
     if (compact) onOpen?.()
-    if (workbench) workbench.open(href(ref, focus))
+    if (workbench) workbench.openIn(tab ? workbench.frameOf(tab.tabId) : undefined, href(ref, focus))
     else void navigate({ href: href(ref, focus) })
   }
   // A link from before tabs (`?editor=`): the editor opens in its own tab beside the chat.

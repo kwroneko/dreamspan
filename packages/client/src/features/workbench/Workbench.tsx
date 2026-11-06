@@ -25,7 +25,7 @@ import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { useCaller } from "../editor/caller.ts"
 import { Away } from "../../ui/away.ts"
-import { Icon } from "../../ui/Icon.tsx"
+import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { ContextMenu, Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { UnsavedScope, UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
@@ -179,7 +179,8 @@ function useLinkGestures(store: WorkbenchStore) {
       event.preventDefault()
       // Alt-click: VS Code's Open to the Side, where frames fit side by side.
       if (event.altKey && matchMedia(WIDE).matches) store.openBeside(href)
-      else store.open(href)
+      // A link inside a frame opens in that frame; outside (the sidebar), wherever it's open.
+      else store.openIn(anchor.closest<HTMLElement>("[data-frame]")?.dataset["frame"], href)
     }
     const beside = (event: Event) => {
       if (event instanceof CustomEvent && typeof event.detail === "string") store.openBeside(event.detail)
@@ -848,19 +849,31 @@ function TabActions({
   const right = frame.tabs.slice(index + 1).filter(closable).length
   const saved = frame.tabs.filter((t) => closable(t) && !store.isUnsaved(t.id)).length
   const all = frame.tabs.filter(closable).length
-  const moves: Array<{ to: string | undefined; label: string; description: string }> = [
+  const moves: Array<{ to: string | undefined; icon: IconName; label: string; description: string }> = [
     {
       to: near.left,
+      icon: "move-left",
       label: "Move to the frame on the left",
       description: "Moves this tab into the frame on the left."
     },
     {
       to: near.right,
+      icon: "move-right",
       label: "Move to the frame on the right",
       description: "Moves this tab into the frame on the right."
     },
-    { to: near.up, label: "Move to the frame above", description: "Moves this tab into the frame above." },
-    { to: near.down, label: "Move to the frame below", description: "Moves this tab into the frame below." }
+    {
+      to: near.up,
+      icon: "move-up",
+      label: "Move to the frame above",
+      description: "Moves this tab into the frame above."
+    },
+    {
+      to: near.down,
+      icon: "move-down",
+      label: "Move to the frame below",
+      description: "Moves this tab into the frame below."
+    }
   ]
   const splitWith = (direction: Direction) => {
     if (!tab) return
@@ -911,7 +924,7 @@ function TabActions({
           ? [
               <MenuItem
                 key={move.label}
-                icon="right"
+                icon={move.icon}
                 description={move.description}
                 onClick={() => store.move(tab.id, move.to!)}
               >

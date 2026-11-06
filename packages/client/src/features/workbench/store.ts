@@ -204,13 +204,17 @@ export class WorkbenchStore {
     if (this.applying) return false
     const tab = findTab(this.layout, tabId)
     if (!tab || action !== "PUSH" || itemKey(href) === itemKey(tab.href)) return false
-    // A preview tab in the focused frame goes there itself, as navigating did before tabs
-    // (fromTab), unless another tab has that item open.
-    const elsewhere = allTabs(this.layout).some((t) => itemKey(t.href) === itemKey(href))
-    if (tab.preview && !elsewhere && frameOfTab(this.layout, tabId)?.id === focusedFrame(this.layout).id) return false
+    // A link in a tab opens in that tab's frame, never in another (VS Code opens in the group
+    // clicked in): another frame showing the item keeps its place and scroll.
+    const frame = frameOfTab(this.layout, tabId)
+    if (!frame) return false
+    // A preview tab goes there itself, as navigating did before tabs (fromTab), unless another
+    // tab of its frame has that item open.
+    const twin = frame.tabs.some((t) => itemKey(t.href) === itemKey(href))
+    if (tab.preview && !twin) return false
     // The view navigated to that URL whole: its sidebar keys are what the sidebar shows next.
     this.shellChange = shellDiff(null, href)
-    this.open(href, { state: clean(state) })
+    this.open(href, { state: clean(state), frame: frame.id })
     this.shellChange = null
     return true
   }
@@ -399,6 +403,18 @@ export class WorkbenchStore {
   }
   move(tabId: string, frameId: string, index?: number) {
     this.set(moveTab(this.layout, tabId, frameId, index, itemKey))
+  }
+  /**
+   * Opens an item from inside a frame (a link in one of its tabs): in that frame, never another,
+   * so a frame showing the same item elsewhere keeps its place. Unknown frames open as `open`.
+   */
+  openIn(frameId: string | undefined, href: string, options: OpenOptions = {}) {
+    const frame = frames(this.layout.root).find((f) => f.id === frameId)?.id
+    return this.open(href, { ...options, ...(frame ? { frame } : {}) })
+  }
+  /** The frame a tab is in. */
+  frameOf(tabId: string) {
+    return frameOfTab(this.layout, tabId)?.id
   }
   /**
    * Opens an item to the side (VS Code's Open to the Side): in the frame on the right of the

@@ -342,6 +342,91 @@ test("open beside, one chat in two frames, and a tab dropped on an edge", async 
   await expect(said(page, "The tide is out")).toHaveCount(2)
   await expect(said(page, "The lamp turns")).toBeVisible()
   if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "three-frames")
+
+  // The lower frame's tab menu: its moves (up, right) each show an arrow pointing that way.
+  await frames.nth(1).locator("[data-tab] [role=tab]").first().click({ button: "right" })
+  const menu = page.getByRole("menu", { name: /^Actions for / })
+  const arrow = (name: string) =>
+    menu
+      .getByRole("menuitem", { name: new RegExp(`^${name}`) })
+      .locator("svg.menu-mark path")
+      .last()
+  await expect(arrow("Move to the frame above")).toHaveAttribute("d", "M12 16V8")
+  await expect(arrow("Move to the frame on the right")).toHaveAttribute("d", "m12 16 4-4-4-4")
+  await expect(menu.getByRole("menuitem", { name: /^Move to the frame on the left/ })).toHaveCount(0)
+  await shot(page, "tab-menu-moves-1440-light")
+  if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "tab-menu-moves")
+  await page.keyboard.press("Escape")
+})
+
+// A link in a frame opens in that frame (VS Code opens in the group clicked in): a frame showing
+// the same item elsewhere keeps its place, scroll and focus (owner, 2026-11-06: a character
+// tile in a Characters tab scrolled the chat in the other frame).
+test("links open in their own frame, never another frame's tab of the item", async ({ page }) => {
+  test.setTimeout(150_000)
+  const frames = page.locator("[data-frame]")
+  const [left, right] = [frames.nth(0), frames.nth(1)]
+  await fresh(page, 1440)
+  // Home in two frames; Mira's tile in the left opens her latest chat there.
+  await page.goto(`${server().url}/`)
+  await expect(page.getByRole("main").getByRole("link", { name: "Open Mira", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Split right" }).click()
+  await expect(frames).toHaveCount(2)
+  await left.getByRole("link", { name: "Open Mira", exact: true }).click()
+  await expect(left.getByText("The tide is out")).toBeVisible()
+  // The same tile in the right frame opens it there too: the left chat keeps its place.
+  await right.getByRole("link", { name: "Open Mira", exact: true }).click()
+  await expect(right.getByText("The tide is out")).toBeVisible()
+  await expect(left.getByText("The tide is out")).toBeVisible()
+  await expect(right).toHaveAttribute("data-focused", "")
+  await expect(frames).toHaveCount(2)
+
+  // A library entry the same way: the editor open on the left, its row clicked on the right.
+  await fresh(page, 1440)
+  await page.goto(`${server().url}/library?kind=preset`)
+  const edit = (frame: typeof left) =>
+    frame.getByRole("list", { name: "Presets" }).getByRole("link", { name: "Edit Harbour preset", exact: true })
+  await expect(edit(page.locator("[data-frame]").first())).toBeVisible()
+  await page.getByRole("button", { name: "Split right" }).click()
+  await expect(frames).toHaveCount(2)
+  await edit(left).click()
+  await expect(left.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
+  await edit(right).click()
+  await expect(right.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
+  await expect(left.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
+  await expect(right).toHaveAttribute("data-focused", "")
+})
+
+// A character tile's Open beside stays while it's pointed at (owner, 2026-11-06: it vanished
+// after a few seconds), and the tile's right-click menu matches a chat row's.
+test("a character tile keeps Open beside while hovered, and has a chat row's menu", async ({ page }) => {
+  test.setTimeout(120_000)
+  await fresh(page, 1440)
+  await page.goto(`${server().url}/`)
+  const main = page.getByRole("main")
+  const tile = main.getByRole("link", { name: "Open Wren", exact: true })
+  await expect(tile).toBeVisible()
+  const beside = main.getByRole("button", { name: "Open Wren beside", exact: true })
+  await tile.hover()
+  await beside.hover()
+  await expect(beside).toHaveCSS("opacity", "1")
+  // Held past its tooltip opening: still shown, on its own backing over the portrait (the
+  // tooltip's open state used to swap the backing for the faint hover tint).
+  await page.waitForTimeout(6000)
+  await expect(page.getByText("Opens it in the frame on the right", { exact: false })).toBeVisible()
+  await expect(beside).toHaveCSS("opacity", "1")
+  await expect(beside).toBeVisible()
+  expect(await beside.evaluate((el) => getComputedStyle(el).backgroundColor)).toMatch(/\/ 0\.85\)$/)
+  await shot(page, "tile-beside-held-1440-light")
+
+  await tile.click({ button: "right" })
+  const menu = page.getByRole("menu", { name: "Actions for Wren" })
+  for (const item of ["Open", "Open beside", "Open in a new browser tab"])
+    await expect(menu.getByRole("menuitem", { name: item, exact: true })).toBeVisible()
+  if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "tile-menu")
+  await menu.getByRole("menuitem", { name: "Open beside", exact: true }).click()
+  await expect(page.locator("[data-frame]")).toHaveCount(2)
+  await expect(page.locator("[data-frame]").nth(1).getByText("The lamp turns")).toBeVisible()
 })
 
 // A tab's right-click menu (the frame's ⋯ has the same): pin, the Close variants, Reopen
