@@ -29,6 +29,7 @@ import { HistoryIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { useComposerTurn } from "./composerTurn.ts"
 import { StripRow } from "./nextReplyStrip.tsx"
+import { NO_ONE } from "./ReplyFrom.tsx"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
@@ -314,8 +315,8 @@ export function Composer({
   const pickedReply = choice.replyFrom !== null && faces.includes(choice.replyFrom) ? choice.replyFrom : null
   const hasImages = (attachmentInput?.count ?? 0) > 0
   const replyPlan = useMemo(
-    () => planReply(cast, turnEntries, speaker, pickedReply, draftText, hasImages),
-    [cast, turnEntries, speaker, pickedReply, draftText, hasImages]
+    () => planReply(cast, turnEntries, speaker, pickedReply, draftText, hasImages, choice.noReplies),
+    [cast, turnEntries, speaker, pickedReply, draftText, hasImages, choice.noReplies]
   )
   const { next, replier } = replyPlan
   const replierName = nameOf(castView, replier)
@@ -432,7 +433,15 @@ export function Composer({
       await captured?.begin(from)
       let accepted = false
       // The text submitted decides, should it differ from the box the preview read.
-      const plan = planReply(cast, turnEntries, speaker, pickedReply, from.text, (captured?.images.length ?? 0) > 0)
+      const plan = planReply(
+        cast,
+        turnEntries,
+        speaker,
+        pickedReply,
+        from.text,
+        (captured?.images.length ?? 0) > 0,
+        choice.noReplies
+      )
       try {
         const { sent, outcome, draft, recovered } = await session.send(
           from.text,
@@ -512,7 +521,7 @@ export function Composer({
   const replies = replyPlan.round.length > 0 ? "reply" : "replies"
   const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} ${replies}` : "Send"
   const sendHint = hasText
-    ? `${sendLabel}${roundNames ? `, then ${roundNames} ${replies}` : ""} (${submitHint})`
+    ? `${sendLabel}${roundNames ? `, then ${roundNames} ${replies}` : choice.noReplies ? ", with no reply" : ""} (${submitHint})`
     : roundNames
       ? `${roundNames} ${replies} now, with nothing sent from you`
       : "Type a message to send"
@@ -579,8 +588,19 @@ export function Composer({
       next,
       round: replyPlan.round,
       picked: pickedReply,
+      noReplies: choice.noReplies,
       loading: turnEntries === null,
-      onPick: (id) => void choices.change({ replyFrom: id }).then(report)
+      // Auto and No one stay until another choice; a character is picked for one reply on top.
+      onPick: (pick) =>
+        void choices
+          .change(
+            pick === NO_ONE
+              ? { replyFrom: null, noReplies: true }
+              : pick === null
+                ? { replyFrom: null, noReplies: false }
+                : { replyFrom: pick }
+          )
+          .then(report)
     },
     leaf,
     leafGenerating,

@@ -260,6 +260,7 @@ export const makeWriteHandlers = (bin: Bin) =>
         guidance,
         speakerEntityId,
         replyFromEntityId,
+        noReplies,
         consumeReplyFromEntityId
       }) =>
         drafts
@@ -267,6 +268,7 @@ export const makeWriteHandlers = (bin: Bin) =>
             ...(guidance === undefined ? {} : { guidance }),
             ...(speakerEntityId === undefined ? {} : { speakerEntityId }),
             ...(replyFromEntityId === undefined ? {} : { replyFromEntityId }),
+            ...(noReplies === undefined ? {} : { noReplies }),
             ...(consumeReplyFromEntityId === undefined ? {} : { consumeReplyFromEntityId })
           })
           .pipe(transaction("SetComposerChoice")),

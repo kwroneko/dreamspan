@@ -233,9 +233,9 @@ for (const width of [1440, 390])
       await expect(page.getByRole("button", { name: "Hide countdown", exact: true })).toHaveCount(0)
       await expect(modelChip(page)).toHaveAccessibleName(/^Model: Synthetic QA · .+\. Change the model$/)
       await expect(presetChip(page)).toHaveAccessibleName(presetName("Default (built-in)"))
-      // Auto, then the five characters who can reply.
+      // Auto, No one, then the five characters who can reply.
       await nextChip(page).click()
-      await expect(choices(page, "Who replies next").getByRole("radio")).toHaveCount(6)
+      await expect(choices(page, "Who replies next").getByRole("radio")).toHaveCount(7)
       if (width === 390 && process.env.RP_SCREENS) {
         mkdirSync(process.env.RP_SCREENS, { recursive: true })
         await page.screenshot({ path: `${process.env.RP_SCREENS}/group-options-${width}-${theme}.png` })

@@ -20,7 +20,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel, openSummarySettings } from "./support/panel.ts"
 import { showAppNavigation, hideAppNavigation } from "./support/appMenu.ts"
 import { level1 } from "./support/summaries.ts"
-import { modelChip, presetChip } from "./support/strip.ts"
+import { modelChip, nextChip, presetChip } from "./support/strip.ts"
 import { portraitPng } from "./support/portrait.ts"
 import { writeScaleFolder } from "./support/stScaleFolder.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
@@ -1429,6 +1429,27 @@ test.describe("synthetic library and every app surface", () => {
             await page.keyboard.press("Escape")
           }
           await audit("lockchat-locked-chips", '[role="group"][aria-label="Next reply"]')
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_NOONE_ONLY === "1") {
+          // Next's No one: the Who replies next menu with its row, and the pill once it's chosen.
+          await go("noone-chips", `/chats/${chatId}`)
+          await audit("noone-chips", '[role="group"][aria-label="Next reply"]')
+          await nextChip(page).click()
+          const menu = page.getByRole("radiogroup", { name: "Who replies next", exact: true })
+          await menu.getByRole("radio", { name: "No one", exact: true }).hover()
+          await page.screenshot({ path: join(work, `${width}-${theme}-noone-menu.png`), animations: "disabled" })
+          await audit("noone-menu", '[role="dialog"]')
+          await menu.getByRole("radio", { name: "No one", exact: true }).click()
+          await expect(nextChip(page)).toHaveAccessibleName(
+            "Next: no one, until you choose otherwise. Choose who replies next"
+          )
+          await page.mouse.move(0, 0)
+          await page.screenshot({ path: join(work, `${width}-${theme}-noone-pill.png`), animations: "disabled" })
+          await audit("noone-pill", '[role="group"][aria-label="Next reply"]')
+          await nextChip(page).click()
+          await page.screenshot({ path: join(work, `${width}-${theme}-noone-chosen-menu.png`), animations: "disabled" })
+          await audit("noone-chosen-menu", '[role="dialog"]')
           return
         }
         if (process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1") {

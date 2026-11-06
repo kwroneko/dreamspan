@@ -59,6 +59,8 @@ interface DraftRow {
   readonly speaker_entity_id: string | null
   readonly reply_from_entity_id: string | null
   readonly guidance: number
+  /** 1 while the composer's Next is No one. */
+  readonly no_replies: number
 }
 
 /** The draft a write took its text from: by its id, in the session it was typed in, with exactly that text. */
@@ -1095,7 +1097,8 @@ export const makeDraftStore = (
       // explicit reset to turn order (null), as switching branches keeps their text.
       if (from !== null && here === null)
         yield* sql`UPDATE drafts SET speaker_entity_id = ${from.speaker_entity_id},
-          reply_from_entity_id = ${from.reply_from_entity_id}, guidance = ${from.guidance} WHERE id = ${opened.id}`
+          reply_from_entity_id = ${from.reply_from_entity_id}, guidance = ${from.guidance},
+          no_replies = ${from.no_replies} WHERE id = ${opened.id}`
       return toDraft(from !== null && here === null ? { ...opened, guidance: from.guidance } : opened, recovered)
     })
 
@@ -1104,7 +1107,8 @@ export const makeDraftStore = (
       draftId: row.id,
       guidance: row.guidance === 1,
       speakerEntityId: row.speaker_entity_id as EntityId | null,
-      replyFromEntityId: row.reply_from_entity_id as EntityId | null
+      replyFromEntityId: row.reply_from_entity_id as EntityId | null,
+      noReplies: row.no_replies === 1
     })
 
   /** The speaker and reply choice of a composer draft of the user's chat. */
@@ -1127,6 +1131,7 @@ export const makeDraftStore = (
       readonly speakerEntityId?: EntityId | null
       readonly replyFromEntityId?: EntityId | null
       readonly guidance?: boolean
+      readonly noReplies?: boolean
       readonly consumeReplyFromEntityId?: EntityId
     }
   ) =>
@@ -1149,9 +1154,16 @@ export const makeDraftStore = (
             ? draft.reply_from_entity_id
             : change.replyFromEntityId
       const guidance = change.guidance === undefined ? draft.guidance : Number(change.guidance)
-      yield* sql`UPDATE drafts SET speaker_entity_id = ${speaker}, reply_from_entity_id = ${replyFrom}, guidance = ${guidance}
-        WHERE id = ${draft.id}`
-      return choiceOf({ ...draft, speaker_entity_id: speaker, reply_from_entity_id: replyFrom, guidance })
+      const noReplies = change.noReplies === undefined ? draft.no_replies : Number(change.noReplies)
+      yield* sql`UPDATE drafts SET speaker_entity_id = ${speaker}, reply_from_entity_id = ${replyFrom}, guidance = ${guidance},
+        no_replies = ${noReplies} WHERE id = ${draft.id}`
+      return choiceOf({
+        ...draft,
+        speaker_entity_id: speaker,
+        reply_from_entity_id: replyFrom,
+        guidance,
+        no_replies: noReplies
+      })
     })
 
   /**

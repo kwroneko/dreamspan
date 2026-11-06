@@ -260,17 +260,25 @@ export const nextInTurn = (
 
 /** One decision for the preview, immediate sends and queued sends (`input`: the text being
  * sent, so the preview follows the box as Send does). A null speaker
- * is a valid unnamed reply, so disabling automatic replies needs an explicit flag. */
+ * is a valid unnamed reply, so disabling automatic replies needs an explicit flag.
+ * `noReplies`: Next is No one (DESIGN §2.3). A message sent gets no reply unless a pick names
+ * one; asking with nothing typed (Reply now, an empty Send) gets Auto's pick, one reply. */
 export const planReply = (
   cast: Cast | null,
   entries: ReadonlyArray<PathEntry> | null,
   speaker: EntityId | null,
   picked: EntityId | null,
   input: string | null = null,
-  hasImages = false
+  hasImages = false,
+  noReplies = false
 ) => {
   const policy = replyPolicyOf(cast)
   const next = entries === null ? null : nextInTurn(cast, entries, speaker, input, hasImages)
+  if (noReplies && picked === null) {
+    const posted = typedText(input) || hasImages
+    const asked = posted ? null : (next?.id ?? null)
+    return { next, replier: asked, round: [], reply: asked !== null }
+  }
   return {
     next,
     replier: picked ?? next?.id ?? null,

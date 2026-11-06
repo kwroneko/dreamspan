@@ -11,7 +11,8 @@ const choice = (draftId: string, speaker: string | null = null, guidance = false
     draftId,
     guidance,
     speakerEntityId: speaker === null ? null : id(speaker),
-    replyFromEntityId: null
+    replyFromEntityId: null,
+    noReplies: false
   })
 
 const fixture = () => {
