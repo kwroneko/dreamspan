@@ -26,8 +26,9 @@ import { useSession } from "../../session.ts"
 import { useCaller } from "../editor/caller.ts"
 import { Away } from "../../ui/away.ts"
 import { Icon } from "../../ui/Icon.tsx"
-import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
+import { ContextMenu, Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
+import { UnsavedScope, UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
 import { Tooltip, IconButton } from "../../ui/Tooltip.tsx"
 import { CenterPage } from "../shell.tsx"
 import { defaultTitle, tabKind } from "./kinds.ts"
@@ -42,7 +43,8 @@ import {
   neighbours,
   type Node,
   type Split,
-  type Tab
+  type Tab,
+  type Direction
 } from "./model.ts"
 import { deviceId } from "./device.ts"
 import { WorkbenchStore } from "./store.ts"
@@ -120,12 +122,14 @@ function WorkbenchFor({ userId, saved }: { userId: string; saved: unknown }) {
       })
   }
   const shownFrame = focusedFrame(layout)
+  // A maximized frame shows alone; the others keep their tabs (VS Code's Maximize Editor Group).
+  const maximized = layout.maximized ? frames(layout.root).find((f) => f.id === layout.maximized) : undefined
   return (
     <WorkbenchContext value={{ store, sideHost }}>
       <div className="flex min-h-0 min-w-0 flex-1">
         <div data-workbench className="flex min-h-0 min-w-0 flex-1 flex-col">
           {wide ? (
-            <NodeView node={layout.root} layout={layout} store={store} slotRef={slotRef} />
+            <NodeView node={maximized ?? layout.root} layout={layout} store={store} slotRef={slotRef} />
           ) : (
             <PhoneFrame frame={shownFrame} layout={layout} store={store} slotRef={slotRef} />
           )}
@@ -134,7 +138,8 @@ function WorkbenchFor({ userId, saved }: { userId: string; saved: unknown }) {
       </div>
       {allTabs(layout).map((tab) => {
         const frame = frameOfTab(layout, tab.id)
-        const shown = frame?.active === tab.id && (wide || frame.id === shownFrame.id)
+        const shown =
+          frame?.active === tab.id && (wide ? !maximized || frame.id === maximized.id : frame.id === shownFrame.id)
         return (
           <TabHost
             key={tab.id}
@@ -271,11 +276,24 @@ function TabHost({ tab, store, target }: { tab: Tab; store: WorkbenchStore; targ
     container.addEventListener("input", edit)
     return () => container.removeEventListener("input", edit)
   }, [container, store, tab.id])
+  // What its editors haven't saved yet (their revision state), for the tab's dot.
+  const [unsaved] = useState(() => new UnsavedTracker())
+  const dirty = useSyncExternalStore(unsaved.subscribe, unsaved.snapshot).size > 0
+  useEffect(() => store.setUnsaved(tab.id, dirty), [store, tab.id, dirty])
+  useEffect(
+    () => () => {
+      unsaved.dispose()
+      store.setUnsaved(tab.id, false)
+    },
+    [unsaved, store, tab.id]
+  )
   return createPortal(
     <TabContext value={{ tabId: tab.id, store }}>
-      <Away value={target === null}>
-        <RouterProvider router={router} />
-      </Away>
+      <UnsavedScope tracker={unsaved} tab={tab.id}>
+        <Away value={target === null}>
+          <RouterProvider router={router} />
+        </Away>
+      </UnsavedScope>
     </TabContext>,
     container
   )
@@ -586,7 +604,11 @@ function TabStrip({
         role="tablist"
         aria-label="Open tabs"
         data-layout-audit-ignore="inset: tabs fill the strip edge to edge, as an editor's tab bar does"
-        className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none]"
+        onWheel={(event) => {
+          // A mouse wheel scrolls the strip sideways, as an editor's tab bar does.
+          if (event.deltaY !== 0 && event.deltaX === 0) event.currentTarget.scrollLeft += event.deltaY
+        }}
+        className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] hover:[scrollbar-width:thin]"
       >
         {tabs.map((tab, index) => {
           const owner = frameOfTab(layout, tab.id)
@@ -595,6 +617,8 @@ function TabStrip({
             <TabButton
               key={tab.id}
               tab={tab}
+              frame={owner ?? frame}
+              layout={layout}
               store={store}
               active={active}
               highlighted={active && (focused || phone)}
@@ -608,7 +632,21 @@ function TabStrip({
         {over === tabs.length && <span aria-hidden="true" className="w-0.5 shrink-0 bg-accent" />}
       </div>
       {!phone && (
-        <div className="flex shrink-0 items-center px-2">
+        <div className="flex shrink-0 items-center gap-0.5 px-2">
+          {isSplit(layout) && (
+            <IconButton
+              label={layout.maximized === frame.id ? "Restore frames" : "Maximize frame"}
+              hint={
+                layout.maximized === frame.id
+                  ? "Shows every frame again."
+                  : "Shows only this frame, until you restore the others."
+              }
+              icon="expand"
+              aria-pressed={layout.maximized === frame.id}
+              className="size-7"
+              onClick={() => store.maximize(layout.maximized === frame.id ? null : frame.id)}
+            />
+          )}
           <FrameMenu frame={frame} layout={layout} store={store} />
         </div>
       )}
@@ -631,6 +669,8 @@ const useTabTitle = (store: WorkbenchStore, tab: Tab) => useMeta(store, tab.id)?
 
 function TabButton({
   tab,
+  frame,
+  layout,
   store,
   active,
   highlighted,
@@ -640,6 +680,8 @@ function TabButton({
   onDrop
 }: {
   tab: Tab
+  frame: Frame
+  layout: Layout
   store: WorkbenchStore
   active: boolean
   highlighted: boolean
@@ -649,11 +691,20 @@ function TabButton({
   onDrop: (event: React.DragEvent) => void
 }) {
   const title = useTabTitle(store, tab)
+  const unsaved = useSyncExternalStore(store.subscribeMeta, () => store.isUnsaved(tab.id))
+  const [menu, setMenu] = useState(false)
+  const [element, setElement] = useState<HTMLDivElement | null>(null)
+  // The shown tab stays in view in a strip that overflows.
+  useEffect(() => {
+    if (active) element?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [active, element])
   return (
     <div
+      ref={setElement}
       data-tab={tab.id}
       data-preview={tab.preview ? "" : undefined}
-      className={`relative flex max-w-56 min-w-24 shrink-0 items-center border-r border-border ${active ? "bg-canvas text-text" : "text-muted hover:bg-hover hover:text-text"}`}
+      data-sticky={tab.sticky ? "" : undefined}
+      className={`group/tab relative flex max-w-56 shrink-0 items-center border-r border-border ${tab.sticky ? "min-w-16" : "min-w-24"} ${active ? "bg-canvas text-text" : "text-muted hover:bg-hover hover:text-text"}`}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
@@ -671,49 +722,85 @@ function TabButton({
           className="absolute inset-x-0 top-0 h-0.5 bg-accent"
         />
       )}
-      <Tooltip
-        label={tab.preview ? `Shows ${title}. Double-click to keep this tab open.` : `Shows ${title}.`}
-        side="bottom"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={active}
-          draggable={draggable}
-          onDragStart={(event) => {
-            event.dataTransfer.setData(TAB_MIME, tab.id)
-            event.dataTransfer.effectAllowed = "move"
-          }}
-          onClick={() => store.focusTab(tab.id)}
-          onDoubleClick={() => store.pin(tab.id)}
-          onAuxClick={(event) => {
-            if (event.button === 1) {
-              event.preventDefault()
-              store.close(tab.id)
+      <ContextMenu
+        label={`Actions for ${title}`}
+        open={menu}
+        onOpenChange={setMenu}
+        trigger={
+          <Tooltip
+            label={
+              tab.preview
+                ? `Shows ${title}. Double-click to keep this tab open. Right-click for more.`
+                : `Shows ${title}. Right-click for more.`
             }
-          }}
-          className="flex h-full min-w-0 flex-1 items-center gap-1.5 ps-2 pe-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
-        >
-          <TabIcon tab={tab} store={store} />
-          {/* As wide as the title in either style: keeping a preview moves nothing after it. */}
-          <span className="grid min-w-0">
-            <span className={`col-start-1 row-start-1 min-w-0 truncate ${tab.preview ? "italic" : ""}`}>{title}</span>
+            side="bottom"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={active}
+              draggable={draggable}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(TAB_MIME, tab.id)
+                event.dataTransfer.effectAllowed = "move"
+              }}
+              onClick={() => store.focusTab(tab.id)}
+              onDoubleClick={() => store.pin(tab.id)}
+              onAuxClick={(event) => {
+                if (event.button === 1) {
+                  event.preventDefault()
+                  store.close(tab.id)
+                }
+              }}
+              className="flex h-full min-w-0 flex-1 items-center gap-1.5 ps-2 pe-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+            >
+              <TabIcon tab={tab} store={store} />
+              {/* As wide as the title in either style: keeping a preview moves nothing after it. */}
+              <span className="grid min-w-0">
+                <span className={`col-start-1 row-start-1 min-w-0 truncate ${tab.preview ? "italic" : ""}`}>
+                  {title}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={`invisible col-start-1 row-start-1 min-w-0 truncate ${tab.preview ? "" : "italic"}`}
+                >
+                  {title}
+                </span>
+              </span>
+            </button>
+          </Tooltip>
+        }
+      >
+        <TabActions tab={tab} frame={frame} layout={layout} store={store} />
+      </ContextMenu>
+      {tab.sticky ? (
+        <IconButton
+          label={`Unpin ${title}`}
+          hint="Pinned: first in its frame and kept by Close others, to the right and all. Click to unpin."
+          icon="pin"
+          filled
+          className="me-1 size-6"
+          onClick={() => store.stick(tab.id, false)}
+        />
+      ) : (
+        <span className="relative me-1 flex size-6 shrink-0 items-center justify-center">
+          <IconButton
+            label={`Close ${title}`}
+            hint={unsaved ? "Has changes not yet saved; they stay with the item. Closes this tab." : "Closes this tab."}
+            icon="close"
+            className={`size-6 ${unsaved ? "opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100" : ""}`}
+            onClick={() => store.close(tab.id)}
+          />
+          {unsaved && (
             <span
               aria-hidden="true"
-              className={`invisible col-start-1 row-start-1 min-w-0 truncate ${tab.preview ? "" : "italic"}`}
-            >
-              {title}
-            </span>
-          </span>
-        </button>
-      </Tooltip>
-      <IconButton
-        label={`Close ${title}`}
-        hint="Closes this tab."
-        icon="close"
-        className="me-1 size-6"
-        onClick={() => store.close(tab.id)}
-      />
+              data-unsaved-dot
+              data-layout-overlay="The unsaved dot takes the close button's place until hovered"
+              className="pointer-events-none absolute size-2 rounded-full bg-text group-hover/tab:hidden group-focus-within/tab:hidden"
+            />
+          )}
+        </span>
+      )}
     </div>
   )
 }
@@ -721,8 +808,48 @@ function TabButton({
 /** The frame's ⋯: what the strip does besides clicks and drags, so moving never needs a drag. */
 function FrameMenu({ frame, layout, store }: { frame: Frame; layout: Layout; store: WorkbenchStore }) {
   const tab = frame.tabs.find((t) => t.id === frame.active)
+  return (
+    <Menu
+      label="Tab and frame actions"
+      hint="Tab and frame actions: pin, keep open, split, move, close"
+      trigger={
+        <button
+          type="button"
+          aria-label="Tab and frame actions"
+          className="inline-flex size-7 items-center justify-center rounded-md text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          <Icon name="more" />
+        </button>
+      }
+    >
+      <TabActions tab={tab} frame={frame} layout={layout} store={store} />
+    </Menu>
+  )
+}
+
+/**
+ * What can be done with a tab and its frame: the frame's ⋯ (for the shown tab) and a tab's
+ * right-click menu (for that tab) list the same, as VS Code's tab context menu does.
+ */
+function TabActions({
+  tab,
+  frame,
+  layout,
+  store
+}: {
+  tab: Tab | undefined
+  frame: Frame
+  layout: Layout
+  store: WorkbenchStore
+}) {
   const near = neighbours(layout, frame.id)
   const split = frames(layout.root).length > 1
+  const index = tab ? frame.tabs.findIndex((t) => t.id === tab.id) : -1
+  const closable = (t: Tab) => !t.sticky
+  const others = frame.tabs.filter((t) => t.id !== tab?.id && closable(t)).length
+  const right = frame.tabs.slice(index + 1).filter(closable).length
+  const saved = frame.tabs.filter((t) => closable(t) && !store.isUnsaved(t.id)).length
+  const all = frame.tabs.filter(closable).length
   const moves: Array<{ to: string | undefined; label: string; description: string }> = [
     {
       to: near.left,
@@ -737,22 +864,27 @@ function FrameMenu({ frame, layout, store }: { frame: Frame; layout: Layout; sto
     { to: near.up, label: "Move to the frame above", description: "Moves this tab into the frame above." },
     { to: near.down, label: "Move to the frame below", description: "Moves this tab into the frame below." }
   ]
+  const splitWith = (direction: Direction) => {
+    if (!tab) return
+    store.focusTab(tab.id)
+    store.split(frame.id, direction)
+  }
   return (
-    <Menu
-      label="Tab and frame actions"
-      hint="Tab and frame actions: keep open, move, close"
-      trigger={
-        <button
-          type="button"
-          aria-label="Tab and frame actions"
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          <Icon name="more" />
-        </button>
-      }
-    >
+    <>
       <MenuItem
         icon="pin"
+        disabled={!tab}
+        description={
+          tab?.sticky
+            ? "Unpins this tab: it can be closed with the others again."
+            : "Keeps this tab first in its frame; Close others, to the right and all leave it open."
+        }
+        onClick={() => tab && store.stick(tab.id, !tab.sticky)}
+      >
+        {tab?.sticky ? "Unpin tab" : "Pin tab"}
+      </MenuItem>
+      <MenuItem
+        icon="check"
         disabled={!tab?.preview}
         description={tab?.preview ? "The next item you open gets its own tab." : "This tab is kept open already."}
         onClick={() => tab && store.pin(tab.id)}
@@ -760,6 +892,22 @@ function FrameMenu({ frame, layout, store }: { frame: Frame; layout: Layout; sto
         Keep tab open
       </MenuItem>
       <MenuSeparator />
+      <MenuItem
+        icon="split-right"
+        disabled={!tab}
+        description="Shows this tab in a second frame on the right too."
+        onClick={() => splitWith("row")}
+      >
+        Split right
+      </MenuItem>
+      <MenuItem
+        icon="split-down"
+        disabled={!tab}
+        description="Shows this tab in a second frame below too."
+        onClick={() => splitWith("column")}
+      >
+        Split down
+      </MenuItem>
       {moves.flatMap((move) =>
         move.to && tab
           ? [
@@ -790,14 +938,79 @@ function FrameMenu({ frame, layout, store }: { frame: Frame; layout: Layout; sto
       >
         Move to a new frame below
       </MenuItem>
+      {split && (
+        <MenuItem
+          icon="expand"
+          description={
+            layout.maximized === frame.id
+              ? "Shows every frame again."
+              : "Shows only this frame, until you restore the others."
+          }
+          onClick={() => store.maximize(layout.maximized === frame.id ? null : frame.id)}
+        >
+          {layout.maximized === frame.id ? "Restore frames" : "Maximize frame"}
+        </MenuItem>
+      )}
       <MenuSeparator />
       <MenuItem
         icon="close"
-        disabled={!tab || frame.tabs.length < 2}
-        description={frame.tabs.length < 2 ? "This frame has no other tabs." : "Closes every other tab in this frame."}
-        onClick={() => tab && store.closeOthers(tab.id)}
+        disabled={!tab}
+        description="Closes this tab. Text typed in it stays with the item."
+        onClick={() => tab && store.close(tab.id)}
+      >
+        Close tab
+      </MenuItem>
+      <MenuItem
+        icon="close"
+        disabled={!tab || others === 0}
+        description={
+          others === 0
+            ? "No other tab here can close (pinned tabs stay)."
+            : "Closes every other tab in this frame except pinned ones."
+        }
+        onClick={() => tab && store.closeTabs(tab.id, "others")}
       >
         Close other tabs
+      </MenuItem>
+      <MenuItem
+        icon="close"
+        disabled={!tab || right === 0}
+        description={
+          right === 0 ? "No tab to the right can close." : "Closes the tabs after this one, except pinned ones."
+        }
+        onClick={() => tab && store.closeTabs(tab.id, "right")}
+      >
+        Close tabs to the right
+      </MenuItem>
+      <MenuItem
+        icon="close"
+        disabled={!tab || saved === 0}
+        description={
+          saved === 0
+            ? "Every tab here has changes not yet saved, or is pinned."
+            : "Closes the tabs here with nothing unsaved, except pinned ones."
+        }
+        onClick={() => tab && store.closeTabs(tab.id, "saved")}
+      >
+        Close saved tabs
+      </MenuItem>
+      <MenuItem
+        icon="close"
+        disabled={!tab || all === 0}
+        description={all === 0 ? "Every tab here is pinned." : "Closes every tab in this frame except pinned ones."}
+        onClick={() => tab && store.closeTabs(tab.id, "all")}
+      >
+        Close all tabs
+      </MenuItem>
+      <MenuItem
+        icon="undo"
+        disabled={!store.canReopen}
+        description={
+          store.canReopen ? "Opens the tab you closed last again." : "No tab was closed since the page opened."
+        }
+        onClick={() => store.reopenClosed()}
+      >
+        Reopen closed tab
       </MenuItem>
       <MenuItem
         icon="close"
@@ -807,7 +1020,7 @@ function FrameMenu({ frame, layout, store }: { frame: Frame; layout: Layout; sto
       >
         Close frame
       </MenuItem>
-    </Menu>
+    </>
   )
 }
 

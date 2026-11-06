@@ -316,7 +316,9 @@ test("open beside, one chat in two frames, and a tab dropped on an edge", async 
   await page.goto(`${server().url}/chats/${fixtures.chatA}`)
   await expect(said(page, "The tide is out")).toBeVisible()
   const sidebar = page.getByRole("complementary", { name: "Sidebar" })
-  const row = sidebar.locator("[data-fork-row]").filter({ has: sidebarChat(page, "Lighthouse night") })
+  const row = sidebar
+    .locator("[data-fork-row]")
+    .filter({ has: page.getByRole("link", { name: /^Open chat Lighthouse night/ }) })
   await row.hover()
   await row.getByRole("button", { name: "Open Lighthouse night beside" }).click()
   const frames = page.locator("[data-frame]")
@@ -346,4 +348,53 @@ test("open beside, one chat in two frames, and a tab dropped on an edge", async 
   await expect(said(page, "The tide is out")).toHaveCount(2)
   await expect(said(page, "The lamp turns")).toBeVisible()
   if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "three-frames")
+})
+
+// A tab's right-click menu (the frame's ⋯ has the same): pin, the Close variants, Reopen
+// closed tab, maximize; and the dot of a tab with changes not yet saved.
+test("tab menu: pin, close many, reopen, maximize, and the unsaved dot", async ({ page }) => {
+  test.setTimeout(150_000)
+  await fresh(page, 1440)
+  await page.goto(`${server().url}/chats/${fixtures.chatA}`)
+  await expect(said(page, "The tide is out")).toBeVisible()
+  await page.getByRole("button", { name: "Split right" }).click()
+  await sidebarChat(page, "Lighthouse night").dblclick()
+  const right = page.locator("[data-frame]").nth(1)
+  await expect(right.locator("[data-tab]")).toHaveCount(2)
+  await openPanel(page, "Prompt preset")
+  await page.getByRole("link", { name: "Open the preset in the large editor" }).click()
+  await expect(right.locator("[data-tab]")).toHaveCount(3)
+  const tab = (name: string) => right.getByRole("tab", { name: new RegExp(`^${name}`) })
+
+  // Pin the first chat's view in the right frame: it moves first and survives Close all.
+  await tab("Harbour walk").click({ button: "right" })
+  const menu = page.getByRole("menu", { name: "Actions for Harbour walk" })
+  await menu.getByRole("menuitem", { name: "Pin tab" }).click()
+  await expect(right.locator("[data-tab]").first()).toHaveAttribute("data-sticky", "")
+  await expect(right.getByRole("button", { name: "Unpin Harbour walk" })).toBeVisible()
+
+  // The editor's unsaved text shows as a dot in place of its close button.
+  const editor = page.getByRole("region", { name: "Preset editor", exact: true })
+  await editor.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }).fill("Unsaved for the dot.")
+  await expect(right.locator("[data-tab] [data-unsaved-dot]")).toHaveCount(1)
+  await shot(page, "tab-unsaved-pinned-1440-light")
+
+  // Close saved tabs keeps the editor (unsaved) and the pinned tab; Close all keeps the pin.
+  await tab("Lighthouse night").click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Close saved tabs" }).click()
+  await expect(right.locator("[data-tab]")).toHaveCount(2)
+  await right.getByRole("button", { name: "Tab and frame actions" }).click()
+  await page.getByRole("menuitem", { name: "Close all tabs" }).click()
+  await expect(right.locator("[data-tab]")).toHaveCount(1)
+  await right.getByRole("button", { name: "Tab and frame actions" }).click()
+  await page.getByRole("menuitem", { name: "Reopen closed tab" }).click()
+  await expect(right.locator("[data-tab]")).toHaveCount(2)
+  await expect(page.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
+
+  // Maximize shows the frame alone until restored.
+  await right.getByRole("button", { name: "Maximize frame" }).click()
+  await expect(page.locator("[data-frame]")).toHaveCount(1)
+  await page.getByRole("button", { name: "Restore frames" }).click()
+  await expect(page.locator("[data-frame]")).toHaveCount(2)
+  if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "tab-menu")
 })

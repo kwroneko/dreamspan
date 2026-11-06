@@ -448,10 +448,9 @@ function Pending({
                   Guidance
                 </span>
               )}
-              <label htmlFor="composer" className="sr-only">
-                {guidance ? "Guidance" : "Message"}
-              </label>
+              {/* Named on itself, not by a label's `for`: two frames can each show a composer. */}
               <AutoGrowTextarea
+                aria-label={guidance ? "Guidance" : "Message"}
                 id="composer"
                 data-testid="composer"
                 value={text}

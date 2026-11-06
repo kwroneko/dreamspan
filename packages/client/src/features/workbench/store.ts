@@ -14,6 +14,10 @@ import {
   allTabs,
   closeFrame,
   closeTab,
+  closeTabs,
+  type CloseWhich,
+  maximizeFrame,
+  stickTab,
   findTab,
   focusFrame,
   focusTab,
@@ -91,6 +95,10 @@ export class WorkbenchStore {
   private applying = false
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribe: (() => void) | null = null
+  /** Tabs closed in this page, the last first, for Reopen closed tab (at most 20). */
+  private closed: Array<{ readonly href: string; readonly frameId: string | undefined }> = []
+  /** Tabs whose views have changes not yet saved (`UnsavedTracker`), for the tab's dot. */
+  private readonly unsavedTabs = new Set<string>()
 
   readonly userId: string
   private readonly browser: RouterHistory
@@ -335,18 +343,52 @@ export class WorkbenchStore {
     if (tab) this.pin(tab.id)
   }
   close(tabId: string) {
-    this.set(closeTab(this.layout, tabId))
+    this.closing(closeTab(this.layout, tabId))
   }
   closeOthers(tabId: string) {
-    const frame = frameOfTab(this.layout, tabId)
-    if (!frame) return
-    let next = this.layout
-    for (const t of frame.tabs) if (t.id !== tabId) next = closeTab(next, t.id)
-    this.set(focusTab(next, tabId))
+    this.closeTabs(tabId, "others")
+  }
+  /** Close others, to the right, all, or saved, in the tab's frame; pinned tabs stay. */
+  closeTabs(tabId: string, which: CloseWhich) {
+    this.closing(closeTabs(this.layout, tabId, which, (id) => this.unsavedTabs.has(id)))
   }
   closeFrame(frameId: string) {
-    this.set(closeFrame(this.layout, frameId))
+    this.closing(closeFrame(this.layout, frameId))
   }
+  /** Sets a layout that closed tabs, remembering them for Reopen closed tab. */
+  private closing(next: Layout) {
+    const kept = new Set(allTabs(next).map((t) => t.id))
+    const gone = frames(this.layout.root).flatMap((f) =>
+      f.tabs.filter((t) => !kept.has(t.id)).map((t) => ({ href: t.href, frameId: f.id }))
+    )
+    this.closed = [...gone.reverse(), ...this.closed].slice(0, 20)
+    this.set(next)
+  }
+  get canReopen() {
+    return this.closed.length > 0
+  }
+  /** Opens the tab closed last again, in its frame if that's still there (kept). */
+  reopenClosed() {
+    const [last, ...rest] = this.closed
+    if (!last) return
+    this.closed = rest
+    const frame = this.frames().some((f) => f.id === last.frameId) ? last.frameId : undefined
+    this.open(last.href, { preview: false, ...(frame ? { frame } : {}) })
+  }
+  stick(tabId: string, sticky: boolean) {
+    this.set(stickTab(this.layout, tabId, sticky))
+  }
+  /** Shows a frame alone, or every frame again (`null`). */
+  maximize(frameId: string | null) {
+    this.set(maximizeFrame(this.layout, frameId))
+  }
+  setUnsaved(tabId: string, unsaved: boolean) {
+    if (this.unsavedTabs.has(tabId) === unsaved) return
+    if (unsaved) this.unsavedTabs.add(tabId)
+    else this.unsavedTabs.delete(tabId)
+    for (const listener of this.metaListeners) listener()
+  }
+  isUnsaved = (tabId: string) => this.unsavedTabs.has(tabId)
   /** Splits a frame; the new frame shows the shown tab's item too, at the same place. */
   split(frameId: string, direction: Direction) {
     const frame = this.frames().find((f) => f.id === frameId)
