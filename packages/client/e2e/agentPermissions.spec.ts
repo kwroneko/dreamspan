@@ -23,7 +23,7 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
 const shots = process.env.SCREENSHOT_DIR
 test.setTimeout(180_000)
 
-/** A provider whose every agent reply writes "Note N" (N counting replies), then answers. */
+/** A provider whose every agent reply writes "Note N" (N counting replies since `reset`), then answers. */
 const startNoteProvider = async () => {
   let replies = 0
   const chunk = (delta: object, finish: string | null = null) =>
@@ -71,6 +71,7 @@ const startNoteProvider = async () => {
   await new Promise<void>((done) => http.listen(0, "127.0.0.1", done))
   return {
     baseUrl: `http://127.0.0.1:${(http.address() as AddressInfo).port}/v1`,
+    reset: () => void (replies = 0),
     stop: () => new Promise<void>((done) => http.close(() => done()))
   }
 }
@@ -79,6 +80,8 @@ let provider: Awaited<ReturnType<typeof startNoteProvider>>
 test.beforeAll(async () => {
   provider = await startNoteProvider()
 })
+// Each test's replies count from 1: a worker runs several of them.
+test.beforeEach(() => provider.reset())
 test.afterAll(async () => {
   await provider.stop()
 })

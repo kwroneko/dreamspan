@@ -173,11 +173,11 @@ describe("agent note tools", () => {
         Private: ["Tobin owes Mira.", false]
       })
 
-      // The first version shown again: the agent's note is off and the edit undone there.
+      // The first version shown again: the edit undone, and the agent's note not there at all.
       yield* api.SelectVersion({ slotId: version.slotId, versionId: version.id, expectedVersionId: swipe.version.id })
       const back = yield* notesAt
       assert.deepStrictEqual(back["Locked"], ["Mira owes Tobin.", false])
-      assert.isFalse(back["Injury"]![1])
+      assert.notProperty(back, "Injury")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
