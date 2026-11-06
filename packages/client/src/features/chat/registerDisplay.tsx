@@ -3,7 +3,8 @@ import { routes } from "../../routes.tsx"
 import { lazy } from "react"
 import { messageRenderers } from "../../ui/Markdown.tsx"
 import { registerMessageCopy } from "../../ui/messageCopy.tsx"
-import { appTools } from "../shell.tsx"
+import { CardHeader } from "../../ui/Surface.tsx"
+import { appTools, useTitle } from "../shell.tsx"
 import { ChatWidthPreference } from "./ChatWidth.tsx"
 import { MessageColorPreferences } from "./MessageColors.tsx"
 import { MessageToolbarPreferences } from "./MessageToolbarPreferences.tsx"
@@ -15,13 +16,24 @@ import { chatPanels } from "./panels.tsx"
 import { chatSurfaceProviders } from "./presentation.tsx"
 import { DisplayProvider, DisplaySettings } from "./DisplaySettings.tsx"
 
+/** The settings page: the panel's settings under the page's title (the chat panel has its own). */
+function InterfacePage() {
+  useTitle("Interface")
+  return (
+    <>
+      <CardHeader center title="Interface" />
+      <DisplaySettings />
+    </>
+  )
+}
+
 export const registerDisplay = () => [
   registerMessageCopy(),
   routes.register({
     id: "settings.display",
     parent: "settings",
     path: "interface",
-    component: DisplaySettings,
+    component: InterfacePage,
     nav: {
       label: "Interface",
       order: 20,
