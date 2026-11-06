@@ -32,6 +32,25 @@ export type RolloutStep = typeof RolloutStep.Type
 export const StepsSummary = Schema.Struct({ count: Schema.Int, ms: Schema.NullOr(Schema.Int) })
 export type StepsSummary = typeof StepsSummary.Type
 
+/**
+ * Why an agent reply can't be resumed (spec/AGENTIC.md §4.2): it isn't an agent reply, it's
+ * still being written or resumed, it finished, or the step named can't be carried on from.
+ */
+export class NotResumable extends Schema.TaggedError<NotResumable>()("NotResumable", {
+  versionId: Schema.String,
+  message: Schema.String
+}) {}
+
+/**
+ * A step's change before resuming from it (§4.4): new text for a thinking or text step, new
+ * arguments for a tool call (it runs again), or a new result for one.
+ */
+export const StepEdit = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("text"), text: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("arguments"), arguments: Schema.Record(Schema.String, Schema.Unknown) }),
+  Schema.Struct({ kind: Schema.Literal("result"), text: Schema.String })
+])
+export type StepEdit = typeof StepEdit.Type
 /** One tool the run was offered, as frozen into its snapshot: exactly what the model saw. */
 export const OfferedTool = Schema.Struct({
   name: Schema.String,

@@ -4,6 +4,7 @@ import { LcmSettings } from "./lcmSettings.ts"
 // to it. The fold is a pure function so the server and the client agree on it.
 import { Data, Effect, Schema, type SchemaAST, Scope } from "effect"
 import { EntityId } from "./chat.ts"
+import { REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
 import { ID_TABLE } from "./id.ts"
 import { type EntityKind, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
@@ -60,6 +61,20 @@ export const StateEventData = Schema.Union([
   event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
   /** The tools an agent reply mode offers, by id, in place of the mode's own list (spec/AGENTIC.md §6). */
   event("agent.tools", Schema.Struct({ tools: Schema.Array(Schema.String) })),
+  /**
+   * Whether agent replies may change a note, or a card's field (as a note replacing it), in this
+   * chat (spec/AGENTIC.md §4.3): over the note's `agent_editable` or the card's
+   * `agent_editable_fields`. One of `note`, or `card` with `field`.
+   */
+  event(
+    "agent.permission",
+    Schema.Struct({
+      note: Schema.optional(EntityId),
+      card: Schema.optional(EntityId),
+      field: Schema.optional(Schema.Literals(REPLACEABLE_CARD_FIELDS)),
+      on: Schema.Boolean
+    })
+  ),
   event("rollout.continuity", Schema.Literals(["fork", "resume_previous"])),
   event("lorebook.binding", Schema.Struct({ entity: EntityId, ref: Schema.NullOr(RefId) })),
   event("lorebook.attach", Schema.Struct({ ref: RefId })),
@@ -154,6 +169,9 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "reply.single": { ids: {} },
   "output.contract": { ids: {} },
   "agent.tools": { ids: {} },
+  "agent.permission": {
+    ids: { note: { table: "entity", kind: "note", chatOwned: true }, card: { table: "entity", kind: "card" } }
+  },
   "rollout.continuity": { ids: {} },
   "lorebook.binding": { ids: { entity: { table: "entity", kind: "card" }, ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.attach": { ids: { ref: { table: "ref", kind: "lorebook" } } },
@@ -367,6 +385,8 @@ export interface ChatState {
   readonly outputContract: "final_text" | "send_message" | "both" | null
   /** `agent.tools`: the tools agent modes offer; null: each mode's own. */
   readonly agentTools: ReadonlyArray<string> | null
+  /** `agent.permission`s by `permissionKey`: on or off, over the note's or card's own. */
+  readonly agentPermissions: Readonly<Record<string, boolean>>
   readonly rolloutContinuity: "fork" | "resume_previous" | null
   readonly lorebookBindings: Readonly<Record<string, string | null>>
   /** The attached lorebooks that are on, in listed order. */
@@ -402,6 +422,7 @@ const emptyChatState: ChatState = {
   replySingle: null,
   outputContract: null,
   agentTools: null,
+  agentPermissions: {},
   rolloutContinuity: null,
   lorebookBindings: {},
   lorebooks: [],
@@ -410,6 +431,18 @@ const emptyChatState: ChatState = {
   loreBelowHistory: null,
   vars: {}
 }
+
+/** An `agent.permission`'s target as `ChatState.agentPermissions` keys it; null when it names none. */
+export const permissionKey = (target: {
+  readonly note?: string | undefined
+  readonly card?: string | undefined
+  readonly field?: string | undefined
+}): string | null =>
+  target.note !== undefined
+    ? `note:${target.note}`
+    : target.card !== undefined && target.field !== undefined
+      ? `card:${target.card}:${target.field}`
+      : null
 
 const add = (list: ReadonlyArray<string>, item: string) => (list.includes(item) ? list : [...list, item])
 const remove = (list: ReadonlyArray<string>, item: string) => list.filter((x) => x !== item)
@@ -522,6 +555,10 @@ const applyCore = (
       return { ...state, outputContract: data.value }
     case "agent.tools":
       return { ...state, agentTools: data.value.tools }
+    case "agent.permission": {
+      const key = permissionKey(data.value)
+      return key === null ? state : { ...state, agentPermissions: { ...state.agentPermissions, [key]: data.value.on } }
+    }
     case "rollout.continuity":
       return { ...state, rolloutContinuity: data.value }
     case "lorebook.binding":

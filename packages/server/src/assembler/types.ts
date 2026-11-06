@@ -317,6 +317,11 @@ export interface LoreDecisionInput {
 export interface ContextSnapshot {
   /** An agent reply's assembly options, for a rebuild. */
   readonly agentAssembly?: AgentAssembly
+  /**
+   * An agent reply's lorebooks as assembly read them (attached, the preset's, cards' embedded
+   * ones, `card:<entity>` with the card's revision), for its lookup_lore tool.
+   */
+  readonly agentLore?: ReadonlyArray<{ readonly id: string; readonly entity: string; readonly revision: string }>
   /** The decision models' admissions, for a rebuild (spec/AGENTIC.md §7). */
   readonly decisionAssembly?: DecisionAssembly
   /** The `lore` decision point's input; AssembleContext takes it out before the snapshot is stored. */

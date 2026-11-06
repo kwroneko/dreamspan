@@ -58,7 +58,8 @@ const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
   "lorebook.attach": { value: (t) => ({ ref: t.lorebook.ref }) },
   "lorebook.detach": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
   "lorebook.remove": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
-  "lorebook.embedded": { value: (t) => ({ entity: t.card.entity, on: false }) }
+  "lorebook.embedded": { value: (t) => ({ entity: t.card.entity, on: false }) },
+  "agent.permission": { value: (t) => ({ note: t.note.entity, card: t.card.entity, field: "description", on: true }) }
 }
 
 const kinds: ReadonlyArray<EntityKind> = ["card", "preset", "lorebook", "note", "preset_overlay"]

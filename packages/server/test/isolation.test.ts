@@ -1904,6 +1904,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.deepStrictEqual(yield* owner.api.GetRolloutSteps({ versionId: owner.chat.generatingId }), [])
       })
   },
+  // Resuming another user's reply is refused as if it weren't there; the owner's, which
+  // isn't an agent reply, as not resumable.
+  ResumeVersion: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const versionId = owner.chat.generatingId
+        yield* refused(actor.api.ResumeVersion({ versionId, expectedRowVersion: 0 }), "NotFound")
+        yield* refused(owner.api.ResumeVersion({ versionId, expectedRowVersion: 0 }), "NotResumable")
+      })
+  },
+  ResumeFromStep: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const versionId = owner.chat.generatingId
+        yield* refused(actor.api.ResumeFromStep({ versionId, step: 0, expectedRowVersion: 0 }), "NotFound")
+      })
+  },
   GetRunTranscript: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

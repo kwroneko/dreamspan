@@ -960,15 +960,15 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ### 7.5 Resuming
 - **[D]** Resume a stopped or broken rollout mid-way **without sending another turn and without the model being able to tell**. reference-harness does this; most coding harnesses don't.
-- **[P]** As in reference-harness (`src/agent/recovery.ts`): **Unbuilt Phase 4 recovery proposal** (AGENTIC §3.3, §4.2); a frozen plain-reply request and text Continue do not implement agent reseeding.
+- **[P]** As in reference-harness (`src/agent/recovery.ts`): **Built; obsolete as a proposal** (2026-11-05; ARCHITECTURE §16, "Agent rollouts": `ResumeVersion`, `agent/resume.ts`).
   - a frozen context snapshot is taken when the rollout starts
   - the transcript is flushed as each turn completes
   - on failure, synthetic error messages and partial turns are stripped and a fresh agent is reseeded
-- **[P]** Interruption policies: **Unbuilt Phase 4 proposal** (AGENTIC §4.2).
+- **[P]** Interruption policies: **Built** (2026-11-05; ARCHITECTURE §16).
   - after a tool call but before its result: re-run the tool
   - midway through a tool call: discard it and resample
   - midway through text: continue it through prefill where supported, otherwise discard it
-- **[P]** Any step of a rollout can be edited before resuming. **Unbuilt Phase 4 proposal** (AGENTIC §4.4).
+- **[P]** Any step of a rollout can be edited before resuming. **Server built** (2026-11-05; `ResumeFromStep`, ARCHITECTURE §16); the inspector's controls are AGENTIC U8.
 
 ### 7.6 Decision models
 - **[D]** Jev and similar decision models are integrated as in reference-harness (`spec/DECISION-MODEL.md`), but are **never mandatory**. Each decision point has a heuristic fallback. Phase 4 design: AGENTIC §7 (points `presence` and `lore`, opt-in per connection). **Built** (phase4decide, 2026-11-05; ARCHITECTURE §16 "Decision models").
