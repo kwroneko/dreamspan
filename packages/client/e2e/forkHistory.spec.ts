@@ -93,7 +93,7 @@ for (const width of [1440, 390])
       await expect(rows.nth(0)).toContainText("Revision 5")
       await expect(rows.nth(0)).toContainText("latest")
       const [mine, theirs] = await admin((api) =>
-        Effect.all([api.GetRef({ refId: fork.id }), api.GetRef({ refId: parent.id })])
+        Effect.all([api.OpenEditor({ refId: fork.id }), api.OpenEditor({ refId: parent.id })])
       )
       expect(mainPrompt(mine.doc)).toBe("Write {{char}}'s next reply.")
       expect(mainPrompt(theirs.doc)).toBe("Write {{char}}'s next reply in the harbour.")
