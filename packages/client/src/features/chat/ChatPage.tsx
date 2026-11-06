@@ -197,7 +197,9 @@ function MessageList({
     // them with its last rows in the layout effect also mounted their controls and reads.
     initialOffset: () => {
       const target = restore?.slot ?? anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null)
-      const index = rows.findIndex((row) => row.key === target || row.lastSlotId === target)
+      // The row the positioning below scrolls to: the one showing the entry, a summary's too.
+      const entry = entries.findIndex((e) => e.slotId === target)
+      const index = entry >= 0 ? rowOf(entry) : rows.findIndex((row) => row.key === target || row.lastSlotId === target)
       let offset = 16
       for (let i = 0; i < (index < 0 ? rows.length : index); i++) offset += rows[i]!.estimate + 6
       return offset
@@ -220,6 +222,17 @@ function MessageList({
     },
     [follow, virtualizer]
   )
+
+  // The virtualizer learns the list's offset only from scroll events. When the browser clamps
+  // an offset it set to where the list already is (the estimated start in a history too short
+  // to scroll, a destination at the top, a row kept in place as rows above it change), none
+  // fires, and the rows between the real offset and its own would never mount.
+  const syncOffset = useCallback(() => {
+    const list = parent.current
+    if (list !== null && Math.abs((virtualizer.scrollOffset ?? 0) - list.scrollTop) >= 1)
+      list.dispatchEvent(new Event("scroll"))
+  }, [virtualizer])
+  useLayoutEffect(syncOffset)
 
   // A new window opens at the asked-for message, or at the bottom.
   // With summaries in the chat, a link waits for the layer: placed among the originals first,
@@ -245,7 +258,12 @@ function MessageList({
     if (row >= 0) virtualizer.scrollToIndex(row, { align: rows[row]?.lastSlotId !== undefined ? "start" : "center" })
     else virtualizer.scrollToEnd()
     hold(row < 0)
-    requestAnimationFrame(() => requestAnimationFrame(() => (settled.current = true)))
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        settled.current = true
+        syncOffset()
+      })
+    )
   })
 
   // Expansions load asynchronously, possibly through several summary levels. Position
