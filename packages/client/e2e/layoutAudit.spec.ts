@@ -277,6 +277,40 @@ test("the detector catches geometry defects and respects documented intent", asy
   expect(clipping.some((v) => v.kind === "text" && v.related === "#vertical")).toBe(true)
   expect(clipping.every((v) => v.kind !== "gap")).toBe(true)
   expect(clipping.filter((v) => v.kind === "text").every((v) => v.related === "#vertical")).toBe(true)
+  // Toggles over a tile's picture, at rest: the archive job's stack (a hidden star keeping its
+  // place above the archive, whose backing was its wrapper's, shown though off) is reported;
+  // each toggle alone in its corner, backed itself and shown only when pressed, is not.
+  const tiles = (toggles: (i: number) => string) => `<style>
+      body { margin: 20px; } .grid { display: grid; grid-template-columns: repeat(3, 120px); gap: 8px; }
+      .tile { position: relative; } .pic { display: block; height: 180px; background: #888; }
+      button { width: 32px; height: 32px; padding: 0; border: 0; background: transparent; }
+      .backed { background: rgba(255, 255, 255, 0.85); }
+    </style>
+    <div class="grid">${[0, 1, 2].map((i) => `<div class="tile"><span class="pic" data-portrait></span>${toggles(i)}</div>`).join("")}</div>`
+  await page.setContent(
+    tiles(
+      (
+        i
+      ) => `<span data-layout-overlay="toggles" style="position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:4px">
+        <button class="backed" aria-pressed="${i === 0}" style="opacity:${i === 0 ? 1 : 0}">S</button>
+        <span class="backed" style="display:flex"><button aria-label="Archive ${i}">A</button></span></span>`
+    )
+  )
+  const stacked = (await layoutAudit(page)).filter((v) => v.kind === "overlay").map((v) => v.measurement)
+  expect(stacked.some((m) => m.startsWith("backing on the wrapper"))).toBe(true)
+  expect(stacked.some((m) => m.includes("keeps its space before this control"))).toBe(true)
+  expect(stacked.some((m) => m.startsWith("first shown control at 8.00, 8.00px"))).toBe(true)
+  expect(stacked.some((m) => m.startsWith("shown at rest"))).toBe(true)
+  expect(stacked.some((m) => m.startsWith("hidden, yet takes clicks"))).toBe(true)
+  await page.setContent(
+    tiles(
+      (i) => `<span data-layout-overlay="star" style="position:absolute;top:8px;left:8px;display:flex">
+        <button class="backed" aria-pressed="${i === 0}" style="opacity:${i === 0 ? 1 : 0};pointer-events:${i === 0 ? "auto" : "none"}">S</button></span>
+        <span data-layout-overlay="archive" style="position:absolute;top:8px;right:8px;display:flex">
+        <button class="backed" aria-pressed="${i === 1}" style="opacity:${i === 1 ? 1 : 0};pointer-events:${i === 1 ? "auto" : "none"}">A</button></span>`
+    )
+  )
+  expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
 })
 
 const work = process.env.LAYOUT_AUDIT_WORK ?? mkdtempSync(join(tmpdir(), "rp-layout-audit-"))
@@ -2508,21 +2542,36 @@ test("phone footer click overrides height collapse", async ({ page }, info) => {
   }
 })
 
+// The tiles' toggles over their pictures are audited at rest as well as hovered and focused
+// (owner, 2026-11-06: the archive toggle showed on every tile, off its corner, its backing
+// doubled), on the views a card can be archived from: Home's All and Archived, the sidebar's
+// tiles, and a card's headers (its page; the full editor, archived or not).
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
     test(`card archive surfaces: ${width} ${theme}`, async ({ page }, info) => {
-      test.setTimeout(180_000)
+      test.setTimeout(240_000)
       const local = await startServer(withAdmin)
       try {
         await seedCardArchive(local)
         await apiLogin(page.request, local, ADMIN.handle, ADMIN.password)
         await page.setViewportSize({ width, height: 900 })
         await page.emulateMedia({ colorScheme: theme })
-        await page.goto(`${local.url}/?show=archived&side=characters&sideShow=archived`)
+        await page.goto(`${local.url}/`)
         const main = page.getByRole("main")
+        // All: the favourite (Pilot 006, its star on) among ordinary tiles.
+        await expect(main.getByRole("link", { name: "Open Pilot 006", exact: true })).toBeVisible()
+        await expectLayout(page, info, `cardarchive-all-rest-${width}-${theme}`, { scope: "main" })
+        await main.screenshot({ path: info.outputPath("all-rest.png") })
+        await main.getByRole("link", { name: "Open Pilot 007", exact: true }).hover()
+        await expectLayout(page, info, `cardarchive-all-hovered-${width}-${theme}`, { scope: "main", hovered: true })
+        await main.getByRole("link", { name: "Open Pilot 006", exact: true }).focus()
+        await expectLayout(page, info, `cardarchive-all-focused-${width}-${theme}`, { scope: "main" })
+        await page.goto(`${local.url}/?show=archived&side=characters&sideShow=archived`)
         await expect(main.getByRole("link", { name: "Open Pilot 001", exact: true })).toBeVisible()
         await expectLayout(page, info, `cardarchive-home-${width}-${theme}`, { scope: "main" })
         await main.screenshot({ path: info.outputPath("home.png") })
+        await main.getByRole("link", { name: "Open Pilot 002", exact: true }).hover()
+        await expectLayout(page, info, `cardarchive-home-hovered-${width}-${theme}`, { scope: "main", hovered: true })
         await main.getByRole("button", { name: "Archive unused cards…", exact: true }).click()
         const dialog = page.getByRole("dialog", { name: "Archive unused cards", exact: true })
         await expect(dialog.getByRole("checkbox", { name: "Pilot 008", exact: true })).toBeVisible()
@@ -2534,6 +2583,26 @@ for (const width of [1440, 390])
         await expect(list.getByRole("link", { name: "Open Pilot 001", exact: true })).toBeVisible()
         await expectLayout(page, info, `cardarchive-sidebar-${width}-${theme}`, { scope: "[data-shell-list]" })
         await list.screenshot({ path: info.outputPath("sidebar.png") })
+        await page.goto(`${local.url}/?side=characters&sideShow=all`)
+        await showAppNavigation(page)
+        await expect(list.getByRole("link", { name: "Open Pilot 006", exact: true })).toBeVisible()
+        await expectLayout(page, info, `cardarchive-sidebar-all-${width}-${theme}`, { scope: "[data-shell-list]" })
+        await list.screenshot({ path: info.outputPath("sidebar-all.png") })
+        for (const [slug, path] of [
+          ["page", "/cards/archive-e-006"],
+          ["editor", "/library/archive-r-archive-e-006"],
+          ["archived-editor", "/library/archive-r-archive-e-001"]
+        ] as const) {
+          await page.goto(`${local.url}${path}`)
+          // The toggles sit in the center column's header, outside its main region.
+          const header = page.locator("[data-center-header]").filter({ visible: true })
+          await expect(header.getByRole("button", { name: /^(Unarchive|Archive) Pilot 00[16]$/ })).toBeVisible()
+          await expect(header.getByRole("button", { name: /favourites$/ })).toBeVisible()
+          await expectLayout(page, info, `cardarchive-header-${slug}-${width}-${theme}`, {
+            scope: "[data-center-header]"
+          })
+          await page.screenshot({ path: info.outputPath(`header-${slug}.png`) })
+        }
       } finally {
         await local.stop()
       }

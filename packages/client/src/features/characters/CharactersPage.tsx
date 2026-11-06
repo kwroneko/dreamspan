@@ -15,7 +15,9 @@ import { GroupGrid } from "./GroupGrid.tsx"
 import { browsable, CharacterGrid, shellAtom, type ShellLibrary } from "./shellData.tsx"
 import { PinnedChats } from "./ShellBrowser.tsx"
 
-const COLUMNS = "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5"
+// By Home's own width, not the window's: in a split frame the tiles keep their size rather than
+// shrinking to five columns of a narrow frame, where the corner toggles would cover the tile.
+const COLUMNS = "grid grid-cols-2 gap-3 @xl:grid-cols-3 @3xl:grid-cols-4 @4xl:grid-cols-5"
 
 function Home({ data }: { data: ShellLibrary }) {
   const [browse, setBrowse] = useHomeBrowse()
@@ -38,7 +40,7 @@ function Home({ data }: { data: ShellLibrary }) {
   const needle = search.trim().toLowerCase()
   const cards = browseCards(browsable(data), browse, search)
   return (
-    <div className="flex flex-col gap-5">
+    <div className="@container flex flex-col gap-5">
       <SlotOutlet slot={homeIntro} props={{ data }} />
       <PinnedChats
         pinsCollapsed={data.pinsCollapsed}
