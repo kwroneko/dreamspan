@@ -6,9 +6,16 @@ import { Loading } from "../../../ui/Spinner.tsx"
 import { chatPanels, lazyPanel, type PanelProps } from "../panels.tsx"
 import { chatSettingSections, messageHeaderDetails, reasoningPanels, runInspectorSections } from "../presentation.tsx"
 import { Steps, StepsBadge } from "./Steps.tsx"
+import { cardDefinitionSections } from "../../editor/cardSections.ts"
 
 const RunSteps = lazy(() => import("./RunSteps.tsx").then((m) => ({ default: m.RunSteps })))
 const ReplyModeSection = lazy(() => import("./ReplyModeSection.tsx").then((m) => ({ default: m.ReplyModeSection })))
+const AgentPermissionsSection = lazy(() =>
+  import("./AgentPermissionsSection.tsx").then((m) => ({ default: m.AgentPermissionsSection }))
+)
+const AgentEditableFields = lazy(() =>
+  import("./AgentEditableFields.tsx").then((m) => ({ default: m.AgentEditableFields }))
+)
 
 export const registerAgent = () => [
   // Above the reasoning: the steps came before the final turn's reasoning and text.
@@ -29,6 +36,26 @@ export const registerAgent = () => [
     component: (props: ComponentProps<typeof ReplyModeSection>) => (
       <Suspense fallback={null}>
         <ReplyModeSection {...props} />
+      </Suspense>
+    )
+  }),
+  // Below the Reply mode's tools: what the tools may change in this chat.
+  chatSettingSections.register({
+    id: "settings.agent-permissions",
+    order: 21,
+    component: (props: ComponentProps<typeof AgentPermissionsSection>) => (
+      <Suspense fallback={null}>
+        <AgentPermissionsSection {...props} />
+      </Suspense>
+    )
+  }),
+  // A card's own Model may change list, under its prompt fields.
+  cardDefinitionSections.register({
+    id: "card.agent-editable-fields",
+    order: 50,
+    component: (props: ComponentProps<typeof AgentEditableFields>) => (
+      <Suspense fallback={null}>
+        <AgentEditableFields {...props} />
       </Suspense>
     )
   }),

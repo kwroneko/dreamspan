@@ -587,7 +587,12 @@ export class ChatSession {
       Context.get(services, AppClient)("SubscribeChat", { chatId: this.chatId }).pipe(
         Stream.runForEach((batch) =>
           Effect.sync(() => {
-            if (batch.some((event) => event._tag === "State" || event._tag === "Reload" || event._tag === "Hello")) {
+            // A message shown with another version selected shows another path's notes: the ones
+            // the model wrote belong to the reply that wrote them (DESIGN §7.3).
+            if (
+              batch.some((event) => event._tag === "State" || event._tag === "Reload" || event._tag === "Hello") ||
+              batch.some((event) => event._tag === "Slot" && this.selectsAnother(event.entry))
+            ) {
               Context.get(
                 services as unknown as Context.Context<Reactivity.Reactivity>,
                 Reactivity.Reactivity
@@ -1120,6 +1125,14 @@ export class ChatSession {
         return this.update({ cache: event.warmth, history })
       }
     }
+  }
+
+  /** Whether a slot event selects another version of a message shown in this fork. */
+  private selectsAnother(entry: PathEntry) {
+    if (entry.shownForkId !== undefined && this.view.forkId !== null && entry.shownForkId !== this.view.forkId)
+      return false
+    const current = this.view.entries.find((e) => e.slotId === entry.slotId)
+    return current !== undefined && current.version.id !== entry.version.id
   }
 
   /** Applies a change to loaded state; applying it again, or after a newer one, changes nothing. */
