@@ -212,11 +212,14 @@ export function CastTab({ session }: { session: ChatSession }) {
   // Only the cast: the tab doesn't re-render as messages arrive.
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
   const view = useMemo(() => castView(cast), [cast])
-  // Who the model is writing as at the end of the chat, if anyone (after Speak now, say).
+  // Who the model is writing as at the end of the chat, if anyone (after Speak now, say): no one
+  // yet while the decision model is choosing who replies.
   const writing = useSyncExternalStore(session.subscribe, () => {
     const { entries, newer } = session.snapshot()
     const last = newer === null ? entries.at(-1) : undefined
-    return last?.version.status === "generating" ? last.version.speakerEntityId : null
+    return last?.version.status === "generating" && last.version.speakerPick?.by !== "auto"
+      ? last.version.speakerEntityId
+      : null
   })
   const participants = useMemo(() => cast?.participants ?? [], [cast])
   const infoResult = useChatCards(session)

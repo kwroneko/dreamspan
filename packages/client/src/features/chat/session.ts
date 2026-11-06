@@ -1454,7 +1454,7 @@ export class ChatSession {
     imageDraftIds?: readonly string[],
     /** Who replies after `replySpeaker`, in turn: the rest of the round (DESIGN §2.3). */
     round: ReadonlyArray<EntityId> = [],
-    /** Auto picked `replySpeaker` and the round: the decision model may choose others (DESIGN §2.3). */
+    /** Auto picked `replySpeaker` and the round, and "Who replies next" is on: the decision model chooses (DESIGN §2.3). */
     autoPick = false
   ): Promise<{
     readonly sent: boolean
@@ -1513,7 +1513,7 @@ export class ChatSession {
     composer?: ComposerSource,
     /** Who replies after this one, in turn: the rest of the round (DESIGN §2.3). */
     round: ReadonlyArray<EntityId> = [],
-    /** Auto picked `speaker` and the round: the decision model may choose others (DESIGN §2.3). */
+    /** Auto picked `speaker` and the round, and "Who replies next" is on: the decision model chooses (DESIGN §2.3). */
     autoPick = false
   ): Promise<Outcome<SendResult>> {
     await beforeReply()

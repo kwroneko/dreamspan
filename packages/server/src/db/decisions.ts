@@ -208,6 +208,16 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
           return true
         }).pipe(transaction(sql, "PickSpeaker")),
 
+      SettleSpeaker: ({ userId, versionId }) =>
+        Effect.gen(function* () {
+          const settled = yield* sql<{ readonly id: string }>`
+            UPDATE versions SET speaker_pick_json = ${JSON.stringify({ by: "order" })}, updated_at = ${Date.now()}
+            WHERE id = ${versionId} AND json_extract(speaker_pick_json, '$.by') = 'auto'
+              AND slot_id IN (SELECT s.id FROM slots s JOIN chats c ON c.id = s.chat_id WHERE c.owner_user_id = ${userId})
+            RETURNING id`
+          return settled.length > 0
+        }).pipe(transaction(sql, "SettleSpeaker")),
+
       ApplyDecisionEffect: ({ userId, rolloutId, versionId, expectedState, events }) =>
         Effect.gen(function* () {
           const decision = yield* decisionRollout(userId, rolloutId)

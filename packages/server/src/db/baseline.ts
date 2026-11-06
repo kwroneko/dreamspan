@@ -349,7 +349,8 @@ export const baseline: ReadonlyArray<string> = [
     macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')),
     origin TEXT NOT NULL,
     source_version_id TEXT REFERENCES versions(id),
-    -- How Auto chose its speaker (SpeakerPick): {"by":"auto"}, or the decision model's pick.
+    -- How a reply's speaker was chosen (SpeakerPick): {"by":"auto"} while the decision model
+    -- is to choose, then its pick, or {"by":"order"} when Auto's pick stood.
     speaker_pick_json TEXT CHECK (speaker_pick_json IS NULL OR json_valid(speaker_pick_json)),
     rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED,
     connection_id TEXT REFERENCES connections(id),
@@ -1109,8 +1110,11 @@ export const baseline: ReadonlyArray<string> = [
     round INTEGER NOT NULL DEFAULT 0 CHECK (round IN (0, 1)),
     -- 1: its round stopped (Stop, a failed reply, a restart) and waits for Continue round.
     held INTEGER NOT NULL DEFAULT 0 CHECK (held IN (0, 1)),
-    -- 1: its reply's speaker is Auto's pick, which the decision model may change when it posts.
+    -- 1: its reply's speaker is for the decision model to choose when it posts (Auto's pick if it can't).
     auto_pick INTEGER NOT NULL DEFAULT 0 CHECK (auto_pick IN (0, 1)),
+    -- A round's entry: the slot of the round's first reply, once there is one, so the turns
+    -- already decided can be shown (DESIGN §2.3).
+    round_start_slot_id TEXT REFERENCES slots(id) ON DELETE SET NULL,
     CHECK (round = 0 OR kind = 'generate'),
     CHECK (held = 0 OR round = 1),
     CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0),
@@ -1121,6 +1125,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE INDEX queued_messages_chat ON queued_messages(chat_id, seq)`,
   `CREATE INDEX queued_messages_speaker ON queued_messages(speaker_entity_id)`,
   `CREATE INDEX queued_messages_reply_speaker ON queued_messages(reply_speaker_entity_id)`,
+  `CREATE INDEX queued_messages_round_start ON queued_messages(round_start_slot_id) WHERE round_start_slot_id IS NOT NULL`,
   `CREATE TRIGGER queued_messages_chat_fixed BEFORE UPDATE OF chat_id ON queued_messages
     WHEN NEW.chat_id IS NOT OLD.chat_id
     BEGIN SELECT RAISE(ABORT, 'queued messages never move to another chat'); END`,

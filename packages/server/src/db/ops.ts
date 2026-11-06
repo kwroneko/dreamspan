@@ -2507,6 +2507,15 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * A reply whose speaker the decision model was to choose, once it didn't (nothing to ask, or no
+   * answer sure enough): Auto's pick stands, and the reply shows it. False when already settled.
+   */
+  Rpc.make("SettleSpeaker", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
   /** State events a decision attaches to a version of its chat, with the decision as their origin. */
   Rpc.make("ApplyDecisionEffect", {
     payload: {

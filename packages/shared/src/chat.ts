@@ -168,12 +168,15 @@ export const ModelRef = Schema.Struct({ provider: Schema.String, model: Schema.S
 export type ModelRef = typeof ModelRef.Type
 
 /**
- * How a reply's speaker was chosen, when Auto chose it (DESIGN §2.3): `auto`, the chat's reply
- * order; `decision`, the decision model's "Who replies next" (spec/AGENTIC.md §7), with how sure
- * it was and the name it was asked about. Absent: someone chose the speaker.
+ * How a reply's speaker was chosen, when the decision model's "Who replies next" was to choose
+ * it (DESIGN §2.3, spec/AGENTIC.md §7): `auto`, not chosen yet (the speaker is Auto's pick, which
+ * the reply never shows as its speaker meanwhile); `order`, Auto's pick stood (nothing to ask, or
+ * no answer sure enough); `decision`, the decision model's pick, with how sure it was and the name
+ * it was asked about. Absent: Auto's or the user's pick, with no decision model involved.
  */
 export const SpeakerPick = Schema.Union([
   Schema.Struct({ by: Schema.Literal("auto") }),
+  Schema.Struct({ by: Schema.Literal("order") }),
   Schema.Struct({
     by: Schema.Literal("decision"),
     confidence: Schema.Number,
@@ -415,9 +418,17 @@ export class QueuedMessage extends Schema.Class<QueuedMessage>("QueuedMessage")(
   /**
    * A reply of a round (DESIGN §2.3): queued by the server, behind the round's reply before it,
    * in `forkId`. `held`: the round stopped (Stop, or a reply that failed) and waits for
-   * Continue round.
+   * Continue round. `decides`: the decision model chooses who replies at this turn, so its
+   * speaker is only Auto's fallback. `startSlotId`: the round's first reply, once posted.
    */
-  round: Schema.optionalKey(Schema.Struct({ held: Schema.Boolean, forkId: Schema.NullOr(ForkId) })),
+  round: Schema.optionalKey(
+    Schema.Struct({
+      held: Schema.Boolean,
+      forkId: Schema.NullOr(ForkId),
+      decides: Schema.optionalKey(Schema.Boolean),
+      startSlotId: Schema.optionalKey(SlotId)
+    })
+  ),
   rowVersion: Schema.Int,
   createdAt: Schema.Number
 }) {}

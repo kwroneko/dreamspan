@@ -464,7 +464,8 @@ export function Composer({
           captured?.images,
           captured?.ids,
           plan.round,
-          plan.auto
+          // For the decision model to choose (the server asks it only if two or more can reply).
+          nextDecisionOn && plan.auto
         )
         accepted = sent
         report(outcome)
@@ -486,7 +487,7 @@ export function Composer({
       "",
       undefined,
       replyPlan.round,
-      replyPlan.auto
+      nextDecisionOn && replyPlan.auto
     )
     report(outcome)
     if (outcome.ok) replied(choice.draftId)

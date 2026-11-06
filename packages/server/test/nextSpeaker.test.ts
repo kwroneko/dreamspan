@@ -170,7 +170,7 @@ describe("who replies next", () => {
       })
       assert.deepStrictEqual(decides(mock.requests()), [])
       assert.strictEqual(version.speakerEntityId, mira.entityId)
-      assert.deepStrictEqual(version.speakerPick, { by: "auto" })
+      assert.deepStrictEqual(version.speakerPick, { by: "order" })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -193,7 +193,7 @@ describe("who replies next", () => {
         })
         assert.lengthOf(decides(mock.requests()), 1)
         assert.strictEqual(version.speakerEntityId, mira.entityId)
-        assert.deepStrictEqual(version.speakerPick, { by: "auto" })
+        assert.deepStrictEqual(version.speakerPick, { by: "order" })
         assert.strictEqual(version.status, "complete")
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     })
@@ -250,6 +250,8 @@ describe("who replies next", () => {
         assert.deepStrictEqual(decides(mock.requests()), [])
         assert.deepStrictEqual(rows(config.dataDir, "SELECT id FROM rollouts WHERE kind = 'decision'"), [])
         assert.strictEqual(version.speakerEntityId, mira.entityId)
+        // Not left waiting for a choice: Auto's pick stands, and the reply shows it.
+        assert.deepStrictEqual(version.speakerPick, { by: "order" })
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     })
 
@@ -288,6 +290,18 @@ describe("who replies next", () => {
           e._tag === "Version" && e.version.status === "complete" && e.version.writer === "model" ? [e.version] : []
         )
       yield* eventually(() => done().length >= 2)
+      // The round's later turn says the decision model chooses it, and where the round started.
+      const queued = events.flatMap((e) => (e._tag === "Queue" ? e.queue : [])).filter((q) => q.round)
+      assert.isNotEmpty(queued)
+      for (const entry of queued) {
+        assert.isTrue(entry.round!.decides)
+        assert.strictEqual(entry.round!.startSlotId, done()[0]!.slotId)
+      }
+      // Every reply of the round shows the speaker chosen, none left waiting.
+      assert.deepStrictEqual(
+        done().map((v) => v.speakerPick?.by),
+        ["decision", "decision"]
+      )
       const asked = decides(mock.requests()).map((r) => (r.body as { state: { characters: Array<string> } }).state)
       assert.deepStrictEqual(
         asked.map((s) => s.characters),

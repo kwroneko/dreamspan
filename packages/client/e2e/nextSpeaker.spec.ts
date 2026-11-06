@@ -24,6 +24,13 @@ let decide: Server
 /** The decision requests received. */
 const asked: Array<unknown> = []
 let decisionConnection = ""
+/** While true, decisions wait in `heldDecisions` until `releaseDecisions`. */
+let holdDecisions = false
+const heldDecisions: Array<() => void> = []
+const releaseDecisions = () => {
+  holdDecisions = false
+  for (const answerNow of heldDecisions.splice(0)) answerNow()
+}
 
 const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), cookie, use)
 
@@ -43,14 +50,19 @@ test.beforeAll(async () => {
     request.on("end", () => {
       const body = JSON.parse(raw) as { questions: Record<string, { criteria: Record<string, string> }> }
       asked.push(body)
-      response.writeHead(200, { "content-type": "application/json" })
-      response.end(
-        JSON.stringify({
-          model: "typesafe/jev-1.13-20260917",
-          answers: answer(body.questions),
-          usage: { input_tokens: 320, output_tokens: 1, cost: 0.0000134 }
-        })
-      )
+      const answerNow = () => {
+        if (response.destroyed) return
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(
+          JSON.stringify({
+            model: "typesafe/jev-1.13-20260917",
+            answers: answer(body.questions),
+            usage: { input_tokens: 320, output_tokens: 1, cost: 0.0000134 }
+          })
+        )
+      }
+      if (holdDecisions) heldDecisions.push(answerNow)
+      else answerNow()
     })
   })
   await new Promise<void>((resolve) => decide.listen(0, "127.0.0.1", resolve))
@@ -106,6 +118,11 @@ test.beforeAll(async () => {
   )
 })
 
+test.afterEach(() => {
+  releaseDecisions()
+  provider.release()
+})
+
 test.afterAll(async () => {
   await provider.stop()
   await new Promise((resolve) => decide.close(resolve))
@@ -115,8 +132,11 @@ test.beforeEach(async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
 })
 
-/** A group chat of Mira, Wren, Ash and Quill, played as Ana, one reply a send, with Ana's first line. */
-const groupChat = () =>
+/**
+ * A group chat of Mira, Wren, Ash and Quill, played as Ana, with Ana's first line: one reply a
+ * send, or (`single` false) a round of everyone Auto has reply, in turn.
+ */
+const groupChat = (single = true) =>
   admin((api) =>
     Effect.gen(function* () {
       const cards = yield* api.ListCards()
@@ -132,7 +152,8 @@ const groupChat = () =>
         greeters: [],
         first: { _tag: "Send", content: "*I shake the rain off my coat.* Evening, all.", speakerEntityId: null }
       })
-      yield* api.ChangeCast({ chatId: started.chat.id, slotId: null, change: { _tag: "ReplySingle", on: true } })
+      if (single)
+        yield* api.ChangeCast({ chatId: started.chat.id, slotId: null, change: { _tag: "ReplySingle", on: true } })
       return started.chat.id
     })
   )
@@ -161,6 +182,31 @@ const auditTooltip = async (page: Page, surface: string) => {
   expect.soft(violations, `${surface}: layout violations`).toEqual([])
 }
 
+/** What a reply's header says while the decision model chooses who writes it. */
+const CHOOSING = "Choosing who replies…"
+const PLANNED = /Mira|Wren|Quill/
+
+/** From now on, records every name each message's header shows, in order, by slot. */
+const recordSpeakers = (page: Page) =>
+  page.evaluate(() => {
+    const seen: Record<string, Array<string>> = {}
+    ;(window as unknown as { seenSpeakers: typeof seen }).seenSpeakers = seen
+    const look = () => {
+      for (const article of document.querySelectorAll("article[data-slot]")) {
+        const label = article.querySelector("header > span")?.textContent?.trim() ?? ""
+        const list = (seen[article.getAttribute("data-slot")!] ??= [])
+        if (list.at(-1) !== label) list.push(label)
+      }
+    }
+    look()
+    new MutationObserver(look).observe(document.body, { subtree: true, childList: true, characterData: true })
+  })
+
+const seenSpeakers = (page: Page) =>
+  page.evaluate(() => (window as unknown as { seenSpeakers: Record<string, Array<string>> }).seenSpeakers)
+
+const strip = (page: Page) => page.getByRole("group", { name: "This round" })
+
 test("the point is off by default, and its switch explains it on hover", async ({ page }) => {
   await setPoint(false)
   await page.goto(`${server().url}/settings/connections/${decisionConnection}`)
@@ -187,12 +233,18 @@ test("off, nothing is sent and Auto picks", async ({ page }) => {
   await nextChip(page).hover()
   await expect(tooltip(page)).toContainText("replies next")
   await expect(tooltip(page)).not.toContainText("decision model")
+  await recordSpeakers(page)
   await page.getByLabel("Message", { exact: true }).fill("Anyone seen the Gull?")
   await page.keyboard.press("Enter")
   await expect(page.locator("article[data-slot]")).toHaveCount(3)
   await expect(page.getByText("The tide is turning.")).toBeVisible()
-  await expect(page.locator("article[data-slot]").last().locator("header").first()).not.toContainText("Ash")
+  const reply = page.locator("article[data-slot]").last()
+  await expect(reply.locator("header").first()).not.toContainText("Ash")
   expect(asked.length).toBe(before)
+  // Nothing to choose: the reply names Auto's pick from the start.
+  const seen = (await seenSpeakers(page))[(await reply.getAttribute("data-slot"))!]!
+  expect(seen).toHaveLength(1)
+  expect(seen[0]).toMatch(PLANNED)
 })
 
 for (const width of [1440, 390])
@@ -219,13 +271,24 @@ for (const width of [1440, 390])
       if (shots) await page.screenshot({ path: `${shots}/pill-before-${width}-${colorScheme}.png` })
       await auditTooltip(page, `pill-before-${width}-${colorScheme}`)
 
+      // While the decision model chooses, the reply names no one: never Auto's pick, then Ash.
       const before = asked.length
+      await recordSpeakers(page)
+      holdDecisions = true
       await page.getByLabel("Message", { exact: true }).fill("Anyone seen the Gull?")
       await page.keyboard.press("Enter")
       const reply = page.locator("article[data-slot]").nth(2)
+      await expect(reply.locator("[data-choosing-speaker]")).toHaveText(CHOOSING)
+      await expect(reply.locator("header").first()).not.toContainText(PLANNED)
+      await expect(reply.locator("header").first()).not.toContainText("Ash")
+      if (shots) await page.screenshot({ path: `${shots}/choosing-${width}-${colorScheme}.png` })
+      await expectLayout(page, test.info(), `choosing-${width}-${colorScheme}`)
+      releaseDecisions()
       await expect(reply.getByText("The tide is turning.")).toBeVisible()
       await expect(reply.locator("header").first()).toContainText("Ash")
       expect(asked.length).toBe(before + 1)
+      const slot = (await reply.getAttribute("data-slot"))!
+      expect((await seenSpeakers(page))[slot]).toEqual([CHOOSING, "Ash"])
 
       await nextChip(page).hover()
       await expect(tooltip(page)).toContainText("The decision model picked Ash for the last reply (91%).")
@@ -248,4 +311,60 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/chats/${chatId}/context/${versionId}`)
       await expect(page.getByText("The decision model picked Ash (91%)")).toBeVisible()
       if (shots) await page.screenshot({ path: `${shots}/inspector-${width}-${colorScheme}.png` })
+    })
+
+// A round (no one-reply-a-send): the strip names the turns already chosen and only counts the
+// rest, never Auto's plan for them; each later turn is chosen when it comes, its reply naming no
+// one until then.
+for (const width of [1440, 390])
+  for (const colorScheme of ["light", "dark"] as const)
+    test(`a round's turns are chosen as they come, at ${width} ${colorScheme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.emulateMedia({ colorScheme })
+      await setPoint(true)
+      const chatId = await groupChat(false)
+      await page.goto(`${server().url}/chats/${chatId}`)
+      await expect(nextChip(page)).toBeEnabled()
+      await recordSpeakers(page)
+      const before = asked.length
+      holdDecisions = true
+      provider.hold()
+      await page.getByLabel("Message", { exact: true }).fill("Anyone seen the Gull?")
+      await page.keyboard.press("Enter")
+
+      // The first turn, being chosen: no one named, in the reply or the strip.
+      const first = page.locator("article[data-slot]").nth(2)
+      await expect(first.locator("[data-choosing-speaker]")).toHaveText(CHOOSING)
+      await expect(strip(page)).toContainText(
+        /Choosing who replies now\. Then \d+ more, each chosen when it's their turn/
+      )
+      await expect(strip(page)).not.toContainText(PLANNED)
+      await expect(strip(page)).not.toContainText("Ash")
+      const turns = Number(/Then (\d+) more/.exec(await strip(page).innerText())![1])
+      expect(turns).toBeGreaterThanOrEqual(1)
+      if (shots) await page.screenshot({ path: `${shots}/round-choosing-${width}-${colorScheme}.png` })
+      await expectLayout(page, test.info(), `round-choosing-${width}-${colorScheme}`)
+
+      // Chosen: Ash, in the reply and the strip; the rest still only counted.
+      releaseDecisions()
+      await expect(first.locator("header").first()).toContainText("Ash")
+      await expect(strip(page)).toContainText(`Ash so far. Then ${turns} more, each chosen when it's their turn`)
+      await expect(strip(page)).not.toContainText(PLANNED)
+      if (shots) await page.screenshot({ path: `${shots}/round-chosen-${width}-${colorScheme}.png` })
+      await expectLayout(page, test.info(), `round-chosen-${width}-${colorScheme}`)
+
+      // The round runs out, each later turn asked when it comes.
+      provider.release()
+      await expect(page.locator("article[data-slot]")).toHaveCount(3 + turns, { timeout: 20_000 })
+      await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
+      await expect(strip(page)).toHaveCount(0)
+      expect(asked.length).toBe(before + 1 + turns)
+      const seen = await seenSpeakers(page)
+      expect(seen[(await first.getAttribute("data-slot"))!]).toEqual([CHOOSING, "Ash"])
+      for (let i = 3; i < 3 + turns; i++) {
+        const shown = seen[(await page.locator("article[data-slot]").nth(i).getAttribute("data-slot"))!]!
+        // Never one name and then another: only the speaker chosen, after the choosing state at most.
+        expect(shown.filter((label) => label !== CHOOSING)).toHaveLength(1)
+        expect(shown.at(-1)).not.toBe(CHOOSING)
+      }
     })
