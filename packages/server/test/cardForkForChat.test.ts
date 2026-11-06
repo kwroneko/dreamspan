@@ -276,4 +276,57 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.deepStrictEqual((yield* t.cast(t.other)).participants, [t.parent.entityId])
     })
   )
+  it.effect("lists a swapped card by identity through rename, bin, restore and purge", () =>
+    Effect.gen(function* () {
+      const t = yield* setup
+      const swapped = yield* t.fork("library review")
+      const listed = () =>
+        t.api
+          .ListLibrary({ kind: "card" })
+          .pipe(
+            Effect.map((refs) =>
+              refs.filter((r) => r.entityId === t.parent.entityId || r.entityId === swapped.entityId)
+            )
+          )
+      assert.sameMembers(
+        (yield* listed()).map((r) => r.entityId),
+        [t.parent.entityId, swapped.entityId]
+      )
+      const opened = yield* t.api.OpenEditor({ refId: swapped.id })
+      yield* t.writer.EditRef({
+        userId: t.userId,
+        refId: swapped.id,
+        expectedRowVersion: opened.ref.rowVersion,
+        doc: { ...opened.doc, name: "A renamed pilot" },
+        message: null,
+        commitDraft: null
+      })
+      const renamed = yield* listed()
+      assert.deepStrictEqual(
+        renamed.map((r) => r.label),
+        ["A renamed pilot", "Pilot"]
+      )
+      assert.strictEqual(renamed[0]!.entityId, swapped.entityId)
+      assert.deepStrictEqual((yield* t.cast(t.main)).participants, [swapped.entityId])
+      const item = yield* t.writer.DeleteEntity({ userId: t.userId, entityId: swapped.entityId })
+      assert.deepStrictEqual(
+        (yield* listed()).map((r) => r.entityId),
+        [t.parent.entityId]
+      )
+      assert.deepStrictEqual((yield* t.cast(t.main)).participants, [swapped.entityId])
+      assert.isTrue((yield* t.cast(t.main)).cards.find((c) => c.entityId === swapped.entityId)!.inBin)
+      yield* t.api.RestoreBinItem({ itemId: item.id })
+      assert.sameMembers(
+        (yield* listed()).map((r) => r.entityId),
+        [t.parent.entityId, swapped.entityId]
+      )
+      const again = yield* t.writer.DeleteEntity({ userId: t.userId, entityId: swapped.entityId })
+      yield* t.api.PurgeBinItem({ itemId: again.id })
+      assert.deepStrictEqual(
+        (yield* listed()).map((r) => r.entityId),
+        [t.parent.entityId]
+      )
+      assert.deepStrictEqual((yield* t.cast(t.main)).participants, [t.parent.entityId])
+    })
+  )
 })
