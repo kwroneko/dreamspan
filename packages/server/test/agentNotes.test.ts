@@ -181,6 +181,70 @@ describe("agent note tools", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("the chat's settings show what the agent may change; its note is listed only where its reply is", () => {
+    const config = testConfig()
+    const model = scriptedModel()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(model.handler)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, events, chat, mira } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        mira: { agent_editable_fields: ["description"] },
+        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+      })
+      const locked = yield* chatNote(api, chat.id, "Locked", "Mira owes Tobin.", false)
+      const me = yield* api.Whoami()
+      const reader = yield* Reader
+      model.run([["write_note", { title: "Injury", content: "Mira's left hand is bandaged." }]])
+      const { entry } = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      const swipe = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+      yield* eventually(() => finished(events, swipe.version.id) !== undefined)
+      const at = { chatId: chat.id, slotId: version.slotId as SlotId }
+      const listed = () => api.ListChatNotes(at).pipe(Effect.map((notes) => notes.map((n) => String(n.doc["title"]))))
+      // Where the reply that wrote it is shown, the note is listed, and the agent may change it.
+      assert.sameMembers(yield* listed(), ["Locked", "Injury"])
+      const shown = yield* api.GetAgentPermissions(at)
+      assert.deepStrictEqual(
+        shown.notes.map((n) => [n.title, n.on, n.own]),
+        [
+          ["Locked", false, false],
+          ["Injury", true, true]
+        ]
+      )
+      const fields = (permissions: typeof shown) =>
+        Object.fromEntries(permissions.cards.find((c) => c.entityId === mira.entityId)!.fields.map((f) => [f.field, f]))
+      assert.deepInclude(fields(shown)["description"], { on: true, own: true })
+      assert.deepInclude(fields(shown)["personality"], { on: false, own: false })
+
+      // The chat allows a field and a note the card and note don't, and forbids the card's own.
+      for (const change of [
+        { target: { card: mira.entityId, field: "personality" as const }, on: true },
+        { target: { card: mira.entityId, field: "description" as const }, on: false },
+        { target: { note: locked.entityId }, on: true }
+      ])
+        yield* api.ChangeCast({ ...at, change: { _tag: "AgentPermission", ...change } })
+      const changed = yield* api.GetAgentPermissions(at)
+      assert.deepInclude(fields(changed)["personality"], { on: true, own: false })
+      assert.deepInclude(fields(changed)["description"], { on: false, own: true })
+      assert.deepInclude(
+        changed.notes.find((n) => n.title === "Locked"),
+        { on: true, own: false }
+      )
+
+      // The first version shown again: the agent's note isn't listed there, for the user or the agent.
+      yield* api.SelectVersion({ slotId: version.slotId, versionId: version.id, expectedVersionId: swipe.version.id })
+      assert.deepStrictEqual(yield* listed(), ["Locked"])
+      assert.deepStrictEqual(
+        (yield* api.GetAgentPermissions(at)).notes.map((n) => n.title),
+        ["Locked"]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("edit_card changes a costume through notes: the field once, the tail after, a swipe undoing both", () => {
     const config = testConfig()
     const model = scriptedModel()
@@ -190,7 +254,7 @@ describe("agent note tools", () => {
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
-      const { version, events, chat } = yield* generateReply(api, {
+      const { version, events, chat, mira } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         mira: {
@@ -278,6 +342,18 @@ describe("agent note tools", () => {
       const restored = yield* turn(later.version.slotId as SlotId, [])
       assert.include(top(restored.request), "She wears a grey travelling coat.")
       assert.notInclude(restored.request.join("\n"), "ball gown")
+      // The notes the swiped-away reply wrote aren't in this chat any more: not listed, and the
+      // description is free for a note of the user's own.
+      const listed = yield* api.ListChatNotes({ chatId: chat.id, slotId: restored.version.slotId as SlotId })
+      assert.notInclude(
+        listed.map((n) => String(n.doc["title"])),
+        "Mira's current description"
+      )
+      yield* api.CreateChatNote({
+        chatId: chat.id,
+        title: "Mine",
+        replaces: { kind: "card_field", field: "description", card: mira.entityId }
+      })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

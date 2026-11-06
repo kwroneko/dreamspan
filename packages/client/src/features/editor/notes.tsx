@@ -537,7 +537,7 @@ export function NoteSettings({ store, cards = [] }: { store: EditorStore; cards?
           store={store}
           path={["agent_editable"]}
           label="The agent may edit it"
-          hint="Kept for agents, which aren't built yet. A file never turns this on."
+          hint="Lets the model change this note with its tools, unless a chat says otherwise. A file never turns this on."
         />
       </div>
     </div>

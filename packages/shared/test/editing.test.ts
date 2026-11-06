@@ -174,5 +174,20 @@ describe("what the drafts can't do", () => {
       { id: "a", agent_editable: true },
       { id: "b", agent_editable: false }
     ])
+    // A card's fields the agent may change: only those the head already lets it.
+    expect(
+      withoutGrantedAgentEdits(
+        "card",
+        { agent_editable_fields: ["description"] },
+        { agent_editable_fields: ["description", "scenario"] }
+      ).agent_editable_fields
+    ).toEqual(["description"])
+    expect(withoutGrantedAgentEdits("card", {}, { name: "Mira", agent_editable_fields: ["scenario"] })).toEqual({
+      name: "Mira"
+    })
+    expect(
+      withoutGrantedAgentEdits("card", { agent_editable_fields: ["scenario"] }, { agent_editable_fields: [] })
+        .agent_editable_fields
+    ).toEqual([])
   })
 })
