@@ -32,11 +32,11 @@ const append = (chatId: string, forkId: string, tip: string, from: number, n: nu
     },
     {
       sql: `WITH RECURSIVE n(x) AS (SELECT ${from} UNION ALL SELECT x+1 FROM n WHERE x < ${from + n - 1})
-        INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
-        SELECT ?||'-s'||x, ?, (SELECT lane_id FROM slots WHERE id = ?),
+        INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
+        SELECT ?||'-s'||x, ?,
           CASE WHEN x = ${from} THEN ? ELSE ?||'-s'||(x-1) END,
           (SELECT depth FROM slots WHERE id = ?) + 1 + x - ${from}, ?||'-v'||x, 1, ? FROM n`,
-      params: [chatId, chatId, tip, tip, chatId, tip, chatId, forkId]
+      params: [chatId, chatId, tip, chatId, tip, chatId, forkId]
     },
     { sql: "UPDATE forks SET tip_slot_id=? WHERE id=?", params: [`${chatId}-s${from + n - 1}`, forkId] }
   ])

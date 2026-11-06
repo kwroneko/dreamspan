@@ -314,7 +314,7 @@ export const maintain = (
       }
     })
     const chunkFor = (chain: ReadonlyArray<LcmSlot>, ask?: Ask, source?: Summary) =>
-      !chain.length || chain.some((c) => c.generating || c.merged) || !chain.some((c) => c.versionId !== null)
+      !chain.length || chain.some((c) => c.generating) || !chain.some((c) => c.versionId !== null)
         ? []
         : Array.from({ length: Math.ceil(chain.length / MAX_CHUNK_SLOTS) }, (_, n) => ({
             inputs: chain.slice(n * MAX_CHUNK_SLOTS, (n + 1) * MAX_CHUNK_SLOTS).map(slotInput),

@@ -67,7 +67,7 @@ export const recordFailedSummary = (
     const chain = yield* lcmPath(sql, userId, job.chat_id, job.last_slot_id, job.first_slot_id).pipe(
       Effect.catchTag("NotFound", () => Effect.succeed([]))
     )
-    if (!chain.length || chain[0]!.id !== job.first_slot_id || chain.some((s) => s.merged)) return null
+    if (!chain.length || chain[0]!.id !== job.first_slot_id) return null
     const children: Array<{ summaryId: string; revisionId: string }> = []
     if (job.level > 1) {
       const ids = JSON.parse(job.input_child_ids ?? "[]") as string[]

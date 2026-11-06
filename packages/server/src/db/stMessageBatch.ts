@@ -51,7 +51,7 @@ export const prepareStMessageBatch = (
 export const insertStMessageBatch = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   batch: ReturnType<typeof prepareStMessageBatch>,
-  position: { chatId: string; laneId: string; forkId: string; parentId: string | null; depth: number }
+  position: { chatId: string; forkId: string; parentId: string | null; depth: number }
 ) {
   if (batch.slotIds.length === 0) return
   yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, speaker_entity_id, writer, content,
@@ -61,8 +61,8 @@ export const insertStMessageBatch = Effect.fnUntraced(function* (
       value ->> '$.reasoning', value ->> '$.reply_sections', value ->> '$.recorded_model_json',
       value ->> '$.recorded_generation_json', value ->> '$.created_at', value ->> '$.updated_at'
     FROM json_each(${batch.versionsJson}) ORDER BY key`
-  yield* sql`INSERT INTO slots (id, chat_id, lane_id, fork_id, parent_slot_id, depth, selected_version_id, context_excluded, created_at)
-    SELECT value ->> '$.id', ${position.chatId}, ${position.laneId}, ${position.forkId},
+  yield* sql`INSERT INTO slots (id, chat_id, fork_id, parent_slot_id, depth, selected_version_id, context_excluded, created_at)
+    SELECT value ->> '$.id', ${position.chatId}, ${position.forkId},
       coalesce(value ->> '$.parent', ${position.parentId}), (value ->> '$.depth') + ${position.depth},
       value ->> '$.selected', value ->> '$.hidden', value ->> '$.at'
     FROM json_each(${batch.slotsJson}) ORDER BY key`

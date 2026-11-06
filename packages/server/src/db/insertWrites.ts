@@ -54,10 +54,10 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
 
           // The anchor: shown in the fork and not deleted there. A neighbour inserted meanwhile
           // is no conflict; the new message still goes directly below the anchor.
-          let anchor: { id: string; depth: number; lane_id: string } | null = null
+          let anchor: { id: string; depth: number } | null = null
           if (anchorSlotId !== null) {
-            const [row] = yield* sql<{ id: string; depth: number; lane_id: string; row_version: number }>`
-              SELECT id, depth, lane_id, row_version FROM slots WHERE id = ${anchorSlotId} AND chat_id = ${chatId}`
+            const [row] = yield* sql<{ id: string; depth: number; row_version: number }>`
+              SELECT id, depth, row_version FROM slots WHERE id = ${anchorSlotId} AND chat_id = ${chatId}`
             if (!row) return yield* new NotFound({ entity: "slot", id: anchorSlotId })
             const place = (yield* slotPlace(sql, chatId, anchorSlotId))!
             const shown = onDisplayPath(yield* pathPieces(sql, chatId, fork.id, fork.tip_slot_id), place)
@@ -74,11 +74,6 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
             }
             anchor = row
           }
-          const laneId =
-            anchor?.lane_id ??
-            (yield* sql<{
-              id: string
-            }>`SELECT id FROM lanes WHERE chat_id = ${chatId} ORDER BY created_at, id LIMIT 1`)[0]!.id
 
           let slotId: string
           let versionId: string
@@ -106,7 +101,7 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
                     origin: "generated",
                     ...(body.direction?.trim() ? { direction: body.direction } : {})
                   })
-            const inserted = yield* graph.insertSlot(chatId, laneId, anchor, version, at, fork.id, [], 0, true)
+            const inserted = yield* graph.insertSlot(chatId, anchor, version, at, fork.id, [], 0, true)
             slotId = inserted.slotId
             versionId = inserted.version.id
           } else {
@@ -148,7 +143,6 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
             yield* sql`INSERT INTO slots ${sql.insert({
               id: slotId,
               chat_id: chatId,
-              lane_id: laneId,
               parent_slot_id: anchor!.id,
               depth: anchor!.depth + 1,
               selected_version_id: versionId,
