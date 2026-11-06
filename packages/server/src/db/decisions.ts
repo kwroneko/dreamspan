@@ -1,4 +1,5 @@
-// Decision models' storage (spec/AGENTIC.md §7). The settings are `user_prefs` key `decisions`,
+import { putUserSetting } from "./settings.ts"
+// Decision models' storage (spec/AGENTIC.md §7). The settings are `settings` key `decisions`,
 // `{ connections: { [id]: { model, points: { [point]: { on, threshold } } } } }`; only entries
 // whose connection (and model) are still the user's and live read back, so a deleted connection
 // sends nothing. Each decision call is a rollout of kind `decision`: its state and questions are
@@ -25,7 +26,9 @@ import { query, transaction } from "./tx.ts"
 const KEY = "decisions"
 
 const stored = (sql: SqlClient.SqlClient, userId: UserId) =>
-  sql<{ value_json: string }>`SELECT value_json FROM user_prefs WHERE user_id = ${userId} AND key = ${KEY}`.pipe(
+  sql<{
+    value_json: string
+  }>`SELECT value_json FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = ${KEY}`.pipe(
     Effect.map(([row]): Array<ConnectionDecisions> => {
       if (!row) return []
       const value = JSON.parse(row.value_json) as { connections?: unknown }
@@ -110,9 +113,7 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
               next.map((entry) => [entry.connectionId, { model: entry.model, points: entry.points }])
             )
           }
-          yield* sql`INSERT INTO user_prefs (user_id, key, value_json)
-            VALUES (${userId}, ${KEY}, ${JSON.stringify(value)})
-            ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
+          yield* putUserSetting(sql, userId, KEY, value)
           return next
         }).pipe(transaction(sql, "SetDecisionSettings")),
 

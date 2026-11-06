@@ -1,3 +1,4 @@
+import { readSetting, putUserSetting } from "./settings.ts"
 import type { StImportPrefix } from "./stImportPrefix.ts"
 import { insertStMessageBatch, prepareStMessageBatch } from "./stMessageBatch.ts"
 import { recordCardArrival, recordChatArrival } from "./stArrival.ts"
@@ -350,23 +351,20 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       Effect.gen(function* () {
         yield* current(userId, importId, importId)
         if (!(yield* ownedPreset(sql, userId, refId))) return yield* new NotFound({ entity: "preset", id: refId })
-        const changed = yield* sql`INSERT INTO user_settings (user_id,key,value_json)
-          VALUES (${userId},${DEFAULT_PRESET},${JSON.stringify(refId)})
-          ON CONFLICT(user_id,key) DO UPDATE SET value_json=excluded.value_json
-          WHERE json_type(user_settings.value_json) = 'null' RETURNING user_id`
-        return changed.length > 0
+        const previous = yield* readSetting(sql, "user", userId, DEFAULT_PRESET)
+        if (previous.value !== null) return false
+        yield* putUserSetting(sql, userId, DEFAULT_PRESET, refId)
+        return true
       }).pipe(transaction(sql, "StImportDefaultPreset")),
     StImportSummarySettings: ({ userId, importId, prompt, settings }) =>
       Effect.gen(function* () {
         yield* current(userId, importId, importId)
-        yield* sql`INSERT INTO user_settings (user_id,key,value_json) VALUES (${userId},'import.st.memory',${settings})
-          ON CONFLICT(user_id,key) DO UPDATE SET value_json=excluded.value_json`
+        yield* putUserSetting(sql, userId, "import.st.memory", JSON.parse(settings))
         if (prompt === null) return
-        // Re-importing must not undo an instruction the user has chosen since the import.
-        yield* sql`INSERT INTO user_settings (user_id,key,value_json)
-          VALUES (${userId},'generation.lcm',${JSON.stringify({ tail: prompt })})
-          ON CONFLICT(user_id,key) DO UPDATE SET value_json=json_set(user_settings.value_json,'$.tail',${prompt})
-          WHERE json_type(user_settings.value_json,'$.tail') IS NULL`
+        // Re-importing keeps an instruction the user has chosen since the import.
+        const { value } = yield* readSetting(sql, "user", userId, "generation.lcm")
+        const stored = (value ?? {}) as Record<string, unknown>
+        if (stored.tail === undefined) yield* putUserSetting(sql, userId, "generation.lcm", { ...stored, tail: prompt })
       }).pipe(transaction(sql, "StImportSummarySettings")),
 
     StImportBegin: ({ userId, importId }) =>

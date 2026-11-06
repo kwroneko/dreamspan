@@ -397,7 +397,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
               ORDER BY e.seq DESC LIMIT 1),
             (SELECT coalesce(json_extract(value_json,'$.when'),
                 CASE json_extract(value_json,'$.spendAhead') WHEN 0 THEN 'next-reply' END)
-              FROM user_settings WHERE user_id = ? AND key = 'generation.lcm'),
+              FROM settings WHERE scope = 'user' AND scope_id = ? AND key = 'generation.lcm'),
             'after-reply') <> 'next-reply' OR ${drivenSql(`${job}.chat_id`, `${job}.fork_id`)})`
         // Depth orders structural paths. Insertions can put a deep slot before a shallow
         // one; resolve the handful of live L1 starts by display position in those forks only.

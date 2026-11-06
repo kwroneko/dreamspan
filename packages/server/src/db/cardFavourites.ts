@@ -1,4 +1,5 @@
-// Favourite cards, per user: one `user_settings` row (`cards.favourites`), so a database made
+import { putUserSetting } from "./settings.ts"
+// Favourite cards, per user: one `settings` row (`cards.favourites`), so a database made
 // before favourites existed needs no schema change. `on` lists the favourite cards' entity ids;
 // `here` the cards whose favourite the user set in this app, which an import's `fav` (ST's
 // favourite flag, `extensions.fav` in the card) no longer changes.
@@ -19,7 +20,7 @@ const strings = (value: unknown): ReadonlyArray<string> =>
 export const readFavourites = (sql: SqlClient.SqlClient, userId: string) =>
   sql<{
     value_json: string
-  }>`SELECT value_json FROM user_settings WHERE user_id = ${userId} AND key = ${CARD_FAVOURITES}`.pipe(
+  }>`SELECT value_json FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = ${CARD_FAVOURITES}`.pipe(
     Effect.map(([row]): Favourites => {
       const stored = row ? (JSON.parse(row.value_json) as { on?: unknown; here?: unknown } | null) : null
       return { on: strings(stored?.on), here: strings(stored?.here) }
@@ -27,8 +28,7 @@ export const readFavourites = (sql: SqlClient.SqlClient, userId: string) =>
   )
 
 const put = (sql: SqlClient.SqlClient, userId: string, value: Favourites) =>
-  sql`INSERT INTO user_settings (user_id, key, value_json) VALUES (${userId}, ${CARD_FAVOURITES}, ${JSON.stringify(value)})
-    ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
+  putUserSetting(sql, userId, CARD_FAVOURITES, value)
 
 const toggled = (list: ReadonlyArray<string>, id: string, on: boolean) =>
   on ? [...list.filter((x) => x !== id), id] : list.filter((x) => x !== id)

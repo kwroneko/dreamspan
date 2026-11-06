@@ -581,7 +581,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         })
       const [prefs] = yield* sql<{
         pins_collapsed: number
-      }>`SELECT pins_collapsed FROM shell_preferences WHERE user_id = ${userId}`
+      }>`SELECT json_extract(value_json, '$') AS pins_collapsed FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = 'shell.pinsCollapsed'`
       const links = new Map<string, SplitChatLink>()
       const parents = new Map<string, string>()
       for (const [id, current] of groupCurrent) {

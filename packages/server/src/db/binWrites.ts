@@ -1,3 +1,4 @@
+import { putUserSetting } from "./settings.ts"
 // Recycle bin write handlers (DESIGN §6.2), in the writer worker.
 import { readBinLimits } from "./binLimits.ts"
 import { defaultBinLimits, type BinLimits } from "@rp/shared/bin.ts"
@@ -24,9 +25,7 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
       ChangeBinLimit: ({ userId, key, value }) =>
         Effect.gen(function* () {
           const limits = { ...(yield* readBinLimits(sql, userId, defaults)), [key]: value }
-          yield* sql`INSERT INTO user_settings (user_id, key, value_json)
-            VALUES (${userId}, 'bin.limits', ${JSON.stringify(limits)})
-            ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
+          yield* putUserSetting(sql, userId, "bin.limits", limits)
           return limits
         }).pipe(transaction(sql, "ChangeBinLimit")),
       DeleteChatGroup: ({ userId, chatId, forkId, expectedForkIds, title }) =>

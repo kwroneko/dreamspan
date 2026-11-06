@@ -1,14 +1,11 @@
 import type { SqlClient } from "effect/sql"
 import { Effect } from "effect"
 
-const PREFIX = "split-chat:"
-export const splitChatKey = (fork: string) => `${PREFIX}${fork}`
-
 export const splitChatMarkers = (sql: SqlClient.SqlClient, userId: string) =>
   Effect.map(
-    sql<{ key: string }>`SELECT key FROM user_settings WHERE user_id = ${userId}
-      AND key GLOB 'split-chat:*' AND value_json = 'true'`,
-    (rows) => new Set(rows.map((r) => r.key.slice(PREFIX.length)))
+    sql<{ id: string }>`SELECT f.id FROM forks f JOIN chats c ON c.id = f.chat_id
+    WHERE c.owner_user_id = ${userId} AND f.split_chat = 1`,
+    (rows) => new Set(rows.map((r) => r.id))
   )
 
 /** Nearest marked ancestor, including the branch itself. Iterative for deeply nested trees. */
