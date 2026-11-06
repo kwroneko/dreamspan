@@ -363,7 +363,7 @@ test("a chat beside its preset editor, two preset editors side by side, and a ho
     // Two presets side by side: the library's editors in two frames.
     await fresh(page, 1440, theme)
     await page.goto(`${server().url}/library/${fixtures.presetA}`)
-    await expect(page.getByRole("combobox", { name: "Switch preset" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Switch preset", exact: true })).toBeVisible()
     // The new frame shows the preset too; the library opens beside it there, then the other preset.
     await page.getByRole("button", { name: "Split right" }).click()
     await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name: "Library" }).click()
@@ -371,7 +371,7 @@ test("a chat beside its preset editor, two preset editors side by side, and a ho
     await library.getByRole("tab", { name: /^Presets/ }).click()
     await library.getByRole("link", { name: "Lighthouse preset", exact: true }).first().click()
     await expect(page.locator("[data-frame]")).toHaveCount(2)
-    await expect(page.getByRole("combobox", { name: "Switch preset" })).toHaveCount(2)
+    await expect(page.getByRole("button", { name: "Switch preset", exact: true })).toHaveCount(2)
     await shot(page, `two-presets-1440-${theme}`)
     if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), `two-presets-${theme}`)
 

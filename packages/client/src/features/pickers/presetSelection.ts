@@ -20,8 +20,11 @@ const presetsAtom = allOf({ live: livePresets, archived: archivedPresets })
 export const BUILTIN = "builtin"
 
 export interface PresetSelection {
-  /** Summary pickers choose only library refs and describe their own use. */
-  readonly usage?: "summary" | undefined
+  /**
+   * Summary pickers choose only library refs and describe their own use; an editor's header
+   * ("edit") switches which preset it edits, choosing none for a reply.
+   */
+  readonly usage?: "summary" | "edit" | undefined
   /** False until the account's choice and both lists are read. */
   readonly lock?: { readonly locked: boolean; readonly disabled: boolean; readonly change: (locked: boolean) => void }
   readonly loaded: boolean
@@ -88,6 +91,40 @@ export function usePresetSelection(session: ChatSession | null): PresetSelection
       const preset = value === BUILTIN ? null : (value as RefId)
       if (locked && session) return (await session.changeCast({ _tag: "Preset", ref: preset })).ok
       return (await action.run((client) => client("ChangeGenerationDefaults", { change: { preset } }), ["settings"])).ok
+    },
+    setArchived: (ref, next) =>
+      action
+        .run((client) => client("SetRefArchived", { refId: ref.id, archived: next }), ["library"])
+        .then((result) => (result.ok ? result.value : null)),
+    refresh: refreshPresets,
+    error: action.error
+  }
+}
+
+/**
+ * The preset an editor edits, as its header's picker (the side panel's, switching documents):
+ * the same lists, archive and New preset; choosing opens the other preset in this editor.
+ */
+export function useEditedPresetSelection(refId: RefId, label: string, open: (refId: RefId) => void): PresetSelection {
+  const action = useAction()
+  const presets = useAtomValue(presetsAtom)
+  const refreshPresets = useAtomRefresh(presetsAtom)
+  useEffect(() => onLibraryChange(refreshPresets), [refreshPresets])
+  const lists = AsyncResult.isSuccess(presets) ? presets.value : null
+  const live = lists?.live ?? []
+  const archived = lists?.archived ?? []
+  const current = live.find((ref) => ref.id === refId) ?? archived.find((ref) => ref.id === refId) ?? null
+  return {
+    usage: "edit",
+    loaded: lists !== null,
+    value: refId,
+    current,
+    label: current?.label ?? label,
+    live,
+    archived,
+    choose: (value) => {
+      if (value !== refId && value !== BUILTIN) open(value as RefId)
+      return Promise.resolve(true)
     },
     setArchived: (ref, next) =>
       action
