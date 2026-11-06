@@ -1702,7 +1702,7 @@
       "type": "trigger",
       "name": "fork_labels_made",
       "tbl_name": "forks",
-      "sql": "CREATE TRIGGER fork_labels_made AFTER INSERT ON forks WHEN NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN INSERT INTO fork_labels (fork_id, chat_id, base, epoch, point, label_end) SELECT NEW.id, NEW.chat_id, b, 0, unhex(hex(b) || (CASE WHEN 0 < 224 THEN printf('%02X', 0 + 1) ELSE 'F0' || printf('%04X', 0 - 224) END)), unhex(hex(b) || 'FF') FROM (SELECT coalesce((SELECT point FROM fork_labels WHERE fork_id = NEW.parent_fork_id), x'') AS b); UPDATE fork_labels SET epoch = epoch + 1, point = unhex(hex(base) || (CASE WHEN epoch + 1 < 224 THEN printf('%02X', epoch + 1 + 1) ELSE 'F0' || printf('%04X', epoch + 1 - 224) END)) WHERE fork_id = NEW.parent_fork_id; END"
+      "sql": "CREATE TRIGGER fork_labels_made AFTER INSERT ON forks WHEN NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN INSERT INTO fork_labels (fork_id, chat_id, base, epoch, point, label_end) SELECT NEW.id, NEW.chat_id, b, 0, unhex(hex(b) || (CASE WHEN 0 < 224 THEN printf('%02X', 0 + 1) WHEN 0 < 65760 THEN 'F0' || printf('%04X', 0 - 224) ELSE 'F1' || printf('%016X', 0 - 224) END)), unhex(hex(b) || 'FF') FROM (SELECT coalesce((SELECT point FROM fork_labels WHERE fork_id = NEW.parent_fork_id), x'') AS b); UPDATE fork_labels SET epoch = epoch + 1, point = unhex(hex(base) || (CASE WHEN epoch + 1 < 224 THEN printf('%02X', epoch + 1 + 1) WHEN epoch + 1 < 65760 THEN 'F0' || printf('%04X', epoch + 1 - 224) ELSE 'F1' || printf('%016X', epoch + 1 - 224) END)) WHERE fork_id = NEW.parent_fork_id; END"
     },
     {
       "type": "trigger",
@@ -2344,7 +2344,7 @@
       "type": "trigger",
       "name": "state_events_fork_label",
       "tbl_name": "state_events",
-      "sql": "CREATE TRIGGER state_events_fork_label AFTER INSERT ON state_events WHEN NEW.fork_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN UPDATE state_events SET fork_label = (SELECT point FROM fork_labels WHERE fork_id = NEW.fork_id) WHERE id = NEW.id; END"
+      "sql": "CREATE TRIGGER state_events_fork_label AFTER INSERT ON state_events WHEN NEW.fork_id IS NOT NULL AND NEW.fork_label IS NULL AND NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN UPDATE state_events SET fork_label = (SELECT point FROM fork_labels WHERE fork_id = NEW.fork_id) WHERE id = NEW.id; END"
     },
     {
       "type": "trigger",
