@@ -1,7 +1,16 @@
 // The agent RPCs (spec/AGENTIC.md §5, §6).
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ACTIVITY_PAGE, ActivityCursor, ActivityPage, NotResumable, ReplyModes, RolloutStep, RunTranscript, StepEdit } from "./agent.ts"
+import {
+  ACTIVITY_PAGE,
+  ActivityCursor,
+  ActivityPage,
+  NotResumable,
+  ReplyModes,
+  RolloutStep,
+  RunTranscript,
+  StepEdit
+} from "./agent.ts"
 import { ChatId, ForkId, PathEntry, VersionId } from "./chat.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
