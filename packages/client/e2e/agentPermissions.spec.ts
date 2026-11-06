@@ -301,12 +301,7 @@ for (const width of [1440, 390])
         own: false,
         chosen: false
       })
-      await admin((api) =>
-        api.UnlinkNote({
-          noteRefId: lampNote.id,
-          chatNote: { chatId: fixture.chatId, slotId: fixture.slotId }
-        })
-      )
+      // Keep it linked so the Notes panel's layout audit also checks its shared banner.
       // Card swap, the chat's card layout: a switch of its own, with or without tools.
       const swap = settings.getByRole("region", { name: "Card swap" })
       await expect(swap.getByRole("switch", { name: "Card swap" })).not.toBeChecked()
