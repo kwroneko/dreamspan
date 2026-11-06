@@ -11,29 +11,9 @@ const runAll = (statements: ReadonlyArray<string>) =>
   })
 
 // Migrations run in the writer worker, before any reader connection is opened.
-// Keep the squashed baseline intact; subsequent migrations preserve existing data.
+// Until the owner declares real use, edit baseline.ts and deploy an empty database.
 export const migrations = {
-  "0001_baseline": runAll(baseline),
-  "0002_composer_guidance": runAll([
-    `ALTER TABLE drafts ADD COLUMN guidance INTEGER NOT NULL DEFAULT 0 CHECK (guidance IN (0, 1))`,
-    `UPDATE drafts SET guidance = COALESCE((SELECT json_extract(value_json, '$.guidance') = 1
-      FROM user_prefs WHERE user_id = drafts.user_id AND key = 'display'), 0)
-      WHERE target_kind = 'composer'`,
-    `UPDATE user_prefs SET value_json = json_remove(value_json, '$.guidance') WHERE key = 'display'`
-  ]),
-  "0003_branch_added_characters": runAll([
-    `ALTER TABLE fork_summaries ADD COLUMN added_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(added_json))`
-  ]),
-  "0004_chat_pins": runAll([
-    `CREATE TABLE chat_pins_new (user_id TEXT NOT NULL REFERENCES users(id),
-      chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, PRIMARY KEY(user_id, chat_id))`,
-    `INSERT INTO chat_pins_new (user_id, chat_id)
-      SELECT user_id, chat_id FROM chat_pins
-      UNION SELECT c.owner_user_id, f.chat_id FROM forks f JOIN chats c ON c.id = f.chat_id
-      WHERE f.pinned_at IS NOT NULL`,
-    `DROP TABLE chat_pins`,
-    `ALTER TABLE chat_pins_new RENAME TO chat_pins`
-  ])
+  "0001_baseline": runAll(baseline)
 }
 
 /**

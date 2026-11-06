@@ -75,7 +75,7 @@ const decodeStateEvent = Schema.decodeUnknownEffect(FoldableEvent)
  * every entry (5 s for a 60-slot window of the 100,000-message perf fixture).
  */
 const siblingCount = (also = "") => {
-  const reachable = `x.lane_id = s.lane_id ${also} AND ${reachableSlot("x")}`
+  const reachable = `x.chat_id = s.chat_id ${also} AND ${reachableSlot("x")}`
   // An inserted message is the only one at its place (spec/MESSAGE-INSERT.md §2.4).
   return `CASE WHEN s.inserted = 1 THEN ${also === "" ? 1 : 0}
     WHEN s.parent_slot_id IS NULL
@@ -87,14 +87,9 @@ const siblingCount = (also = "") => {
 const startsFork = (s: string) =>
   `(SELECT f.id FROM forks f WHERE f.id = ${s}.fork_id AND f.base_slot_id IS ${s}.parent_slot_id)`
 
-/**
- * The name a slot shows among its alternates: a name the user gave (or took off) the fork it
- * starts, else its own label (an ST import's, or a continuation's name from before forks),
- * else its fork's name.
- */
-const branchLabel = (s: string) => `nullif(coalesce((SELECT CASE WHEN f.name_user = 1 THEN coalesce(f.name, '')
-    ELSE coalesce(${s}.branch_name, f.name) END
-  FROM forks f WHERE f.id = ${s}.fork_id AND f.base_slot_id IS ${s}.parent_slot_id), ${s}.branch_name), '')`
+/** The name of the fork this slot starts, empty when the fork has no name. */
+const branchLabel = (s: string) => `nullif((SELECT f.name FROM forks f
+  WHERE f.id = ${s}.fork_id AND f.base_slot_id IS ${s}.parent_slot_id), '')`
 
 /**
  * A path entry's columns: the slot's, and its shown version's under their own names. The
@@ -104,7 +99,7 @@ const branchLabel = (s: string) => `nullif(coalesce((SELECT CASE WHEN f.name_use
  * another fork's does. The count of versions is the message's own: a fork's copies stand in
  * for them.
  */
-const pathColumns = (fork: string) => `${shownVersionColumns}, s.lane_id, s.parent_slot_id, s.depth, s.inserted,
+const pathColumns = (fork: string) => `${shownVersionColumns}, s.parent_slot_id, s.depth, s.inserted,
   s.row_version + max(coalesce(so.seq, 0), coalesce(ro.seq, 0), coalesce(dso.seq, 0), coalesce(hso.seq, 0))
     AS row_version,
   coalesce(hso.flag, ${contextExcluded()}) AS context_excluded, coalesce(hso.flag, s.hidden_by_user) AS hidden_by_user,
@@ -894,10 +889,9 @@ export const makeReadHandlers = Effect.gen(function* () {
         const [slot] = yield* sql<{
           chat_id: string
           parent_slot_id: string | null
-          lane_id: string
           inserted: number
         }>`
-          SELECT s.chat_id, s.parent_slot_id, s.lane_id, s.inserted FROM slots s JOIN chats c ON c.id = s.chat_id
+          SELECT s.chat_id, s.parent_slot_id, s.inserted FROM slots s JOIN chats c ON c.id = s.chat_id
           WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
         // Each alternate's first words as the fork named shows them, else the fork through it.
@@ -915,11 +909,11 @@ export const makeReadHandlers = Effect.gen(function* () {
             : slot.parent_slot_id === null
               ? yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${slot.chat_id}
-                  AND x.depth = 0 AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                  AND x.depth = 0 AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id`
               : yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
-                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                  AND x.chat_id = ${slot.chat_id} AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id`
         return rows.map(
           (row, index) => new Branch({ slotId: row.id, index, name: row.branch_name, preview: row.preview })

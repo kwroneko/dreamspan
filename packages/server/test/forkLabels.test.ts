@@ -40,13 +40,12 @@ const setup = Effect.gen(function* () {
   yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
   yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
   yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (${CHAT}, 'u', 'rp', 'active', 1)`
-  yield* sql`INSERT INTO lanes (id, chat_id, name, created_at) VALUES ('l', ${CHAT}, 'main', 1)`
   for (const [depth, id] of SLOTS.entries())
     yield* Effect.gen(function* () {
       yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`
-      yield* sql`INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
-        VALUES (${id}, ${CHAT}, 'l', ${depth === 0 ? null : SLOTS[depth - 1]!}, ${depth}, ${`v-${id}`}, 1)`
+      yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
+        VALUES (${id}, ${CHAT}, ${depth === 0 ? null : SLOTS[depth - 1]!}, ${depth}, ${`v-${id}`}, 1)`
     }).pipe(sql.withTransaction)
   yield* sql`UPDATE forks SET tip_slot_id = 's3' WHERE id = ${CHAT}`
   return sql

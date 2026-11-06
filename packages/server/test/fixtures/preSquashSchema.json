@@ -344,18 +344,6 @@
     },
     {
       "type": "index",
-      "name": "lanes_chat",
-      "tbl_name": "lanes",
-      "sql": "CREATE INDEX lanes_chat ON lanes(chat_id)"
-    },
-    {
-      "type": "index",
-      "name": "lanes_forked_from",
-      "tbl_name": "lanes",
-      "sql": "CREATE INDEX lanes_forked_from ON lanes(forked_from_slot_id) WHERE forked_from_slot_id IS NOT NULL"
-    },
-    {
-      "type": "index",
       "name": "lcm_enable_one_staging",
       "tbl_name": "lcm_enable_runs",
       "sql": "CREATE UNIQUE INDEX lcm_enable_one_staging ON lcm_enable_runs(chat_id) WHERE published = 0 AND phase <> 'cancelled'"
@@ -560,12 +548,6 @@
     },
     {
       "type": "index",
-      "name": "slot_parents_parent",
-      "tbl_name": "slot_parents",
-      "sql": "CREATE INDEX slot_parents_parent ON slot_parents(parent_slot_id)"
-    },
-    {
-      "type": "index",
       "name": "slots_bin_item",
       "tbl_name": "slots",
       "sql": "CREATE INDEX slots_bin_item ON slots(bin_item_id) WHERE bin_item_id IS NOT NULL"
@@ -590,21 +572,9 @@
     },
     {
       "type": "index",
-      "name": "slots_lane",
-      "tbl_name": "slots",
-      "sql": "CREATE INDEX slots_lane ON slots(lane_id)"
-    },
-    {
-      "type": "index",
       "name": "slots_parent",
       "tbl_name": "slots",
       "sql": "CREATE INDEX slots_parent ON slots(parent_slot_id)"
-    },
-    {
-      "type": "index",
-      "name": "slots_placement_group",
-      "tbl_name": "slots",
-      "sql": "CREATE INDEX slots_placement_group ON slots(placement_group_id) WHERE placement_group_id IS NOT NULL"
     },
     {
       "type": "index",
@@ -898,7 +868,7 @@
       "type": "table",
       "name": "bin_items",
       "tbl_name": "bin_items",
-      "sql": "CREATE TABLE \"bin_items\" ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('chat', 'message', 'branch', 'version', 'entity', 'connection', 'card_asset')), target_id TEXT NOT NULL, chat_id TEXT, title TEXT NOT NULL, excerpt TEXT NOT NULL, origin_json TEXT NOT NULL CHECK (json_valid(origin_json)), byte_size INTEGER NOT NULL, deleted_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE \"bin_items\" ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL, target_id TEXT NOT NULL, chat_id TEXT, title TEXT NOT NULL, excerpt TEXT NOT NULL, origin_json TEXT NOT NULL CHECK (json_valid(origin_json)), byte_size INTEGER NOT NULL, deleted_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
@@ -910,13 +880,13 @@
       "type": "table",
       "name": "changeset_groups",
       "tbl_name": "changeset_groups",
-      "sql": "CREATE TABLE changeset_groups ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, origin TEXT NOT NULL CHECK (origin IN ('user', 'agent')), created_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE changeset_groups ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
       "name": "changeset_items",
       "tbl_name": "changeset_items",
-      "sql": "CREATE TABLE changeset_items ( id INTEGER PRIMARY KEY, changeset_id TEXT NOT NULL REFERENCES changesets(id) ON DELETE CASCADE, target_kind TEXT NOT NULL CHECK (target_kind IN ('version_replace', 'summary_revision', 'state_event')), target_id TEXT NOT NULL, before_json TEXT CHECK (before_json IS NULL OR json_valid(before_json)), after_json TEXT CHECK (after_json IS NULL OR json_valid(after_json)), reverted_at INTEGER ) STRICT"
+      "sql": "CREATE TABLE changeset_items ( id INTEGER PRIMARY KEY, changeset_id TEXT NOT NULL REFERENCES changesets(id) ON DELETE CASCADE, target_kind TEXT NOT NULL, target_id TEXT NOT NULL, before_json TEXT CHECK (before_json IS NULL OR json_valid(before_json)), after_json TEXT CHECK (after_json IS NULL OR json_valid(after_json)), reverted_at INTEGER ) STRICT"
     },
     {
       "type": "table",
@@ -928,7 +898,7 @@
       "type": "table",
       "name": "changesets",
       "tbl_name": "changesets",
-      "sql": "CREATE TABLE changesets ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, title TEXT NOT NULL, origin TEXT NOT NULL CHECK (origin IN ('user', 'agent')), rollout_id TEXT REFERENCES rollouts(id), fork_id TEXT NOT NULL REFERENCES forks(id), seq INTEGER NOT NULL, group_id TEXT NOT NULL REFERENCES changeset_groups(id), status TEXT NOT NULL CHECK (status IN ('applying', 'applied', 'reverted', 'partially_reverted')), created_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE changesets ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, title TEXT NOT NULL, origin TEXT NOT NULL, rollout_id TEXT REFERENCES rollouts(id), fork_id TEXT NOT NULL REFERENCES forks(id), seq INTEGER NOT NULL, group_id TEXT NOT NULL REFERENCES changeset_groups(id), status TEXT NOT NULL CHECK (status IN ('applying', 'applied', 'reverted', 'partially_reverted')), created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
@@ -946,13 +916,13 @@
       "type": "table",
       "name": "chat_pins",
       "tbl_name": "chat_pins",
-      "sql": "CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL, PRIMARY KEY(user_id, chat_id, fork_id))"
+      "sql": "CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, PRIMARY KEY(user_id, chat_id)) STRICT"
     },
     {
       "type": "table",
       "name": "chats",
       "tbl_name": "chats",
-      "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')), status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER, added_at INTEGER, st_group_id TEXT, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3) , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0, -- Moved by triggers on every write the shell's fork summaries read (fork_summaries). shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT"
+      "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER, added_at INTEGER, st_group_id TEXT, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3) , deleted_at INTEGER, bin_item_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0, -- Moved by triggers on every write the shell's fork summaries read (fork_summaries). shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT"
     },
     {
       "type": "table",
@@ -976,7 +946,7 @@
       "type": "table",
       "name": "cost_settings",
       "tbl_name": "cost_settings",
-      "sql": "CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json)))"
+      "sql": "CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json))) STRICT"
     },
     {
       "type": "table",
@@ -994,13 +964,13 @@
       "type": "table",
       "name": "drafts",
       "tbl_name": "drafts",
-      "sql": "CREATE TABLE drafts ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'entity_field', 'summary_edit', 'user_field', 'queue_edit', 'insert')), target_id TEXT NOT NULL, field TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)), -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key. base_revision TEXT, -- A library field's session a save or checkpoint ended: the revision now holding its text. committed_revision TEXT, row_version INTEGER NOT NULL DEFAULT 1, cleared_version INTEGER NOT NULL DEFAULT 0, deletions_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(deletions_json)), updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, UNIQUE (user_id, target_kind, target_id, field) ) STRICT"
+      "sql": "CREATE TABLE drafts ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), target_kind TEXT NOT NULL, target_id TEXT NOT NULL, field TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)), -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key. base_revision TEXT, -- A library field's session a save or checkpoint ended: the revision now holding its text. committed_revision TEXT, row_version INTEGER NOT NULL DEFAULT 1, cleared_version INTEGER NOT NULL DEFAULT 0, deletions_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(deletions_json)), updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, guidance INTEGER NOT NULL DEFAULT 0 CHECK (guidance IN (0, 1)), UNIQUE (user_id, target_kind, target_id, field) ) STRICT"
     },
     {
       "type": "table",
       "name": "entities",
       "tbl_name": "entities",
-      "sql": "CREATE TABLE entities ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('card', 'preset', 'lorebook', 'note', 'preset_overlay')), created_at INTEGER NOT NULL, archived_at INTEGER , deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, forked_from_entity_id TEXT REFERENCES entities(id), forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, forked_in_chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, forked_at INTEGER) STRICT"
+      "sql": "CREATE TABLE entities ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL, created_at INTEGER NOT NULL, archived_at INTEGER , deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, forked_from_entity_id TEXT REFERENCES entities(id), forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, forked_in_chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, forked_at INTEGER) STRICT"
     },
     {
       "type": "table",
@@ -1012,7 +982,7 @@
       "type": "table",
       "name": "entity_revisions",
       "tbl_name": "entity_revisions",
-      "sql": "CREATE TABLE entity_revisions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, entity_id TEXT NOT NULL REFERENCES entities(id), parents TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(parents) AND json_type(parents) = 'array'), doc_json TEXT NOT NULL CHECK (json_valid(doc_json)), doc_hash TEXT NOT NULL, schema_version INTEGER NOT NULL, origin TEXT NOT NULL CHECK (origin IN ('import', 'user', 'agent', 'changeset', 'merge', 'generation')), origin_ref TEXT, message TEXT, -- Plain text extracted from doc_json for full-text search. search_text TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE entity_revisions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, entity_id TEXT NOT NULL REFERENCES entities(id), parents TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(parents) AND json_type(parents) = 'array'), doc_json TEXT NOT NULL CHECK (json_valid(doc_json)), doc_hash TEXT NOT NULL, schema_version INTEGER NOT NULL, origin TEXT NOT NULL, origin_ref TEXT, message TEXT, -- Plain text extracted from doc_json for full-text search. search_text TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
@@ -1066,7 +1036,7 @@
       "type": "table",
       "name": "fork_overrides",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event', 'insert', 'image_exclude')), -- image_exclude: the message's own version and an image of it, \"<version id>:<media id>\". target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
+      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL, -- image_exclude: the message's own version and an image of it, \"<version id>:<media id>\". target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' ) STRICT"
     },
     {
       "type": "table",
@@ -1078,7 +1048,7 @@
       "type": "table",
       "name": "fork_summaries",
       "tbl_name": "fork_summaries",
-      "sql": "CREATE TABLE fork_summaries ( fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE, chat_id TEXT NOT NULL, -- The computation's format, and the chat's and owner's stamps it was computed at. format INTEGER NOT NULL, stamp INTEGER NOT NULL, user_stamp INTEGER NOT NULL, preview TEXT NOT NULL, messages INTEGER NOT NULL, leaf TEXT, end_at INTEGER, -- Where it parts from the fork it was made from: its first own message's time (else its -- making) and how many messages it shares (forkSummaries.ts); null for a chat's first. split_at INTEGER, split_after INTEGER, -- Entity ids only: names and avatars are read with the summary. cast_json TEXT NOT NULL CHECK (json_valid(cast_json)), joined_json TEXT NOT NULL CHECK (json_valid(joined_json)), departed_json TEXT NOT NULL CHECK (json_valid(departed_json)), activity_json TEXT NOT NULL CHECK (json_valid(activity_json)) ) STRICT"
+      "sql": "CREATE TABLE fork_summaries ( fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE, chat_id TEXT NOT NULL, -- The computation's format, and the chat's and owner's stamps it was computed at. format INTEGER NOT NULL, stamp INTEGER NOT NULL, user_stamp INTEGER NOT NULL, preview TEXT NOT NULL, messages INTEGER NOT NULL, leaf TEXT, end_at INTEGER, -- Where it parts from the fork it was made from: its first own message's time (else its -- making) and how many messages it shares (forkSummaries.ts); null for a chat's first. split_at INTEGER, split_after INTEGER, -- Entity ids only: names and avatars are read with the summary. cast_json TEXT NOT NULL CHECK (json_valid(cast_json)), joined_json TEXT NOT NULL CHECK (json_valid(joined_json)), departed_json TEXT NOT NULL CHECK (json_valid(departed_json)), activity_json TEXT NOT NULL CHECK (json_valid(activity_json)), added_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(added_json)) ) STRICT"
     },
     {
       "type": "table",
@@ -1109,12 +1079,6 @@
       "name": "jobs",
       "tbl_name": "jobs",
       "sql": "CREATE TABLE jobs ( id TEXT PRIMARY KEY, owner_user_id TEXT REFERENCES users(id), kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'complete', 'failed')), request_class TEXT NOT NULL DEFAULT 'background' CHECK (request_class IN ('interactive', 'idle', 'background')), payload_json TEXT NOT NULL CHECK (json_valid(payload_json)), attempts INTEGER NOT NULL DEFAULT 0, max_retries INTEGER NOT NULL DEFAULT 2, run_after INTEGER, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL ) STRICT"
-    },
-    {
-      "type": "table",
-      "name": "lanes",
-      "tbl_name": "lanes",
-      "sql": "CREATE TABLE lanes ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, name TEXT NOT NULL, color TEXT, forked_from_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
@@ -1150,7 +1114,7 @@
       "type": "table",
       "name": "llm_requests",
       "tbl_name": "llm_requests",
-      "sql": "CREATE TABLE llm_requests ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL REFERENCES connections(id), model_id TEXT REFERENCES models(id), chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL, version_id TEXT REFERENCES versions(id) ON DELETE SET NULL, purpose TEXT NOT NULL CHECK (purpose IN ('generation', 'summarize', 'condense', 'decision', 'workshop', 'idle_job', 'edit', 'test')), -- What was requested. api TEXT NOT NULL, provider TEXT NOT NULL, model_key TEXT NOT NULL, -- What served it: the model the response named, and the routed upstream where a -- gateway reports one (OpenRouter). response_model TEXT, upstream TEXT, status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'aborted', 'interrupted')), started_at INTEGER NOT NULL, first_token_at INTEGER, ended_at INTEGER, -- Normalized counts (PROVIDERS §9.2). cache_write_long is the subset of cache_write -- written with the long TTL; reasoning is the subset of output. estimated_input INTEGER, input_tokenizer TEXT, input_uncached INTEGER, cache_read INTEGER, cache_write INTEGER, cache_write_long INTEGER, output INTEGER, reasoning INTEGER, usage_source TEXT NOT NULL DEFAULT 'none' CHECK (usage_source IN ('reported', 'estimated', 'none')), -- The provider's usage object verbatim, so counts can be recomputed if a -- normalization turns out wrong. raw_usage_json TEXT CHECK (raw_usage_json IS NULL OR json_valid(raw_usage_json)), reported_cost REAL, cost REAL, cost_currency TEXT, -- What produced cost: a built-in price source, 'reported', or a user formula. cost_formula TEXT, error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), cache_stagger_json TEXT CHECK (cache_stagger_json IS NULL OR json_valid(cache_stagger_json)), cache_identity_json TEXT CHECK (cache_identity_json IS NULL OR json_valid(cache_identity_json)), backfill_id TEXT REFERENCES jobs(id), reserved_tokens INTEGER, reserved_cost REAL, reserved_currency TEXT, CHECK ((status = 'running') = (ended_at IS NULL)), CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL)) ) STRICT"
+      "sql": "CREATE TABLE llm_requests ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL REFERENCES connections(id), model_id TEXT REFERENCES models(id), chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL, version_id TEXT REFERENCES versions(id) ON DELETE SET NULL, purpose TEXT NOT NULL, -- What was requested. api TEXT NOT NULL, provider TEXT NOT NULL, model_key TEXT NOT NULL, -- What served it: the model the response named, and the routed upstream where a -- gateway reports one (OpenRouter). response_model TEXT, upstream TEXT, status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'aborted', 'interrupted')), started_at INTEGER NOT NULL, first_token_at INTEGER, ended_at INTEGER, -- Normalized counts (PROVIDERS §9.2). cache_write_long is the subset of cache_write -- written with the long TTL; reasoning is the subset of output. estimated_input INTEGER, input_tokenizer TEXT, input_uncached INTEGER, cache_read INTEGER, cache_write INTEGER, cache_write_long INTEGER, output INTEGER, reasoning INTEGER, usage_source TEXT NOT NULL DEFAULT 'none' CHECK (usage_source IN ('reported', 'estimated', 'none')), -- The provider's usage object verbatim, so counts can be recomputed if a -- normalization turns out wrong. raw_usage_json TEXT CHECK (raw_usage_json IS NULL OR json_valid(raw_usage_json)), reported_cost REAL, cost REAL, cost_currency TEXT, -- What produced cost: a built-in price source, 'reported', or a user formula. cost_formula TEXT, error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), cache_stagger_json TEXT CHECK (cache_stagger_json IS NULL OR json_valid(cache_stagger_json)), cache_identity_json TEXT CHECK (cache_identity_json IS NULL OR json_valid(cache_identity_json)), backfill_id TEXT REFERENCES jobs(id), reserved_tokens INTEGER, reserved_cost REAL, reserved_currency TEXT, CHECK ((status = 'running') = (ended_at IS NULL)), CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL)) ) STRICT"
     },
     {
       "type": "table",
@@ -1210,7 +1174,7 @@
       "type": "table",
       "name": "rollouts",
       "tbl_name": "rollouts",
-      "sql": "CREATE TABLE rollouts ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, kind TEXT NOT NULL CHECK (kind IN ('generation', 'summarize', 'condense', 'decision', 'workshop', 'idle_job', 'edit')), status TEXT NOT NULL CHECK (status IN ('created', 'running', 'completed', 'stopped', 'failed', 'interrupted', 'discarded')), slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, parent_rollout_id TEXT REFERENCES rollouts(id), role TEXT NOT NULL, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), request_class TEXT NOT NULL CHECK (request_class IN ('interactive', 'idle', 'background')), -- Provider-reported usage, rolled up. NULL means unknown, not zero (as in reference-harness). llm_requests INTEGER, usage_input_tokens INTEGER, usage_output_tokens INTEGER, usage_cache_read_tokens INTEGER, usage_cache_write_tokens INTEGER, usage_cost REAL, cache_observed_json TEXT CHECK (cache_observed_json IS NULL OR json_valid(cache_observed_json)), error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, updated_at INTEGER NOT NULL, completed_at INTEGER , context_issues_json TEXT CHECK (context_issues_json IS NULL OR json_valid(context_issues_json)), history_start_slot_id TEXT, history_start_depth INTEGER, history_depth INTEGER, fork_id TEXT, -- Agent rollouts (spec/AGENTIC.md §9): tool calls so far, and the orchestration mode it ran in. step_count INTEGER NOT NULL DEFAULT 0 CHECK (step_count >= 0), mode TEXT) STRICT"
+      "sql": "CREATE TABLE rollouts ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, kind TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('created', 'running', 'completed', 'stopped', 'failed', 'interrupted', 'discarded')), slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, parent_rollout_id TEXT REFERENCES rollouts(id), role TEXT NOT NULL, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), request_class TEXT NOT NULL CHECK (request_class IN ('interactive', 'idle', 'background')), -- Provider-reported usage, rolled up. NULL means unknown, not zero (as in reference-harness). llm_requests INTEGER, usage_input_tokens INTEGER, usage_output_tokens INTEGER, usage_cache_read_tokens INTEGER, usage_cache_write_tokens INTEGER, usage_cost REAL, cache_observed_json TEXT CHECK (cache_observed_json IS NULL OR json_valid(cache_observed_json)), error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, updated_at INTEGER NOT NULL, completed_at INTEGER , context_issues_json TEXT CHECK (context_issues_json IS NULL OR json_valid(context_issues_json)), history_start_slot_id TEXT, history_start_depth INTEGER, history_depth INTEGER, fork_id TEXT, -- Agent rollouts (spec/AGENTIC.md §9): tool calls so far, and the orchestration mode it ran in. step_count INTEGER NOT NULL DEFAULT 0 CHECK (step_count >= 0), mode TEXT) STRICT"
     },
     {
       "type": "table",
@@ -1222,7 +1186,7 @@
       "type": "table",
       "name": "shell_preferences",
       "tbl_name": "shell_preferences",
-      "sql": "CREATE TABLE shell_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id), pins_collapsed INTEGER NOT NULL DEFAULT 0)"
+      "sql": "CREATE TABLE shell_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id), pins_collapsed INTEGER NOT NULL DEFAULT 0) STRICT"
     },
     {
       "type": "table",
@@ -1232,15 +1196,9 @@
     },
     {
       "type": "table",
-      "name": "slot_parents",
-      "tbl_name": "slot_parents",
-      "sql": "CREATE TABLE slot_parents ( slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, parent_slot_id TEXT NOT NULL REFERENCES slots(id), ordinal INTEGER NOT NULL, PRIMARY KEY (slot_id, ordinal) ) STRICT, WITHOUT ROWID"
-    },
-    {
-      "type": "table",
       "name": "slots",
       "tbl_name": "slots",
-      "sql": "CREATE TABLE slots ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, lane_id TEXT NOT NULL REFERENCES lanes(id), parent_slot_id TEXT REFERENCES slots(id), depth INTEGER NOT NULL CHECK (depth >= 0), selected_version_id TEXT NOT NULL REFERENCES versions(id) DEFERRABLE INITIALLY DEFERRED, context_excluded INTEGER NOT NULL DEFAULT 0 CHECK (context_excluded IN (0, 1)), placement_group_id TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), branch_name TEXT, st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1)), chain_id TEXT, fork_id TEXT, -- Inserted between messages (spec/MESSAGE-INSERT.md §2.2): placed per fork by an insert override. inserted INTEGER NOT NULL DEFAULT 0 CHECK (inserted IN (0, 1)), CHECK ((parent_slot_id IS NULL) = (depth = 0)) ) STRICT"
+      "sql": "CREATE TABLE slots ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, parent_slot_id TEXT REFERENCES slots(id), depth INTEGER NOT NULL CHECK (depth >= 0), selected_version_id TEXT NOT NULL REFERENCES versions(id) DEFERRABLE INITIALLY DEFERRED, context_excluded INTEGER NOT NULL DEFAULT 0 CHECK (context_excluded IN (0, 1)), row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), chain_id TEXT, fork_id TEXT, -- Inserted between messages (spec/MESSAGE-INSERT.md §2.2): placed per fork by an insert override. inserted INTEGER NOT NULL DEFAULT 0 CHECK (inserted IN (0, 1)), CHECK ((parent_slot_id IS NULL) = (depth = 0)) ) STRICT"
     },
     {
       "type": "table",
@@ -1252,7 +1210,7 @@
       "type": "table",
       "name": "state_events",
       "tbl_name": "state_events",
-      "sql": "CREATE TABLE state_events ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, slot_id TEXT REFERENCES slots(id) ON DELETE CASCADE, version_id TEXT REFERENCES versions(id) ON DELETE CASCADE, seq INTEGER NOT NULL, key TEXT NOT NULL, scope TEXT, value_json TEXT NOT NULL CHECK (json_valid(value_json)), origin TEXT NOT NULL CHECK (origin IN ('user', 'rollout', 'changeset', 'import')), origin_ref TEXT, created_at INTEGER NOT NULL, superseded_by_changeset TEXT REFERENCES changesets(id), slot_chain_id TEXT, slot_depth INTEGER, fork_id TEXT REFERENCES forks(id), fork_seq INTEGER, -- Its fork's point when written (db/forkLabels.ts): visible where label <= point < the fork's end. fork_label BLOB, CHECK ((fork_id IS NULL AND fork_seq IS NULL) OR (fork_id IS NOT NULL AND fork_seq IS NOT NULL AND fork_seq > 0)), CHECK (key <> 'card.swap' OR (slot_id IS NULL AND version_id IS NULL AND scope IS NULL AND fork_id IS NOT NULL)), CHECK (version_id IS NULL OR slot_id IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE state_events ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, slot_id TEXT REFERENCES slots(id) ON DELETE CASCADE, version_id TEXT REFERENCES versions(id) ON DELETE CASCADE, seq INTEGER NOT NULL, key TEXT NOT NULL, scope TEXT, value_json TEXT NOT NULL CHECK (json_valid(value_json)), origin TEXT NOT NULL, origin_ref TEXT, created_at INTEGER NOT NULL, superseded_by_changeset TEXT REFERENCES changesets(id), slot_chain_id TEXT, slot_depth INTEGER, fork_id TEXT REFERENCES forks(id), fork_seq INTEGER, -- Its fork's point when written (db/forkLabels.ts): visible where label <= point < the fork's end. fork_label BLOB, CHECK ((fork_id IS NULL AND fork_seq IS NULL) OR (fork_id IS NOT NULL AND fork_seq IS NOT NULL AND fork_seq > 0)), CHECK (key <> 'card.swap' OR (slot_id IS NULL AND version_id IS NULL AND scope IS NULL AND fork_id IS NOT NULL)), CHECK (version_id IS NULL OR slot_id IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1300,7 +1258,7 @@
       "type": "table",
       "name": "summary_revisions",
       "tbl_name": "summary_revisions",
-      "sql": "CREATE TABLE summary_revisions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, content TEXT NOT NULL, rollout_id TEXT REFERENCES rollouts(id), token_count INTEGER NOT NULL, origin TEXT NOT NULL CHECK (origin IN ('generated', 'user', 'changeset', 'imported')), created_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE summary_revisions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, content TEXT NOT NULL, rollout_id TEXT REFERENCES rollouts(id), token_count INTEGER NOT NULL, origin TEXT NOT NULL, created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
@@ -1354,7 +1312,7 @@
       "type": "table",
       "name": "version_attachments",
       "tbl_name": "version_attachments",
-      "sql": "CREATE TABLE version_attachments ( version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, media_id TEXT NOT NULL REFERENCES media_assets(id), kind TEXT NOT NULL CHECK (kind IN ('image')), alt_text TEXT, PRIMARY KEY (version_id, ordinal) ) STRICT, WITHOUT ROWID"
+      "sql": "CREATE TABLE version_attachments ( version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, media_id TEXT NOT NULL REFERENCES media_assets(id), kind TEXT NOT NULL, alt_text TEXT, PRIMARY KEY (version_id, ordinal) ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "table",
@@ -1372,7 +1330,7 @@
       "type": "table",
       "name": "versions",
       "tbl_name": "versions",
-      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), -- Cast when this version was written, independent of later cast changes. NULL only -- while an imported version awaits its file's cast at StImportFinishChat. cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, -- The text and reasoning as they were before regex scripts rewrote them (ARCHITECTURE §12), -- null when unchanged; never sent anywhere. What the scripts did: rewrite_json. raw_content TEXT, raw_reasoning TEXT, -- The reply sections before the reasoning scripts rewrote their text, as JSON. raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)), rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)), frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL CHECK (origin IN ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate', 'merge', 'resumed')), source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), -- An imported version's model, and its times and token count, as its app recorded them -- (rows.ts); null for none and for this app's own generations (model_id, usage_json). recorded_model_json TEXT CHECK (recorded_model_json IS NULL OR json_valid(recorded_model_json)), recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), -- Cast when this version was written, independent of later cast changes. NULL only -- while an imported version awaits its file's cast at StImportFinishChat. cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, -- The text and reasoning as they were before regex scripts rewrote them (ARCHITECTURE §12), -- null when unchanged; never sent anywhere. What the scripts did: rewrite_json. raw_content TEXT, raw_reasoning TEXT, -- The reply sections before the reasoning scripts rewrote their text, as JSON. raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)), rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)), frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL, source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), -- An imported version's model, and its times and token count, as its app recorded them -- (rows.ts); null for none and for this app's own generations (model_id, usage_json). recorded_model_json TEXT CHECK (recorded_model_json IS NULL OR json_valid(recorded_model_json)), recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT, fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1970,18 +1928,6 @@
     },
     {
       "type": "trigger",
-      "name": "lanes_fork_same_chat",
-      "tbl_name": "lanes",
-      "sql": "CREATE TRIGGER lanes_fork_same_chat BEFORE INSERT ON lanes WHEN NEW.forked_from_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.forked_from_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'a lane forks from a slot of its own chat'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "lanes_fork_same_chat_update",
-      "tbl_name": "lanes",
-      "sql": "CREATE TRIGGER lanes_fork_same_chat_update BEFORE UPDATE OF chat_id, forked_from_slot_id ON lanes WHEN NEW.chat_id IS NOT OLD.chat_id OR (NEW.forked_from_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.forked_from_slot_id) IS NOT NEW.chat_id) BEGIN SELECT RAISE(ABORT, 'a lane stays in its chat and forks from a slot of its own chat'); END"
-    },
-    {
-      "type": "trigger",
       "name": "lcm_enable_explicit_visibility",
       "tbl_name": "slots",
       "sql": "CREATE TRIGGER lcm_enable_explicit_visibility AFTER UPDATE OF context_excluded ON slots BEGIN UPDATE lcm_enable_slots SET shown = 0 WHERE slot_id = NEW.id; END"
@@ -2300,33 +2246,9 @@
     },
     {
       "type": "trigger",
-      "name": "slot_parents_acyclic",
-      "tbl_name": "slot_parents",
-      "sql": "CREATE TRIGGER slot_parents_acyclic BEFORE INSERT ON slot_parents WHEN NEW.parent_slot_id = NEW.slot_id OR EXISTS (SELECT 1 FROM slots WHERE parent_slot_id = NEW.slot_id) OR EXISTS (SELECT 1 FROM slot_parents WHERE parent_slot_id = NEW.slot_id) BEGIN SELECT RAISE(ABORT, 'a slot''s merge parents are recorded before anything is appended below it'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "slot_parents_fixed",
-      "tbl_name": "slot_parents",
-      "sql": "CREATE TRIGGER slot_parents_fixed BEFORE UPDATE ON slot_parents BEGIN SELECT RAISE(ABORT, 'the graph is append-only: merge parents never change'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "slot_parents_same_chat",
-      "tbl_name": "slot_parents",
-      "sql": "CREATE TRIGGER slot_parents_same_chat BEFORE INSERT ON slot_parents WHEN (SELECT chat_id FROM slots WHERE id = NEW.parent_slot_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id) BEGIN SELECT RAISE(ABORT, 'a merge parent must be in the same chat'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "slots_branch_name_frozen",
-      "tbl_name": "slots",
-      "sql": "CREATE TRIGGER slots_branch_name_frozen BEFORE UPDATE OF branch_name, branch_name_user ON slots WHEN NEW.branch_name IS NOT OLD.branch_name OR NEW.branch_name_user IS NOT OLD.branch_name_user BEGIN SELECT RAISE(ABORT, 'branch names belong to forks'); END"
-    },
-    {
-      "type": "trigger",
       "name": "slots_chain_assigned",
       "tbl_name": "slots",
-      "sql": "CREATE TRIGGER slots_chain_assigned AFTER INSERT ON slots BEGIN UPDATE slots SET chain_id = coalesce( (SELECT p.chain_id FROM slots p WHERE p.id = NEW.parent_slot_id AND p.lane_id = NEW.lane_id AND NOT EXISTS (SELECT 1 FROM slots c WHERE c.chain_id = p.chain_id AND c.depth = NEW.depth AND c.id <> NEW.id)), NEW.id) WHERE id = NEW.id; END"
+      "sql": "CREATE TRIGGER slots_chain_assigned AFTER INSERT ON slots BEGIN UPDATE slots SET chain_id = coalesce( (SELECT p.chain_id FROM slots p WHERE p.id = NEW.parent_slot_id AND p.chat_id = NEW.chat_id AND NOT EXISTS (SELECT 1 FROM slots c WHERE c.chain_id = p.chain_id AND c.depth = NEW.depth AND c.id <> NEW.id)), NEW.id) WHERE id = NEW.id; END"
     },
     {
       "type": "trigger",
@@ -2366,12 +2288,6 @@
     },
     {
       "type": "trigger",
-      "name": "slots_lane_same_chat",
-      "tbl_name": "slots",
-      "sql": "CREATE TRIGGER slots_lane_same_chat BEFORE INSERT ON slots WHEN (SELECT chat_id FROM lanes WHERE id = NEW.lane_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'a slot''s lane must be in the same chat'); END"
-    },
-    {
-      "type": "trigger",
       "name": "slots_parent_same_chat",
       "tbl_name": "slots",
       "sql": "CREATE TRIGGER slots_parent_same_chat BEFORE INSERT ON slots WHEN NEW.parent_slot_id IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM slots p WHERE p.id = NEW.parent_slot_id AND p.chat_id = NEW.chat_id AND p.depth + 1 = NEW.depth) BEGIN SELECT RAISE(ABORT, 'a slot''s parent must be in the same chat, one level up'); END"
@@ -2404,7 +2320,7 @@
       "type": "trigger",
       "name": "slots_shape_fixed",
       "tbl_name": "slots",
-      "sql": "CREATE TRIGGER slots_shape_fixed BEFORE UPDATE OF chat_id, lane_id, parent_slot_id, depth ON slots WHEN NEW.chat_id IS NOT OLD.chat_id OR NEW.lane_id IS NOT OLD.lane_id OR NEW.parent_slot_id IS NOT OLD.parent_slot_id OR NEW.depth IS NOT OLD.depth BEGIN SELECT RAISE(ABORT, 'the graph is append-only: a slot never moves'); END"
+      "sql": "CREATE TRIGGER slots_shape_fixed BEFORE UPDATE OF chat_id, parent_slot_id, depth ON slots WHEN NEW.chat_id IS NOT OLD.chat_id OR NEW.parent_slot_id IS NOT OLD.parent_slot_id OR NEW.depth IS NOT OLD.depth BEGIN SELECT RAISE(ABORT, 'the graph is append-only: a slot never moves'); END"
     },
     {
       "type": "trigger",
@@ -2470,7 +2386,7 @@
       "type": "trigger",
       "name": "summaries_chain",
       "tbl_name": "summaries",
-      "sql": "CREATE TRIGGER summaries_chain BEFORE INSERT ON summaries WHEN NOT EXISTS (SELECT 1 FROM lcm_enable_runs r WHERE r.id = NEW.id AND r.chat_id = NEW.chat_id AND r.phase = 'copy' AND r.gathered = NEW.slot_count AND json_extract(r.payload_json, '$.imported.firstSlotId') = NEW.first_slot_id AND json_extract(r.payload_json, '$.imported.lastSlotId') = NEW.last_slot_id) AND NOT EXISTS ( WITH RECURSIVE chain(id, parent_slot_id, n) AS ( SELECT id, parent_slot_id, 1 FROM slots WHERE id = NEW.last_slot_id AND chat_id = NEW.chat_id UNION ALL SELECT s.id, s.parent_slot_id, c.n + 1 FROM slots s JOIN chain c ON s.id = c.parent_slot_id WHERE c.n < NEW.slot_count AND s.chat_id = NEW.chat_id ) SELECT 1 FROM chain WHERE id = NEW.first_slot_id AND n = NEW.slot_count AND NOT EXISTS (SELECT 1 FROM chain c JOIN slot_parents p ON p.slot_id = c.id) ) AND NOT EXISTS ( -- A display range may leave an inserted subtree for an older inserted sibling or -- the ordinary successor of its anchor. It never returns from an ordinary branch. WITH RECURSIVE head(id, parent_slot_id, inserted, depth) AS ( SELECT id, parent_slot_id, inserted, depth FROM slots WHERE id = NEW.first_slot_id UNION ALL SELECT s.id, s.parent_slot_id, s.inserted, s.depth FROM slots s JOIN head h ON s.id = h.parent_slot_id WHERE h.inserted = 1 ), tail(id, parent_slot_id, inserted, depth) AS ( SELECT id, parent_slot_id, inserted, depth FROM slots WHERE id = NEW.last_slot_id UNION ALL SELECT s.id, s.parent_slot_id, s.inserted, s.depth FROM slots s JOIN tail t ON s.id = t.parent_slot_id WHERE t.depth > (SELECT min(depth) FROM head) ) SELECT 1 FROM head h JOIN tail t ON h.parent_slot_id IS t.parent_slot_id OR h.id = t.id WHERE NEW.slot_count >= 2 AND ( (h.id = NEW.first_slot_id AND h.id = t.id AND NEW.slot_count > (SELECT depth FROM slots WHERE id = NEW.last_slot_id) - h.depth + 1 AND EXISTS (SELECT 1 FROM tail a JOIN slots x ON x.parent_slot_id = a.id WHERE x.inserted = 1 AND a.depth >= h.depth AND a.id <> NEW.last_slot_id)) OR (h.inserted = 1 AND h.id <> t.id AND (t.inserted = 0 OR h.id > t.id))) AND NOT EXISTS (SELECT 1 FROM tail a JOIN slot_parents p ON p.slot_id = a.id WHERE a.depth >= t.depth) AND NOT EXISTS (SELECT 1 FROM head a JOIN slot_parents p ON p.slot_id = a.id WHERE a.depth >= h.depth) ) BEGIN SELECT RAISE(ABORT, 'summary endpoints must form its declared primary-parent chain'); END"
+      "sql": "CREATE TRIGGER summaries_chain BEFORE INSERT ON summaries WHEN NOT EXISTS (SELECT 1 FROM lcm_enable_runs r WHERE r.id = NEW.id AND r.chat_id = NEW.chat_id AND r.phase = 'copy' AND r.gathered = NEW.slot_count AND json_extract(r.payload_json, '$.imported.firstSlotId') = NEW.first_slot_id AND json_extract(r.payload_json, '$.imported.lastSlotId') = NEW.last_slot_id) AND NOT EXISTS ( WITH RECURSIVE chain(id, parent_slot_id, n) AS ( SELECT id, parent_slot_id, 1 FROM slots WHERE id = NEW.last_slot_id AND chat_id = NEW.chat_id UNION ALL SELECT s.id, s.parent_slot_id, c.n + 1 FROM slots s JOIN chain c ON s.id = c.parent_slot_id WHERE c.n < NEW.slot_count AND s.chat_id = NEW.chat_id ) SELECT 1 FROM chain WHERE id = NEW.first_slot_id AND n = NEW.slot_count ) AND NOT EXISTS ( -- A display range may leave an inserted subtree for an older inserted sibling or -- the ordinary successor of its anchor. It never returns from an ordinary branch. WITH RECURSIVE head(id, parent_slot_id, inserted, depth) AS ( SELECT id, parent_slot_id, inserted, depth FROM slots WHERE id = NEW.first_slot_id UNION ALL SELECT s.id, s.parent_slot_id, s.inserted, s.depth FROM slots s JOIN head h ON s.id = h.parent_slot_id WHERE h.inserted = 1 ), tail(id, parent_slot_id, inserted, depth) AS ( SELECT id, parent_slot_id, inserted, depth FROM slots WHERE id = NEW.last_slot_id UNION ALL SELECT s.id, s.parent_slot_id, s.inserted, s.depth FROM slots s JOIN tail t ON s.id = t.parent_slot_id WHERE t.depth > (SELECT min(depth) FROM head) ) SELECT 1 FROM head h JOIN tail t ON h.parent_slot_id IS t.parent_slot_id OR h.id = t.id WHERE NEW.slot_count >= 2 AND ( (h.id = NEW.first_slot_id AND h.id = t.id AND NEW.slot_count > (SELECT depth FROM slots WHERE id = NEW.last_slot_id) - h.depth + 1 AND EXISTS (SELECT 1 FROM tail a JOIN slots x ON x.parent_slot_id = a.id WHERE x.inserted = 1 AND a.depth >= h.depth AND a.id <> NEW.last_slot_id)) OR (h.inserted = 1 AND h.id <> t.id AND (t.inserted = 0 OR h.id > t.id))) ) BEGIN SELECT RAISE(ABORT, 'summary endpoints must form its declared primary-parent chain'); END"
     },
     {
       "type": "trigger",
@@ -2668,7 +2584,7 @@
       "type": "trigger",
       "name": "summary_inputs_chain",
       "tbl_name": "summary_inputs",
-      "sql": "CREATE TRIGGER summary_inputs_chain BEFORE INSERT ON summary_inputs WHEN NOT EXISTS ( SELECT 1 FROM summaries s JOIN slots i ON i.id = NEW.slot_id WHERE s.id = NEW.summary_id AND s.level = 1 AND NEW.ordinal >= 0 AND NEW.ordinal < s.slot_count AND NOT EXISTS (SELECT 1 FROM slot_parents p WHERE p.slot_id = NEW.slot_id) AND NEW.ordinal = coalesce((SELECT ordinal + 1 FROM summary_inputs WHERE summary_id = s.id ORDER BY ordinal DESC LIMIT 1), 0) AND CASE WHEN NEW.ordinal = 0 THEN NEW.slot_id = s.first_slot_id WHEN i.parent_slot_id = (SELECT slot_id FROM summary_inputs WHERE summary_id = s.id AND ordinal = NEW.ordinal - 1) THEN 1 ELSE EXISTS (WITH RECURSIVE up(id, parent_slot_id, inserted, depth) AS ( SELECT id, parent_slot_id, inserted, depth FROM slots WHERE id = (SELECT slot_id FROM summary_inputs WHERE summary_id = NEW.summary_id AND ordinal = NEW.ordinal - 1) UNION ALL SELECT a.id, a.parent_slot_id, a.inserted, a.depth FROM slots a JOIN up ON a.id = up.parent_slot_id WHERE up.inserted = 1 AND up.depth > (SELECT depth FROM slots WHERE id = NEW.slot_id) ) SELECT 1 FROM up WHERE up.inserted = 1 AND up.id <> NEW.slot_id AND up.parent_slot_id IS i.parent_slot_id AND (i.inserted = 0 OR up.id > i.id)) END ) BEGIN SELECT RAISE(ABORT, 'summary inputs must follow their declared chain in order'); END"
+      "sql": "CREATE TRIGGER summary_inputs_chain BEFORE INSERT ON summary_inputs WHEN NOT EXISTS ( SELECT 1 FROM summaries s JOIN slots i ON i.id = NEW.slot_id WHERE s.id = NEW.summary_id AND s.level = 1 AND NEW.ordinal >= 0 AND NEW.ordinal < s.slot_count AND NEW.ordinal = coalesce((SELECT ordinal + 1 FROM summary_inputs WHERE summary_id = s.id ORDER BY ordinal DESC LIMIT 1), 0) AND CASE WHEN NEW.ordinal = 0 THEN NEW.slot_id = s.first_slot_id WHEN i.parent_slot_id = (SELECT slot_id FROM summary_inputs WHERE summary_id = s.id AND ordinal = NEW.ordinal - 1) THEN 1 ELSE EXISTS (WITH RECURSIVE up(id, parent_slot_id, inserted, depth) AS ( SELECT id, parent_slot_id, inserted, depth FROM slots WHERE id = (SELECT slot_id FROM summary_inputs WHERE summary_id = NEW.summary_id AND ordinal = NEW.ordinal - 1) UNION ALL SELECT a.id, a.parent_slot_id, a.inserted, a.depth FROM slots a JOIN up ON a.id = up.parent_slot_id WHERE up.inserted = 1 AND up.depth > (SELECT depth FROM slots WHERE id = NEW.slot_id) ) SELECT 1 FROM up WHERE up.inserted = 1 AND up.id <> NEW.slot_id AND up.parent_slot_id IS i.parent_slot_id AND (i.inserted = 0 OR up.id > i.id)) END ) BEGIN SELECT RAISE(ABORT, 'summary inputs must follow their declared chain in order'); END"
     },
     {
       "type": "trigger",

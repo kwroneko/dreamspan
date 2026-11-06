@@ -1216,7 +1216,7 @@ export class ChatSession {
       if (entries.some((e) => e.parentSlotId === entry.parentSlotId && e.branchCount < entry.branchCount)) {
         this.update({
           entries: entries.map((e) =>
-            e.parentSlotId === entry.parentSlotId && e.laneId === entry.laneId && e.branchCount < entry.branchCount
+            e.parentSlotId === entry.parentSlotId && e.branchCount < entry.branchCount
               ? ({ ...e, branchCount: entry.branchCount } as PathEntry)
               : e
           )

@@ -33,9 +33,9 @@ it.effect(
         },
         {
           sql: `WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x<99999)
-      INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
-      SELECT ?||'-s'||x,?,(SELECT id FROM lanes WHERE chat_id=? LIMIT 1),CASE WHEN x=0 THEN NULL ELSE ?||'-s'||(x-1) END,x,?||'-v'||x,1,? FROM n`,
-          params: [chatId, chatId, chatId, chatId, chatId, forkId]
+      INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
+      SELECT ?||'-s'||x,?,CASE WHEN x=0 THEN NULL ELSE ?||'-s'||(x-1) END,x,?||'-v'||x,1,? FROM n`,
+          params: [chatId, chatId, chatId, chatId, forkId]
         },
         { sql: "UPDATE forks SET tip_slot_id=? WHERE id=?", params: [chatId + "-s99999", forkId] }
       ])

@@ -63,8 +63,8 @@ for (const width of [1440, 390])
             params: [version, x, "An inserted reply beside the lantern.", at, at]
           },
           {
-            sql: "INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at,fork_id,inserted) VALUES(?,?,?,?,?,?,?,?,1)",
-            params: [x, chat.id, anchor.laneId, anchor.slotId, anchor.depth + 1, version, at, chat.currentForkId]
+            sql: "INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id,inserted) VALUES(?,?,?,?,?,?,?,1)",
+            params: [x, chat.id, anchor.slotId, anchor.depth + 1, version, at, chat.currentForkId]
           },
           { sql: "UPDATE chats SET state_seq = state_seq + 1 WHERE id = ?", params: [chat.id] },
           {

@@ -1,5 +1,4 @@
-// The baseline against its frozen schema dump (the 56-step chain it replaced, plus the fork deletion triggers and `history_changes` of unit 5, the token-estimate ledger fields/index, the draft deletion watermark and the compact lore activation receipts and card-asset bin kind, the agent rollout fields and receipts, edited in as the baseline allows), and the migrator's refusal of a database
-// made before it.
+// The current baseline schema, fresh defaults and refusal of incompatible migration ledgers.
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
@@ -17,11 +16,7 @@ interface Entry {
   readonly sql: string
 }
 
-/**
- * sqlite_master as the old chain left it on an empty database (tables, indexes, triggers,
- * views, whitespace collapsed), dumped before the squash. The chain's only rows were its
- * ledger, so there were no seed rows to compare.
- */
+/** Recorded current sqlite_master, including deliberate baseline edits; no seed rows. */
 const chain = (
   JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/preSquashSchema.json"), "utf8")) as {
     schema: ReadonlyArray<Entry>
@@ -76,105 +71,26 @@ describe("the migrator", () => {
   )
 })
 
-it.effect("migrates existing composer switches from each account and removes only that preference", () =>
+it.effect("fresh defaults include composer guidance, branch additions and global chat pins", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord({ "0001_baseline": migrations["0001_baseline"] }) })
-    for (const id of ["on", "off", "unset"])
-      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${id}, ${id}, ${id}, 'user', 0)`
-    for (const [id, guidance] of [
-      ["on", true],
-      ["off", false]
-    ] as const)
-      yield* sql`INSERT INTO user_prefs (user_id, key, value_json)
-        VALUES (${id}, 'display', ${JSON.stringify({ guidance, reasoning: "collapsed" })})`
-    for (const [id, owner, kind] of [
-      ["a", "on", "composer"],
-      ["b", "on", "composer"],
-      ["c", "off", "composer"],
-      ["d", "unset", "composer"],
-      ["e", "on", "scratchpad"]
-    ])
-      yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, updated_at)
-        VALUES (${id!}, ${owner!}, ${kind!}, ${id!}, 'Synthetic draft', 0)`
     yield* Effect.scoped(Layer.build(Migrations))
-    const rows = yield* sql<{
-      id: string
-      guidance: number
-      content: string
-    }>`SELECT id, guidance, content FROM drafts ORDER BY id`
+    yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+    yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
+    yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, updated_at)
+      VALUES ('d', 'u', 'composer', 'c', 'Synthetic draft', 0)`
     assert.deepStrictEqual(
-      rows.map((row) => [row.id, row.guidance]),
-      [
-        ["a", 1],
-        ["b", 1],
-        ["c", 0],
-        ["d", 0],
-        ["e", 0]
-      ]
+      (yield* sql`SELECT guidance FROM drafts`).map((r) => r.guidance),
+      [0]
     )
-    assert.isTrue(rows.every((row) => row.content === "Synthetic draft"))
-    const prefs = yield* sql<{ value_json: string }>`SELECT value_json FROM user_prefs ORDER BY user_id`
+    yield* sql`INSERT INTO chat_pins (user_id, chat_id) VALUES ('u', 'c')`
     assert.deepStrictEqual(
-      prefs.map((row) => JSON.parse(row.value_json)),
-      [{ reasoning: "collapsed" }, { reasoning: "collapsed" }]
+      (yield* sql`PRAGMA table_info(chat_pins)`).map((r) => r.name),
+      ["user_id", "chat_id"]
     )
-    yield* Effect.scoped(Layer.build(Migrations))
-    const [again] = yield* sql<{ guidance: number }>`SELECT guidance FROM drafts WHERE id = 'a'`
-    assert.strictEqual(again!.guidance, 1)
-  }).pipe(Effect.provide(layer()))
-)
-
-it.effect("migrates branch pins to one global chat pin and preserves local pins on rerun", () =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    yield* SqliteMigrator.run({
-      loader: SqliteMigrator.fromRecord({
-        "0001_baseline": migrations["0001_baseline"],
-        "0002_composer_guidance": migrations["0002_composer_guidance"],
-        "0003_branch_added_characters": migrations["0003_branch_added_characters"]
-      })
-    })
-    yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('owner', 'owner', 'Owner', 'user', 0)`
-    for (const id of ["pinned", "ordinary", "legacy"])
-      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at)
-        VALUES (${id}, 'owner', 'rp', 'active', 0)`
-    for (const [id, chat, pin] of [
-      ["a", "pinned", 100],
-      ["b", "pinned", 200],
-      ["c", "ordinary", null]
-    ] as const)
-      yield* sql`INSERT INTO forks (id, chat_id, created_at, pinned_at) VALUES (${id}, ${chat}, 0, ${pin})`
-    yield* sql`INSERT INTO chat_pins (user_id, chat_id, fork_id) VALUES ('owner', 'legacy', 'old')`
-    yield* Effect.scoped(Layer.build(Migrations))
-    const pins = yield* sql`SELECT user_id, chat_id FROM chat_pins ORDER BY chat_id`
-    assert.deepStrictEqual(
-      pins.map((r) => [r.user_id, r.chat_id]),
-      [
-        ["owner", "legacy"],
-        ["owner", "pinned"]
-      ]
+    assert.isTrue(
+      (yield* sql`PRAGMA table_info(fork_summaries)`).some((r) => r.name === "added_json" && r.dflt_value === "'[]'")
     )
-    const branches = yield* sql`SELECT id, pinned_at FROM forks WHERE id IN ('a', 'b', 'c') ORDER BY id`
-    assert.deepStrictEqual(
-      branches.map((r) => [r.id, r.pinned_at]),
-      [
-        ["a", 100],
-        ["b", 200],
-        ["c", null]
-      ]
-    )
-    // A restart must not re-pin a chat the user has since unpinned.
-    yield* sql`DELETE FROM chat_pins WHERE chat_id = 'pinned'`
-    yield* Effect.scoped(Layer.build(Migrations))
-    const remaining = yield* sql`SELECT chat_id FROM chat_pins`
-    assert.deepStrictEqual(
-      remaining.map((r) => r.chat_id),
-      ["legacy"]
-    )
-    assert.deepStrictEqual(
-      yield* sql`SELECT id, pinned_at FROM forks WHERE id IN ('a', 'b', 'c') ORDER BY id`,
-      branches
-    )
+    assert.deepStrictEqual(Object.keys(migrations), ["0001_baseline"])
   }).pipe(Effect.provide(layer()))
 )

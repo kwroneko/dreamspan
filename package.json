@@ -22,6 +22,7 @@
     "test:slow": "vitest run --project server-slow; files=$?; vitest run --project shared --project client --project server --tags-filter=slow && exit $files",
     "size": "node scripts/size.ts",
     "check": "node scripts/check.ts",
+    "check:schema-fold": "node packages/server/scripts/compare-baselines.ts",
     "test:browser": "npm run build && playwright test -c packages/client/playwright.config.ts --project=chromium",
     "test:browser:all": "npm run build && playwright test -c packages/client/playwright.config.ts",
     "measure:cache-study": "node packages/server/scripts/cache-study.ts",

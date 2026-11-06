@@ -584,14 +584,6 @@ describe("display lineage regressions", () => {
             Exit.isFailure(yield* rawSummary(h, [a!, y, x, reply, b!])),
             "cannot return from an ordinary branch"
           )
-          const merged = yield* h.insert(h.main, a!, "merged insertion")
-          yield* fixtureSql(h.dataDir, [
-            {
-              sql: "INSERT INTO slot_parents(slot_id,parent_slot_id,ordinal) VALUES(?,?,0)",
-              params: [merged, b!]
-            }
-          ])
-          assert.isTrue(Exit.isFailure(yield* rawSummary(h, [a!, merged, b!])), "merged inputs remain forbidden")
         })
       ),
     60_000

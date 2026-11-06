@@ -82,7 +82,7 @@ interface MergedRow {
 interface MergePlan {
   readonly preview: ChatMergePreview
   readonly fork: ForkRow
-  readonly at: { readonly id: string; readonly depth: number; readonly lane_id: string }
+  readonly at: { readonly id: string; readonly depth: number }
   /** The join is appended: the merge position is the fork's tip and nothing shows after it. */
   readonly append: boolean
   readonly sourceChatId: string
@@ -207,8 +207,8 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     if (atId === null) return yield* refused("This chat has no messages to merge after yet.")
     const place = yield* slotPlace(sql, request.chatId, atId)
     const atPos = place === null ? null : positionOf(pieces, place)
-    const [at] = yield* sql<{ id: string; depth: number; lane_id: string; row_version: number; deleted: number }>`
-      SELECT s.id, s.depth, s.lane_id, s.row_version, ${slotDeletedIn(sql, fork.id, "s")} AS deleted
+    const [at] = yield* sql<{ id: string; depth: number; row_version: number; deleted: number }>`
+      SELECT s.id, s.depth, s.row_version, ${slotDeletedIn(sql, fork.id, "s")} AS deleted
       FROM slots s WHERE s.id = ${atId} AND s.chat_id = ${request.chatId}`
     if (atPos === null || !at || at.deleted !== 0)
       return yield* new StaleWrite({ entity: "slot", id: atId, expected: 0, actual: at?.row_version ?? 0 })
@@ -545,7 +545,6 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
           })
           const { slotId, version: row } = yield* graph.insertSlot(
             chatId,
-            plan.at.lane_id,
             plan.at,
             version,
             now,

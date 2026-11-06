@@ -22,9 +22,9 @@ lcmTest(
             SELECT 'big-v-' || i, 'big-s-' || i, 0, 'complete', 'human', 'The road ran on, mile ' || i || '.', 'verbatim', 'user_written', 1, 1 FROM n`
         },
         {
-          sql: `${count} INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
-            SELECT 'big-s-' || i, ?, (SELECT id FROM lanes WHERE chat_id = ?), CASE WHEN i = 0 THEN NULL ELSE 'big-s-' || (i - 1) END, i, 'big-v-' || i, 1 FROM n`,
-          params: [h.chat.id, h.chat.id]
+          sql: `${count} INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
+            SELECT 'big-s-' || i, ?, CASE WHEN i = 0 THEN NULL ELSE 'big-s-' || (i - 1) END, i, 'big-v-' || i, 1 FROM n`,
+          params: [h.chat.id]
         },
         { sql: "UPDATE chats SET active_leaf_slot_id = ? WHERE id = ?", params: [`big-s-${last}`, h.chat.id] }
       ])

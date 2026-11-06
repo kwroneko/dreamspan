@@ -52,7 +52,7 @@ export const defaultLeafPlanner: LeafPlanner = {
         flush()
         continue
       }
-      if (s.generating || s.merged) break
+      if (s.generating) break
       chunk.push(s)
       tokens += slotCost(s)
       if (chunk.length >= MAX_CHUNK_SLOTS || tokens >= leafInput || (s.children >= 2 && tokens >= leafInput / 4))

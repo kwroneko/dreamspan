@@ -74,16 +74,15 @@ const build = (length: number) => {
     })
     const db = new DatabaseSync(databaseFile(dataDir))
     try {
-      const lane = (db.prepare("SELECT id FROM lanes WHERE chat_id = ?").get(chat.id) as { id: string }).id
       db.exec("PRAGMA foreign_keys = ON; BEGIN")
       const version = db.prepare(`INSERT INTO versions
         (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (?, ?, 0, 'complete', 'model', 'Synthetic reply', 'verbatim', 'generated', 1, 1)`)
       const slotRow = db.prepare(`INSERT INTO slots
-        (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?, 1)`)
+        (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, 1)`)
       const slot = (id: string, parent: string | null, depth: number) => {
         version.run(`v-${id}`, id)
-        slotRow.run(id, chat.id, lane, parent, depth, `v-${id}`)
+        slotRow.run(id, chat.id, parent, depth, `v-${id}`)
       }
       let seq = 0
       const event =
@@ -497,7 +496,6 @@ const withInsertions = (f: Fixture) => {
     const exists = db.prepare("SELECT 1 FROM forks WHERE id = ?").get(INSERT_FORK)
     if (!exists) {
       db.exec("PRAGMA foreign_keys = ON; BEGIN")
-      const lane = (db.prepare("SELECT id FROM lanes WHERE chat_id = ?").get(f.chatId) as { id: string }).id
       let { state } = db.prepare("SELECT state_seq AS state FROM chats WHERE id = ?").get(f.chatId) as { state: number }
       db.prepare(
         `INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, created_at, base_slot_id,
@@ -507,13 +505,13 @@ const withInsertions = (f: Fixture) => {
         (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (?, ?, 0, 'complete', 'human', 'Inserted', 'verbatim', 'user_written', 1, 1)`)
       const slot = db.prepare(`INSERT INTO slots
-        (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, inserted) VALUES (?, ?, ?, ?, ?, ?, 1, 1)`)
+        (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, inserted) VALUES (?, ?, ?, ?, ?, 1, 1)`)
       const place =
         db.prepare(`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, flag)
         VALUES (?, ?, ?, ?, 'insert', ?, ?, ?, 1)`)
       for (const x of anchors) {
         version.run(`v-${x.id}`, x.id)
-        slot.run(x.id, f.chatId, lane, x.anchor, x.depth, `v-${x.id}`)
+        slot.run(x.id, f.chatId, x.anchor, x.depth, `v-${x.id}`)
         place.run(`o-${x.id}`, f.chatId, INSERT_FORK, ++state, x.id, x.anchor, x.depth - 1)
       }
       db.prepare("UPDATE chats SET state_seq = ? WHERE id = ?").run(state, f.chatId)

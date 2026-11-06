@@ -23,13 +23,12 @@ const setup = Effect.gen(function* () {
   yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
   for (const chat of ["main", "other"])
     yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (${chat}, 'u', 'rp', 'active', 1)`
-  yield* sql`INSERT INTO lanes (id, chat_id, name, created_at) VALUES ('l', 'main', 'main', 1), ('o', 'other', 'main', 1)`
-  const slot = (id: string, parent: string | null, depth: number, chat = "main", lane = "l") =>
+  const slot = (id: string, parent: string | null, depth: number, chat = "main") =>
     Effect.gen(function* () {
       yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`
-      yield* sql`INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
-        VALUES (${id}, ${chat}, ${lane}, ${parent}, ${depth}, ${`v-${id}`}, 1)`
+      yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
+        VALUES (${id}, ${chat}, ${parent}, ${depth}, ${`v-${id}`}, 1)`
     }).pipe(sql.withTransaction)
   yield* slot("r", null, 0)
   yield* slot("a", "r", 1)
@@ -37,7 +36,7 @@ const setup = Effect.gen(function* () {
   yield* slot("c", "b", 3)
   yield* slot("x", "a", 2)
   yield* slot("y", "b", 3)
-  yield* slot("o1", null, 0, "other", "o")
+  yield* slot("o1", null, 0, "other")
   yield* sql`UPDATE forks SET tip_slot_id = 'c' WHERE id = 'main'`
   yield* sql`UPDATE forks SET tip_slot_id = 'o1' WHERE id = 'other'`
   // Written before X and Y were made, as their numbers say.
@@ -155,8 +154,8 @@ describe("per-fork summary validity", () => {
         yield* Effect.andThen(
           sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at,
             updated_at) VALUES ('v-i', 'i', 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`,
-          sql`INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
-            VALUES ('i', 'main', 'l', 'b', 3, 'v-i', 1, 1)`
+          sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
+            VALUES ('i', 'main', 'b', 3, 'v-i', 1, 1)`
         ).pipe(sql.withTransaction)
         assert.deepStrictEqual(
           yield* reached(sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, flag)

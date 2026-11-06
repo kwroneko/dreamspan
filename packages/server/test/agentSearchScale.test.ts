@@ -53,10 +53,9 @@ describe("search_chat at scale", () => {
             params: [c, c]
           },
           {
-            sql: `${n} INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
-              SELECT ?||'-s'||x,?,(SELECT id FROM lanes WHERE chat_id=? LIMIT 1),
-                CASE WHEN x=0 THEN NULL ELSE ?||'-s'||(x-1) END,x,?||'-v'||x,1,? FROM n`,
-            params: [c, c, c, c, c, main]
+            sql: `${n} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
+              SELECT ?||'-s'||x,?,CASE WHEN x=0 THEN NULL ELSE ?||'-s'||(x-1) END,x,?||'-v'||x,1,? FROM n`,
+            params: [c, c, c, c, main]
           },
           // A side reply at each fork's base, off the main path, naming the lighthouse too.
           {
@@ -65,9 +64,9 @@ describe("search_chat at scale", () => {
             params: [c, c]
           },
           {
-            sql: `${k} INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
-              SELECT ?||'-side'||x,?,(SELECT id FROM lanes WHERE chat_id=? LIMIT 1),?||'-s'||(15*(x+1)-1),15*(x+1),?||'-sv'||x,1,? FROM k`,
-            params: [c, c, c, c, c, main]
+            sql: `${k} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
+              SELECT ?||'-side'||x,?,?||'-s'||(15*(x+1)-1),15*(x+1),?||'-sv'||x,1,? FROM k`,
+            params: [c, c, c, c, main]
           },
           { sql: "UPDATE forks SET tip_slot_id=? WHERE id=?", params: [`${c}-s${LENGTH - 1}`, main] },
           // 300 forks, each off its side reply, selecting swipes near its base.

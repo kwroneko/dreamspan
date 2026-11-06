@@ -44,7 +44,6 @@ const entry = (
 ) =>
   ({
     slotId: slot as SlotId,
-    laneId: "lane",
     parentSlotId: parent as SlotId | null,
     depth,
     rowVersion: 1,

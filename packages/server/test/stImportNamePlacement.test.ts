@@ -106,17 +106,6 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
                   before.path.entries.map((e) => e.slotId)
                 )
               else assert.notStrictEqual(after.path.entries[0]!.slotId, before.path.entries[0]!.slotId)
-              const [slots] = yield* fixtureSql(
-                config.dataDir,
-                [
-                  {
-                    sql: "SELECT count(*) AS n FROM slots WHERE chat_id = ? AND (branch_name IS NOT NULL OR branch_name_user <> 0)",
-                    params: [after.record.chatId]
-                  }
-                ],
-                { readOnly: true }
-              )
-              assert.strictEqual(slots![0]!.n, 0)
               yield* run([[source, child()]])
               assert.deepStrictEqual(yield* snapshot(api, source), after, "unchanged replay")
               // A different source is its own file/fork, even with identical bytes.
