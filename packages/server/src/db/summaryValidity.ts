@@ -8,6 +8,9 @@
 // - a slot's shown fields (`slots` columns, its versions): the forks whose tip is it or below it.
 //   A new slot reaches none (no fork's path holds it until a fork's tip moves, below);
 //   Every retained version contributes participation, even an unselected alternative.
+//   A newly inserted alternative reaches other forks only for new participation or
+//   human-author activity their stored summary doesn't already cover; the selection
+//   override independently reaches the editing fork and its inheriting descendants.
 // - a fork's row (tip, deletion): that fork. Where a fork splits off reads its
 //   parent's path too: a fork's tip moving reaches its children whose tips are below a slot
 //   one of its paths holds and the other doesn't (the slots between the two tips and their
@@ -23,10 +26,13 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { pointAtSql } from "./forkLabels.ts"
+import { shownInSql } from "./forkState.ts"
 
 const SELF = "self"
 const FORK = "fork"
 const SLOT = "slot"
+const VERSION = "version"
+const TEXT = "text"
 const CHAT = "chat"
 /** A fork's tip moved: `ref` the fork, `from` and `to` the tips. */
 const TIP = "tip"
@@ -65,7 +71,7 @@ const statements: ReadonlyArray<string> = [
   // alternatives also contribute persona activity.
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_insert AFTER INSERT ON main.versions
     WHEN EXISTS (SELECT 1 FROM slots WHERE id = NEW.slot_id)
-    BEGIN ${touch(SLOT, slotChat("NEW.slot_id"), "NEW.slot_id")} END`,
+    BEGIN ${touch(VERSION, slotChat("NEW.slot_id"), "NEW.id")} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version AFTER UPDATE OF slot_id, speaker_entity_id, status, origin,
     source_version_id, created_at, deleted_at, purged_at, fork_id ON main.versions
     WHEN NEW.slot_id IS NOT OLD.slot_id OR NEW.speaker_entity_id IS NOT OLD.speaker_entity_id
@@ -80,7 +86,7 @@ const statements: ReadonlyArray<string> = [
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_text AFTER UPDATE OF content ON main.version_texts
     WHEN NEW.content IS NOT OLD.content BEGIN
       INSERT INTO shell_touches(kind, chat_id, ref)
-        SELECT '${SLOT}', s.chat_id, s.id FROM versions v JOIN slots s ON s.id = v.slot_id
+        SELECT '${TEXT}', s.chat_id, v.id FROM versions v JOIN slots s ON s.id = v.slot_id
         WHERE v.seq = NEW.version_seq;
     END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_cast AFTER UPDATE OF cast_json ON main.version_texts
@@ -152,6 +158,20 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
     if (!tracking) return
     const moved = yield* sql<{ chat_id: string; stamp: number }>`SELECT chat_id, stamp FROM shell_moved`
     if (moved.length > 0) {
+      // An alternative changes every fork's historical participation only when it
+      // adds evidence. Its selection is already tracked by the fork override.
+      // In particular, editing an old shared message must not walk every frozen
+      // branch just to rediscover the same cast and human-author activity.
+      yield* sql`INSERT INTO shell_touches(kind, chat_id, ref)
+        SELECT DISTINCT ${SLOT}, t.chat_id, v.slot_id FROM shell_touches t
+        JOIN versions v ON v.id = t.ref JOIN slots s ON s.id = v.slot_id
+        WHERE t.kind = ${VERSION} AND v.purged_at IS NULL AND (
+          EXISTS (SELECT 1 FROM version_participants p WHERE p.version_id = v.id AND NOT EXISTS (
+            SELECT 1 FROM versions other JOIN version_participants op ON op.version_id = other.id
+            WHERE other.slot_id = v.slot_id AND other.id NOT IN (
+              SELECT ref FROM shell_touches WHERE kind = ${VERSION}) AND other.purged_at IS NULL
+              AND op.entity_id = p.entity_id))
+          OR (s.inserted = 1 AND v.writer = 'human' AND v.speaker_entity_id IS NOT NULL))`
       // Decide once per moved chat. Inlining this scans all touches again for every
       // touched version below; pinning many swipes would make settlement quadratic.
       yield* sql`WITH RECURSIVE
@@ -162,13 +182,25 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
               -- normal reply still reaches its forks by chain intervals even
               -- when another message in the chat has an insertion.
               OR (t.kind = ${SLOT} AND EXISTS (
-                SELECT 1 FROM slots s WHERE s.id = t.ref AND s.inserted = 1))))),
+                SELECT 1 FROM slots s WHERE s.id = t.ref AND s.inserted = 1))
+              OR (t.kind = ${TEXT} AND EXISTS (
+                SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id WHERE v.id = t.ref AND s.inserted = 1))))),
         -- A shared old slot can have hundreds of thousands of descendants. Reach its
         -- forks by chain intervals, never by enumerating that message history. Deduplicate
         -- swipes pinned together before joining them to the forks' segments.
-        touched(chat_id, chain_id, depth) AS MATERIALIZED (
-          SELECT DISTINCT s.chat_id, s.chain_id, s.depth FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id
-            JOIN slots s ON s.id = t.ref WHERE t.kind = ${SLOT}),
+        touched(chat_id, chain_id, depth, author, at, slot_id, version_id) AS MATERIALIZED (
+          SELECT DISTINCT s.chat_id, s.chain_id, s.depth, NULL, NULL, s.id, NULL
+          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id
+            JOIN slots s ON s.id = t.ref WHERE t.kind = ${SLOT}
+          UNION SELECT s.chat_id, s.chain_id, s.depth, v.speaker_entity_id,
+            CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END, s.id, NULL
+          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id JOIN versions v ON v.id = t.ref
+            JOIN slots s ON s.id = v.slot_id
+          WHERE t.kind = ${VERSION} AND v.writer = 'human' AND v.speaker_entity_id IS NOT NULL
+            AND v.purged_at IS NULL AND s.inserted = 0
+          UNION SELECT s.chat_id, s.chain_id, s.depth, NULL, NULL, s.id, v.id
+          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id JOIN versions v ON v.id = t.ref
+            JOIN slots s ON s.id = v.slot_id WHERE t.kind = ${TEXT}),
         segments(fork_id, chat_id, chain_id, lo, hi) AS (
           SELECT f.id, f.chat_id, s.chain_id, h.depth, s.depth FROM kept k
             CROSS JOIN forks f ON f.chat_id = k.chat_id
@@ -208,6 +240,14 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
           UNION ALL SELECT f.id FROM shifted h JOIN forks f ON f.parent_fork_id = h.fork AND f.tip_slot_id = h.id
           UNION ALL SELECT g.fork_id FROM segments g JOIN touched t ON t.chat_id = g.chat_id
             AND t.chain_id = g.chain_id AND t.depth BETWEEN g.lo AND g.hi
+            JOIN slots affected ON affected.id = t.slot_id
+            -- A newly human-authored alternative matters only when this fork
+            -- doesn't already record that author's same or later turn.
+            WHERE (t.version_id IS NULL OR ${sql.literal(shownInSql("g.fork_id", "affected"))} = t.version_id)
+              AND (t.author IS NULL OR NOT EXISTS (
+              SELECT 1 FROM fork_summaries fs, json_each(fs.activity_json) a WHERE fs.fork_id = g.fork_id
+                AND a.value ->> 'entityId' = t.author AND (a.value ->> 'at' > t.at
+                  OR (a.value ->> 'at' = t.at AND a.value ->> 'slot' = t.slot_id))))
           -- The writer's range from its point at that number: one range of fork_labels_point.
           UNION ALL SELECT x.fork_id FROM written w JOIN fork_labels wl ON wl.fork_id = w.ref
             JOIN fork_labels x ON x.chat_id = w.chat_id
