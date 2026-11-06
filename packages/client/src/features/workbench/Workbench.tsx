@@ -180,7 +180,7 @@ function useLinkGestures(store: WorkbenchStore) {
       // Alt-click: VS Code's Open to the Side, where frames fit side by side.
       if (event.altKey && matchMedia(WIDE).matches) store.openBeside(href)
       // A link inside a frame opens in that frame; outside (the sidebar), wherever it's open.
-      else store.openIn(anchor.closest<HTMLElement>("[data-frame]")?.dataset["frame"], href)
+      else store.openIn(anchor.closest<HTMLElement>("[data-frame]")?.dataset["frame"], href, { whole: true })
     }
     const beside = (event: Event) => {
       if (event instanceof CustomEvent && typeof event.detail === "string") store.openBeside(event.detail)

@@ -181,17 +181,22 @@ export function useShellNavigation() {
   }
 }
 
-/** Where a character's tile links: the chat it opens (its latest), else a new one. */
+/**
+ * Where a character's tile links: the chat it opens (its latest), else a new one, with the
+ * sidebar on the character's chats and its card's panel, as a click opens it (`useOpenCharacter`),
+ * so Open beside, Alt-click and a new browser tab open the character too (owner, 2026-11-06).
+ */
 const characterLink = (card: ShellCard) => {
   const latest = card.open ?? null
   const entity = card.card.entityId
+  const character = { character: entity, panel: `card:${entity}` }
   return latest
     ? {
         to: "/chats/$chatId" as const,
         params: { chatId: latest.chatId },
-        search: { fork: latest.forkId, ...(latest.slot ? { slot: latest.slot } : {}) }
+        search: { ...character, fork: latest.forkId, ...(latest.slot ? { slot: latest.slot } : {}) }
       }
-    : { to: "/cards/$entityId/chat" as const, params: { entityId: entity }, search: {} }
+    : { to: "/cards/$entityId/chat" as const, params: { entityId: entity }, search: character }
 }
 
 export function useOpenCharacter() {
