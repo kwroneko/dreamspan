@@ -12,7 +12,7 @@ interface Box {
   height: number
 }
 interface Violation {
-  kind: "inset" | "text" | "gap" | "alignment" | "overlap" | "exception"
+  kind: "inset" | "text" | "gap" | "alignment" | "overlap" | "overlay" | "exception"
   selector: string
   related?: string
   name: string
@@ -195,7 +195,7 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
       for (const el of shown) {
         if (el.hasAttribute("data-layout-audit-ignore")) {
           for (const entry of el.dataset.layoutAuditIgnore!.split(";"))
-            if (!/^(inset|text|gap|alignment|overlap):\s*\S.+/.test(entry.trim()))
+            if (!/^(inset|text|gap|alignment|overlap|overlay):\s*\S.+/.test(entry.trim()))
               add("exception", el, `Invalid exception (rule and reason required): ${entry}`)
         }
         // An icon's paths are drawing primitives, not independent layout boxes.
@@ -466,6 +466,112 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           const overlap = intersection(a, b)
           if (overlap) add("overlap", a, `content intersection ${overlap}`, b)
         }
+      // Controls laid over a picture (a tile's star, its archive, a group's pin), as they rest
+      // and as hovered: the overlay checks above skip them, since they overlap the picture on
+      // purpose. Each carries one backing of its own (a wrapper's backing doubles or mismatches
+      // it); a hidden sibling keeps no space (the shown control would sit off its corner); in a
+      // grid of tiles the first shown control sits at the same inset on every tile; and at rest,
+      // where a pointer can hover, only a pressed toggle shows.
+      const pictures = "img, picture, video, canvas, [data-portrait]"
+      const backed = (el: HTMLElement) => {
+        const s = css(el)
+        const alpha = s.backgroundColor.match(/[\d.]+(?=\)$)/)?.[0]
+        const transparent =
+          s.backgroundColor === "transparent" || (/(rgba|\/)/.test(s.backgroundColor) && alpha === "0")
+        return !transparent || s.backgroundImage !== "none"
+      }
+      const hoverable = matchMedia("(hover: hover) and (pointer: fine)").matches
+      const groups = new Map<string, Array<{ el: HTMLElement; x: number; y: number }>>()
+      for (const layer of nodes) {
+        if (!layer.dataset.layoutOverlay || css(layer).position !== "absolute" || !visible(layer, false)) continue
+        const host = layer.offsetParent as HTMLElement | null
+        const box = rect(layer)
+        if (
+          !host ||
+          ![...host.querySelectorAll<HTMLElement>(pictures)].some((p) => {
+            const r = rect(p)
+            return (
+              r.width &&
+              r.height &&
+              r.left < box.right &&
+              box.left < r.right &&
+              r.top < box.bottom &&
+              box.top < r.bottom
+            )
+          })
+        )
+          continue
+        const shownControls = [...layer.querySelectorAll<HTMLElement>(controls)].filter(
+          (c) =>
+            visible(c) &&
+            ![...ancestors(parent(c))].some((p) => p !== layer && layer.contains(p) && p.matches(controls))
+        )
+        for (const control of shownControls) {
+          const wrappers = [...ancestors(parent(control))].slice(0, [...ancestors(parent(control))].indexOf(layer) + 1)
+          const backing = wrappers.find(backed)
+          if (backing)
+            add(
+              "overlay",
+              control,
+              backed(control)
+                ? `doubled backing: the control and its wrapper ${path(backing)} both paint one`
+                : `backing on the wrapper ${path(backing)}, not on the control`,
+              backing
+            )
+          else if (!backed(control)) add("overlay", control, "no backing of its own over the picture")
+          if (
+            hoverable &&
+            !host.matches(":hover, :focus-within") &&
+            control.getAttribute("aria-pressed") !== "true" &&
+            host.parentElement &&
+            css(host.parentElement).display.includes("grid")
+          )
+            add("overlay", control, "shown at rest though not a pressed toggle (hover or focus should reveal it)")
+        }
+        // A hidden control must not take the clicks meant for the picture under it.
+        for (const control of layer.querySelectorAll<HTMLElement>(controls))
+          if (visible(control, false) && !visible(control) && css(control).pointerEvents !== "none")
+            add("overlay", control, "hidden, yet takes clicks meant for the picture under it")
+        // Space kept by a hidden sibling, before a shown one in the overlay's flow.
+        for (const container of [layer, ...layer.querySelectorAll<HTMLElement>("*")]) {
+          const flow = boxChildren(container).filter(
+            (n) => visible(n, false) && !["absolute", "fixed"].includes(css(n).position)
+          )
+          const firstShown = flow.findIndex((n) => visible(n))
+          for (const hidden of flow.slice(0, Math.max(0, firstShown)))
+            add("overlay", flow[firstShown]!, `hidden ${path(hidden)} keeps its space before this control`, hidden)
+        }
+        const first = shownControls[0]
+        const grid = host.parentElement
+        if (!first || !grid || !css(grid).display.includes("grid")) continue
+        const at = rect(first),
+          tile = rect(host)
+        const fromLeft = css(layer).left !== "auto"
+        const key = `${path(grid)}|${layer.dataset.layoutOverlay}`
+        groups.set(key, [
+          ...(groups.get(key) ?? []),
+          { el: first, x: fromLeft ? at.left - tile.left : tile.right - at.right, y: at.top - tile.top }
+        ])
+      }
+      // The inset most of a grid's tiles use is the intended one; the others are reported.
+      for (const tiles of groups.values()) {
+        if (tiles.length < 2) continue
+        const counts = new Map<string, number>()
+        for (const t of tiles)
+          counts.set(
+            `${Math.round(t.x)},${Math.round(t.y)}`,
+            (counts.get(`${Math.round(t.x)},${Math.round(t.y)}`) ?? 0) + 1
+          )
+        const [usual] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]!
+        const [ux, uy] = usual.split(",").map(Number) as [number, number]
+        for (const t of tiles)
+          if (Math.abs(t.x - ux) > tolerance || Math.abs(t.y - uy) > tolerance)
+            add(
+              "overlay",
+              t.el,
+              `first shown control at ${t.x.toFixed(2)}, ${t.y.toFixed(2)}px from its tile's corner; ${ux}, ${uy}px on the grid's other tiles`
+            )
+      }
       return results
     },
     { inset: options.inset ?? 8, scope: options.scope }
@@ -473,13 +579,19 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
 }
 
 /** Attach ALL measurements and a crop per violation before failing the test. */
-export async function expectLayout(page: Page, info: TestInfo, surface: string, options: { scope?: string } = {}) {
-  await page.mouse.move(0, 0)
+/** `hovered`: audit with the pointer where it is (a hovered tile); by default it moves away first. */
+export async function expectLayout(
+  page: Page,
+  info: TestInfo,
+  surface: string,
+  options: { scope?: string; hovered?: boolean } = {}
+) {
+  if (!options.hovered) await page.mouse.move(0, 0)
   await page.evaluate(async () => {
     await document.fonts.ready
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
   })
-  const violations = await layoutAudit(page, options)
+  const violations = await layoutAudit(page, { ...(options.scope ? { scope: options.scope } : {}) })
   const slug = surface.replace(/[^a-z0-9-]/gi, "-")
   for (const [i, violation] of violations.entries()) {
     violation.crop = info.outputPath(`${slug}-${i}-${violation.kind}.png`)

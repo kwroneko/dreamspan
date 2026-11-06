@@ -2,6 +2,7 @@ import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useAtomRefresh } from "@effect/atom-react"
 import { CardSurface } from "../cardForks/surfaces.tsx"
+import { CardFavourite } from "./CardFavourite.tsx"
 // A card's page (DESIGN §2.1, §4): the card without entering a chat. Continue (its latest
 // chat), New chat and every chat it's in as peers, then its definition to read, each field
 // folded to a few lines. Its library label is the title; the in-chat name, what `{{char}}`
@@ -229,7 +230,8 @@ function Page({ card, persona = false }: { card: CardUsage; persona?: boolean })
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <CenterHeaderContent>
             <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{card.label}</h1>
-            <CardSurface placement="archive-toggle" entityId={card.entityId} />
+            {/* The star and the archive, as in the card's editor headers. */}
+            <CardFavourite entityId={card.entityId} />
           </CenterHeaderContent>
           {persona && <PersonaBadge />}
           <CardSurface placement="provenance" entityId={card.entityId} />
