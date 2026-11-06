@@ -86,6 +86,21 @@ export const CHAT_WIDTH = { min: 480, max: 3840, step: 40, default: 1200 } as co
 export const PresetSort = Schema.Literals(["name", "modified", "used"])
 export type PresetSort = typeof PresetSort.Type
 
+/** The sorts of an editor's lorebook, note or snippet switcher: by name (A–Z), last edited. */
+export const DocumentSort = Schema.Literals(["name", "modified"])
+export type DocumentSort = typeof DocumentSort.Type
+
+/**
+ * The card editor's header switcher: its sort (the card lists' four), the other way round from
+ * the sort's own, and Include personas. Its filter starts afresh each time, as the lists' does.
+ */
+export const CardSwitcherView = Schema.Struct({
+  sort: Schema.Literals(["recent", "created", "added", "name"]),
+  reversed: Schema.Boolean,
+  withPersonas: Schema.Boolean
+})
+export type CardSwitcherView = typeof CardSwitcherView.Type
+
 /** The user's on/off choices by a registered part's id, over each part's default. */
 const choicesById = Schema.Record(Schema.String, Schema.Boolean).check(
   Schema.isMaxProperties(200),
@@ -114,6 +129,12 @@ const displayFields = {
   presetSort: PresetSort,
   /** How model lists sort (the composer's picker and the Model tab's). */
   modelSort: Schema.Literals(["name", "used"]),
+  /** How the editors' header switchers sort lorebooks, notes and snippets, each kind its own. */
+  lorebookSort: DocumentSort,
+  noteSort: DocumentSort,
+  snippetSort: DocumentSort,
+  /** The card editor's header switcher's sort, direction and Include personas. */
+  cardSwitcher: CardSwitcherView,
   /**
    * "Only keep one image open at a time" (owner, 2026-11-02): a portrait's click replaces the
    * one beside the chat instead of opening on top of it.
@@ -149,6 +170,10 @@ export const DisplayPrefsChange = Schema.Struct({
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
   presetSort: Schema.optionalKey(displayFields.presetSort),
   modelSort: Schema.optionalKey(displayFields.modelSort),
+  lorebookSort: Schema.optionalKey(displayFields.lorebookSort),
+  noteSort: Schema.optionalKey(displayFields.noteSort),
+  snippetSort: Schema.optionalKey(displayFields.snippetSort),
+  cardSwitcher: Schema.optionalKey(displayFields.cardSwitcher),
   singlePortrait: Schema.optionalKey(displayFields.singlePortrait),
   /** Merged by id with what's stored, so a write names only the choices it changes. */
   messageToolbar: Schema.optionalKey(displayFields.messageToolbar),
@@ -173,6 +198,10 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   chatWidth: CHAT_WIDTH.default,
   presetSort: "name",
   modelSort: "name",
+  lorebookSort: "name",
+  noteSort: "name",
+  snippetSort: "name",
+  cardSwitcher: { sort: "recent", reversed: false, withPersonas: false },
   singlePortrait: false,
   messageToolbar: {},
   dismissedInfo: {},
@@ -514,6 +543,11 @@ export class ChatApi extends RpcGroup.make(
        * the send started (DESIGN §2.3). Posted at once, the client's Generate carries it.
        */
       round: Schema.optionalKey(Schema.Array(EntityId)),
+      /**
+       * If it's queued: `replySpeakerEntityId` and the round are Auto's picks, so the decision
+       * model's "Who replies next", when the user turned it on, may choose another for each.
+       */
+      autoPick: Schema.optionalKey(Schema.Boolean),
       composer: ComposerCommit
     },
     success: SendResult,
@@ -538,6 +572,11 @@ export class ChatApi extends RpcGroup.make(
        * server behind it. Any Send or Generate at the fork's tip ends the round already there.
        */
       round: Schema.optionalKey(Schema.Array(EntityId)),
+      /**
+       * `speakerEntityId` and the round are Auto's picks: the decision model's "Who replies
+       * next", when the user turned it on, may choose another for each (DESIGN §2.3).
+       */
+      autoPick: Schema.optionalKey(Schema.Boolean),
       composer: ComposerCommit
     },
     success: SendResult,

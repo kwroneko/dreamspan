@@ -35,6 +35,7 @@ import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDr
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 import { requestCastAdd } from "./castAddState.ts"
+import { useDecisionPointOn } from "../decisions/index.tsx"
 
 /** A phone's width, the composers' compact layout's breakpoint. */
 const COMPACT_WIDTH = 640
@@ -326,6 +327,17 @@ export function Composer({
   // Only known when the window reaches the leaf; otherwise the server takes the message anyway.
   const leaf = view.newer === null ? view.entries.at(-1) : undefined
   const leafGenerating = leaf?.version.status === "generating"
+  // "Who replies next" (DESIGN §2.3): with it on, the decision model picks Auto's replies when it
+  // has two or more present characters to choose from, but whoever spoke last (the server's rule).
+  const nextDecisionOn = useDecisionPointOn("next")
+  const lastSpeaker = draftText.trim() !== "" || hasImages ? speaker : (leaf?.version.speakerEntityId ?? null)
+  const decides =
+    nextDecisionOn &&
+    replyPlan.auto &&
+    (cast?.participants.filter((id) => !cast.playedByMe.includes(id) && !cast.absent.includes(id) && id !== lastSpeaker)
+      .length ?? 0) >= 2
+  const leafPick = leaf?.version.speakerPick
+  const lastPick = leafPick?.by === "decision" ? { name: leafPick.name, confidence: leafPick.confidence } : undefined
   const recent = useMemo(
     () =>
       recentSpeakers(view.entries, 4)
@@ -451,7 +463,9 @@ export function Composer({
           plan.reply,
           captured?.images,
           captured?.ids,
-          plan.round
+          plan.round,
+          // For the decision model to choose (the server asks it only if two or more can reply).
+          nextDecisionOn && plan.auto
         )
         accepted = sent
         report(outcome)
@@ -467,7 +481,14 @@ export function Composer({
   const replyNow = async () => {
     if (busy || !ready || replier === null || choice.draftId === null) return
     setBusy(true)
-    const outcome = await session.generate(session.snapshot().leafSlotId, replier, "", undefined, replyPlan.round)
+    const outcome = await session.generate(
+      session.snapshot().leafSlotId,
+      replier,
+      "",
+      undefined,
+      replyPlan.round,
+      nextDecisionOn && replyPlan.auto
+    )
     report(outcome)
     if (outcome.ok) replied(choice.draftId)
     setBusy(false)
@@ -519,12 +540,31 @@ export function Composer({
 
   const hasText = text.trim() !== "" || !!attachmentInput?.count
   const replies = replyPlan.round.length > 0 ? "reply" : "replies"
-  const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} ${replies}` : "Send"
+  // With the decision model choosing (DESIGN §2.3), Auto's plan is only its fallback: not named.
+  const sendLabel = hasText
+    ? name
+      ? `Send as ${name}`
+      : "Send"
+    : decides
+      ? "Get a reply"
+      : replierName
+        ? `${replierName} ${replies}`
+        : "Send"
   const sendHint = hasText
-    ? `${sendLabel}${roundNames ? `, then ${roundNames} ${replies}` : choice.noReplies ? ", with no reply" : ""} (${submitHint})`
-    : roundNames
-      ? `${roundNames} ${replies} now, with nothing sent from you`
-      : "Type a message to send"
+    ? `${sendLabel}${
+        decides
+          ? ", then the decision model chooses who replies"
+          : roundNames
+            ? `, then ${roundNames} ${replies}`
+            : choice.noReplies
+              ? ", with no reply"
+              : ""
+      } (${submitHint})`
+    : decides
+      ? "A reply now, with nothing sent from you; the decision model chooses who"
+      : roundNames
+        ? `${roundNames} ${replies} now, with nothing sent from you`
+        : "Type a message to send"
   // Generate writes the speaker's turn: for a card the user plays, the model writes it for them.
   const editedName = editing === null ? null : nameOf(castView, editing.speakerEntityId)
   // Keep the action named while the cast is loading; the full name includes its speaker.
@@ -590,6 +630,8 @@ export function Composer({
       picked: pickedReply,
       noReplies: choice.noReplies,
       loading: turnEntries === null,
+      decides,
+      ...(lastPick ? { lastPick } : {}),
       // Auto and No one stay until another choice; a character is picked for one reply on top.
       onPick: (pick) =>
         void choices

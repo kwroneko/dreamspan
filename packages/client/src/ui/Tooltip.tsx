@@ -64,7 +64,14 @@ export const iconButtonClass = (tone: "muted" | "danger" = "muted") =>
  * opaque while hovered and while its tooltip is open, where `hover:bg-hover` and
  * `data-popup-open:bg-hover` would let a dark picture swallow the icon.
  */
-export const OVER_PICTURE = "bg-surface/85 hover:bg-surface/85 data-popup-open:bg-surface/85"
+const OVER_PICTURE = "bg-surface/85 hover:bg-surface/85 data-popup-open:bg-surface/85"
+/**
+ * A toggle over a tile's picture (a character's star and archive, a group's pin): one backing,
+ * `OVER_PICTURE`, on the button itself, never on a wrapper. Off, it shows only while its
+ * `tile-toggle-surface` is hovered or holds focus, and takes no room meanwhile beyond its own
+ * corner (styles.css); on, and on touch screens, it stays shown.
+ */
+export const PICTURE_TOGGLE = `tile-toggle ${OVER_PICTURE}`
 
 /** A button that's just an icon: `label` is its accessible name and its tooltip. */
 export function IconButton({

@@ -7,7 +7,7 @@ import { contextImage, wireImages } from "../assembler/imageTokens.ts"
 // The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
 // was sent, from its rollout's stored snapshot, with each piece's source named for the user.
 import { createHash } from "node:crypto"
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId, SpeakerPick, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { type ContextSource, type RequestFigures, RunContext, versionMetricsOf } from "@rp/shared/inspectorApi.ts"
@@ -286,6 +286,12 @@ export const inspectionInputs = (
     } satisfies InspectionInputs
   })
 
+/** The decision model's pick of the reply's speaker, as the inspector shows it. */
+const speakerPickOf = (json: string | null) => {
+  const pick = json === null ? null : (JSON.parse(json) as SpeakerPick)
+  return pick?.by === "decision" ? { speakerPick: { name: pick.name, confidence: pick.confidence } } : {}
+}
+
 export const makeInspectorReadHandlers = Effect.gen(function* () {
   const assembler = yield* WorkerAssembler
   const sql = yield* SqlClient.SqlClient
@@ -300,8 +306,10 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           status: string
           snapshot: string
           sent_context_json: string | null
+          speaker_pick_json: string | null
         }>`
-        SELECT s.chat_id, r.fork_id, v.slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot, p.sent_context_json
+        SELECT s.chat_id, r.fork_id, v.slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot, p.sent_context_json,
+          v.speaker_pick_json
         FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
         JOIN rollouts r ON r.id = v.rollout_id JOIN rollout_payloads p ON p.rollout_id = r.id
         WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND p.context_snapshot_json IS NOT NULL
@@ -345,6 +353,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           mode: snapshot.inputs.mode,
           capture: display ? "captured" : "unavailable",
           tokenizer: textCounts.tokenizer,
+          ...speakerPickOf(row.speaker_pick_json),
           messages: display
             ? wire!.messages.map((message, at) => ({
                 role: message.role,

@@ -12,15 +12,17 @@ import type {
 } from "@rp/shared/chatSetupApi.ts"
 import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { openOnPlainClick } from "../../ui/links.ts"
-import { OPEN_BESIDE_HINT, OpenBesideButton, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
+import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
+import { Effect, Schedule, Stream } from "effect"
+import { applyShellCards, applyShellForks } from "@rp/shared/shellUpdates.ts"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { OVER_PICTURE, Tooltip } from "../../ui/Tooltip.tsx"
+import { PICTURE_TOGGLE, Tooltip } from "../../ui/Tooltip.tsx"
 import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
 import type { CardSort } from "./cardRecency.ts"
 
@@ -35,7 +37,24 @@ export type ShellLibrary = ShellCards
 const SHELL_KEYS = ["chats", "library", "pins", "favourites"]
 
 /** Kept while the app runs: every screen reads it, and a remount mustn't cancel and send it again. */
-export const shellAtom = Atom.keepAlive(AppClient.query("GetShellCards", undefined, { reactivityKeys: SHELL_KEYS }))
+export const shellAtom = Atom.keepAlive(
+  AppClient.runtime.factory.withReactivity(SHELL_KEYS)(
+    AppClient.runtime.atom(
+      Stream.unwrap(
+        Effect.map(AppClient, (client) =>
+          client("WatchShellCards", undefined).pipe(
+            Stream.retry(Schedule.spaced("1 second")),
+            Stream.scan(
+              (): ShellCards => ({ cards: [], personas: [], archived: [], pinsCollapsed: false }),
+              applyShellCards
+            ),
+            Stream.drop(1)
+          )
+        )
+      )
+    )
+  )
+)
 
 /** Every card the lists browse: the characters, then the persona folder's (each `persona`), for `browseCards`. */
 export const browsable = (data: ShellLibrary) => [...data.cards, ...data.personas, ...data.archived]
@@ -64,10 +83,27 @@ const withCast = (data: ShellForks): ReadonlyMap<ShellSection, ShellRows> => {
 /** One atom per view, by its JSON: each screen's lists are read with only the rows they show. */
 const shellForksAtom = Atom.family((key: string) =>
   Atom.mapResult(
-    AppClient.query("GetShellForks", JSON.parse(key) as ShellForksView, {
-      reactivityKeys: SHELL_KEYS,
-      timeToLive: "2 minutes"
-    }),
+    AppClient.runtime.factory.withReactivity(SHELL_KEYS)(
+      AppClient.runtime.atom(
+        Stream.unwrap(
+          Effect.map(AppClient, (client) =>
+            client("WatchShellForks", JSON.parse(key) as ShellForksView).pipe(
+              Stream.retry(Schedule.spaced("1 second")),
+              Stream.scan(
+                () =>
+                  ({
+                    sections: [],
+                    people: [],
+                    filterCounts: { all: 0, pinned: 0, groups: 0, solo: 0, branches: 0 }
+                  }) as ShellForks,
+                applyShellForks
+              ),
+              Stream.drop(1)
+            )
+          )
+        )
+      )
+    ),
     (data) => ({ rows: withCast(data), filterCounts: data.filterCounts })
   )
 )
@@ -315,7 +351,8 @@ export function CharacterGrid({
 }
 
 /**
- * A character's tile: its picture, names and use, with the favourite star over the picture.
+ * A character's tile: its picture, names and use, with its favourite star and archive toggle
+ * over the picture's top corners.
  * `sort`: a date sort's date ends the last line. `pick`: what a click does, else open its chat.
  */
 function CharacterTile({
@@ -447,18 +484,14 @@ function CharacterTile({
           {state.pending ? "Adding…" : state.done ? "In this chat" : "Add to chat"}
         </Button>
       )}
-      <span
-        data-layout-overlay="Favourite action sits over the portrait"
-        className="absolute top-2 left-2 flex flex-col gap-1"
-      >
-        <FavouriteStar card={card} className={`tile-toggle ${OVER_PICTURE}`} />
-        <span className={`tile-toggle rounded-md ${OVER_PICTURE}`}>
-          <CardSurface placement="archive-toggle" entityId={c.entityId} />
-        </span>
+      {/* Each toggle has a corner of its own: the star top left, the archive top right. */}
+      <span data-layout-overlay="Favourite action sits over the portrait" className="absolute top-2 left-2 flex">
+        <FavouriteStar card={card} className={PICTURE_TOGGLE} />
       </span>
+      {/* A picker adds to a chat (its corner shows whether one's in it); archiving isn't part of that. */}
       {!pick && (
-        <span data-layout-overlay="Open beside sits over the portrait" className="absolute top-2 right-2">
-          <OpenBesideButton href={besideHref} name={c.label} className={`tile-beside ${OVER_PICTURE}`} />
+        <span data-layout-overlay="Archive action sits over the portrait" className="absolute top-2 right-2 flex">
+          <CardSurface placement="archive-toggle" entityId={c.entityId} className={PICTURE_TOGGLE} />
         </span>
       )}
       {state.mark && (

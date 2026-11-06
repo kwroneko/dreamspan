@@ -119,6 +119,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         ordinal,
         status: version.status,
         speaker_entity_id: version.speakerEntityId,
+        speaker_pick_json: version.speakerPick ? JSON.stringify(version.speakerPick) : null,
         cast_json: JSON.stringify(cast),
         writer: version.writer,
         content: version.content,

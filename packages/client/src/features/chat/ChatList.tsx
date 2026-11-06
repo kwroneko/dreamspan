@@ -32,7 +32,11 @@ interface Query {
 }
 
 const firstPage = (query: Query) =>
-  AppClient.query("ListChats", { limit: PAGE, before: null, ...query }, { reactivityKeys: ["chats", "library"] })
+  AppClient.query(
+    "ListChats",
+    { limit: PAGE, before: null, ...query },
+    { reactivityKeys: ["chats", "chat-lists", "library"] }
+  )
 
 /** All the chats' first page: the sidebar's, refreshed on its own. */
 const chatsAtom = firstPage({})
@@ -174,7 +178,7 @@ function Rows({ chats, onDelete }: { chats: ReadonlyArray<Chat>; onDelete: (chat
       AppClient.query(
         "ListChatSummaries",
         { chatIds: key === "" ? [] : (key.split(",") as Array<ChatId>) },
-        { reactivityKeys: ["chats", "library"] }
+        { reactivityKeys: ["chats", "chat-lists", "library"] }
       ),
     [key]
   )

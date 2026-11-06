@@ -6,17 +6,18 @@ import { AsyncResult } from "effect/reactivity"
 import { shellAtom } from "./shellData.tsx"
 import { FavouriteStar } from "./cardBrowse.tsx"
 
-/** A character's favourite star beside its name; a persona (not on the shell's grids) has none. */
+/** A card's favourite star and archive toggle, side by side, beside its name. */
 export function CardFavourite({ entityId }: { entityId: string }) {
   const shell = useAtomValue(shellAtom)
   const card = AsyncResult.isSuccess(shell)
     ? [...shell.value.cards, ...shell.value.personas, ...shell.value.archived].find((c) => c.card.entityId === entityId)
     : undefined
+  // One group, so a wrapping row (the side panel's) never parts the star from the archive.
   return card ? (
-    <>
+    <span className="inline-flex shrink-0 items-center">
       <FavouriteStar card={card} />
       <CardSurface placement="archive-toggle" entityId={entityId as EntityId} />
-    </>
+    </span>
   ) : null
 }
 

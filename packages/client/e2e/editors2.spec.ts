@@ -6,7 +6,7 @@
 import { switchAll } from "./support/lorebook.ts"
 import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { HELD_FIELD, textField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
@@ -169,6 +169,9 @@ for (const width of [1440, 390])
       await expect(formats).toBeHidden()
       await expect(parent).toBeVisible()
       await page.keyboard.press("Escape")
+      // Reopened while the closing menu still animates out, the old menu's focus return
+      // can land after the new one has taken focus.
+      await expect(parent).toBeHidden()
       // Keyboard alone: Enter opens Cast, typeahead reaches Export, → opens the submenu,
       // Enter selects PNG and starts the download. Left returns to the parent level.
       await page.mouse.move(0, 0)
@@ -176,12 +179,16 @@ for (const width of [1440, 390])
       await more.press("Enter")
       await page.keyboard.type("Export")
       await expect(trigger).toBeFocused()
+      // A submenu takes focus a moment after it shows; keys pressed before then reach the parent.
+      const focusIn = (menu: Locator) => expect.poll(() => menu.evaluate((m) => m.contains(document.activeElement)))
       await page.keyboard.press("ArrowRight")
       await expect(formats).toBeVisible()
+      await focusIn(formats).toBe(true)
       await page.keyboard.press("ArrowLeft")
       await expect(trigger).toBeFocused()
       await page.keyboard.press("Enter")
       await expect(formats).toBeVisible()
+      await focusIn(formats).toBe(true)
       await page.keyboard.press("Home")
       await expect(formats.getByRole("menuitem", { name: "PNG", exact: true })).toBeFocused()
       const keyedDownload = page.waitForEvent("download")
@@ -210,8 +217,13 @@ for (const width of [1440, 390])
           await more.focus()
           await more.press("Enter")
           await page.keyboard.type("Export")
+          await expect(trigger).toBeFocused()
+          // Home before the submenu takes focus moves to the parent's first item instead,
+          // closing the submenu, and Enter then picks that item.
           await page.keyboard.press("ArrowRight")
+          await focusIn(formats).toBe(true)
           await page.keyboard.press("Home")
+          await expect(formats.getByRole("menuitem", { name: "PNG", exact: true })).toBeFocused()
           await page.keyboard.press("Enter")
         } else {
           await more.click()
@@ -220,6 +232,9 @@ for (const width of [1440, 390])
         }
         await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toHaveText("Description")
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+        // The closing dialog hands focus back as it unmounts: wait, as for the menu above.
+        await expect(dialog).toHaveCount(0)
+        await expect(parent).toBeHidden()
       }
     })
 

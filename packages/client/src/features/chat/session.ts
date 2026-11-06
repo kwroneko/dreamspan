@@ -573,12 +573,12 @@ export class ChatSession {
   private chatsTimer: ReturnType<typeof setTimeout> | null = null
   private chatsInvalidate: (() => void) | null = null
 
-  /** Has the lists of chats read again a second after the first change since they last were. */
+  /** Refreshes legacy chat/group lists and split links after a burst. Shell rows stream independently. */
   private chatsChanged(services: Context.Context<Reactivity.Reactivity>) {
     this.chatsInvalidate = () => {
       this.chatsTimer = null
       this.chatsInvalidate = null
-      Context.get(services, Reactivity.Reactivity).invalidateUnsafe(["chats"])
+      Context.get(services, Reactivity.Reactivity).invalidateUnsafe(["chat-lists"])
     }
     this.chatsTimer ??= setTimeout(() => this.chatsInvalidate?.(), CHATS_REREAD_MS)
   }
@@ -607,8 +607,7 @@ export class ChatSession {
                 Reactivity.Reactivity
               ).invalidateUnsafe([`chat-notes:${this.chatId}`])
             }
-            // The lists of chats (the left panel's, at 0.1 to 0.5 s a read at the owner's scale)
-            // read again once the chat has changed, at most once a second, and not for the Hello
+            // The legacy paged chat list reads again after a change, at most once a second, not for the Hello
             // that opens it: the lists were just read, and opening a chat changes none of them.
             const opening = this.hellos === 0 && batch.every((event) => event._tag === "Hello")
             if (
@@ -1453,7 +1452,9 @@ export class ChatSession {
     images?: import("@rp/shared/chat.ts").MessageImages,
     imageDraftIds?: readonly string[],
     /** Who replies after `replySpeaker`, in turn: the rest of the round (DESIGN §2.3). */
-    round: ReadonlyArray<EntityId> = []
+    round: ReadonlyArray<EntityId> = [],
+    /** Auto picked `replySpeaker` and the round, and "Who replies next" is on: the decision model chooses (DESIGN §2.3). */
+    autoPick = false
   ): Promise<{
     readonly sent: boolean
     readonly outcome: Outcome<unknown>
@@ -1478,6 +1479,7 @@ export class ChatSession {
           // Queued with no one to reply, it posts alone, as it does at once.
           ...(reply ? {} : { reply: false }),
           ...(reply && round.length > 0 ? { round } : {}),
+          ...(reply && autoPick ? { autoPick } : {}),
           ...(composer === undefined ? {} : { composer: commitOf(composer) })
         })
       ),
@@ -1493,7 +1495,7 @@ export class ChatSession {
     if (!reply) return { sent: true, outcome: result, draft, recovered }
     return {
       sent: true,
-      outcome: await this.generate(result.value.entry.slotId, replySpeaker, "", undefined, round),
+      outcome: await this.generate(result.value.entry.slotId, replySpeaker, "", undefined, round, autoPick),
       draft,
       recovered
     }
@@ -1509,7 +1511,9 @@ export class ChatSession {
     direction = "",
     composer?: ComposerSource,
     /** Who replies after this one, in turn: the rest of the round (DESIGN §2.3). */
-    round: ReadonlyArray<EntityId> = []
+    round: ReadonlyArray<EntityId> = [],
+    /** Auto picked `speaker` and the round, and "Who replies next" is on: the decision model chooses (DESIGN §2.3). */
+    autoPick = false
   ): Promise<Outcome<SendResult>> {
     await beforeReply()
     const result = await this.queueSnapshot(
@@ -1522,6 +1526,7 @@ export class ChatSession {
           speakerEntityId: speaker,
           ...(direction.trim() === "" ? {} : { direction }),
           ...(round.length > 0 ? { round } : {}),
+          ...(autoPick ? { autoPick } : {}),
           ...(composer === undefined ? {} : { composer: commitOf(composer) })
         })
       ),

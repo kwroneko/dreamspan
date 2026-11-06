@@ -220,6 +220,32 @@ export const makeShellReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   /** The last computation and the database version it read (one connection per reader worker). */
   let memo: { readonly userId: string; readonly version: number; readonly state: ShellState } | null = null
+  // Only bounded refreshes may use the foreground lane. Initial, wide, deep and
+  // insertion-heavy reads retain the background lane's reserved reply reader.
+  const liveReady = (userId: string) =>
+    Effect.gen(function* () {
+      const userStamp = yield* summaryStamps(sql, userId)
+      const rows = yield* sql<{ id: string; chat_id: string; messages: number | null; stale: number }>`
+      SELECT f.id, f.chat_id, s.messages,
+        s.fork_id IS NULL OR s.format <> ${FORK_SUMMARY_FORMAT} OR s.stamp <> c.shell_stamp
+          OR s.user_stamp <> ${userStamp} AS stale
+      FROM chats c CROSS JOIN forks f ON f.chat_id = c.id LEFT JOIN fork_summaries s ON s.fork_id = f.id
+      WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL LIMIT 5001`
+      if (rows.length > 5000) return false
+      const stale = rows.filter((row) => row.stale !== 0)
+      if (stale.length > 2 || stale.some((row) => (row.messages ?? 0) > 5000)) return false
+      if (stale.length === 0) return true
+      const ids = JSON.stringify(stale.map((row) => row.id))
+      const depths = yield* sql<{ depth: number }>`SELECT s.depth FROM json_each(${ids}) j
+      CROSS JOIN forks f ON f.id = j.value JOIN slots s ON s.id = f.tip_slot_id
+      UNION ALL SELECT s.depth FROM json_each(${ids}) j CROSS JOIN forks f ON f.id = j.value
+        JOIN forks p ON p.id = f.parent_fork_id JOIN slots s ON s.id = p.tip_slot_id`
+      if (depths.some((row) => row.depth >= 5000)) return false
+      const inserted =
+        yield* sql`SELECT 1 FROM json_each(${JSON.stringify([...new Set(stale.map((row) => row.chat_id))])}) j
+      CROSS JOIN fork_overrides o ON o.chat_id = j.value AND o.kind = 'insert' LIMIT 1`
+      return inserted.length === 0
+    })
   const shellState = (userId: string, recompute: boolean | undefined) =>
     Effect.gen(function* () {
       // The stamps first, which also opens the transaction's snapshot: the version read next is its own.
@@ -634,7 +660,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       if (recompute !== true) memo = { userId, version, state }
       return state
     })
-  return {
+  const handlers = {
     ShellLibrary: ({ userId, recompute }) =>
       Effect.map(shellState(userId, recompute), (state) => ({
         cards: state.cards,
@@ -701,5 +727,16 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           fresh: state.fresh
         }
       }).pipe(query("ShellForks"))
+  } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
+  return {
+    ...handlers,
+    ShellCardsLive: (payload: Parameters<typeof handlers.ShellCards>[0]) =>
+      Effect.gen(function* () {
+        return (yield* liveReady(payload.userId)) ? yield* handlers.ShellCards(payload) : null
+      }).pipe(query("ShellCardsLive")),
+    ShellForksLive: (payload: Parameters<typeof handlers.ShellForks>[0]) =>
+      Effect.gen(function* () {
+        return (yield* liveReady(payload.userId)) ? yield* handlers.ShellForks(payload) : null
+      }).pipe(query("ShellForksLive"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

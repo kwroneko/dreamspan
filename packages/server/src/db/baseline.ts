@@ -349,6 +349,9 @@ export const baseline: ReadonlyArray<string> = [
     macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')),
     origin TEXT NOT NULL,
     source_version_id TEXT REFERENCES versions(id),
+    -- How a reply's speaker was chosen (SpeakerPick): {"by":"auto"} while the decision model
+    -- is to choose, then its pick, or {"by":"order"} when Auto's pick stood.
+    speaker_pick_json TEXT CHECK (speaker_pick_json IS NULL OR json_valid(speaker_pick_json)),
     rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED,
     connection_id TEXT REFERENCES connections(id),
     model_id TEXT REFERENCES models(id),
@@ -407,8 +410,8 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE VIEW version_records AS SELECT v.*, t.cast_json, t.content, t.context_form, t.display_form, t.reasoning, t.raw_content, t.raw_reasoning, t.raw_sections, t.rewrite_json, t.reply_sections, t.frozen_macros, t.greeting_ref, t.direction, t.error_json, t.usage_json, t.recorded_model_json, t.recorded_generation_json
     FROM versions v JOIN version_texts t ON t.version_seq = v.seq`,
   `CREATE TRIGGER version_records_insert INSTEAD OF INSERT ON version_records BEGIN
-    INSERT INTO versions (seq, id, slot_id, ordinal, status, speaker_entity_id, writer, macro_mode, origin, source_version_id, rollout_id, connection_id, model_id, starred, hidden, changeset_id, created_at, updated_at, deleted_at, bin_item_id, purged_at, mark, fork_id) VALUES (
-      NEW.seq, NEW.id, NEW.slot_id, NEW.ordinal, NEW.status, NEW.speaker_entity_id, NEW.writer, NEW.macro_mode, NEW.origin, NEW.source_version_id, NEW.rollout_id, NEW.connection_id, NEW.model_id, coalesce(NEW.starred, 0), coalesce(NEW.hidden, 0), NEW.changeset_id, NEW.created_at, NEW.updated_at, NEW.deleted_at, NEW.bin_item_id, NEW.purged_at, NEW.mark, NEW.fork_id);
+    INSERT INTO versions (seq, id, slot_id, ordinal, status, speaker_entity_id, speaker_pick_json, writer, macro_mode, origin, source_version_id, rollout_id, connection_id, model_id, starred, hidden, changeset_id, created_at, updated_at, deleted_at, bin_item_id, purged_at, mark, fork_id) VALUES (
+      NEW.seq, NEW.id, NEW.slot_id, NEW.ordinal, NEW.status, NEW.speaker_entity_id, NEW.speaker_pick_json, NEW.writer, NEW.macro_mode, NEW.origin, NEW.source_version_id, NEW.rollout_id, NEW.connection_id, NEW.model_id, coalesce(NEW.starred, 0), coalesce(NEW.hidden, 0), NEW.changeset_id, NEW.created_at, NEW.updated_at, NEW.deleted_at, NEW.bin_item_id, NEW.purged_at, NEW.mark, NEW.fork_id);
     INSERT INTO version_texts(version_seq, cast_json, content, context_form, display_form, reasoning, raw_content, raw_reasoning, raw_sections, rewrite_json, reply_sections, frozen_macros, greeting_ref, direction, error_json, usage_json, recorded_model_json, recorded_generation_json) VALUES (
       (SELECT seq FROM versions WHERE id = NEW.id), NEW.cast_json, coalesce(NEW.content, ''), NEW.context_form, NEW.display_form, NEW.reasoning, NEW.raw_content, NEW.raw_reasoning, NEW.raw_sections, NEW.rewrite_json, NEW.reply_sections, NEW.frozen_macros, NEW.greeting_ref, NEW.direction, NEW.error_json, NEW.usage_json, NEW.recorded_model_json, NEW.recorded_generation_json);
   END`,
@@ -419,8 +422,8 @@ export const baseline: ReadonlyArray<string> = [
     UPDATE version_texts SET cast_json = NEW.cast_json, content = NEW.content, context_form = NEW.context_form, display_form = NEW.display_form, reasoning = NEW.reasoning, raw_content = NEW.raw_content, raw_reasoning = NEW.raw_reasoning, raw_sections = NEW.raw_sections, rewrite_json = NEW.rewrite_json, reply_sections = NEW.reply_sections, frozen_macros = NEW.frozen_macros, greeting_ref = NEW.greeting_ref, direction = NEW.direction, error_json = NEW.error_json, usage_json = NEW.usage_json, recorded_model_json = NEW.recorded_model_json, recorded_generation_json = NEW.recorded_generation_json
       WHERE version_seq = OLD.seq AND (cast_json IS NOT NEW.cast_json OR content IS NOT NEW.content OR context_form IS NOT NEW.context_form OR display_form IS NOT NEW.display_form OR reasoning IS NOT NEW.reasoning OR raw_content IS NOT NEW.raw_content OR raw_reasoning IS NOT NEW.raw_reasoning OR raw_sections IS NOT NEW.raw_sections OR rewrite_json IS NOT NEW.rewrite_json OR reply_sections IS NOT NEW.reply_sections OR frozen_macros IS NOT NEW.frozen_macros OR greeting_ref IS NOT NEW.greeting_ref OR direction IS NOT NEW.direction OR error_json IS NOT NEW.error_json OR usage_json IS NOT NEW.usage_json OR recorded_model_json IS NOT NEW.recorded_model_json OR recorded_generation_json IS NOT NEW.recorded_generation_json);
     -- Finalize only after saving text, while the old generating status still permits writes.
-    UPDATE versions SET seq = NEW.seq, id = NEW.id, slot_id = NEW.slot_id, ordinal = NEW.ordinal, status = NEW.status, speaker_entity_id = NEW.speaker_entity_id, writer = NEW.writer, macro_mode = NEW.macro_mode, origin = NEW.origin, source_version_id = NEW.source_version_id, rollout_id = NEW.rollout_id, connection_id = NEW.connection_id, model_id = NEW.model_id, starred = NEW.starred, hidden = NEW.hidden, changeset_id = NEW.changeset_id, created_at = NEW.created_at, deleted_at = NEW.deleted_at, bin_item_id = NEW.bin_item_id, mark = NEW.mark, fork_id = NEW.fork_id
-      WHERE seq = OLD.seq AND (seq IS NOT NEW.seq OR id IS NOT NEW.id OR slot_id IS NOT NEW.slot_id OR ordinal IS NOT NEW.ordinal OR status IS NOT NEW.status OR speaker_entity_id IS NOT NEW.speaker_entity_id OR writer IS NOT NEW.writer OR macro_mode IS NOT NEW.macro_mode OR origin IS NOT NEW.origin OR source_version_id IS NOT NEW.source_version_id OR rollout_id IS NOT NEW.rollout_id OR connection_id IS NOT NEW.connection_id OR model_id IS NOT NEW.model_id OR starred IS NOT NEW.starred OR hidden IS NOT NEW.hidden OR changeset_id IS NOT NEW.changeset_id OR created_at IS NOT NEW.created_at OR deleted_at IS NOT NEW.deleted_at OR bin_item_id IS NOT NEW.bin_item_id OR mark IS NOT NEW.mark OR fork_id IS NOT NEW.fork_id);
+    UPDATE versions SET seq = NEW.seq, id = NEW.id, slot_id = NEW.slot_id, ordinal = NEW.ordinal, status = NEW.status, speaker_entity_id = NEW.speaker_entity_id, speaker_pick_json = NEW.speaker_pick_json, writer = NEW.writer, macro_mode = NEW.macro_mode, origin = NEW.origin, source_version_id = NEW.source_version_id, rollout_id = NEW.rollout_id, connection_id = NEW.connection_id, model_id = NEW.model_id, starred = NEW.starred, hidden = NEW.hidden, changeset_id = NEW.changeset_id, created_at = NEW.created_at, deleted_at = NEW.deleted_at, bin_item_id = NEW.bin_item_id, mark = NEW.mark, fork_id = NEW.fork_id
+      WHERE seq = OLD.seq AND (seq IS NOT NEW.seq OR id IS NOT NEW.id OR slot_id IS NOT NEW.slot_id OR ordinal IS NOT NEW.ordinal OR status IS NOT NEW.status OR speaker_entity_id IS NOT NEW.speaker_entity_id OR speaker_pick_json IS NOT NEW.speaker_pick_json OR writer IS NOT NEW.writer OR macro_mode IS NOT NEW.macro_mode OR origin IS NOT NEW.origin OR source_version_id IS NOT NEW.source_version_id OR rollout_id IS NOT NEW.rollout_id OR connection_id IS NOT NEW.connection_id OR model_id IS NOT NEW.model_id OR starred IS NOT NEW.starred OR hidden IS NOT NEW.hidden OR changeset_id IS NOT NEW.changeset_id OR created_at IS NOT NEW.created_at OR deleted_at IS NOT NEW.deleted_at OR bin_item_id IS NOT NEW.bin_item_id OR mark IS NOT NEW.mark OR fork_id IS NOT NEW.fork_id);
   END`,
   `CREATE TRIGGER version_texts_failed_error_insert BEFORE INSERT ON version_texts
     WHEN NEW.error_json IS NULL AND EXISTS (
@@ -1107,6 +1110,11 @@ export const baseline: ReadonlyArray<string> = [
     round INTEGER NOT NULL DEFAULT 0 CHECK (round IN (0, 1)),
     -- 1: its round stopped (Stop, a failed reply, a restart) and waits for Continue round.
     held INTEGER NOT NULL DEFAULT 0 CHECK (held IN (0, 1)),
+    -- 1: its reply's speaker is for the decision model to choose when it posts (Auto's pick if it can't).
+    auto_pick INTEGER NOT NULL DEFAULT 0 CHECK (auto_pick IN (0, 1)),
+    -- A round's entry: the slot of the round's first reply, once there is one, so the turns
+    -- already decided can be shown (DESIGN §2.3).
+    round_start_slot_id TEXT REFERENCES slots(id) ON DELETE SET NULL,
     CHECK (round = 0 OR kind = 'generate'),
     CHECK (held = 0 OR round = 1),
     CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0),
@@ -1117,6 +1125,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE INDEX queued_messages_chat ON queued_messages(chat_id, seq)`,
   `CREATE INDEX queued_messages_speaker ON queued_messages(speaker_entity_id)`,
   `CREATE INDEX queued_messages_reply_speaker ON queued_messages(reply_speaker_entity_id)`,
+  `CREATE INDEX queued_messages_round_start ON queued_messages(round_start_slot_id) WHERE round_start_slot_id IS NOT NULL`,
   `CREATE TRIGGER queued_messages_chat_fixed BEFORE UPDATE OF chat_id ON queued_messages
     WHEN NEW.chat_id IS NOT OLD.chat_id
     BEGIN SELECT RAISE(ABORT, 'queued messages never move to another chat'); END`,

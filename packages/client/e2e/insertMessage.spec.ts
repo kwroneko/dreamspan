@@ -235,7 +235,10 @@ for (const [width, height] of [
       await editor(page).getByTestId("insert-text").fill("Mention the silver lantern.")
       await editor(page).getByRole("button", { name: "Generate as Tobin", exact: true }).click()
       await expect(editor(page)).toHaveCount(0)
-      await expect(messages(page)).toHaveCount(6)
+      // Six messages now; a phone's window mounts only those in view and two beyond (clientperf).
+      await expect.poll(async () => (await textsIn(fixture, fixture.main)).length).toBe(6)
+      await expect(messages(page).nth(1)).toContainText("#2")
+      await expect(messages(page).nth(1)).toContainText("Tobin")
       await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
       const directed = await admin((api) =>
         Effect.map(

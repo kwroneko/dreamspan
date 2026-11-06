@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { resolve } from "node:path"
 import { createServer, type ViteDevServer } from "vite"
-import { openSummarySettings } from "./support/panel.ts"
+import { openPanel, openSummarySettings } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { level1 } from "./support/summaries.ts"
@@ -14,7 +14,8 @@ test.use({ actionTimeout: 15_000 })
 const server = serverPerFile(withAdmin)
 let vite: ViteDevServer
 let url: string
-test.beforeAll(async () => {
+test.beforeAll(async ({ browser }) => {
+  test.setTimeout(180_000)
   vite = await createServer({
     root: resolve(import.meta.dirname, ".."),
     server: {
@@ -28,6 +29,28 @@ test.beforeAll(async () => {
   })
   await vite.listen()
   url = vite.resolvedUrls!.local[0]!.replace(/\/$/, "")
+  // Compile the dev application's chat and card editor modules once, before the tests time
+  // their own steps (as chatContributions does): a cold dev server compiles each on first load.
+  const { card, chat } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const card = yield* api.CreateCard({ label: "Synthetic warm-up", name: "Warm" })
+      const chat = yield* api.CreateChat({ title: "Synthetic warm-up" })
+      return { card, chat }
+    })
+  )
+  const warm = await browser.newPage()
+  try {
+    await apiLogin(warm.request, server(), ADMIN.handle, ADMIN.password)
+    await warm.goto(`${url}/chats/${chat.id}`, { timeout: 0 })
+    await expect(warm.getByRole("textbox", { name: "Message", exact: true })).toBeEditable({ timeout: 0 })
+    // The Summaries tab is loaded when first opened.
+    const summaries = await openPanel(warm, "Summaries")
+    await expect(summaries.getByText("Summary settings", { exact: true })).toBeVisible({ timeout: 0 })
+    await warm.goto(`${url}/cards/${card.entityId}`, { timeout: 0 })
+    await expect(warm.getByRole("button", { name: "Compare with family", exact: true })).toBeVisible({ timeout: 0 })
+  } finally {
+    await warm.close()
+  }
 })
 test.afterAll(async () => {
   await vite?.close()
@@ -120,7 +143,13 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   await expect(page.getByText("Plugin summary fields", { exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "Hide panel", exact: true }).click()
   await plugin(page, "hide")
+  // The originals replace the summary. The timeline mounts only the rows in view and two
+  // beyond, so the first is read at the top, and the list goes back to the reply after.
+  const list = page.getByTestId("messages")
+  await list.evaluate((list) => list.scrollTo({ top: 0 }))
   await expect(page.getByText("Original 1", { exact: true })).toBeVisible()
+  await list.evaluate((list) => list.scrollTo({ top: list.scrollHeight }))
+  await expect(article).toBeVisible()
   await expect(page.getByRole("group", { name: "Versions", exact: true })).toHaveCount(0)
   await expect(page.getByTestId("lcm-boundary")).toHaveCount(0)
   await article.dispatchEvent("pointerdown", { pointerType: "touch", clientX: 200, clientY: 300 })

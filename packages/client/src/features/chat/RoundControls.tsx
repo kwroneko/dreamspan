@@ -2,18 +2,45 @@
 // reply after the reply being written, or, once Stop (or a failed reply) stopped it, who was,
 // with Continue round and End round. The round's entries are the server's queue entries
 // (`QueuedMessage.round`), so a reload or a second tab shows the same; the queue list leaves
-// them out. A `composerControls` entry (`composer.round`), so a plugin can replace it.
-import type { QueuedMessage } from "@rp/shared/chat.ts"
+// them out. With "Who replies next" on, the decision model chooses each turn's speaker when the
+// turn comes, so the strip names the turns already chosen and only counts the rest: Auto's plan
+// for them is only a fallback. A `composerControls` entry (`composer.round`), so a plugin can
+// replace it.
+import type { PathEntry, QueuedMessage, SlotId } from "@rp/shared/chat.ts"
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
-import { listNames, nameOf, useCast } from "./cast.ts"
+import { type CastView, listNames, nameOf, useCast } from "./cast.ts"
 import type { ComposerControlContext } from "./composerControls.tsx"
 
 /** The fork's round entries, in turn. */
 const roundOf = (queue: ReadonlyArray<QueuedMessage>, forkId: string | null) =>
   queue.filter((entry) => entry.round !== undefined && entry.round.forkId === forkId)
+
+/**
+ * The round's replies so far, in the messages shown: from its first reply through the one its
+ * next turn waits for (being written, or the last written once the round stopped).
+ */
+const turnsSoFar = (entries: ReadonlyArray<PathEntry>, start: SlotId | undefined, current: SlotId) => {
+  const last = entries.findIndex((entry) => entry.slotId === current)
+  if (last < 0) return []
+  const first = start === undefined ? -1 : entries.findIndex((entry) => entry.slotId === start)
+  return entries.slice(first >= 0 && first <= last ? first : last, last + 1)
+}
+
+/** "Ash and Wren so far. Choosing who replies now. " — the turns the decision model has had. */
+const soFar = (cast: CastView, turns: ReadonlyArray<PathEntry>) => {
+  const choosing = turns.some((turn) => turn.version.speakerPick?.by === "auto" && turn.version.status === "generating")
+  const named = turns.flatMap((turn) =>
+    turn.version.speakerPick?.by === "auto" && turn.version.status === "generating"
+      ? []
+      : [nameOf(cast, turn.version.speakerEntityId) ?? "?"]
+  )
+  return `${named.length > 0 ? `${listNames(named)} so far. ` : ""}${choosing ? "Choosing who replies now. " : ""}`
+}
+
+const more = (count: number) => (count === 1 ? "1 more" : `${count} more`)
 
 export function RoundControls({ view, session, report }: ComposerControlContext) {
   const cast = useCast()
@@ -21,7 +48,19 @@ export function RoundControls({ view, session, report }: ComposerControlContext)
   const round = roundOf(view.queue, view.forkId)
   if (round.length === 0) return null
   const held = round.some((entry) => entry.round?.held)
+  const decides = round.some((entry) => entry.round?.decides === true)
   const names = listNames(round.map((entry) => nameOf(cast, entry.speakerEntityId) ?? "?"))
+  const chosen = decides
+    ? soFar(
+        cast,
+        turnsSoFar(
+          view.entries,
+          round.find((entry) => entry.round?.startSlotId)?.round?.startSlotId,
+          round[0]!.replySlotId
+        )
+      )
+    : ""
+  const still = decides ? `${more(round.length)}, each chosen when it's their turn` : names
   const run = async (action: "continue" | "end") => {
     setBusy(true)
     report(await session.round(action))
@@ -48,7 +87,8 @@ export function RoundControls({ view, session, report }: ComposerControlContext)
     >
       <Badge tone={held ? "warning" : "neutral"}>{held ? "round stopped" : "round"}</Badge>
       <span className="min-w-[10rem] flex-1 text-muted [overflow-wrap:anywhere]">
-        {held ? `Still to reply: ${names}` : `Then ${names}, in turn`}
+        {chosen}
+        {held ? `Still to reply: ${still}` : decides ? `Then ${still}` : `Then ${names}, in turn`}
       </span>
       <span className="ml-auto flex flex-wrap items-center gap-1">
         <Tooltip
@@ -57,7 +97,9 @@ export function RoundControls({ view, session, report }: ComposerControlContext)
               ? "This round is already running."
               : busy
                 ? "Wait for the round to update."
-                : `${names} reply in turn now, after the last message as it is.`
+                : decides
+                  ? `${more(round.length)} reply in turn now, after the last message as it is, each chosen when it's their turn.`
+                  : `${names} reply in turn now, after the last message as it is.`
           }
         >
           <Button

@@ -27,7 +27,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Icon } from "../../ui/Icon.tsx"
-import { IconButton, OVER_PICTURE, Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton, PICTURE_TOGGLE, Tooltip } from "../../ui/Tooltip.tsx"
 import { forkLabel, formatMoment, OPENS_HERE_HINT } from "../chat/forks.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
@@ -178,7 +178,7 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
         </Link>
       </Tooltip>
       <span data-layout-overlay="Pin action sits over the group portrait" className="absolute right-2 top-2">
-        <PinButton fork={fork} className={`tile-toggle ${OVER_PICTURE}`} />
+        <PinButton fork={fork} className={PICTURE_TOGGLE} />
       </span>
     </div>
   )

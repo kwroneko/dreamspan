@@ -30,7 +30,6 @@ export const register = () => {
     order: 10,
     component: CardArchive
   })
-  cardContributions.register({ id: "cards.archive-menu", placement: "actions", order: 90, menu: CardArchiveMenu })
   cardContributions.register({
     id: "cards.archive-tile-menu",
     placement: "tile-menu",

@@ -2,7 +2,6 @@
 // the Side. It's an event the workbench listens for (Workbench.tsx), so it works wherever it's
 // rendered, inside the workbench's context or not.
 import { useSyncExternalStore } from "react"
-import { IconButton } from "../../ui/Tooltip.tsx"
 
 export const OPEN_BESIDE = "rp:open-beside"
 
@@ -20,17 +19,3 @@ export const useCanOpenBeside = () => useSyncExternalStore(subscribe, () => matc
 
 export const OPEN_BESIDE_HINT =
   "Opens it in the frame on the right, adding one if there's none. Alt-click a link to do the same."
-
-export function OpenBesideButton({ href, name, className = "" }: { href: string; name: string; className?: string }) {
-  const wide = useCanOpenBeside()
-  if (!wide) return null
-  return (
-    <IconButton
-      label={`Open ${name} beside`}
-      hint={OPEN_BESIDE_HINT}
-      icon="split-right"
-      className={className}
-      onClick={() => openBeside(href)}
-    />
-  )
-}
