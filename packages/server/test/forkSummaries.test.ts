@@ -308,7 +308,7 @@ describe("summary fork overrides", () => {
       ])
       assert.isTrue((yield* h.read(h.main)).fresh)
       yield* fixtureSql(config.dataDir, [
-        { sql: "UPDATE versions SET content='amended afterwards' WHERE id=?", params: [copy] }
+        { sql: "UPDATE version_records SET content='amended afterwards' WHERE id=?", params: [copy] }
       ])
       assert.isFalse((yield* h.read(h.main)).fresh)
       assert.isTrue((yield* h.read(g)).fresh)

@@ -399,10 +399,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         -- A generated version with a source continues it (ContinueVersion); the source is
         -- a version of the same slot (graphIntegrity.ts), frozen once it was written.
         CASE WHEN v.writer = 'model' AND v.origin = 'generated' THEN v.source_version_id END AS continues,
-        (SELECT x.content FROM versions x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id) AS continued_text,
-        (SELECT x.reply_sections FROM versions x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id)
+        (SELECT x.content FROM version_records x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id) AS continued_text,
+        (SELECT x.reply_sections FROM version_records x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id)
           AS continued_sections
-      FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+      FROM version_records v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND s.id = ${slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}
         AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
       Effect.flatMap(([row]) =>
@@ -614,7 +614,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
                 'cast', (SELECT json_group_array(c.value ->> 'name') FROM json_each(m.cast_json) c
                   WHERE c.value ->> 'from' <> 'destination'))
               FROM chat_merges m WHERE m.slot_id = s.id) AS merge_json`
-        const joins = sql`JOIN versions v ON v.id = ${selected}
+        const joins = sql`JOIN version_records v ON v.id = ${selected}
           JOIN versions o ON o.id = ${sql.literal(originalSql("v"))}
           JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)`
         const rows =
@@ -810,14 +810,14 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           ...(yield* sql<{ eligible: number; receipts: string }>`
           ${path}
           SELECT CASE WHEN ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
-            AND (length(v.content) > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN 1 ELSE 0 END AS eligible, ${receipts(sql`v.id`)} AS receipts
+            AND (v.content_length > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN 1 ELSE 0 END AS eligible, ${receipts(sql`v.id`)} AS receipts
           FROM path JOIN slots s ON s.id = path.id JOIN versions v ON v.id = ${selected}
           WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${owned} ORDER BY path.position`)
         ]
         if (continuing) {
           const continued = yield* sql<{ eligible: number; receipts: string }>`
             SELECT 1 AS eligible, ${receipts(sql`v.id`)} AS receipts FROM versions v JOIN slots s ON s.id = v.slot_id
-            WHERE v.id = ${continuing} AND s.chat_id = ${chatId} AND length(v.content) > 0 AND ${owned}`
+            WHERE v.id = ${continuing} AND s.chat_id = ${chatId} AND v.content_length > 0 AND ${owned}`
           rows.push(...continued)
         }
         const relevant = new Set(identities)
@@ -854,7 +854,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const onDisplay = yield* display(leaf)
         const counted = sql`count(*) AS n FROM path JOIN slots s ON s.id = path.id
         JOIN versions v ON v.id = ${selected}
-        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed' AND (length(v.content) > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id))`
+        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed' AND (v.content_length > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id = v.id))`
         const [row] =
           onDisplay === null
             ? yield* sql<{ n: number }>`
@@ -1091,7 +1091,7 @@ const replaySources = (
             : yield* sql<{ id: string; content: string; reply_sections: string | null; amends: number }>`
                 SELECT v.id, v.content, v.reply_sections,
                   (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amends
-                FROM versions v JOIN slots s ON s.id = v.slot_id
+                FROM version_records v JOIN slots s ON s.id = v.slot_id
                 WHERE s.chat_id = ${chatId} AND ${owned} AND v.id IN ${sql.in(ids)}`
         const byId = new Map(rows.map((row) => [row.id, row]))
         const entries = yield* Effect.forEach(window.entries, ({ amends, ...entry }) =>

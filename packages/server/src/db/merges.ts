@@ -173,7 +173,7 @@ const readStretch = (
           ${contextExcludedIn(sql, fork.id)} AS excluded, v.status, v.speaker_entity_id, v.content,
           v.created_at, f.writer AS first_writer, f.origin AS first_origin, v.origin
         FROM display_slots path JOIN slots s ON s.id = path.id
-        JOIN versions v ON v.id = ${shownIn(sql, fork.id, "s")}
+        JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "s")}
         JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)
         WHERE s.chat_id = ${fork.chat_id}
         ORDER BY path.position`
@@ -557,7 +557,7 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
             yield* sql`UPDATE forks SET tip_slot_id = ${slotId}, row_version = row_version + 1 WHERE id = ${plan.fork.id}`
           else yield* writeInsert(sql, { id: plan.fork.id, chatId }, slotId, 1)
           // The join pins the union: the merged-in characters took part (DESIGN §3.5).
-          yield* sql`UPDATE versions SET cast_json = ${JSON.stringify(plan.union)} WHERE id = ${row.id}`
+          yield* sql`UPDATE version_records SET cast_json = ${JSON.stringify(plan.union)} WHERE id = ${row.id}`
           for (const entity of plan.added)
             yield* graph.insertStateEvent(
               userId,

@@ -619,7 +619,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           }
           yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
           const columns = rewriteColumns(rewrite)
-          yield* sql`UPDATE versions SET content = ${content}, status = ${status},
+          yield* sql`UPDATE version_records SET content = ${content}, status = ${status},
             reasoning = CASE WHEN ${reasoning === undefined ? 1 : 0} THEN reasoning ELSE ${reasoning || null} END,
             raw_content = ${columns.raw_content}, raw_reasoning = ${columns.raw_reasoning},
             raw_sections = ${columns.raw_sections},

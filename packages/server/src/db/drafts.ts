@@ -295,7 +295,7 @@ export const makeDraftStore = (
               Effect.map(([row]) => row?.content ?? null)
             )
       case "version_edit":
-        return sql<{ content: string }>`SELECT content FROM versions WHERE id = ${key.targetId}`.pipe(
+        return sql<{ content: string }>`SELECT content FROM version_records WHERE id = ${key.targetId}`.pipe(
           Effect.map(([row]) => row?.content ?? null)
         )
       default:

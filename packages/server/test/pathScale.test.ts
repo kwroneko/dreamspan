@@ -16,6 +16,7 @@ import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { pathPieces, placedInsertionsSql, positionOf, slotPlace } from "../src/db/displayPath.ts"
 import { pathSegments } from "../src/db/pathSegments.ts"
+import { lcmPathColumns } from "../src/db/lcmPath.ts"
 import { displayWindow, pathWindow, stateEventsOnPath } from "../src/db/reads.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
@@ -75,7 +76,7 @@ const build = (length: number) => {
     const db = new DatabaseSync(databaseFile(dataDir))
     try {
       db.exec("PRAGMA foreign_keys = ON; BEGIN")
-      const version = db.prepare(`INSERT INTO versions
+      const version = db.prepare(`INSERT INTO version_records
         (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (?, ?, 0, 'complete', 'model', 'Synthetic reply', 'verbatim', 'generated', 1, 1)`)
       const slotRow = db.prepare(`INSERT INTO slots
@@ -106,10 +107,10 @@ const build = (length: number) => {
       db.prepare("UPDATE chats SET active_leaf_slot_id = ? WHERE id = ?").run(`p-${length}`, chat.id)
 
       // Forks and their selections, the same in every fixture relative to the root and to the tip.
-      const alternate = db.prepare(`INSERT INTO versions
+      const alternate = db.prepare(`INSERT INTO version_records
         (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (?, ?, 1, 'complete', 'model', 'Alternate reply', 'verbatim', 'generated', 1, 1)`)
-      const copy = db.prepare(`INSERT INTO versions
+      const copy = db.prepare(`INSERT INTO version_records
         (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, fork_id, created_at,
           updated_at)
         VALUES (?, ?, 2, 'complete', 'human', 'Amended', 'verbatim', 'edited', ?, ?, 1, 1)`)
@@ -184,7 +185,7 @@ const compiled = (f: Fixture, statement: (sql: SqlClient.SqlClient) => Statement
   }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(f.dataDir), readonly: true })))
 
 /**
- * Runs a statement with every row read from `slots`, `versions`, `state_events`, `forks` and
+ * Runs a statement with every row read from `slots`, `versions`, `version_texts`, `state_events`, `forks` and
  * `fork_overrides` counted:
  * temporary views of the same names shadow the tables and call a counter per row, which
  * keeps their indexes usable. The sibling counts name their index (`INDEXED BY`), which a
@@ -201,8 +202,22 @@ const visits = (f: Fixture, statement: (sql: SqlClient.SqlClient) => Statement.S
         count++
         return 1
       })
-      for (const table of ["slots", "versions", "state_events", "forks", "fork_overrides", "fork_labels"])
+      for (const table of [
+        "slots",
+        "versions",
+        "version_texts",
+        "state_events",
+        "forks",
+        "fork_overrides",
+        "fork_labels"
+      ])
         db.exec(`CREATE TEMP VIEW ${table} AS SELECT * FROM main.${table} WHERE visit(rowid)`)
+      // A persistent view resolves its tables in main. Recreate it in TEMP so payload
+      // consumers also count their actual metadata and payload probes.
+      const recordView = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'version_records'").get() as {
+        sql: string
+      }
+      db.exec(recordView.sql.replace("CREATE VIEW", "CREATE TEMP VIEW"))
       db.exec(`CREATE TEMP VIEW fork_steps AS SELECT * FROM main.fork_steps WHERE visit(kind)`)
       const counted = text.replaceAll(/\bslots (\w+) INDEXED BY/g, "main.slots $1 INDEXED BY")
       const rows = db.prepare(counted).all(...(params as Array<string | number | null>))
@@ -300,6 +315,14 @@ describe("paths by chain segment", () => {
             const tip = `p-${f.length}` as SlotId
             return {
               tipWindow: yield* visits(f, (sql) => pathWindow(sql, f.chatId, tip, 200)),
+              lcmWindow: yield* visits(
+                f,
+                (sql) => sql`
+                ${pathSegments(sql, f.chatId, tip, 200)}, path(id, position) AS (
+                  SELECT s.id, s.depth FROM segments g CROSS JOIN slots s
+                    ON s.chain_id = g.chain_id AND s.depth BETWEEN max(g.lo, g.floor) AND g.hi
+                ) SELECT ${lcmPathColumns(sql, f.chatId)}`
+              ),
               forkTipWindow: yield* visits(f, (sql) => pathWindow(sql, f.chatId, tip, 200, DEEP_FORK)),
               deepestTipWindow: yield* visits(f, (sql) => pathWindow(sql, f.chatId, tip, 200, DEEPEST_FORK)),
               forkBranchyWindow: yield* visits(f, (sql) =>
@@ -318,6 +341,7 @@ describe("paths by chain segment", () => {
         // The probe sees the real traversal: the old walk to the root grows with the length.
         assert.isAbove(large.eventsBefore.visited, 40 * small.eventsBefore.visited)
         assert.deepStrictEqual(large.tipWindow, small.tipWindow)
+        assert.deepStrictEqual(large.lcmWindow, small.lcmWindow)
         assert.deepStrictEqual(large.branchyWindow, small.branchyWindow)
         assert.deepStrictEqual(large.forkTipWindow, small.forkTipWindow)
         assert.deepStrictEqual(large.forkBranchyWindow, small.forkBranchyWindow)
@@ -501,7 +525,7 @@ const withInsertions = (f: Fixture) => {
         `INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, created_at, base_slot_id,
           tip_slot_id) VALUES (?, ?, ?, ?, 1, ?, ?)`
       ).run(INSERT_FORK, f.chatId, f.chatId, state, `p-${f.length}`, `p-${f.length}`)
-      const version = db.prepare(`INSERT INTO versions
+      const version = db.prepare(`INSERT INTO version_records
         (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (?, ?, 0, 'complete', 'human', 'Inserted', 'verbatim', 'user_written', 1, 1)`)
       const slot = db.prepare(`INSERT INTO slots

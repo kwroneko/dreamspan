@@ -49,15 +49,16 @@ const chatOf = (path: string) =>
 const SHOWN = selectedInSql(currentForkSql("s.chat_id"), "s")
 const shownAt = (slotId: string) => query(`SELECT ${SHOWN} AS id FROM slots s WHERE s.id = ?`, slotId)[0]!.id
 const textOf = (slotId: string | null) =>
-  query(`SELECT v.content FROM slots s JOIN versions v ON v.id = ${SHOWN} WHERE s.id = ?`, slotId ?? "")[0]?.content
+  query(`SELECT v.content FROM slots s JOIN version_records v ON v.id = ${SHOWN} WHERE s.id = ?`, slotId ?? "")[0]
+    ?.content
 /** The path ending at the slot showing `text`: each slot's selected text and whether it's hidden. */
 const pathTo = (text: string) =>
   query(
-    `WITH RECURSIVE view AS (SELECT f.id FROM forks f JOIN slots t ON t.id = f.tip_slot_id JOIN versions v ON v.id = t.selected_version_id WHERE v.content = ?), p(id, parent, depth) AS (
-       SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN versions v ON v.id = ${SHOWN} WHERE v.content = ?
+    `WITH RECURSIVE view AS (SELECT f.id FROM forks f JOIN slots t ON t.id = f.tip_slot_id JOIN version_records v ON v.id = t.selected_version_id WHERE v.content = ?), p(id, parent, depth) AS (
+       SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN version_records v ON v.id = ${SHOWN} WHERE v.content = ?
        UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN p ON s.id = p.parent)
      SELECT v.content, s.context_excluded AS hidden FROM p JOIN slots s ON s.id = p.id
-       JOIN versions v ON v.id = ${selectedInSql("(SELECT id FROM view)", "s")} ORDER BY p.depth`,
+       JOIN version_records v ON v.id = ${selectedInSql("(SELECT id FROM view)", "s")} ORDER BY p.depth`,
     text,
     text
   ) as Array<{ content: string; hidden: number }>
@@ -100,7 +101,7 @@ const exec = (statement: string) =>
       })
   )
 const present = (content: string) =>
-  Number(query("SELECT count(*) AS n FROM versions WHERE content = ?", content)[0]!.n)
+  Number(query("SELECT count(*) AS n FROM version_records WHERE content = ?", content)[0]!.n)
 const answer = (response: Response) => Effect.promise(() => response.json() as Promise<{ outcome: string }>)
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })("ST import edges", (it) => {
@@ -161,7 +162,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       )
       const user = yield* second.api.Whoami()
       const childSlot = query(
-        `SELECT s.id FROM slots s JOIN versions v ON v.id = ${SHOWN} WHERE v.content = 'child'`
+        `SELECT s.id FROM slots s JOIN version_records v ON v.id = ${SHOWN} WHERE v.content = 'child'`
       )[0]!.id as never
       const state = foldState(yield* (yield* Reader).StateEventsAt({ userId: user.id, chatId, slotId: childSlot }))
       // On the branch, its own note applies, not its parent's.
@@ -312,7 +313,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual((yield* answer(response)).outcome, "added")
       // It takes the time of the message before it.
       assert.deepStrictEqual(
-        query("SELECT v.created_at FROM versions v WHERE v.content = 'hostile date'").map((r) => r.created_at),
+        query("SELECT v.created_at FROM version_records v WHERE v.content = 'hostile date'").map((r) => r.created_at),
         [1_730_000_000_000]
       )
     })
@@ -471,7 +472,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         assert.strictEqual(sent.outcome, "continue")
       }
       yield* exec(
-        "CREATE TRIGGER st_test_fail BEFORE INSERT ON versions WHEN NEW.content = 'explode' BEGIN SELECT RAISE(ABORT, 'test'); END"
+        "CREATE TRIGGER st_test_fail BEFORE INSERT ON version_texts WHEN NEW.content = 'explode' BEGIN SELECT RAISE(ABORT, 'test'); END"
       )
       const failed = yield* sendFile(importId, path, jsonl(message("explode", 1)), {
         card: "none",
@@ -590,8 +591,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const user = yield* first.api.Whoami()
       const writer = yield* Writer
       const slotOf = (text: string) =>
-        query("SELECT s.id FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = ?", text)[0]!.id as SlotId
-      const versionOf = (text: string) => query("SELECT id FROM versions WHERE content = ?", text)[0]!.id as VersionId
+        query("SELECT s.id FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE v.content = ?", text)[0]!
+          .id as SlotId
+      const versionOf = (text: string) =>
+        query("SELECT id FROM version_records WHERE content = ?", text)[0]!.id as VersionId
       yield* writer.AmendVersion({
         userId: user.id,
         versionId: versionOf("kept-u"),
@@ -803,7 +806,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       )
       const user = yield* first.api.Whoami()
       const writer = yield* Writer
-      const versionId = query("SELECT id FROM versions WHERE content = 'am-user'")[0]!.id as VersionId
+      const versionId = query("SELECT id FROM version_records WHERE content = 'am-user'")[0]!.id as VersionId
       yield* writer.AmendVersion({ userId: user.id, versionId, content: "am-user edited", expectedRowVersion: 1 })
       const second = yield* begin
       yield* sendStFile(second.importId, path, jsonl({ chat_metadata: {} }, ...lines, message("am-next", 3)), {
@@ -843,7 +846,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         yield* sendFile(first.importId, path, jsonl({ chat_metadata: {} }, ...lines), { card: "none", last: "0" })
       )
       const user = yield* first.api.Whoami()
-      const versionId = query("SELECT id FROM versions WHERE content = 'ab-user'")[0]!.id as VersionId
+      const versionId = query("SELECT id FROM version_records WHERE content = 'ab-user'")[0]!.id as VersionId
       yield* (yield* Writer).AmendVersion({
         userId: user.id,
         versionId,
@@ -851,7 +854,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         expectedRowVersion: 1
       })
       const slotId = query(
-        "SELECT s.id FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = 'ab-binned'"
+        "SELECT s.id FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE v.content = 'ab-binned'"
       )[0]!.id as SlotId
       yield* first.api.DeleteMessage({ slotId })
       const second = yield* begin
@@ -859,7 +862,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         card: "none"
       })
       const rows = query(
-        "SELECT s.deleted_at FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = 'ab-binned'"
+        "SELECT s.deleted_at FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE v.content = 'ab-binned'"
       )
       assert.lengthOf(rows, 1)
       assert.isNotNull(rows[0]!.deleted_at)
@@ -897,8 +900,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             yield* sendStFile(first.importId, branch, jsonl(header, ...lines), { card: "none" })
           }
           const user = yield* first.api.Whoami()
-          const slot = query("SELECT slot_id FROM versions WHERE content = ?", `${tag}-reply`)[0]!.slot_id as SlotId
-          const alt = query("SELECT id FROM versions WHERE content = ?", `${tag}-alt`)[0]!.id as VersionId
+          const slot = query("SELECT slot_id FROM version_records WHERE content = ?", `${tag}-reply`)[0]!
+            .slot_id as SlotId
+          const alt = query("SELECT id FROM version_records WHERE content = ?", `${tag}-alt`)[0]!.id as VersionId
           const shown = shownAt(slot)
           // The fork the choice is made in: the chat may open on another once the branch finishes.
           const { forkId: chosenIn } = yield* (yield* Writer).SelectVersion({
@@ -907,7 +911,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             versionId: alt,
             expectedVersionId: shown as VersionId
           })
-          const binned = query("SELECT slot_id FROM versions WHERE content = ?", `${tag}-bin`)[0]!.slot_id as SlotId
+          const binned = query("SELECT slot_id FROM version_records WHERE content = ?", `${tag}-bin`)[0]!
+            .slot_id as SlotId
           yield* first.api.DeleteMessage({ slotId: binned })
           const next = yield* begin
           yield* sendStFile(next.importId, branch, jsonl(header, ...lines, message(`${tag}-tail`, 4)), { card: "none" })
@@ -917,7 +922,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           )
           assert.strictEqual(present(`${tag}-reply`), 1)
           const rows = query(
-            "SELECT s.deleted_at FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = ?",
+            "SELECT s.deleted_at FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE v.content = ?",
             `${tag}-bin`
           )
           assert.lengthOf(rows, 1)

@@ -96,7 +96,7 @@ layer(serverLayer(config), { excludeTestServices: true })("batched ST message in
               { sql: "SELECT * FROM forks WHERE chat_id = ? ORDER BY id", params: [chat] },
               { sql: "SELECT * FROM slots WHERE chat_id = ? ORDER BY depth", params: [chat] },
               {
-                sql: "SELECT v.* FROM slots s JOIN versions v ON v.slot_id = s.id WHERE s.chat_id = ? ORDER BY s.depth, v.ordinal",
+                sql: "SELECT v.* FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE s.chat_id = ? ORDER BY s.depth, v.ordinal",
                 params: [chat]
               },
               {

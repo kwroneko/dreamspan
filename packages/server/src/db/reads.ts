@@ -936,7 +936,7 @@ export const makeReadHandlers = Effect.gen(function* () {
           ? (yield* liveFork(yield* ownedChat(userId, slot.chat_id as ChatId), forkId)).id
           : yield* forkAt(sql, slot.chat_id, slotId)
         const columns = sql`x.id, ${sql.literal(branchLabel("x"))} AS branch_name, CASE WHEN NOT ${slotDeletedIn(sql, shown, "x")}
-          THEN substr((SELECT v.content FROM versions v WHERE v.id = ${shownIn(sql, shown, "x")}), 1, 160)
+          THEN substr((SELECT v.content FROM version_records v WHERE v.id = ${shownIn(sql, shown, "x")}), 1, 160)
           ELSE '' END AS preview`
         // An inserted message has no alternates: it's the only one at its place.
         const rows =
@@ -991,7 +991,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     GetVersion: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<VersionRow>`
-          SELECT v.*, ${sql.literal(versionExtras("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+          SELECT v.*, ${sql.literal(versionExtras("v"))} FROM version_records v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
             AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })

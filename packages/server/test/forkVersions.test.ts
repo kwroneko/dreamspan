@@ -181,7 +181,7 @@ describe("amending a shared message", () => {
       // The original is untouched: its text, its history; the copy's history is the original's.
       assert.deepStrictEqual(yield* history(hello), [])
       assert.deepStrictEqual(yield* history(copy.id), ["hello"])
-      const [owned] = yield* rows("SELECT fork_id, content FROM versions WHERE id = ?", hello)
+      const [owned] = yield* rows("SELECT fork_id, content FROM version_records WHERE id = ?", hello)
       assert.deepStrictEqual(owned, { fork_id: null, content: "hello" })
       // In the picker the copy is where its original was, and the count is the message's own.
       assert.deepStrictEqual(yield* picker(m0.slotId, main), [
@@ -369,7 +369,7 @@ describe("amending a shared message", () => {
         const again = yield* writer.DeleteVersion({ userId, versionId: copy.id, forkId: main })
         yield* writer.PurgeBinItem({ userId, itemId: again.id })
         const [purged] = yield* rows(
-          "SELECT content, purged_at IS NOT NULL AS purged FROM versions WHERE id = ?",
+          "SELECT content, purged_at IS NOT NULL AS purged FROM version_records WHERE id = ?",
           copy.id
         )
         assert.deepStrictEqual(purged, { content: "", purged: 1 })
@@ -506,7 +506,7 @@ describe("the database keeps versions and their flags the message's", () => {
           () =>
             db
               .prepare(
-                `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id,
+                `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id,
                   fork_id, created_at, updated_at)
                 VALUES ('stray', ?, 99, 'complete', 'human', 'x', 'verbatim', 'edited', ?, ?, 0, 0)`
               )

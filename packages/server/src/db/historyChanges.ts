@@ -85,12 +85,12 @@ export const recordHistoryReduction = Effect.fnUntraced(function* (
   const [previous] =
     versionId !== null && forkId === null
       ? yield* sql<{ content: Uint8Array }>`
-          SELECT CAST(v.content AS BLOB) AS content FROM slots s JOIN versions v ON v.id = ${versionId}
+          SELECT CAST(v.content AS BLOB) AS content FROM slots s JOIN version_records v ON v.id = ${versionId}
           WHERE s.id = ${slotId} AND (s.selected_version_id = v.id OR EXISTS (SELECT 1 FROM fork_overrides o
             WHERE o.target_id = s.id AND o.kind = 'select' AND o.value_id = v.id) OR EXISTS (SELECT 1
             FROM fork_overrides o WHERE o.target_id = v.source_version_id AND o.kind = 'replace' AND o.value_id = v.id))`
       : yield* sql<{ content: Uint8Array }>`
-          SELECT CAST(v.content AS BLOB) AS content FROM slots s JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
+          SELECT CAST(v.content AS BLOB) AS content FROM slots s JOIN version_records v ON v.id = ${shownIn(sql, fork, "s")}
           WHERE s.id = ${slotId} AND (${versionId} IS NULL OR v.id = ${versionId})`
   if (previous && content.length < Buffer.from(previous.content).toString("utf8").length)
     yield* recordReduction(sql, slotId, forkId)

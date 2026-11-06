@@ -41,7 +41,7 @@ const htmlAt = (depth: number) => depth % 997 === 0
 
 const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => {
   const insertVersion = db.prepare(
-    `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, error_json, created_at, updated_at)
+    `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, error_json, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?, ?)`
   )
   const insertSlot = db.prepare(

@@ -73,7 +73,7 @@ const scenario = (dataDir: string, remove: (api: Api, child: PathWindow) => Effe
   })
 
 // Purging keeps slots and versions as placeholders with their bin item ids.
-const modelText = `SELECT v.slot_id, v.content, v.purged_at FROM versions v JOIN slots s ON s.id = v.slot_id
+const modelText = `SELECT v.slot_id, v.content, v.purged_at FROM version_records v JOIN slots s ON s.id = v.slot_id
   WHERE (s.bin_item_id = ?1 OR v.bin_item_id = ?1) AND v.writer = 'model'`
 
 /**

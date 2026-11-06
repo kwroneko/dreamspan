@@ -807,7 +807,9 @@ class World {
     }
     for (const row of this.all<{ t: string | null }>(`SELECT content AS t FROM recovered_texts`))
       texts.push(row.t ?? "")
-    for (const row of this.all<{ c: string; d: string | null }>(`SELECT content AS c, direction AS d FROM versions`))
+    for (const row of this.all<{ c: string; d: string | null }>(
+      `SELECT content AS c, direction AS d FROM version_records`
+    ))
       texts.push(row.c, row.d ?? "")
     for (const row of this.all<{ c: string; d: string | null }>(
       `SELECT content AS c, direction AS d FROM queued_messages`
