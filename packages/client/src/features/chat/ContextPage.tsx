@@ -679,6 +679,14 @@ function Inspector({ run }: { run: RunContext }) {
           <dd>
             {run.preset.label ?? BUILTIN_PRESET_LABEL} ({run.preset.scope})
           </dd>
+          {run.speakerPick && (
+            <>
+              <dt className="text-muted">Speaker</dt>
+              <dd>
+                The decision model picked {run.speakerPick.name} ({Math.round(run.speakerPick.confidence * 100)}%)
+              </dd>
+            </>
+          )}
           <dt className="text-muted">Generation</dt>
           <dd>
             {run.type}, {run.mode === "st" ? "the earlier fixed layout" : "the preset's layout"}; {run.status}

@@ -33,7 +33,11 @@ const waitForExit = (child: ChildProcess) =>
 const startOnce = async (env: Record<string, string>): Promise<TestServer | null> => {
   const dataDir = mkdtempSync(join(tmpdir(), "rp-browser-"))
   const serverPort = nextPort()
-  const entry = env.FAKE_GENERATOR_TPS === undefined ? "packages/server/src/main.ts" : "packages/server/src/dev/main.ts"
+  // The development entry point reads the test-only settings (the fake generator, decision deadlines).
+  const entry =
+    env.FAKE_GENERATOR_TPS === undefined && env.DECISION_TIMEOUT_MS === undefined
+      ? "packages/server/src/main.ts"
+      : "packages/server/src/dev/main.ts"
   let listening = false
   let launchId = 0
   const launch = () => {
