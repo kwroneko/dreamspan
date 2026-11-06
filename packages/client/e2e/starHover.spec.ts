@@ -62,6 +62,12 @@ async function hitTest(star: Locator) {
 
 async function checkStars(page: Page, scope: Locator, surface: "home" | "sidebar" | "library" | "cast") {
   const portrait = surface !== "library"
+  // Fork badges (and the cast's membership marks) arrive after the tiles and push later
+  // rows down. Hovering before they land leaves the pointer over the gap above the tile,
+  // where its hidden star no longer takes clicks.
+  for (const [i, name] of names.entries())
+    if (i % 4 >= 2) await expect(scope.getByRole("button", { name: `Forks of ${name}`, exact: true })).toHaveCount(1)
+  if (surface === "cast") await expect(scope.getByText("In this chat", { exact: true })).toHaveCount(4)
   for (const [i, name] of names.entries()) {
     const namedStar = scope.getByRole("button", {
       name: new RegExp(`^(Add|Remove) ${name} (to|from) favourites$`),
