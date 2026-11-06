@@ -1,3 +1,5 @@
+import { forkLabelSchema } from "./forkLabels.ts"
+
 // The schema, created whole. Nobody has run an earlier version of this software, so there
 // is no chain of migrations to replay: while that holds, a schema change edits this file and
 // the deploy starts from an empty data directory (ARCHITECTURE.md, Migrations).
@@ -76,13 +78,9 @@ const shellSummaries: ReadonlyArray<string> = [
     fork_id, fork_seq, superseded_by_changeset ON state_events BEGIN ${bumpChat("NEW.chat_id")} END`,
   `CREATE TRIGGER shell_state_events_delete AFTER DELETE ON state_events BEGIN ${bumpChat("OLD.chat_id")} END`,
   `CREATE TRIGGER shell_forks_insert AFTER INSERT ON forks BEGIN ${bumpChat("NEW.chat_id")} END`,
-  `CREATE TRIGGER shell_forks_update AFTER UPDATE OF chat_id, parent_fork_id, tip_slot_id, deleted_at, purged_at,
-    lineage_json ON forks BEGIN ${bumpChat("NEW.chat_id")} END`,
+  `CREATE TRIGGER shell_forks_update AFTER UPDATE OF chat_id, parent_fork_id, tip_slot_id, deleted_at, purged_at
+    ON forks BEGIN ${bumpChat("NEW.chat_id")} END`,
   `CREATE TRIGGER shell_forks_delete AFTER DELETE ON forks BEGIN ${bumpChat("OLD.chat_id")} END`,
-  `CREATE TRIGGER shell_fork_event_snapshots_insert AFTER INSERT ON fork_event_snapshots
-    BEGIN ${bumpChat("(SELECT chat_id FROM forks WHERE id = NEW.fork_id)")} END`,
-  `CREATE TRIGGER shell_fork_event_snapshots_delete AFTER DELETE ON fork_event_snapshots
-    BEGIN ${bumpChat("(SELECT chat_id FROM forks WHERE id = OLD.fork_id)")} END`,
   `CREATE TRIGGER shell_entities_purge AFTER UPDATE OF purged_at ON entities WHEN NEW.purged_at IS NOT OLD.purged_at
     BEGIN ${bumpUser("NEW.owner_user_id")} END`,
   `CREATE TRIGGER shell_entities_delete AFTER DELETE ON entities BEGIN ${bumpUser("OLD.owner_user_id")} END`,
@@ -474,6 +472,8 @@ export const baseline: ReadonlyArray<string> = [
     created_at INTEGER NOT NULL,
     superseded_by_changeset TEXT REFERENCES changesets(id), slot_chain_id TEXT, slot_depth INTEGER,
     fork_id TEXT REFERENCES forks(id), fork_seq INTEGER,
+    -- Its fork's point when written (db/forkLabels.ts): visible where label <= point < the fork's end.
+    fork_label BLOB,
     CHECK ((fork_id IS NULL AND fork_seq IS NULL) OR (fork_id IS NOT NULL AND fork_seq IS NOT NULL AND fork_seq > 0)),
     CHECK (key <> 'card.swap' OR (slot_id IS NULL AND version_id IS NULL AND scope IS NULL AND fork_id IS NOT NULL)),
     CHECK (version_id IS NULL OR slot_id IS NOT NULL)
@@ -1169,8 +1169,10 @@ export const baseline: ReadonlyArray<string> = [
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     depth INTEGER NOT NULL,
     revision INTEGER NOT NULL,
-    -- The chat's state_seq of this reduction, retained for descendant lineage bounds.
+    -- The chat's state_seq of this reduction.
     seq INTEGER NOT NULL DEFAULT 0,
+    -- Its fork's point when written (db/forkLabels.ts); null for every fork.
+    label BLOB,
     PRIMARY KEY (slot_id, fork_id, seq)
   ) STRICT`,
   `CREATE INDEX history_changes_depth ON history_changes(chat_id, depth)`,
@@ -1596,7 +1598,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE forks (
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    -- The fork it was made from (lineage); null for a chat's first.
+    -- The fork it was made from; null for a chat's first. Its place in the fork tree is in fork_labels.
     parent_fork_id TEXT REFERENCES forks(id) DEFERRABLE INITIALLY DEFERRED,
     -- The chat's state_seq when it was made.
     branched_at INTEGER NOT NULL DEFAULT 0,
@@ -1613,7 +1615,7 @@ export const baseline: ReadonlyArray<string> = [
     bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL,
     purged_at INTEGER,
     row_version INTEGER NOT NULL DEFAULT 1
-  , lineage_json TEXT CHECK (lineage_json IS NULL OR json_valid(lineage_json))) STRICT`,
+  ) STRICT`,
   `CREATE INDEX forks_chat ON forks(chat_id)`,
   `CREATE INDEX forks_parent ON forks(parent_fork_id) WHERE parent_fork_id IS NOT NULL`,
   `CREATE INDEX forks_base ON forks(base_slot_id) WHERE base_slot_id IS NOT NULL`,
@@ -1723,16 +1725,6 @@ export const baseline: ReadonlyArray<string> = [
     ON fork_overrides BEGIN SELECT RAISE(ABORT, 'an override keeps its fork, kind and target'); END`,
   `CREATE TRIGGER fork_overrides_seq_forward BEFORE UPDATE OF seq ON fork_overrides WHEN NEW.seq < OLD.seq
     BEGIN SELECT RAISE(ABORT, 'an override''s seq only moves forward'); END`,
-  `CREATE TRIGGER forks_lineage_given BEFORE INSERT ON forks
-    WHEN (NEW.lineage_json IS NULL AND NEW.parent_fork_id IS NOT NULL)
-      OR (NEW.lineage_json IS NOT NULL AND NEW.lineage_json ->> '$[0][0]' IS NOT NEW.id)
-    BEGIN SELECT RAISE(ABORT, 'a fork made from another is inserted with its lineage, itself first'); END`,
-  `CREATE TRIGGER forks_lineage_root AFTER INSERT ON forks WHEN NEW.lineage_json IS NULL BEGIN
-    UPDATE forks SET lineage_json = json_array(json_array(NEW.id, NULL)) WHERE id = NEW.id;
-  END`,
-  `CREATE TRIGGER forks_lineage_fixed BEFORE UPDATE OF lineage_json ON forks
-    WHEN OLD.lineage_json IS NOT NULL AND NEW.lineage_json IS NOT OLD.lineage_json
-    BEGIN SELECT RAISE(ABORT, 'a fork keeps its lineage'); END`,
   `CREATE TRIGGER slots_branch_name_frozen BEFORE UPDATE OF branch_name, branch_name_user ON slots
     WHEN NEW.branch_name IS NOT OLD.branch_name OR NEW.branch_name_user IS NOT OLD.branch_name_user
     BEGIN SELECT RAISE(ABORT, 'branch names belong to forks'); END`,
@@ -1839,21 +1831,9 @@ export const baseline: ReadonlyArray<string> = [
       WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth))
     BEGIN ${raise("a deleted swipe is one of its message's own versions")}; END`,
   `CREATE INDEX state_events_fork ON state_events(fork_id, fork_seq) WHERE fork_id IS NOT NULL`,
-  `CREATE TABLE fork_event_snapshots (
-    fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE,
-    event_id TEXT NOT NULL REFERENCES state_events(id) ON DELETE CASCADE,
-    PRIMARY KEY (fork_id, event_id)
-  ) STRICT, WITHOUT ROWID`,
-  `CREATE TRIGGER fork_event_snapshots_immutable BEFORE UPDATE ON fork_event_snapshots
-    BEGIN SELECT RAISE(ABORT, 'a fork event snapshot is immutable'); END`,
-  `CREATE INDEX fork_event_snapshots_event ON fork_event_snapshots(event_id)`,
   `CREATE TRIGGER state_events_fork_same_chat BEFORE INSERT ON state_events
     WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
     BEGIN SELECT RAISE(ABORT, 'a state event belongs to a fork of its chat'); END`,
-  `CREATE TRIGGER fork_event_snapshots_same_chat BEFORE INSERT ON fork_event_snapshots
-    WHEN (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT
-      (SELECT chat_id FROM state_events WHERE id = NEW.event_id)
-    BEGIN SELECT RAISE(ABORT, 'a snapshot event belongs to its fork chat'); END`,
   `CREATE TRIGGER fork_overrides_event_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'suppress_event'
     AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM state_events e
       WHERE e.id = NEW.target_id AND e.chat_id = NEW.chat_id AND e.slot_id IS NEW.slot_id))
@@ -1943,5 +1923,6 @@ export const baseline: ReadonlyArray<string> = [
   ) STRICT, WITHOUT ROWID`,
   `CREATE TRIGGER chat_merge_messages_frozen BEFORE UPDATE ON chat_merge_messages
     BEGIN SELECT RAISE(ABORT, 'a merged message never changes'); END`,
+  ...forkLabelSchema,
   ...shellSummaries
 ]

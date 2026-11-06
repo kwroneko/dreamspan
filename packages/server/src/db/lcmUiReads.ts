@@ -11,7 +11,7 @@ import { lineageValidator, selectSummaryLayer } from "./lcmLayer.ts"
 import { insertedOnPath, pathView, type LcmView } from "./lcmDisplay.ts"
 import { positionOf, type PathPiece } from "./displayPath.ts"
 import { toLlmRequest, type LlmRequestRow } from "./providers.ts"
-import { readSummary } from "./lcmReads.ts"
+import { readingOnce, readSummary } from "./lcmReads.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
 
@@ -338,7 +338,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           cursorSlotId: layer.cursor as LcmState["leafSlotId"] | null,
           cursorPosition: layer.cursorDepth
         })
-      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("GetLcmState")),
+      }).pipe(readingOnce, inFork(sql, chatId, forkId, leafSlotId), query("GetLcmState")),
 
     GetLcmCoverage: ({
       userId,

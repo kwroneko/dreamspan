@@ -9,13 +9,30 @@ import { contextExcludedIn } from "./lcmVisibility.ts"
 import { Summary, SummaryAttempt, SummaryDetails } from "@rp/shared/lcm.ts"
 import { shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Effect, Schema } from "effect"
+import { Context, Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
 import { positionOf } from "./displayPath.ts"
 import { lcmView, type LcmView } from "./lcmDisplay.ts"
 import { imagesMatch } from "./lcmImages.ts"
+
+/**
+ * What one storage operation has read of summaries so far, when it keeps it (`readingOnce`):
+ * each summary as a fork without insertions shows it, by fork and id, and whether a summary's
+ * stored lineage holds (`lineageValidator`, fork-independent there). A reply's plan reads the
+ * layer, assembles and maintains, each reading the same summaries; this reads each once.
+ */
+export const SummaryReads = Context.Reference<{
+  readonly summaries: Map<string, Summary>
+  readonly valid: Map<string, boolean>
+} | null>("rp/SummaryReads", { defaultValue: () => null })
+
+/** Runs `effect` keeping what it reads of summaries for the rest of it (`SummaryReads`). */
+export const readingOnce = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.flatMap(SummaryReads, (kept) =>
+    kept !== null ? effect : Effect.provideService(effect, SummaryReads, { summaries: new Map(), valid: new Map() })
+  )
 
 export const readSummary = (
   sql: SqlClient.SqlClient,
@@ -36,6 +53,14 @@ export const readSummary = (
       if (shown === undefined) {
         shown = yield* lcmView(sql, owner?.chat_id ?? "", fork)
         views = [...views, shown]
+      }
+      // A summary read as it is now, in a fork that shows no inserted slots, is the same all operation long.
+      const kept = summaryId === id && revision !== undefined ? null : yield* SummaryReads
+      const key = `${fork}\u0000${summaryId}`
+      const hit = shown.pieces === null ? kept?.summaries.get(key) : undefined
+      if (hit !== undefined) {
+        memo.set(summaryId, hit)
+        return hit
       }
       const [row] = yield* sql<{
         id: string
@@ -167,6 +192,7 @@ export const readSummary = (
         children: children.map((p) => ({ summaryId: p.parent_id, revisionId: p.parent_revision_id }))
       })
       memo.set(summaryId, summary)
+      if (shown.pieces === null) kept?.summaries.set(key, summary)
       return summary
     })
   return read(id)

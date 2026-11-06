@@ -4,7 +4,7 @@
 // display path (displayPath.ts), which adds the inserted slots it places (`onForkPath`).
 import type { SqlClient } from "effect/sql"
 import { Effect } from "effect"
-import { shownIn, shownInSql, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
+import { effectiveOverrideSql, shownIn, shownInSql, slotDeletedIn, versionDeletedIn, withFork } from "./forkState.ts"
 import { onDisplayPath, pathPieces, placedInsertions, slotPlace } from "./displayPath.ts"
 import { pathSegments } from "./pathSegments.ts"
 import type { ForkRow } from "./rows.ts"
@@ -141,11 +141,16 @@ const reaches = (t: string, x: string) => `(${x}.inserted = 1 OR ${t}.depth >= $
 
 /**
  * The live fork whose path holds `slotId` that was current most recently, preferring
- * `prefer` when its path holds it too; null when no live fork's does. Most recent first, so
- * the usual case checks one or two forks.
+ * `prefer` when its path holds it too; null when no live fork's does. `prefer` is checked
+ * alone first, so the usual case reads one fork, not the chat's; then most recent first.
  */
 export const forkThrough = (sql: SqlClient.SqlClient, chatId: string, slotId: string, prefer: string | null = null) =>
   Effect.gen(function* () {
+    if (prefer !== null) {
+      const [own] = yield* sql<ForkRow>`
+        SELECT f.* FROM forks f WHERE f.id = ${prefer} AND f.chat_id = ${chatId} AND f.deleted_at IS NULL`
+      if (own !== undefined && (yield* onForkPath(sql, chatId, own, slotId))) return own
+    }
     const candidates = yield* sql<ForkRow>`
       SELECT f.* FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
       WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL AND ${sql.literal(reaches("t", "x"))}
@@ -169,14 +174,12 @@ export const shownElsewhere = (
   versionId: string
 ) =>
   Effect.gen(function* () {
-    // The fork's replacement of the original, as `replacedInSql` reads it, with it bound.
+    // The fork's replacement of the original, as `replacedInSql` reads it, with the original bound.
     const candidates = yield* sql<ForkRow>`
       SELECT f.* FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
       WHERE f.chat_id = ${chatId} AND f.purged_at IS NULL AND f.id <> ${forkId} AND ${sql.literal(reaches("t", "x"))}
-        AND coalesce((SELECT o.value_id FROM json_each(f.lineage_json) l CROSS JOIN fork_overrides o
-          WHERE o.fork_id = l.value ->> 0 AND o.kind = 'replace' AND o.target_id = ${original}
-            AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807)
-          ORDER BY l.key, o.seq DESC LIMIT 1), ${original}) = ${versionId}
+        AND coalesce((SELECT o.value_id FROM fork_overrides o
+          WHERE o.id = ${withFork(sql, original, (target) => effectiveOverrideSql("replace", "f.id", target))}), ${original}) = ${versionId}
       ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
     for (const fork of candidates) if (yield* onForkPath(sql, chatId, fork, slotId)) return true
     return false
