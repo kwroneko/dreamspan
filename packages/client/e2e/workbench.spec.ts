@@ -507,27 +507,18 @@ test("links open in their own frame, never another frame's tab of the item", asy
   await expect(right).toHaveAttribute("data-focused", "")
 })
 
-// A character tile's Open beside stays while it's pointed at (owner, 2026-11-06: it vanished
-// after a few seconds), and the tile's right-click menu matches a chat row's.
-test("a character tile keeps Open beside while hovered, and has a chat row's menu", async ({ page }) => {
+// A character tile has no Open beside button (owner, 2026-11-06: "Remove the 'open in a frame on
+// the right' button... it's redundant with the context menu"); its right-click menu matches a
+// chat row's, and Open beside is there.
+test("a character tile opens beside from a chat row's menu, with no button for it", async ({ page }) => {
   test.setTimeout(120_000)
   await fresh(page, 1440)
   await page.goto(`${server().url}/`)
   const main = page.getByRole("main")
   const tile = main.getByRole("link", { name: "Open Wren", exact: true })
   await expect(tile).toBeVisible()
-  const beside = main.getByRole("button", { name: "Open Wren beside", exact: true })
   await tile.hover()
-  await beside.hover()
-  await expect(beside).toHaveCSS("opacity", "1")
-  // Held past its tooltip opening: still shown, on its own backing over the portrait (the
-  // tooltip's open state used to swap the backing for the faint hover tint).
-  await page.waitForTimeout(6000)
-  await expect(page.getByText("Opens it in the frame on the right", { exact: false })).toBeVisible()
-  await expect(beside).toHaveCSS("opacity", "1")
-  await expect(beside).toBeVisible()
-  expect(await beside.evaluate((el) => getComputedStyle(el).backgroundColor)).toMatch(/\/ 0\.85\)$/)
-  await shot(page, "tile-beside-held-1440-light")
+  await expect(main.getByRole("button", { name: /beside/ })).toHaveCount(0)
 
   await tile.click({ button: "right" })
   const menu = page.getByRole("menu", { name: "Actions for Wren" })

@@ -70,7 +70,8 @@ async function checkStars(page: Page, scope: Locator, surface: "home" | "sidebar
     const tile = namedStar.locator(
       "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' tile-toggle-surface ')][1]"
     )
-    const star = tile.locator(".tile-toggle")
+    // The star, not the archive toggle in the tile's other corner.
+    const star = tile.locator(".tile-toggle[aria-label$='favourites']")
     await tile.scrollIntoViewIfNeeded()
     await star.scrollIntoViewIfNeeded()
     await expect(tile.getByRole("button", { name: `Forks of ${name}`, exact: true })).toHaveCount(i % 4 >= 2 ? 1 : 0)
