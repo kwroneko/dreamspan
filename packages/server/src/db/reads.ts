@@ -1,3 +1,4 @@
+import { archiveCandidates } from "./cardArchive.ts"
 import { LibraryRef } from "@rp/shared/library.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
 import { previousRevisionSql, revisionNumber, revisionOnLine, revisionUse } from "./revisionNumbers.ts"
@@ -586,6 +587,8 @@ export const makeReadHandlers = Effect.gen(function* () {
         query("GetDraftState")
       ),
 
+    ListArchiveCandidates: ({ userId, criteria }) =>
+      archiveCandidates(sql, userId, criteria).pipe(query("ListArchiveCandidates")),
     ListLibrary: ({ userId, kind, tag, archived, withFilterData }) =>
       lib
         .refsWhere(

@@ -1,3 +1,4 @@
+import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { WorkbenchDevice, WorkbenchLayoutJson } from "@rp/shared/workbenchApi.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
@@ -1065,6 +1066,16 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Archives or restores an entity. */
+  Rpc.make("ArchiveUnusedCards", {
+    payload: { userId: UserId, criteria: ArchiveCriteria, entityIds: Schema.Array(EntityId) },
+    success: CardArchiveReceipt,
+    error: StorageError
+  }),
+  Rpc.make("UndoCardArchive", {
+    payload: { userId: UserId, ...CardArchiveReceipt.fields },
+    success: Schema.Int,
+    error: StorageError
+  }),
   Rpc.make("SetEntityArchived", {
     payload: { userId: UserId, entityId: EntityId, archived: Schema.Boolean },
     success: Schema.Void,
@@ -2635,6 +2646,11 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, recompute: Schema.optionalKey(Schema.Boolean) },
     success: ShellLibraryRead,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ListArchiveCandidates", {
+    payload: { userId: UserId, criteria: ArchiveCriteria },
+    success: Schema.Array(ArchiveCandidate),
+    error: StorageError
   }),
   Rpc.make("ShellCards", { payload: { userId: UserId }, success: ShellCardsRead, error: StorageError }),
   Rpc.make("ShellForks", {

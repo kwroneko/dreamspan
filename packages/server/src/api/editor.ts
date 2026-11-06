@@ -449,3 +449,23 @@ export const makeGalleryHandlers = Effect.gen(function* () {
       )
   } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").GalleryApi.of>[0]
 })
+
+export const makeCardArchiveHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const writer = yield* Writer
+  const userId = Effect.map(CurrentUser, (user) => user.id)
+  return {
+    ListArchiveCandidates: ({ criteria }) =>
+      Effect.flatMap(userId, (id) => reader.ListArchiveCandidates({ userId: id, criteria })).pipe(
+        settle("ListArchiveCandidates")
+      ),
+    ArchiveUnusedCards: ({ criteria, entityIds }) =>
+      Effect.flatMap(userId, (id) => writer.ArchiveUnusedCards({ userId: id, criteria, entityIds })).pipe(
+        settle("ArchiveUnusedCards")
+      ),
+    UndoCardArchive: ({ entityIds, archivedAt }) =>
+      Effect.flatMap(userId, (id) => writer.UndoCardArchive({ userId: id, entityIds, archivedAt })).pipe(
+        settle("UndoCardArchive")
+      )
+  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").CardArchiveApi.of>[0]
+})

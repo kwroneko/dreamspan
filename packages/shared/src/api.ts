@@ -21,7 +21,7 @@ import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
-import { EditorApi, ForkMergeApi, GalleryApi } from "./editorApi.ts"
+import { EditorApi, ForkMergeApi, GalleryApi, CardArchiveApi } from "./editorApi.ts"
 import { WorkbenchApi } from "./workbenchApi.ts"
 import {
   AccountRejected,
@@ -402,6 +402,8 @@ export class AppCoreApi extends RpcGroup.make(
 /** The fork merge RPCs (editorApi.ts), authenticated like the rest. */
 export const AuthenticatedForkMergeApi = ForkMergeApi.middleware(Authentication)
 
+export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authentication)
+
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
@@ -425,6 +427,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedChatEventsApi)
   .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedDecisionApi)
+  .merge(AuthenticatedCardArchiveApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedWorkbenchApi)
   .merge(AuthenticatedSummaryRequestApi)

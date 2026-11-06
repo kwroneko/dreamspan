@@ -1,3 +1,4 @@
+import { ArchiveControl } from "../characters/CardArchive.tsx"
 // The library's own item actions. Each is a separate registration, so a plugin can replace
 // or disable one (`library.chat`, `.edit`, `.archive`, `.persona`, `.update`, `.export`).
 import { Link } from "@tanstack/react-router"
@@ -76,6 +77,7 @@ function UpdateItem({ entry, description }: LibraryItemProps) {
 function ArchiveAction({ entry }: LibraryItemProps) {
   const action = useAction()
   const archived = entry.archivedAt != null
+  if (entry.kind === "card") return <ArchiveControl refId={entry.id} name={entry.label} archived={archived} />
   return (
     <IconButton
       label={`${archived ? "Unarchive" : "Archive"} ${entry.label}`}
@@ -120,7 +122,7 @@ export const registerItemActions = () => [
   libraryItemActions.register({
     id: "library.archive",
     order: 25,
-    available: ({ entry }) => entry.kind === "preset",
+    available: ({ entry }) => entry.kind === "preset" || entry.kind === "card",
     direct: ArchiveAction
   }),
   libraryItemActions.register({

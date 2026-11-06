@@ -1,3 +1,4 @@
+import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
 import { useSplitChats } from "../chat/splitChats.ts"
 import { requestSplitReveal, useSplitReveal } from "../chat/splitReveal.ts"
 import type { ChatBrowse } from "@rp/shared/chatBrowse.ts"
@@ -933,6 +934,7 @@ function Browser({ data }: { data: ShellLibrary }) {
         />
       )}
       {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups includePersonas />}
+      {grid && browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
       <div
         ref={listRef}
@@ -949,12 +951,18 @@ function Browser({ data }: { data: ShellLibrary }) {
               className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
             />
           ) : (
-            <CharacterGrid
-              cards={browseCards(browsable(data), browse, needle)}
-              sort={browse.sort}
-              markPersonas={mixesPersonas(browse)}
-              className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
-            />
+            <>
+              <CharacterGrid
+                cards={browseCards(browsable(data), browse, needle)}
+                sort={browse.sort}
+                markPersonas={mixesPersonas(browse)}
+                className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
+              />
+              <SlotOutlet
+                slot={cardSearchExtras}
+                props={{ data, browse, search: needle, className: "grid grid-cols-2 gap-2" }}
+              />
+            </>
           )
         ) : (
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.

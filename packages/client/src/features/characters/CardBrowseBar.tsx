@@ -17,6 +17,7 @@ function GroupsFilter({
   return (
     <CardFilterControl
       compact
+      archived
       value={browse.filter}
       onChange={(filter) => onChange({ filter })}
       cards={browsable(data)}

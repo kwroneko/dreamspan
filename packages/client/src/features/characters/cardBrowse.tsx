@@ -19,7 +19,7 @@ import { CARD_FILTERS } from "./homeSearch.ts"
 import type { ShellLibrary } from "./shellData.tsx"
 
 type ShellCard = ShellLibrary["cards"][number]
-type CardFilter = "all" | "used" | "unused" | "favourites" | "personas" | "groups"
+type CardFilter = "all" | "used" | "unused" | "favourites" | "personas" | "groups" | "archived"
 export interface CardBrowse {
   readonly filter: CardFilter
   readonly sort: CardSort
@@ -80,21 +80,27 @@ const matchesName = (c: ShellCard, needle: string) =>
   [c.card.label, c.card.name, c.card.subtitle].some((n) => n.toLowerCase().includes(needle))
 
 const inFilter = (c: ShellCard, filter: CardFilter) =>
-  filter === "personas"
-    ? c.persona
-    : filter === "used"
-      ? c.card.chats > 0
-      : filter === "unused"
-        ? c.card.chats === 0
-        : filter === "favourites"
-          ? c.favourite
-          : true
+  filter === "archived"
+    ? c.archivedAt != null
+    : c.archivedAt != null
+      ? false
+      : filter === "personas"
+        ? c.persona
+        : filter === "used"
+          ? c.card.chats > 0
+          : filter === "unused"
+            ? c.card.chats === 0
+            : filter === "favourites"
+              ? c.favourite
+              : true
 
 /** Whether a filter's list mixes the persona folder's cards in with the characters (and so marks them). */
 export const mixesPersonas = (browse: CardBrowse) => browse.withPersonas && browse.filter !== "personas"
 /** The cards a filter considers: personas only under Personas or with Include personas. */
 const considered = (cards: ReadonlyArray<ShellCard>, browse: Pick<CardBrowse, "filter" | "withPersonas">) =>
-  browse.filter === "personas" || browse.withPersonas ? cards : cards.filter((c) => !c.persona)
+  browse.filter === "archived" || browse.filter === "personas" || browse.withPersonas
+    ? cards
+    : cards.filter((c) => !c.persona)
 
 /** The characters a place shows: its filter and the search, in its order. */
 export const browseCards = (cards: ReadonlyArray<ShellCard>, browse: CardBrowse, search: string) => {
@@ -108,23 +114,35 @@ export const browseCards = (cards: ReadonlyArray<ShellCard>, browse: CardBrowse,
 
 /** Each filter's count over all the characters, whatever the search: what choosing it would show without one. */
 const filterCounts = (all: ReadonlyArray<ShellCard>, withPersonas: boolean) => {
-  const cards = withPersonas ? all : all.filter((c) => !c.persona)
+  const live = all.filter((c) => c.archivedAt == null)
+  const cards = withPersonas ? live : live.filter((c) => !c.persona)
   return {
     all: cards.length,
     used: cards.filter((c) => c.card.chats > 0).length,
     unused: cards.filter((c) => c.card.chats === 0).length,
     favourites: cards.filter((c) => c.favourite).length,
-    personas: all.filter((c) => c.persona).length
+    personas: live.filter((c) => c.persona).length,
+    archived: all.filter((c) => c.archivedAt != null).length
   }
 }
 
+const FILTER_HINTS: Record<CardFilter, string> = {
+  all: "Shows cards outside the archive",
+  used: "Shows cards with chats",
+  unused: "Shows cards without chats",
+  favourites: "Shows starred cards outside the archive",
+  personas: "Shows the cards you play as",
+  groups: "Shows chats with several characters",
+  archived: "Shows archived cards, including personas"
+}
 const FILTER_LABELS: Record<CardFilter, string> = {
   all: "All",
   used: "With chats",
   unused: "Never used",
   favourites: "Favourites",
   personas: "Personas",
-  groups: "Groups"
+  groups: "Groups",
+  archived: "Archived"
 }
 
 /**
@@ -138,7 +156,8 @@ export function CardFilterControl({
   groups,
   withPersonas = false,
   compact = false,
-  wrap = true
+  wrap = true,
+  archived = false
 }: {
   value: CardFilter
   onChange: (filter: CardFilter) => void
@@ -149,9 +168,10 @@ export function CardFilterControl({
   compact?: boolean
   /** Wraps onto more lines when narrow; off, the choices scroll sideways instead. */
   wrap?: boolean
+  archived?: boolean
 }) {
   const counts = filterCounts(cards, withPersonas)
-  const options = FILTERS.filter((f) => f !== "groups" || groups !== undefined)
+  const options = FILTERS.filter((f) => (f !== "groups" || groups !== undefined) && (f !== "archived" || archived))
   const count = (f: CardFilter) => (f === "groups" ? (groups ?? null) : counts[f])
   const shown = options.includes(value) ? value : "all"
   if (compact)
@@ -163,7 +183,8 @@ export function CardFilterControl({
         onValueChange={onChange}
         items={options.map((f) => ({
           value: f,
-          label: `${FILTER_LABELS[f]} · ${count(f)?.toLocaleString() ?? "…"}`
+          label: `${FILTER_LABELS[f]} · ${count(f)?.toLocaleString() ?? "…"}`,
+          description: FILTER_HINTS[f]
         }))}
       />
     )
@@ -171,10 +192,12 @@ export function CardFilterControl({
     <Segmented
       wrap={wrap}
       label="Show"
+      inlineDescription={false}
       value={shown}
       onValueChange={onChange}
       options={options.map((f) => ({
         value: f,
+        description: FILTER_HINTS[f],
         label: (
           <>
             {FILTER_LABELS[f]}
@@ -202,7 +225,7 @@ export function IncludePersonas({
   browse: CardBrowse
   onChange: (change: Partial<CardBrowse>) => void
 }) {
-  const hidden = browse.filter === "personas" || browse.filter === "groups"
+  const hidden = browse.filter === "personas" || browse.filter === "groups" || browse.filter === "archived"
   return (
     <IconButton
       label="Include personas"
