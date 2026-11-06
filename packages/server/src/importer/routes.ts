@@ -217,7 +217,7 @@ export const layer = Layer.unwrap(
       // Before the body is read: a refused import reads, parses and stores nothing.
       const target = into === null ? null : yield* reader.GetLibraryRef({ userId: user.id, refId: into })
       if (target !== null && target.kind !== "card" && target.parentEntityId !== null) {
-        return jsonError(409, "a preset or lorebook fork takes new versions only by merging from its original")
+        return jsonError(409, "a variant takes new versions by merging from its original")
       }
       if (mode !== null && target?.kind !== "card") return jsonError(409, "only a card takes a new version in place")
 

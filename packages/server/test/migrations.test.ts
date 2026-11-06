@@ -1,4 +1,4 @@
-// The baseline against its frozen schema dump (the 56-step chain it replaced, plus the fork deletion triggers and `history_changes` of unit 5, the token-estimate ledger fields/index, the draft deletion watermark and the compact lore activation receipts and card-asset bin kind, the agent rollout fields and receipts, edited in as the baseline allows), and the migrator's refusal of a database
+// The baseline against its frozen schema dump (the 56-step chain it replaced, plus the fork deletion triggers and `history_changes` of unit 5, the token-estimate ledger fields/index, the draft deletion watermark and the compact lore activation receipts and card-asset bin kind, the agent rollout fields and receipts, one ref per library entity (spec/LIBRARY-FORKS.md), edited in as the baseline allows), and the migrator's refusal of a database
 // made before it.
 import { readFileSync } from "node:fs"
 import { join } from "node:path"

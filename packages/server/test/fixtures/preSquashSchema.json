@@ -194,30 +194,6 @@
     },
     {
       "type": "index",
-      "name": "entity_refs_chat",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE INDEX entity_refs_chat ON entity_refs(chat_id) WHERE chat_id IS NOT NULL"
-    },
-    {
-      "type": "index",
-      "name": "entity_refs_entity",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE INDEX entity_refs_entity ON entity_refs(entity_id)"
-    },
-    {
-      "type": "index",
-      "name": "entity_refs_follows",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE INDEX entity_refs_follows ON entity_refs(follows_ref_id) WHERE follows_ref_id IS NOT NULL"
-    },
-    {
-      "type": "index",
-      "name": "entity_refs_fork_revision",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE INDEX entity_refs_fork_revision ON entity_refs(forked_from_revision_id) WHERE forked_from_revision_id IS NOT NULL"
-    },
-    {
-      "type": "index",
       "name": "entity_refs_head",
       "tbl_name": "entity_refs",
       "sql": "CREATE INDEX entity_refs_head ON entity_refs(head_revision_id)"
@@ -1006,7 +982,7 @@
       "type": "table",
       "name": "entity_refs",
       "tbl_name": "entity_refs",
-      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id), ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), follows_ref_id TEXT REFERENCES entity_refs(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id), forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3), CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)), CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL UNIQUE REFERENCES entities(id), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3) ) STRICT"
     },
     {
       "type": "table",
@@ -1144,7 +1120,7 @@
       "type": "table",
       "name": "library_merges",
       "tbl_name": "library_merges",
-      "sql": "CREATE TABLE library_merges ( revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE, ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE, ours_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, theirs_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, source_ref_id TEXT REFERENCES entity_refs(id) ON DELETE SET NULL, selection_json TEXT NOT NULL, created_at INTEGER NOT NULL, undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL ) STRICT"
+      "sql": "CREATE TABLE library_merges ( revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE, ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE, ours_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, theirs_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, source_ref_id TEXT REFERENCES entity_refs(id) ON DELETE SET NULL, selection_json TEXT NOT NULL, created_at INTEGER NOT NULL, undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL ) STRICT"
     },
     {
       "type": "table",
@@ -1430,18 +1406,6 @@
     },
     {
       "type": "trigger",
-      "name": "card_ref_insert",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER card_ref_insert BEFORE INSERT ON entity_refs WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card' AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id)) BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "card_ref_update",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER card_ref_update BEFORE UPDATE ON entity_refs WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card' AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id)) BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END"
-    },
-    {
-      "type": "trigger",
       "name": "card_summaries_delete",
       "tbl_name": "entity_revisions",
       "sql": "CREATE TRIGGER card_summaries_delete AFTER DELETE ON entity_revisions BEGIN DELETE FROM card_summaries WHERE revision_id = OLD.id; END"
@@ -1679,24 +1643,6 @@
       "name": "entities_owner_fixed",
       "tbl_name": "entities",
       "sql": "CREATE TRIGGER entities_owner_fixed BEFORE UPDATE OF owner_user_id ON entities WHEN NEW.owner_user_id IS NOT OLD.owner_user_id BEGIN SELECT RAISE(ABORT, 'entities never change owner'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "entity_refs_chat_fixed",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER entity_refs_chat_fixed BEFORE UPDATE OF chat_id ON entity_refs WHEN NEW.chat_id IS NOT NULL AND NEW.chat_id IS NOT OLD.chat_id BEGIN SELECT RAISE(ABORT, 'a chat override never moves to another chat'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "entity_refs_chat_owner",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER entity_refs_chat_owner BEFORE INSERT ON entity_refs WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id) IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id) BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "entity_refs_chat_owner_update",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER entity_refs_chat_owner_update BEFORE UPDATE OF chat_id, entity_id ON entity_refs WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id) IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id) BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END"
     },
     {
       "type": "trigger",
