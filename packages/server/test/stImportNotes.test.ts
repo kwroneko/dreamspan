@@ -24,11 +24,11 @@ const query = (sql: string, ...args: Array<string>) => {
 /** The head of every live note of a card, by the card's label. */
 const cardNotes = (label: string) =>
   query(
-    `SELECT h.doc_json FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+    `SELECT h.doc_json FROM entities e JOIN entity_refs r ON r.entity_id = e.id
      JOIN entity_revisions h ON h.id = r.head_revision_id
      WHERE e.kind = 'note' AND e.deleted_at IS NULL AND json_extract(h.doc_json, '$.owner.card') =
        (SELECT r2.entity_id FROM entity_refs r2 JOIN entities e2 ON e2.id = r2.entity_id
-        WHERE e2.kind = 'card' AND r2.label = ? AND r2.ref_kind = 'upstream')
+        WHERE e2.kind = 'card' AND r2.label = ?)
      ORDER BY e.id`,
     label
   ).map((row) => JSON.parse(row.doc_json as string) as Record<string, unknown>)

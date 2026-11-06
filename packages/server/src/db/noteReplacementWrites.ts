@@ -36,7 +36,7 @@ export const replacementConflict = Effect.fnUntraced(function* (
   if (previous && keyOf(previous) === target) return null
   const notes = yield* sql<{ entity: string; revision: string; doc_json: string }>`
     SELECT e.id AS entity, r.head_revision_id AS revision, h.doc_json
-    FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+    FROM entities e JOIN entity_refs r ON r.entity_id = e.id
     JOIN entity_revisions h ON h.id = r.head_revision_id
     WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL AND e.id != ${entity ?? ""}`
   const heads = notes.map((n) => ({ ...n, doc: JSON.parse(n.doc_json) as Doc }))

@@ -30,10 +30,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
     ListSnippets: ({ userId, chatId, query: search }) =>
       Effect.gen(function* () {
         yield* chatFork(sql, userId, chatId, null)
-        const refs = yield* lib.refsWhere(
-          "e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'",
-          [userId]
-        )
+        const refs = yield* lib.refsWhere("e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL", [userId])
         const items = yield* Effect.forEach(refs, (ref) => readSnippet(sql, userId, ref, chatId))
         const needle = search?.trim().toLocaleLowerCase() ?? ""
         return items
@@ -64,10 +61,18 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           FROM drafts d
           WHERE d.user_id = ${userId} AND d.target_kind = 'entity_field' AND d.target_id = ${target}
           ORDER BY d.field`
+        // Its family's entries, the original and every fork of a fork, as they're listed.
+        const family = ref.kind === "card" ? null : yield* lib.libraryFamily(userId, ref.entity_id, ref.kind)
+        const members = (family?.members ?? []).filter(
+          (m) => m.refId !== null && (m.state === "live" || m.state === "archived")
+        )
         const variants =
-          ref.kind === "card"
+          members.length === 0
             ? []
-            : yield* lib.refsWhere("r.entity_id = ? AND r.ref_kind <> 'chat_override'", [ref.entity_id])
+            : yield* lib.refsWhere(
+                `r.id IN (${members.map(() => "?").join(", ")})`,
+                members.map((m) => m.refId)
+              )
         return new EditorSnapshot({
           ref: toLibraryRef(ref),
           doc: editedDoc(ref.kind, resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id))),
@@ -97,7 +102,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
       ),
 
     CardFamily: ({ userId, entityId }) =>
-      Effect.flatMap(lib.cardFamily(userId, entityId), (family) =>
+      Effect.flatMap(lib.libraryFamily(userId, entityId), (family) =>
         family === null ? Effect.fail(new NotFound({ entity: "card", id: entityId })) : Effect.succeed(family)
       ).pipe(query("CardFamily")),
 
@@ -114,7 +119,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const card = yield* lib.ownedRef(userId, cardRefId)
         const notes = yield* lib.refsWhere(
-          `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+          `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL
            AND json_extract((SELECT h.doc_json FROM entity_revisions h WHERE h.id = r.head_revision_id),
              '$.owner.card') = ?`,
           [userId, card.entity_id]
@@ -155,7 +160,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           SELECT count(*) AS n FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (chat?.n !== 1) return yield* new NotFound({ entity: "chat", id: chatId })
         const rows = yield* lib.refsWhere(
-          `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+          `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL
            AND EXISTS (SELECT 1 FROM entity_revisions h WHERE h.id = r.head_revision_id
              AND (json_extract(h.doc_json, '$.owner.chat') = ?
                OR json_extract(h.doc_json, '$.owner.card') IN (SELECT value FROM json_each(?))))`,
@@ -202,7 +207,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         if (chatNote) yield* chatFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)
         // SQLite LIKE's case folding is ASCII-only, so titles are matched here.
         const rows = yield* lib.refsWhere(
-          `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+          `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL
            AND (? IS NULL OR r.id = ?) AND (? IS NULL OR e.id = ?)
            AND json_extract((SELECT h.doc_json FROM entity_revisions h WHERE h.id = r.head_revision_id),
              '$.owner.shared') IS NOT NULL`,

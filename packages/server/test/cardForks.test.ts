@@ -162,29 +162,20 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("cards refuse the shared variant and chat override operations", () =>
+  it.effect("cards refuse the label-only variant operations: they fork with their names", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const writer = yield* Writer
       const userId = yield* me(api)
       const parent = yield* card(api, "Independent")
-      const chat = yield* api.CreateChat({ title: "Synthetic" })
       assert.strictEqual(
         yield* outcome(api.ForkVariant({ refId: parent.ref.id, label: "Legacy", subtitle: "", moveDrafts: true })),
         "EditRefused"
       )
-      for (const operation of [
-        writer.ForkRef({ userId, refId: parent.ref.id, label: "Legacy", subtitle: "" }),
-        writer.CreateChatOverride({ userId, refId: parent.ref.id, chatId: chat.id }),
-        writer.PromoteOverride({
-          userId,
-          refId: parent.ref.id,
-          label: "Legacy",
-          subtitle: "",
-          expectedRowVersion: parent.ref.rowVersion
-        })
-      ])
-        assert.strictEqual(yield* outcome(operation), "RefOperationRefused:Cards use independent forks.")
+      assert.strictEqual(
+        yield* outcome(writer.ForkRef({ userId, refId: parent.ref.id, label: "Legacy", subtitle: "" })),
+        "RefOperationRefused:Cards fork with their names (ForkCard)."
+      )
       assert.deepStrictEqual(
         (yield* api.CardFamily({ entityId: parent.entityId })).members.map((m) => m.entityId),
         [parent.entityId]
@@ -232,15 +223,14 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       })
       assert.notStrictEqual(forked.entityId, parent.entityId)
       assert.deepStrictEqual(
-        [forked.kind, forked.refKind, forked.label, forked.subtitle],
-        ["card", "upstream", "Mira", "noir"]
+        [forked.kind, forked.parentEntityId, forked.label, forked.subtitle],
+        ["card", parent.entityId, "Mira", "noir"]
       )
       assert.strictEqual(head.ref.modelName, "Mira Vey")
       assert.strictEqual(forked.modelName, "Captain Vey")
       assert.isTrue(head.ref.hasImport)
       assert.isFalse(forked.hasImport)
       assert.isFalse(forked.updateAvailable)
-      assert.strictEqual(forked.followsRefId, null)
       const opened = yield* api.OpenEditor({ refId: forked.id })
       assert.deepStrictEqual(opened.doc, { ...head.doc, nickname: "Captain Vey", character_version: "noir" })
       assert.deepStrictEqual(

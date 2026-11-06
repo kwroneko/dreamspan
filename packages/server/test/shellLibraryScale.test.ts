@@ -46,8 +46,8 @@ const build = (userId: string, now: number) => {
       params: [now]
     },
     {
-      sql: `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
-        WITH RECURSIVE ${series("n", CARDS)} SELECT printf('r-%04d', i), printf('e-%04d', i), 'upstream',
+      sql: `INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+        WITH RECURSIVE ${series("n", CARDS)} SELECT printf('r-%04d', i), printf('e-%04d', i),
           printf('v-%04d', i), 'Card ' || i, ?, ? FROM n`,
       params: [now, now]
     },

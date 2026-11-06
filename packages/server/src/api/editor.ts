@@ -241,11 +241,10 @@ export const makeEditorHandlers = Effect.gen(function* () {
           })
           .pipe(changed(id))
       ).pipe(
-        // A chat's note or a non-card chat override changed.
-        Effect.tap((change) =>
+        // A chat's note changed.
+        Effect.tap(() =>
           Effect.sync(() => {
-            const chatId = chatNote?.chatId ?? change.ref.chatId
-            if (chatId) hub.publish(chatId, { _tag: "State" })
+            if (chatNote) hub.publish(chatNote.chatId, { _tag: "State" })
           })
         ),
         Effect.map(saved),

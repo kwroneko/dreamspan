@@ -12,7 +12,6 @@ import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 // A library entry's editor (ARCHITECTURE.md §14): which entry and scope you're editing, how
 // many chats the change reaches, and the save cluster (DESIGN §10.1).
 import { useAtomValue } from "@effect/atom-react"
-import type { ChatId } from "@rp/shared/chat.ts"
 import type { SavedRef } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link, useParams, useSearch } from "@tanstack/react-router"
@@ -24,7 +23,7 @@ import {
 } from "./cardSections.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -33,9 +32,7 @@ import { WindowClose } from "../../ui/WindowClose.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
-import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
-import { chatName, formatDay } from "../chat/chatTitle.ts"
 import { useTitle } from "../shell.tsx"
 import { CardFavourite } from "../characters/CardFavourite.tsx"
 import { shellAtom } from "../characters/shellData.tsx"
@@ -90,20 +87,6 @@ const savedNotice = (saved: SavedRef) => {
       : ""
   ].filter((part) => part !== "")
   return parts.length === 0 ? null : ["Saved.", ...parts].join(" ")
-}
-
-/** The chat a chat override belongs to, by name, as a link back to it. */
-function OverrideChat({ chatId, prefix = "" }: { chatId: ChatId; prefix?: string }) {
-  const result = useAtomValue(useMemo(() => AppClient.query("GetChat", { chatId }), [chatId]))
-  const name = AsyncResult.isSuccess(result) ? chatName(result.value.title, [], result.value.createdAt) : null
-  return (
-    <Tooltip label="Returns to the chat.">
-      <Link to="/chats/$chatId" params={{ chatId }} className="text-accent underline-offset-4 hover:underline">
-        {prefix}
-        {name ? `${name.name}${name.started ? ` (started ${formatDay(name.started)})` : ""}` : "the chat"}
-      </Link>
-    </Tooltip>
-  )
 }
 
 export function Editor({
@@ -248,11 +231,7 @@ export function Editor({
       </h1>
       {(ref.kind !== "card" || bookOnly) && <Badge>{bookOnly ? "lorebook" : (KINDS[ref.kind] ?? ref.kind)}</Badge>}
       {ref.kind === "card" && !bookOnly && <CardFavourite entityId={ref.entityId} />}
-      {ref.kind !== "card" && ref.refKind !== "upstream" && (
-        <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
-          {ref.refKind === "variant" ? "variant" : "edited for this chat"}
-        </Badge>
-      )}
+      {ref.kind !== "card" && ref.parentEntityId !== null && <Badge tone="accent">variant</Badge>}
     </div>
   )
 
@@ -264,11 +243,7 @@ export function Editor({
             onClose && ref.kind === "preset" && variants.length <= 1 && !ref.subtitle ? "hidden" : "flex flex-col gap-1"
           }
         >
-          {onClose ? null : ref.chatId !== null ? (
-            <span className="text-sm">
-              <OverrideChat chatId={ref.chatId} prefix="← Back to " />
-            </span>
-          ) : (
+          {onClose ? null : (
             <Tooltip label="Returns to the library.">
               <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
                 ← Library
@@ -344,13 +319,7 @@ export function Editor({
                   </button>
                 </Tooltip>
               </>
-            ) : ref.kind === "preset" ? null : ref.chatId !== null ? (
-              // A chat override (DESIGN §4): this chat's own version of the entry.
-              <>
-                Only <OverrideChat chatId={ref.chatId} /> uses this version; the original's later changes still reach it
-                where you haven't edited the same text.
-              </>
-            ) : ref.kind === "lorebook" ? (
+            ) : ref.kind === "preset" ? null : ref.kind === "lorebook" ? (
               addedTo(usedByChats)
             ) : ref.kind === "card" ? (
               <Tooltip label="Shows this card's chats.">
@@ -393,8 +362,7 @@ export function Editor({
                 <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
               )}
               {ref.kind !== "card" ? (
-                ref.kind !== "note" &&
-                ref.refKind !== "chat_override" && (
+                ref.kind !== "note" && (
                   <>
                     <Button
                       hint="A named copy with its own changes. Later changes to this one can be merged into it."
@@ -505,17 +473,15 @@ export function Editor({
                   <Icon name="history" />
                   <span>History</span>
                 </Button>
-                {ref.refKind !== "chat_override" && (
-                  <Button
-                    className="h-8! px-2!"
-                    aria-label="Make a variant"
-                    hint="Makes a named copy with its own changes."
-                    onClick={() => setOpen("fork")}
-                  >
-                    <Icon name="branch" />
-                    <span>Make a variant</span>
-                  </Button>
-                )}
+                <Button
+                  className="h-8! px-2!"
+                  aria-label="Make a variant"
+                  hint="Makes a named copy with its own changes."
+                  onClick={() => setOpen("fork")}
+                >
+                  <Icon name="branch" />
+                  <span>Make a variant</span>
+                </Button>
                 <SlotOutlet slot={editorActions} props={{ store }} />
               </>
             }

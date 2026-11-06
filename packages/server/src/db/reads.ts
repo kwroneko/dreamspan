@@ -517,7 +517,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         SELECT b.*, (SELECT v.doc_json FROM entity_refs r JOIN entities e ON e.id = r.entity_id
           JOIN entity_revisions v ON v.id = r.head_revision_id
           WHERE b.kind = 'entity' AND e.kind = 'card' AND e.id = b.target_id
-          ORDER BY r.ref_kind = 'upstream' DESC, r.created_at, r.id LIMIT 1) AS card_doc_json
+          LIMIT 1) AS card_doc_json
         FROM bin_items b WHERE user_id = ${userId}
           AND (${before?.id ?? null} IS NULL OR (deleted_at, id) < (${before?.deletedAt ?? null}, ${before?.id ?? null}))
         ORDER BY deleted_at DESC, id DESC LIMIT ${limit}`.pipe(
@@ -586,7 +586,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     ListLibrary: ({ userId, kind, tag, archived, withFilterData }) =>
       lib
         .refsWhere(
-          `e.owner_user_id = ? AND e.kind = ? AND r.ref_kind <> 'chat_override' AND e.deleted_at IS NULL
+          `e.owner_user_id = ? AND e.kind = ? AND e.deleted_at IS NULL
            AND (e.archived_at IS NOT NULL) = ?
            AND (? IS NULL OR EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = ?))`,
           [userId, kind, archived ? 1 : 0, tag, tag]
@@ -717,16 +717,6 @@ export const makeReadHandlers = Effect.gen(function* () {
           theirsRevisionId: plan.theirsHead as RevisionId
         })
       }).pipe(query("PreviewMerge")),
-
-    ListChatOverrides: ({ userId, chatId }) =>
-      Effect.gen(function* () {
-        yield* ownedChat(userId, chatId)
-        const rows = yield* lib.refsWhere("r.chat_id = ? AND e.owner_user_id = ? AND e.deleted_at IS NULL", [
-          chatId,
-          userId
-        ])
-        return rows.map(toLibraryRef)
-      }).pipe(query("ListChatOverrides")),
 
     // --- Chats
 

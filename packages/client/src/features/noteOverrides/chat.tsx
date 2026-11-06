@@ -100,7 +100,7 @@ export const useCardRef = () => {
   const refs = useAtomValue(cardRefs)
   return (entity: string) =>
     AsyncResult.isSuccess(refs)
-      ? (refs.value.find((ref) => ref.entityId === entity && ref.refKind === "upstream")?.id as RefId | undefined)
+      ? (refs.value.find((ref) => ref.entityId === entity)?.id as RefId | undefined)
       : undefined
 }
 

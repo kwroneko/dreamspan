@@ -35,7 +35,7 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
     const lib = makeLibraryQueries(sql)
     const fork = yield* viewAt(sql, chatId, leafSlotId)
     const rows = yield* lib.refsWhere(
-      `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+      `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL
        AND EXISTS (SELECT 1 FROM entity_revisions h WHERE h.id = r.head_revision_id
          AND json_extract(h.doc_json, '$.owner.chat') = ? AND json_extract(h.doc_json, '$.kind') = 'imported_summary')`,
       [userId, chatId]
@@ -82,7 +82,7 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
 export const importedSummaryNotes = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
   Effect.map(
     makeLibraryQueries(sql).refsWhere(
-      `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+      `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL
        AND EXISTS (SELECT 1 FROM entity_revisions h WHERE h.id = r.head_revision_id
          AND json_extract(h.doc_json, '$.owner.chat') = ? AND json_extract(h.doc_json, '$.kind') = 'imported_summary')`,
       [userId, chatId]

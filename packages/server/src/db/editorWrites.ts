@@ -83,6 +83,16 @@ export interface LibrarySteps {
     readonly sourceHash: string | null
     readonly message?: string | null
   }) => Sql<RefRow>
+  /** A fork, every kind's: a new entity from a revision of `ref`'s (its head by default). */
+  readonly forkEntity: (options: {
+    readonly userId: UserId
+    readonly ref: RefRow
+    readonly label: string
+    readonly subtitle: string
+    readonly source?: string
+    readonly doc?: Doc
+    readonly message?: string
+  }) => Sql<RefRow>
   readonly checkReferences: (userId: string, doc: Doc) => Effect.Effect<void, NotFound | SqlError.SqlError>
 }
 
@@ -233,7 +243,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   /** An entity's upstream ref, the user's own; null if there's none. */
   const upstreamRef = (userId: UserId, entity: string) =>
     sql<{ id: string }>`SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-      WHERE r.entity_id = ${entity} AND e.owner_user_id = ${userId} AND r.ref_kind = 'upstream' LIMIT 1`.pipe(
+      WHERE r.entity_id = ${entity} AND e.owner_user_id = ${userId} LIMIT 1`.pipe(
       Effect.map(([row]) => row?.id ?? null)
     )
 
@@ -486,29 +496,16 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
     ForkWithDrafts: ({ userId, refId, label, subtitle, moveDrafts }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
-        if (ref.kind === "card") return yield* refused(ref, "Cards use independent forks.")
-        if (ref.ref_kind === "chat_override") {
-          return yield* refused(ref, "A chat override can't be forked; promote it to a variant instead.")
-        }
-        const id = uuidv7()
-        const at = Date.now()
-        yield* sql`INSERT INTO entity_refs ${sql.insert({
-          id,
-          entity_id: ref.entity_id,
-          ref_kind: "variant",
-          head_revision_id: ref.head_revision_id,
-          follows_ref_id: ref.id,
-          merge_base_revision_id: ref.head_revision_id,
-          forked_from_revision_id: ref.head_revision_id,
-          label,
-          subtitle,
-          created_at: at,
-          updated_at: at
-        })}`
+        if (ref.kind === "card") return yield* refused(ref, "Cards fork with their names (ForkCard).")
+        const fork = yield* steps.forkEntity({ userId, ref, label, subtitle })
         if (moveDrafts) {
-          yield* drafts.moveFields(userId, refId, id)
+          yield* drafts.moveFields(userId, refId, fork.id)
+          // Typed on the revision copied: the fork's first revision is the same content, and its own.
+          yield* sql`UPDATE drafts SET base_revision = ${fork.head_revision_id}
+            WHERE user_id = ${userId} AND target_kind = 'entity_field' AND target_id = ${fork.id}
+              AND status = 'active' AND base_revision = ${ref.head_revision_id}`
         }
-        return toLibraryRef(yield* steps.reload(id))
+        return toLibraryRef(yield* steps.reload(fork.id))
       }).pipe(transaction(sql, "ForkWithDrafts")),
 
     RenameRef: ({ userId, refId, label, subtitle, expectedRowVersion }) =>

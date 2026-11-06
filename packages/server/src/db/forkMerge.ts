@@ -18,7 +18,7 @@ export const makeForkMergeQueries = (sql: SqlClient.SqlClient) => {
     return p ? Effect.succeed(p) : Effect.fail(refused(ref, "Library merging is disabled."))
   }
   const getSource = Effect.fnUntraced(function* (userId: UserId, ref: RefRow) {
-    const parentId = ref.follows_ref_id ?? ref.parent_ref_id
+    const parentId = ref.parent_ref_id
     if (parentId !== null) yield* lib.ownedRef(userId, parentId)
     return { parentRefId: parentId as RefId | null, head: ref.followed_head, base: ref.merge_base_revision_id }
   })
@@ -60,7 +60,7 @@ export const makeForkMergeQueries = (sql: SqlClient.SqlClient) => {
       revision_id: RevisionId
       ours_revision_id: RevisionId
       base_revision_id: RevisionId | null
-      theirs_revision_id: RevisionId
+      theirs_revision_id: RevisionId | null
       source_ref_id: RefId | null
       selection_json: string
       created_at: number
@@ -129,89 +129,31 @@ export const makeForkMergeQueries = (sql: SqlClient.SqlClient) => {
       records: yield* records(refId)
     }
   })
+  // One family read for every kind (spec/LIBRARY-FORKS.md): a fork is an entity of its own, so
+  // its node is the entity, purged members kept as tombstones without a ref.
   const genealogy = Effect.fnUntraced(function* (userId: UserId, refId: RefId) {
     const ref = yield* lib.ownedRef(userId, refId)
-    if (ref.kind === "card") {
-      const family = (yield* lib.cardFamily(userId, ref.entity_id))!
-      const dates = yield* sql<{ ref_id: string; at: number }>`SELECT ref_id, max(created_at) AS at FROM library_merges
-        WHERE undone_by_revision_id IS NULL AND ref_id IN (SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id WHERE e.owner_user_id = ${userId}) GROUP BY ref_id`
-      const last = new Map(dates.map((r) => [r.ref_id, r.at]))
-      return {
-        rootRefId: family.members.find((m) => m.entityId === family.rootEntityId)?.refId ?? null,
-        rootNodeId: family.rootEntityId,
-        members: family.members.map((m) => ({
-          nodeId: m.entityId,
-          parentNodeId: m.parentEntityId,
-          refId: m.refId,
-          entityId: m.entityId,
-          kind: "card",
-          refKind: "upstream",
-          parentRefId: family.members.find((p) => p.entityId === m.parentEntityId)?.refId ?? null,
-          label: m.label,
-          subtitle: m.subtitle,
-          state: m.state,
-          forkedAt: m.forkedAt,
-          forkedFromRevisionId: m.forkedFromRevisionId,
-          lastMergeAt: m.refId === null ? null : (last.get(m.refId) ?? null)
-        }))
-      }
-    }
-    // Non-card forks already have their own ref identities. Cards use their existing entity parent.
-    // Keep tombstone nodes in the card family API; this query also represents retained non-card refs.
-    const rows = yield* sql<{
-      id: RefId
-      entity_id: string
-      kind: string
-      ref_kind: string
-      parent: RefId | null
-      label: string
-      subtitle: string
-      deleted_at: number | null
-      purged_at: number | null
-      archived_at: number | null
-      forked_at: number | null
-      fork_revision: RevisionId | null
-      last_merge: number | null
-    }>`
-      WITH RECURSIVE nodes AS (
-        SELECT r.id, r.entity_id, e.kind, r.ref_kind, coalesce(r.follows_ref_id,
-          (SELECT p.id FROM entity_refs p WHERE p.entity_id = e.forked_from_entity_id AND p.ref_kind = 'upstream')) AS parent,
-          r.label, r.subtitle, e.deleted_at, e.purged_at, e.archived_at,
-          CASE WHEN r.follows_ref_id IS NOT NULL THEN r.created_at ELSE e.forked_at END AS forked_at,
-          coalesce(r.forked_from_revision_id, e.forked_from_revision_id) AS fork_revision,
-          (SELECT max(m.created_at) FROM library_merges m WHERE m.ref_id = r.id AND m.undone_by_revision_id IS NULL) AS last_merge
-        FROM entity_refs r JOIN entities e ON e.id = r.entity_id WHERE e.owner_user_id = ${userId}
-      ), up(id, parent) AS (SELECT id, parent FROM nodes WHERE id = ${refId}
-        UNION SELECT n.id, n.parent FROM nodes n JOIN up ON n.id = up.parent),
-      root(id) AS (SELECT id FROM up WHERE parent IS NULL),
-      family(id) AS (SELECT id FROM root UNION SELECT n.id FROM nodes n JOIN family f ON n.parent = f.id)
-      SELECT n.* FROM nodes n JOIN family f ON f.id = n.id`
-    const root = rows.find((r) => r.parent === null)
-    if (!root) return yield* new RefOperationRefused({ refId, reason: "This family has no retained root." })
+    const family = (yield* lib.libraryFamily(userId, ref.entity_id, ref.kind))!
+    const refs = family.members.flatMap((m) => (m.refId === null ? [] : [m.refId]))
+    const dates = yield* sql<{ ref_id: string; at: number }>`SELECT ref_id, max(created_at) AS at FROM library_merges
+      WHERE undone_by_revision_id IS NULL AND ${sql.in("ref_id", refs)} GROUP BY ref_id`
+    const last = new Map(dates.map((r) => [r.ref_id, r.at]))
     return {
-      rootRefId: root.id,
-      rootNodeId: root.id,
-      members: rows.map((r) => ({
-        nodeId: r.id,
-        parentNodeId: r.parent,
-        refId: r.id,
-        entityId: r.entity_id,
-        kind: r.kind,
-        refKind: r.ref_kind,
-        parentRefId: r.parent,
-        label: r.label,
-        subtitle: r.subtitle,
-        state:
-          r.purged_at !== null
-            ? ("purged" as const)
-            : r.deleted_at !== null
-              ? ("binned" as const)
-              : r.archived_at !== null
-                ? ("archived" as const)
-                : ("live" as const),
-        forkedAt: r.forked_at,
-        forkedFromRevisionId: r.fork_revision,
-        lastMergeAt: r.last_merge
+      rootRefId: family.members.find((m) => m.entityId === family.rootEntityId)?.refId ?? null,
+      rootNodeId: family.rootEntityId,
+      members: family.members.map((m) => ({
+        nodeId: m.entityId,
+        parentNodeId: m.parentEntityId,
+        refId: m.refId,
+        entityId: m.entityId,
+        kind: ref.kind,
+        parentRefId: family.members.find((p) => p.entityId === m.parentEntityId)?.refId ?? null,
+        label: m.label,
+        subtitle: m.subtitle,
+        state: m.state,
+        forkedAt: m.forkedAt,
+        forkedFromRevisionId: m.forkedFromRevisionId,
+        lastMergeAt: m.refId === null ? null : (last.get(m.refId) ?? null)
       }))
     }
   })

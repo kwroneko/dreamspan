@@ -13,7 +13,6 @@ import {
   MergeConflictInfo,
   type MergeOutcome,
   type RefId,
-  type RefKind,
   type RevisionId
 } from "@rp/shared/library.ts"
 import { hasSchema, validateDoc } from "@rp/shared/editing.ts"
@@ -34,23 +33,23 @@ export interface RefRow {
   readonly id: string
   readonly entity_id: string
   readonly kind: EntityKind
-  readonly ref_kind: RefKind
+  /** The entity it was forked from (or marked a fork of), whatever state that is in. */
+  readonly parent_entity_id: string | null
   readonly label: string
   readonly subtitle: string
   readonly head_revision_id: string
   readonly import_head: string | null
+  /** The live parent's ref, when the parent is what it merges from (it has no imports of its own). */
   readonly parent_ref_id: string | null
-  readonly follows_ref_id: string | null
   readonly merge_base_revision_id: string | null
-  readonly chat_id: string | null
   readonly row_version: number
   readonly updated_at: number
   readonly created_at?: number
   readonly archived_at: number | null
   readonly last_used_at: number | null
-  /** The head of the followed ref; for an upstream ref, its latest import. */
+  /** What it merges from: its latest import, else its live parent's head. */
   readonly followed_head: string | null
-  /** The followed ref's label; null for an upstream ref. */
+  /** The parent's label when the parent is what it merges from; null for an import line. */
   readonly followed_label: string | null
   readonly card_nickname: unknown
   /** A lorebook's entry count, from its head revision; null for other kinds. */
@@ -62,7 +61,7 @@ export const toLibraryRef = (row: RefRow) =>
     id: row.id as RefId,
     entityId: row.entity_id as EntityId,
     kind: row.kind,
-    refKind: row.ref_kind,
+    parentEntityId: row.parent_entity_id as EntityId | null,
     label: row.label,
     subtitle: row.subtitle,
     ...(row.kind === "card"
@@ -77,13 +76,13 @@ export const toLibraryRef = (row: RefRow) =>
       ? { lorebookEntries: row.lorebook_entries }
       : {}),
     headRevisionId: row.head_revision_id as RevisionId,
-    followsRefId: row.follows_ref_id as RefId | null,
-    chatId: row.chat_id as ChatId | null,
-    hasImport: row.ref_kind === "upstream" && row.import_head !== null,
-    // A card fork's parent versions are offered only by the explicit merge (ForkMergeStatus):
-    // the editor's update alert speaks of imported files, and the merge UI isn't built yet.
+    hasImport: row.import_head !== null,
+    // The library's "update available": a card fork's parent's new revisions show only in its
+    // editor's merge notice (card forks for a chat are many); a preset's or lorebook's here too.
     updateAvailable:
-      row.parent_ref_id === null && row.followed_head !== null && row.followed_head !== row.merge_base_revision_id,
+      (row.kind !== "card" || row.parent_ref_id === null) &&
+      row.followed_head !== null &&
+      row.followed_head !== row.merge_base_revision_id,
     rowVersion: row.row_version,
     updatedAt: row.updated_at,
     ...(row.created_at === undefined ? {} : { addedAt: row.created_at }),
@@ -91,28 +90,29 @@ export const toLibraryRef = (row: RefRow) =>
     lastUsedAt: row.last_used_at
   })
 
-// An upstream ref follows its imports: the latest import is what it merges in, and its
-// merge base is the import it last merged. So a re-import merges with the user's edits
-// to the upstream the same way a variant merges with its upstream.
+// Every entity has one ref (spec/LIBRARY-FORKS.md). It merges from its own import line once it
+// has one: the latest import is what it merges in, its merge base the import it last merged, so a
+// re-import merges with the user's edits. A fork without imports of its own merges from its live
+// parent's head, its base the parent revision it was forked from or last merged.
+const importHead = `(SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import'
+  ORDER BY i.seq DESC LIMIT 1)`
 const refSelect = `
-  SELECT r.id, r.entity_id, e.kind, r.ref_kind, r.label, r.subtitle, r.head_revision_id, r.follows_ref_id,
-    coalesce(r.merge_base_revision_id, CASE WHEN e.kind = 'card' THEN e.forked_from_revision_id END) AS merge_base_revision_id, r.chat_id, r.row_version, r.created_at, r.updated_at, e.archived_at, r.last_used_at,
-    f.label AS followed_label,
-    (SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import' ORDER BY i.seq DESC LIMIT 1) AS import_head,
-    CASE WHEN e.kind = 'card' AND NOT EXISTS (SELECT 1 FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import') THEN (SELECT p.id FROM entity_refs p WHERE p.entity_id = e.forked_from_entity_id AND p.ref_kind = 'upstream') ELSE NULL END AS parent_ref_id,
+  SELECT r.id, r.entity_id, e.kind, e.forked_from_entity_id AS parent_entity_id, r.label, r.subtitle, r.head_revision_id,
+    coalesce(r.merge_base_revision_id, e.forked_from_revision_id) AS merge_base_revision_id, r.row_version, r.created_at, r.updated_at, e.archived_at, r.last_used_at,
+    ${importHead} AS import_head,
+    CASE WHEN ${importHead} IS NULL THEN p.id END AS parent_ref_id,
+    CASE WHEN ${importHead} IS NULL THEN p.label END AS followed_label,
+    coalesce(${importHead}, p.head_revision_id) AS followed_head,
     CASE WHEN e.kind = 'card' THEN
       (SELECT json_extract(h.doc_json, '$.nickname') FROM entity_revisions h WHERE h.id = r.head_revision_id)
       ELSE NULL END AS card_nickname,
     CASE WHEN e.kind = 'lorebook' THEN
       (SELECT json_array_length(h.doc_json, '$.entries') FROM entity_revisions h WHERE h.id = r.head_revision_id)
-      ELSE NULL END AS lorebook_entries,
-    CASE WHEN r.ref_kind = 'upstream'
-      THEN coalesce((SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import'
-            ORDER BY i.seq DESC LIMIT 1), (SELECT p.head_revision_id FROM entity_refs p WHERE p.entity_id = e.forked_from_entity_id AND p.ref_kind = 'upstream'))
-      ELSE f.head_revision_id END AS followed_head
+      ELSE NULL END AS lorebook_entries
   FROM entity_refs r
   JOIN entities e ON e.id = r.entity_id
-  LEFT JOIN entity_refs f ON f.id = r.follows_ref_id`
+  LEFT JOIN entity_refs p ON p.entity_id = (SELECT pe.id FROM entities pe
+    WHERE pe.id = e.forked_from_entity_id AND pe.deleted_at IS NULL)`
 
 export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
   const ownedRef = (userId: UserId, refId: string) =>
@@ -192,7 +192,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       SELECT r.id FROM entity_refs r
       JOIN entities e ON e.id = r.entity_id
       JOIN entity_revisions h ON h.id = r.head_revision_id
-      WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+      WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
         AND json_extract(h.doc_json, '$.owner.card') = ${cardEntityId}
         AND json_extract(h.doc_json, '$.module_id') IS NULL
         AND coalesce(json_extract(h.doc_json, '$.kind'), '') <> 'character_author_note'
@@ -204,27 +204,26 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       SELECT r.id FROM entity_refs r
       JOIN entities e ON e.id = r.entity_id
       JOIN entity_revisions h ON h.id = r.head_revision_id
-      WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+      WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
         AND json_extract(h.doc_json, '$.owner.card') = ${cardEntityId}
         AND json_extract(h.doc_json, '$.module_id') = ${id}
       ORDER BY e.id LIMIT 1`.pipe(Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null))))
 
   /**
-   * The chats a change to this ref reaches: those whose state names it, those with an
-   * override following it, and, for cards, those with recorded version participation.
+   * The chats a change to this ref reaches: those whose state names it, and, for cards, those
+   * with recorded version participation.
    * A card still counts after leaving, but a temporary cast change never counts.
    */
-  const usedByChats = (userId: UserId, ref: Pick<RefRow, "id" | "ref_kind" | "entity_id" | "kind">) =>
+  const usedByChats = (userId: UserId, ref: Pick<RefRow, "id" | "entity_id" | "kind">) =>
     (ref.kind === "card"
       ? sql<{ n: number }>`SELECT count(*) AS n FROM card_chat_membership m CROSS JOIN chats c ON c.id = m.chat_id
           WHERE m.entity_id = ${ref.entity_id} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
       : sql<{ n: number }>`
       SELECT count(*) AS n FROM chats c
-      WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND (
-        EXISTS (SELECT 1 FROM state_events s WHERE s.chat_id = c.id
+      WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+        AND EXISTS (SELECT 1 FROM state_events s WHERE s.chat_id = c.id
           AND s.key IN ('preset.binding', 'lorebook.attach')
-          AND json_extract(s.value_json, '$.ref') = ${ref.id})
-        OR EXISTS (SELECT 1 FROM entity_refs o WHERE o.chat_id = c.id AND o.follows_ref_id = ${ref.id}))`
+          AND json_extract(s.value_json, '$.ref') = ${ref.id})`
     ).pipe(Effect.map(([row]) => row!.n))
 
   /**
@@ -234,7 +233,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
     sql<{ id: string }>`
       SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
       WHERE r.entity_id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'card'
-        AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+        AND e.deleted_at IS NULL
       LIMIT 1`.pipe(Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null))))
 
   /**
@@ -252,7 +251,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
             AND e.kind = 'card' AND e.deleted_at IS NULL`
         return row ? { refId: binding.ref ?? null, revisionId: row.id } : null
       }
-      const which = binding?.ref ? sql`r.id = ${binding.ref} AND r.ref_kind = 'upstream'` : sql`r.ref_kind = 'upstream'`
+      const which = binding?.ref ? sql`r.id = ${binding.ref}` : sql`1`
       const [row] = yield* sql<{ id: string; head_revision_id: string }>`
         SELECT r.id, r.head_revision_id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
         WHERE r.entity_id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'card'
@@ -277,12 +276,14 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
         AND entity_id IN (SELECT id FROM ancestors)`.pipe(Effect.map(([row]) => row ?? null))
 
   /**
-   * A card's family (spec/CARD-FORKS-DELTA.md §2): up its parents to the root, the member with
-   * none, then down from there to every fork of a fork, so it's the same from any member.
+   * An entry's family (spec/CARD-FORKS-DELTA.md §2, spec/LIBRARY-FORKS.md): up its parents to
+   * the root, the member with none, then down from there to every fork of a fork, so it's the
+   * same from any member. Every kind forks this way; a family is one kind (`entities_fork_parent`).
    * Binned and purged members stay, marked. UNION, not UNION ALL, so even a cycle the writer
-   * should have refused ends the walk. Null when `entityId` isn't the user's live card.
+   * should have refused ends the walk. Null when `entityId` isn't the user's live entry of `kind`
+   * (a card unless asked otherwise; null: any kind).
    */
-  const cardFamily = (userId: UserId, entityId: string) =>
+  const libraryFamily = (userId: UserId, entityId: string, kind: EntityKind | null = "card") =>
     Effect.gen(function* () {
       const rows = yield* sql<{
         id: string
@@ -301,8 +302,8 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       }>`
         WITH RECURSIVE
           asked(id) AS (
-            SELECT id FROM entities WHERE id = ${entityId} AND owner_user_id = ${userId} AND kind = 'card'
-              AND deleted_at IS NULL),
+            SELECT id FROM entities WHERE id = ${entityId} AND owner_user_id = ${userId}
+              AND (${kind} IS NULL OR kind = ${kind}) AND deleted_at IS NULL),
           up(id, parent) AS (
             SELECT e.id, e.forked_from_entity_id FROM entities e JOIN asked ON asked.id = e.id
             UNION
@@ -322,9 +323,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
             WHERE s.entity_id = +e.id
               AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
         FROM family JOIN entities e ON e.id = family.id
-        LEFT JOIN entity_refs r ON r.id = (
-          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
-          LIMIT 1)
+        LEFT JOIN entity_refs r ON r.entity_id = e.id
         ORDER BY e.id`
       if (rows.length === 0) return null
       const state = (row: (typeof rows)[number]): FamilyMemberState =>
@@ -357,7 +356,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
     })
 
   return {
-    cardFamily,
+    libraryFamily,
     draftBase,
     ownedRef,
     refsWhere,

@@ -89,9 +89,8 @@ export const previewForkNotes = Effect.fnUntraced(function* (
     card_name: string | null
   }>`
     SELECT e.id AS entity, r.id AS ref, r.head_revision_id AS revision, h.doc_json,
-      (SELECT label FROM entity_refs WHERE entity_id = json_extract(h.doc_json, '$.owner.card')
-        AND ref_kind = 'upstream') AS card_name
-    FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+      (SELECT label FROM entity_refs WHERE entity_id = json_extract(h.doc_json, '$.owner.card')) AS card_name
+    FROM entities e JOIN entity_refs r ON r.entity_id = e.id
     JOIN entity_revisions h ON h.id = r.head_revision_id
     WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
       AND e.id IN ${sql.in([...changed])}

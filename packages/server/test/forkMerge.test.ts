@@ -195,20 +195,13 @@ describe("explicit library merges", () => {
       const parent = (yield* make({ text: "base" })).ref
       const child = yield* writer.ForkRef({ userId, refId: parent.id, label: "Child", subtitle: "" })
       const peer = yield* writer.ForkRef({ userId, refId: parent.id, label: "Peer", subtitle: "" })
-      const chat = yield* writer.CreateChat({
-        userId,
-        kind: "rp",
-        status: "active",
-        title: "Synthetic",
-        participants: [],
-        greeting: null
-      })
-      const override = yield* writer.CreateChatOverride({ userId, refId: child.id, chatId: chat.id })
-      const family = yield* reader.LibraryGenealogy({ userId, refId: override.id })
+      const grandchild = yield* writer.ForkRef({ userId, refId: child.id, label: "Grandchild", subtitle: "" })
+      const family = yield* reader.LibraryGenealogy({ userId, refId: grandchild.id })
       assert.deepStrictEqual(
         new Set(family.members.map((m) => m.refId)),
-        new Set([parent.id, child.id, peer.id, override.id])
+        new Set([parent.id, child.id, peer.id, grandchild.id])
       )
+      assert.strictEqual(family.members.find((m) => m.refId === grandchild.id)?.parentRefId, child.id)
       assert.deepStrictEqual(yield* reader.LibraryGenealogy({ userId, refId: peer.id }), family)
       yield* edit(parent.id, { text: "new" })
       yield* writer.SaveDraft({

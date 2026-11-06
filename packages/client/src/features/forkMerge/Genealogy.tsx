@@ -22,8 +22,7 @@ function MemberName({ member, onOpen }: { member: Member; onOpen: () => void }) 
   const select = useContext(PanelVariantNavigation)
   const name = `${member.label || "Deleted entry"}${member.subtitle ? ` · ${member.subtitle}` : ""}`
   const linked = member.refId !== null && (member.state === "live" || member.state === "archived")
-  if (!linked || member.refKind === "chat_override")
-    return <span className="text-sm [overflow-wrap:anywhere]">{name}</span>
+  if (!linked) return <span className="text-sm [overflow-wrap:anywhere]">{name}</span>
   return (
     <Tooltip label="Opens this one for editing.">
       <Link
@@ -90,7 +89,6 @@ function Branch({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <MemberName member={member} onOpen={onOpen} />
             {member.refId === current && <Badge tone="accent">this one</Badge>}
-            {member.refKind === "chat_override" && <Badge>one chat's copy</Badge>}
             {member.state !== "live" && (
               <Badge>
                 {member.state === "binned" ? "in the bin" : member.state === "purged" ? "deleted" : member.state}

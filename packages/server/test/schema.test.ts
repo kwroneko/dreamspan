@@ -398,13 +398,8 @@ describe("edits are non-destructive (invariant 1)", () => {
     run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('card', ?, 'preset', 1)`, owner)
     run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
          VALUES ('rev', 'card', '{}', 'h', 1, 'user', 1)`)
-    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
-         VALUES ('base', 'card', 'upstream', 'rev', 'Card', 1, 1)`)
-    run(
-      `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, follows_ref_id, merge_base_revision_id, label, chat_id, created_at, updated_at)
-         VALUES ('override', 'card', 'chat_override', 'rev', 'base', 'rev', 'Card', ?, 1, 1)`,
-      c.chatId
-    )
+    run(`INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+         VALUES ('base', 'card', 'rev', 'Card', 1, 1)`)
     run(
       `INSERT INTO state_events (id, chat_id, slot_id, seq, key, value_json, origin, created_at)
          VALUES ('ev', ?, ?, 0, 'var.set', '{}', 'user', 1)`,
@@ -424,32 +419,33 @@ describe("edits are non-destructive (invariant 1)", () => {
     expect(all<{ id: string }>(`SELECT id FROM entity_refs`).map((r) => r.id)).toEqual(["base"])
   })
 
-  it("allows only one independent upstream ref for cards", () => {
+  it("gives every entity one ref: a fork is an entity of its own (spec/LIBRARY-FORKS.md)", () => {
     const owner = user()
-    const c = chat(owner)
-    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('card', ?, 'card', 1)`, owner)
-    run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
-      VALUES ('rev', 'card', '{}', 'h', 1, 'user', 1)`)
-    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
-      VALUES ('base', 'card', 'upstream', 'rev', 'Card', 1, 1)`)
-    for (const kind of ["upstream", "variant", "chat_override"]) {
+    for (const kind of ["card", "preset"]) {
+      run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES (?, ?, ?, 1)`, kind, owner, kind)
+      run(
+        `INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+        VALUES (?, ?, '{}', 'h', 1, 'user', 1)`,
+        `${kind}-rev`,
+        kind
+      )
+      run(
+        `INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+        VALUES (?, ?, ?, 'Entry', 1, 1)`,
+        `${kind}-ref`,
+        kind,
+        `${kind}-rev`
+      )
       expect(() =>
         run(
-          `INSERT INTO entity_refs
-        (id, entity_id, ref_kind, head_revision_id, follows_ref_id, chat_id, label, created_at, updated_at)
-        VALUES ('extra', 'card', ?, 'rev', ?, ?, 'Card', 1, 1)`,
+          `INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+          VALUES ('extra', ?, ?, 'Entry', 1, 1)`,
           kind,
-          kind === "upstream" ? null : "base",
-          kind === "chat_override" ? c.chatId : null
+          `${kind}-rev`
         )
-      ).toThrow(/one independent upstream ref/)
+      ).toThrow(/UNIQUE/)
     }
-    expect(() => run(`UPDATE entity_refs SET ref_kind = 'variant', follows_ref_id = 'base' WHERE id = 'base'`)).toThrow(
-      /one independent upstream ref/
-    )
-    expect(() => run(`UPDATE entity_refs SET follows_ref_id = 'base' WHERE id = 'base'`)).toThrow(
-      /one independent upstream ref/
-    )
+    expect(() => run(`UPDATE entity_refs SET entity_id = 'card' WHERE id = 'preset-ref'`)).toThrow()
   })
 
   it("never changes an entity revision", () => {
@@ -689,45 +685,11 @@ describe("references across chats", () => {
     run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('theirs', ?, 'card', 1)`, stranger)
     run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
          VALUES ('rev', 'mine', '{}', 'h', 1, 'user', 1)`)
-    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
-         VALUES ('ref', 'mine', 'upstream', 'rev', 'Mine', 1, 1)`)
+    run(`INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+         VALUES ('ref', 'mine', 'rev', 'Mine', 1, 1)`)
     expect(() => run(`UPDATE entity_refs SET entity_id = 'theirs' WHERE id = 'ref'`)).toThrow(
       /never moves to another entity/
     )
-  })
-
-  it("keeps a chat override to the chat owner's entities", () => {
-    const owner = user()
-    const stranger = user()
-    const c = chat(owner)
-    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('theirs', ?, 'preset', 1)`, stranger)
-    run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
-         VALUES ('rev', 'theirs', '{}', 'h', 1, 'user', 1)`)
-    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
-         VALUES ('base', 'theirs', 'upstream', 'rev', 'Card', 1, 1)`)
-    expect(() =>
-      run(
-        `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, follows_ref_id, label, chat_id, created_at, updated_at)
-           VALUES ('override', 'theirs', 'chat_override', 'rev', 'base', 'Card', ?, 1, 1)`,
-        c.chatId
-      )
-    ).toThrow(/chat owner/)
-    // An override stays with its chat, though it may stop being one.
-    const own = chat(owner)
-    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('mine', ?, 'preset', 1)`, owner)
-    run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
-         VALUES ('rev2', 'mine', '{}', 'h', 1, 'user', 1)`)
-    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
-         VALUES ('mine-base', 'mine', 'upstream', 'rev2', 'Card', 1, 1)`)
-    run(
-      `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, follows_ref_id, label, chat_id, created_at, updated_at)
-         VALUES ('mine-override', 'mine', 'chat_override', 'rev2', 'mine-base', 'Card', ?, 1, 1)`,
-      c.chatId
-    )
-    expect(() => run(`UPDATE entity_refs SET chat_id = ? WHERE id = 'mine-override'`, own.chatId)).toThrow(
-      /another chat/
-    )
-    run(`UPDATE entity_refs SET ref_kind = 'variant', chat_id = NULL WHERE id = 'mine-override'`)
   })
 })
 

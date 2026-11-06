@@ -29,8 +29,8 @@ describe("group read scale", () => {
             params: [now]
           },
           {
-            sql: `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
-            ${series(1000)} SELECT printf('r-%04d', i), printf('e-%04d', i), 'upstream', printf('v-%04d', i),
+            sql: `INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+            ${series(1000)} SELECT printf('r-%04d', i), printf('e-%04d', i), printf('v-%04d', i),
               'Card ' || i, ?, ? FROM n`,
             params: [now, now]
           },

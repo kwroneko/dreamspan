@@ -161,18 +161,13 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           SELECT json_group_array(value ->> '$.entity') FROM json_each(${snapshot}, '$.inputs.cards')
         ) WHERE id = ${versionId}`
         // The preset it's written with was last used now (the preset picker's Last used): the ref
-        // the snapshot names, and for a chat's own copy the entry it follows too.
+        // the snapshot names.
         const [used] = yield* sql<{ ref: string | null }>`
           SELECT json_extract(context_snapshot_json, '$.inputs.preset.ref') AS ref
           FROM rollout_payloads WHERE rollout_id = ${rolloutId}`
         if (used?.ref)
           yield* sql`UPDATE entity_refs SET last_used_at = ${now}
-            WHERE id IN (
-              SELECT coalesce(CASE WHEN r.ref_kind = 'chat_override' THEN f.id END, r.id) FROM entity_refs r
-              LEFT JOIN entity_refs f ON f.id = r.follows_ref_id
-              WHERE r.id = ${used.ref}
-              UNION SELECT ${used.ref})
-              AND entity_id IN (SELECT id FROM entities WHERE owner_user_id = ${userId})`
+            WHERE id = ${used.ref} AND entity_id IN (SELECT id FROM entities WHERE owner_user_id = ${userId})`
         yield* sql`UPDATE rollouts SET
           history_start_slot_id = json_extract(${snapshot}, '$.historyStart.slotId'),
           -- Structural, as the candidate walk reads it (historyStart.ts): in a fork with

@@ -11,7 +11,7 @@ export const recordCardArrival = Effect.fnUntraced(function* (
   arrival: StArrival
 ) {
   yield* sql`UPDATE entity_refs SET created_at = ${arrival.at}, st_added_basis = ${arrival.basis}
-    WHERE id = ${refId} AND ref_kind = 'upstream'
+    WHERE id = ${refId}
       AND EXISTS (SELECT 1 FROM entities e WHERE e.id = entity_refs.entity_id
         AND e.owner_user_id = ${userId} AND e.kind = 'card')
       AND (st_added_basis IS NULL OR st_added_basis > ${arrival.basis}
