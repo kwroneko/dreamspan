@@ -12,14 +12,15 @@ import type {
 } from "@rp/shared/chatSetupApi.ts"
 import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { openOnPlainClick } from "../../ui/links.ts"
-import { OpenBesideButton } from "../workbench/OpenBeside.tsx"
+import { OPEN_BESIDE_HINT, OpenBesideButton, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
+import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
+import { OVER_PICTURE, Tooltip } from "../../ui/Tooltip.tsx"
 import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
 import type { CardSort } from "./cardRecency.ts"
 
@@ -317,6 +318,8 @@ function CharacterTile({
 }) {
   const open = useOpenCharacter()
   const besideHref = useRouter().buildLocation(characterLink(card)).href
+  const canBeside = useCanOpenBeside()
+  const [menu, setMenu] = useState(false)
   const c = card.card
   const state = pick?.state(status) ?? {}
   const inner = (
@@ -382,17 +385,37 @@ function CharacterTile({
     <div
       className={`tile-toggle-surface relative flex min-w-0 flex-col ${pick?.onOpen ? "overflow-hidden rounded-lg border border-border bg-surface" : ""}`}
     >
-      <Tooltip
-        label={
-          pick
-            ? pick.onOpen
-              ? `Open ${c.label} in the full editor`
-              : pick.hint(card, status)
-            : `Opens ${c.label}’s card.`
-        }
-      >
-        {button}
-      </Tooltip>
+      {pick ? (
+        <Tooltip label={pick.onOpen ? `Open ${c.label} in the full editor` : pick.hint(card, status)}>{button}</Tooltip>
+      ) : (
+        // The same menu as a chat row's (ShellBrowser's ForkRow).
+        <ContextMenu
+          label={`Actions for ${c.label}`}
+          open={menu}
+          onOpenChange={setMenu}
+          trigger={
+            <Tooltip label={`Opens ${c.label}’s card.${canBeside ? " Right-click to open it beside." : ""}`}>
+              {button}
+            </Tooltip>
+          }
+        >
+          <MenuItem icon="chat" description="Opens it here, as a click does." onClick={() => open(c.entityId)}>
+            Open
+          </MenuItem>
+          {canBeside && (
+            <MenuItem icon="split-right" description={OPEN_BESIDE_HINT} onClick={() => openBeside(besideHref)}>
+              Open beside
+            </MenuItem>
+          )}
+          <MenuItem
+            icon="external"
+            description="Opens it in a new tab of the browser."
+            onClick={() => window.open(besideHref, "_blank", "noopener")}
+          >
+            Open in a new browser tab
+          </MenuItem>
+        </ContextMenu>
+      )}
       {pick?.onOpen && (
         <Button
           data-layout-audit-ignore="inset: The footer joins the tile border edge to edge"
@@ -408,18 +431,11 @@ function CharacterTile({
         </Button>
       )}
       <span data-layout-overlay="Favourite action sits over the portrait" className="absolute top-2 left-2">
-        <FavouriteStar
-          card={card}
-          className="tile-toggle bg-surface/85 hover:bg-surface/85 data-popup-open:bg-surface/85"
-        />
+        <FavouriteStar card={card} className={`tile-toggle ${OVER_PICTURE}`} />
       </span>
       {!pick && (
         <span data-layout-overlay="Open beside sits over the portrait" className="absolute top-2 right-2">
-          <OpenBesideButton
-            href={besideHref}
-            name={c.label}
-            className="tile-beside bg-surface/85 hover:bg-surface/85"
-          />
+          <OpenBesideButton href={besideHref} name={c.label} className={`tile-beside ${OVER_PICTURE}`} />
         </span>
       )}
       {state.mark && (

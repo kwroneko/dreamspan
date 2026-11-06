@@ -59,6 +59,13 @@ export const iconButtonClass = (tone: "muted" | "danger" = "muted") =>
     tone === "danger" ? "text-muted hover:text-danger" : "text-muted hover:text-text"
   }`
 
+/**
+ * An icon button laid over a picture (a tile's star, Open beside, pin): its backing stays
+ * opaque while hovered and while its tooltip is open, where `hover:bg-hover` and
+ * `data-popup-open:bg-hover` would let a dark picture swallow the icon.
+ */
+export const OVER_PICTURE = "bg-surface/85 hover:bg-surface/85 data-popup-open:bg-surface/85"
+
 /** A button that's just an icon: `label` is its accessible name and its tooltip. */
 export function IconButton({
   label,
