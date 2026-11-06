@@ -367,7 +367,7 @@ export const shownVersionColumns = `v.id, v.slot_id, o.ordinal, v.status, v.spea
 /** Joins version `o`, one of a message's own, to what fork `fork` shows for it (`v`) and the fork's flags on it. */
 export const shownJoin = (sql: SqlClient.SqlClient, fork: string | null) => sql`
   LEFT JOIN fork_overrides ro ON ro.id = ${effectiveOverride(sql, "replace", fork, "o.id")}
-  JOIN versions v ON v.id = coalesce(ro.value_id, o.id)
+  JOIN version_records v ON v.id = coalesce(ro.value_id, o.id)
   LEFT JOIN fork_overrides sf ON sf.id = ${effectiveOverride(sql, "star", fork, "o.id")}
   LEFT JOIN fork_overrides pf ON pf.id = ${effectiveOverride(sql, "picker_hide", fork, "o.id")}`
 

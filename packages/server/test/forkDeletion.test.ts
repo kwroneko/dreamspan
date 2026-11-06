@@ -336,7 +336,7 @@ describe("deleting for good", () => {
       assert.deepStrictEqual(yield* texts(side), ["root", "h1", "g1"])
       assert.deepStrictEqual(yield* texts(main), ["root", "h1", "h2"])
       assert.deepStrictEqual(
-        (yield* rows(`SELECT content FROM versions WHERE slot_id = ? ORDER BY ordinal`, a1.slotId)).map(
+        (yield* rows(`SELECT content FROM version_records WHERE slot_id = ? ORDER BY ordinal`, a1.slotId)).map(
           (r) => r.content
         ),
         ["", ""]
@@ -364,7 +364,9 @@ describe("deleting for good", () => {
       )
       yield* writer.PurgeBinItem({ userId, itemId: item.id })
       assert.deepStrictEqual(yield* texts(side), ["root", "h1", "a1", "g1"])
-      assert.deepStrictEqual((yield* rows(`SELECT content FROM versions WHERE id = ?`, again))[0], { content: "" })
+      assert.deepStrictEqual((yield* rows(`SELECT content FROM version_records WHERE id = ?`, again))[0], {
+        content: ""
+      })
     }).pipe(Effect.provide(database(dir)))
   })
 
@@ -472,7 +474,7 @@ describe("fork deletion review regressions", () => {
       const sideItem = yield* writer.DeleteVersion({ userId, versionId: again, forkId: side })
       yield* writer.DeleteMessage({ userId, slotId: h2.slotId, forkId: main })
       yield* writer.RestoreBinItem({ userId, itemId: sideItem.id })
-      assert.deepStrictEqual((yield* rows("SELECT content FROM versions WHERE id = ?", again))[0], {
+      assert.deepStrictEqual((yield* rows("SELECT content FROM version_records WHERE id = ?", again))[0], {
         content: "a1 again"
       })
     }).pipe(

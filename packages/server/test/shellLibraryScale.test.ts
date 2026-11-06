@@ -66,7 +66,7 @@ const build = (userId: string, now: number) => {
       params: [now]
     },
     {
-      sql: `INSERT INTO versions (id, slot_id, ordinal, status, speaker_entity_id, writer, content, macro_mode, origin, created_at, updated_at)
+      sql: `INSERT INTO version_records (id, slot_id, ordinal, status, speaker_entity_id, writer, content, macro_mode, origin, created_at, updated_at)
         WITH RECURSIVE ${series("d", BIG_MESSAGES)}
         SELECT 'v-' || s.i || '-' || d.i, 's-' || s.i || '-' || d.i, 0, 'complete',
           CASE WHEN d.i % 2 = 1 THEN printf('e-%04d', CASE WHEN s.i % 5 = 0 AND d.i % 4 = 3 THEN (s.i * 3 + 1) % 400 ELSE s.i % 400 END) END,
@@ -123,7 +123,7 @@ const measure = () =>
       const depth = BIG_MESSAGES + n
       yield* fixtureSql(config.dataDir, [
         {
-          sql: `INSERT INTO versions (id, slot_id, ordinal, status, speaker_entity_id, writer, content, macro_mode, origin, created_at, updated_at)
+          sql: `INSERT INTO version_records (id, slot_id, ordinal, status, speaker_entity_id, writer, content, macro_mode, origin, created_at, updated_at)
             VALUES (?, ?, 0, 'complete', 'e-0000', 'model', 'Appended.', 'verbatim', 'generated', ?, ?)`,
           params: [`v-0-${depth}`, `s-0-${depth}`, now + n, now + n]
         },

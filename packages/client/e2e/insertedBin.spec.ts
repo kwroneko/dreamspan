@@ -59,7 +59,7 @@ for (const width of [1440, 390])
       await Effect.runPromise(
         fixtureSql(server().dataDir, [
           {
-            sql: "INSERT INTO versions(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) VALUES(?,?,0,'complete','model',?,'verbatim','duplicate',?,?)",
+            sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) VALUES(?,?,0,'complete','model',?,'verbatim','duplicate',?,?)",
             params: [version, x, "An inserted reply beside the lantern.", at, at]
           },
           {

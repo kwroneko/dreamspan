@@ -320,7 +320,9 @@ describe("recycle bin", () => {
       // The swipe deleted separately inside it has nothing left to restore either.
       assert.deepStrictEqual(yield* bin(), [])
       const db = new DatabaseSync(databaseFile(dir), { readOnly: true })
-      const rows = db.prepare(`SELECT content, purged_at FROM versions WHERE slot_id = ?`).all(b.slotId) as Array<{
+      const rows = db
+        .prepare(`SELECT content, purged_at FROM version_records WHERE slot_id = ?`)
+        .all(b.slotId) as Array<{
         content: string
         purged_at: number | null
       }>
@@ -440,7 +442,7 @@ describe("recycle bin", () => {
       assert.deepStrictEqual(yield* path(), ["root", "a"])
       const db = new DatabaseSync(databaseFile(dir), { readOnly: true })
       const versions = db
-        .prepare(`SELECT content FROM versions WHERE purged_at IS NOT NULL ORDER BY content`)
+        .prepare(`SELECT content FROM version_records WHERE purged_at IS NOT NULL ORDER BY content`)
         .all()
         .map((r) => r.content)
       const chats = db.prepare(`SELECT count(*) AS n FROM chats WHERE id = ?`).get(other.id)
@@ -755,7 +757,7 @@ const slotRow = (dir: string, slotId: SlotId) => {
     purged_at: number | null
   }
   const contents = (
-    db.prepare(`SELECT content FROM versions WHERE slot_id = ? ORDER BY ordinal`).all(slotId) as Array<{
+    db.prepare(`SELECT content FROM version_records WHERE slot_id = ? ORDER BY ordinal`).all(slotId) as Array<{
       content: string
     }>
   ).map((row) => row.content)

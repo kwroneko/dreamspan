@@ -269,7 +269,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               ? []
               : yield* sql<{ depth: number; speaker: string | null; writer: string; text: string }>`
                   SELECT s.depth, v.speaker_entity_id AS speaker, v.writer, substr(v.content, 1, 240) AS text
-                  FROM slots s JOIN versions v ON v.id = ${sql.literal(shownInSql(currentForkSql("s.chat_id"), "s"))}
+                  FROM slots s JOIN version_records v ON v.id = ${sql.literal(shownInSql(currentForkSql("s.chat_id"), "s"))}
                   WHERE s.id = ${end} AND s.chat_id = ${chatId}`
           summaries.push(
             new ChatSummary({

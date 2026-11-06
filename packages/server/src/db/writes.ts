@@ -505,7 +505,7 @@ export const makeWriteHandlers = (bin: Bin) =>
             const at = Date.now()
             if (content !== row.content) {
               const rewritten = rewriteColumns(rewrite)
-              yield* sql`UPDATE versions SET content = ${content}, raw_content = ${rewritten.raw_content},
+              yield* sql`UPDATE version_records SET content = ${content}, raw_content = ${rewritten.raw_content},
                 raw_reasoning = ${rewritten.raw_reasoning}, raw_sections = ${rewritten.raw_sections},
                 rewrite_json = ${rewritten.rewrite_json}, updated_at = ${at}
                 WHERE id = ${versionId}`
@@ -529,19 +529,19 @@ export const makeWriteHandlers = (bin: Bin) =>
           // (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
           const at = Date.now()
           const copy = uuidv7()
-          const columns = (yield* sql<{ name: string }>`SELECT name FROM pragma_table_info('versions')`)
+          const columns = (yield* sql<{ name: string }>`SELECT name FROM pragma_table_info('version_records')`)
             .map((c) => c.name)
             .filter((name) => !copiedFresh.has(name))
           yield* sql.unsafe(
-            `INSERT INTO versions (id, ordinal, content, origin, source_version_id, fork_id, created_at, updated_at,
+            `INSERT INTO version_records (id, ordinal, content, origin, source_version_id, fork_id, created_at, updated_at,
                ${columns.join(", ")})
              SELECT ?, (SELECT max(ordinal) + 1 FROM versions WHERE slot_id = v.slot_id), ?, 'edited', ?, ?, ?, ?,
                ${columns.map((c) => `v.${c}`).join(", ")}
-             FROM versions v WHERE v.id = ?`,
+             FROM version_records v WHERE v.id = ?`,
             [copy, content, original, fork.id, at, at, versionId]
           )
           const rewritten = rewriteColumns(rewrite)
-          yield* sql`UPDATE versions SET raw_content = ${rewritten.raw_content}, raw_reasoning = ${rewritten.raw_reasoning},
+          yield* sql`UPDATE version_records SET raw_content = ${rewritten.raw_content}, raw_reasoning = ${rewritten.raw_reasoning},
             raw_sections = ${rewritten.raw_sections}, rewrite_json = ${rewritten.rewrite_json} WHERE id = ${copy}`
           yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
             SELECT ${copy}, content, replaced_at, images_json FROM version_history WHERE version_id = ${versionId} ORDER BY id`
@@ -571,7 +571,7 @@ export const makeWriteHandlers = (bin: Bin) =>
             return yield* new NotFound({ entity: "generating version", id: versionId })
           }
           yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
-          yield* sql`UPDATE versions SET content = ${content}, status = ${status},
+          yield* sql`UPDATE version_records SET content = ${content}, status = ${status},
             reasoning = CASE WHEN ${reasoning === undefined ? 1 : 0} THEN reasoning ELSE ${reasoning || null} END,
             reply_sections = CASE WHEN ${replySections === undefined ? 1 : 0} THEN reply_sections
               ELSE ${replySections ? JSON.stringify(replySections) : null} END,

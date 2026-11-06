@@ -51,7 +51,7 @@ const chat = (ownerId: string, status = "active") => {
   return { chatId }
 }
 
-const versionSql = `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+const versionSql = `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
   VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?)`
 
 /** Appends a slot with one version: the version first, then the slot (deferred keys). */
@@ -89,6 +89,108 @@ const slot = (
   })
   return { slotId, versionId, depth }
 }
+
+describe("version payload separation", () => {
+  it("keeps every unbounded text/JSON field outside metadata and flag query plans", () => {
+    const columns = all<{ name: string }>("PRAGMA table_info(versions)").map((c) => c.name)
+    for (const column of [
+      "content",
+      "reasoning",
+      "raw_content",
+      "raw_reasoning",
+      "raw_sections",
+      "reply_sections",
+      "rewrite_json",
+      "frozen_macros",
+      "cast_json",
+      "direction",
+      "error_json",
+      "usage_json",
+      "recorded_model_json",
+      "recorded_generation_json",
+      "context_form",
+      "display_form",
+      "greeting_ref"
+    ])
+      expect(columns).not.toContain(column)
+    const c = chat(user())
+    const s = slot(c, null, { content: "Synthetic long reply. ".repeat(1000) })
+    expect(get<{ n: number }>("SELECT count(*) AS n FROM version_texts").n).toBe(1)
+    const plan = all<{ detail: string }>(
+      `EXPLAIN QUERY PLAN SELECT v.deleted_at, v.purged_at, v.fork_id, v.hidden
+      FROM slots s JOIN versions v ON v.slot_id = s.id WHERE s.chat_id = ?`,
+      c.chatId
+    )
+    expect(plan.some((r) => /version_texts/.test(r.detail))).toBe(false)
+    expect(get<{ content: string }>("SELECT content FROM version_records WHERE id = ?", s.versionId).content).toBe(
+      "Synthetic long reply. ".repeat(1000)
+    )
+  })
+
+  it("guards payload ownership, retains empty payloads and cascades them with their version", () => {
+    const c = chat(user())
+    const s = slot(c, null)
+    const seq = get<{ seq: number }>("SELECT seq FROM versions WHERE id = ?", s.versionId).seq
+    expect(get<{ content: string }>("SELECT content FROM version_texts WHERE version_seq = ?", seq).content).toBe("")
+    expect(() => run("DELETE FROM version_texts WHERE version_seq = ?", seq)).toThrow(/delete the version/)
+    expect(() => run("UPDATE version_texts SET version_seq = version_seq + 1 WHERE version_seq = ?", seq)).toThrow(
+      /never changes owner/
+    )
+    run("DELETE FROM chats WHERE id = ?", c.chatId)
+    expect(get<{ n: number }>("SELECT count(*) AS n FROM version_texts").n).toBe(0)
+  })
+
+  it("requires exactly one payload at commit even for direct metadata inserts", () => {
+    const c = chat(user())
+    const s = slot(c, null)
+    expect(() =>
+      tx(() =>
+        run(
+          `INSERT INTO versions(id, slot_id, ordinal, status, writer, macro_mode, origin, created_at, updated_at)
+      VALUES ('no-payload', ?, 1, 'complete', 'human', 'verbatim', 'user_written', 1, 1)`,
+          s.slotId
+        )
+      )
+    ).toThrow(/FOREIGN KEY/)
+    expect(get<{ n: number }>("SELECT count(*) AS n FROM versions").n).toBe(1)
+  })
+
+  it("maintains SQLite character counts for freshness and eligibility without reading prose", () => {
+    const c = chat(user())
+    const s = slot(c, null, { content: "A🌙" })
+    expect(
+      get<{ content_length: number }>("SELECT content_length FROM versions WHERE id = ?", s.versionId).content_length
+    ).toBe(2)
+    expect(() => run("UPDATE versions SET content_length = 100 WHERE id = ?", s.versionId)).toThrow(
+      /comes from its payload/
+    )
+    run("UPDATE version_records SET content = '' WHERE id = ?", s.versionId)
+    expect(
+      get<{ content_length: number }>("SELECT content_length FROM versions WHERE id = ?", s.versionId).content_length
+    ).toBe(0)
+  })
+
+  it("freezes content on the payload table and requires a failed version's error", () => {
+    const c = chat(user())
+    const s = slot(c, null, { writer: "model", status: "generating" })
+    const seq = get<{ seq: number }>("SELECT seq FROM versions WHERE id = ?", s.versionId).seq
+    expect(() => run("UPDATE versions SET status = 'failed' WHERE id = ?", s.versionId)).toThrow(/require an error/)
+    run(
+      `UPDATE version_records SET content = 'partial', status = 'failed', error_json = '{"message":"Synthetic failure"}'
+      WHERE id = ?`,
+      s.versionId
+    )
+    expect(() => run("UPDATE version_texts SET content = 'replacement' WHERE version_seq = ?", seq)).toThrow(
+      /immutable once generated/
+    )
+    expect(() => run("UPDATE version_texts SET error_json = NULL WHERE version_seq = ?", seq)).toThrow(
+      /require an error/
+    )
+    expect(get<{ content: string }>("SELECT content FROM version_records WHERE id = ?", s.versionId).content).toBe(
+      "partial"
+    )
+  })
+})
 
 const addVersion = (
   slotId: string,
@@ -240,7 +342,7 @@ describe("graph shape", () => {
     const s = slot(chat(owner), null, { writer: "model", content: "generated" })
     const edit = (source: string) =>
       run(
-        `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, created_at, updated_at)
+        `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, created_at, updated_at)
          VALUES (?, ?, 1, 'complete', 'human', 'edited', 'verbatim', 'edited', ?, 1, 1)`,
         id("v"),
         s.slotId,
@@ -254,7 +356,7 @@ describe("graph shape", () => {
     // Deleting the source clears the reference instead of failing on it.
     const third = addVersion(s.slotId, 2, { writer: "model", content: "a swipe" })
     run(
-      `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, created_at, updated_at)
+      `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, created_at, updated_at)
        VALUES (?, ?, 3, 'complete', 'human', 'edited swipe', 'verbatim', 'edited', ?, 1, 1)`,
       id("v"),
       s.slotId,
@@ -272,9 +374,9 @@ describe("edits are non-destructive (invariant 1)", () => {
     const owner = user()
     const c = chat(owner)
     const s = slot(c, null, { writer: "model", status: "generating", content: "" })
-    run(`UPDATE versions SET content = 'partial text' WHERE id = ?`, s.versionId) // streaming is fine
-    run(`UPDATE versions SET content = 'full text', status = 'complete' WHERE id = ?`, s.versionId)
-    expect(() => run(`UPDATE versions SET content = 'rewritten' WHERE id = ?`, s.versionId)).toThrow(
+    run(`UPDATE version_records SET content = 'partial text' WHERE id = ?`, s.versionId) // streaming is fine
+    run(`UPDATE version_records SET content = 'full text', status = 'complete' WHERE id = ?`, s.versionId)
+    expect(() => run(`UPDATE version_records SET content = 'rewritten' WHERE id = ?`, s.versionId)).toThrow(
       /immutable once generated/
     )
     // Generation doesn't reopen, for model or user-written versions.
@@ -283,7 +385,7 @@ describe("edits are non-destructive (invariant 1)", () => {
       expect(() => run(`UPDATE versions SET status = 'generating' WHERE id = ?`, v)).toThrow(/never goes back/)
     }
     // Only deleting for good from the recycle bin empties model output.
-    expect(() => run(`UPDATE versions SET purged_at = 1, content = '' WHERE id = ?`, s.versionId)).toThrow(
+    expect(() => run(`UPDATE version_records SET purged_at = 1, content = '' WHERE id = ?`, s.versionId)).toThrow(
       /immutable once generated/
     )
     const binItem = (userId: string, kind: string, targetId: string, chatId: string) => {
@@ -299,7 +401,7 @@ describe("edits are non-destructive (invariant 1)", () => {
       )
       return itemId
     }
-    const purge = () => run(`UPDATE versions SET purged_at = 1, content = '' WHERE id = ?`, s.versionId)
+    const purge = () => run(`UPDATE version_records SET purged_at = 1, content = '' WHERE id = ?`, s.versionId)
     // Pointing the version at a bin item that isn't its own doesn't open it up: another
     // user's item.
     const stranger = user()
@@ -325,8 +427,8 @@ describe("edits are non-destructive (invariant 1)", () => {
   it("keeps the earlier content of an amended user-written version", () => {
     const c = chat(user())
     const s = slot(c, null, { content: "first draft" })
-    run(`UPDATE versions SET content = 'second draft', updated_at = 2 WHERE id = ?`, s.versionId)
-    run(`UPDATE versions SET content = 'final', updated_at = 3 WHERE id = ?`, s.versionId)
+    run(`UPDATE version_records SET content = 'second draft', updated_at = 2 WHERE id = ?`, s.versionId)
+    run(`UPDATE version_records SET content = 'final', updated_at = 3 WHERE id = ?`, s.versionId)
     expect(
       all<{ content: string }>(`SELECT content FROM version_history WHERE version_id = ? ORDER BY id`, s.versionId).map(
         (r) => r.content
@@ -789,6 +891,12 @@ describe("foreign keys", () => {
           (index) => get<{ name: string }>(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`, index.name).name
         )
       )
+      // INTEGER PRIMARY KEY aliases rowid and has no separate pragma_index_list entry.
+      const primary = all<{ name: string; type: string }>(
+        `SELECT name, type FROM pragma_table_info(?) WHERE pk > 0`,
+        name
+      )
+      if (primary.length === 1 && primary[0]!.type === "INTEGER") leading.add(primary[0]!.name)
       for (const fk of all<{ from: string; table: string }>(`SELECT * FROM pragma_foreign_key_list(?)`, name)) {
         if (!neverDeleted.has(fk.table) && !leading.has(fk.from) && !unindexedOk.has(`${name}.${fk.from}`))
           unindexed.push(`${name}.${fk.from}`)
@@ -808,7 +916,7 @@ describe("full-text search", () => {
   it("indexes versions once generation ends, and follows amendments", () => {
     const c = chat(user())
     const streaming = slot(c, null, { writer: "model", status: "generating" })
-    run(`UPDATE versions SET content = 'the lantern swung low' WHERE id = ?`, streaming.versionId)
+    run(`UPDATE version_records SET content = 'the lantern swung low' WHERE id = ?`, streaming.versionId)
     expect(search("lantern")).toEqual([])
     run(`UPDATE versions SET status = 'complete' WHERE id = ?`, streaming.versionId)
     expect(search("lantern")).toEqual([streaming.versionId])
@@ -816,7 +924,7 @@ describe("full-text search", () => {
     const typed = slot(c, streaming, { content: "Café au lait" })
     expect(search("cafe")).toEqual([typed.versionId]) // diacritics folded
     expect(search("lai*")).toEqual([typed.versionId]) // prefix queries
-    run(`UPDATE versions SET content = 'Black coffee' WHERE id = ?`, typed.versionId)
+    run(`UPDATE version_records SET content = 'Black coffee' WHERE id = ?`, typed.versionId)
     expect(search("cafe")).toEqual([])
     expect(search("coffee")).toEqual([typed.versionId])
   })
@@ -849,6 +957,23 @@ describe("full-text search", () => {
     expect(matches("harbor")).toEqual([bob])
   })
 
+  it("removes version search terms before cascading the payload and reusing its integer key", () => {
+    const oldChat = chat(user())
+    const old = slot(oldChat, null, { writer: "model", content: "private lighthouse" })
+    const seq = get<{ seq: number }>("SELECT seq FROM versions WHERE id = ?", old.versionId).seq
+    run("DELETE FROM chats WHERE id = ?", oldChat.chatId)
+    const fresh = slot(chat(user()), null, { writer: "model", content: "ordinary harbor" })
+    expect(get<{ seq: number }>("SELECT seq FROM versions WHERE id = ?", fresh.versionId).seq).toBe(seq)
+    const hits = (text: string) =>
+      all<{ id: string }>(
+        `SELECT v.id FROM versions_fts f
+      JOIN versions v ON v.seq = f.rowid WHERE versions_fts MATCH ?`,
+        text
+      ).map((r) => r.id)
+    expect(hits("lighthouse")).toEqual([])
+    expect(hits("harbor")).toEqual([fresh.versionId])
+  })
+
   it("keeps every index in step with inserts, updates and deletes of its table", () => {
     const tables = all<{ name: string }>(
       `SELECT name FROM sqlite_schema WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE % USING fts5%'`
@@ -856,10 +981,11 @@ describe("full-text search", () => {
     expect(tables.sort()).toEqual(["entity_revisions", "summary_revisions", "versions"])
     for (const table of tables) {
       const events = all<{ sql: string }>(
-        `SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ? AND sql LIKE ?`,
+        `SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name IN (?, ?) AND sql LIKE ?`,
         table,
+        table === "versions" ? "version_texts" : table,
         `%${table}_fts%`
-      ).map((r) => /AFTER (INSERT|UPDATE|DELETE)/.exec(r.sql)?.[1])
+      ).map((r) => /(?:BEFORE|AFTER) (INSERT|UPDATE|DELETE)/.exec(r.sql)?.[1])
       const immutable = all(`SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?`, `${table}_immutable`)
       expect(new Set(events), table).toEqual(
         new Set(immutable.length ? ["INSERT", "DELETE"] : ["INSERT", "UPDATE", "DELETE"])
@@ -1069,7 +1195,7 @@ describe("inserted messages (spec/MESSAGE-INSERT.md §2.2)", () => {
     const versionId = id("v")
     tx(() => {
       run(
-        `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+        `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
          VALUES (?, ?, 0, 'complete', 'model', 'copy', 'verbatim', 'duplicate', ?, ?)`,
         versionId,
         slotId,

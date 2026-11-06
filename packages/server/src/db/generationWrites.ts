@@ -157,7 +157,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
             CASE WHEN json_extract(${snapshot}, '$.inputs.type') = 'continue' THEN 1 ELSE 0 END`
         // Pin the cast actually assembled, including an earlier-message swipe and a cast
         // change racing the placeholder's creation. Later undo cannot rewrite this evidence.
-        yield* sql`UPDATE versions SET cast_json = (
+        yield* sql`UPDATE version_records SET cast_json = (
           SELECT json_group_array(value ->> '$.entity') FROM json_each(${snapshot}, '$.inputs.cards')
         ) WHERE id = ${versionId}`
         // The preset it's written with was last used now (the preset picker's Last used): the ref
@@ -198,7 +198,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
                 FROM versions v JOIN slots s ON s.id = v.slot_id
                 WHERE v.id = ${id} AND v.macro_mode = 'template' AND s.chat_id = ${chatId}`
               if (!template) return
-              yield* sql`UPDATE versions SET frozen_macros = ${JSON.stringify(frozen)}
+              yield* sql`UPDATE version_records SET frozen_macros = ${JSON.stringify(frozen)}
                 WHERE id = ${id} AND frozen_macros IS NULL`
               if (template.written === 0) yield* setVariables(chatId, template.slot_id, id, writes, rolloutId, now)
             }),
@@ -241,7 +241,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           usage_cache_read_tokens = ${usage!.cache_read}, usage_cache_write_tokens = ${usage!.cache_write},
           usage_cost = ${usage!.cost}, completed_at = ${now}, updated_at = ${now}
           WHERE id = ${rolloutId} AND status = 'running'`
-        yield* sql`UPDATE versions SET usage_json = ${JSON.stringify({
+        yield* sql`UPDATE version_records SET usage_json = ${JSON.stringify({
           requests: usage!.requests,
           inputUncached: usage!.input,
           output: usage!.output,

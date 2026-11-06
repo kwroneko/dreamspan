@@ -63,7 +63,8 @@ type Slot = {
   speaker: string | null
   at: number
   depth: number
-  preview: string
+  version_seq: number
+  content_length: number
   status: string
   participants: string
   human_authors: string
@@ -208,6 +209,7 @@ export const computeForkSummaries = (
       if (ids.size > 0) parentPaths.set(fork.id, ids)
     }
     const summaries: Array<ForkSummary> = []
+    const previewCandidates: Array<Array<number>> = []
     for (const record of records) {
       let path = structural(record)
       const base = record.base_slot_id === null ? undefined : path.find((s) => s.id === record.base_slot_id)
@@ -220,7 +222,7 @@ export const computeForkSummaries = (
             : yield* sql<Slot>`
               SELECT ${record.id} AS fork_id, s.id, s.chat_id, s.parent_slot_id, s.created_at, s.depth,
                 CASE WHEN ${slotDeletedIn(sql, record.id, "s")} THEN 1 END AS deleted_at,
-                v.status, v.speaker_entity_id AS speaker, substr(v.content, 1, 160) AS preview,
+                v.status, v.speaker_entity_id AS speaker, v.seq AS version_seq, v.content_length,
                 ${sql.literal(slotParticipantsSql("s"))} AS participants,
                 ${sql.literal(slotHumanAuthorsSql("s"))} AS human_authors,
                 CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at
@@ -273,7 +275,7 @@ export const computeForkSummaries = (
       const activity = new Map<string, { entityId: EntityId; at: number; slot: string }>()
       const lastSpoke = new Map<string, number>()
       let endpoint: Slot | undefined
-      let preview = ""
+      const candidates: Array<number> = []
       let messages = 0
       // What it shares: its parent's path while that's live, else the history up to its base.
       const parent = record.parent_fork_id === null ? undefined : parentPaths.get(record.parent_fork_id)
@@ -295,7 +297,7 @@ export const computeForkSummaries = (
         if (shared !== null && split === null && !shared(s)) split = { at: s.created_at, after: messages }
         messages++
         endpoint = s
-        if (s.status !== "failed" && s.preview.trim()) preview = s.preview
+        if (s.status !== "failed" && s.content_length > 0) candidates.push(s.version_seq)
         state = foldState(positional.get(s.id) ?? [], state)
         const record = (entity: string, at: number) => {
           if (at >= (activity.get(entity)?.at ?? -Infinity))
@@ -324,10 +326,11 @@ export const computeForkSummaries = (
         state = foldState([event], state)
       }
       const present = state.participants.filter((id) => !state.playedByMe.includes(id) && !state.absent.includes(id))
+      previewCandidates.push(candidates)
       summaries.push({
         forkId: record.id,
         chatId: record.chat_id,
-        preview,
+        preview: "",
         messages,
         leaf: endpoint?.id ?? null,
         endAt: endpoint?.at ?? null,
@@ -349,7 +352,29 @@ export const computeForkSummaries = (
         }))
       })
     }
-    return summaries
+    // All history/participation above is metadata. Read only each fork's newest
+    // candidate excerpt, sharing reads where forks select the same version. A
+    // whitespace-only prefix falls back to the next candidate, exactly as before.
+    const previews: Array<string> = summaries.map(() => "")
+    const excerpts = new Map<number, string>()
+    let pending = previewCandidates.flatMap((candidates, i) => (candidates.length ? [i] : []))
+    while (pending.length > 0) {
+      const unread = [...new Set(pending.map((i) => previewCandidates[i]!.at(-1)!))].filter((seq) => !excerpts.has(seq))
+      if (unread.length > 0) {
+        const read = yield* sql<{ version_seq: number; text: string }>`
+          SELECT t.version_seq, substr(t.content, 1, 160) AS text FROM json_each(${JSON.stringify(unread)}) j
+          CROSS JOIN version_texts t ON t.version_seq = j.value`
+        for (const row of read) excerpts.set(row.version_seq, row.text)
+      }
+      const next: Array<number> = []
+      for (const i of pending) {
+        const text = excerpts.get(previewCandidates[i]!.pop()!) ?? ""
+        if (text.trim()) previews[i] = text
+        else if (previewCandidates[i]!.length > 0) next.push(i)
+      }
+      pending = next
+    }
+    return summaries.map((summary, i) => ({ ...summary, preview: previews[i]! }))
   })
 
 /**

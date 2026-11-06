@@ -25,7 +25,7 @@ try {
   {
     db.exec("PRAGMA foreign_keys = ON; BEGIN")
     const version =
-      db.prepare(`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+      db.prepare(`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
       VALUES (?, ?, 0, ?, 'model', ?, 'verbatim', 'generated', 1, 1)`)
     const slot = db.prepare(
       `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, 1)`
@@ -47,7 +47,7 @@ try {
     const slot = db.prepare(`INSERT INTO slots
       (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
       VALUES (?, ?, ?, ?, ?, 1)`)
-    const version = db.prepare(`INSERT INTO versions
+    const version = db.prepare(`INSERT INTO version_records
       (id, slot_id, ordinal, status, writer, content, macro_mode, origin, rollout_id, created_at, updated_at)
       VALUES (?, ?, ?, 'complete', 'model', 'Synthetic reply', 'verbatim', 'generated', ?, 1, 1)`)
     const rollout = db.prepare(`INSERT INTO rollouts

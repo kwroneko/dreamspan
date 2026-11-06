@@ -109,10 +109,10 @@ const setup = (dataDir: string) =>
           const found =
             piece.kind === "inserted"
               ? yield* sql<{ id: SlotId; content: string; deleted: number }>`
-                  SELECT s.id, (SELECT content FROM versions WHERE id = ${shownIn(sql, forkId, "s")}) AS content,
+                  SELECT s.id, (SELECT content FROM version_records WHERE id = ${shownIn(sql, forkId, "s")}) AS content,
                     ${slotDeletedIn(sql, forkId, "s")} AS deleted FROM slots s WHERE s.id = ${piece.slotId}`
               : yield* sql<{ id: SlotId; content: string; deleted: number }>`
-                  SELECT s.id, (SELECT content FROM versions WHERE id = ${shownIn(sql, forkId, "s")}) AS content,
+                  SELECT s.id, (SELECT content FROM version_records WHERE id = ${shownIn(sql, forkId, "s")}) AS content,
                     ${slotDeletedIn(sql, forkId, "s")} AS deleted
                   FROM slots s WHERE s.chain_id = ${piece.chainId} AND s.depth BETWEEN ${piece.lo} AND ${piece.hi}
                   ORDER BY s.depth`

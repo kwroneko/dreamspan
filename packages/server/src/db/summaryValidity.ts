@@ -66,18 +66,30 @@ const statements: ReadonlyArray<string> = [
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_insert AFTER INSERT ON main.versions
     WHEN EXISTS (SELECT 1 FROM slots WHERE id = NEW.slot_id)
     BEGIN ${touch(SLOT, slotChat("NEW.slot_id"), "NEW.slot_id")} END`,
-  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version AFTER UPDATE OF slot_id, speaker_entity_id, content, origin,
+  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version AFTER UPDATE OF slot_id, speaker_entity_id, status, origin,
     source_version_id, created_at, deleted_at, purged_at, fork_id ON main.versions
+    WHEN NEW.slot_id IS NOT OLD.slot_id OR NEW.speaker_entity_id IS NOT OLD.speaker_entity_id
+      OR (NEW.status = 'failed') IS NOT (OLD.status = 'failed')
+      OR NEW.origin IS NOT OLD.origin OR NEW.source_version_id IS NOT OLD.source_version_id
+      OR NEW.created_at IS NOT OLD.created_at OR NEW.deleted_at IS NOT OLD.deleted_at
+      OR NEW.purged_at IS NOT OLD.purged_at OR NEW.fork_id IS NOT OLD.fork_id
     BEGIN ${touch(SLOT, slotChat("OLD.slot_id"), "OLD.slot_id")} ${touch(SLOT, slotChat("NEW.slot_id"), "NEW.slot_id")} END`,
   // A single-fork import has no other summary to preserve; avoid walking its whole
   // newly pinned history. In a branched chat, pinning one file reaches only the forks
   // displaying those slots. `below` deduplicates their shared descendant paths.
-  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_cast AFTER UPDATE OF cast_json ON main.versions
+  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_text AFTER UPDATE OF content ON main.version_texts
+    WHEN NEW.content IS NOT OLD.content BEGIN
+      INSERT INTO shell_touches(kind, chat_id, ref)
+        SELECT '${SLOT}', s.chat_id, s.id FROM versions v JOIN slots s ON s.id = v.slot_id
+        WHERE v.seq = NEW.version_seq;
+    END`,
+  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_cast AFTER UPDATE OF cast_json ON main.version_texts
     WHEN NEW.cast_json IS NOT OLD.cast_json BEGIN
-      INSERT INTO shell_touches (kind, chat_id, ref)
-        VALUES (CASE WHEN OLD.cast_json IS NULL AND (SELECT count(*) FROM (
-          SELECT 1 FROM forks WHERE chat_id = ${slotChat("NEW.slot_id")} LIMIT 2)) < 2
-          THEN '${CHAT}' ELSE '${SLOT}' END, ${slotChat("NEW.slot_id")}, NEW.slot_id);
+      INSERT INTO shell_touches(kind, chat_id, ref)
+        SELECT CASE WHEN OLD.cast_json IS NULL AND (SELECT count(*) FROM (
+          SELECT 1 FROM forks WHERE chat_id = s.chat_id LIMIT 2)) < 2
+          THEN '${CHAT}' ELSE '${SLOT}' END, s.chat_id, s.id
+        FROM versions v JOIN slots s ON s.id = v.slot_id WHERE v.seq = NEW.version_seq;
     END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_delete AFTER DELETE ON main.versions
     BEGIN ${touch(SLOT, slotChat("OLD.slot_id"), "OLD.slot_id")} END`,

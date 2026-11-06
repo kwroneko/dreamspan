@@ -25,7 +25,7 @@ db.exec(
 )
 try {
   const version =
-    db.prepare(`INSERT INTO versions(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at)
+    db.prepare(`INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at)
     VALUES(?,?,?,'complete',?,?,'verbatim',?,1,1)`)
   const slot =
     db.prepare(`INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,fork_id,inserted,created_at)

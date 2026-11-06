@@ -22,7 +22,7 @@ export const stImportGraph = (dataDir: string, chatId: string) =>
       {
         sql: `SELECT s.id, s.parent_slot_id AS parent, ${selectedInSql(currentForkSql("s.chat_id"), "s")} AS selected,
       v.content, v.reasoning, v.created_at AS at, v.origin, v.macro_mode AS macroMode, v.status
-      FROM slots s JOIN versions v ON v.slot_id = s.id WHERE s.chat_id = ? ORDER BY s.depth, s.id, v.ordinal`,
+      FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE s.chat_id = ? ORDER BY s.depth, s.id, v.ordinal`,
         params: [chatId]
       }
     ],
