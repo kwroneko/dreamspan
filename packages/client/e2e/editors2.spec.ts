@@ -217,8 +217,13 @@ for (const width of [1440, 390])
           await more.focus()
           await more.press("Enter")
           await page.keyboard.type("Export")
+          await expect(trigger).toBeFocused()
+          // Home before the submenu takes focus moves to the parent's first item instead,
+          // closing the submenu, and Enter then picks that item.
           await page.keyboard.press("ArrowRight")
+          await focusIn(formats).toBe(true)
           await page.keyboard.press("Home")
+          await expect(formats.getByRole("menuitem", { name: "PNG", exact: true })).toBeFocused()
           await page.keyboard.press("Enter")
         } else {
           await more.click()
@@ -227,6 +232,9 @@ for (const width of [1440, 390])
         }
         await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toHaveText("Description")
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+        // The closing dialog hands focus back as it unmounts: wait, as for the menu above.
+        await expect(dialog).toHaveCount(0)
+        await expect(parent).toBeHidden()
       }
     })
 
