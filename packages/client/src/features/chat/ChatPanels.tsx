@@ -8,7 +8,8 @@ import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
-import { Away, useAway } from "../../ui/away.ts"
+import { Away } from "../../ui/away.ts"
+import { useTabShown } from "../workbench/tab.tsx"
 import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
 import { UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
 import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
@@ -404,8 +405,9 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   )
   // A phone's sheet covers everything: once this chat's tab is behind another (an editor opened
   // from it, or a resize below the breakpoint while it was) the sheet closes rather than coming
-  // back over the chat, as opening a large editor from it closes it.
-  const away = useAway()
+  // back over the chat, as opening a large editor from it closes it. The layout says so, not
+  // the tab's place on screen, which a resize moves for a moment while the frames remount.
+  const away = !useTabShown(wide)
   useEffect(() => {
     if (!wide && away && latest.current.panel !== null) show(null)
   }, [wide, away, show])

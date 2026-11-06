@@ -24,12 +24,12 @@ export const loginCookie = async (server: TestServer, handle: string, password: 
 }
 
 /**
- * Starts the user's center column over at one tab. The workbench keeps its tabs per account
- * across page loads (features/workbench), so a test would otherwise open beside the tabs the
- * test before it kept. `apiLogin` does this for each test's page.
+ * Starts the user's center column over at one tab on every device. The workbench keeps its tabs
+ * per account and browser across page loads (features/workbench), so a test that logs in again
+ * in the same browser would otherwise open beside the tabs it kept. `apiLogin` does this.
  */
 export const forgetWorkbench = (server: TestServer, cookie: string) =>
-  withCookie(server, cookie, (api) => api.SetWorkbenchLayout({ layout: "{}" }))
+  withCookie(server, cookie, (api) => api.ForgetWorkbenchLayouts({}))
 
 /** Logs in over HTTP and runs `use` with an RPC client acting as that user. */
 export const asUser = async <A>(

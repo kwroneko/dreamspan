@@ -1302,17 +1302,25 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   GetWorkbenchLayout: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        const before = yield* actor.api.GetWorkbenchLayout({})
-        yield* owner.api.SetWorkbenchLayout({ layout: JSON.stringify({ owner: true }) })
-        assert.deepStrictEqual(yield* actor.api.GetWorkbenchLayout({}), before)
+        const before = yield* actor.api.GetWorkbenchLayout({ device: "d" })
+        yield* owner.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ owner: true }) })
+        assert.deepStrictEqual(yield* actor.api.GetWorkbenchLayout({ device: "d" }), before)
       })
   },
   SetWorkbenchLayout: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        const before = yield* owner.api.GetWorkbenchLayout({})
-        yield* actor.api.SetWorkbenchLayout({ layout: JSON.stringify({ actor: true }) })
-        assert.deepStrictEqual(yield* owner.api.GetWorkbenchLayout({}), before)
+        const before = yield* owner.api.GetWorkbenchLayout({ device: "d" })
+        yield* actor.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ actor: true }) })
+        assert.deepStrictEqual(yield* owner.api.GetWorkbenchLayout({ device: "d" }), before)
+      })
+  },
+  ForgetWorkbenchLayouts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ owner: true }) })
+        yield* actor.api.ForgetWorkbenchLayouts({})
+        assert.strictEqual(yield* owner.api.GetWorkbenchLayout({ device: "d" }), JSON.stringify({ owner: true }))
       })
   },
   ImpersonationNotice: {
