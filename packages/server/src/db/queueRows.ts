@@ -26,6 +26,10 @@ export interface QueuedRow {
   /** 1: a reply of a round; `held` 1: its round stopped, waiting for Continue round. */
   readonly round: number
   readonly held: number
+  /** 1: the reply's speaker is Auto's pick, which the decision model may change (DESIGN §2.3). */
+  readonly auto_pick: number
+  /** A round's entry: the slot of the round's first reply, once posted. */
+  readonly round_start_slot_id: string | null
   readonly row_version: number
   readonly created_at: number
 }
@@ -41,7 +45,16 @@ export const toQueued = (row: QueuedRow) =>
     speakerEntityId: row.speaker_entity_id as EntityId | null,
     replySpeakerEntityId: row.reply_speaker_entity_id as EntityId | null,
     direction: row.direction,
-    ...(row.round === 1 ? { round: { held: row.held === 1, forkId: row.fork_id as ForkId | null } } : {}),
+    ...(row.round === 1
+      ? {
+          round: {
+            held: row.held === 1,
+            forkId: row.fork_id as ForkId | null,
+            ...(row.auto_pick === 1 ? { decides: true } : {}),
+            ...(row.round_start_slot_id === null ? {} : { startSlotId: row.round_start_slot_id as SlotId })
+          }
+        }
+      : {}),
     rowVersion: row.row_version,
     createdAt: row.created_at
   })

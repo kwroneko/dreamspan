@@ -977,7 +977,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor) =>
       Effect.gen(function* () {
         const points = (yield* actor.api.ListDecisionPoints()).map((point) => point.id)
-        assert.deepStrictEqual(points, ["lore", "presence"])
+        assert.deepStrictEqual(points, ["lore", "presence", "next"])
       })
   },
   GetDecisionSettings: {

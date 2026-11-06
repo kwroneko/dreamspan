@@ -576,6 +576,9 @@ export const Message = memo(function Message({
   // impersonation), so its › generates another, written as its speaker.
   const generated = model || version.writer === "model" || versions?.at(-1)?.writer === "model"
   const name = speaker?.name ?? (model ? "Model" : "You")
+  // "Who replies next" (DESIGN §2.3): until the decision model has chosen, the reply names no one,
+  // since the speaker it holds meanwhile is only Auto's fallback.
+  const choosing = generating && version.speakerPick?.by === "auto"
   const deleted = useDeletedToast()
   /** A delete says so, with Undo (DESIGN §6.2). */
   const toast = (outcome: Outcome<BinItem>) => {
@@ -831,15 +834,19 @@ export const Message = memo(function Message({
     >
       {/* The portrait, with its number, generation time and tokens under it, as in ST. */}
       <div className="flex shrink-0 flex-col items-center gap-1.5">
-        <Avatar
-          id={speakerId ?? (model ? "model" : "you")}
-          name={name}
-          mediaId={speaker?.avatarMediaId ?? null}
-          crop={speaker?.avatarCrop}
-          size="chat"
-          preview
-          className={`mt-0.5 ${hidden ? "opacity-50 grayscale" : ""}`}
-        />
+        {choosing ? (
+          <Avatar id="" name="?" size="chat" className="mt-0.5" />
+        ) : (
+          <Avatar
+            id={speakerId ?? (model ? "model" : "you")}
+            name={name}
+            mediaId={speaker?.avatarMediaId ?? null}
+            crop={speaker?.avatarCrop}
+            size="chat"
+            preview
+            className={`mt-0.5 ${hidden ? "opacity-50 grayscale" : ""}`}
+          />
+        )}
         <div
           data-portrait-details
           className={`flex w-(--chat-portrait-width,60px) flex-col items-center gap-0.5 text-center text-[11px] leading-tight text-muted tabular-nums empty:hidden [overflow-wrap:anywhere] ${
@@ -851,9 +858,18 @@ export const Message = memo(function Message({
       </div>
       <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
         <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">
-          <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate">
-            {name}
-          </span>
+          {choosing ? (
+            <span
+              data-choosing-speaker
+              className="min-w-0 text-muted italic max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:shrink-0"
+            >
+              Choosing who replies…
+            </span>
+          ) : (
+            <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate">
+              {name}
+            </span>
+          )}
           {/* Its time and model (messageDetails.tsx), as the user chose to show them. */}
           <MessageDetails details={details.header} {...detailProps} />
           {

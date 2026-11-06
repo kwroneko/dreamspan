@@ -25,6 +25,21 @@ const settingsAtom = AppClient.query("GetDecisionSettings", undefined, { reactiv
 
 const NONE = "none"
 
+/**
+ * Whether a decision point may ask: registered, and on for a connection whose decision model is
+ * chosen (what the server checks before it sends anything).
+ */
+export const useDecisionPointOn = (pointId: string): boolean => {
+  const points = useAtomValue(pointsAtom)
+  const settings = useAtomValue(settingsAtom)
+  return (
+    AsyncResult.isSuccess(points) &&
+    AsyncResult.isSuccess(settings) &&
+    points.value.some((point) => point.id === pointId) &&
+    settings.value.some((entry) => entry.model !== null && entry.points[pointId]?.on === true)
+  )
+}
+
 const modelName = (model: Model) => resolveModel(model.key, model.upstream, model.overrides).name.value
 
 /** One point's switch and, while it's on, how sure the model must be. */

@@ -37,7 +37,7 @@ export function ReplyChoicesSetting() {
     <section aria-label="Who replies">
       <Fieldset
         legend="Who replies"
-        about="Choose Auto, No one or a character under Next in the composer. Decision connections can help Auto choose who's present."
+        about="Choose Auto, No one or a character under Next in the composer. Decision connections can help Auto choose who replies."
       >
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="ghost" hint="Opens the next-reply picker in the composer." onClick={() => void choose()}>

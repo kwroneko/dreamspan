@@ -148,6 +148,8 @@ for (const width of [1440, 390])
       await again.fill("A foghorn sounds.")
       await again.press("Control+Home")
       await again.press("Control+Shift+End")
+      // The shortcut acts on the selection the editor has published, as its button shows.
+      await expect(notes.getByRole("button", { name: "Send selection to snippet", exact: true })).toBeVisible()
       await again.press("Control+Shift+S")
       await page.getByRole("menuitem", { name: /^Untitled snippet/ }).click()
       await expect(notes).toBeVisible()
