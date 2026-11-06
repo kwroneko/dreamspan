@@ -106,7 +106,11 @@ export function SnippetLarge({
                   kind="note"
                   subject="snippet"
                   focus={SNIPPET_FOCUS}
-                  items={state.items.map((item) => ({ value: item.ref.id, label: item.title || item.ref.label }))}
+                  items={state.items.map((item) => ({
+                    value: item.ref.id,
+                    label: item.title || item.ref.label,
+                    updatedAt: item.ref.updatedAt
+                  }))}
                 />
               </h1>
             </InlineRename>

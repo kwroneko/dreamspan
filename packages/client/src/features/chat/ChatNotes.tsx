@@ -378,7 +378,8 @@ function ChatNoteLargeIn({
                   onClose: close,
                   choices: notes.map((note) => ({
                     value: note.ref.id,
-                    label: noteTitle(note.doc["title"], note.doc["content"], note.ref.label).title
+                    label: noteTitle(note.doc["title"], note.doc["content"], note.ref.label).title,
+                    updatedAt: note.ref.updatedAt
                   }))
                 }}
               />

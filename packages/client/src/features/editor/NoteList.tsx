@@ -113,7 +113,11 @@ export function NoteBlock({
   onRelinked?: (() => void) | undefined
   /** Shown in the large editor over the chat, with a way back. */
   large?:
-    { readonly onClose: () => void; readonly choices?: ReadonlyArray<{ value: RefId; label: string }> } | undefined
+    | {
+        readonly onClose: () => void
+        readonly choices?: ReadonlyArray<{ value: RefId; label: string; updatedAt?: number }>
+      }
+    | undefined
   /** Just added: once it has read its note, it scrolls into view and flashes. */
   reveal?: boolean | undefined
   onRevealed?: (() => void) | undefined

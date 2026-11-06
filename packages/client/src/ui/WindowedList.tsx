@@ -10,6 +10,8 @@ export function WindowedList<T>({
   initialIndex = 0,
   initialOffset,
   listLabel,
+  estimateSize = 106,
+  gap = true,
   ...props
 }: {
   items: ReadonlyArray<T>
@@ -20,6 +22,10 @@ export function WindowedList<T>({
   initialOffset?: () => number
   /** An ordered list when supplied, otherwise a plain stack of rows. */
   listLabel?: string
+  /** A row's expected height before it's measured. */
+  estimateSize?: number
+  /** A small gap between rows (the branch lists); off, rows touch (a picker's radio rows). */
+  gap?: boolean
 } & Omit<HTMLAttributes<HTMLDivElement>, "children">) {
   "use no memo"
   const parent = useRef<HTMLDivElement>(null)
@@ -33,10 +39,10 @@ export function WindowedList<T>({
     count: items.length,
     getScrollElement: () => parent.current,
     getItemKey,
-    estimateSize: () => 106,
+    estimateSize: () => estimateSize,
     overscan: 3,
     enabled: windowed,
-    initialOffset: () => initialOffset?.() ?? Math.max(0, initialIndex - 1) * 106,
+    initialOffset: () => initialOffset?.() ?? Math.max(0, initialIndex - 1) * estimateSize,
     initialRect: { width: 0, height: 500 },
     rangeExtractor: (range) => {
       const indices = defaultRangeExtractor(range)
@@ -74,7 +80,7 @@ export function WindowedList<T>({
     >
       <List
         aria-label={listLabel}
-        className={windowed ? "relative" : "flex flex-col gap-1"}
+        className={windowed ? "relative" : `flex flex-col ${gap ? "gap-1" : ""}`}
         style={windowed ? { height: virtualizer.getTotalSize() } : undefined}
       >
         {rows.map((row) => (
@@ -84,7 +90,7 @@ export function WindowedList<T>({
             ref={windowed ? virtualizer.measureElement : undefined}
             aria-posinset={listLabel ? row.index + 1 : undefined}
             aria-setsize={listLabel ? items.length : undefined}
-            className={windowed ? "absolute left-0 w-full pb-1" : undefined}
+            className={windowed ? `absolute left-0 w-full ${gap ? "pb-1" : ""}` : undefined}
             style={windowed ? { top: row.start } : undefined}
           >
             {renderItem(items[row.index]!, row.index)}

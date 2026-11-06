@@ -2,7 +2,8 @@
 // chip and the side panel tabs' dropdowns), the filter, and the list of radio rows, each with
 // a muted line under its name and an optional icon button beside it that acts on the row
 // without choosing it or closing the popover.
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
+import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
+import { WindowedList } from "../../ui/WindowedList.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
@@ -105,9 +106,42 @@ export function PickerSearch({
       autoComplete="off"
       value={value}
       onChange={(event) => onChange(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        // Down goes into the list (at the checked row when it's shown); Enter takes the first row.
+        const rows = document.getElementById(controls)?.querySelectorAll<HTMLElement>("[role=radio]")
+        if (!rows?.length) return
+        if (event.key === "ArrowDown") {
+          event.preventDefault()
+          ;([...rows].find((row) => row.getAttribute("aria-checked") === "true") ?? rows[0])!.focus()
+        } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+          event.preventDefault()
+          rows[0]!.click()
+        }
+      }}
       className="shrink-0"
     />
   )
+}
+
+/** Up and Down move between a list's rows; Home and End go to its first and last shown row. */
+const moveInList = (event: KeyboardEvent<HTMLElement>, search: HTMLElement | null | undefined) => {
+  const target = event.target as HTMLElement
+  if (target.getAttribute("role") !== "radio") return
+  const rows = [...event.currentTarget.querySelectorAll<HTMLElement>("[role=radio]")]
+  const at = rows.indexOf(target)
+  const next =
+    event.key === "ArrowDown"
+      ? rows[at + 1]
+      : event.key === "ArrowUp"
+        ? (rows[at - 1] ?? (at === 0 ? search : undefined))
+        : event.key === "Home"
+          ? rows[0]
+          : event.key === "End"
+            ? rows.at(-1)
+            : undefined
+  if (next === undefined && !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return
+  event.preventDefault()
+  next?.focus()
 }
 
 interface PickerRowAction {
@@ -156,27 +190,56 @@ export function PickerList({
   /** Where focus goes when an action empties the list. */
   fallbackFocus?: RefObject<HTMLElement | null> | undefined
 }) {
-  const list = useRef<HTMLDivElement>(null)
-  const [refocus, setRefocus] = useState<{ index: number; value: string } | null>(null)
+  // Where focus goes once an action has changed the rows.
+  const refocus = useRef<{ index: number; value: string } | null>(null)
   const values = items.map((item) => item.value).join("\n")
+  const shownValues = useRef(values)
   useEffect(() => {
-    if (refocus === null || list.current === null) return
+    const element = document.getElementById(id)
+    const before = shownValues.current
+    if (element === null || before === values) return
+    shownValues.current = values
+    const wanted = refocus.current
+    refocus.current = null
+    // A new filter starts at the top of its rows, unless focus is in the list (or the rows only
+    // just loaded, shown at the current one).
+    if (wanted === null || document.activeElement instanceof HTMLInputElement) {
+      if (before !== "" && !element.contains(document.activeElement)) element.scrollTop = 0
+      return
+    }
     // Still there (archiving failed, or the current preset stays listed): focus it again.
-    const rows = [...list.current.querySelectorAll<HTMLElement>("[data-picker-row]")]
-    const same = rows.find((row) => row.dataset.pickerRow === refocus.value)
-    const next = same ?? rows[Math.min(refocus.index, rows.length - 1)]
+    const rows = [...element.querySelectorAll<HTMLElement>("[data-picker-row]")]
+    const same = rows.find((row) => row.dataset.pickerRow === wanted.value)
+    const next = same ?? rows[Math.min(wanted.index, rows.length - 1)]
     const target = next?.querySelector<HTMLElement>("[data-picker-action]") ?? next?.querySelector("[role=radio]")
     ;(target ?? fallbackFocus?.current)?.focus()
-    setRefocus(null)
   }, [values]) // eslint-disable-line react-hooks/exhaustive-deps -- once the rows have changed
+  if (items.length === 0)
+    return (
+      <div id={id} role="radiogroup" aria-label={title} className="flex min-h-0 flex-col p-2">
+        <div className="px-2 py-1.5 text-sm text-muted">{empty}</div>
+      </div>
+    )
+  // Hundreds of presets or thousands of cards: only the rows in view (and a few more) mount.
   return (
-    <div ref={list} id={id} role="radiogroup" aria-label={title} className="flex min-h-0 flex-col overflow-y-auto p-2">
-      {items.length === 0 && <div className="px-2 py-1.5 text-sm text-muted">{empty}</div>}
-      {items.map((item, index) => {
+    <WindowedList
+      id={id}
+      role="radiogroup"
+      aria-label={title}
+      className="flex min-h-0 flex-col overflow-y-auto p-2"
+      items={items}
+      itemKey={itemKey}
+      estimateSize={48}
+      gap={false}
+      initialIndex={Math.max(
+        0,
+        items.findIndex((item) => item.value === value)
+      )}
+      onKeyDown={(event) => moveInList(event, fallbackFocus?.current)}
+      renderItem={(item, index) => {
         const checked = item.value === value
         return (
           <div
-            key={item.value}
             data-picker-row={item.value}
             className={`grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 rounded-md hover:bg-surface-raised ${item.action ? `${rowActionInsetClass} [--row-action-inset:2rem]` : ""}`}
           >
@@ -211,17 +274,19 @@ export function PickerList({
                 icon={item.action.icon}
                 disabled={item.action.pending === true}
                 onClick={() => {
-                  setRefocus({ index, value: item.value })
+                  refocus.current = { index, value: item.value }
                   item.action!.onClick()
                 }}
               />
             )}
           </div>
         )
-      })}
-    </div>
+      }}
+    />
   )
 }
+
+const itemKey = (item: PickerItem) => item.value
 
 /** A full-width row under the list: an action ("New preset…") or a link ("Manage connections…"). */
 export const pickerRowClass =
