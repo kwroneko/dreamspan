@@ -253,6 +253,73 @@ test("off, nothing is sent and Auto picks", async ({ page }) => {
   expect(seen[0]).toMatch(PLANNED)
 })
 
+test("a queued round names only its own replies, including after reopening", async ({ page }) => {
+  await setPoint(true)
+  const chatId = await groupChat(false)
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(nextChip(page)).toBeEnabled()
+  provider.hold()
+  await page.getByLabel("Message", { exact: true }).fill("Hold the current reply.")
+  await page.getByRole("button", { name: "Send as Ana", exact: true }).click()
+  await expect(page.locator("article[data-slot]").nth(2).locator("header").first()).toContainText("Ash")
+  await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.GetChat({ chatId: chatId as never })
+      const cards = yield* api.ListCards()
+      const id = (name: string) => cards.find((card) => card.name === name)!.entityId as EntityId
+      yield* api.Generate({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        speakerEntityId: id("Mira"),
+        autoPick: true
+      })
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: chat.activeLeafSlotId,
+        branch: false,
+        content: "Start this round after the earlier queued reply.",
+        replySpeakerEntityId: id("Wren"),
+        round: [id("Ash"), id("Quill")],
+        autoPick: true
+      })
+    })
+  )
+  await expect(strip(page)).toContainText("Then 2 more")
+  await expect(strip(page)).not.toContainText("so far.")
+  await page.reload()
+  await expect(strip(page)).toContainText("Then 2 more")
+  await expect(strip(page)).not.toContainText("so far.")
+  // The older queued reply is being chosen; this round has still not started.
+  holdDecisions = true
+  provider.release()
+  await expect(page.locator("article[data-slot] [data-choosing-speaker]")).toHaveText(CHOOSING)
+  await expect(strip(page)).not.toContainText("Choosing who replies now.")
+  if (shots) await page.screenshot({ path: `${shots}/queued-round-waiting.png`, animations: "disabled" })
+  releaseDecisions()
+  // The timeline virtualizes older rows: count the persisted path, not mounted articles.
+  await expect
+    .poll(
+      () =>
+        admin((api) =>
+          Effect.gen(function* () {
+            const chat = yield* api.GetChat({ chatId: chatId as never })
+            const path = yield* api.ReadPath({
+              chatId: chat.id,
+              leafSlotId: chat.activeLeafSlotId,
+              range: { _tag: "Bottom" },
+              limit: 10
+            })
+            return { count: path.entries.length, status: path.entries.at(-1)?.version.status }
+          })
+        ),
+      { timeout: 20_000 }
+    )
+    .toEqual({ count: 8, status: "complete" })
+  await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
+  await expect(strip(page)).toHaveCount(0)
+})
+
 for (const width of [1440, 390])
   for (const colorScheme of ["light", "dark"] as const)
     test(`on, the decision model picks who replies, at ${width} ${colorScheme}`, async ({ page }) => {

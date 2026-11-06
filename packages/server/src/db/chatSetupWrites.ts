@@ -276,12 +276,21 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         posted.push(next.slotId)
         yield* sql`DELETE FROM queued_messages WHERE id IN ${sql.in(ids.slice(0, entries.length - waiting.length + 1))}`
         const rest = waiting.slice(1).map((entry) => entry.id)
-        if (rest.length > 0)
-          // A round queued before its first reply existed starts at this one.
+        if (rest.length > 0) {
           yield* sql`UPDATE queued_messages SET reply_slot_id = ${next.slotId}, fork_id = ${forkId},
-              round_start_slot_id = CASE WHEN round = 1 THEN coalesce(round_start_slot_id, ${next.slotId}) END,
               updated_at = ${Date.now()}
             WHERE id IN ${sql.in(rest)}`
+          // Only this reply's immediately following round starts here. Later queued
+          // actions have not posted their first reply yet and must retain a null start.
+          // This also establishes a start when startup recovered the queued action
+          // without generating its first reply and Continue resumes its remaining round.
+          const following = waiting.slice(1)
+          const nextAction = following.findIndex((entry) => entry.round === 0)
+          const starting = following.slice(0, nextAction < 0 ? following.length : nextAction).map((entry) => entry.id)
+          if (starting.length > 0)
+            yield* sql`UPDATE queued_messages SET round_start_slot_id = coalesce(round_start_slot_id, ${next.slotId})
+              WHERE id IN ${sql.in(starting)}`
+        }
         return { posted, next: { slotId: next.slotId, versionId: next.version.id as VersionId, forkId: next.forkId } }
       })
 

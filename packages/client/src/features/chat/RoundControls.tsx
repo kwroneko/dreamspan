@@ -23,9 +23,12 @@ const roundOf = (queue: ReadonlyArray<QueuedMessage>, forkId: string | null) =>
  * next turn waits for (being written, or the last written once the round stopped).
  */
 const turnsSoFar = (entries: ReadonlyArray<PathEntry>, start: SlotId | undefined, current: SlotId) => {
+  // A queued action has not posted its first reply: the one it waits for belongs
+  // to an earlier action, not to this round.
+  if (start === undefined) return []
   const last = entries.findIndex((entry) => entry.slotId === current)
   if (last < 0) return []
-  const first = start === undefined ? -1 : entries.findIndex((entry) => entry.slotId === start)
+  const first = entries.findIndex((entry) => entry.slotId === start)
   return entries.slice(first >= 0 && first <= last ? first : last, last + 1)
 }
 
