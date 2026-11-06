@@ -1942,6 +1942,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  GetAgentPermissions: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetAgentPermissions({ chatId: owner.chat.chatId, slotId: null }), "NotFound")
+        assert.isArray((yield* owner.api.GetAgentPermissions({ chatId: owner.chat.chatId, slotId: null })).cards)
+      })
+  },
   ListActivity: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

@@ -33,18 +33,36 @@ const noteEditable = (state: ChatState, entity: string, doc: Doc) =>
   state.agentPermissions[permissionKey({ note: entity })!] ?? doc["agent_editable"] === true
 
 /**
+ * Where notes are read: where a reply is being written (a tool's context), or the position the
+ * chat's settings show (`displayEnd`, as the Notes list reads it).
+ */
+export type NotesPosition = Pick<ToolContext, "userId" | "chatId" | "forkId" | "reader"> & {
+  readonly slotId: ToolContext["slotId"] | null
+  readonly displayEnd?: boolean
+}
+
+/**
  * The chat's state where the reply is being written: the parent's, with the reply's own effects
  * so far (spec/AGENTIC.md §4.3, mid-rollout reads), which apply while it's shown.
  */
-const stateHere = (context: ToolContext) =>
+const stateHere = (context: NotesPosition) =>
   Effect.gen(function* () {
-    const { userId, chatId, forkId, slotId, reader } = context
-    const events = yield* reader.StateEventsAt({ userId, chatId, slotId, forkId })
+    const { userId, chatId, forkId, slotId, reader, displayEnd } = context
+    const events = yield* reader.StateEventsAt({
+      userId,
+      chatId,
+      slotId,
+      forkId,
+      ...(displayEnd ? { displayEnd } : {})
+    })
     return { events, state: foldState(events) }
   })
 
-/** The notes the assembler reads at the position, as the chat's notes list shows them. */
-export const notesAt = (context: ToolContext) =>
+/**
+ * The notes the assembler reads at the position, as the chat's notes list shows them: a note an
+ * agent reply wrote only where that reply is shown.
+ */
+export const notesAt = (context: NotesPosition) =>
   Effect.gen(function* () {
     const { userId, chatId, forkId, slotId, reader } = context
     const { events, state } = yield* stateHere(context)
