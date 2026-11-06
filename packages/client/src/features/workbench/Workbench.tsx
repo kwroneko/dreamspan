@@ -47,6 +47,7 @@ import {
   type Direction
 } from "./model.ts"
 import { deviceId } from "./device.ts"
+import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
 
@@ -171,23 +172,19 @@ function useLinkGestures(store: WorkbenchStore) {
     const click = (event: MouseEvent) => {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return
       const target = event.target instanceof Element ? event.target : null
-      // An "Open beside" button (OpenBeside.tsx), and Alt-click on a link: VS Code's Open to the Side.
-      const beside = target?.closest("[data-open-beside]")?.getAttribute("data-open-beside")
-      if (beside) {
-        event.preventDefault()
-        store.openBeside(beside)
-        return
-      }
       const anchor = target?.closest("a[href]")
       if (!(anchor instanceof HTMLAnchorElement)) return
       const href = appPath(anchor)
       if (href === null) return
       event.preventDefault()
-      if (event.altKey) {
-        if (matchMedia(WIDE).matches) store.openBeside(href)
-        else store.open(href)
-      } else store.open(href)
+      // Alt-click: VS Code's Open to the Side, where frames fit side by side.
+      if (event.altKey && matchMedia(WIDE).matches) store.openBeside(href)
+      else store.open(href)
     }
+    const beside = (event: Event) => {
+      if (event instanceof CustomEvent && typeof event.detail === "string") store.openBeside(event.detail)
+    }
+    window.addEventListener(OPEN_BESIDE, beside)
     const dblclick = (event: MouseEvent) => {
       const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null
       if (!(anchor instanceof HTMLAnchorElement)) return
@@ -197,6 +194,7 @@ function useLinkGestures(store: WorkbenchStore) {
     document.addEventListener("click", click)
     document.addEventListener("dblclick", dblclick)
     return () => {
+      window.removeEventListener(OPEN_BESIDE, beside)
       document.removeEventListener("click", click)
       document.removeEventListener("dblclick", dblclick)
     }
@@ -783,7 +781,7 @@ function TabButton({
           onClick={() => store.stick(tab.id, false)}
         />
       ) : (
-        <span className="relative me-1 flex size-6 shrink-0 items-center justify-center">
+        <span className="relative me-1 flex shrink-0 items-center justify-center">
           <IconButton
             label={`Close ${title}`}
             hint={unsaved ? "Has changes not yet saved; they stay with the item. Closes this tab." : "Closes this tab."}

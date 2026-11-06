@@ -6,8 +6,7 @@
   .tile-toggle-surface:not(:hover):not(:focus-within) .tile-toggle[aria-pressed="false"] {
     opacity: 0;
   }
-  /* A chat row's Open beside, the same way. */
-  .fork-row:not(:hover):not(:focus-within) .fork-row-beside,
+  /* A character tile's Open beside, the same way. */
   .tile-toggle-surface:not(:hover):not(:focus-within) .tile-beside {
     opacity: 0;
   }
