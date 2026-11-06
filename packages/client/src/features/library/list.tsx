@@ -194,7 +194,7 @@ function Badges({ item, seen }: { item: Item; seen: boolean }) {
   return (
     <>
       {persona(item) && !item.personaOnly && <PersonaBadge />}
-      {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
+      {entry.kind !== "card" && entry.parentEntityId !== null && <Badge>variant</Badge>}
       {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
       {entry.kind === "card" && seen && <CardSurface placement="badge" entityId={entry.entityId} label={entry.label} />}
     </>
@@ -266,7 +266,7 @@ function Row({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForma
   const line =
     entry.kind === "card" ||
     entry.subtitle !== "" ||
-    entry.refKind === "variant" ||
+    entry.parentEntityId !== null ||
     entry.updateAvailable ||
     item.detail !== undefined
   // The name beside the actions, and the line under it: one row, never wrapped. On a phone the

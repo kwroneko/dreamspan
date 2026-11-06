@@ -310,7 +310,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       yield* sql`INSERT INTO entity_refs ${sql.insert({
         id: uuidv7(),
         entity_id: entityId,
-        ref_kind: "upstream",
         head_revision_id: parent,
         merge_base_revision_id: parent,
         label: note.title,
@@ -878,7 +877,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           if (localTargets.has(`note:${id}`)) return true
           const [row] = yield* sql<{ changed: number }>`SELECT e.deleted_at IS NOT NULL OR EXISTS (
             SELECT 1 FROM entity_refs r JOIN entity_revisions h ON h.id = r.head_revision_id
-            WHERE r.entity_id = e.id AND r.ref_kind = 'upstream' AND h.origin <> 'import'
+            WHERE r.entity_id = e.id AND h.origin <> 'import'
           ) AS changed FROM entities e WHERE e.id = ${id}`
           return row?.changed === 1
         })
@@ -896,7 +895,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             // the chat has one such note. A new note here showed up in every fork, switched off
             // in all but this one (owner, 2026-11-01).
             const [ref] = yield* sql<{ head_revision_id: string }>`
-              SELECT head_revision_id FROM entity_refs WHERE entity_id = ${replaced} AND ref_kind = 'upstream'`
+              SELECT head_revision_id FROM entity_refs WHERE entity_id = ${replaced}`
             const revision = yield* insertNoteRevisions(
               replaced,
               chatId,

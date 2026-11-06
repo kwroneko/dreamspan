@@ -16,7 +16,7 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
    */
   const shownOutside = (userId: string, entityId: string, chatId: string) =>
     sql<{ one: number }>`
-      SELECT 1 AS one FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+      SELECT 1 AS one FROM entities e JOIN entity_refs r ON r.entity_id = e.id
       JOIN entity_revisions h ON h.id = r.head_revision_id
       WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
         AND json_extract(h.doc_json, '$.link') = ${entityId}

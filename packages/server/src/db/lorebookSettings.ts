@@ -51,8 +51,8 @@ export const readCardPromptUse = (sql: SqlClient.SqlClient, userId: UserId) =>
   })
 
 /**
- * The user's live presets whose HEAD lists the lorebook `ref`, a chat's own preset copy too
- * while its chat isn't binned. Owner-scoped: another user's presets never show.
+ * The user's live presets whose HEAD lists the lorebook `ref`. Owner-scoped: another user's
+ * presets never show.
  */
 export const readLorebookPresets = (sql: SqlClient.SqlClient, userId: UserId, ref: RefId) =>
   Effect.map(
@@ -60,10 +60,8 @@ export const readLorebookPresets = (sql: SqlClient.SqlClient, userId: UserId, re
       SELECT r.id AS ref_id, r.label, json_extract(l.value, '$.enabled') AS enabled
       FROM entity_refs r JOIN entities e ON e.id = r.entity_id
       JOIN entity_revisions h ON h.id = r.head_revision_id
-      LEFT JOIN chats c ON c.id = r.chat_id
       JOIN json_each(h.doc_json, '$.lorebooks') l
       WHERE e.owner_user_id = ${userId} AND e.kind = 'preset' AND e.deleted_at IS NULL
-        AND (r.chat_id IS NULL OR c.deleted_at IS NULL)
         AND json_extract(l.value, '$.id') = ${ref}
       ORDER BY r.label, r.id`,
     (rows): ReadonlyArray<LorebookPreset> =>

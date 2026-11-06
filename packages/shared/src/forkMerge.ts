@@ -42,7 +42,8 @@ export const MergeRecord = Schema.Struct({
   revisionId: RevisionId,
   oursRevisionId: RevisionId,
   baseRevisionId: Schema.NullOr(RevisionId),
-  theirsRevisionId: RevisionId,
+  /** Null once the revision merged in is gone (its entry deleted for good). */
+  theirsRevisionId: Schema.NullOr(RevisionId),
   sourceRefId: Schema.NullOr(RefId),
   selection: MergeSelection,
   createdAt: Schema.Number,
@@ -66,7 +67,6 @@ export const LibraryGenealogy = Schema.Struct({
       refId: Schema.NullOr(RefId),
       entityId: Schema.String,
       kind: Schema.String,
-      refKind: Schema.String,
       parentRefId: Schema.NullOr(RefId),
       label: Schema.String,
       subtitle: Schema.String,

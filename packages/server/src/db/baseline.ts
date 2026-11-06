@@ -239,33 +239,30 @@ export const baseline: ReadonlyArray<string> = [
     BEGIN DELETE FROM card_summaries WHERE revision_id = OLD.id; END`,
   `CREATE INDEX entity_revisions_entity ON entity_revisions(entity_id, seq)`,
   `CREATE INDEX entity_revisions_hash ON entity_revisions(entity_id, doc_hash)`,
+  // An entity's one ref: its head, what it last merged (from its own import line or, for a
+  // fork, its parent's revisions: so it may name another entity's revision), its label and
+  // import source. A fork is an entity of its own (`entities.forked_from_*`, spec/LIBRARY-FORKS.md).
   `CREATE TABLE entity_refs (
     id TEXT PRIMARY KEY,
-    entity_id TEXT NOT NULL REFERENCES entities(id),
-    ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')),
+    entity_id TEXT NOT NULL UNIQUE REFERENCES entities(id),
     head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id),
-    follows_ref_id TEXT REFERENCES entity_refs(id),
-    merge_base_revision_id TEXT REFERENCES entity_revisions(id),
-    forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
+    merge_base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
     label TEXT NOT NULL,
     subtitle TEXT NOT NULL DEFAULT '',
-    chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
     source_path TEXT,
     source_hash TEXT,
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     last_used_at INTEGER,
-    st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3),
-    CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)),
-    CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL)
+    st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3)
   ) STRICT`,
   `CREATE TABLE library_merges (
     revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE,
     ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE,
     ours_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
     base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
-    theirs_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    theirs_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
     source_ref_id TEXT REFERENCES entity_refs(id) ON DELETE SET NULL,
     selection_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
@@ -277,20 +274,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE INDEX library_merges_theirs ON library_merges(theirs_revision_id)`,
   `CREATE INDEX library_merges_source ON library_merges(source_ref_id) WHERE source_ref_id IS NOT NULL`,
   `CREATE INDEX library_merges_undo ON library_merges(undone_by_revision_id) WHERE undone_by_revision_id IS NOT NULL`,
-  `CREATE INDEX entity_refs_fork_revision ON entity_refs(forked_from_revision_id) WHERE forked_from_revision_id IS NOT NULL`,
-  `CREATE TRIGGER card_ref_insert BEFORE INSERT ON entity_refs
-    WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
-      AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL
-        OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id))
-    BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END`,
-  `CREATE TRIGGER card_ref_update BEFORE UPDATE ON entity_refs
-    WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
-      AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL
-        OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id))
-    BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END`,
-  `CREATE INDEX entity_refs_entity ON entity_refs(entity_id)`,
-  `CREATE INDEX entity_refs_chat ON entity_refs(chat_id) WHERE chat_id IS NOT NULL`,
-  `CREATE INDEX entity_refs_follows ON entity_refs(follows_ref_id) WHERE follows_ref_id IS NOT NULL`,
   `CREATE TABLE entity_tags (
     entity_id TEXT NOT NULL REFERENCES entities(id),
     tag TEXT NOT NULL,
@@ -969,9 +952,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER bin_items_chat_fixed BEFORE UPDATE OF chat_id ON bin_items
       WHEN NEW.chat_id IS NOT OLD.chat_id
       BEGIN SELECT RAISE(ABORT, 'bin_items rows never move to another chat'); END`,
-  `CREATE TRIGGER entity_refs_chat_fixed BEFORE UPDATE OF chat_id ON entity_refs
-    WHEN NEW.chat_id IS NOT NULL AND NEW.chat_id IS NOT OLD.chat_id
-    BEGIN SELECT RAISE(ABORT, 'a chat override never moves to another chat'); END`,
   `CREATE TRIGGER chats_owner_fixed BEFORE UPDATE OF owner_user_id ON chats
       WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
       BEGIN SELECT RAISE(ABORT, 'chats never change owner'); END`,
@@ -981,14 +961,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER connections_owner_fixed BEFORE UPDATE OF owner_user_id ON connections
       WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
       BEGIN SELECT RAISE(ABORT, 'connections never change owner'); END`,
-  `CREATE TRIGGER entity_refs_chat_owner BEFORE INSERT ON entity_refs
-    WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
-      IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id)
-    BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END`,
-  `CREATE TRIGGER entity_refs_chat_owner_update BEFORE UPDATE OF chat_id, entity_id ON entity_refs
-    WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
-      IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id)
-    BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END`,
   `CREATE TRIGGER entity_revisions_fts_delete AFTER DELETE ON entity_revisions
     BEGIN INSERT INTO entity_revisions_fts (entity_revisions_fts, rowid, search_text) VALUES ('delete', OLD.seq, OLD.search_text); END`,
   `CREATE TRIGGER credentials_owner_fixed BEFORE UPDATE OF owner_user_id ON credentials

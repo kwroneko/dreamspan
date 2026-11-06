@@ -24,12 +24,13 @@ export const ownedModel = (sql: SqlClient.SqlClient, userId: UserId, connection:
     WHERE m.id = ${model} AND c.id = ${connection} AND c.owner_user_id = ${userId}
       AND c.deleted_at IS NULL AND c.purged_at IS NULL`.pipe(Effect.map(([row]) => row?.n === 1))
 
-/** A live preset ref of the user's, not a chat override. */
+/** A live preset ref of the user's. */
 export const ownedPreset = (sql: SqlClient.SqlClient, userId: UserId, ref: string) =>
   sql<{ n: number }>`
     SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-    WHERE r.id = ${ref} AND e.owner_user_id = ${userId} AND e.kind = 'preset' AND e.deleted_at IS NULL
-      AND r.ref_kind <> 'chat_override'`.pipe(Effect.map(([row]) => row?.n === 1))
+    WHERE r.id = ${ref} AND e.owner_user_id = ${userId} AND e.kind = 'preset' AND e.deleted_at IS NULL`.pipe(
+    Effect.map(([row]) => row?.n === 1)
+  )
 
 /** A live, unarchived card in this account's persona folder. */
 export const ownedPersona = (sql: SqlClient.SqlClient, userId: UserId, entityId: string) =>

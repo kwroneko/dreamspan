@@ -48,7 +48,8 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
       )
     )
 
-  const family = (userId: UserId, entityId: string) => Effect.map(lib.cardFamily(userId, entityId), (found) => found!)
+  const family = (userId: UserId, entityId: string) =>
+    Effect.map(lib.libraryFamily(userId, entityId), (found) => found!)
 
   const graph = makeGraphWrites(sql, steps.drafts)
   const carry = makeDraftCarry(sql, steps.drafts)
@@ -77,41 +78,24 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
       // write, against the same cards the client checks (live and archived, not in the bin).
       const same = yield* sql<{ id: RefId; label: string; subtitle: string }>`
           SELECT r.id, r.label, r.subtitle FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-          WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL
-            AND r.ref_kind = 'upstream' AND r.label = ${name} AND r.subtitle = ${characterVersion}`
+          WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND r.label = ${name} AND r.subtitle = ${characterVersion}`
       const clash = cardNameClash(same, name, characterVersion)
       if (clash !== null) return yield* new RefOperationRefused({ refId, reason: clash })
 
       const source = sourceRevision ?? ref.head_revision_id
-      const doc: Doc = {
-        ...(yield* lib.loadDoc(source)),
-        name,
-        nickname,
-        character_version: characterVersion
-      }
-      const fork = yield* steps.createUpstream({
+      // The library's one fork step (spec/LIBRARY-FORKS.md), with the names the dialog gave.
+      const fork = yield* steps.forkEntity({
         userId,
-        kind: "card",
+        ref,
         label: name,
         subtitle: characterVersion,
-        doc: steps.encode(doc),
-        schemaVersion: (yield* steps.revision(source)).schema_version,
-        origin: "user",
-        originRef: JSON.stringify({ forked: source }),
-        sourcePath: null,
-        sourceHash: null,
-        message: `Forked from ${ref.label}${ref.subtitle ? ` · ${ref.subtitle}` : ""}`
+        source,
+        doc: { ...(yield* lib.loadDoc(source)), name, nickname, character_version: characterVersion }
       })
-      const at = Date.now()
-      yield* sql`UPDATE entities SET forked_from_entity_id = ${ref.entity_id}, forked_from_revision_id = ${source},
-                   forked_at = ${at} WHERE id = ${fork.entity_id}`
-      // Folders, the persona folder included.
-      yield* sql`INSERT INTO entity_tags (entity_id, tag)
-                   SELECT ${fork.entity_id}, tag FROM entity_tags WHERE entity_id = ${ref.entity_id}`
 
-      // The card's own notes, each a new note of the fork's from its head (DESIGN §4, Q2).
+      // The card's own notes, each a fork of that note, of the fork's, from its head (DESIGN §4, Q2).
       const notes = yield* lib.refsWhere(
-        `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+        `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL
            AND json_extract((SELECT h.doc_json FROM entity_revisions h WHERE h.id = r.head_revision_id),
              '$.owner.card') = ?`,
         [userId, ref.entity_id]
@@ -119,28 +103,20 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
       const noteCopies = new Map<string, EntityId>()
       for (const note of notes.toSorted((a, b) => (a.entity_id < b.entity_id ? -1 : 1))) {
         const noteDoc = yield* lib.loadDoc(note.head_revision_id)
-        const copy = yield* steps.createUpstream({
+        // Its lineage keeps a draft typed before a saved change on its base for conflict detection,
+        // including when this note is copied through another card fork later.
+        const copy = yield* steps.forkEntity({
           userId,
-          kind: "note",
+          ref: note,
           label: note.label,
           subtitle: note.subtitle,
-          doc: steps.encode({
+          doc: {
             ...noteDoc,
             owner: { card: fork.entity_id as EntityId },
             ...forkCondition(noteDoc, ref.entity_id, fork.entity_id as EntityId)
-          }),
-          schemaVersion: (yield* steps.revision(note.head_revision_id)).schema_version,
-          origin: "user",
-          originRef: JSON.stringify({ forked: note.head_revision_id }),
-          sourcePath: null,
-          sourceHash: null,
+          },
           message: "Copied with the card's fork"
         })
-        // Drafts typed before a saved change must keep that base for conflict detection,
-        // including when this note is copied through another card fork later.
-        yield* sql`UPDATE entities SET forked_from_entity_id = ${note.entity_id},
-          forked_from_revision_id = ${note.head_revision_id}, forked_at = ${at}
-          WHERE id = ${copy.entity_id}`
         noteCopies.set(note.entity_id, copy.entity_id as EntityId)
         // Its unsaved text goes with the fork, still unsaved; the original goes back to its
         // last revision, the text one step back in its edit history (owner, 2026-11-02).
@@ -154,8 +130,6 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
             base: (typed) => (typed === null || typed === note.head_revision_id ? copy.head_revision_id : typed)
           }
         )
-        yield* sql`INSERT INTO entity_tags (entity_id, tag)
-                     SELECT ${copy.entity_id}, tag FROM entity_tags WHERE entity_id = ${note.entity_id}`
       }
 
       // The card's own unsaved fields go with the fork too, without asking (owner, 2026-11-02),

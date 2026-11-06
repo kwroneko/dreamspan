@@ -315,7 +315,7 @@ export class AppCoreApi extends RpcGroup.make(
   // (POST /library/import, /library/export), since RPC messages are JSON.
   /** Data from the worker exporter registry, in preference order. */
   Rpc.make("ListExportFormats", { success: Schema.Array(ExportFormatInfo), error: ServerError }),
-  /** The user's upstream refs and variants of one kind, by label. */
+  /** The user's entries of one kind, forks included, by label. */
   Rpc.make("ListLibrary", {
     payload: {
       kind: EntityKind,

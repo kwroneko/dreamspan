@@ -43,7 +43,7 @@ export const register = () => [
   libraryItemActions.register({
     id: "card-import.new-version",
     order: 40,
-    available: ({ entry }) => entry.kind === "card" && entry.refKind === "upstream",
+    available: ({ entry }) => entry.kind === "card",
     menu: (props) => (
       <Suspense fallback={null}>
         <MenuEntry openDialog={props.openDialog} description={props.description} />

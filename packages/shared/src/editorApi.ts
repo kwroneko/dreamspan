@@ -18,7 +18,7 @@ export class InvalidDocument extends Schema.TaggedError<InvalidDocument>()("Inva
   problems: Schema.Array(Schema.String)
 }) {}
 
-/** The change doesn't apply here (a chat override can't be forked, the update moved on). */
+/** The change doesn't apply here (a card forks with its names, the update moved on). */
 export class EditRefused extends Schema.TaggedError<EditRefused>()("EditRefused", {
   message: Schema.String
 }) {}
@@ -312,7 +312,10 @@ export class EditorApi extends RpcGroup.make(
     error: Schema.Union([...Writes])
   }),
   // --- Edit scope (DESIGN §4).
-  /** A non-card variant following this ref, optionally taking its unsaved drafts along. */
+  /**
+   * A fork of this preset, lorebook or note: an entry of its own, which takes the original's later
+   * changes only by an explicit merge (spec/LIBRARY-FORKS.md), optionally taking its unsaved drafts along.
+   */
   Rpc.make("ForkVariant", {
     payload: { refId: RefId, label: Label, subtitle: Subtitle, moveDrafts: Schema.Boolean },
     success: LibraryRef,
@@ -466,7 +469,7 @@ export class EditorApi extends RpcGroup.make(
 ) {}
 
 /**
- * Explicit merges into a fork or chat override from its parent or import line, and the
+ * Explicit merges into a fork from its parent or import line, and the
  * family tree (DESIGN §4). A group of its own, merged into AppApi with its own handler
  * layer: one handler layer for every RPC exceeds TypeScript's instantiation depth (TS2589).
  */

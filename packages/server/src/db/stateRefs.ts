@@ -25,7 +25,7 @@ type Reference =
       readonly chatOwned?: true | "required"
       readonly allowDeleted?: true
     }
-  /** A ref of `entity` when given; a chat override only of this chat. */
+  /** A ref of `entity` when given. */
   | { readonly table: "ref"; readonly id: string; readonly kind: EntityKind; readonly entity: string | undefined }
   /** A revision of `entity`, or of the entity of `ref`, when given. */
   | {
@@ -119,17 +119,17 @@ export const checkStateReferences = (
               AND owner_user_id = ${userId} AND kind = ${reference.kind} AND (${reference.allowDeleted ? 0 : live} = 0 OR deleted_at IS NULL)
               AND (${reference.chatOwned ? 1 : 0} = 0 OR NOT EXISTS (
                 SELECT 1 FROM entity_refs r JOIN entity_revisions v ON v.id = r.head_revision_id
-                WHERE r.entity_id = ${reference.id} AND r.ref_kind = 'upstream'
+                WHERE r.entity_id = ${reference.id}
                   AND json_extract(v.doc_json, '$.owner.chat') IS NOT NULL
                   AND json_extract(v.doc_json, '$.owner.chat') <> ${chatId}))
               AND (${reference.chatOwned === "required" ? 1 : 0} = 0 OR EXISTS (
                 SELECT 1 FROM entity_refs r JOIN entity_revisions v ON v.id = r.head_revision_id
-                WHERE r.entity_id = ${reference.id} AND r.ref_kind = 'upstream'
+                WHERE r.entity_id = ${reference.id}
                   AND json_extract(v.doc_json, '$.owner.chat') = ${chatId}))`
           case "ref":
             return sql<{ n: number }>`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
               WHERE r.id = ${reference.id} AND e.owner_user_id = ${userId} AND e.kind = ${reference.kind}
-                AND (${live} = 0 OR e.deleted_at IS NULL) AND (r.chat_id IS NULL OR r.chat_id = ${chatId})
+                AND (${live} = 0 OR e.deleted_at IS NULL)
                 AND (${reference.entity ?? null} IS NULL OR r.entity_id = ${reference.entity ?? null})`
           case "revision":
             return sql<{ n: number }>`SELECT count(*) AS n FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
