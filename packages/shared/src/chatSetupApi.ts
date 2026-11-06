@@ -261,7 +261,11 @@ export class ShellForks extends Schema.Class<ShellForks>("ShellForks")({
 /** Initial snapshots and subsequent changed rows; order also carries removals and page boundaries. */
 export const ShellCardsUpdate = Schema.Struct({
   ...ShellCards.fields,
-  order: Schema.Struct({ cards: Schema.Array(EntityId), personas: Schema.Array(EntityId) })
+  order: Schema.Struct({
+    cards: Schema.Array(EntityId),
+    personas: Schema.Array(EntityId),
+    archived: Schema.Array(EntityId)
+  })
 })
 export type ShellCardsUpdate = typeof ShellCardsUpdate.Type
 export const ShellForksUpdate = Schema.Struct({

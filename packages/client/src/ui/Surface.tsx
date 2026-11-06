@@ -117,13 +117,13 @@ export function Alert({
   return (
     <div
       role={tone === "danger" ? "alert" : "status"}
-      className={`flex flex-col gap-2 rounded-md border p-3 text-sm sm:flex-row sm:items-start sm:justify-between ${alertTones[tone]}`}
+      className={`flex flex-col gap-2 rounded-md border p-3 text-sm sm:flex-row sm:flex-wrap sm:items-start sm:justify-between ${alertTones[tone]}`}
     >
-      <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 flex-col gap-1 [overflow-wrap:anywhere] sm:basis-60 sm:grow">
         {title && <p className={`font-medium ${alertTitleTones[tone]}`}>{title}</p>}
         {children && <div className="text-text [overflow-wrap:anywhere]">{children}</div>}
       </div>
-      {actions && <div className="flex shrink-0 gap-2">{actions}</div>}
+      {actions && <div className="flex max-w-full shrink-0 flex-wrap gap-2">{actions}</div>}
     </div>
   )
 }

@@ -1482,7 +1482,7 @@ const composeStage = sync("compose", (assembly) => {
   // impersonation turn, as ST passes the character's prompts for every generation type).
   const speaker = cast.speaker
   // Card-swap (DESIGN §5.2), as ST's "Swap character cards" group mode: the preset's card
-  // places hold only the speaking character's card, with its examples and notes; the other
+  // places hold only the speaking character's card, with its examples and definition notes; the other
   // characters' are left out. Everything else, the persona included, goes where the preset says.
   // The chat's card layout (`cards.rotation`, with or without tools), or the card-swap reply mode.
   const rotation = mode.cardsRotation || assembly.request.agent?.speakerCardOnly === true
@@ -1697,7 +1697,9 @@ const composeStage = sync("compose", (assembly) => {
     group ? exampleLines(assembly, card, modelName(card.doc), true) : exampleLines(assembly, card, names.char, false)
   )
   let examples: Array<Array<ChatLine>> = examples0
-  const pendingNotes = placedNotes(assembly, characters, cast.personas)
+  // Only notes inside the definitions follow the rotating card. Notes at other positions
+  // keep their own conditions (CHARACTER-CONTEXT §4.1's documented difference from ST).
+  const pendingNotes = placedNotes(assembly, cast.characters, cast.personas)
   const newChat = group
     ? optional("utility.new_group_chat_prompt", utility.new_group_chat_prompt)
     : optional("utility.new_chat_prompt", utility.new_chat_prompt)

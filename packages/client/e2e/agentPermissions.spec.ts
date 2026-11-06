@@ -15,12 +15,13 @@ import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
-import { asUser } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let adminCookie = ""
+const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), adminCookie, use)
 const shots = process.env.SCREENSHOT_DIR
 test.setTimeout(180_000)
 
@@ -82,7 +83,10 @@ test.beforeAll(async () => {
   provider = await startNoteProvider()
 })
 // Each test's replies count from 1: a worker runs several of them.
-test.beforeEach(() => provider.reset())
+test.beforeEach(async () => {
+  provider.reset()
+  adminCookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+})
 test.afterAll(async () => {
   await provider.stop()
 })
@@ -261,6 +265,43 @@ for (const width of [1440, 390])
         own: false,
         chosen: false
       })
+      // Linking a note keeps a chat override. Its box is disabled, but Reset must still
+      // drop that override: switch_note uses the same permission for its local activation.
+      const lampBox = notes.getByRole("checkbox", { name: `Lamp oil ${width} ${theme}` })
+      await lampBox.click()
+      await expect(lampBox).toBeChecked()
+      const lampNote = await admin((api) =>
+        Effect.gen(function* () {
+          const entries = yield* api.ListChatNotes({ chatId: fixture.chatId, slotId: fixture.slotId })
+          const lamp = entries.find((n) => n.ref.label === `Lamp oil ${width} ${theme}`)!
+          yield* api.CreateSharedNote({
+            title: `Shared lamp ${width} ${theme}`,
+            content: "The lamp needs oil.",
+            fromNoteRefId: lamp.ref.id,
+            chatNote: { chatId: fixture.chatId, slotId: fixture.slotId }
+          })
+          return lamp.ref
+        })
+      )
+      await expect(lampBox).toBeDisabled()
+      await expect(notes.getByRole("button", { name: "Reset" })).toHaveCount(1)
+      await lampBox.scrollIntoViewIfNeeded()
+      await shot("chat-linked-note-reset")
+      await expectLayout(page, info, `linked-note-reset-${width}-${theme}`, { scope: "[data-agent-permissions]" })
+      await notes.getByRole("button", { name: "Reset" }).click()
+      await expect(notes.getByRole("button", { name: "Reset" })).toHaveCount(0)
+      await expect(lampBox).not.toBeChecked()
+      await expect(lampBox).toBeDisabled()
+      const linkedReset = await admin((api) =>
+        api.GetAgentPermissions({ chatId: fixture.chatId, slotId: fixture.slotId })
+      )
+      expect(linkedReset.notes.find((n) => n.entityId === lampNote.entityId)).toMatchObject({
+        linked: true,
+        on: false,
+        own: false,
+        chosen: false
+      })
+      // Keep it linked so the Notes panel's layout audit also checks its shared banner.
       // Card swap, the chat's card layout: a switch of its own, with or without tools.
       const swap = settings.getByRole("region", { name: "Card swap" })
       await expect(swap.getByRole("switch", { name: "Card swap" })).not.toBeChecked()

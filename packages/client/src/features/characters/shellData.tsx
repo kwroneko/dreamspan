@@ -44,7 +44,10 @@ export const shellAtom = Atom.keepAlive(
         Effect.map(AppClient, (client) =>
           client("WatchShellCards", undefined).pipe(
             Stream.retry(Schedule.spaced("1 second")),
-            Stream.scan(() => ({ cards: [], personas: [], pinsCollapsed: false }) as ShellCards, applyShellCards),
+            Stream.scan(
+              (): ShellCards => ({ cards: [], personas: [], archived: [], pinsCollapsed: false }),
+              applyShellCards
+            ),
             Stream.drop(1)
           )
         )

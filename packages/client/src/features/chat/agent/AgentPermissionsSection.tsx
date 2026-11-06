@@ -134,7 +134,7 @@ function Permissions({
       <Row
         key={key}
         reset={
-          n.chosen && !n.linked ? (
+          n.chosen ? (
             <Reset
               disabled={busy}
               hint={`Goes back to “${n.title}”'s own setting: the model ${n.own ? "may" : "may not"} change it.`}
