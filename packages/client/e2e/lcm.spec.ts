@@ -16,6 +16,7 @@ import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { condensed, count, failedJob, level1 } from "./support/summaries.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { showActions } from "./support/message.ts"
+import { expectFlashedThenUnmarked, recordFlashes } from "./support/flashes.ts"
 import { makeCopy } from "../src/features/editor/backup.ts"
 
 const server = serverPerFile(withAdmin)
@@ -172,6 +173,7 @@ for (const [name, viewport] of [
 
     test("the panel lists the summaries by level and range; a range opens at its first message", async ({ page }) => {
       const fixture = await makeChat(`panel-${name}`)
+      await recordFlashes(page)
       await open(page, fixture)
       await page.getByTestId("lcm-boundary").click()
       const dialog = panel(page)
@@ -192,7 +194,7 @@ for (const [name, viewport] of [
       if (name === "phone") await expect(dialog).toHaveCount(0)
       else await expect(dialog).toBeVisible()
       await expect(page).toHaveURL(new RegExp(`slot=${fixture.entries[4]!.slotId}`))
-      await expect(article(page, fixture, 5)).toHaveClass(/border-accent/)
+      await expectFlashedThenUnmarked(page, article(page, fixture, 5))
       if (name === "phone") {
         await page.goBack()
         await expect(children).toBeVisible()

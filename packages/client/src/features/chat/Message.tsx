@@ -507,7 +507,6 @@ const swipeCanStart = (target: EventTarget | null) =>
 export const Message = memo(function Message({
   entry,
   session,
-  highlighted,
   context,
   revealed,
   onReveal,
@@ -516,7 +515,6 @@ export const Message = memo(function Message({
 }: {
   entry: PathEntry
   session: ChatSession
-  highlighted: boolean
   /** Why it isn't sent to the model, when it was left out or summarized (not hidden). */
   context: ContextMark | null
   /** Its actions are shown on a narrow screen, after a tap. */
@@ -814,13 +812,11 @@ export const Message = memo(function Message({
       className={`group flex touch-pan-y gap-3 rounded-lg border px-3 py-2.5 max-sm:gap-2.5 max-sm:px-2.5 ${
         context?.kind === "dropped" ? "text-muted border-dashed " : ""
       }${context?.kind === "summarized" ? "border-l-4 border-l-accent/50 " : ""}${
-        highlighted
-          ? "border-accent bg-accent/5"
-          : context?.kind === "dropped"
-            ? "border-border"
-            : model
-              ? "border-transparent hover:bg-surface-raised/40"
-              : "border-transparent bg-surface-raised"
+        context?.kind === "dropped"
+          ? "border-border"
+          : model
+            ? "border-transparent hover:bg-surface-raised/40"
+            : "border-transparent bg-surface-raised"
       }`}
       onPointerDown={onPointerDown}
       onPointerUp={onPointerUp}

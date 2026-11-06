@@ -25,15 +25,7 @@ const included = {
   left_out: "Not read by the model"
 } as const
 
-export function MergedChatRow({
-  entry,
-  session,
-  highlighted
-}: {
-  entry: PathEntry
-  session: ChatSession
-  highlighted: boolean
-}) {
+export function MergedChatRow({ entry, session }: { entry: PathEntry; session: ChatSession }) {
   const [info, setInfo] = useState<MergeInfo | null>(null)
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<ReadonlyArray<MergedMessage>>([])
@@ -98,7 +90,7 @@ export function MergedChatRow({
       data-slot={entry.slotId}
       data-merge
       data-hidden={hidden || undefined}
-      className={`group flex min-w-0 flex-col gap-1 rounded-lg border border-dashed px-3 py-2 ${highlighted ? "border-accent bg-accent/5" : "border-border"}`}
+      className="group flex min-w-0 flex-col gap-1 rounded-lg border border-dashed border-border px-3 py-2"
     >
       <header className="flex min-h-8 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <Tooltip label={open ? "Click to hide the merged messages." : "Click to show the merged messages."}>

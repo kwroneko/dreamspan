@@ -7,6 +7,7 @@ import type { Chat, SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
+import { expectFlashedThenUnmarked, recordFlashes } from "./support/flashes.ts"
 import { REPLY, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, startServer, withAdmin } from "./support/server.ts"
@@ -126,8 +127,13 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
     await expect(page.getByText("Link copied")).toBeVisible()
     const link = await page.evaluate(() => navigator.clipboard.readText())
     expect(link).toMatch(/slot=/)
+    await recordFlashes(page)
     await page.goto(link)
-    await expect(page.locator("article[data-slot]").first()).toHaveClass(/border-accent/)
+    // It flashes, then is left unmarked.
+    await expectFlashedThenUnmarked(
+      page,
+      page.locator(`article[data-slot="${new URL(link).searchParams.get("slot")}"]`)
+    )
 
     // A branch from the first message: the reply below it isn't on it.
     await messageMenu(page.getByRole("article", { name: "Your message" }).first(), "Branch from here")

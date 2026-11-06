@@ -109,14 +109,22 @@ export function revealAdded(item: HTMLElement) {
   const growing = new ResizeObserver(reveal)
   growing.observe(item)
   setTimeout(() => growing.disconnect(), 1000)
-  flash(item)
+  flashItem(item)
 }
 
-/** The box flashing: an accent ring three times, or one fading highlight with reduced motion. */
-function flash(element: HTMLElement) {
+const FLASH = "reveal-flash"
+
+/**
+ * The box flashing: an accent ring three times, or one fading highlight with reduced motion, and
+ * then nothing: what an added item and a message jumped to both show (DESIGN §190, owner
+ * 2026-11-06). `data-flashing` is on it meanwhile.
+ */
+export function flashItem(element: HTMLElement) {
   if (typeof element.animate !== "function") return
   const ring = "inset 0 0 0 2px var(--color-accent)"
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+  // Flashing it again starts over, rather than two flashes out of step.
+  for (const running of element.getAnimations()) if (running.id === FLASH) running.cancel()
   element.dataset.flashing = ""
   const animation = reduced
     ? element.animate(
@@ -138,5 +146,10 @@ function flash(element: HTMLElement) {
           easing: "ease-in-out"
         }
       )
-  animation.onfinish = animation.oncancel = () => delete element.dataset.flashing
+  animation.id = FLASH
+  animation.onfinish = () => delete element.dataset.flashing
+  animation.oncancel = () => {
+    if (!element.getAnimations().some((other) => other.id === FLASH && other !== animation))
+      delete element.dataset.flashing
+  }
 }
