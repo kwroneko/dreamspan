@@ -66,7 +66,7 @@ export const registerMessageActions = () => [
     describe: viewOf(({ session, entry }) => ({
       label: "Write your own version",
       icon: "write",
-      hint: "Write a new version of this message from an empty editor.",
+      hint: "Write a new version of this message, with its versions above the editor to take passages from.",
       onSelect: () => session.openEditor({ _tag: "Write", slotId: entry.slotId }, "", entry.slotId)
     }))
   }),

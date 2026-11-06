@@ -59,6 +59,27 @@ export function revealIfHidden(header: HTMLElement, parts: ReadonlyArray<HTMLEle
 }
 
 /**
+ * Holds `element` where it is on screen for a moment, while what's around it changes size (a
+ * control whose own action changes the length of the text beside it never moves under the
+ * cursor, owner 2026-11-02): each frame scrolls back by however far it moved.
+ */
+export function keepInPlace(element: HTMLElement, ms = 600) {
+  const top = element.getBoundingClientRect().top
+  const until = performance.now() + ms
+  const hold = () => {
+    if (!element.isConnected) return
+    const delta = element.getBoundingClientRect().top - top
+    if (Math.abs(delta) >= 1) {
+      const scroller = scrollParentOf(element)
+      if (scroller) scroller.scrollTop += delta
+      else window.scrollBy(0, delta)
+    }
+    if (performance.now() < until) requestAnimationFrame(hold)
+  }
+  requestAnimationFrame(hold)
+}
+
+/**
  * What an "Add <thing>" button calls on the item it added (owner, 2026-11-02): the whole item
  * scrolled into view, its header included (only as far as needed; an item taller than the view
  * shows from its header down), then its box flashes a few times so the user sees which one it
