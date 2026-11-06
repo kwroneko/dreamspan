@@ -638,9 +638,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         SELECT id, title FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
       if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
       // The legacy physical-chat operation must not erase its split-off groups either.
-      const [split] = yield* sql`SELECT 1 FROM forks f JOIN user_settings m
-        ON m.user_id = ${userId} AND m.key = 'split-chat:' || f.id AND m.value_json = 'true'
-        WHERE f.chat_id = ${chatId} LIMIT 1`
+      const [split] = yield* sql`SELECT 1 FROM forks f WHERE f.chat_id = ${chatId} AND f.split_chat = 1 LIMIT 1`
       if (split) {
         const { groupId, members } = yield* loadChatGroup(userId, chatId, null)
         return yield* removeChatGroup(userId, chatId, groupId, members, chat.title || "Untitled chat")

@@ -26,7 +26,7 @@ export type { ProxyOverride, Route } from "./route.ts"
 const SETTING_KEY = "network"
 const PROXY_BINDING = "app:network:proxy_url"
 
-/** What's stored in app_settings: the proxy URL may hold credentials, so it's encrypted. */
+/** What's stored in app-scoped settings: the proxy URL may hold credentials, so it's encrypted. */
 const StoredNetwork = Schema.Struct({
   proxyUrlEnc: Schema.NullOr(Schema.String),
   bypass: Schema.Array(Schema.String),

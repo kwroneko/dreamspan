@@ -12,7 +12,7 @@ it.live("reads older display rows with colour defaults, merges colour patches an
     const session = yield* api.GetSession()
     yield* fixtureSql(config.dataDir, [
       {
-        sql: "INSERT INTO user_prefs(user_id,key,value_json) VALUES (?, 'display', ?)",
+        sql: "INSERT INTO settings(scope,scope_id,key,value_json,revision,updated_at) VALUES ('user', ?, 'display', ?, 1, 0)",
         params: [session.user.id, JSON.stringify({ reasoning: "collapsed" })]
       }
     ])
@@ -178,6 +178,11 @@ it.live("each device keeps its own workbench layout, and an account keeps its 20
     assert.strictEqual(yield* alice.GetWorkbenchLayout({ device: "other-0" }), JSON.stringify({ index: 0 }))
     const reconnect = yield* client({ "Remote-User": "alice" })
     assert.strictEqual(yield* reconnect.GetWorkbenchLayout({ device: "other-18" }), JSON.stringify({ index: 18 }))
+    yield* bob.SetWorkbenchLayout({ device: "phone", layout: phone })
+    yield* alice.ForgetWorkbenchLayouts({})
+    assert.isNull(yield* alice.GetWorkbenchLayout({ device: "phone" }))
+    assert.isNull(yield* reconnect.GetWorkbenchLayout({ device: "other-18" }))
+    assert.strictEqual(yield* bob.GetWorkbenchLayout({ device: "phone" }), phone)
     const decode = Schema.decodeUnknownOption(WorkbenchDevice)
     for (const value of ["", "a/b", "x".repeat(65), "a b"]) assert.strictEqual(decode(value)._tag, "None")
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))

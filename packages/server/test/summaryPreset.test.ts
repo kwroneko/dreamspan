@@ -100,7 +100,7 @@ lcmTest("summaries use a specific preset, fall back for unavailable refs, and re
     // A dangling stored choice (for example, after removing its ref) also falls back.
     yield* fixtureSql(h.dataDir, [
       {
-        sql: "UPDATE user_settings SET value_json=json_set(value_json, '$.preset', 'missing-summary-preset') WHERE user_id=? AND key='generation.lcm'",
+        sql: "UPDATE settings SET value_json=json_set(value_json, '$.preset', 'missing-summary-preset') WHERE scope='user' AND scope_id=? AND key='generation.lcm'",
         params: [h.userId]
       }
     ])

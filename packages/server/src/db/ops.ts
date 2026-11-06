@@ -2537,7 +2537,7 @@ export class WriteOps extends RpcGroup.make(
     error: StorageError
   }),
   /**
-   * Saves a device's center column layout (key `workbench:<device>` of `user_prefs`). An account
+   * Saves a device's center column layout (device-scoped key `workbench` in `settings`). An account
    * keeps the layouts of its most recently saving devices only.
    */
   Rpc.make("SetWorkbenchLayout", {

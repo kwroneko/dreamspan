@@ -1,7 +1,7 @@
 // A version's reasoning ("thinking", DESIGN §7.4), above its text: it streams live, open by
 // default, and folds when the reply is done; one click opens it again. Folding or opening it
 // while the reply is still being written becomes the user's choice for every reply after
-// (`user_prefs`, so it follows them to other devices). It's never sent back to the model.
+// (`settings`, so it follows them to other devices). It's never sent back to the model.
 // Its header carries the `reasoningActions` slot: Copy reasoning (the raw text) and Collapse
 // all (every reasoning block shown closes; the streaming preference stays as it is).
 // The reply's own leading tagged sections (spec/REPLY-SECTIONS.md) show in a second panel of

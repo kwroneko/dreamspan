@@ -1,9 +1,10 @@
+import { putUserSetting } from "./settings.ts"
 import { readTextCalibration } from "./textCalibration.ts"
 // How each of a user's connections counts tokens (owner, 2026-11-02: "NEVER send anything to
 // providers users didn't actually choose to… It should also be possible to specify a separate
 // token counting endpoint for a connection"; DESIGN §11). On this server unless the user chose a
 // provider: the connection's own, or another of their connections used only for counting.
-// `user_prefs` key `token_counting`, `{ connections: { [id]: viaId } }`. Only choices whose two
+// `settings` key `token_counting`, `{ connections: { [id]: viaId } }`. Only choices whose two
 // connections are still the user's and live read back; anything else counts on this server.
 import type { ConnectionId } from "@rp/shared/providers.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -16,7 +17,9 @@ import { query, transaction } from "./tx.ts"
 const KEY = "token_counting"
 
 const stored = (sql: SqlClient.SqlClient, userId: UserId) =>
-  sql<{ value_json: string }>`SELECT value_json FROM user_prefs WHERE user_id = ${userId} AND key = ${KEY}`.pipe(
+  sql<{
+    value_json: string
+  }>`SELECT value_json FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = ${KEY}`.pipe(
     Effect.map(([row]): Array<[string, string]> => {
       if (!row) return []
       const value = JSON.parse(row.value_json) as { connections?: unknown }
@@ -71,9 +74,7 @@ export const makeTokenCountingWriteHandlers = Effect.gen(function* () {
         const next = (yield* live(sql, userId)).filter((choice) => choice.connectionId !== connectionId)
         if (via) next.push({ connectionId, via })
         const value = { connections: Object.fromEntries(next.map((choice) => [choice.connectionId, choice.via])) }
-        yield* sql`INSERT INTO user_prefs (user_id, key, value_json)
-          VALUES (${userId}, ${KEY}, ${JSON.stringify(value)})
-          ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
+        yield* putUserSetting(sql, userId, KEY, value)
         return next
       }).pipe(transaction(sql, "SetTokenCounting"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>

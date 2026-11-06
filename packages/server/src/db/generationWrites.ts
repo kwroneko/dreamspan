@@ -1,7 +1,8 @@
+import { putUserSetting, writeSetting } from "./settings.ts"
 import { nextSeq, eventApplies } from "./forkState.ts"
 // Generation's writes: rollouts and the user's defaults (ARCHITECTURE §15).
 import type { UserId } from "@rp/shared/domain.ts"
-import { NotFound, StaleWrite } from "@rp/shared/errors.ts"
+import { NotFound } from "@rp/shared/errors.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -13,7 +14,6 @@ import {
   DEFAULT_PERSONA,
   DEFAULT_PRESET,
   GLOBAL_REGEX,
-  readGlobalRegex,
   ownedModel,
   ownedPreset,
   ownedPersona,
@@ -72,11 +72,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       )
     })
 
-  const putSetting = (userId: UserId, key: string, value: unknown) =>
-    value === null
-      ? sql`DELETE FROM user_settings WHERE user_id = ${userId} AND key = ${key}`
-      : sql`INSERT INTO user_settings (user_id, key, value_json) VALUES (${userId}, ${key}, ${JSON.stringify(value)})
-          ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
+  const putSetting = (userId: UserId, key: string, value: unknown) => putUserSetting(sql, userId, key, value)
 
   const connectionLock = (userId: UserId, model: { connection: string } | null) =>
     Effect.gen(function* () {
@@ -287,18 +283,8 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
     /** The global regex scripts replaced, if the caller read the revision stored (ST's "Global scripts"). */
     SetGlobalRegex: ({ userId, scripts, expectedRevision }) =>
       Effect.gen(function* () {
-        const stored = yield* readGlobalRegex(sql, userId)
-        if (stored.revision !== expectedRevision)
-          return yield* new StaleWrite({
-            entity: "global regex scripts",
-            id: userId,
-            expected: expectedRevision,
-            actual: stored.revision
-          })
-        // The schema refused repeated ids and more than MAX_GLOBAL_SCRIPTS.
-        const next = { scripts, revision: stored.revision + 1 }
-        yield* putSetting(userId, GLOBAL_REGEX, next)
-        return next
+        const revision = yield* writeSetting(sql, "user", userId, GLOBAL_REGEX, scripts, expectedRevision)
+        return { scripts, revision }
       }).pipe(transaction(sql, "SetGlobalRegex")),
 
     // One transaction from the read of the stored summary defaults to the write, so another
@@ -328,7 +314,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         if (change.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, change.judge)
         if (change.tail !== undefined || change.fallback !== undefined || change.lcm !== undefined) {
           const [row] = yield* sql<{ value_json: string }>`
-            SELECT value_json FROM user_settings WHERE user_id = ${userId} AND key = ${DEFAULT_LCM}`
+            SELECT value_json FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = ${DEFAULT_LCM}`
           const stored = row ? (JSON.parse(row.value_json) as Record<string, unknown>) : {}
           const lcm: Record<string, unknown> = { ...stored }
           if (change.tail !== undefined) {

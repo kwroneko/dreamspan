@@ -1,12 +1,13 @@
-// The user's generation defaults in `user_settings`; one naming something gone reads as none.
+import { readSetting } from "./settings.ts"
+// The user's generation defaults in `settings`; one naming something gone reads as none.
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { GenerationDefaults } from "@rp/shared/generation.ts"
 import { newChatLcm } from "@rp/shared/lcmSettings.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
-import { GlobalRegex } from "@rp/shared/regexScripts.ts"
-import { Effect, Option, Schema } from "effect"
+import type { GlobalRegex } from "@rp/shared/regexScripts.ts"
+import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 
 export const DEFAULT_PERSONA = "chat.persona"
@@ -42,7 +43,9 @@ export const ownedPersona = (sql: SqlClient.SqlClient, userId: UserId, entityId:
   )
 
 const setting = (sql: SqlClient.SqlClient, userId: UserId, key: string) =>
-  sql<{ value_json: string }>`SELECT value_json FROM user_settings WHERE user_id = ${userId} AND key = ${key}`.pipe(
+  sql<{
+    value_json: string
+  }>`SELECT value_json FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = ${key}`.pipe(
     Effect.map(([row]) => (row ? (JSON.parse(row.value_json) as unknown) : null))
   )
 
@@ -87,13 +90,9 @@ export const newChatLcmSettings = (sql: SqlClient.SqlClient, userId: UserId, ena
     newChatLcm(stored as GenerationDefaults["lcm"] | null, enabled)
   )
 
-const decodeGlobalRegex = Schema.decodeUnknownOption(GlobalRegex)
-
-/** The global regex scripts as stored; a value that doesn't decode reads as none, at its revision. */
+/** The revision belongs to the common settings row, never the JSON payload. */
 export const readGlobalRegex = (sql: SqlClient.SqlClient, userId: UserId) =>
-  Effect.map(setting(sql, userId, GLOBAL_REGEX), (stored): GlobalRegex => {
-    const decoded = decodeGlobalRegex(stored)
-    if (Option.isSome(decoded)) return decoded.value
-    const revision = (stored as { revision?: unknown } | null)?.revision
-    return { scripts: [], revision: typeof revision === "number" && Number.isSafeInteger(revision) ? revision : 0 }
-  })
+  Effect.map(readSetting(sql, "user", userId, GLOBAL_REGEX), ({ value, revision }): GlobalRegex => ({
+    scripts: (value ?? []) as GlobalRegex["scripts"],
+    revision
+  }))

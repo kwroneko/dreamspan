@@ -93,7 +93,7 @@ const choicesById = Schema.Record(Schema.String, Schema.Boolean).check(
     expected: "ids of at most 200 characters"
   })
 )
-/** The user's display choices that follow them across devices (`user_prefs`). */
+/** The user's display choices that follow them across devices (`settings`). */
 const messageColor = Schema.NullOr(Schema.String.check(Schema.isPattern(/^#[\da-f]{6}$/i)))
 const displayFields = {
   mainTextColor: messageColor,

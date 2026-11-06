@@ -1,4 +1,4 @@
-import { splitChatKey } from "./splitChats.ts"
+import { putUserSetting } from "./settings.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { setFavourite } from "./cardFavourites.ts"
@@ -19,14 +19,13 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
           chat_id: ChatId
           name: string | null
           base_slot_id: string | null
-        }>`SELECT f.id, f.chat_id, f.name, f.base_slot_id FROM forks f JOIN chats c ON c.id = f.chat_id
+          split_chat: number
+        }>`SELECT f.id, f.chat_id, f.name, f.base_slot_id, f.split_chat FROM forks f JOIN chats c ON c.id = f.chat_id
           WHERE f.id = ${forkId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
             AND f.deleted_at IS NULL AND f.parent_fork_id IS NOT NULL`
         if (!fork) return yield* new NotFound({ entity: "branch", id: forkId })
         if (title !== undefined) {
-          const [marker] = yield* sql`SELECT 1 FROM user_settings
-            WHERE user_id = ${userId} AND key = ${splitChatKey(forkId)} AND value_json = 'true'`
-          if (fork.name !== title.expectedName || Boolean(marker) === split)
+          if (fork.name !== title.expectedName || Boolean(fork.split_chat) === split)
             return yield* new EditRefused({ message: "This branch changed since confirmation. No changes were made." })
           const name = cleanName(title.name) || null
           if (name !== fork.name) {
@@ -36,10 +35,7 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
               WHERE fork_id = ${forkId} AND parent_slot_id IS ${fork.base_slot_id}`
           }
         }
-        if (split)
-          yield* sql`INSERT INTO user_settings(user_id, key, value_json)
-          VALUES (${userId}, ${splitChatKey(forkId)}, 'true') ON CONFLICT(user_id, key) DO NOTHING`
-        else yield* sql`DELETE FROM user_settings WHERE user_id = ${userId} AND key = ${splitChatKey(forkId)}`
+        yield* sql`UPDATE forks SET split_chat = ${split ? 1 : 0} WHERE id = ${forkId}`
         return fork.chat_id
       }).pipe(transaction(sql, "SetSplitChat")),
     SetChatPin: ({ userId, chatId, pinned }) =>
@@ -48,8 +44,7 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
           yield* sql`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) {
           const [root] = yield* sql`SELECT f.id FROM forks f JOIN chats c ON c.id = f.chat_id
-            JOIN user_settings m ON m.user_id = c.owner_user_id AND m.key = ${splitChatKey(chatId)} AND m.value_json = 'true'
-            WHERE f.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
+            WHERE f.id = ${chatId} AND f.split_chat = 1 AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
           if (!root) return yield* new NotFound({ entity: "chat", id: chatId })
           yield* sql`UPDATE forks SET pinned_at = ${pinned ? Date.now() : null}, row_version = row_version + 1 WHERE id = ${chatId}`
           return
@@ -60,7 +55,7 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
         else yield* sql`DELETE FROM chat_pins WHERE user_id = ${userId} AND chat_id = ${chatId}`
       }).pipe(transaction(sql, "SetChatPin")),
     SetHomePinsCollapsed: ({ userId, collapsed }) =>
-      sql`INSERT INTO shell_preferences(user_id, pins_collapsed) VALUES (${userId}, ${collapsed ? 1 : 0}) ON CONFLICT(user_id) DO UPDATE SET pins_collapsed = excluded.pins_collapsed`.pipe(
+      putUserSetting(sql, userId, "shell.pinsCollapsed", collapsed).pipe(
         Effect.asVoid,
         transaction(sql, "SetHomePinsCollapsed")
       ),

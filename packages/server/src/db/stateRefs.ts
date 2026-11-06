@@ -153,7 +153,7 @@ export const checkStateReferences = (
         if (data.key === "lcm.settings" && reference.table === "ref") {
           const [retained] = yield* sql<{ ok: number }>`SELECT
             NOT EXISTS (SELECT 1 FROM entity_refs WHERE id=${reference.id}) AND (
-              EXISTS (SELECT 1 FROM user_settings WHERE user_id=${userId} AND key='generation.lcm'
+              EXISTS (SELECT 1 FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key='generation.lcm'
                 AND json_extract(value_json, '$.preset')=${reference.id}) OR
               EXISTS (SELECT 1 FROM state_events e JOIN chats c ON c.id=e.chat_id
                 WHERE c.id=${chatId} AND c.owner_user_id=${userId} AND e.key='lcm.settings'

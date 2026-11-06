@@ -1,5 +1,5 @@
 // The center column's frames and tabs (client features/workbench), kept per account and
-// device in `user_prefs` so a reload opens them as the user left them on that device: a phone
+// device in `settings` so a reload opens them as the user left them on that device: a phone
 // and a desktop each keep their own.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
