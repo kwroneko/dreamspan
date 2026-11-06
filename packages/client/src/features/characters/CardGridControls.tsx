@@ -27,7 +27,7 @@ export function CardGridControls({
     const sheet = new CSSStyleSheet()
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
     const node = root.current!
-    const filters = node.querySelector<HTMLElement>(".card-grid-filter > *")!
+    const filters = node.querySelector<HTMLElement>('.card-grid-filter [role="group"]')!
     const sort = node.querySelector<HTMLElement>(".card-grid-sort > *")!
     const search = node.querySelector<HTMLElement>(".card-grid-search-size")!
     const measure = () => {
@@ -61,8 +61,9 @@ export function CardGridControls({
     <div ref={root} data-card-grid-controls style={{ containerType: "inline-size", containerName: name }}>
       <div aria-hidden="true" className="card-grid-search-size invisible absolute h-0 w-xs" />
       <div className="card-grid-controls grid min-w-0 grid-cols-1 items-start gap-2">
-        <div className="card-grid-filter min-w-0 overflow-x-auto">
+        <div className="card-grid-filter min-w-0 overflow-x-auto [&>div]:w-max">
           <CardFilterControl
+            archived
             value={browse.filter}
             onChange={(filter) => onChange({ filter })}
             cards={browsable(data)}

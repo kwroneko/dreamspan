@@ -125,6 +125,7 @@ export class ShellCard extends Schema.Class<ShellCard>("ShellCard")({
   addedAt: Schema.Number,
   /** The user's favourite (`cards.favourites`; an import's ST `fav` until the user sets it here). */
   favourite: Schema.Boolean,
+  archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   /** In the persona folder (DESIGN §2.2): card lists offer it under Personas, and mark it where they mix it in. */
   persona: Schema.Boolean,
   /** Null: the card is in no chat yet, and its tile starts one. */
@@ -196,6 +197,7 @@ export class ShellCards extends Schema.Class<ShellCards>("ShellCards")({
   cards: Schema.Array(ShellCard),
   /** Persona usage for library and card details; kept apart from the character grids. */
   personas: Schema.Array(ShellCard),
+  archived: Schema.Array(ShellCard),
   pinsCollapsed: Schema.Boolean
 }) {}
 

@@ -229,6 +229,7 @@ function Page({ card, persona = false }: { card: CardUsage; persona?: boolean })
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <CenterHeaderContent>
             <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{card.label}</h1>
+            <CardSurface placement="archive-toggle" entityId={card.entityId} />
           </CenterHeaderContent>
           {persona && <PersonaBadge />}
           <CardSurface placement="provenance" entityId={card.entityId} />

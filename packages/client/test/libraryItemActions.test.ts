@@ -50,7 +50,7 @@ it("offers each kind its own actions, a lorebook an Edit, a card no merging upda
   try {
     const card = { entry: ref({ hasImport: true }), persona: false, exportFormats: formats }
     // A card takes a new version wholesale through "Import a new version…" (features/cardImport).
-    expect(ids(card)).toEqual(["library.chat", "library.edit", "library.persona", "library.export"])
+    expect(ids(card)).toEqual(["library.chat", "library.edit", "library.archive", "library.persona", "library.export"])
     expect(ids({ ...card, entry: ref({ hasImport: false }) })).not.toContain("library.update")
     // Every kind opens in its editor's page, a lorebook too.
     expect(ids({ ...card, entry: ref({ kind: "lorebook" }) })).toEqual(["library.edit", "library.update"])

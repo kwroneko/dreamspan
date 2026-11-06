@@ -1,3 +1,7 @@
+import { ArchivedMatches } from "./ArchivedMatches.tsx"
+import { ArchiveUnused } from "./ArchiveUnused.tsx"
+import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
+import { CardArchive, CardArchiveMenu } from "./CardArchive.tsx"
 import { sidebarSearch } from "./sidebarSearch.ts"
 import { shellSearchKeys, tabKinds } from "../workbench/kinds.ts"
 import { SplitChatSection } from "../chat/SplitChatSection.tsx"
@@ -20,6 +24,21 @@ import { CardChatsLink, CastChatsLink } from "./chatLinks.tsx"
 import { castMemberNavigation } from "../chat/presentation.tsx"
 
 export const register = () => {
+  cardContributions.register({
+    id: "cards.archive-toggle",
+    placement: "archive-toggle",
+    order: 10,
+    component: CardArchive
+  })
+  cardContributions.register({ id: "cards.archive-menu", placement: "actions", order: 90, menu: CardArchiveMenu })
+  cardContributions.register({
+    id: "cards.archive-tile-menu",
+    placement: "tile-menu",
+    order: 10,
+    component: CardArchiveMenu
+  })
+  archivedCardActions.register({ id: "cards.archive-unused", order: 10, component: ArchiveUnused })
+  cardSearchExtras.register({ id: "cards.archived-search", order: 10, component: ArchivedMatches })
   registerDefaultPersona()
   panelEditorActions.register({ id: "characters.panel-favourite", order: 40, component: PanelFavourite })
   characterChatActions.register({ id: "characters.new-chat", order: 10, component: NewCharacterChat })
