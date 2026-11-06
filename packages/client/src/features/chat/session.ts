@@ -69,6 +69,9 @@ export const liveSections = Atom.family((_id: VersionId) => Atom.make<string | n
 /** A generating agent reply's steps as they stand (spec/AGENTIC.md §5.1); null when it isn't generating or has none yet. */
 export const liveSteps = Atom.family((_id: VersionId) => Atom.make<ReadonlyArray<RolloutStep> | null>(null))
 
+/** Multiple workbench views share live atoms in the same registry. */
+const liveOwners = new WeakMap<AtomRegistry.AtomRegistry, Map<VersionId, number>>()
+
 export interface ChatView {
   readonly chat: Chat | null
   /** The fork shown, as the server resolved it (spec/FORK-INDEPENDENCE-DELTA.md §2.1). */
@@ -642,14 +645,7 @@ export class ChatSession {
     if (this.highlightTimer !== null) clearTimeout(this.highlightTimer)
     if (this.frame !== null) cancelAnimationFrame(this.frame)
     if (this.subscription) Effect.runFork(Fiber.interrupt(this.subscription))
-    for (const [id, unmount] of this.live) {
-      this.registry.set(waitingCache(id), false)
-      this.registry.set(liveText(id), null)
-      this.registry.set(liveReasoning(id), null)
-      this.registry.set(liveSections(id), null)
-      this.registry.set(liveSteps(id), null)
-      unmount()
-    }
+    for (const unmount of this.live.values()) unmount()
     this.live.clear()
   }
 
@@ -1332,12 +1328,25 @@ export class ChatSession {
   }
 
   private mountLive(id: VersionId) {
+    const owners = liveOwners.get(this.registry) ?? new Map<VersionId, number>()
+    liveOwners.set(this.registry, owners)
+    owners.set(id, (owners.get(id) ?? 0) + 1)
     const text = this.registry.mount(liveText(id))
     const reasoning = this.registry.mount(liveReasoning(id))
     const sections = this.registry.mount(liveSections(id))
     const steps = this.registry.mount(liveSteps(id))
     const waiting = this.registry.mount(waitingCache(id))
     return () => {
+      const remaining = (owners.get(id) ?? 1) - 1
+      if (remaining > 0) owners.set(id, remaining)
+      else {
+        owners.delete(id)
+        this.registry.set(waitingCache(id), false)
+        this.registry.set(liveText(id), null)
+        this.registry.set(liveReasoning(id), null)
+        this.registry.set(liveSections(id), null)
+        this.registry.set(liveSteps(id), null)
+      }
       text()
       reasoning()
       sections()

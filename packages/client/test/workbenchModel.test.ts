@@ -122,6 +122,32 @@ describe("workbench layout", () => {
     expect(focusedTab(layout)?.href).toBe("/b")
   })
 
+  it("uses the strip's insertion boundary when reordering to the right", () => {
+    let layout = initialLayout("/a")
+    layout = pinTab(layout, focusedTab(layout)!.id)
+    for (const href of ["/b", "/c"]) layout = openTab(layout, href, keyOf, { preview: false })
+    layout = moveTab(layout, allTabs(layout)[0]!.id, focusedFrame(layout).id, 2)
+    expect(titles(layout)).toEqual([["/b", "/a", "/c"]])
+  })
+
+  it("keeps moved tabs open without crossing the pinned boundary", () => {
+    let layout = initialLayout("/a")
+    const a = focusedTab(layout)!.id
+    layout = stickTab(layout, a, true)
+    const left = focusedFrame(layout).id
+    layout = splitFrame(layout, left, "row")
+    layout = openTab(layout, "/b", keyOf)
+    const b = focusedTab(layout)!.id
+    layout = openTab(layout, "/c", keyOf, { frame: left })
+    layout = moveTab(layout, b, left, 0, keyOf)
+    expect(titles(layout)).toEqual([["/a", "/b", "/c"], ["/a"]])
+    expect(allTabs(layout).find((t) => t.id === b)?.preview).toBe(false)
+    layout = moveTab(layout, a, left, 3, keyOf)
+    expect(titles(layout)[0]).toEqual(["/a", "/b", "/c"])
+    layout = openTab(layout, "/d", keyOf)
+    expect(titles(layout)[0]).toEqual(["/a", "/b", "/d"])
+  })
+
   it("splits empty on either side, for a tab dropped on a frame's edge", () => {
     let layout = initialLayout("/a")
     layout = pinTab(layout, focusedTab(layout)!.id)
@@ -202,5 +228,25 @@ describe("workbench layout", () => {
       }
     })
     expect(broken && titles(broken)).toEqual(titles(layout))
+  })
+
+  it("drops network-path URLs and repairs saved pinned and preview order", () => {
+    for (const href of ["//other.invalid/chats/a", "/\\other.invalid/chats/a"]) {
+      expect(restoreLayout({ version: 1, root: { type: "frame", id: "f", tabs: [{ id: "t", href }] } })).toBeNull()
+    }
+    const restored = restoreLayout({
+      version: 1,
+      root: {
+        type: "frame",
+        id: "f",
+        tabs: [
+          { id: "a", href: "/a", preview: true },
+          { id: "b", href: "/b", sticky: true },
+          { id: "c", href: "/c", preview: true }
+        ]
+      }
+    })!
+    expect(titles(restored)).toEqual([["/b", "/a", "/c"]])
+    expect(allTabs(restored).filter((tab) => tab.preview)).toHaveLength(1)
   })
 })

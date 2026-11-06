@@ -110,7 +110,7 @@ const shoot = async (page: Page, name: string, width: number, theme: string) => 
   await page.screenshot({ path: join(shots, `${name}-${width}-${theme}.png`) })
 }
 
-const composerBox = (page: Page) => page.locator("#composer")
+const composerBox = (page: Page) => page.getByTestId("composer")
 const guidanceSwitch = (page: Page) => page.getByRole("switch", { name: "Guidance", exact: true })
 const lastMessage = (page: Page) => page.locator("article[data-slot]").last()
 /** The latest reply's › past its last version, shown without a hover at every width. */

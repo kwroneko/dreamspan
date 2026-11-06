@@ -57,10 +57,11 @@ export function DocumentSwitcher({
             // An editor opened from a chat stays bound to that chat.
             const chat = typeof search.chat === "string" ? { chat: search.chat } : {}
             const chatFork = typeof search.chatFork === "string" ? { chatFork: search.chatFork } : {}
+            const chatTab = typeof search.chatTab === "string" ? { chatTab: search.chatTab } : {}
             void navigate({
               to: "/library/$refId",
               params: { refId: next },
-              search: { ...(focus ? { focus } : {}), ...chat, ...chatFork }
+              search: { ...(focus ? { focus } : {}), ...chat, ...chatFork, ...chatTab }
             })
           }}
         />

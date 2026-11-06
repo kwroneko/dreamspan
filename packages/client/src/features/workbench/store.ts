@@ -154,6 +154,11 @@ export class WorkbenchStore {
     if (allTabs(next).length === 0) {
       this.layout = openTab(next, HOME, itemKey)
     }
+    // Closed views must not keep their pictures, reading state or deferred navigation alive.
+    const live = new Set(allTabs(this.layout).map((tab) => tab.id))
+    for (const values of [this.meta, this.initialState, this.openedFrom, this.unsavedTabs]) {
+      for (const id of values.keys()) if (!live.has(id)) values.delete(id)
+    }
     for (const listener of this.listeners) listener()
     this.schedule(saveAfter)
     const after = focusedTab(this.layout)
@@ -483,9 +488,13 @@ export class WorkbenchStore {
       const tab = findTab(this.layout, id)
       if (!tab || frameOfTab(this.layout, id)?.active !== id) continue
       if (this.panelTabs.has(id)) return id
-      const chat = new URL(tab.href, "http://tab.invalid").searchParams.get("chat")
+      const params = new URL(tab.href, "http://tab.invalid").searchParams
+      const chat = params.get("chat")
       if (!chat) continue
       const key = itemKey(`/chats/${chat}`)
+      const sourceId = params.get("chatTab")
+      const source = sourceId ? findTab(this.layout, sourceId) : undefined
+      if (source && this.panelTabs.has(source.id) && itemKey(source.href) === key) return source.id
       const owner = allTabs(this.layout).find((t) => this.panelTabs.has(t.id) && itemKey(t.href) === key)
       if (owner) return owner.id
     }
