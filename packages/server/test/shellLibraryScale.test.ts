@@ -56,10 +56,6 @@ const build = (userId: string, now: number) => {
         SELECT printf('c-%05d', i), ?, 'rp', 'active', 'Chat ' || i, ?, ? + i FROM sizes`,
       params: [userId, now, now]
     },
-    {
-      sql: `INSERT INTO lanes (id, chat_id, name, created_at) SELECT 'l-' || i, printf('c-%05d', i), 'main', ? FROM sizes`,
-      params: [now]
-    },
     // Every fifth chat is a group of three; 20 cards are never used.
     {
       sql: `INSERT INTO state_events (id, chat_id, seq, key, value_json, origin, created_at, fork_id, fork_seq)
@@ -80,9 +76,9 @@ const build = (userId: string, now: number) => {
       params: [now - 10_000_000, now - 10_000_000]
     },
     {
-      sql: `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
+      sql: `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
         WITH RECURSIVE ${series("d", BIG_MESSAGES)}
-        SELECT 's-' || s.i || '-' || d.i, printf('c-%05d', s.i), 'l-' || s.i,
+        SELECT 's-' || s.i || '-' || d.i, printf('c-%05d', s.i),
           CASE WHEN d.i = 0 THEN NULL ELSE 's-' || s.i || '-' || (d.i - 1) END, d.i, 'v-' || s.i || '-' || d.i, ?
         FROM d JOIN sizes s ON d.i < s.n ORDER BY d.i, s.i`,
       params: [now - 10_000_000]
@@ -132,8 +128,8 @@ const measure = () =>
           params: [`v-0-${depth}`, `s-0-${depth}`, now + n, now + n]
         },
         {
-          sql: `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
-            VALUES (?, 'c-00000', 'l-0', ?, ?, ?, ?)`,
+          sql: `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
+            VALUES (?, 'c-00000', ?, ?, ?, ?)`,
           params: [`s-0-${depth}`, `s-0-${depth - 1}`, depth, `v-0-${depth}`, now + n]
         },
         { sql: `UPDATE chats SET active_leaf_slot_id = ? WHERE id = 'c-00000'`, params: [`s-0-${depth}`] }

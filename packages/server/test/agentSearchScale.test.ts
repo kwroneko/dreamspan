@@ -53,10 +53,9 @@ describe("search_chat at scale", () => {
             params: [c, c]
           },
           {
-            sql: `${n} INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
-              SELECT ?||'-s'||x,?,(SELECT id FROM lanes WHERE chat_id=? LIMIT 1),
-                CASE WHEN x=0 THEN NULL ELSE ?||'-s'||(x-1) END,x,?||'-v'||x,1,? FROM n`,
-            params: [c, c, c, c, c, main]
+            sql: `${n} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
+              SELECT ?||'-s'||x,?,CASE WHEN x=0 THEN NULL ELSE ?||'-s'||(x-1) END,x,?||'-v'||x,1,? FROM n`,
+            params: [c, c, c, c, main]
           },
           // A side reply at each fork's base, off the main path, naming the lighthouse too.
           {
@@ -65,17 +64,17 @@ describe("search_chat at scale", () => {
             params: [c, c]
           },
           {
-            sql: `${k} INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
-              SELECT ?||'-side'||x,?,(SELECT id FROM lanes WHERE chat_id=? LIMIT 1),?||'-s'||(15*(x+1)-1),15*(x+1),?||'-sv'||x,1,? FROM k`,
-            params: [c, c, c, c, c, main]
+            sql: `${k} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
+              SELECT ?||'-side'||x,?,?||'-s'||(15*(x+1)-1),15*(x+1),?||'-sv'||x,1,? FROM k`,
+            params: [c, c, c, c, main]
           },
           { sql: "UPDATE forks SET tip_slot_id=? WHERE id=?", params: [`${c}-s${LENGTH - 1}`, main] },
           // 300 forks, each off its side reply, selecting swipes near its base.
           {
-            sql: `${k} INSERT INTO forks(id,chat_id,parent_fork_id,branched_at,base_slot_id,tip_slot_id,created_at,lineage_json)
-              SELECT ?||'-f'||x,?,?,0,?||'-s'||(15*(x+1)-1),?||'-side'||x,1,json_array(json_array(?||'-f'||x,NULL),json_array(?,NULL))
+            sql: `${k} INSERT INTO forks(id,chat_id,parent_fork_id,branched_at,base_slot_id,tip_slot_id,created_at)
+              SELECT ?||'-f'||x,?,?,0,?||'-s'||(15*(x+1)-1),?||'-side'||x,1
               FROM k`,
-            params: [c, c, main, c, c, c, main]
+            params: [c, c, main, c, c]
           },
           {
             sql: `${k}, j(y) AS (SELECT 0 UNION ALL SELECT y+1 FROM j WHERE y<19)
@@ -86,9 +85,9 @@ describe("search_chat at scale", () => {
           },
           // The fork searched in: the main path, showing the swipe at every 100th message.
           {
-            sql: `INSERT INTO forks(id,chat_id,parent_fork_id,branched_at,base_slot_id,tip_slot_id,created_at,lineage_json)
-              VALUES (?,?,?,0,?,?,1,json_array(json_array(?,NULL),json_array(?,NULL)))`,
-            params: [target, c, main, `${c}-s${LENGTH - 1}`, `${c}-s${LENGTH - 1}`, target, main]
+            sql: `INSERT INTO forks(id,chat_id,parent_fork_id,branched_at,base_slot_id,tip_slot_id,created_at)
+              VALUES (?,?,?,0,?,?,1)`,
+            params: [target, c, main, `${c}-s${LENGTH - 1}`, `${c}-s${LENGTH - 1}`]
           },
           {
             sql: `${n} INSERT INTO fork_overrides(id,chat_id,fork_id,seq,kind,target_id,slot_id,slot_depth,value_id)

@@ -57,7 +57,14 @@ const scriptedModel = () => {
 type Api = Effect.Success<ReturnType<typeof client>>
 
 /** A chat note with this text, which the agent may change or not, made from the editor. */
-const chatNote = (api: Api, chatId: ChatId, title: string, content: string, editable: boolean) =>
+const chatNote = (
+  api: Api,
+  chatId: ChatId,
+  title: string,
+  content: string,
+  editable: boolean,
+  fields: ReadonlyArray<readonly [string, string]> = []
+) =>
   Effect.gen(function* () {
     const ref = yield* api.CreateChatNote({ chatId, title })
     const save = (field: string, value: string) =>
@@ -76,6 +83,7 @@ const chatNote = (api: Api, chatId: ChatId, title: string, content: string, edit
       })
     yield* save(textField(["content"]), content)
     if (editable) yield* save(valueField(["agent_editable"]), "true")
+    for (const [field, value] of fields) yield* save(field, value)
     const opened = yield* api.OpenEditor({ refId: ref.id as RefId })
     yield* api.CommitEditorDrafts({
       refId: ref.id as RefId,
@@ -95,6 +103,79 @@ const stepResults = (api: Api, versionId: VersionId) =>
     .pipe(Effect.map((steps) => steps.flatMap((s) => (s.kind === "tool" ? [s.result] : []))))
 
 describe("agent note tools", () => {
+  for (const deniedBy of ["note", "chat", "link", "linked replacement"] as const)
+    it.live(`edit_card respects a tail note's permission denied by the ${deniedBy}`, () => {
+      const config = testConfig()
+      const model = scriptedModel()
+      return Effect.gen(function* () {
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() => startMockProvider(model.handler)),
+          (m) => Effect.promise(() => m.close())
+        )
+        const api = yield* client()
+        const { version, events, chat, mira } = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          mira: { description: "She wears a grey coat.", agent_editable_fields: ["description"] },
+          state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        })
+        const tail = yield* chatNote(
+          api,
+          chat.id,
+          "Mira's current description",
+          "Keep this text.",
+          deniedBy !== "note",
+          deniedBy === "linked replacement"
+            ? [
+                [
+                  valueField(["replaces"]),
+                  JSON.stringify({ kind: "card_field", field: "description", card: mira.entityId })
+                ]
+              ]
+            : []
+        )
+        if (deniedBy === "link" || deniedBy === "linked replacement")
+          yield* api.CreateSharedNote({
+            title: "Shared details",
+            content: "Keep this text.",
+            fromNoteRefId: tail.id,
+            chatNote: { chatId: chat.id, forkId: chat.currentForkId, slotId: version.slotId }
+          })
+        const me = yield* api.Whoami()
+        const reader = yield* Reader
+        if (deniedBy === "chat") {
+          const writer = yield* Writer
+          yield* writer.AddStateEvent({
+            userId: me.id,
+            chatId: chat.id,
+            slotId: null,
+            versionId: null,
+            scope: null,
+            data: { key: "agent.permission", value: { note: tail.entityId, on: false } }
+          })
+        }
+        model.run([["edit_card", { character: "Mira", field: "description", find: "grey coat", replace: "red gown" }]])
+        const { entry } = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+        const swipe = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+        yield* eventually(() => finished(events, swipe.version.id) !== undefined)
+        assert.deepStrictEqual(yield* stepResults(api, swipe.version.id), [
+          deniedBy === "link" || deniedBy === "linked replacement"
+            ? "“Mira's current description” shows a shared note, which only its editor changes."
+            : "You may not change “Mira's current description”."
+        ])
+        const notes = yield* reader.ChatNoteEntries({
+          userId: me.id,
+          chatId: chat.id,
+          slotId: version.slotId,
+          cards: []
+        })
+        assert.deepStrictEqual(
+          notes.map((n) => n.doc["content"]),
+          ["Keep this text."]
+        )
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+
   it.live("write_note and edit_note change only what the chat allows, and a swipe takes it back", () => {
     const config = testConfig()
     const model = scriptedModel()

@@ -1,3 +1,4 @@
+import { installStorageKindValidation } from "./storageKinds.ts"
 import { makeStImportPrefix, stImportPrefixHandlers } from "./stImportPrefix.ts"
 import { stateModuleHandlers } from "./stateModules.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
@@ -47,6 +48,7 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
     WriteOps.toLayer(
       Effect.gen(function* () {
         // After the migrations, which make the tables it watches.
+        yield* installStorageKindValidation
         yield* trackSummaryTouches(yield* SqlClient.SqlClient)
         // One bin (and draft store) for every handler group.
         const bin = makeBin(

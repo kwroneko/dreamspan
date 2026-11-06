@@ -16,8 +16,8 @@ lcmTest(
             sql: `${seq} INSERT INTO versions(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) SELECT 'v-${count}-'||i,'s-${count}-'||i,0,'complete','human','synthetic','verbatim','user_written',1,1 FROM n`
           },
           {
-            sql: `${seq} INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at) SELECT 's-${count}-'||i,?,(SELECT id FROM lanes WHERE chat_id=?),CASE WHEN i=0 THEN NULL ELSE 's-${count}-'||(i-1) END,i,'v-${count}-'||i,1 FROM n`,
-            params: [h.chat.id, h.chat.id]
+            sql: `${seq} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at) SELECT 's-${count}-'||i,?,CASE WHEN i=0 THEN NULL ELSE 's-${count}-'||(i-1) END,i,'v-${count}-'||i,1 FROM n`,
+            params: [h.chat.id]
           },
           { sql: "UPDATE chats SET active_leaf_slot_id=? WHERE id=?", params: [`s-${count}-${count - 1}`, h.chat.id] }
         ])
@@ -58,8 +58,8 @@ for (const absent of ["hidden", "deleted", "empty"] as const)
             params: ["story ".repeat(70)]
           },
           {
-            sql: `${seq} INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,context_excluded,created_at) SELECT 'hidden-s-'||i,?,(SELECT id FROM lanes WHERE chat_id=?),CASE WHEN i=0 THEN NULL ELSE 'hidden-s-'||(i-1) END,i,'hidden-v-'||i,CASE WHEN i<99900 THEN 1 ELSE 0 END,1 FROM n`,
-            params: [h.chat.id, h.chat.id]
+            sql: `${seq} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,context_excluded,created_at) SELECT 'hidden-s-'||i,?,CASE WHEN i=0 THEN NULL ELSE 'hidden-s-'||(i-1) END,i,'hidden-v-'||i,CASE WHEN i<99900 THEN 1 ELSE 0 END,1 FROM n`,
+            params: [h.chat.id]
           },
           { sql: "UPDATE chats SET active_leaf_slot_id='hidden-s-99999' WHERE id=?", params: [h.chat.id] },
           // Marks as the code before forks wrote them, which the database freezes now.

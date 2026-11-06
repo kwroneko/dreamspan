@@ -24,7 +24,14 @@ import type { Providers, ProviderError } from "../providers/Providers.ts"
 import type { AgentPlan } from "./modes.ts"
 import { countSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
 import { danglingCalls } from "./resume.ts"
-import { budgetResult, type FrozenTool, frozenTool, sendMessageDefinition, type RolloutTool } from "./tools.ts"
+import {
+  budgetResult,
+  type FrozenTool,
+  frozenTool,
+  sendMessageDefinition,
+  type RolloutTool,
+  type ToolOutput
+} from "./tools.ts"
 import { rolloutRequest } from "./wire.ts"
 
 declare module "@earendil-works/pi-agent-core" {
@@ -133,12 +140,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       const prefix = providerRequest(resolved, model)
       const sends = plan.contract !== "final_text"
       let sent: string | undefined
-      const sendTool = sendMessageTool((message) => {
+      const send = (message: string) => {
         if (sent !== undefined) return false
         sent = message
         emit(message)
         return true
-      })
+      }
+      const sendTool = sendMessageTool(send)
       // A resume offers the definitions its snapshot froze, exactly as they were sent.
       const frozen = (run.offered ?? tools.map(frozenTool)).filter((t) => t.name !== SEND_MESSAGE)
       const piTools: ReadonlyArray<Tool> = [
@@ -329,8 +337,22 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         parameters: tool.parameters,
         executionMode: "sequential",
         execute: async (toolCallId, params, signal) => {
+          // A committed call's receipt takes precedence over validation against its own
+          // changed state (a note may now exist, or its old passage may already be gone).
+          const execute =
+            tool.effect === "chat_state"
+              ? run.reader
+                  .RolloutReceipt({ userId: request.userId, rolloutId, toolCallId })
+                  .pipe(
+                    Effect.flatMap((receipt) =>
+                      receipt === null
+                        ? tool.execute(context(toolCallId), params as never)
+                        : Effect.succeed<ToolOutput>({ text: receipt })
+                    )
+                  )
+              : tool.execute(context(toolCallId), params as never)
           // A stop interrupts the tool; its result says so, and a resume runs the call again.
-          const exit = await runPromise(Effect.exit(tool.execute(context(toolCallId), params as never)), {
+          const exit = await runPromise(Effect.exit(execute), {
             signal
           }).catch(() => undefined)
           if (signal?.aborted || exit === undefined || Exit.isFailure(exit))
@@ -459,7 +481,27 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       )
       // A resumed run first runs the calls it had made without results (receipts make a
       // chat-state call already written answer as it did), then goes on as the loop would.
-      const dangling = danglingCalls(agent.state.messages)
+      // A terminal send may have been flushed before the process died, while the version's
+      // completion was not. Restore it through the ordinary output pipeline without a new turn.
+      if (sends && seed) {
+        const delivered = new Set(
+          seed.flatMap((m) =>
+            m.role === "toolResult" && m.toolName === SEND_MESSAGE && !m.isError ? [m.toolCallId] : []
+          )
+        )
+        for (const message of seed) {
+          if (message.role !== "assistant") continue
+          for (const part of message.content)
+            if (
+              part.type === "toolCall" &&
+              part.name === SEND_MESSAGE &&
+              delivered.has(part.id) &&
+              typeof part.arguments.message === "string"
+            )
+              send(part.arguments.message)
+        }
+      }
+      const dangling = sent === undefined ? danglingCalls(agent.state.messages) : []
       if (dangling.length > 0) {
         const signal = new AbortController()
         yield* Effect.addFinalizer(() => Effect.sync(() => signal.abort()))

@@ -49,7 +49,6 @@ const version = (id: string, slotId: string, status: Version["status"], content:
 const entry = (slot: string, parent: string | null, v: Version, rowVersion = 1) =>
   ({
     slotId: slot as SlotId,
-    laneId: "lane",
     parentSlotId: parent as SlotId | null,
     depth: parent === null ? 0 : 1,
     rowVersion,

@@ -194,9 +194,7 @@ export const makeWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           const at = Date.now()
           const chatId = uuidv7()
-          const laneId = uuidv7()
           yield* sql`INSERT INTO chats ${sql.insert({ id: chatId, owner_user_id: userId, kind, status, title, created_at: at })}`
-          yield* sql`INSERT INTO lanes ${sql.insert({ id: laneId, chat_id: chatId, name: "main", created_at: at })}`
           yield* insertStateEvent(userId, chatId, null, null, null, {
             key: "lcm.settings",
             value: yield* newChatLcmSettings(sql, userId)
@@ -206,7 +204,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           }
           if (greeting) {
             yield* checkSpeaker(userId, greeting.speakerEntityId)
-            const { slotId } = yield* insertSlot(chatId, laneId, null, greeting, at)
+            const { slotId } = yield* insertSlot(chatId, null, greeting, at)
             yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId} WHERE id = ${chatId}`
           }
           const [row] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
@@ -748,8 +746,8 @@ export const makeWriteHandlers = (bin: Bin) =>
       SwitchBranch: ({ userId, chatId, slotId, index, forkId }) =>
         Effect.gen(function* () {
           const shown = yield* ownedFork(userId, chatId, forkId)
-          const [slot] = yield* sql<{ parent_slot_id: string | null; lane_id: string; inserted: number }>`
-            SELECT parent_slot_id, lane_id, inserted FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`
+          const [slot] = yield* sql<{ parent_slot_id: string | null; inserted: number }>`
+            SELECT parent_slot_id, inserted FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`
           if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
           // An inserted message has no alternates (ListBranches): index 0 is itself.
           const [sibling] =
@@ -760,11 +758,11 @@ export const makeWriteHandlers = (bin: Bin) =>
               : slot.parent_slot_id === null
                 ? yield* sql<{ id: SlotId }>`
                   SELECT x.id FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${chatId} AND x.depth = 0
-                    AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                    AND ${sql.literal(reachableSlot("x"))}
                   ORDER BY x.id LIMIT 1 OFFSET ${index}`
                 : yield* sql<{ id: SlotId }>`
                   SELECT x.id FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
-                    AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                    AND x.chat_id = ${chatId} AND ${sql.literal(reachableSlot("x"))}
                   ORDER BY x.id LIMIT 1 OFFSET ${index}`
           if (!sibling) return yield* new NotFound({ entity: "branch", id: `${slotId}#${index}` })
           let fork: ForkRow | null = yield* forkThrough(sql, chatId, sibling.id, shown.id)

@@ -52,7 +52,6 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
       const [run] = yield* sql<{
         n: number
         root: number
-        merged: number
         generating: number
         hidden: number
       }>`WITH RECURSIVE chain(id, parent, depth) AS (
@@ -61,11 +60,10 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
             WHERE c.id <> ${first}
         ) SELECT count(*) AS n,
           coalesce(sum(c.id = ${first} AND c.parent IS NULL), 0) AS root,
-          coalesce(sum(EXISTS (SELECT 1 FROM slot_parents m WHERE m.slot_id = c.id)), 0) AS merged,
           coalesce(sum(coalesce(v.status = 'generating', 0)), 0) AS generating,
           coalesce(sum(${contextExcludedIn(sql, fork)}), 0) AS hidden
           FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}`
-      if (!run || run.n < 1 || run.root !== 1 || run.merged > 0 || run.generating > 0) continue
+      if (!run || run.n < 1 || run.root !== 1 || run.generating > 0) continue
       return {
         noteEntity: row.entity_id,
         content: note.value.content,

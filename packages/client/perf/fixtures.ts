@@ -40,14 +40,13 @@ const versionsAt = (depth: number) => (depth % 50 === 1 ? 4 : 1)
 const htmlAt = (depth: number) => depth % 997 === 0
 
 const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => {
-  const lane = (db.prepare("SELECT id FROM lanes WHERE chat_id = ?").get(chatId) as { id: string }).id
   const insertVersion = db.prepare(
     `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, error_json, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?, ?)`
   )
   const insertSlot = db.prepare(
-    `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
   )
   const start = Date.now() - count * 60_000
   const slots: Array<string> = []
@@ -80,7 +79,7 @@ const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => 
       )
       if (!failed) selected = id
     }
-    insertSlot.run(slotId, chatId, lane, parentId, depth, selected, at)
+    insertSlot.run(slotId, chatId, parentId, depth, selected, at)
     lastSelected = selected
     return slotId
   }

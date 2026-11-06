@@ -9,7 +9,6 @@ import {
   type EntityId,
   Fork,
   type ForkId,
-  type LaneId,
   PathEntry,
   RecordedGeneration,
   type SlotId,
@@ -284,7 +283,6 @@ export const toVersion = (row: VersionRow) =>
 
 /** A slot on a path, with its selected version's columns under their own names. */
 export interface PathRow extends VersionRow {
-  readonly lane_id: string
   readonly parent_slot_id: string | null
   readonly depth: number
   readonly row_version: number
@@ -315,7 +313,6 @@ export const toPathEntry = (row: PathRow) => {
   const contextExcluded = row.context_excluded === 1
   return new PathEntry({
     slotId: row.slot_id as SlotId,
-    laneId: row.lane_id as LaneId,
     parentSlotId: row.parent_slot_id as SlotId | null,
     depth: row.depth,
     rowVersion: row.row_version,

@@ -136,13 +136,12 @@ describe("chains", () => {
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`
-      yield* sql`INSERT INTO lanes (id, chat_id, name, created_at) VALUES ('main', 'chat', 'main', 1), ('side', 'chat', 'side', 2)`
-      const slot = (id: string, parent: string | null, depth: number, lane = "main", chain: string | null = null) =>
+      const slot = (id: string, parent: string | null, depth: number, chain: string | null = null) =>
         Effect.gen(function* () {
           yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
             VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`
-          yield* sql`INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, chain_id)
-            VALUES (${id}, 'chat', ${lane}, ${parent}, ${depth}, ${`v-${id}`}, 1, ${chain})`
+          yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, chain_id)
+            VALUES (${id}, 'chat', ${parent}, ${depth}, ${`v-${id}`}, 1, ${chain})`
         }).pipe(sql.withTransaction)
       const chain = (id: string) =>
         sql<{ chain_id: string }>`SELECT chain_id FROM slots WHERE id = ${id}`.pipe(Effect.map(([r]) => r!.chain_id))
@@ -151,19 +150,19 @@ describe("chains", () => {
       yield* slot("r", null, 0)
       yield* slot("a", "r", 1)
       yield* slot("b", "r", 1)
-      // A child in another lane than its parent starts a chain, even as the first child.
-      yield* slot("l", "a", 2, "side")
+      // The first child continues its parent chain; the next child starts a new one.
+      yield* slot("l", "a", 2)
       yield* slot("m", "a", 2)
       assert.deepStrictEqual(
         [yield* chain("r"), yield* chain("a"), yield* chain("b"), yield* chain("l"), yield* chain("m")],
-        ["r", "r", "b", "l", "r"]
+        ["r", "r", "b", "r", "m"]
       )
       // Nothing moves a slot to another chain, or inserts one with a chain other than its own.
       assert.isTrue(yield* refused(sql`UPDATE slots SET chain_id = 'b' WHERE id = 'a'`))
-      assert.isTrue(yield* refused(slot("x", "b", 2, "main", "r")))
-      assert.isTrue(yield* refused(slot("y", "m", 3, "main", "y")))
-      yield* slot("z", "m", 3, "main", "r") // its own chain, stated
-      assert.strictEqual(yield* chain("z"), "r")
+      assert.isTrue(yield* refused(slot("x", "b", 2, "r")))
+      assert.isTrue(yield* refused(slot("y", "m", 3, "y")))
+      yield* slot("z", "m", 3, "m") // its own chain, stated
+      assert.strictEqual(yield* chain("z"), "m")
 
       const event = (id: string, slotId: string | null, extra = sql``) =>
         sql`INSERT INTO state_events (id, chat_id, slot_id, seq, key, value_json, origin, created_at ${extra})
@@ -173,7 +172,7 @@ describe("chains", () => {
       const placed = yield* sql<{ id: string; slot_chain_id: string | null; slot_depth: number | null }>`
         SELECT id, slot_chain_id, slot_depth FROM state_events ORDER BY id`
       assert.deepStrictEqual(placed, [
-        { id: "e1", slot_chain_id: "r", slot_depth: 2 },
+        { id: "e1", slot_chain_id: "m", slot_depth: 2 },
         { id: "e2", slot_chain_id: null, slot_depth: null }
       ])
       assert.isTrue(yield* refused(sql`UPDATE state_events SET slot_chain_id = 'b' WHERE id = 'e1'`))
@@ -193,13 +192,12 @@ describe("chains", () => {
         yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
         yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
         yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`
-        yield* sql`INSERT INTO lanes (id, chat_id, name, created_at) VALUES ('main', 'chat', 'main', 1)`
         const slot = (id: string, parent: string | null, depth: number, inserted = 0) =>
           Effect.gen(function* () {
             yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
             VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`
-            yield* sql`INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
-            VALUES (${id}, 'chat', 'main', ${parent}, ${depth}, ${`v-${id}`}, 1, ${inserted})`
+            yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
+            VALUES (${id}, 'chat', ${parent}, ${depth}, ${`v-${id}`}, 1, ${inserted})`
           }).pipe(sql.withTransaction)
         const placed = (id: string) =>
           sql<{ chain_id: string; depth: number }>`SELECT chain_id, depth FROM slots WHERE id = ${id}`.pipe(

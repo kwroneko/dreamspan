@@ -93,7 +93,6 @@ layer(serverLayer(config), { excludeTestServices: true })("batched ST message in
             config.dataDir,
             [
               { sql: "SELECT * FROM chats WHERE id = ?", params: [chat] },
-              { sql: "SELECT * FROM lanes WHERE chat_id = ? ORDER BY id", params: [chat] },
               { sql: "SELECT * FROM forks WHERE chat_id = ? ORDER BY id", params: [chat] },
               { sql: "SELECT * FROM slots WHERE chat_id = ? ORDER BY depth", params: [chat] },
               {
@@ -123,7 +122,7 @@ layer(serverLayer(config), { excludeTestServices: true })("batched ST message in
           ])
           for (const [table, rows] of result.entries()) {
             for (const [index, row] of rows.entries()) {
-              if (typeof row.id === "string" && table !== 8) ids.set(row.id, `${table}:${index}`)
+              if (typeof row.id === "string" && table !== 7) ids.set(row.id, `${table}:${index}`)
             }
           }
           const normalize = (value: unknown): unknown => {
@@ -138,7 +137,7 @@ layer(serverLayer(config), { excludeTestServices: true })("batched ST message in
               return Object.fromEntries(Object.entries(value).map(([key, val]) => [key, normalize(val)]))
             return value
           }
-          result[4]!.forEach((row, index) => {
+          result[3]!.forEach((row, index) => {
             row.seq = index
           })
           return normalize(result)
@@ -211,7 +210,6 @@ it.live(
           "entity_refs",
           "entity_revisions",
           "chats",
-          "lanes",
           "forks",
           "slots",
           "versions",
@@ -242,11 +240,11 @@ it.live(
           { readOnly: true }
         )
         assert.deepStrictEqual(rows.at(-1), [])
-        assert.lengthOf(rows[6]!, family.uniqueMessages)
-        assert.lengthOf(rows[7]!, family.uniqueVersions + (change === "local" || change === "swipe" ? 1 : 0))
-        assert.lengthOf(rows[5]!, family.files.length)
-        assert.lengthOf(rows[14]!, family.files.length)
-        assert.isTrue(rows[14]!.every((row) => row.valid === 1))
+        assert.lengthOf(rows[5]!, family.uniqueMessages)
+        assert.lengthOf(rows[6]!, family.uniqueVersions + (change === "local" || change === "swipe" ? 1 : 0))
+        assert.lengthOf(rows[4]!, family.files.length)
+        assert.lengthOf(rows[13]!, family.files.length)
+        assert.isTrue(rows[13]!.every((row) => row.valid === 1))
         const library = yield* api.GetShellLibrary()
         // All physical storage and derived search/participation rows, plus the shell's
         // summaries. Only independent IDs, sequence offsets and wall clocks differ.
@@ -256,8 +254,8 @@ it.live(
         ])
         for (const [table, entries] of rows.entries())
           for (const [index, row] of entries.entries()) {
-            if (typeof row.id === "string" && table !== 12) ids.set(row.id, `${table}:${index}`)
-            if (table === 7) row.seq = index
+            if (typeof row.id === "string" && table !== 11) ids.set(row.id, `${table}:${index}`)
+            if (table === 6) row.seq = index
             if (table === 2) {
               assert.strictEqual(row.doc_hash, docHash(JSON.parse(row.doc_json as string)))
               row.doc_hash = "verified from document"
@@ -266,7 +264,7 @@ it.live(
         // Summary baseline hashes include source-slot UUIDs. Their complete stored
         // texts, revision history and coverage are compared above/below as ordinary rows.
         let summarySignature = 0
-        for (const row of rows[10]!) {
+        for (const row of rows[9]!) {
           const payload = JSON.parse(row.payload_json as string)
           const summary = JSON.parse(payload.state).summary
           if (typeof summary === "string" && !ids.has(summary))

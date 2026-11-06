@@ -6,8 +6,8 @@
 // far. Its point is B(F)·enc(e(F)); its range is every label from B(F)·enc(0) up to its end
 // B(F)·ff. Making G from F sets B(G) to F's point and moves F's epoch on, so whatever F writes
 // afterwards sorts after everything in G's range, and whatever it wrote before, before. `enc`
-// is order-preserving and prefix-free: one byte e + 1 for e < 224, else f0 and two bytes;
-// ff never starts a code.
+// is order-preserving and prefix-free: one byte e + 1 below 224, f0 and two bytes below
+// 65,760, else f1 and eight bytes; ff never starts a code.
 //
 // A per-fork row (`fork_overrides`) of (kind, target) written in F adds a step at F's point
 // naming the row and, the first time F writes that key, a step at F's end naming the row in
@@ -22,14 +22,22 @@ import type { DatabaseSync } from "node:sqlite"
 
 /** SQL: the code of epoch `e` (an SQL expression) as hex text. */
 const encHexSql = (e: string) =>
-  `(CASE WHEN ${e} < 224 THEN printf('%02X', ${e} + 1) ELSE 'F0' || printf('%04X', ${e} - 224) END)`
+  `(CASE WHEN ${e} < 224 THEN printf('%02X', ${e} + 1)
+    WHEN ${e} < 65760 THEN 'F0' || printf('%04X', ${e} - 224)
+    ELSE 'F1' || printf('%016X', ${e} - 224) END)`
 
 /** SQL: the label `base`·enc(`e`) (SQL expressions; `||` on blobs makes text, hence hex). */
 const labelSql = (base: string, e: string) => `unhex(hex(${base}) || ${encHexSql(e)})`
 
 /** The code of epoch `e`. */
-const enc = (e: number): Uint8Array =>
-  e < 224 ? Uint8Array.of(e + 1) : Uint8Array.of(0xf0, (e - 224) >> 8, (e - 224) & 0xff)
+const enc = (e: number): Uint8Array => {
+  if (e < 224) return Uint8Array.of(e + 1)
+  if (e < 65760) return Uint8Array.of(0xf0, (e - 224) >> 8, (e - 224) & 0xff)
+  const out = new Uint8Array(9)
+  out[0] = 0xf1
+  new DataView(out.buffer).setBigUint64(1, BigInt(e) - 224n)
+  return out
+}
 
 const concat = (a: Uint8Array, b: Uint8Array) => {
   const out = new Uint8Array(a.length + b.length)
@@ -118,7 +126,9 @@ export const forkLabelSchema: ReadonlyArray<string> = [
   `CREATE TRIGGER fork_overrides_steps_gone AFTER DELETE ON fork_overrides BEGIN
     DELETE FROM fork_steps WHERE kind = OLD.kind AND target_id = OLD.target_id;
   END`,
-  `CREATE TRIGGER state_events_fork_label AFTER INSERT ON state_events WHEN NEW.fork_id IS NOT NULL AND ${live} BEGIN
+  // A legacy interrupted import copies events with their original labels and fork seqs.
+  `CREATE TRIGGER state_events_fork_label AFTER INSERT ON state_events
+    WHEN NEW.fork_id IS NOT NULL AND NEW.fork_label IS NULL AND ${live} BEGIN
     UPDATE state_events SET fork_label = (SELECT point FROM fork_labels WHERE fork_id = NEW.fork_id) WHERE id = NEW.id;
   END`,
   `CREATE TRIGGER state_events_fork_label_fixed BEFORE UPDATE OF fork_label ON state_events

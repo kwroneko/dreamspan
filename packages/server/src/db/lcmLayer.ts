@@ -61,14 +61,13 @@ export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId, view?
         if (ok) memo.set(id, true)
         return ok
       }
-      const chain = yield* sql<{ id: string; parent_slot_id: string | null; merged: number }>`
+      const chain = yield* sql<{ id: string; parent_slot_id: string | null }>`
       WITH RECURSIVE chain(id,parent_slot_id,n) AS (
         SELECT id,parent_slot_id,1 FROM slots WHERE id=${summary.last_slot_id} AND chat_id=${summary.chat_id}
         UNION ALL SELECT s.id,s.parent_slot_id,c.n+1 FROM slots s JOIN chain c ON s.id=c.parent_slot_id
           WHERE c.n<${summary.slot_count} AND s.chat_id=${summary.chat_id}
-      ) SELECT id,parent_slot_id,EXISTS(SELECT 1 FROM slot_parents p WHERE p.slot_id=chain.id) AS merged FROM chain ORDER BY n DESC`
-      if (chain.length !== summary.slot_count || chain[0]?.id !== summary.first_slot_id || chain.some((s) => s.merged))
-        return false
+      ) SELECT id,parent_slot_id FROM chain ORDER BY n DESC`
+      if (chain.length !== summary.slot_count || chain[0]?.id !== summary.first_slot_id) return false
       const inputs = yield* sql<{ ordinal: number; slot_id: string; version_valid: number }>`
       SELECT i.ordinal,i.slot_id,i.version_id IS NULL OR EXISTS(SELECT 1 FROM versions v WHERE v.id=i.version_id AND v.slot_id=i.slot_id) AS version_valid
       FROM summary_inputs i WHERE i.summary_id=${id} ORDER BY i.ordinal`
@@ -125,9 +124,8 @@ export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId, view?
   }) =>
     Effect.gen(function* () {
       const pieces = view!.pieces!
-      const inputs = yield* sql<{ ordinal: number; slot_id: string; version_valid: number; merged: number }>`
-        SELECT i.ordinal, i.slot_id, i.version_id IS NULL OR EXISTS(SELECT 1 FROM versions v WHERE v.id=i.version_id AND v.slot_id=i.slot_id) AS version_valid,
-          EXISTS(SELECT 1 FROM slot_parents p WHERE p.slot_id=i.slot_id) AS merged
+      const inputs = yield* sql<{ ordinal: number; slot_id: string; version_valid: number }>`
+        SELECT i.ordinal, i.slot_id, i.version_id IS NULL OR EXISTS(SELECT 1 FROM versions v WHERE v.id=i.version_id AND v.slot_id=i.slot_id) AS version_valid
         FROM summary_inputs i WHERE i.summary_id=${summary.id} ORDER BY i.ordinal`
       const children = yield* sql<{
         ordinal: number
@@ -156,7 +154,7 @@ export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId, view?
         return (
           !children.length &&
           inputs.length === summary.slot_count &&
-          inputs.every((i, n) => i.ordinal === n && i.version_valid && !i.merged) &&
+          inputs.every((i, n) => i.ordinal === n && i.version_valid) &&
           inputs[0]?.slot_id === summary.first_slot_id &&
           inputs.at(-1)?.slot_id === summary.last_slot_id &&
           followsInDisplay(

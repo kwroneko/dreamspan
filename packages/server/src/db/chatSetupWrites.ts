@@ -328,7 +328,6 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           }
           const at = Date.now()
           const chatId = uuidv7() as ChatId
-          const laneId = uuidv7()
           const names = ids.filter((id) => cards.includes(id)).map((id) => byId.get(id)!.card.name)
           yield* sql`INSERT INTO chats ${sql.insert({
             id: chatId,
@@ -338,7 +337,6 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             title: title?.trim() || titleFor(names, at),
             created_at: at
           })}`
-          yield* sql`INSERT INTO lanes ${sql.insert({ id: laneId, chat_id: chatId, name: "main", created_at: at })}`
           yield* graph.insertStateEvent(userId, chatId, null, null, null, {
             key: "lcm.settings",
             value: yield* newChatLcmSettings(sql, userId)
@@ -385,7 +383,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               0,
               options.findIndex((option) => option.index === greeting)
             )
-            const inserted = yield* graph.insertSlot(chatId, laneId, parent, greetingVersion(0), at, null, more, picked)
+            const inserted = yield* graph.insertSlot(chatId, parent, greetingVersion(0), at, null, more, picked)
             const slotId = inserted.slotId as SlotId
             yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
             root = slotId

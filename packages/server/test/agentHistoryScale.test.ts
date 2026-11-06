@@ -30,9 +30,9 @@ it.live("history reads stay on the selected path with 5,000 messages, 300 forks 
       },
       {
         sql: `WITH RECURSIVE ns(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM ns WHERE n<4999)
-          INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at)
-          SELECT 'scale-s-'||n,?,(SELECT id FROM lanes WHERE chat_id=?),CASE WHEN n=0 THEN NULL ELSE 'scale-s-'||(n-1) END,n,'scale-v-'||n,1 FROM ns`,
-        params: [chat.id, chat.id]
+          INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at)
+          SELECT 'scale-s-'||n,?,CASE WHEN n=0 THEN NULL ELSE 'scale-s-'||(n-1) END,n,'scale-v-'||n,1 FROM ns`,
+        params: [chat.id]
       },
       { sql: "UPDATE forks SET tip_slot_id='scale-s-4999' WHERE id=?", params: [chat.currentForkId] },
       { sql: "UPDATE chats SET active_leaf_slot_id='scale-s-4999' WHERE id=?", params: [chat.id] },
@@ -66,6 +66,8 @@ it.live("history reads stay on the selected path with 5,000 messages, 300 forks 
       cache: new Map(),
       reader: {
         ...reader,
+        // Exercise the paged fallback used by forks with inserted messages, rather than FTS.
+        SearchChat: (() => Effect.succeed(null)) as Reader["Service"]["SearchChat"],
         ReadPath: (input) => {
           windows++
           return reader.ReadPath(input)

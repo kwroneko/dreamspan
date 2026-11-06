@@ -165,7 +165,6 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
    */
   const insertSlot = (
     chatId: string,
-    laneId: string,
     parent: { id: string; depth: number } | null,
     version: NewVersion,
     at: number,
@@ -195,7 +194,6 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       yield* sql`INSERT INTO slots ${sql.insert({
         id: slotId,
         chat_id: chatId,
-        lane_id: laneId,
         parent_slot_id: parent?.id ?? null,
         depth: parent ? parent.depth + 1 : 0,
         selected_version_id: rows[selected]!.id,
@@ -400,12 +398,12 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       let fork = yield* ownedFork(userId, chatId, params.forkId ?? null)
       const draftForkId = fork.id
       yield* checkSpeaker(userId, version.speakerEntityId)
-      let parent: { id: string; depth: number; lane_id: string } | null = null
+      let parent: { id: string; depth: number } | null = null
       if (parentSlotId !== null) {
         // A deleted message is the fork's tip only while its gap still holds an inserted message
         // the fork shows (`relocateLeaf`, spec/MESSAGE-INSERT.md §2.4): appends go below it.
-        const [row] = yield* sql<{ id: string; depth: number; lane_id: string }>`
-            SELECT id, depth, lane_id FROM slots WHERE id = ${parentSlotId} AND chat_id = ${chatId}
+        const [row] = yield* sql<{ id: string; depth: number }>`
+            SELECT id, depth FROM slots WHERE id = ${parentSlotId} AND chat_id = ${chatId}
               AND (deleted_at IS NULL OR id = ${fork.tip_slot_id})`
         if (!row) return yield* new NotFound({ entity: "slot", id: parentSlotId })
         parent = row
@@ -427,12 +425,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       } else if (parentSlotId !== fork.tip_slot_id) {
         return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
       }
-      const laneId =
-        parent?.lane_id ??
-        (yield* sql<{
-          id: string
-        }>`SELECT id FROM lanes WHERE chat_id = ${chatId} ORDER BY created_at, id LIMIT 1`)[0]!.id
-      const { slotId, version: row } = yield* insertSlot(chatId, laneId, parent, version, at, fork.id)
+      const { slotId, version: row } = yield* insertSlot(chatId, parent, version, at, fork.id)
       yield* sql`UPDATE forks SET tip_slot_id = ${slotId}, row_version = row_version + 1 WHERE id = ${fork.id}`
       if (chatted) yield* chatIn(fork.id, at)
       const [chat] = yield* sql<ChatRow>`

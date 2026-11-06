@@ -82,19 +82,14 @@ test.beforeAll(async () => {
       // version records them (castpresence, DESIGN §3.5 [P], ARCHITECTURE §3.8); a join alone
       // doesn't count.
       {
-        sql: `INSERT INTO lanes (id, chat_id, name, created_at)
-          SELECT 'lane-' || id, id, 'main', ? FROM chats WHERE id LIKE 'scale-%'`,
-        params: [now]
-      },
-      {
         sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
           SELECT 'version-' || id, 'slot-' || id, 0, 'complete', 'human', 'verbatim', 'imported', json_array(?), created_at, created_at
           FROM chats WHERE id LIKE 'scale-%'`,
         params: [scale]
       },
       {
-        sql: `INSERT INTO slots (id, chat_id, lane_id, depth, selected_version_id, created_at)
-          SELECT 'slot-' || id, id, 'lane-' || id, 0, 'version-' || id, created_at FROM chats WHERE id LIKE 'scale-%'`
+        sql: `INSERT INTO slots (id, chat_id, depth, selected_version_id, created_at)
+          SELECT 'slot-' || id, id, 0, 'version-' || id, created_at FROM chats WHERE id LIKE 'scale-%'`
       },
       { sql: "UPDATE chats SET active_leaf_slot_id = 'slot-' || id WHERE id LIKE 'scale-%'" },
       { sql: "UPDATE forks SET tip_slot_id = 'slot-' || chat_id WHERE chat_id LIKE 'scale-%'" }
