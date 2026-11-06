@@ -141,7 +141,7 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
 export function GroupPage() {
   const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
   const atom = useMemo(
-    () => AppClient.query("ListGroupChats", { chatId }, { reactivityKeys: ["chats", "library"] }),
+    () => AppClient.query("ListGroupChats", { chatId }, { reactivityKeys: ["chats", "chat-lists", "library"] }),
     [chatId]
   )
   const result = useAtomValue(atom)

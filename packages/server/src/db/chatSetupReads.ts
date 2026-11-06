@@ -21,7 +21,7 @@ import { chatQueue } from "./queueRows.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 import { withoutPurged } from "./stateRefs.ts"
-import { currentForkSql, forkAt, selectedInSql, shownInSql, slotDeletedInSql } from "./forkState.ts"
+import { forkAt, selectedInSql, shownInSql, slotDeletedInSql } from "./forkState.ts"
 import { lastShown, lastText } from "./forks.ts"
 import { displayLength, pathPieces, placedInsertions } from "./displayPath.ts"
 
@@ -267,10 +267,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           const [leaf] =
             end === null
               ? []
-              : yield* sql<{ depth: number; speaker: string | null; writer: string; text: string }>`
-                  SELECT s.depth, v.speaker_entity_id AS speaker, v.writer, substr(v.content, 1, 240) AS text
-                  FROM slots s JOIN version_records v ON v.id = ${sql.literal(shownInSql(currentForkSql("s.chat_id"), "s"))}
-                  WHERE s.id = ${end} AND s.chat_id = ${chatId}`
+              : yield* sql<{ depth: number }>`SELECT depth FROM slots WHERE id = ${end} AND chat_id = ${chatId}`
           summaries.push(
             new ChatSummary({
               chatId,

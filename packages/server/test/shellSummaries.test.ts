@@ -90,6 +90,85 @@ const setup = Effect.gen(function* () {
 })
 
 describe("shell fork summaries", () => {
+  it.live("foreground shell reads defer broad recomputations and serve settled summaries", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, harbor, append, check, tam, version } = yield* setup
+      const main = harbor.currentForkId!
+      const root = yield* append(harbor.id, null, "Root", undefined, main)
+      for (let n = 0; n < 2; n++)
+        yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: root.slotId })
+      const payload = {
+        userId,
+        view: {
+          entity: null,
+          chat: null,
+          search: "",
+          sort: "recent" as const,
+          sections: [{ id: "all" as const, limit: 100 }]
+        }
+      }
+      assert.isNull(yield* reader.ShellCardsLive({ userId }))
+      assert.isNull(yield* reader.ShellForksLive(payload))
+      yield* check("settled", [harbor.id])
+      assert.deepStrictEqual(yield* reader.ShellCardsLive({ userId }), yield* reader.ShellCards({ userId }))
+      assert.deepStrictEqual(yield* reader.ShellForksLive(payload), yield* reader.ShellForks(payload))
+      yield* writer.AddVersion({
+        userId,
+        slotId: root.slotId,
+        forkId: main,
+        select: false,
+        commitDraft: null,
+        version: version("A new participant", tam.entityId)
+      })
+      assert.isNull(yield* reader.ShellCardsLive({ userId }))
+      assert.isNull(yield* reader.ShellForksLive(payload))
+      yield* check("shared participation", [harbor.id])
+    }).pipe(Effect.provide(database()))
+  )
+  it.live("an edit with existing participation preserves frozen forks and unrelated chats", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, harbor, append, check, version } = yield* setup
+      const main = harbor.currentForkId!
+      const root = yield* append(harbor.id, null, "Original", undefined, main)
+      const { fork } = yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: root.slotId })
+      yield* check("initial", [harbor.id])
+      yield* writer.AddVersion({
+        userId,
+        slotId: root.slotId,
+        forkId: main,
+        select: true,
+        commitDraft: null,
+        version: new NewVersion({
+          ...version("Edited", root.version.speakerEntityId),
+          writer: "human",
+          origin: "edited",
+          sourceVersionId: root.version.id
+        })
+      })
+      const changed = yield* reader.ShellLibrary({ userId })
+      assert.deepStrictEqual(
+        changed.fresh.flatMap((chat) => JSON.parse(chat.forks).map((row: { forkId: string }) => row.forkId)),
+        [main]
+      )
+      assert.strictEqual(changed.forks.find((row) => row.forkId === fork.id)!.preview, "Original")
+      assert.strictEqual(changed.forks.find((row) => row.forkId === main)!.preview, "Edited")
+      yield* check("local edit", [harbor.id])
+      const current = yield* reader.GetSlot({ userId, slotId: root.slotId, forkId: main })
+      yield* writer.AmendVersion({
+        userId,
+        versionId: current.entry.version.id,
+        forkId: main,
+        content: "Amended again",
+        expectedRowVersion: current.entry.version.rowVersion
+      })
+      const amended = yield* reader.ShellLibrary({ userId })
+      assert.deepStrictEqual(
+        amended.fresh.flatMap((chat) => JSON.parse(chat.forks).map((row: { forkId: string }) => row.forkId)),
+        [main]
+      )
+      yield* check("repeated local edit", [harbor.id])
+    }).pipe(Effect.provide(database()))
+  )
   for (const parentCount of [1, 17])
     it.live(`summarizes plain children of ${parentCount} overridden parents`, () =>
       Effect.gen(function* () {
@@ -660,7 +739,7 @@ describe("shell fork summaries", () => {
       yield* walks("nothing written", [])
       yield* t.append(harbor.id, ownA.slotId, "atA goes on.", mira.entityId, atA)
       yield* walks("append in one fork", ["atA"])
-      // A retained authored swipe contributes activity on every fork displaying its slot.
+      // The same model speaker and cast add no historical participation.
       const swipe = yield* writer.AddVersion({
         userId,
         slotId: a.slotId,
@@ -669,7 +748,7 @@ describe("shell fork summaries", () => {
         select: true,
         commitDraft: null
       })
-      yield* walks("swipe on a shared slot", ["main", "atA", "atB"])
+      yield* walks("swipe on a shared slot", ["main"])
       yield* writer.SelectVersion({
         userId,
         slotId: a.slotId,
@@ -689,8 +768,8 @@ describe("shell fork summaries", () => {
         content: "b, amended.",
         expectedRowVersion: written.entry.version.rowVersion
       })
-      // The edit's human-authored copy is retained activity wherever this slot is displayed.
-      yield* walks("edit on a shared slot", ["atB", "main"])
+      // An anonymous edit adds no human-author activity on the frozen forks.
+      yield* walks("edit on a shared slot", ["atB"])
       yield* writer.AddStateEvent({
         userId,
         chatId: harbor.id,

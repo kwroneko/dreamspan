@@ -258,6 +258,25 @@ export class ShellForks extends Schema.Class<ShellForks>("ShellForks")({
   people: Schema.Array(CastCard)
 }) {}
 
+/** Initial snapshots and subsequent changed rows; order also carries removals and page boundaries. */
+export const ShellCardsUpdate = Schema.Struct({
+  ...ShellCards.fields,
+  order: Schema.Struct({ cards: Schema.Array(EntityId), personas: Schema.Array(EntityId) })
+})
+export type ShellCardsUpdate = typeof ShellCardsUpdate.Type
+export const ShellForksUpdate = Schema.Struct({
+  ...ShellForks.fields,
+  sections: Schema.Array(
+    Schema.Struct({
+      id: ShellSection,
+      rows: Schema.Array(ShellFork),
+      order: Schema.Array(Schema.String),
+      total: Schema.Int
+    })
+  )
+})
+export type ShellForksUpdate = typeof ShellForksUpdate.Type
+
 /** An open id, resolved against the server's role-projection registry when a context is assembled. */
 const RolesProjection = Schema.String
 
@@ -698,5 +717,16 @@ export class ChatSetupApi extends RpcGroup.make(
     payload: { queuedId: Schema.String, expectedRowVersion: Schema.Int },
     success: QueuedMessage,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
+  })
+) {}
+
+/** Streaming shell reads have their own handler layer to bound RPC type expansion. */
+export class ShellUpdatesApi extends RpcGroup.make(
+  Rpc.make("WatchShellCards", { success: ShellCardsUpdate, error: Schema.Union([...Errors]), stream: true }),
+  Rpc.make("WatchShellForks", {
+    payload: ShellForksView,
+    success: ShellForksUpdate,
+    error: Schema.Union([...Errors]),
+    stream: true
   })
 ) {}

@@ -74,7 +74,7 @@ export class ChatHub extends Context.Service<
       hello: () => ChatEvent
     ) => Effect.Effect<Queue.Dequeue<Batch, Cause.Done>, never, Scope.Scope>
     /**
-     * Calls `listener` for each change published to a chat someone subscribes to: every
+     * Calls `listener` for each change published to a chat: every
      * event but streamed text and the cache estimate, which follows from the others.
      */
     readonly listen: (listener: (chatId: ChatId) => void) => Effect.Effect<void, never, Scope.Scope>
@@ -104,7 +104,6 @@ export class ChatHub extends Context.Service<
 
         return ChatHub.of({
           publish: (chatId, event) => {
-            if (!subscribers.has(chatId)) return
             if (
               event._tag !== "Delta" &&
               event._tag !== "Reasoning" &&
@@ -112,12 +111,14 @@ export class ChatHub extends Context.Service<
               event._tag !== "Cache"
             )
               for (const listener of listeners) listener(chatId)
+            if (!subscribers.has(chatId)) return
             const events = pending.get(chatId)
             if (events) events.push(event)
             else pending.set(chatId, [event])
             timer ??= setTimeout(flush, BATCH_MS)
           },
           close: (chatId, last) => {
+            for (const listener of listeners) listener(chatId)
             const batch = coalesce([...(pending.get(chatId) ?? []), last])
             pending.delete(chatId)
             for (const subscriber of subscribers.get(chatId) ?? []) {

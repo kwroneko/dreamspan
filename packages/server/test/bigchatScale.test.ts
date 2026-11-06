@@ -6,6 +6,8 @@ import { BroadcastChannel, Worker } from "node:worker_threads"
 import { assert, it } from "@effect/vitest"
 import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
+import type { ShellForks } from "@rp/shared/chatSetupApi.ts"
+import { applyShellForks } from "@rp/shared/shellUpdates.ts"
 import { Effect, Stream } from "effect"
 import { StImports } from "../src/importer/StImports.ts"
 import * as Fake from "../src/dev/fakeGenerator.ts"
@@ -133,7 +135,7 @@ for (const size of sizes) {
         }
         // Free the physical duplicate prefixes before measuring live work.
         rmSync(root, { recursive: true, force: true })
-        const samples: Array<{ operation: string; ms: number; refreshMs: number }> = []
+        const samples: Array<{ operation: string; ms: number; refreshMs: number; visibleMs?: number }> = []
         const view = {
           entity: null,
           chat: null,
@@ -146,14 +148,21 @@ for (const size of sizes) {
           yield* api.GetShellForks(view)
           yield* api.GetShellLibrary()
         })
-        const measure = <A, E, R>(operation: string, action: Effect.Effect<A, E, R>) =>
+        const measure = <A, E, R>(operation: string, action: Effect.Effect<A, E, R>, visible?: () => number | null) =>
           Effect.gen(function* () {
             const start = performance.now()
             const answer = yield* action
             const ms = performance.now() - start
+            if (visible) yield* eventually(() => visible() !== null)
+            const visibleMs = visible ? visible()! - start : undefined
             const refreshStart = performance.now()
             yield* refresh
-            const sample = { operation, ms, refreshMs: performance.now() - refreshStart }
+            const sample = {
+              operation,
+              ms,
+              refreshMs: performance.now() - refreshStart,
+              ...(visibleMs === undefined ? {} : { visibleMs })
+            }
             samples.push(sample)
             console.log("BIGCHAT_LIVE", size, JSON.stringify(sample))
             return answer
@@ -166,6 +175,20 @@ for (const size of sizes) {
             ? shell.forks.find((fork) => !fork.original && fork.messages >= 3000 * size)!.forkId
             : chat.currentForkId!
         ) as ForkId
+        let visibleRows: ShellForks | undefined
+        let visibleAt = 0
+        yield* api.WatchShellForks(view).pipe(
+          Stream.runForEach((update) =>
+            Effect.sync(() => {
+              visibleRows = applyShellForks(visibleRows, update)
+              visibleAt = performance.now()
+            })
+          ),
+          Effect.forkScoped
+        )
+        yield* api.WatchShellCards().pipe(Stream.runDrain, Effect.forkScoped)
+        const visibleFork = () => visibleRows?.sections[0]?.rows[0]?.forkId
+        yield* eventually(() => visibleRows !== undefined)
         const path = (forkId = main, leafSlotId: SlotId | null = null) =>
           api.ReadPath({ chatId, forkId, leafSlotId, range: { _tag: "Bottom" }, limit: 100 })
         const [ids] = yield* fixtureSql(
@@ -246,7 +269,8 @@ for (const size of sizes) {
             range: { _tag: "Around", slot: old },
             limit: 10
           })).entries.find((e) => e.slotId === old)!
-          yield* measure(
+          yield* eventually(() => visibleFork() === forked.fork.id)
+          const edited = yield* measure(
             "edit-old",
             api.EditVersion({
               slotId: old,
@@ -254,17 +278,38 @@ for (const size of sizes) {
               sourceVersionId: atOld.version.id,
               expectedRowVersion: atOld.rowVersion,
               content: `Synthetic live edit ${repeat}.`
+            }),
+            () => (visibleFork() === main ? visibleAt : null)
+          )
+          yield* measure(
+            "amend-old",
+            api.AmendVersion({
+              versionId: edited.version.id,
+              forkId: main,
+              content: `Synthetic live amendment ${repeat}.`,
+              expectedRowVersion: edited.version.rowVersion
             })
           )
         }
         result.samples = samples
-        // A generous shared-host ceiling, proportional to the requested shape. The old
-        // repeated-prefix walk took 16–20 s at half size and over a minute at full size.
+        // Full-size edit-to-stream samples were 198–343 ms. Across all three sizes
+        // the shared-host peaks were 698 ms to the stream and 1,073 ms through the
+        // forced reads; amendments peaked at 846 ms. Leave headroom for host load,
+        // while catching the former tens-of-seconds whole-chat recomputation.
         const edits = samples.filter((sample) => sample.operation === "edit-old")
-        assert.isBelow(Math.max(...edits.map((sample) => sample.ms + sample.refreshMs)), 20_000 * size + 1000)
+        assert.isBelow(Math.max(...edits.map((sample) => sample.visibleMs!)), 1000)
+        assert.isBelow(
+          Math.max(...edits.map((sample) => Math.max(sample.ms, sample.visibleMs!) + sample.refreshMs)),
+          1500
+        )
+        const amendments = samples.filter((sample) => sample.operation === "amend-old")
+        assert.isBelow(Math.max(...amendments.map((sample) => sample.ms + sample.refreshMs)), 1500)
         // A single changed view reads its own paths; the first send must not scan the
         // whole growing chat merely because that fork still has no version overrides.
-        assert.isBelow(samples.find((sample) => sample.operation === "send")!.refreshMs, 2000 * size + 1000)
+        assert.isBelow(
+          samples.find((sample) => sample.operation === "send")!.refreshMs,
+          Math.min(2000, 2000 * size + 1000)
+        )
         profile("live")
         // A reusable synthetic DB for SQL-plan/VM-step investigation; copied by SQLite in a worker.
         if (out) {
