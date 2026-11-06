@@ -33,7 +33,7 @@ import {
   slotAtPosition,
   slotPlace
 } from "./displayPath.ts"
-import { shownIn, slotDeletedIn, writeInsert } from "./forkState.ts"
+import { inFork, shownIn, slotDeletedIn, writeInsert } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -218,7 +218,19 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     const sourceEnd = displayEnd(sourcePieces, source.tip_slot_id)
     const sourceLength = displayLength(sourcePieces)
     const sameChat = source.chat_id === request.chatId
-    const shared = sameChat ? Math.min(sharedPrefix(pieces, sourcePieces), atPos + 1) : 0
+    let shared = sameChat ? Math.min(sharedPrefix(pieces, sourcePieces), atPos + 1) : 0
+    // Shared slots may show different swipes, amend copies or visibility in these forks.
+    // Stop at the first effective difference, even while the structural paths still agree.
+    if (shared > 0) {
+      const [different] = yield* sql<{ position: number }>`
+        ${displaySlots(sql, pieces, 0, shared - 1)}
+        SELECT path.position FROM display_slots path JOIN slots s ON s.id = path.id
+        WHERE ${shownIn(sql, fork.id, "s")} IS NOT ${shownIn(sql, source.id, "s")}
+          OR ${slotDeletedIn(sql, fork.id, "s")} <> ${slotDeletedIn(sql, source.id, "s")}
+          OR ${contextExcludedIn(sql, fork.id)} <> ${contextExcludedIn(sql, source.id)}
+        ORDER BY path.position LIMIT 1`
+      if (different) shared = different.position
+    }
     let basePos = shared - 1
     // Merged before: only what's new since the latest earlier merge of this source fork on the
     // destination's path up to M, whose pinned tip the source still shows.
@@ -271,8 +283,8 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
 
     // The post-base part, newest first into the budget; the rest from the source's summaries.
     const read = yield* readStretch(sql, source, sourcePieces, first, sourceLength - 1)
-    const nested = read.filter((row) => row.origin === "merge" && usable(row)).length
-    const messages = read.filter((row) => usable(row) && row.origin !== "merge")
+    const nested = read.filter((row) => row.first_origin === "merge" && usable(row)).length
+    const messages = read.filter((row) => usable(row) && row.first_origin !== "merge")
     const speakers = [...new Set(messages.flatMap((row) => (row.speaker_entity_id ? [row.speaker_entity_id] : [])))]
     const cards = new Map(
       (yield* loadCards(sql, userId, speakers as Array<EntityId>)).map((c) => [c.card.entityId as string, c.card])
@@ -291,8 +303,15 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       verbatimFrom--
     }
     const verbatimPos = messages[verbatimFrom]?.position ?? sourceLength
-    const layer = verbatimFrom > 0 ? yield* selectSummaryLayer(sql, userId, source.chat_id, sourceEnd) : null
+    const layer =
+      verbatimFrom > 0
+        ? yield* selectSummaryLayer(sql, userId, source.chat_id, sourceEnd).pipe(
+            inFork(sql, source.chat_id, source.id, sourceEnd)
+          )
+        : null
     const summaries = (layer?.summaries ?? [])
+      // Summary ranges are one-based; all merge positions are zero-based.
+      .map((s) => ({ ...s, from: s.from - 1, to: s.to - 1 }))
       .filter((s) => s.from > basePos && s.to < verbatimPos && s.content.trim() !== "")
       .toSorted((a, b) => a.from - b.from)
     const covered = (position: number) => summaries.some((s) => s.from <= position && position <= s.to)
@@ -357,8 +376,10 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
 
     // A summary covering M in the destination is written again over the join (MESSAGE-INSERT §3.4).
     const append = atId === fork.tip_slot_id && end === fork.tip_slot_id
-    const destLayer = append ? null : yield* selectSummaryLayer(sql, userId, request.chatId, end)
-    const covering = destLayer?.summaries.find((s) => s.from <= atPos && atPos < s.to) ?? null
+    const destLayer = append
+      ? null
+      : yield* selectSummaryLayer(sql, userId, request.chatId, end).pipe(inFork(sql, request.chatId, fork.id, end))
+    const covering = destLayer?.summaries.find((s) => s.from <= atPos + 1 && atPos + 1 < s.to) ?? null
 
     const counts = {
       messages: messages.length,
@@ -368,22 +389,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       leftOut: request.includeLeftOut ? 0 : leftOut,
       tokens: estimateTokens(transcript)
     }
-    const digest = createHash("sha256")
-      .update(
-        JSON.stringify([
-          atId,
-          source.tip_slot_id,
-          sourceEnd,
-          basePos,
-          spanFrom,
-          request.includeLeftOut,
-          read.map((r) => [r.id, r.content.length, r.deleted, r.excluded, r.status]),
-          summaries.map((s) => s.revisionId),
-          union
-        ])
-      )
-      .digest("base64url")
-    const preview = new ChatMergePreview({
+    const previewFields = {
       sourceTitle: title,
       sameChat,
       shared: Math.max(0, shared),
@@ -413,9 +419,14 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       framing: fillMergeTemplate(MERGE_SECTION_DEFAULT, title, castNames),
       section: transcript,
       join: fillMergeTemplate(MERGE_JOIN_DEFAULT, title, castNames),
-      rewrites: covering ? { from: covering.from + 1, to: covering.to + 1, tokens: covering.tokens } : null,
-      digest
-    })
+      rewrites: covering ? { from: covering.from, to: covering.to, tokens: covering.tokens } : null
+    }
+    // Hash the actual preview and frozen rows, including full texts and speaker names.
+    // Text length alone misses same-length edits and swipes made while the dialog is open.
+    const digest = createHash("sha256")
+      .update(JSON.stringify([request, source.tip_slot_id, sourceEnd, previewFields, rows]))
+      .digest("base64url")
+    const preview = new ChatMergePreview({ ...previewFields, digest })
     return {
       preview,
       fork,
