@@ -70,7 +70,7 @@ export const generateReply = (
     /** The reply as Auto asks for it: its speaker (by card name) and the round after it, Auto's picks. */
     readonly auto?: { readonly speaker: string; readonly round?: ReadonlyArray<string> }
     /** Called once the chat is set up, before anything is sent, with the `characters`' ids in order. */
-    readonly before?: (chat: Chat, characters: ReadonlyArray<EntityId>) => Effect.Effect<void, unknown, never>
+    readonly before?: (chat: Chat, characters: ReadonlyArray<EntityId>) => Effect.Effect<void, unknown, Writer>
   }
 ) =>
   Effect.gen(function* () {
@@ -149,7 +149,7 @@ export const generateReply = (
       writer.AddStateEvent({ userId, chatId: chat.id, slotId: null, versionId: null, scope: null, data })
     yield* state({ key: "played_by_me.set", value: { entities: [tobin.entityId as EntityId] } })
     for (const data of options.state ?? []) yield* state(data)
-    const characters = []
+    const characters: Array<Effect.Success<ReturnType<typeof entity>>> = []
     for (const name of options.characters ?? []) {
       const card = yield* entity("card", name, cardDoc(name, `{{char}} rides with {{user}}.`))
       yield* state({ key: "participant.join", value: { entity: card.entityId as EntityId } })

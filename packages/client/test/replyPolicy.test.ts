@@ -52,6 +52,7 @@ it.effect("a scoped reply policy changes the composer's choice, disables and res
     assert.deepStrictEqual(planReply(cast, [], null, null), {
       next: { id: a, after: null, then: [] },
       replier: a,
+      auto: true,
       round: [],
       reply: true
     })
@@ -69,6 +70,7 @@ it.effect("a scoped reply policy changes the composer's choice, disables and res
         assert.deepStrictEqual(planReply(cast, [], null, null), {
           next: { id: b, after: a },
           replier: b,
+          auto: true,
           round: [],
           reply: true
         })
@@ -82,10 +84,17 @@ it.effect("a scoped reply policy changes the composer's choice, disables and res
             assert.deepStrictEqual(planReply(cast, [], null, null), {
               next: null,
               replier: null,
+              auto: false,
               round: [],
               reply: false
             })
-            assert.deepStrictEqual(planReply(cast, [], null, b), { next: null, replier: b, round: [], reply: true })
+            assert.deepStrictEqual(planReply(cast, [], null, b), {
+              next: null,
+              replier: b,
+              auto: false,
+              round: [],
+              reply: true
+            })
             assert.isFalse(planReply(null, [], null, null).reply)
           })
         )
@@ -196,12 +205,14 @@ it("follows the chat's reply order: list, pooled and manual, as ST's group strat
   assert.deepStrictEqual(planReply(manual, user, ana, null, "Hello?"), {
     next: null,
     replier: null,
+    auto: false,
     round: [],
     reply: false
   })
   assert.deepStrictEqual(planReply(manual, user, ana, null, "", true), {
     next: null,
     replier: null,
+    auto: false,
     round: [],
     reply: false
   })
@@ -301,6 +312,7 @@ it("No one under Next: no reply to what you send, Auto's one reply when asked, a
     assert.deepStrictEqual(planReply(cast, user, ana, wren, "Hi.", false, true), {
       next: planReply(cast, user, ana, null, "Hi.").next,
       replier: wren,
+      auto: false,
       round: [],
       reply: true
     })
