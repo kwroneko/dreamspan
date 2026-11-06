@@ -10,8 +10,9 @@ import type {
   ShellForksView,
   ShellSection
 } from "@rp/shared/chatSetupApi.ts"
-import { Link, useNavigate, useSearch } from "@tanstack/react-router"
+import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { openOnPlainClick } from "../../ui/links.ts"
+import { OpenBesideButton } from "../workbench/OpenBeside.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
@@ -315,6 +316,7 @@ function CharacterTile({
   marked: boolean
 }) {
   const open = useOpenCharacter()
+  const besideHref = useRouter().buildLocation(characterLink(card)).href
   const c = card.card
   const state = pick?.state(status) ?? {}
   const inner = (
@@ -411,6 +413,15 @@ function CharacterTile({
           className="tile-toggle bg-surface/85 hover:bg-surface/85 data-popup-open:bg-surface/85"
         />
       </span>
+      {!pick && (
+        <span data-layout-overlay="Open beside sits over the portrait" className="absolute top-2 right-2">
+          <OpenBesideButton
+            href={besideHref}
+            name={c.label}
+            className="tile-beside bg-surface/85 hover:bg-surface/85"
+          />
+        </span>
+      )}
       {state.mark && (
         <span
           data-layout-overlay="Chat membership sits over the portrait"

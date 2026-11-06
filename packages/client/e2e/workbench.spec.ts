@@ -123,9 +123,11 @@ test("two chats side by side; the side panel follows the frame focused last; it 
   await page.goto(`${server().url}/chats/${fixtures.chatA}`)
   await expect(said(page, "The tide is out")).toBeVisible()
   await openPanel(page, "This chat")
+  // Split right shows the chat in both frames (VS Code's Split Editor); the next open goes
+  // beside the copy, in the frame focused now.
   await page.getByRole("button", { name: "Split right" }).click()
   await expect(page.locator("[data-frame]")).toHaveCount(2)
-  await expect(page.getByText("Open a chat, a card or an editor from the sidebar")).toBeVisible()
+  await expect(said(page, "The tide is out")).toHaveCount(2)
   await sidebarChat(page, "Lighthouse night").click()
   await expect(said(page, "The lamp turns")).toBeVisible()
   await expect(said(page, "The tide is out")).toBeVisible()
@@ -141,6 +143,9 @@ test("two chats side by side; the side panel follows the frame focused last; it 
   // A tab moves with a visible control, not only by dragging.
   await page.locator("[data-frame]").nth(1).getByRole("button", { name: "Tab and frame actions" }).click()
   await page.getByRole("menuitem", { name: "Move to the frame on the left" }).click()
+  await expect(page.locator("[data-frame]").first().locator("[data-tab]")).toHaveCount(2)
+  // The right frame kept its own view of the first chat; closing it closes the frame.
+  await page.locator("[data-frame]").nth(1).getByRole("button", { name: "Close Harbour walk" }).click()
   await expect(page.locator("[data-frame]")).toHaveCount(1)
   await expect(tabs(page)).toHaveCount(2)
   await page.getByRole("button", { name: "Tab and frame actions" }).click()
@@ -254,7 +259,7 @@ test("a chat beside its preset editor, two preset editors side by side, and a ho
     await fresh(page, 1440, theme)
     await page.goto(`${server().url}/library/${fixtures.presetA}`)
     await expect(page.getByRole("combobox", { name: "Switch preset" })).toBeVisible()
-    // The new frame waits for the next open: the library, then the other preset from it.
+    // The new frame shows the preset too; the library opens beside it there, then the other preset.
     await page.getByRole("button", { name: "Split right" }).click()
     await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name: "Library" }).click()
     const library = page.locator("[data-frame]").nth(1)
@@ -301,3 +306,44 @@ for (const width of [1024, 390])
       await expect(said(page, "The lamp turns")).toHaveCount(0)
     }
   })
+
+// VS Code's editor groups: Open beside and Alt-click open in a frame on the right, a chat can
+// show in two frames, and a tab dragged to a frame's edge splits there (the overlay shows the
+// half it takes).
+test("open beside, one chat in two frames, and a tab dropped on an edge", async ({ page }) => {
+  test.setTimeout(150_000)
+  await fresh(page, 1440)
+  await page.goto(`${server().url}/chats/${fixtures.chatA}`)
+  await expect(said(page, "The tide is out")).toBeVisible()
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" })
+  const row = sidebar.locator("[data-fork-row]").filter({ has: sidebarChat(page, "Lighthouse night") })
+  await row.hover()
+  await row.getByRole("button", { name: "Open Lighthouse night beside" }).click()
+  const frames = page.locator("[data-frame]")
+  await expect(frames).toHaveCount(2)
+  await expect(frames.nth(1).getByText("The lamp turns")).toBeVisible()
+  await expect(said(page, "The tide is out")).toBeVisible()
+
+  // Alt-click from the right frame: a third frame, the first chat in two of them.
+  await sidebarChat(page, "Harbour walk").click({ modifiers: ["Alt"] })
+  await expect(frames).toHaveCount(3)
+  await expect(said(page, "The tide is out")).toHaveCount(2)
+  await shot(page, "open-beside-1440-light")
+
+  // The third frame's tab, dropped on the first frame's bottom edge: a frame below it.
+  const tab = frames.nth(2).locator("[data-tab] [role=tab]")
+  const target = (await frames.first().boundingBox())!
+  const from = (await tab.boundingBox())!
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height - 30, { steps: 12 })
+  await expect(frames.first().locator('[data-drop-zone="bottom"]')).toBeVisible()
+  await page.mouse.up()
+  await expect(frames).toHaveCount(3)
+  const [top, below] = [(await frames.nth(0).boundingBox())!, (await frames.nth(1).boundingBox())!]
+  expect(below.x).toBeCloseTo(top.x, 0)
+  expect(below.y).toBeGreaterThan(top.y + top.height - 2)
+  await expect(said(page, "The tide is out")).toHaveCount(2)
+  await expect(said(page, "The lamp turns")).toBeVisible()
+  if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "three-frames")
+})
