@@ -2937,10 +2937,10 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
       const text = contents(swapped).join("\n")
       for (const other of ["keeps the ledger", "Exact.", "A flood.", "mends nets", "Patient.", "Hold this."])
         expect(text).not.toContain(other)
-      // The speaker's examples and depth prompt only (ST sends no group depth prompts in swap mode).
+      // Examples rotate. Notes outside definitions keep their own conditions (our documented ST difference).
       expect(text).toContain("Closed.")
       expect(text).toContain("Oren's depth prompt.")
-      expect(text).not.toContain("Mira's depth prompt.")
+      expect(text).toContain("Mira's depth prompt.")
       // The persona and everything else stay where the preset puts them: the same message as plain.
       expect(marker(swapped, "personaDescription")).toBe("<Tobin>\nTobin draws maps.\n</Tobin>")
       const index = (snapshot: ContextSnapshot, needle: string) =>
@@ -2970,6 +2970,58 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
       )
       expect(contents(off)).toEqual(contents(await assembled(three())))
     })
+
+    it.each(["chat", "mode"] as const)(
+      "keeps non-definition notes and their conditions with %s rotation",
+      async (via) => {
+        const notes: Array<NoteInput> = [
+          depthNote("mira", "MIRA ALWAYS"),
+          ...(
+            [
+              { mode: "tail", role: "system" },
+              { mode: "section", section: "context_start", role: "system" }
+            ] as const
+          ).map((placement, index) => ({
+            ...depthNote("mira", `MIRA ALWAYS ${index}`),
+            entity: `note-mira-${index}`,
+            doc: { ...depthNote("mira", `MIRA ALWAYS ${index}`).doc, placement }
+          })),
+          {
+            ...depthNote("sela", "SELA WITH DEFINITIONS"),
+            doc: {
+              ...depthNote("sela", "SELA WITH DEFINITIONS").doc,
+              placement: { mode: "section", section: "after_main_prompt", role: "system" }
+            }
+          },
+          {
+            ...depthNote("oren", "OREN OWN TURN"),
+            doc: { ...depthNote("oren", "OREN OWN TURN").doc, condition: { when: "turn", cards: ["oren" as never] } }
+          },
+          {
+            ...depthNote("sela", "SELA OWN TURN"),
+            entity: "sela-turn-note",
+            doc: { ...depthNote("sela", "SELA OWN TURN").doc, condition: { when: "turn", cards: ["sela" as never] } }
+          }
+        ]
+        for (const definitions of [false, true]) {
+          const snapshot = await assembled(
+            three({
+              notes,
+              preset: definitions ? withDefinitions(preset()) : preset(),
+              events: via === "chat" ? [at(null, { key: "cards.rotation", value: { on: true } })] : []
+            }),
+            via === "mode" ? swap : {}
+          )
+          const text = contents(snapshot).join("\n")
+          expect(text).toContain("MIRA ALWAYS")
+          expect(text).toContain("MIRA ALWAYS 0")
+          expect(text).toContain("MIRA ALWAYS 1")
+          expect(text).toContain("OREN OWN TURN")
+          expect(text).not.toContain("SELA OWN TURN")
+          expect(text).not.toContain("SELA WITH DEFINITIONS")
+        }
+      }
+    )
 
     it("rotates with the speaker, in the whole-card Definitions marker too", async () => {
       const definitions = withDefinitions(preset())
