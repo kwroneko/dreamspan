@@ -318,6 +318,19 @@ describe("agent note tools", () => {
       assert.deepInclude(fields(changed)["personality"], { chosen: true })
       assert.deepInclude(fields(changed)["scenario"], { chosen: false })
 
+      // Linking a note does not drop its permission override. Reset still has to work:
+      // switch_note uses that override even while the linked note's text cannot be edited.
+      yield* api.CreateSharedNote({
+        title: "Shared locked note",
+        content: "Mira owes Tobin.",
+        fromNoteRefId: locked.id,
+        chatNote: at
+      })
+      assert.deepInclude(
+        (yield* api.GetAgentPermissions(at)).notes.find((n) => n.entityId === locked.entityId),
+        { linked: true, on: true, own: false, chosen: true }
+      )
+
       // Reset: the chat's choice dropped, the card's and note's own settings hold again.
       for (const target of [{ card: mira.entityId, field: "personality" as const }, { note: locked.entityId }])
         yield* api.ChangeCast({ ...at, change: { _tag: "AgentPermission", target, on: null } })
@@ -326,7 +339,7 @@ describe("agent note tools", () => {
       assert.deepInclude(fields(reset)["description"], { on: false, own: true, chosen: true })
       assert.deepInclude(
         reset.notes.find((n) => n.title === "Locked"),
-        { on: false, own: false, chosen: false }
+        { linked: true, on: false, own: false, chosen: false }
       )
 
       // The library's note list leaves out the notes agent replies wrote, from every branch.
