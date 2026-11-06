@@ -121,6 +121,9 @@ for (const width of [1440, 390])
               loading: !!document.querySelector('[data-testid="messages-loading"]'),
               messages: messages?.querySelectorAll("article[data-slot]").length ?? 0,
               branches: branches?.querySelectorAll("[data-fork-row]").length ?? 0,
+              // A folded section (the phone's closed menu sheet folds it) mounts no rows.
+              branchSection: !!branches,
+              branchOpen: branches?.querySelector("[data-foot-header] [aria-expanded]")?.ariaExpanded === "true",
               branchHeight: branches?.getBoundingClientRect().height ?? 0,
               branchTop: branches?.getBoundingClientRect().top ?? 0,
               splitHeight: document.querySelector('[aria-label="Related chats"]')?.getBoundingClientRect().height ?? 0,
@@ -152,6 +155,8 @@ for (const width of [1440, 390])
                     loading: boolean
                     messages: number
                     branches: number
+                    branchSection: boolean
+                    branchOpen: boolean
                     split: boolean
                     branchHeight: number
                     branchTop: number
@@ -180,7 +185,7 @@ for (const width of [1440, 390])
             "no collapsed split section"
           ).toEqual([])
           expect(
-            data.filter((frame) => frame.branches === 0),
+            data.filter((frame) => !frame.branchSection || (frame.branchOpen && frame.branches === 0)),
             "no collapsed branch viewer"
           ).toEqual([])
         }
