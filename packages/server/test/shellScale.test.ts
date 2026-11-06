@@ -117,8 +117,10 @@ describe("group read scale", () => {
         )
         assert.isBelow(groupsTook, 2000)
         // Cards are described once in people, not repeated in every fork (3.8 MB when they were).
-        // The whole read is for tools and tests now; with fheader's branch fields it's ~2.35 MB here.
-        assert.isBelow(bytes, 3_000_000)
+        // The whole read is for tools and tests. Split, participation, pin and arrival
+        // metadata grew this fixture to 3,206,083 bytes on master (2026-11-05).
+        // Allow under 10% headroom; the app's paged response keeps its own bound below.
+        assert.isBelow(bytes, 3_500_000)
         // What the app sends a page load (fux1): the cards, and the first 100 rows of the chat list.
         const cards = yield* api.GetShellCards()
         const page = yield* api.GetShellForks({
