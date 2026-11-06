@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 50
+export const ASSEMBLER_VERSION = 51
 
 export type Role = "system" | "user" | "assistant"
 
@@ -60,6 +60,8 @@ export type Source =
       readonly revision: string
       readonly field: string
       readonly persona?: boolean
+      /** Left out by card-swap this turn: sent only on its own character's turn (inspector's "not sent" list only). */
+      readonly swapped?: boolean
     }
   | {
       readonly kind: "lorebook"
@@ -294,8 +296,8 @@ export interface NoteReplacement {
 export interface AgentAssembly {
   /** Told the model with the end of the request: its tools, and how to give its reply. */
   readonly instructions: string
-  /** Card-swap: the speaker's card goes at the tail instead of with the others (DESIGN §5.2). */
-  readonly cardsAtTail: boolean
+  /** Card-swap: the preset's card places hold only the speaker's card (DESIGN §5.2). */
+  readonly speakerCardOnly: boolean
 }
 
 /** What decision models decided for this context (spec/AGENTIC.md §7): the lorebook entries admitted. */

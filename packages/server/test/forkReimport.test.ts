@@ -29,7 +29,7 @@ const query = (sql: string, ...args: Array<string | number>) => {
 }
 const slotOf = (text: string) =>
   query(
-    `SELECT s.id, s.chat_id FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = ? AND v.ordinal = 0`,
+    `SELECT s.id, s.chat_id FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE v.content = ? AND v.ordinal = 0`,
     text
   )[0] as { id: SlotId; chat_id: ChatId }
 

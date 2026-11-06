@@ -1,3 +1,4 @@
+import { archiveCandidates } from "./cardArchive.ts"
 import { LibraryRef } from "@rp/shared/library.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
 import { previousRevisionSql, revisionNumber, revisionOnLine, revisionUse } from "./revisionNumbers.ts"
@@ -586,12 +587,18 @@ export const makeReadHandlers = Effect.gen(function* () {
         query("GetDraftState")
       ),
 
+    ListArchiveCandidates: ({ userId, criteria }) =>
+      archiveCandidates(sql, userId, criteria).pipe(query("ListArchiveCandidates")),
     ListLibrary: ({ userId, kind, tag, archived, withFilterData }) =>
       lib
         .refsWhere(
+          // A note an agent reply wrote (its first revision the reply's, as `agentWrittenNotes`
+          // reads it) belongs to that reply, shown only where it is: never in the library's list.
           `e.owner_user_id = ? AND e.kind = ? AND e.deleted_at IS NULL
            AND (e.archived_at IS NOT NULL) = ?
-           AND (? IS NULL OR EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = ?))`,
+           AND (? IS NULL OR EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = ?))
+           AND (e.kind <> 'note' OR (SELECT f.origin FROM entity_revisions f WHERE f.entity_id = e.id
+             ORDER BY f.seq LIMIT 1) IS NOT 'generation')`,
           [userId, kind, archived ? 1 : 0, tag, tag]
         )
         .pipe(
@@ -936,7 +943,7 @@ export const makeReadHandlers = Effect.gen(function* () {
           ? (yield* liveFork(yield* ownedChat(userId, slot.chat_id as ChatId), forkId)).id
           : yield* forkAt(sql, slot.chat_id, slotId)
         const columns = sql`x.id, ${sql.literal(branchLabel("x"))} AS branch_name, CASE WHEN NOT ${slotDeletedIn(sql, shown, "x")}
-          THEN substr((SELECT v.content FROM versions v WHERE v.id = ${shownIn(sql, shown, "x")}), 1, 160)
+          THEN substr((SELECT v.content FROM version_records v WHERE v.id = ${shownIn(sql, shown, "x")}), 1, 160)
           ELSE '' END AS preview`
         // An inserted message has no alternates: it's the only one at its place.
         const rows =
@@ -991,7 +998,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     GetVersion: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<VersionRow>`
-          SELECT v.*, ${sql.literal(versionExtras("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+          SELECT v.*, ${sql.literal(versionExtras("v"))} FROM version_records v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
             AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })

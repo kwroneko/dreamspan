@@ -59,12 +59,18 @@ export const StateEventData = Schema.Union([
   /** On: one reply per user action, where ST replies with the reply order's whole round (DESIGN §2.3). */
   event("reply.single", Schema.Struct({ on: Schema.Boolean })),
   event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
+  /**
+   * Card-swap (DESIGN §5.2; spec/CHARACTER-CONTEXT.md §4.1): on, the preset's card places hold only
+   * the speaking character's card. A card-layout setting, with or without tools; absent is off.
+   */
+  event("cards.rotation", Schema.Struct({ on: Schema.Boolean })),
   /** The tools an agent reply mode offers, by id, in place of the mode's own list (spec/AGENTIC.md §6). */
   event("agent.tools", Schema.Struct({ tools: Schema.Array(Schema.String) })),
   /**
    * Whether agent replies may change a note, or a card's field (as a note replacing it), in this
    * chat (spec/AGENTIC.md §4.3): over the note's `agent_editable` or the card's
-   * `agent_editable_fields`. One of `note`, or `card` with `field`.
+   * `agent_editable_fields`. One of `note`, or `card` with `field`. `on: null` drops the chat's
+   * choice: the note's or card's own setting holds again.
    */
   event(
     "agent.permission",
@@ -72,7 +78,7 @@ export const StateEventData = Schema.Union([
       note: Schema.optional(EntityId),
       card: Schema.optional(EntityId),
       field: Schema.optional(Schema.Literals(REPLACEABLE_CARD_FIELDS)),
-      on: Schema.Boolean
+      on: Schema.NullOr(Schema.Boolean)
     })
   ),
   event("rollout.continuity", Schema.Literals(["fork", "resume_previous"])),
@@ -168,6 +174,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "reply.order": { ids: {} },
   "reply.single": { ids: {} },
   "output.contract": { ids: {} },
+  "cards.rotation": { ids: {} },
   "agent.tools": { ids: {} },
   "agent.permission": {
     ids: { note: { table: "entity", kind: "note", chatOwned: true }, card: { table: "entity", kind: "card" } }
@@ -383,6 +390,8 @@ export interface ChatState {
   /** One reply per user action instead of a round; null (no event) is off, as in ST. */
   readonly replySingle: boolean | null
   readonly outputContract: "final_text" | "send_message" | "both" | null
+  /** `cards.rotation`: only the speaker's card where the preset puts cards; null (no event) is off. */
+  readonly cardsRotation: boolean | null
   /** `agent.tools`: the tools agent modes offer; null: each mode's own. */
   readonly agentTools: ReadonlyArray<string> | null
   /** `agent.permission`s by `permissionKey`: on or off, over the note's or card's own. */
@@ -421,6 +430,7 @@ const emptyChatState: ChatState = {
   replyOrder: null,
   replySingle: null,
   outputContract: null,
+  cardsRotation: null,
   agentTools: null,
   agentPermissions: {},
   rolloutContinuity: null,
@@ -553,11 +563,17 @@ const applyCore = (
       return { ...state, replySingle: data.value.on }
     case "output.contract":
       return { ...state, outputContract: data.value }
+    case "cards.rotation":
+      return { ...state, cardsRotation: data.value.on }
     case "agent.tools":
       return { ...state, agentTools: data.value.tools }
     case "agent.permission": {
       const key = permissionKey(data.value)
-      return key === null ? state : { ...state, agentPermissions: { ...state.agentPermissions, [key]: data.value.on } }
+      if (key === null) return state
+      if (data.value.on !== null)
+        return { ...state, agentPermissions: { ...state.agentPermissions, [key]: data.value.on } }
+      const { [key]: _dropped, ...rest } = state.agentPermissions
+      return { ...state, agentPermissions: rest }
     }
     case "rollout.continuity":
       return { ...state, rolloutContinuity: data.value }

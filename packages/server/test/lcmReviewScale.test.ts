@@ -13,7 +13,7 @@ lcmTest(
         const seq = `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i < ${count - 1})`
         yield* fixtureSql(h.dataDir, [
           {
-            sql: `${seq} INSERT INTO versions(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) SELECT 'v-${count}-'||i,'s-${count}-'||i,0,'complete','human','synthetic','verbatim','user_written',1,1 FROM n`
+            sql: `${seq} INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) SELECT 'v-${count}-'||i,'s-${count}-'||i,0,'complete','human','synthetic','verbatim','user_written',1,1 FROM n`
           },
           {
             sql: `${seq} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at) SELECT 's-${count}-'||i,?,CASE WHEN i=0 THEN NULL ELSE 's-${count}-'||(i-1) END,i,'v-${count}-'||i,1 FROM n`,
@@ -54,7 +54,7 @@ for (const absent of ["hidden", "deleted", "empty"] as const)
         const seq = `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i < ${count - 1})`
         yield* fixtureSql(h.dataDir, [
           {
-            sql: `${seq} INSERT INTO versions(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) SELECT 'hidden-v-'||i,'hidden-s-'||i,0,'complete','human',?,'verbatim','user_written',1,1 FROM n`,
+            sql: `${seq} INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) SELECT 'hidden-v-'||i,'hidden-s-'||i,0,'complete','human',?,'verbatim','user_written',1,1 FROM n`,
             params: ["story ".repeat(70)]
           },
           {
@@ -76,7 +76,7 @@ for (const absent of ["hidden", "deleted", "empty"] as const)
               ? [
                   { sql: "UPDATE slots SET context_excluded=0 WHERE chat_id=?", params: [h.chat.id] },
                   {
-                    sql: "UPDATE versions SET content='' WHERE slot_id IN (SELECT id FROM slots WHERE chat_id=? AND depth<99900)",
+                    sql: "UPDATE version_records SET content='' WHERE slot_id IN (SELECT id FROM slots WHERE chat_id=? AND depth<99900)",
                     params: [h.chat.id]
                   }
                 ]
@@ -106,7 +106,7 @@ for (const absent of ["hidden", "deleted", "empty"] as const)
         // A restored effective slot invalidates its empty coverage and comes back as raw text.
         yield* fixtureSql(h.dataDir, [
           { sql: "UPDATE slots SET context_excluded=0,deleted_at=NULL WHERE id='hidden-s-0'" },
-          { sql: "UPDATE versions SET content='Restored visible input.' WHERE id='hidden-v-0'" }
+          { sql: "UPDATE version_records SET content='Restored visible input.' WHERE id='hidden-v-0'" }
         ])
         const restored = yield* h.api.GetLcmState({ chatId: h.chat.id, leafSlotId: position.leafSlotId })
         assert.strictEqual(restored.cursorDepth, -1)

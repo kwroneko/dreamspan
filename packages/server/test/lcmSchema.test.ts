@@ -51,7 +51,7 @@ const chat = (ownerId: string, status = "active") => {
   return { chatId }
 }
 
-const versionSql = `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+const versionSql = `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
   VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?)`
 
 /** Appends a slot with one version: the version first, then the slot (deferred keys). */
@@ -243,6 +243,12 @@ describe("foreign keys", () => {
           (index) => get<{ name: string }>(`SELECT name FROM pragma_index_info(?) ORDER BY seqno`, index.name).name
         )
       )
+      // INTEGER PRIMARY KEY aliases rowid and has no separate pragma_index_list entry.
+      const primary = all<{ name: string; type: string }>(
+        `SELECT name, type FROM pragma_table_info(?) WHERE pk > 0`,
+        name
+      )
+      if (primary.length === 1 && primary[0]!.type === "INTEGER") leading.add(primary[0]!.name)
       for (const fk of all<{ from: string; table: string }>(`SELECT * FROM pragma_foreign_key_list(?)`, name)) {
         if (!neverDeleted.has(fk.table) && !leading.has(fk.from) && !unindexedOk.has(`${name}.${fk.from}`))
           unindexed.push(`${name}.${fk.from}`)

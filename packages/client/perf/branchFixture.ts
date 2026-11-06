@@ -5,7 +5,7 @@ const { file, chat } = workerData as { file: string; chat: string }
 const db = new DatabaseSync(file)
 db.exec("PRAGMA foreign_keys=ON; BEGIN; INSERT INTO fork_label_pause VALUES (1)")
 const v = db.prepare(
-  "INSERT INTO versions(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) VALUES(?,?,?,'complete',?,?,'verbatim','user_written',?,?)"
+  "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) VALUES(?,?,?,'complete',?,?,'verbatim','user_written',?,?)"
 )
 const s = db.prepare(
   "INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,fork_id,created_at) VALUES(?,?,?,?,?,?,?)"

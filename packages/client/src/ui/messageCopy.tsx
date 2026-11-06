@@ -175,6 +175,73 @@ function copyStoredSelection(range: Range): CopiedSelection | null {
 }
 
 /**
+ * The part of a selection inside `within` (an element around message bodies) as its stored text,
+ * the way copying it gives it; null when the selection isn't in it.
+ */
+export function selectedSourceText(range: Range, within: Element): string | null {
+  const clipped = clippedRange(range, within)
+  if (!clipped) return null
+  // Body by body, each clipped to itself: reading text around a body would move the
+  // selection for a moment (`nativeText`), which a selection listener would hear again.
+  const slices = [...within.querySelectorAll("[data-message-source]")].flatMap((body) => {
+    const part = clippedRange(clipped, body)
+    const text = part && copyStoredSelection(part)?.text
+    return part && text ? [keepFormatting(part, body, text)] : []
+  })
+  return slices.length > 0 ? slices.join("\n\n") : clipped.toString()
+}
+
+/** Inline formatting and its marks, for a selection that starts or ends inside it. */
+const marks: Record<string, string> = { em: "*", i: "*", strong: "**", b: "**", del: "~~", s: "~~" }
+
+/** The formatting elements around a point in a body, innermost first. */
+function formattingAt(node: Node, body: Element): Element[] {
+  const around: Element[] = []
+  for (let element = node.nodeType === 1 ? (node as Element) : node.parentElement; element && element !== body;) {
+    if (element.localName in marks) around.push(element)
+    element = element.parentElement
+  }
+  return around
+}
+
+/** The mark that opens `element` in its stored text: `_` where the text used it. */
+function markOf(element: Element, text: string): string {
+  const mark = marks[element.localName]!
+  const leaf = element.querySelector("[data-source-map]")
+  if (!leaf || mark === "~~") return mark
+  const map = JSON.parse(leaf.getAttribute("data-source-map")!) as SourceMap
+  const first = typeof map.chars === "number" ? map.chars : map.chars.find((char) => char !== null)?.[0]
+  return first !== undefined && text[first - 1] === "_" ? mark.replaceAll("*", "_") : mark
+}
+
+/**
+ * A selection's stored text keeps the marks of formatting it covers whole. Starting or ending
+ * inside italics (say) would leave a mark open or lose the formatting: close and open them again.
+ */
+function keepFormatting(part: Range, body: Element, slice: string): string {
+  const stored = bodies.get(body) ?? ""
+  const document = body.ownerDocument
+  const empty = (from: [Node, number], to: [Node, number]) => {
+    const between = document.createRange()
+    between.setStart(...from)
+    between.setEnd(...to)
+    return between.toString() === ""
+  }
+  const opening = formattingAt(part.startContainer, body)
+    .filter((element) => !empty([element, 0], [part.startContainer, part.startOffset]))
+    .map((element) => markOf(element, stored))
+    .reverse()
+    .join("")
+  const closing = formattingAt(part.endContainer, body)
+    .filter((element) => !empty([part.endContainer, part.endOffset], [element, element.childNodes.length]))
+    .map((element) => markOf(element, stored))
+    .join("")
+  if (!opening && !closing) return slice
+  const [, before, inner, after] = /^(\s*)([\s\S]*?)(\s*)$/.exec(slice)!
+  return inner ? `${before}${opening}${inner}${closing}${after}` : slice
+}
+
+/**
  * The offset in a message body's source text of a point in its rendered text (a click's
  * caret, say), with that source text; null outside a mapped body.
  */

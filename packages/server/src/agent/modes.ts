@@ -18,7 +18,8 @@ export interface AgentPlan {
   readonly assembly?: {
     /** Told with the end of the request, given the tools actually offered. */
     readonly instructions: (offered: ReadonlyArray<string>, contract: OutputContract) => string
-    readonly cardsAtTail: boolean
+    /** Card-swap: only the speaking character's card is sent, where the preset puts cards. */
+    readonly speakerCardOnly: boolean
   }
 }
 
@@ -70,7 +71,7 @@ export const agentInstructions = (offered: ReadonlyArray<string>, contract: Outp
     .join(" ")
 
 const agentPlan =
-  (cardsAtTail: boolean) =>
+  (speakerCardOnly: boolean) =>
   ({ state }: { readonly state: ChatState }): AgentPlan => {
     const contract = state.outputContract ?? "both"
     const tools = state.agentTools ?? NARRATOR_TOOLS
@@ -79,7 +80,7 @@ const agentPlan =
       tools,
       contract,
       turnCap: 12,
-      assembly: { instructions: agentInstructions, cardsAtTail }
+      assembly: { instructions: agentInstructions, speakerCardOnly }
     }
   }
 
@@ -91,12 +92,12 @@ export const narratorMode: OrchestrationMode = {
   plan: agentPlan(false)
 }
 
-/** As the narrator, with the speaking character's card at the tail (DESIGN §5.2's card-swap layout). */
+/** As the narrator, with only the speaking character's card sent (DESIGN §5.2's card-swap layout). */
 export const cardSwapMode: OrchestrationMode = {
   id: "card-swap",
   label: "Card swap with tools",
   description:
-    "As the narrator, with the speaking character's card moved to the end, just before the reply. Follows the card more closely, and costs more cache.",
+    "As the narrator, with only the speaking character's card sent, where the prompt preset puts cards. The cards change with each speaker, so less of the context can be cached.",
   plan: agentPlan(true)
 }
 

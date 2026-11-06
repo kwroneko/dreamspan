@@ -1,7 +1,8 @@
 // What the model may change (spec/AGENTIC.md §4.3) in the browser: the card editor's Model may
 // change list (side panel and full editor), saved with the card; the chat's Model may change
-// section under Reply mode, starting from the card's and note's own settings and overriding them;
-// and a note the model wrote, listed in Notes only where the reply that wrote it is shown. A
+// section under Reply mode, starting from the card's and note's own settings, overriding them and
+// Reset back to them; and a note the model wrote, listed in Notes only where the reply that wrote
+// it is shown, and never in the library's note list (the note editor's switcher). A
 // scripted loopback provider writes one note per reply. Layout audit on each surface, at 1440 and
 // 390, light and dark. Every card and note here is made up.
 import { mkdirSync } from "node:fs"
@@ -165,6 +166,8 @@ for (const width of [1440, 390])
             first: { _tag: "Send", content: "The lamp went out.", speakerEntityId: null }
           })
           const chatId = started.chat.id
+          // A note of the user's own, which the library lists beside the model's, which it doesn't.
+          yield* api.CreateChatNote({ chatId, title: `Lamp oil ${width} ${theme}`, content: "The lamp needs oil." })
           const modes = yield* api.ListReplyModes({})
           const narrator = modes.modes.find((m) => m.id === "narrator")!
           yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "ReplyMode", mode: "narrator" } })
@@ -213,6 +216,8 @@ for (const width of [1440, 390])
       const notes = chat.getByRole("group", { name: "Chat notes" })
       await expect(notes.getByRole("checkbox", { name: "Note 2" })).toBeChecked()
       await expect(notes.getByRole("checkbox", { name: "Note 1" })).toHaveCount(0)
+      // No Reset while every box follows its note's or card's own setting.
+      await expect(chat.getByRole("button", { name: "Reset" })).toHaveCount(0)
       await fields.getByRole("checkbox", { name: "Description" }).click()
       await expect(fields.getByRole("checkbox", { name: "Description" })).toBeChecked()
       const permissions = await admin((api) =>
@@ -221,11 +226,49 @@ for (const width of [1440, 390])
       expect(permissions.cards[0]!.fields.find((f) => f.field === "description")).toEqual({
         field: "description",
         on: true,
-        own: false
+        own: false,
+        chosen: true
       })
+      // The chat's choice has a Reset beside it, explained on hover; the note unticked has one too.
+      const reset = fields.getByRole("button", { name: "Reset" })
+      await expect(reset).toHaveCount(1)
+      await expect(reset).toHaveAccessibleDescription(
+        `Goes back to ${name}'s card setting: the model may not change its Description.`
+      )
+      await notes.getByRole("checkbox", { name: "Note 2" }).click()
+      await expect(notes.getByRole("checkbox", { name: "Note 2" })).not.toBeChecked()
+      await expect(notes.getByRole("button", { name: "Reset" })).toHaveCount(1)
       await chat.scrollIntoViewIfNeeded()
+      await reset.hover()
+      await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText("Goes back to")
       await shot("chat-model-may-change")
       await expectLayout(page, info, `chat-model-may-change-${width}-${theme}`, { scope: "[data-agent-permissions]" })
+      await page.mouse.move(0, 0)
+      // Reset: the boxes follow the card's and the note's own settings again.
+      const box = await fields.getByRole("checkbox", { name: "Description" }).boundingBox()
+      await reset.click()
+      await expect(fields.getByRole("checkbox", { name: "Description" })).not.toBeChecked()
+      await expect(fields.getByRole("button", { name: "Reset" })).toHaveCount(0)
+      // The box didn't move when its Reset went.
+      expect(await fields.getByRole("checkbox", { name: "Description" }).boundingBox()).toEqual(box)
+      await notes.getByRole("button", { name: "Reset" }).click()
+      await expect(notes.getByRole("checkbox", { name: "Note 2" })).toBeChecked()
+      await expect(chat.getByRole("button", { name: "Reset" })).toHaveCount(0)
+      const after = await admin((api) => api.GetAgentPermissions({ chatId: fixture.chatId, slotId: fixture.slotId }))
+      expect(after.cards[0]!.fields.find((f) => f.field === "description")).toEqual({
+        field: "description",
+        on: false,
+        own: false,
+        chosen: false
+      })
+      // Card swap, the chat's card layout: a switch of its own, with or without tools.
+      const swap = settings.getByRole("region", { name: "Card swap" })
+      await expect(swap.getByRole("switch", { name: "Card swap" })).not.toBeChecked()
+      await swap.getByRole("switch", { name: "Card swap" }).click()
+      await expect(swap.getByRole("switch", { name: "Card swap" })).toBeChecked()
+      await swap.scrollIntoViewIfNeeded()
+      await shot("card-swap-setting")
+      await expectLayout(page, info, `card-swap-setting-${width}-${theme}`, { scope: '[aria-label="Card swap"]' })
       if (width === 390) await closePanel(page)
 
       // Notes: only the shown swipe's note; the other swipe shown, only its own.
@@ -239,6 +282,23 @@ for (const width of [1440, 390])
       )
       await expect(notesTab.getByRole("region", { name: "Note Note 1" })).toBeVisible()
       await expect(notesTab.getByRole("region", { name: "Note Note 2" })).toHaveCount(0)
+
+      // The library's note list (the note editor's switcher) has the user's note, not the model's.
+      const listed = await admin((api) => api.ListLibrary({ kind: "note" }))
+      expect(listed.map((ref) => ref.label)).toContain(`Lamp oil ${width} ${theme}`)
+      expect(listed.map((ref) => ref.label)).not.toContain("Note 1")
+      expect(listed.map((ref) => ref.label)).not.toContain("Note 2")
+      const lamp = listed.find((ref) => ref.label === `Lamp oil ${width} ${theme}`)!
+      await page.goto(`${server().url}/library/${lamp.id}`)
+      const switcher = page.getByRole("combobox", { name: "Switch note" })
+      await expect(switcher).toBeVisible({ timeout: 30_000 })
+      await switcher.click()
+      const options = page.getByRole("option")
+      await expect(options.filter({ hasText: `Lamp oil ${width} ${theme}` })).toHaveCount(1)
+      await expect(options.filter({ hasText: /^Note [12]/ })).toHaveCount(0)
+      await shot("note-switcher")
+      await expectLayout(page, info, `note-switcher-${width}-${theme}`, { scope: '[role="listbox"]' })
+      await page.keyboard.press("Escape")
 
       // The full editor has the same list, as saved.
       if (width === 1440) {

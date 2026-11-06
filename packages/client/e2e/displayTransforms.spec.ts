@@ -125,7 +125,7 @@ for (const width of [1440, 390])
       await Effect.runPromise(
         fixtureSql(server().dataDir, [
           {
-            sql: "INSERT INTO versions(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,fork_id,speaker_entity_id) SELECT ?,slot_id,ordinal+1,'complete','model',content,'verbatim','generated',created_at,updated_at,fork_id,speaker_entity_id FROM versions WHERE id=?",
+            sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,fork_id,speaker_entity_id) SELECT ?,slot_id,ordinal+1,'complete','model',content,'verbatim','generated',created_at,updated_at,fork_id,speaker_entity_id FROM version_records WHERE id=?",
             params: [modelVersion, fixture.model.version.id]
           }
         ])
@@ -206,7 +206,7 @@ for (const width of [1440, 390])
         await Effect.runPromise(
           fixtureSql(server().dataDir, [
             {
-              sql: "INSERT INTO versions(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,fork_id,speaker_entity_id) SELECT ?,slot_id,ordinal+1,'complete','model',?,'verbatim','generated',created_at,updated_at,fork_id,speaker_entity_id FROM versions WHERE id=?",
+              sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,fork_id,speaker_entity_id) SELECT ?,slot_id,ordinal+1,'complete','model',?,'verbatim','generated',created_at,updated_at,fork_id,speaker_entity_id FROM version_records WHERE id=?",
               params: [hostileId, hostileText, modelVersion]
             }
           ])

@@ -41,7 +41,7 @@ export const orderProblem = (s: Record<string, unknown>) => {
 /** The effective version after the covered run is shown; deleted/failed text still has none. */
 const effective = (sql: SqlClient.SqlClient, fork: string | null) =>
   sql`NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${shownVersionDeletedIn(sql, fork, "v")}
-    AND v.status NOT IN ('generating', 'failed') AND length(v.content) > 0`
+    AND v.status NOT IN ('generating', 'failed') AND v.content_length > 0`
 
 export const makeLcmEnableWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {

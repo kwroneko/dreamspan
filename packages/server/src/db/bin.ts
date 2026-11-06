@@ -94,11 +94,21 @@ const chatName = (title: string | null | undefined) => (title ? `"${title}"` : "
 const bytes = (column: string) => `coalesce(length(CAST(${column} AS BLOB)), 0)`
 
 /** The bytes deleting version `v` for good frees: what purgeVersions empties or deletes. */
-const versionBytes = (v: string) =>
+const versionBytes = (v: string, text = v) =>
   [
-    ...["content", "reasoning", "reply_sections", "display_form", "context_form", "direction", "frozen_macros"].map(
-      (column) => bytes(`${v}.${column}`)
-    ),
+    ...[
+      "content",
+      "reasoning",
+      "raw_content",
+      "raw_reasoning",
+      "raw_sections",
+      "rewrite_json",
+      "reply_sections",
+      "display_form",
+      "context_form",
+      "direction",
+      "frozen_macros"
+    ].map((column) => bytes(`${text}.${column}`)),
     `(SELECT coalesce(sum(${bytes("h.content")}), 0) FROM version_history h WHERE h.version_id = ${v}.id)`,
     `(SELECT coalesce(sum(${bytes("a.alt_text")}), 0) FROM version_attachments a WHERE a.version_id = ${v}.id)`
   ].join(" + ")
@@ -294,7 +304,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         content: string
       }>`
         SELECT s.id, s.chat_id, s.depth, s.parent_slot_id, c.title, v.content
-        FROM slots s JOIN chats c ON c.id = s.chat_id JOIN versions v ON v.id = ${shownIn(sql, fork.id, "s")}
+        FROM slots s JOIN chats c ON c.id = s.chat_id JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "s")}
         WHERE s.id = ${slotId} AND NOT ${slotDeletedIn(sql, fork.id, "s")}`
       if (!row) return yield* new NotFound({ entity: "slot", id: slotId })
       // Where the fork shows it, as the chat numbers it: its depth unless insertions move it.
@@ -308,8 +318,9 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       ? Effect.succeed({ slots: 0, bytes: 0 })
       : Effect.map(
           sql<{ slots: number; bytes: number }>`
-            SELECT count(DISTINCT s.id) AS slots, coalesce(sum(${sql.literal(versionBytes("v"))}), 0) AS bytes
+            SELECT count(DISTINCT s.id) AS slots, coalesce(sum(${sql.literal(versionBytes("v", "vt"))}), 0) AS bytes
             FROM slots s LEFT JOIN versions v ON v.slot_id = s.id AND v.deleted_at IS NULL
+              LEFT JOIN version_texts vt ON vt.version_seq = v.seq
             WHERE ${sql.in("s.id", ids)} AND s.deleted_at IS NULL`,
           ([row]) => row!
         )
@@ -364,7 +375,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     Effect.gen(function* () {
       const slot = yield* ownedLiveSlot(userId, slotId, forkId)
       const [size] = yield* sql<{ n: number }>`
-        SELECT coalesce(sum(${sql.literal(versionBytes("v"))}), 0) AS n FROM versions v
+        SELECT coalesce(sum(${sql.literal(versionBytes("v"))}), 0) AS n FROM version_records v
         WHERE v.slot_id = ${slotId} AND v.deleted_at IS NULL`
       const itemId = yield* insertItem({
         userId,
@@ -433,9 +444,10 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           : statement === "count"
             ? sql<{ slots: number; bytes: number }>`
                 ${pathSegments(sql, fork.chat_id, fork.tip_slot_id, null)}
-                SELECT count(DISTINCT s.id) AS slots, coalesce(sum(${sql.literal(versionBytes("v"))}), 0) AS bytes
+                SELECT count(DISTINCT s.id) AS slots, coalesce(sum(${sql.literal(versionBytes("v", "vt"))}), 0) AS bytes
                 FROM segments g JOIN slots s ON s.chain_id = g.chain_id AND s.depth BETWEEN max(g.lo, ${below}) AND g.hi
                   LEFT JOIN versions v ON v.slot_id = s.id AND v.deleted_at IS NULL
+              LEFT JOIN version_texts vt ON vt.version_seq = v.seq
                 WHERE s.deleted_at IS NULL`
             : sql<{ slots: number; bytes: number }>`
                 ${pathSegments(sql, fork.chat_id, fork.tip_slot_id, null)}
@@ -453,7 +465,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       }
       const end = yield* lastShown(sql, fork.chat_id, fork)
       const [tip] = yield* sql<{ content: string }>`
-        SELECT v.content FROM slots t JOIN versions v ON v.id = ${shownIn(sql, forkId, "t")} WHERE t.id = ${end}`
+        SELECT v.content FROM slots t JOIN version_records v ON v.id = ${shownIn(sql, forkId, "t")} WHERE t.id = ${end}`
       const itemId = group
         ? group.itemId
         : yield* insertItem({
@@ -574,8 +586,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       }>`
         SELECT o.id, o.slot_id, s.chat_id, o.ordinal, x.content,
           ${sql.literal(versionBytes("o"))} + (SELECT coalesce(sum(${sql.literal(versionBytes("c"))}), 0)
-            FROM versions c WHERE c.source_version_id = o.id AND c.fork_id IS NOT NULL) AS bytes
-        FROM versions x JOIN versions o ON o.id = ${sql.literal(originalSql("x"))}
+            FROM version_records c WHERE c.source_version_id = o.id AND c.fork_id IS NOT NULL) AS bytes
+        FROM version_records x JOIN version_records o ON o.id = ${sql.literal(originalSql("x"))}
           JOIN slots s ON s.id = o.slot_id JOIN chats c ON c.id = s.chat_id
         WHERE x.id = ${shownId} AND c.owner_user_id = ${userId}
           AND o.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
@@ -649,9 +661,9 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
                  THEN ${sql.literal(versionBytes("v"))} END), 0) AS bytes,
           count(DISTINCT s.id) AS messages,
           (SELECT v2.content FROM chats c2 JOIN slots s2 ON s2.id = c2.active_leaf_slot_id
-             JOIN versions v2 ON v2.id = ${sql.literal(shownInSql("c2.current_fork_id", "s2"))}
+             JOIN version_records v2 ON v2.id = ${sql.literal(shownInSql("c2.current_fork_id", "s2"))}
              WHERE c2.id = ${chatId}) AS last
-        FROM slots s JOIN versions v ON v.slot_id = s.id WHERE s.chat_id = ${chatId}`
+        FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE s.chat_id = ${chatId}`
       const [records] = yield* sql.unsafe<{ n: number }>(
         `SELECT coalesce(sum(n), 0) AS n FROM (${chatRecordBytes.join(" UNION ALL ")})`,
         chatRecordBytes.map(() => chatId)
@@ -929,7 +941,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       const purgeVersions = (versions: string) =>
         Effect.gen(function* () {
           yield* run(
-            `UPDATE versions SET purged_at = ?, content = '', reasoning = NULL, reply_sections = NULL, display_form = NULL,
+            `UPDATE version_records SET purged_at = ?, content = '', reasoning = NULL, raw_content = NULL,
+               raw_reasoning = NULL, raw_sections = NULL, rewrite_json = NULL, reply_sections = NULL, display_form = NULL,
                context_form = NULL, direction = NULL, frozen_macros = NULL
              WHERE ${versions}`,
             [now]

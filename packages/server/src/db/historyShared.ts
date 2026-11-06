@@ -41,7 +41,7 @@ export const historyCurrent = Effect.fnUntraced(function* (
         id: string
         content: string
         slot_id: string
-      }>`SELECT id, content, slot_id FROM versions WHERE id=${id}`
+      }>`SELECT id, content, slot_id FROM version_records WHERE id=${id}`
       return row ?? null
     }
   } else if (edit.kind === "state_event") {

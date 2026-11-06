@@ -2656,6 +2656,24 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       )
   },
+  ListArchiveCandidates: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.ListArchiveCandidates({ criteria: { never: 1, inactive: 1 } }), (cards) =>
+        assert.isFalse(cards.some((c) => c.entityId === owner.cardId))
+      )
+  },
+  ArchiveUnusedCards: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.ArchiveUnusedCards({ criteria: { never: 1 }, entityIds: [owner.cardId] }), (receipt) =>
+        assert.lengthOf(receipt.entityIds, 0)
+      )
+  },
+  UndoCardArchive: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.UndoCardArchive({ entityIds: [owner.cardId], archivedAt: 1 }), (count) =>
+        assert.strictEqual(count, 0)
+      )
+  },
   SetRefArchived: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

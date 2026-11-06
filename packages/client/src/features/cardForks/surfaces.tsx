@@ -23,7 +23,16 @@ export interface CardMenuProps extends CardSurfaceContext {
 }
 /** `header`: a row under a card's names in its header (the chat panel's tab, the full editor) and on its page. */
 export type CardPlacement =
-  "actions" | "provenance" | "badge" | "family" | "header" | "chats" | "persona-badge" | "persona-menu"
+  | "archive-toggle"
+  | "tile-menu"
+  | "actions"
+  | "provenance"
+  | "badge"
+  | "family"
+  | "header"
+  | "chats"
+  | "persona-badge"
+  | "persona-menu"
 interface CardContribution {
   readonly id: string
   readonly placement: CardPlacement

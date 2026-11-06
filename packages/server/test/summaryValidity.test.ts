@@ -25,7 +25,7 @@ const setup = Effect.gen(function* () {
     yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (${chat}, 'u', 'rp', 'active', 1)`
   const slot = (id: string, parent: string | null, depth: number, chat = "main") =>
     Effect.gen(function* () {
-      yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+      yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`
       yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
         VALUES (${id}, ${chat}, ${parent}, ${depth}, ${`v-${id}`}, 1)`
@@ -105,17 +105,17 @@ describe("per-fork summary validity", () => {
         assert.deepStrictEqual(yield* reached(sql`UPDATE slots SET created_at = 2 WHERE id = 'c'`), ["main"])
         assert.deepStrictEqual(yield* reached(sql`UPDATE slots SET purged_at = 2 WHERE id = 'x'`), ["X"])
         // An edit of a shared slot's version, or its deletion.
-        assert.deepStrictEqual(yield* reached(sql`UPDATE versions SET content = 'edited' WHERE id = 'v-b'`), [
+        assert.deepStrictEqual(yield* reached(sql`UPDATE version_records SET content = 'edited' WHERE id = 'v-b'`), [
           "Y",
           "main"
         ])
-        yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+        yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
           VALUES ('v-a2', 'a', 1, 'complete', 'human', 'swipe', 'verbatim', 'user_written', 1, 1)`
         assert.deepStrictEqual(yield* reached(sql`DELETE FROM versions WHERE id = 'v-a2'`), all)
         // A retained swipe contributes participation/activity on every path through its slot.
         // A new slot is on no path until a fork's tip moves to it, which reaches that fork.
         assert.deepStrictEqual(
-          yield* reached(sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin,
+          yield* reached(sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin,
             created_at, updated_at) VALUES ('v-a3', 'a', 2, 'complete', 'human', 'swipe', 'verbatim', 'user_written', 1, 1)`),
           all
         )
@@ -152,7 +152,7 @@ describe("per-fork summary validity", () => {
         // Kinds the summaries don't read move nothing; insertion placement is fork-owned.
         assert.deepStrictEqual(yield* reached(override("h1", "Y", 13, "hide")), [])
         yield* Effect.andThen(
-          sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at,
+          sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at,
             updated_at) VALUES ('v-i', 'i', 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`,
           sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
             VALUES ('i', 'main', 'b', 3, 'v-i', 1, 1)`

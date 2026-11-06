@@ -1,3 +1,4 @@
+import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "./cardArchive.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "./forkMerge.ts"
 // The editor RPCs (ARCHITECTURE.md "Editing the library"; DESIGN §4, §6.2), merged into
 // AppApi. Every text field edits through a draft on the server, with its own undo history;
@@ -516,4 +517,18 @@ export class GalleryApi extends RpcGroup.make(
     success: SavedRef,
     error: Schema.Union([...Writes])
   })
+) {}
+
+export class CardArchiveApi extends RpcGroup.make(
+  Rpc.make("ListArchiveCandidates", {
+    payload: { criteria: ArchiveCriteria },
+    success: Schema.Array(ArchiveCandidate),
+    error: ServerError
+  }),
+  Rpc.make("ArchiveUnusedCards", {
+    payload: { criteria: ArchiveCriteria, entityIds: Schema.Array(EntityId) },
+    success: CardArchiveReceipt,
+    error: ServerError
+  }),
+  Rpc.make("UndoCardArchive", { payload: CardArchiveReceipt.fields, success: Schema.Int, error: ServerError })
 ) {}

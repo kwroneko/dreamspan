@@ -51,7 +51,7 @@ What presence can't express yet, **[P]** with the reason:
 
 - **[D]** (owner, 2026-11-06) "Yes, but I am not sure this wording is always what we want. One important case: two entirely separate storylines, that are 1 on 1 chats, merge. What do we say then?"
 
-**[P] Proposal, for the owner to confirm.** In a separate context, the messages its character wasn't present for are left out. A gap line replaces a stretch only where the character was present before it and after it, within its own storyline. Everything else is someone else's past, and nothing is said by default:
+**[D]** (owner, 2026-11-06, confirming the proposal below: "Ok") In a separate context, the messages its character wasn't present for are left out. A gap line replaces a stretch only where the character was present before it and after it, within its own storyline. Everything else is someone else's past, and nothing is said by default:
 - before the character's first message in the chat (it hadn't arrived);
 - a merged-in storyline the character was never part of;
 - after its last message, when it's away at the tip (the line appears once it's back).
@@ -98,7 +98,7 @@ The preset's layout is the default: every cast card where the preset puts it, on
 
 - **[D]** (owner, 2026-11-06) "Swap mode still shows the persona on ST. With this configuration as described the LLM would quite literally never see it. … If a user wants card defs to be shown at the end, this can be done by editing the prompt preset. It's the rotation that can't be expressed that way… Why do we have to go out of our way to seemingly override the user's preset choices."
 
-**Target behaviour** (the parallel `cardswap` job builds it): card-swap is rotation only. The preset's card-definition positions hold only the current speaker's card, as in ST's "Swap character cards". Nothing moves to the tail. The persona and everything else are unchanged. Concretely:
+**Target behaviour** (**built** by the `cardswap` job as the `cards.rotation` setting, ARCHITECTURE §16; the persona-turn [P] below is not built: a persona turn sends every card): card-swap is rotation only. The preset's card-definition positions hold only the current speaker's card, as in ST's "Swap character cards". Nothing moves to the tail. The persona and everything else are unchanged. Concretely:
 - The per-field markers (`charDescription`, `charPersonality`, `scenario`, `dialogueExamples`, and `{{description}}`, `{{personality}}`, `{{scenario}}` in preset text) and the Definitions marker are filled from the speaker's card alone, still in its `<Name>…</Name>` wrapper (DESIGN §5.0 [D]). The other characters' cards are not sent at those positions.
 - Card notes "With the definitions" follow their card: only the speaker's are sent there. The Own-turn notes marker is unaffected: it holds the speaker's own-turn notes with either layout.
 - Unchanged: the persona's description at `personaDescription` or in Definitions; the speaker's system prompt and post-history overrides (as always); card notes at other positions (they follow their own conditions); lorebooks (the Lorebooks tab decides which books are in, as always); the chat's history, summaries and notes.
@@ -244,8 +244,7 @@ The two decision points:
 
 ### 8.2 Decisions for the owner
 
-1. **Gap lines** (§2.2, proposed). A line only where the character was present before and after a stretch of its own storyline; nothing said for a merged-in storyline it was never in, nor before it arrived; the wording is preset text with `{{absentCount}}` and `{{absentNames}}`, plus an optional join line at a merge point, empty by default. Confirm or change the rule and the default wording.
-2. **A shared past** (§2.4, Open). Whether separate contexts should also offer "Storylines rejoin here": everything before that message summarized once for everyone (one cache prefix, Wren learns the inn scene as a summary), separate recent history after it, and the same for merged chats. Default meanwhile: parallel contexts with their own summaries.
-3. **How a narrator's context shows diverged storylines** (§6, Open). Options a–d; my lean is a (labelled runs in path order) within a chat and c (the merge's section) for merged chats.
+1. **A shared past** (§2.4, Open). Whether separate contexts should also offer "Storylines rejoin here": everything before that message summarized once for everyone (one cache prefix, Wren learns the inn scene as a summary), separate recent history after it, and the same for merged chats. Default meanwhile: parallel contexts with their own summaries.
+2. **How a narrator's context shows diverged storylines** (§6, Open). Options a–d; my lean is a (labelled runs in path order) within a chat and c (the merge's section) for merged chats.
 
 Turn picking with decision models (§5) is written as proposed, not listed: both points are opt-in, and the only proposal is that, with separate contexts, a decision-set away shows on the timeline with Undo.

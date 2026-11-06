@@ -51,11 +51,11 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         SELECT id, parent_slot_id, depth FROM slots WHERE id = ${leafSlotId} AND depth > ${after}
         UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN path p ON s.id = p.parent
           WHERE s.depth > ${after}
-      ) SELECT count(*) AS n, coalesce(sum((length(v.content) + 3) / 4 + 3), 0) AS tokens
+      ) SELECT count(*) AS n, coalesce(sum((v.content_length + 3) / 4 + 3), 0) AS tokens
         FROM path p JOIN slots s ON s.id = p.id JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
         WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND (${contextExcludedIn(sql, fork)} = 0 OR s.depth <= ${shownThrough})
           AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
-          AND length(v.content) > 0`
+          AND v.content_length > 0`
     ).pipe(Effect.map(([row]) => row ?? { n: 0, tokens: 0 }))
 
   return {

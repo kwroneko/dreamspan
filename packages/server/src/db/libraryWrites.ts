@@ -1,3 +1,4 @@
+import { archiveCandidates } from "./cardArchive.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
 import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
 import { makeForkMergeWriteHandlers } from "./forkMergeWrites.ts"
@@ -73,6 +74,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const lib = makeLibraryQueries(sql)
+    let archiveClock = 0
+    const archiveTime = () => (archiveClock = Math.max(Date.now(), archiveClock + 1))
     yield* libraryMergePolicies.register(defaultLibraryMergePolicy)
     const { drafts } = bin
     const forkMerge = makeForkMergeQueries(sql)
@@ -637,10 +640,28 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           return unique
         }).pipe(transaction(sql, "SetEntityTags")),
 
+      ArchiveUnusedCards: ({ userId, criteria, entityIds }) =>
+        Effect.gen(function* () {
+          const requested = new Set(entityIds)
+          const eligible = (yield* archiveCandidates(sql, userId, criteria)).filter((c) => requested.has(c.entityId))
+          const ids = eligible.map((c) => c.entityId)
+          const archivedAt = archiveTime()
+          yield* sql`UPDATE entities SET archived_at = ${archivedAt}
+            WHERE owner_user_id = ${userId} AND id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`
+          return { entityIds: ids, archivedAt }
+        }).pipe(transaction(sql, "ArchiveUnusedCards")),
+      UndoCardArchive: ({ userId, entityIds, archivedAt }) =>
+        Effect.gen(function* () {
+          const rows = yield* sql<{ id: string }>`UPDATE entities SET archived_at = NULL
+            WHERE owner_user_id = ${userId} AND kind = 'card' AND deleted_at IS NULL
+              AND archived_at = ${archivedAt} AND id IN (SELECT value FROM json_each(${JSON.stringify(entityIds)}))
+            RETURNING id`
+          return rows.length
+        }).pipe(transaction(sql, "UndoCardArchive")),
       SetEntityArchived: ({ userId, entityId, archived }) =>
         Effect.gen(function* () {
           const rows = yield* sql<{ id: string }>`
-          UPDATE entities SET archived_at = ${archived ? Date.now() : null}
+          UPDATE entities SET archived_at = CASE WHEN ${archived ? 1 : 0} = 1 THEN coalesce(archived_at, ${archiveTime()}) END
           WHERE id = ${entityId} AND owner_user_id = ${userId} AND deleted_at IS NULL RETURNING id`
           if (rows.length === 0) return yield* new NotFound({ entity: "entity", id: entityId })
         }).pipe(transaction(sql, "SetEntityArchived")),
@@ -649,7 +670,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
           yield* sql`UPDATE entities
-            SET archived_at = CASE WHEN ${archived ? 1 : 0} = 1 THEN coalesce(archived_at, ${Date.now()}) END
+            SET archived_at = CASE WHEN ${archived ? 1 : 0} = 1 THEN coalesce(archived_at, ${archiveTime()}) END
             WHERE id = ${ref.entity_id}`
           return toLibraryRef(yield* reload(refId))
         }).pipe(transaction(sql, "SetRefArchived")),

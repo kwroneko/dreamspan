@@ -31,6 +31,7 @@ import {
   type AppRpcs,
   AppCoreApi,
   AuthenticatedGalleryApi,
+  AuthenticatedCardArchiveApi,
   AuthenticatedWorkbenchApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
@@ -51,7 +52,12 @@ import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatEventHandlers, makeChatHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
-import { makeEditorHandlers, makeGalleryHandlers, makeForkMergeHandlers } from "./api/editor.ts"
+import {
+  makeEditorHandlers,
+  makeGalleryHandlers,
+  makeForkMergeHandlers,
+  makeCardArchiveHandlers
+} from "./api/editor.ts"
 import { makeWorkbenchHandlers } from "./api/workbench.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeBinHandlers } from "./api/bin.ts"
@@ -154,6 +160,7 @@ const Handlers = Layer.mergeAll(
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),
   AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
+  AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedWorkbenchApi.toLayer(makeWorkbenchHandlers)
 )

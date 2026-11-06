@@ -14,7 +14,7 @@ export const forkRecency = (f: string) => `max(${f}.created_at, coalesce(${f}.la
 
 /** A fork's columns for `toFork`: the row, its tip's text as it shows it and whether it's current. */
 export const forkColumns = (f: string) => `${f}.*,
-  (SELECT substr(v.content, 1, 160) FROM slots t JOIN versions v ON v.id = ${shownInSql(`${f}.id`, "t")}
+  (SELECT substr(v.content, 1, 160) FROM slots t JOIN version_records v ON v.id = ${shownInSql(`${f}.id`, "t")}
     WHERE t.id = ${f}.tip_slot_id) AS tip_excerpt,
   (SELECT c.current_fork_id = ${f}.id FROM chats c WHERE c.id = ${f}.chat_id) AS current`
 
@@ -58,7 +58,7 @@ export const withDisplayEnd = <
     const end = yield* lastShown(sql, row.chat_id, row)
     if (end === row.tip_slot_id || end === null) return row
     const [text] = yield* sql<{ excerpt: string | null }>`
-      SELECT substr(v.content, 1, 160) AS excerpt FROM slots t JOIN versions v ON v.id = ${shownIn(sql, row.id, "t")}
+      SELECT substr(v.content, 1, 160) AS excerpt FROM slots t JOIN version_records v ON v.id = ${shownIn(sql, row.id, "t")}
       WHERE t.id = ${end}`
     return { ...row, tip_excerpt: text?.excerpt ?? row.tip_excerpt }
   })
@@ -76,13 +76,26 @@ export const lastText = Effect.fn("lastText")(function* (
     p.kind === "inserted" ? p.depth : p.lo,
     p.kind === "inserted" ? p.depth : p.hi
   ])
+  // Each chain range supplies its newest visible nonblank version with an index
+  // walk. Sorting every message body before LIMIT 1 defeats the payload split.
   const [row] = yield* sql<{ speaker: string | null; writer: string; text: string }>`
-    SELECT v.speaker_entity_id AS speaker, v.writer, substr(v.content, 1, 240) AS text
-    FROM json_each(${JSON.stringify(ranges)}) p CROSS JOIN slots s
-      ON s.chat_id = ${chatId} AND s.chain_id = p.value ->> 0 AND s.depth BETWEEN p.value ->> 1 AND p.value ->> 2
-    JOIN versions v ON v.id = ${shownIn(sql, forkId, "s")}
-    WHERE NOT ${slotDeletedIn(sql, forkId, "s")} AND v.status <> 'failed' AND length(trim(v.content, char(9) || char(10) || char(13) || ' ')) > 0
-    ORDER BY cast(p.key AS INTEGER) DESC, s.depth DESC LIMIT 1`
+    WITH candidates AS MATERIALIZED (
+      SELECT cast(p.key AS INTEGER) AS position, (
+        SELECT v.seq FROM slots s INDEXED BY slots_chain
+        JOIN versions v ON v.id = ${shownIn(sql, forkId, "s")}
+        JOIN version_texts t ON t.version_seq = v.seq
+        WHERE s.chat_id = ${chatId} AND s.chain_id = p.value ->> 0
+          AND s.depth BETWEEN p.value ->> 1 AND p.value ->> 2
+          AND NOT ${slotDeletedIn(sql, forkId, "s")} AND v.status <> 'failed' AND v.content_length > 0
+          AND length(trim(t.content, char(9) || char(10) || char(13) || ' ')) > 0
+        ORDER BY s.depth DESC LIMIT 1
+      ) AS version_seq FROM json_each(${JSON.stringify(ranges)}) p
+    ), chosen AS MATERIALIZED (
+      SELECT version_seq FROM candidates WHERE version_seq IS NOT NULL ORDER BY position DESC LIMIT 1
+    )
+    SELECT v.speaker_entity_id AS speaker, v.writer, substr(t.content, 1, 240) AS text
+    FROM chosen c CROSS JOIN versions v ON v.seq = c.version_seq
+    CROSS JOIN version_texts t ON t.version_seq = v.seq`
   return row ?? null
 })
 

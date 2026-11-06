@@ -32,7 +32,7 @@ export const binItemForks = (sql: SqlClient.SqlClient, userId: UserId, itemIds: 
       for (const fork of forks) {
         const end = yield* lastShown(sql, item.chat_id, fork)
         const [tip] = yield* sql<{ excerpt: string }>`
-              SELECT substr(v.content, 1, 80) AS excerpt FROM slots t JOIN versions v ON v.id = ${shownIn(sql, fork.id, "t")}
+              SELECT substr(v.content, 1, 80) AS excerpt FROM slots t JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "t")}
               WHERE t.id = ${end}`
         shown.push(
           new BinForkShown({
@@ -105,7 +105,7 @@ export const binItemBranches = (sql: SqlClient.SqlClient, userId: UserId, itemId
       Effect.gen(function* () {
         const end = yield* lastShown(sql, chatId, fork)
         const [tip] = yield* sql<{ excerpt: string }>`
-          SELECT substr(v.content, 1, 80) AS excerpt FROM slots t JOIN versions v ON v.id = ${shownIn(sql, fork.id, "t")}
+          SELECT substr(v.content, 1, 80) AS excerpt FROM slots t JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "t")}
           WHERE t.id = ${end}`
         return tip?.excerpt ?? ""
       })

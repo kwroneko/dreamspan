@@ -211,7 +211,7 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
             ? sql`segments g CROSS JOIN slots s ON s.chat_id=${chatId} AND s.chain_id=g.chain_id AND s.depth BETWEEN max(g.lo,${from}) AND g.hi`
             : sql`display_slots d JOIN slots s ON s.id=d.id AND s.chat_id=${chatId}`
         }
-        JOIN versions v ON v.id=${shownIn(sql, forkId, "s")} WHERE NOT ${slotDeletedIn(sql, forkId, "s")} AND NOT ${shownVersionDeletedIn(sql, forkId, "v")}
+        JOIN version_records v ON v.id=${shownIn(sql, forkId, "s")} WHERE NOT ${slotDeletedIn(sql, forkId, "s")} AND NOT ${shownVersionDeletedIn(sql, forkId, "v")}
         AND ${contextExcludedIn(sql, forkId)}=0 AND v.status <> 'generating'`
         const [summaries] = yield* sql<{ summaries: number; tokens: number }>`
         SELECT count(*) AS summaries,coalesce(sum(r.token_count),0) AS tokens FROM summaries s JOIN summary_revisions r ON r.id=${historySummaryRevision(sql, forkId, "s")}

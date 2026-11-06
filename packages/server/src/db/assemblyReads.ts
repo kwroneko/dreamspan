@@ -407,7 +407,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
 
     RawVersionText: ({ userId, versionId }) =>
       sql<{ raw_content: string | null; raw_reasoning: string | null; raw_sections: string | null }>`
-        SELECT v.raw_content, v.raw_reasoning, v.raw_sections FROM versions v
+        SELECT v.raw_content, v.raw_reasoning, v.raw_sections FROM version_records v
         JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
         WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
           AND v.deleted_at IS NULL AND v.purged_at IS NULL`.pipe(

@@ -38,7 +38,7 @@ const SHELL_KEYS = ["chats", "library", "pins", "favourites"]
 export const shellAtom = Atom.keepAlive(AppClient.query("GetShellCards", undefined, { reactivityKeys: SHELL_KEYS }))
 
 /** Every card the lists browse: the characters, then the persona folder's (each `persona`), for `browseCards`. */
-export const browsable = (data: ShellLibrary) => [...data.cards, ...data.personas]
+export const browsable = (data: ShellLibrary) => [...data.cards, ...data.personas, ...data.archived]
 
 /** A section's rows, with their cast's cards, and how many it has. */
 export interface ShellRows {
@@ -419,6 +419,7 @@ function CharacterTile({
           >
             Open in a new browser tab
           </MenuItem>
+          <CardSurface placement="tile-menu" entityId={c.entityId} />
         </ContextMenu>
       )}
       {pick?.onOpen && (
@@ -435,8 +436,14 @@ function CharacterTile({
           {state.pending ? "Adding…" : state.done ? "In this chat" : "Add to chat"}
         </Button>
       )}
-      <span data-layout-overlay="Favourite action sits over the portrait" className="absolute top-2 left-2">
+      <span
+        data-layout-overlay="Favourite action sits over the portrait"
+        className="absolute top-2 left-2 flex flex-col gap-1"
+      >
         <FavouriteStar card={card} className={`tile-toggle ${OVER_PICTURE}`} />
+        <span className={`tile-toggle rounded-md ${OVER_PICTURE}`}>
+          <CardSurface placement="archive-toggle" entityId={c.entityId} />
+        </span>
       </span>
       {!pick && (
         <span data-layout-overlay="Open beside sits over the portrait" className="absolute top-2 right-2">

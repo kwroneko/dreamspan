@@ -74,7 +74,7 @@ const harness = (server: Parameters<typeof lcmHarness>[0]) =>
       })
     const assemble = (
       row: { slotId: SlotId; version: { id: VersionId } },
-      agent?: { instructions: string; cardsAtTail: boolean }
+      agent?: { instructions: string; speakerCardOnly: boolean }
     ) =>
       Effect.map(
         h.reader.AssembleContext({
@@ -200,7 +200,7 @@ lcmTest("an agent reply's context lays the merge out the same way, and a rebuild
   Effect.gen(function* () {
     const h = yield* harness(server)
     const made = yield* h.merge(h.rows[3]!.slotId)
-    const agent = { instructions: "Agent tools go here.", cardsAtTail: false }
+    const agent = { instructions: "Agent tools go here.", speakerCardOnly: false }
     const row = yield* h.append("Message 9. The reply.", made.slotId)
     const parallel = yield* h.assemble(row, agent)
     ascending(all(parallel), [

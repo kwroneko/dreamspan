@@ -1,3 +1,4 @@
+import type { CardBrowse } from "./cardBrowse.tsx"
 import { defineSlot } from "../../slots.tsx"
 import type { ShellLibrary } from "./shellData.tsx"
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -13,3 +14,14 @@ export const sidebarFoot = defineSlot<Record<string, never>>("sidebar.foot")
 
 /** Actions above a single character's chats, outside group and branch scopes. */
 export const characterChatActions = defineSlot<{ entityId: EntityId; label: string }>("sidebar.character-chat-actions")
+
+/** Actions for the explicit Archived view, shared by Home and the sidebar. */
+export const archivedCardActions = defineSlot<Record<string, never>>("cards.archived-actions")
+
+/** Results offered after an ordinary local card search. */
+export const cardSearchExtras = defineSlot<{
+  data: ShellLibrary
+  browse: CardBrowse
+  search: string
+  className: string
+}>("cards.search-extras")

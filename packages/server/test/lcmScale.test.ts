@@ -18,7 +18,7 @@ lcmTest(
       const count = `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ${last})`
       yield* fixtureSql(h.dataDir, [
         {
-          sql: `${count} INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+          sql: `${count} INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
             SELECT 'big-v-' || i, 'big-s-' || i, 0, 'complete', 'human', 'The road ran on, mile ' || i || '.', 'verbatim', 'user_written', 1, 1 FROM n`
         },
         {
