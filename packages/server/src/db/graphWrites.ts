@@ -58,7 +58,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
   /** A version of the user's, with its amend count; `live` also refuses one in the bin. */
   const ownedVersion = (userId: UserId, versionId: VersionId, live: boolean) =>
     sql<VersionRow & { purged_at: number | null }>`
-      SELECT v.*, ${sql.literal(versionExtras("v"))} FROM versions v JOIN slots s ON s.id = v.slot_id
+      SELECT v.*, ${sql.literal(versionExtras("v"))} FROM version_records v JOIN slots s ON s.id = v.slot_id
         JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
         AND (${live ? 0 : 1} OR (v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL))`.pipe(
@@ -112,8 +112,9 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
   ) =>
     Effect.gen(function* () {
       yield* checkSource(slotId, version.sourceVersionId)
-      const row = yield* sql<VersionRow>`INSERT INTO versions ${sql.insert({
-        id: uuidv7(),
+      const id = uuidv7()
+      yield* sql`INSERT INTO version_records ${sql.insert({
+        id,
         slot_id: slotId,
         ordinal,
         status: version.status,
@@ -133,8 +134,9 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         error_json: version.error ? JSON.stringify(version.error) : null,
         created_at: at,
         updated_at: at
-      })} RETURNING *`
-      const inserted = row[0]!
+      })}`
+      const [insertedRow] = yield* sql<VersionRow>`SELECT * FROM version_records WHERE id = ${id}`
+      const inserted = insertedRow!
       if (version.images !== undefined) {
         const [chat] = yield* sql<{
           owner: string
@@ -492,7 +494,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     Effect.gen(function* () {
       const { slot, fork, selected, shown, rowVersion } = yield* slotInFork(userId, slotId, forkId)
       const [version] = yield* sql<{ id: string; content: string }>`
-        SELECT o.id, (SELECT content FROM versions WHERE id = ${replacedIn(sql, fork.id, "o.id")}) AS content
+        SELECT o.id, (SELECT content FROM version_records WHERE id = ${replacedIn(sql, fork.id, "o.id")}) AS content
         FROM versions v JOIN versions o ON o.id = ${sql.literal(originalSql("v"))}
         WHERE v.id = ${versionId} AND v.slot_id = ${slotId} AND v.deleted_at IS NULL AND o.deleted_at IS NULL`
       if (!version) return yield* new NotFound({ entity: "version", id: versionId })

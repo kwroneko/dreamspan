@@ -596,7 +596,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             const speaker = message.speaker === null ? null : (speakers[message.speaker] ?? null)
             const chosen = message.selected < message.versions.length ? message.selected : 0
             const insertVersion = (slotId: string, ordinal: number, version: (typeof message.versions)[number]) =>
-              sql<{ id: string }>`INSERT INTO versions ${sql.insert({
+              sql<{ id: string }>`INSERT INTO version_records ${sql.insert({
                 id: uuidv7(),
                 slot_id: slotId,
                 ordinal,
@@ -670,7 +670,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
                   ) AS locally_changed,
                   coalesce((SELECT h.content FROM version_history h WHERE h.version_id = v.id ORDER BY h.id LIMIT 1),
                     v.content) AS original
-                FROM slots s JOIN versions v ON v.slot_id = s.id AND v.fork_id IS NULL
+                FROM slots s JOIN version_records v ON v.slot_id = s.id AND v.fork_id IS NULL
                 WHERE ${parent === null ? sql`s.chat_id = ${chatId} AND s.depth = 0` : sql`s.parent_slot_id = ${parent.id}`}
                   AND s.inserted = 0
                 ORDER BY s.id, v.ordinal`
@@ -951,7 +951,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         // once; a later re-import or a local cast change must not rewrite old participation.
         const importedCast = foldState(input.events.map((data) => ({ scope: null, data }))).participants
         yield* sql`${pathSegments(sql, chatId, input.end, null)}
-          UPDATE versions SET cast_json = ${JSON.stringify(importedCast)}
+          UPDATE version_records SET cast_json = ${JSON.stringify(importedCast)}
           WHERE origin = 'imported' AND cast_json IS NULL AND slot_id IN (
             SELECT s.id FROM segments g CROSS JOIN slots s
             WHERE s.chat_id = ${chatId} AND s.chain_id = g.chain_id AND s.depth BETWEEN g.lo AND g.hi

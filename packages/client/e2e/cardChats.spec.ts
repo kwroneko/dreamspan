@@ -82,7 +82,7 @@ test.beforeAll(async () => {
       // version records them (castpresence, DESIGN §3.5 [P], ARCHITECTURE §3.8); a join alone
       // doesn't count.
       {
-        sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
+        sql: `INSERT INTO version_records (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
           SELECT 'version-' || id, 'slot-' || id, 0, 'complete', 'human', 'verbatim', 'imported', json_array(?), created_at, created_at
           FROM chats WHERE id LIKE 'scale-%'`,
         params: [scale]

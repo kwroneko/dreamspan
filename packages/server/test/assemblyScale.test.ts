@@ -25,7 +25,7 @@ const append = (chatId: string, forkId: string, tip: string, from: number, n: nu
   fixtureSql(config.dataDir, [
     {
       sql: `WITH RECURSIVE n(x) AS (SELECT ${from} UNION ALL SELECT x+1 FROM n WHERE x < ${from + n - 1})
-        INSERT INTO versions(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
+        INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
         SELECT ?||'-v'||x, ?||'-s'||x, 0, 'complete', NULL, CASE WHEN x % 2 = 0 THEN 'human' ELSE 'model' END,
           'Aria walks the garden path, line '||x||'.', 'verbatim', CASE WHEN x % 2 = 0 THEN 'user_written' ELSE 'generated' END, 1, 1 FROM n`,
       params: [chatId, chatId]

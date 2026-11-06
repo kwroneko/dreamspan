@@ -28,6 +28,27 @@ export interface LcmSlot {
   /** Live children that aren't inserted: alternates below it, which make it a branch point. */
   children: number
 }
+// Keep LEFT joins on individual tables. A joined view on their right is
+// materialized in full by SQLite, even for a bounded path window.
+export const lcmPathColumns = (
+  sql: SqlClient.SqlClient,
+  fork: string | null
+) => sql`p.id, s.parent_slot_id AS parent, s.depth, p.position, s.parent_slot_id AS previous, s.inserted,
+      CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
+        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND (v.content_length > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
+      CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
+        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN CASE WHEN v.content_length > 0 THEN t.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
+      (SELECT json_group_array(json_object('mediaId',m.id,'sha256',m.sha256,'width',m.width,'height',m.height))
+        FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND NOT ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "a.media_id")} ORDER BY a.ordinal) AS images_json,
+      (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
+      coalesce(v.status = 'generating',0) AS generating,
+      (SELECT count(*) FROM slots child WHERE child.parent_slot_id = p.id AND child.deleted_at IS NULL AND child.inserted = 0) AS children
+      FROM path p JOIN slots s ON s.id = p.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
+      LEFT JOIN version_texts t ON t.version_seq = v.seq AND v.content_length > 0
+        AND v.status NOT IN ('generating','failed') AND NOT ${slotDeletedIn(sql, fork, "s")}
+        AND ${contextExcludedIn(sql, fork)} = 0 AND NOT ${shownVersionDeletedIn(sql, fork, "v")}
+      ORDER BY p.position`
+
 /**
  * The slots from `first` (or the root) to `leaf`, oldest first, with the versions the fork in
  * view shows (ForkView; else the fork through `leaf`). `limit` stops the walk after that many
@@ -48,18 +69,7 @@ export const lcmPath = (
       WHERE s.id = ${leaf} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
     if (!owned) return yield* new NotFound({ entity: "chat path", id: leaf })
     const fork = yield* viewAt(sql, chatId, leaf)
-    const columns = sql`p.id, s.parent_slot_id AS parent, s.depth, p.position, s.parent_slot_id AS previous, s.inserted,
-      CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
-        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND (length(v.content) > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
-      CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
-        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN CASE WHEN length(v.content) > 0 THEN v.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
-      (SELECT json_group_array(json_object('mediaId',m.id,'sha256',m.sha256,'width',m.width,'height',m.height))
-        FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND NOT ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "a.media_id")} ORDER BY a.ordinal) AS images_json,
-      (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
-      coalesce(v.status = 'generating',0) AS generating,
-      (SELECT count(*) FROM slots child WHERE child.parent_slot_id = p.id AND child.deleted_at IS NULL AND child.inserted = 0) AS children
-      FROM path p JOIN slots s ON s.id = p.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
-      ORDER BY p.position`
+    const columns = lcmPathColumns(sql, fork)
     const decode = (rows: ReadonlyArray<LcmSlot & { images_json: string }>) =>
       rows.map(({ images_json, ...row }) => ({
         ...row,

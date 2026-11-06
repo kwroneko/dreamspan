@@ -18,6 +18,17 @@ export interface TextActionContext {
   readonly text: string
   readonly source?: "snippet" | "note"
   readonly refId?: string
+  /**
+   * The message whose text this is, while the user writes their own version of it (the
+   * composition, features/chat/composition.ts): text added there goes to that version.
+   */
+  readonly ownVersion?: OwnVersionTarget
+}
+/** A version the user is writing of a message, which text can be added to. */
+export interface OwnVersionTarget {
+  /** Says which message, for explanations: "message 12". */
+  readonly name: string
+  readonly add: (text: string) => void
 }
 export interface TextAction {
   readonly id: string
@@ -63,11 +74,16 @@ export const editorTextActions = (
   text: string,
   selection: string,
   source?: "snippet",
-  keepUnavailable = false
+  keepUnavailable = false,
+  scope: Partial<Pick<TextActionContext, "ownVersion">> = {}
 ) =>
   [...entries.filter((a) => a.editor === "selection"), ...entries.filter((a) => a.editor !== "selection")].flatMap(
     (action) => {
-      const context = { text: action.editor === "selection" ? selection : text, ...(source ? { source } : {}) }
+      const context = {
+        text: action.editor === "selection" ? selection : text,
+        ...(source ? { source } : {}),
+        ...scope
+      }
       if (action.editor === "selection" ? selection.length === 0 : action.editor !== "text") return []
       if (action.applies?.(context) === false) return []
       return action.available(context) || (keepUnavailable && action.editor === "text") ? [{ action, context }] : []
@@ -89,16 +105,19 @@ export function EditorTextActions({
   selection,
   shown,
   source,
+  scope,
   className = ""
 }: {
   text: string
   selection: string
   shown: boolean
   source?: "snippet" | undefined
+  /** What the text belongs to, for actions on it: rendered message text being composed from. */
+  scope?: Partial<Pick<TextActionContext, "ownVersion">> | undefined
   className?: string
 }) {
   const snapshot = useSyncExternalStore(textActions.subscribe, textActions.snapshot, textActions.snapshot)
-  const offered = editorTextActions(snapshot.entries, text, selection, source, true)
+  const offered = editorTextActions(snapshot.entries, text, selection, source, true, scope)
   if (offered.length === 0) return null
   return (
     <div

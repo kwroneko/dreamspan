@@ -108,7 +108,7 @@ export const readSummary = (
             WHERE ci.changeset_id=o.changeset_id AND ci.target_kind='version_replace'
               AND ci.target_id=o.target_id AND ci.after_json ->> '$.id'=v.id
               AND p.value ->> '$.id'=i.version_id AND p.value ->> '$.amends'=i.amend_count)) AS replaced_with_summaries, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
-          AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed') AND length(v.content) > 0
+          AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed') AND v.content_length > 0
           THEN v.id ELSE NULL END AS effective, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS current_amends
         FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions iv ON iv.id=i.version_id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
         WHERE i.summary_id = ${summaryId} ORDER BY i.ordinal`

@@ -394,7 +394,7 @@ for (const [name, viewport] of [
             refusal === "judged"
               ? { sql: "UPDATE versions SET mark = 'refused' WHERE id = ?", params: [reply.entry.version.id] }
               : {
-                  sql: "UPDATE versions SET status = 'failed', error_json = ? WHERE id = ?",
+                  sql: "UPDATE version_records SET status = 'failed', error_json = ? WHERE id = ?",
                   params: [
                     JSON.stringify({ class: "refused", message: "Synthetic provider refusal" }),
                     reply.entry.version.id

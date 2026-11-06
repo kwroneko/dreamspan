@@ -62,11 +62,19 @@ const shellSummaries: ReadonlyArray<string> = [
   // A message's first version is inserted before its slot, whose insert moves the stamp.
   `CREATE TRIGGER shell_versions_insert AFTER INSERT ON versions
     BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = NEW.slot_id)")} END`,
-  `CREATE TRIGGER shell_versions_update AFTER UPDATE OF slot_id, speaker_entity_id, content, origin, source_version_id,
-    created_at, deleted_at, purged_at, fork_id, cast_json ON versions
+  `CREATE TRIGGER shell_versions_update AFTER UPDATE OF slot_id, speaker_entity_id, status, origin, source_version_id,
+    created_at, deleted_at, purged_at, fork_id ON versions
+    WHEN NEW.slot_id IS NOT OLD.slot_id OR NEW.speaker_entity_id IS NOT OLD.speaker_entity_id
+      OR (NEW.status = 'failed') IS NOT (OLD.status = 'failed')
+      OR NEW.origin IS NOT OLD.origin OR NEW.source_version_id IS NOT OLD.source_version_id
+      OR NEW.created_at IS NOT OLD.created_at OR NEW.deleted_at IS NOT OLD.deleted_at
+      OR NEW.purged_at IS NOT OLD.purged_at OR NEW.fork_id IS NOT OLD.fork_id
     BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = NEW.slot_id)")} END`,
   `CREATE TRIGGER shell_versions_delete AFTER DELETE ON versions
     BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = OLD.slot_id)")} END`,
+  `CREATE TRIGGER shell_version_texts_update AFTER UPDATE OF content, cast_json ON version_texts
+    WHEN NEW.content IS NOT OLD.content OR NEW.cast_json IS NOT OLD.cast_json
+    BEGIN ${bumpChat("(SELECT s.chat_id FROM versions v JOIN slots s ON s.id = v.slot_id WHERE v.seq = NEW.version_seq)")} END`,
   // The kinds the walk reads; the others (stars, summaries, hides) leave it alone.
   ...(["insert", "update", "delete"] as const).map((op) => {
     const row = op === "delete" ? "OLD" : "NEW"
@@ -328,52 +336,104 @@ export const baseline: ReadonlyArray<string> = [
   ) STRICT`,
   `CREATE INDEX slots_parent ON slots(parent_slot_id)`,
   `CREATE INDEX slots_chat_depth ON slots(chat_id, depth)`,
+  // Hot graph/flag reads never visit the payload's overflow pages.
   `CREATE TABLE versions (
-    seq INTEGER PRIMARY KEY,
+    seq INTEGER PRIMARY KEY REFERENCES version_texts(version_seq) DEFERRABLE INITIALLY DEFERRED,
     id TEXT NOT NULL UNIQUE,
     slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
     ordinal INTEGER NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')),
     speaker_entity_id TEXT REFERENCES entities(id),
-    -- Cast when this version was written, independent of later cast changes. NULL only
-    -- while an imported version awaits its file's cast at StImportFinishChat.
-    cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')),
     writer TEXT NOT NULL CHECK (writer IN ('human', 'model')),
-    content TEXT NOT NULL DEFAULT '',
+    content_length INTEGER NOT NULL DEFAULT 0 CHECK (content_length >= 0),
     macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')),
-    context_form TEXT,
-    display_form TEXT,
-    reasoning TEXT,
-    -- The text and reasoning as they were before regex scripts rewrote them (ARCHITECTURE §12),
-    -- null when unchanged; never sent anywhere. What the scripts did: rewrite_json.
-    raw_content TEXT,
-    raw_reasoning TEXT,
-    -- The reply sections before the reasoning scripts rewrote their text, as JSON.
-    raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)),
-    rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)),
-    reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)),
-    frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
     origin TEXT NOT NULL,
     source_version_id TEXT REFERENCES versions(id),
-    greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)),
-    direction TEXT,
     rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED,
     connection_id TEXT REFERENCES connections(id),
     model_id TEXT REFERENCES models(id),
-    error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
-    usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)),
-    -- An imported version's model, and its times and token count, as its app recorded them
-    -- (rows.ts); null for none and for this app's own generations (model_id, usage_json).
-    recorded_model_json TEXT CHECK (recorded_model_json IS NULL OR json_valid(recorded_model_json)),
-    recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json)),
     starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)),
     hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
     changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT, fork_id TEXT,
-    UNIQUE (slot_id, ordinal),
-    CHECK (status <> 'failed' OR error_json IS NOT NULL)
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER,
+    bin_item_id TEXT,
+    purged_at INTEGER,
+    mark TEXT,
+    fork_id TEXT,
+    UNIQUE (slot_id, ordinal)
   ) STRICT`,
+  `CREATE TABLE version_texts (
+    version_seq INTEGER PRIMARY KEY REFERENCES versions(seq) ON DELETE CASCADE,
+    cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')),
+    content TEXT NOT NULL DEFAULT '',
+    context_form TEXT,
+    display_form TEXT,
+    reasoning TEXT,
+    raw_content TEXT,
+    raw_reasoning TEXT,
+    raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)),
+    rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)),
+    reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)),
+    frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
+    greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)),
+    direction TEXT,
+    error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
+    usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)),
+    recorded_model_json TEXT CHECK (recorded_model_json IS NULL OR json_valid(recorded_model_json)),
+    recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json))
+  ) STRICT`,
+  // The deferred reverse FK requires one payload per version at commit, including empty ones.
+  `CREATE TRIGGER version_texts_identity_fixed BEFORE UPDATE OF version_seq ON version_texts
+    WHEN NEW.version_seq IS NOT OLD.version_seq
+    BEGIN SELECT RAISE(ABORT, 'a version payload never changes owner'); END`,
+  `CREATE TRIGGER version_texts_retained BEFORE DELETE ON version_texts
+    WHEN EXISTS (SELECT 1 FROM versions WHERE seq = OLD.version_seq)
+    BEGIN SELECT RAISE(ABORT, 'delete the version to delete its payload'); END`,
+  // Counts and emptiness checks stay on metadata, using SQLite's character-count semantics.
+  `CREATE TRIGGER version_texts_length_insert AFTER INSERT ON version_texts BEGIN
+    UPDATE versions SET content_length = length(NEW.content) WHERE seq = NEW.version_seq;
+  END`,
+  `CREATE TRIGGER version_texts_length_update AFTER UPDATE OF content ON version_texts
+    WHEN NEW.content IS NOT OLD.content BEGIN
+    UPDATE versions SET content_length = length(NEW.content) WHERE seq = NEW.version_seq;
+  END`,
+  `CREATE TRIGGER versions_length_derived BEFORE UPDATE OF content_length ON versions
+    WHEN NEW.content_length IS NOT (SELECT length(content) FROM version_texts WHERE version_seq = NEW.seq)
+    BEGIN SELECT RAISE(ABORT, 'a version length comes from its payload'); END`,
+  // Text consumers explicitly opt into this flattened view. Metadata consumers use versions.
+  // The write triggers keep bulk INSERT/SELECT and copies atomic without a main-thread shim.
+  `CREATE VIEW version_records AS SELECT v.*, t.cast_json, t.content, t.context_form, t.display_form, t.reasoning, t.raw_content, t.raw_reasoning, t.raw_sections, t.rewrite_json, t.reply_sections, t.frozen_macros, t.greeting_ref, t.direction, t.error_json, t.usage_json, t.recorded_model_json, t.recorded_generation_json
+    FROM versions v JOIN version_texts t ON t.version_seq = v.seq`,
+  `CREATE TRIGGER version_records_insert INSTEAD OF INSERT ON version_records BEGIN
+    INSERT INTO versions (seq, id, slot_id, ordinal, status, speaker_entity_id, writer, macro_mode, origin, source_version_id, rollout_id, connection_id, model_id, starred, hidden, changeset_id, created_at, updated_at, deleted_at, bin_item_id, purged_at, mark, fork_id) VALUES (
+      NEW.seq, NEW.id, NEW.slot_id, NEW.ordinal, NEW.status, NEW.speaker_entity_id, NEW.writer, NEW.macro_mode, NEW.origin, NEW.source_version_id, NEW.rollout_id, NEW.connection_id, NEW.model_id, coalesce(NEW.starred, 0), coalesce(NEW.hidden, 0), NEW.changeset_id, NEW.created_at, NEW.updated_at, NEW.deleted_at, NEW.bin_item_id, NEW.purged_at, NEW.mark, NEW.fork_id);
+    INSERT INTO version_texts(version_seq, cast_json, content, context_form, display_form, reasoning, raw_content, raw_reasoning, raw_sections, rewrite_json, reply_sections, frozen_macros, greeting_ref, direction, error_json, usage_json, recorded_model_json, recorded_generation_json) VALUES (
+      (SELECT seq FROM versions WHERE id = NEW.id), NEW.cast_json, coalesce(NEW.content, ''), NEW.context_form, NEW.display_form, NEW.reasoning, NEW.raw_content, NEW.raw_reasoning, NEW.raw_sections, NEW.rewrite_json, NEW.reply_sections, NEW.frozen_macros, NEW.greeting_ref, NEW.direction, NEW.error_json, NEW.usage_json, NEW.recorded_model_json, NEW.recorded_generation_json);
+  END`,
+  `CREATE TRIGGER version_records_update INSTEAD OF UPDATE ON version_records BEGIN
+    -- History uses the amendment's timestamp; the purge guard needs its bin authorization.
+    UPDATE versions SET updated_at = NEW.updated_at, purged_at = NEW.purged_at, bin_item_id = NEW.bin_item_id WHERE seq = OLD.seq
+      AND (updated_at IS NOT NEW.updated_at OR purged_at IS NOT NEW.purged_at OR bin_item_id IS NOT NEW.bin_item_id);
+    UPDATE version_texts SET cast_json = NEW.cast_json, content = NEW.content, context_form = NEW.context_form, display_form = NEW.display_form, reasoning = NEW.reasoning, raw_content = NEW.raw_content, raw_reasoning = NEW.raw_reasoning, raw_sections = NEW.raw_sections, rewrite_json = NEW.rewrite_json, reply_sections = NEW.reply_sections, frozen_macros = NEW.frozen_macros, greeting_ref = NEW.greeting_ref, direction = NEW.direction, error_json = NEW.error_json, usage_json = NEW.usage_json, recorded_model_json = NEW.recorded_model_json, recorded_generation_json = NEW.recorded_generation_json
+      WHERE version_seq = OLD.seq AND (cast_json IS NOT NEW.cast_json OR content IS NOT NEW.content OR context_form IS NOT NEW.context_form OR display_form IS NOT NEW.display_form OR reasoning IS NOT NEW.reasoning OR raw_content IS NOT NEW.raw_content OR raw_reasoning IS NOT NEW.raw_reasoning OR raw_sections IS NOT NEW.raw_sections OR rewrite_json IS NOT NEW.rewrite_json OR reply_sections IS NOT NEW.reply_sections OR frozen_macros IS NOT NEW.frozen_macros OR greeting_ref IS NOT NEW.greeting_ref OR direction IS NOT NEW.direction OR error_json IS NOT NEW.error_json OR usage_json IS NOT NEW.usage_json OR recorded_model_json IS NOT NEW.recorded_model_json OR recorded_generation_json IS NOT NEW.recorded_generation_json);
+    -- Finalize only after saving text, while the old generating status still permits writes.
+    UPDATE versions SET seq = NEW.seq, id = NEW.id, slot_id = NEW.slot_id, ordinal = NEW.ordinal, status = NEW.status, speaker_entity_id = NEW.speaker_entity_id, writer = NEW.writer, macro_mode = NEW.macro_mode, origin = NEW.origin, source_version_id = NEW.source_version_id, rollout_id = NEW.rollout_id, connection_id = NEW.connection_id, model_id = NEW.model_id, starred = NEW.starred, hidden = NEW.hidden, changeset_id = NEW.changeset_id, created_at = NEW.created_at, deleted_at = NEW.deleted_at, bin_item_id = NEW.bin_item_id, mark = NEW.mark, fork_id = NEW.fork_id
+      WHERE seq = OLD.seq AND (seq IS NOT NEW.seq OR id IS NOT NEW.id OR slot_id IS NOT NEW.slot_id OR ordinal IS NOT NEW.ordinal OR status IS NOT NEW.status OR speaker_entity_id IS NOT NEW.speaker_entity_id OR writer IS NOT NEW.writer OR macro_mode IS NOT NEW.macro_mode OR origin IS NOT NEW.origin OR source_version_id IS NOT NEW.source_version_id OR rollout_id IS NOT NEW.rollout_id OR connection_id IS NOT NEW.connection_id OR model_id IS NOT NEW.model_id OR starred IS NOT NEW.starred OR hidden IS NOT NEW.hidden OR changeset_id IS NOT NEW.changeset_id OR created_at IS NOT NEW.created_at OR deleted_at IS NOT NEW.deleted_at OR bin_item_id IS NOT NEW.bin_item_id OR mark IS NOT NEW.mark OR fork_id IS NOT NEW.fork_id);
+  END`,
+  `CREATE TRIGGER version_texts_failed_error_insert BEFORE INSERT ON version_texts
+    WHEN NEW.error_json IS NULL AND EXISTS (
+      SELECT 1 FROM versions WHERE seq = NEW.version_seq AND status = 'failed' AND purged_at IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'failed versions require an error payload'); END`,
+  `CREATE TRIGGER versions_failed_error_update BEFORE UPDATE OF status ON versions
+    WHEN NEW.status = 'failed' AND NEW.purged_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM version_texts WHERE version_seq = NEW.seq AND error_json IS NOT NULL)
+    BEGIN SELECT RAISE(ABORT, 'failed versions require an error payload'); END`,
+  `CREATE TRIGGER version_texts_failed_error BEFORE UPDATE OF error_json ON version_texts
+    WHEN NEW.error_json IS NULL AND EXISTS (
+      SELECT 1 FROM versions WHERE seq = OLD.version_seq AND status = 'failed' AND purged_at IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'failed versions require an error payload'); END`,
   `CREATE INDEX versions_rollout ON versions(rollout_id) WHERE rollout_id IS NOT NULL`,
   // Startup's InterruptGenerations finds the few generating versions without scanning every
   // message: 8.5 s at 500,000 messages before (fux1).
@@ -387,15 +447,29 @@ export const baseline: ReadonlyArray<string> = [
   ) STRICT, WITHOUT ROWID`,
   `CREATE INDEX version_participants_version ON version_participants(version_id, entity_id)`,
   `CREATE TRIGGER version_participants_insert AFTER INSERT ON versions BEGIN
-    INSERT OR IGNORE INTO version_participants (version_id, entity_id)
-      SELECT NEW.id, value FROM json_each(NEW.cast_json)
+    INSERT OR IGNORE INTO version_participants(version_id, entity_id)
+      SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL;
+  END`,
+  `CREATE TRIGGER version_participants_speaker AFTER UPDATE OF speaker_entity_id ON versions
+    WHEN NEW.speaker_entity_id IS NOT OLD.speaker_entity_id BEGIN
+    DELETE FROM version_participants WHERE version_id = NEW.id;
+    INSERT OR IGNORE INTO version_participants(version_id, entity_id)
+      SELECT NEW.id, value FROM version_texts t, json_each(t.cast_json) WHERE t.version_seq = NEW.seq
       UNION SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL;
   END`,
-  `CREATE TRIGGER version_participants_update AFTER UPDATE OF cast_json, speaker_entity_id ON versions BEGIN
-    DELETE FROM version_participants WHERE version_id = NEW.id;
-    INSERT OR IGNORE INTO version_participants (version_id, entity_id)
-      SELECT NEW.id, value FROM json_each(NEW.cast_json)
-      UNION SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL;
+  `CREATE TRIGGER version_participants_cast_insert AFTER INSERT ON version_texts
+    BEGIN
+    DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq);
+    INSERT OR IGNORE INTO version_participants(version_id, entity_id)
+      SELECT v.id, j.value FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq
+      UNION SELECT id, speaker_entity_id FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL;
+  END`,
+  `CREATE TRIGGER version_participants_cast AFTER UPDATE OF cast_json ON version_texts
+    WHEN NEW.cast_json IS NOT OLD.cast_json BEGIN
+    DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq);
+    INSERT OR IGNORE INTO version_participants(version_id, entity_id)
+      SELECT v.id, j.value FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq
+      UNION SELECT id, speaker_entity_id FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL;
   END`,
   `CREATE VIEW card_chat_membership AS
     SELECT DISTINCT p.entity_id, s.chat_id FROM version_participants p
@@ -570,16 +644,18 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER rollout_snapshot_frozen BEFORE UPDATE OF context_snapshot_json ON rollout_payloads
     WHEN OLD.context_snapshot_json IS NOT NULL AND NEW.context_snapshot_json IS NOT OLD.context_snapshot_json
     BEGIN SELECT RAISE(ABORT, 'a rollout context snapshot is frozen once written'); END`,
-  `CREATE TRIGGER versions_amend_history AFTER UPDATE OF content ON versions
-    WHEN OLD.writer = 'human' AND OLD.status <> 'generating' AND NEW.content IS NOT OLD.content
+  `CREATE TRIGGER versions_amend_history AFTER UPDATE OF content ON version_texts
+    WHEN NEW.content IS NOT OLD.content AND EXISTS (
+      SELECT 1 FROM versions WHERE seq = OLD.version_seq AND writer = 'human' AND status <> 'generating')
     BEGIN
-      INSERT INTO version_history (version_id, content, replaced_at, images_json)
-      VALUES (OLD.id, OLD.content, NEW.updated_at, (SELECT json_group_array(json_object(
+      INSERT INTO version_history(version_id, content, replaced_at, images_json)
+      SELECT v.id, OLD.content, v.updated_at, (SELECT json_group_array(json_object(
         'mediaId', media_id, 'altText', coalesce(alt_text, ''))) FROM
-        (SELECT media_id, alt_text FROM version_attachments WHERE version_id = OLD.id ORDER BY ordinal)));
+        (SELECT media_id, alt_text FROM version_attachments WHERE version_id = v.id ORDER BY ordinal))
+      FROM versions v WHERE v.seq = OLD.version_seq;
     END`,
-  `CREATE TRIGGER versions_identity_fixed BEFORE UPDATE OF id, slot_id, ordinal, writer, origin ON versions
-    WHEN NEW.id IS NOT OLD.id OR NEW.slot_id IS NOT OLD.slot_id OR NEW.ordinal IS NOT OLD.ordinal
+  `CREATE TRIGGER versions_identity_fixed BEFORE UPDATE OF seq, id, slot_id, ordinal, writer, origin ON versions
+    WHEN NEW.seq IS NOT OLD.seq OR NEW.id IS NOT OLD.id OR NEW.slot_id IS NOT OLD.slot_id OR NEW.ordinal IS NOT OLD.ordinal
       OR NEW.writer IS NOT OLD.writer OR NEW.origin IS NOT OLD.origin
     BEGIN SELECT RAISE(ABORT, 'a version''s identity, slot, writer and origin never change'); END`,
   `CREATE TRIGGER state_events_immutable BEFORE UPDATE OF chat_id, slot_id, version_id, seq, key, scope, value_json, origin, fork_id, fork_seq ON state_events
@@ -607,20 +683,29 @@ export const baseline: ReadonlyArray<string> = [
       OR (NEW.version_id IS NOT NULL AND (SELECT slot_id FROM versions WHERE id = NEW.version_id) IS NOT NEW.slot_id)
     BEGIN SELECT RAISE(ABORT, 'a state event''s slot must be in its chat, and its version in that slot'); END`,
   `CREATE VIRTUAL TABLE versions_fts USING fts5(
-    content, content='versions', content_rowid='seq',
+    content, content='version_texts', content_rowid='version_seq',
     tokenize='unicode61 remove_diacritics 2', prefix='2 3'
   )`,
-  `CREATE TRIGGER versions_fts_insert AFTER INSERT ON versions WHEN NEW.status <> 'generating'
-    BEGIN INSERT INTO versions_fts (rowid, content) VALUES (NEW.seq, NEW.content); END`,
-  `CREATE TRIGGER versions_fts_update AFTER UPDATE OF content, status ON versions
+  `CREATE TRIGGER versions_fts_insert AFTER INSERT ON version_texts
+    WHEN (SELECT status FROM versions WHERE seq = NEW.version_seq) <> 'generating'
+    BEGIN INSERT INTO versions_fts(rowid, content) VALUES (NEW.version_seq, NEW.content); END`,
+  `CREATE TRIGGER versions_fts_text AFTER UPDATE OF content ON version_texts
+    WHEN NEW.content IS NOT OLD.content AND (SELECT status FROM versions WHERE seq = NEW.version_seq) <> 'generating'
     BEGIN
-      INSERT INTO versions_fts (versions_fts, rowid, content)
-        SELECT 'delete', OLD.seq, OLD.content WHERE OLD.status <> 'generating';
-      INSERT INTO versions_fts (rowid, content)
-        SELECT NEW.seq, NEW.content WHERE NEW.status <> 'generating';
+      INSERT INTO versions_fts(versions_fts, rowid, content) VALUES ('delete', OLD.version_seq, OLD.content);
+      INSERT INTO versions_fts(rowid, content) VALUES (NEW.version_seq, NEW.content);
     END`,
-  `CREATE TRIGGER versions_fts_delete AFTER DELETE ON versions WHEN OLD.status <> 'generating'
-    BEGIN INSERT INTO versions_fts (versions_fts, rowid, content) VALUES ('delete', OLD.seq, OLD.content); END`,
+  `CREATE TRIGGER versions_fts_status AFTER UPDATE OF status ON versions
+    WHEN NEW.status IS NOT OLD.status BEGIN
+      INSERT INTO versions_fts(versions_fts, rowid, content)
+        SELECT 'delete', OLD.seq, content FROM version_texts WHERE version_seq = OLD.seq AND OLD.status <> 'generating';
+      INSERT INTO versions_fts(rowid, content)
+        SELECT NEW.seq, content FROM version_texts WHERE version_seq = NEW.seq AND NEW.status <> 'generating';
+    END`,
+  // Run before the parent disappears: its status determines whether FTS has this row.
+  `CREATE TRIGGER versions_fts_delete BEFORE DELETE ON versions WHEN OLD.status <> 'generating'
+    BEGIN INSERT INTO versions_fts(versions_fts, rowid, content)
+      SELECT 'delete', OLD.seq, content FROM version_texts WHERE version_seq = OLD.seq; END`,
   `CREATE VIRTUAL TABLE entity_revisions_fts USING fts5(
     search_text, content='entity_revisions', content_rowid='seq',
     tokenize='unicode61 remove_diacritics 2', prefix='2 3'
@@ -1465,15 +1550,16 @@ export const baseline: ReadonlyArray<string> = [
         AND (NEW.target_kind IS NOT 'composer'
           OR (SELECT owner_user_id FROM entities WHERE id = NEW.reply_from_entity_id) IS NOT NEW.user_id)
       BEGIN SELECT RAISE(ABORT, 'a composer chooses among the cards of its owner'); END`,
-  `CREATE TRIGGER versions_model_content_frozen BEFORE UPDATE OF content ON versions
-      WHEN OLD.writer = 'model' AND OLD.status <> 'generating' AND NEW.content IS NOT OLD.content
-        AND NOT (NEW.purged_at IS NOT NULL AND NEW.content = '' AND EXISTS (
+  `CREATE TRIGGER versions_model_content_frozen BEFORE UPDATE OF content ON version_texts
+    WHEN NEW.content IS NOT OLD.content AND EXISTS (
+      SELECT 1 FROM versions v WHERE v.seq = OLD.version_seq AND v.writer = 'model' AND v.status <> 'generating'
+        AND NOT (v.purged_at IS NOT NULL AND NEW.content = '' AND EXISTS (
           SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id
             JOIN bin_items b ON b.user_id = c.owner_user_id AND b.chat_id = c.id
-          WHERE s.id = OLD.slot_id AND (
-            (b.id = OLD.bin_item_id AND b.kind = 'version')
-            OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch')))))
-      BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END`,
+          WHERE s.id = v.slot_id AND (
+            (b.id = v.bin_item_id AND b.kind = 'version')
+            OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch'))))))
+    BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END`,
   `CREATE TRIGGER card_names_insert AFTER INSERT ON entity_refs
       WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
         AND (NEW.label IS NOT coalesce((SELECT json_extract(doc_json, '$.name') FROM entity_revisions WHERE id = NEW.head_revision_id), '')

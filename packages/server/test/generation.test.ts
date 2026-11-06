@@ -24,7 +24,7 @@ import {
 const recorded = (dataDir: string, versionId: VersionId) => {
   const db = new DatabaseSync(databaseFile(dataDir), { readOnly: true })
   try {
-    const version = db.prepare("SELECT * FROM versions WHERE id = ?").get(versionId) as Record<string, unknown>
+    const version = db.prepare("SELECT * FROM version_records WHERE id = ?").get(versionId) as Record<string, unknown>
     const rollout = db.prepare("SELECT * FROM rollouts WHERE id = ?").get(version.rollout_id as string) as Record<
       string,
       unknown
@@ -166,7 +166,9 @@ describe("generation", () => {
       }
       const db = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
       try {
-        const greeting = db.prepare("SELECT id, frozen_macros FROM versions WHERE origin = 'greeting'").get() as {
+        const greeting = db
+          .prepare("SELECT id, frozen_macros FROM version_records WHERE origin = 'greeting'")
+          .get() as {
           id: string
           frozen_macros: string
         }

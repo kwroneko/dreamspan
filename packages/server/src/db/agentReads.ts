@@ -254,13 +254,13 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
                   CROSS JOIN versions v ON v.slot_id = s.id
                   WHERE v.macro_mode = 'template')
                 SELECT s.depth AS position, v.speaker_entity_id AS speaker, v.writer, v.macro_mode, v.content
-                FROM candidates h CROSS JOIN versions v ON v.seq = h.seq CROSS JOIN slots s ON s.id = v.slot_id
+                FROM candidates h CROSS JOIN version_records v ON v.seq = h.seq CROSS JOIN slots s ON s.id = v.slot_id
                 WHERE s.chat_id = ${chatId} AND ${onPath} AND ${shown}
                 ORDER BY position DESC LIMIT ${limit}`
             : yield* sql<Row>`
                 ${pathSegments(sql, chatId, leafSlotId, null)}
                 SELECT s.depth AS position, v.speaker_entity_id AS speaker, v.writer, v.macro_mode, v.content
-                FROM versions v JOIN slots s ON s.id = v.slot_id
+                FROM version_records v JOIN slots s ON s.id = v.slot_id
                 WHERE s.chat_id = ${chatId}
                   AND ${match === null ? sql`1` : sql`(v.seq IN (SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${match}) OR v.macro_mode = 'template')`}
                   AND ${onPath} AND ${shown}

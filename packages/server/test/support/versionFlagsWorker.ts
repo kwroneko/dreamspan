@@ -30,7 +30,7 @@ try {
   db.exec("PRAGMA foreign_keys=ON; PRAGMA cache_size=-262144; PRAGMA temp_store=MEMORY")
   if (!probe) {
     const version =
-      db.prepare(`INSERT INTO versions(id,slot_id,ordinal,status,writer,content,reasoning,macro_mode,origin,created_at,updated_at)
+      db.prepare(`INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,reasoning,macro_mode,origin,created_at,updated_at)
       VALUES(?,?,?,'complete',?,?,?,'verbatim',?,1,1)`)
     const slot = db.prepare(`INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
       VALUES(?,?,?,?,?,1,?)`)
@@ -63,9 +63,9 @@ try {
         const original = `${id}-v${count - 1}`
         const copy = `${id}-copy`
         db.prepare(
-          `INSERT INTO versions(id,slot_id,ordinal,status,writer,content,reasoning,macro_mode,origin,
+          `INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,reasoning,macro_mode,origin,
           source_version_id,fork_id,created_at,updated_at)
-          SELECT ?,slot_id,?,'complete','human',content,reasoning,'verbatim','edited',id,?,1,1 FROM versions WHERE id=?`
+          SELECT ?,slot_id,?,'complete','human',content,reasoning,'verbatim','edited',id,?,1,1 FROM version_records WHERE id=?`
         ).run(copy, count, forkId, original)
         const seq = (
           db.prepare("UPDATE chats SET state_seq=state_seq+1 WHERE id=? RETURNING state_seq").get(chatId) as {

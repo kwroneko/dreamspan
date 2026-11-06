@@ -234,11 +234,63 @@ describe("shell fork summaries", () => {
       assert.strictEqual(shell.forks.find((f) => f.forkId === main)!.preview, "Latest text")
       assert.strictEqual((yield* reader.ListForks({ userId, chatId: harbor.id }))[0]!.tipExcerpt, "Latest text")
       assert.strictEqual((yield* reader.ChatSummaries({ userId, chatIds: [harbor.id] }))[0]!.last!.text, "Latest text")
+      const side = yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: root.slotId })
+      yield* append(harbor.id, root.slotId, "\r\n ", null, side.fork.id)
+      assert.strictEqual((yield* reader.ChatSummaries({ userId, chatIds: [harbor.id] }))[0]!.last!.text, "Latest text")
       const blank = yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: null })
       yield* append(harbor.id, null, "", null, blank.fork.id)
       const noText = yield* check("no text", [harbor.id])
       assert.strictEqual(noText.forks.find((f) => f.forkId === blank.fork.id)!.preview, "")
       assert.strictEqual((yield* reader.ChatSummaries({ userId, chatIds: [harbor.id] }))[0]!.last, null)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("preview fallback tests the excerpt while last text tests the whole body", () =>
+    Effect.gen(function* () {
+      const { reader, userId, harbor, append, check } = yield* setup
+      const main = harbor.currentForkId!
+      const root = yield* append(harbor.id, null, "Earlier excerpt", null, main)
+      const leading = " ".repeat(170) + "Visible after the excerpt"
+      yield* append(harbor.id, root.slotId, leading, null, main)
+      const shell = yield* check("whitespace prefix", [harbor.id])
+      assert.strictEqual(shell.forks.find((f) => f.forkId === main)!.preview, "Earlier excerpt")
+      assert.strictEqual((yield* reader.ChatSummaries({ userId, chatIds: [harbor.id] }))[0]!.last!.text, leading)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("a failed reply invalidates its cached preview even when its partial text is unchanged", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, harbor, append, version } = yield* setup
+      const main = harbor.currentForkId!
+      const root = yield* append(harbor.id, null, "Earlier text", null, main)
+      const reply = yield* writer.AppendMessage({
+        userId,
+        chatId: harbor.id,
+        forkId: main,
+        parentSlotId: root.slotId,
+        branch: false,
+        commitDraft: null,
+        version: new NewVersion({
+          ...version("Partial reply", null),
+          writer: "model",
+          status: "generating",
+          origin: "generated"
+        })
+      })
+      const cached = yield* reader.ShellLibrary({ userId })
+      yield* writer.StoreForkSummaries({ userId, chats: cached.fresh })
+      assert.strictEqual(cached.forks.find((f) => f.forkId === main)!.preview, "Partial reply")
+      yield* writer.SaveGeneration({
+        userId,
+        versionId: reply.version.id,
+        content: "Partial reply",
+        status: "failed",
+        error: { class: "test", message: "Synthetic failure" }
+      })
+      assert.strictEqual(
+        (yield* reader.ShellLibrary({ userId })).forks.find((f) => f.forkId === main)!.preview,
+        "Earlier text"
+      )
     }).pipe(Effect.provide(database()))
   )
 

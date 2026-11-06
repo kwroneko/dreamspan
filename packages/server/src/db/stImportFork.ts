@@ -22,7 +22,7 @@ export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent:
     // (spec/FORK-INDEPENDENCE-DELTA.md §5 step 6, unit 9).
     const versions =
       yield* sql<Row>`SELECT v.*, ${replacedIn(sql, sql.literal(currentForkSql("s.chat_id")), "v.id")} AS shown_id
-      FROM versions v JOIN slots s ON s.id = v.slot_id WHERE v.slot_id = ${source} AND v.fork_id IS NULL
+      FROM version_records v JOIN slots s ON s.id = v.slot_id WHERE v.slot_id = ${source} AND v.fork_id IS NULL
       ORDER BY v.ordinal`
     const id = uuidv7()
     const ids = new Map(versions.map((v) => [v.id, uuidv7()]))
@@ -32,8 +32,10 @@ export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent:
       const { seq: _seq, shown_id: shownId, ...fields } = version
       const versionId = ids.get(version.id)!
       const [copy] =
-        shownId === version.id ? [] : yield* sql<Row>`SELECT content, updated_at FROM versions WHERE id = ${shownId}`
-      yield* sql`INSERT INTO versions ${sql.insert({
+        shownId === version.id
+          ? []
+          : yield* sql<Row>`SELECT content, updated_at FROM version_records WHERE id = ${shownId}`
+      yield* sql`INSERT INTO version_records ${sql.insert({
         ...fields,
         ...copy,
         status: version.status === "generating" ? "interrupted" : version.status,

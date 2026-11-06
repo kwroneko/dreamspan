@@ -54,7 +54,7 @@ export const insertStMessageBatch = Effect.fnUntraced(function* (
   position: { chatId: string; forkId: string; parentId: string | null; depth: number }
 ) {
   if (batch.slotIds.length === 0) return
-  yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, speaker_entity_id, writer, content,
+  yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, speaker_entity_id, writer, content,
     macro_mode, origin, reasoning, reply_sections, recorded_model_json, recorded_generation_json, created_at, updated_at)
     SELECT value ->> '$.id', value ->> '$.slot_id', value ->> '$.ordinal', 'complete',
       value ->> '$.speaker_entity_id', value ->> '$.writer', value ->> '$.content', 'verbatim', 'imported',

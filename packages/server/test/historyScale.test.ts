@@ -27,7 +27,7 @@ it.effect(
       yield* fixtureSql(config.dataDir, [
         {
           sql: `WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x<99999)
-      INSERT INTO versions(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
+      INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
       SELECT ?||'-v'||x,?||'-s'||x,0,'complete',NULL,'human','Aria in the garden.','verbatim','user_written',1,1 FROM n`,
           params: [chatId, chatId]
         },

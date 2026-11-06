@@ -102,7 +102,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
               const copyKey = `${current.id}:${edit.after}`
               const [existingCopy] = copies.has(copyKey)
                 ? []
-                : yield* sql<{ id: string }>`SELECT v.id FROM versions v JOIN changesets c ON c.id=v.changeset_id
+                : yield* sql<{ id: string }>`SELECT v.id FROM version_records v JOIN changesets c ON c.id=v.changeset_id
                 JOIN changeset_items i ON i.changeset_id=c.id AND i.target_kind='version_replace' AND i.target_id=${edit.targetId}
                 WHERE c.group_id=${groupId} AND i.before_json ->> '$.id'=${current.id} AND v.content=${edit.after}
                   AND v.source_version_id=${edit.targetId} AND v.purged_at IS NULL LIMIT 1`
@@ -128,13 +128,13 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                   "created_at",
                   "updated_at"
                 ])
-                const columns = (yield* sql<{ name: string }>`SELECT name FROM pragma_table_info('versions')`)
+                const columns = (yield* sql<{ name: string }>`SELECT name FROM pragma_table_info('version_records')`)
                   .map((c) => c.name)
                   .filter((c) => !excluded.has(c))
                 yield* sql.unsafe(
-                  `INSERT INTO versions (id, ordinal, content, origin, source_version_id, fork_id, changeset_id, created_at, updated_at, ${columns.join(",")})
+                  `INSERT INTO version_records (id, ordinal, content, origin, source_version_id, fork_id, changeset_id, created_at, updated_at, ${columns.join(",")})
                 SELECT ?, (SELECT max(ordinal)+1 FROM versions WHERE slot_id=v.slot_id), ?, 'changeset', ?, ?, ?, ?, ?, ${columns.map((c) => `v.${c}`).join(",")}
-                FROM versions v WHERE id=?`,
+                FROM version_records v WHERE id=?`,
                   [afterId, edit.after, edit.targetId, forkId, record.id, Date.now(), Date.now(), current.id]
                 )
                 yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text)
