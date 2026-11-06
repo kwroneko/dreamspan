@@ -308,19 +308,18 @@ for (const width of [1024, 390])
   })
 
 // VS Code's editor groups: Open beside and Alt-click open in a frame on the right, a chat can
-// show in two frames, and a tab dragged to a frame's edge splits there (the overlay shows the
-// half it takes).
+// show in two frames, and a tab dragged to a frame's edge splits there.
 test("open beside, one chat in two frames, and a tab dropped on an edge", async ({ page }) => {
   test.setTimeout(150_000)
   await fresh(page, 1440)
   await page.goto(`${server().url}/chats/${fixtures.chatA}`)
   await expect(said(page, "The tide is out")).toBeVisible()
-  const sidebar = page.getByRole("complementary", { name: "Sidebar" })
-  const row = sidebar
-    .locator("[data-fork-row]")
-    .filter({ has: page.getByRole("link", { name: /^Open chat Lighthouse night/ }) })
-  await row.hover()
-  await row.getByRole("button", { name: "Open Lighthouse night beside" }).click()
+  // A chat row's right-click menu: Open beside.
+  await sidebarChat(page, "Lighthouse night").click({ button: "right" })
+  await page
+    .getByRole("menu", { name: "Actions for Lighthouse night" })
+    .getByRole("menuitem", { name: "Open beside" })
+    .click()
   const frames = page.locator("[data-frame]")
   await expect(frames).toHaveCount(2)
   await expect(frames.nth(1).getByText("The lamp turns")).toBeVisible()
@@ -335,12 +334,7 @@ test("open beside, one chat in two frames, and a tab dropped on an edge", async 
   // The third frame's tab, dropped on the first frame's bottom edge: a frame below it.
   const tab = frames.nth(2).locator("[data-tab] [role=tab]")
   const target = (await frames.first().boundingBox())!
-  const from = (await tab.boundingBox())!
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(target.x + target.width / 2, target.y + target.height - 30, { steps: 12 })
-  await expect(frames.first().locator('[data-drop-zone="bottom"]')).toBeVisible()
-  await page.mouse.up()
+  await tab.dragTo(frames.first(), { targetPosition: { x: target.width / 2, y: target.height - 30 } })
   await expect(frames).toHaveCount(3)
   const [top, below] = [(await frames.nth(0).boundingBox())!, (await frames.nth(1).boundingBox())!]
   expect(below.x).toBeCloseTo(top.x, 0)
@@ -357,11 +351,13 @@ test("tab menu: pin, close many, reopen, maximize, and the unsaved dot", async (
   await fresh(page, 1440)
   await page.goto(`${server().url}/chats/${fixtures.chatA}`)
   await expect(said(page, "The tide is out")).toBeVisible()
+  // The panel first: once two chats show, each header has its own panel toggle.
+  await openPanel(page, "Prompt preset")
   await page.getByRole("button", { name: "Split right" }).click()
   await sidebarChat(page, "Lighthouse night").dblclick()
   const right = page.locator("[data-frame]").nth(1)
   await expect(right.locator("[data-tab]")).toHaveCount(2)
-  await openPanel(page, "Prompt preset")
+  await page.getByRole("tab", { name: "Prompt preset" }).click()
   await page.getByRole("link", { name: "Open the preset in the large editor" }).click()
   await expect(right.locator("[data-tab]")).toHaveCount(3)
   const tab = (name: string) => right.getByRole("tab", { name: new RegExp(`^${name}`) })
@@ -373,23 +369,27 @@ test("tab menu: pin, close many, reopen, maximize, and the unsaved dot", async (
   await expect(right.locator("[data-tab]").first()).toHaveAttribute("data-sticky", "")
   await expect(right.getByRole("button", { name: "Unpin Harbour walk" })).toBeVisible()
 
-  // The editor's unsaved text shows as a dot in place of its close button.
+  // The editor's unsaved text shows as a dot in place of its close button (the chat's tab too:
+  // its panel holds the same preset).
   const editor = page.getByRole("region", { name: "Preset editor", exact: true })
   await editor.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }).fill("Unsaved for the dot.")
-  await expect(right.locator("[data-tab] [data-unsaved-dot]")).toHaveCount(1)
+  const editorTab = right.locator("[data-tab]").last()
+  await expect(editorTab.locator("[data-unsaved-dot]")).toHaveCount(1)
+  await expect(right.locator("[data-tab]").first().locator("[data-unsaved-dot]")).toHaveCount(0)
   await shot(page, "tab-unsaved-pinned-1440-light")
 
-  // Close saved tabs keeps the editor (unsaved) and the pinned tab; Close all keeps the pin.
+  // Close to the right, Reopen closed tab, then Close all, which keeps the pinned tab.
   await tab("Lighthouse night").click({ button: "right" })
-  await page.getByRole("menuitem", { name: "Close saved tabs" }).click()
+  await page.getByRole("menuitem", { name: "Close tabs to the right" }).click()
   await expect(right.locator("[data-tab]")).toHaveCount(2)
+  await right.getByRole("button", { name: "Tab and frame actions" }).click()
+  await page.getByRole("menuitem", { name: "Reopen closed tab" }).click()
+  await expect(right.locator("[data-tab]")).toHaveCount(3)
+  await expect(page.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
   await right.getByRole("button", { name: "Tab and frame actions" }).click()
   await page.getByRole("menuitem", { name: "Close all tabs" }).click()
   await expect(right.locator("[data-tab]")).toHaveCount(1)
-  await right.getByRole("button", { name: "Tab and frame actions" }).click()
-  await page.getByRole("menuitem", { name: "Reopen closed tab" }).click()
-  await expect(right.locator("[data-tab]")).toHaveCount(2)
-  await expect(page.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
+  await expect(right.locator("[data-tab]").first()).toHaveAttribute("data-sticky", "")
 
   // Maximize shows the frame alone until restored.
   await right.getByRole("button", { name: "Maximize frame" }).click()
