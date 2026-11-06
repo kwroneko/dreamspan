@@ -67,6 +67,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "orchestration.mode", value: { mode: change.mode } }
     case "AgentTools":
       return { key: "agent.tools", value: { tools: change.tools } }
+    case "AgentPermission":
+      return { key: "agent.permission", value: { ...change.target, on: change.on } }
   }
 }
 

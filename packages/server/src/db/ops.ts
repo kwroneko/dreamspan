@@ -3167,7 +3167,8 @@ export class ReadOps extends RpcGroup.make(
   }),
   /**
    * The live chat's own notes, then these cards', by their upstream refs, oldest first, each
-   * linked one with its shared note (whose text is in `doc.content`).
+   * linked one with its shared note (whose text is in `doc.content`). A note an agent reply
+   * wrote is among them only where that reply is shown (DESIGN §7.3 [D]).
    */
   Rpc.make("ChatNoteEntries", {
     payload: {
@@ -3178,7 +3179,12 @@ export class ReadOps extends RpcGroup.make(
       cards: Schema.Array(EntityId)
     },
     success: Schema.Array(
-      Schema.Struct({ ref: LibraryRef, doc: Doc, card: Schema.NullOr(EntityId), linked: Schema.NullOr(LinkedNote) })
+      Schema.Struct({
+        ref: LibraryRef,
+        doc: Doc,
+        card: Schema.NullOr(EntityId),
+        linked: Schema.NullOr(LinkedNote)
+      })
     ),
     error: Schema.Union([NotFound, StorageError])
   }),

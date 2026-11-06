@@ -2,42 +2,19 @@
 // from the modes the server has registered, written as `orchestration.mode` at the leaf shown, so
 // it follows the branch and changes the next reply only. For a mode that uses tools, the tools it
 // may use, each a checkbox, written as `agent.tools`.
-import type { ReplyModes } from "@rp/shared/agent.ts"
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { Checkbox } from "../../../ui/Choice.tsx"
 import { Field, Fieldset } from "../../../ui/Field.tsx"
 import { Select } from "../../../ui/Select.tsx"
 import type { ChatSession } from "../session.ts"
-
-const PLAIN = "plain"
-
-/** The registered modes and tools, read once a page: they change only when plugins do. */
-let known: Promise<ReplyModes | string> | null = null
-const readModes = (session: ChatSession) =>
-  (known ??= session
-    .call((client) => client("ListReplyModes", {}))
-    .then((result) => {
-      if (result.ok) return result.value
-      known = null
-      return `The reply modes couldn't be read: ${result.error.message}`
-    }))
+import { PLAIN, useReplyModes } from "./replyModes.ts"
 
 export function ReplyModeSection({ session }: { session: ChatSession }) {
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
-  const [modes, setModes] = useState<ReplyModes | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { modes, error: readError } = useReplyModes(session)
+  const [writeError, setError] = useState<string | null>(null)
+  const error = writeError ?? readError
   const [pending, setPending] = useState<{ mode?: string; tools?: ReadonlyArray<string> } | null>(null)
-  useEffect(() => {
-    let active = true
-    void readModes(session).then((result) => {
-      if (!active) return
-      if (typeof result === "string") setError(result)
-      else setModes(result)
-    })
-    return () => {
-      active = false
-    }
-  }, [session])
   if (cast === null || modes === null)
     return error ? (
       <p role="alert" className="text-sm text-danger">

@@ -1,14 +1,16 @@
 // The agent RPCs (@rp/shared/agentApi.ts). Storage checks the version or chat is the caller's.
-import { foldState } from "@rp/shared/state.ts"
+import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
+import { foldState, permissionKey } from "@rp/shared/state.ts"
 import { ACTIVITY_PAGE, NotResumable, type StepEdit } from "@rp/shared/agent.ts"
 import { type AgentApi } from "@rp/shared/agentApi.ts"
 import { CurrentUser } from "@rp/shared/api.ts"
-import type { ForkId, VersionId } from "@rp/shared/chat.ts"
+import type { EntityId, ForkId, VersionId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect, Option } from "effect"
 import { planResume, planStepResume, type ResumePlan, StepNotResumable } from "../agent/resume.ts"
 import { countSteps } from "../agent/steps.ts"
+import { notesAt } from "../agent/tools/notes.ts"
 import type { FrozenTool } from "../agent/tools.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
@@ -129,6 +131,55 @@ export const makeAgentHandlers = Effect.gen(function* () {
       Effect.flatMap(CurrentUser, (user) => reader.RolloutTranscript({ userId: user.id, versionId })).pipe(
         internal("GetRunTranscript")
       ),
+    // The rule the note and card tools apply (agent/tools/notes.ts, cardEdit.ts): the chat's
+    // `agent.permission`, else the note's `agent_editable` or the card's `agent_editable_fields`.
+    GetAgentPermissions: ({ chatId, slotId, forkId }) =>
+      Effect.gen(function* () {
+        const userId = (yield* CurrentUser).id
+        const { notes, state } = yield* notesAt({
+          userId,
+          chatId,
+          forkId: forkId ?? null,
+          slotId,
+          reader,
+          displayEnd: true
+        })
+        const chosen = (key: string | null, own: boolean) => ({
+          on: (key === null ? undefined : state.agentPermissions[key]) ?? own,
+          own
+        })
+        const ids = [...new Set([...state.participants, ...state.playedByMe])] as Array<EntityId>
+        const cards = ids.length
+          ? yield* reader.AgentCards({
+              userId,
+              chatId,
+              entityIds: ids,
+              bindings: Object.fromEntries(
+                Object.entries(state.cardBindings).map(([entity, b]) => [
+                  entity,
+                  { ref: b.ref ?? null, revision: b.revision ?? null }
+                ])
+              )
+            })
+          : []
+        return {
+          notes: notes.map((note) => ({
+            entityId: note.entity,
+            title: note.title,
+            card: note.card,
+            linked: note.linked,
+            ...chosen(permissionKey({ note: note.entity }), note.doc["agent_editable"] === true)
+          })),
+          cards: cards.map((card) => ({
+            entityId: card.entityId as EntityId,
+            name: card.name,
+            fields: REPLACEABLE_CARD_FIELDS.map((field) => ({
+              field,
+              ...chosen(permissionKey({ card: card.entityId, field }), card.editableFields.includes(field))
+            }))
+          }))
+        }
+      }).pipe(internal("GetAgentPermissions")),
     // As registered now: a plugin's mode or tool shows here as the built-ins do. External tools
     // are never offered in a reply (spec/AGENTIC.md §4.1), so they aren't listed.
     ListReplyModes: () =>

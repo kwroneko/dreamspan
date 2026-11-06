@@ -75,7 +75,8 @@ export function Checkbox({
   hint,
   indeterminate = false,
   disabled = false,
-  labelHidden = false
+  labelHidden = false,
+  hintInline = true
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
@@ -87,6 +88,11 @@ export function Checkbox({
   labelHelp?: ReactNode
   /** What ticking it does, when the label doesn't say. */
   hint?: string | undefined
+  /**
+   * False: the hint is only the tooltip, never a line under the label on a phone (a long list of
+   * alike boxes whose group explains them).
+   */
+  hintInline?: boolean
   /** Some but not all of what it stands for are ticked (a list's header checkbox), or mixed values. */
   indeterminate?: boolean
   disabled?: boolean
@@ -128,6 +134,7 @@ export function Checkbox({
         hidden={labelHidden}
         description={description}
         hint={hint ? { id: `${id}-hint`, text: hint } : undefined}
+        hintInline={hintInline}
       >
         {children}
       </ChoiceLabel>
