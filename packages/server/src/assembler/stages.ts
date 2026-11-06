@@ -390,7 +390,8 @@ const noteGateStage = sync("note-gate", (assembly) => {
 
 const modeOf = (state: ChatState): Mode => ({
   projection: state.rolesProjection ?? "by_writer",
-  loreBelowHistory: state.loreBelowHistory ?? true
+  loreBelowHistory: state.loreBelowHistory ?? true,
+  cardsRotation: state.cardsRotation ?? false
 })
 
 const modeStage = sync("mode", (assembly) => {
@@ -1480,9 +1481,13 @@ const composeStage = sync("compose", (assembly) => {
   // The speaking card, a card the user plays included (owner 2026-10-28: its prompts apply on an
   // impersonation turn, as ST passes the character's prompts for every generation type).
   const speaker = cast.speaker
-  // Card-swap (DESIGN §5.2): the speaking character's card goes at the tail, the others stay.
-  const atTail = assembly.request.agent?.cardsAtTail && speaker && cast.characters.includes(speaker) ? speaker : null
-  const characters = atTail ? cast.characters.filter((card) => card !== atTail) : cast.characters
+  // Card-swap (DESIGN §5.2), as ST's "Swap character cards" group mode: the preset's card
+  // places hold only the speaking character's card, with its examples and notes; the other
+  // characters' are left out. Everything else, the persona included, goes where the preset says.
+  // The chat's card layout (`cards.rotation`, with or without tools), or the card-swap reply mode.
+  const rotation = mode.cardsRotation || assembly.request.agent?.speakerCardOnly === true
+  const swapped = rotation && speaker && cast.characters.includes(speaker) ? speaker : null
+  const characters = swapped ? [swapped] : cast.characters
   const group = cast.characters.length > 1
   const own = (card: CardInput) => ({ char: modelName(card.doc) })
 
@@ -1683,17 +1688,12 @@ const composeStage = sync("compose", (assembly) => {
       )
     }
   }
-  if (atTail) {
-    const tailText = (a: Assembly, card: CardInput, name: keyof CardInput["doc"], n?: Partial<Names>) =>
-      name === "description" || name === "personality" || name === "scenario"
-        ? field(card, name)
-        : cardText(a, card, name, n)
-    const block = cardBlock(assembly, atTail, tailText, wrap, cardNotes(assembly, atTail, atTail))
-    if (block) assembly.tailCard = block
-    else delete assembly.tailCard
-  } else delete assembly.tailCard
+  // The swapped-in card changes with the speaker, so what holds it can't be cached across turns.
+  if (swapped && cast.characters.length > 1)
+    for (const marker of [markers.definitions, markers.description, markers.personality, markers.scenario])
+      if (marker) env.markVolatile(marker.piece)
   // Examples keep their own handling: parsed per card into example chats, named in a group.
-  const examples0 = cast.characters.flatMap((card) =>
+  const examples0 = characters.flatMap((card) =>
     group ? exampleLines(assembly, card, modelName(card.doc), true) : exampleLines(assembly, card, names.char, false)
   )
   let examples: Array<Array<ChatLine>> = examples0
@@ -1703,6 +1703,17 @@ const composeStage = sync("compose", (assembly) => {
     : optional("utility.new_chat_prompt", utility.new_chat_prompt)
 
   const collection = collectionOf(assembly)
+  // The cards card-swap left out this turn, for the inspector's "not sent" list.
+  if (swapped)
+    for (const card of cast.characters)
+      if (card !== swapped)
+        (assembly.skippedPrompts ??= []).push({
+          kind: "card",
+          entity: card.entity,
+          revision: card.revision,
+          field: "definitions",
+          swapped: true
+        })
   const lore = assembly.lore ?? []
   const loreBlock = (id: string, entries: typeof lore, format = false): Text | null => {
     if (!entries.length) return null
@@ -1807,7 +1818,7 @@ const composeStage = sync("compose", (assembly) => {
         identifier = target.field === "system_prompt" ? "main" : "jailbreak"
       } else if (target.field === "mes_example") identifier = "dialogueExamples"
       else {
-        if (card === atTail) continue
+        if (swapped && card !== swapped && !cast.personas.includes(card)) continue
         identifier = definitions
           ? "charDefinitions"
           : cast.personas.includes(card)
@@ -2111,17 +2122,7 @@ const composeStage = sync("compose", (assembly) => {
     group: cast.characters.length > 1 ? cast.characters.map((c) => modelName(c.doc)) : []
   }
   const cost = (built: ReturnType<typeof compose>) => {
-    const all = assembly.tailCard
-      ? [
-          ...built.messages,
-          {
-            role: "system" as const,
-            content: assembly.tailCard.text,
-            pieces: [assembly.tailCard.piece],
-            kind: "volatile" as const
-          }
-        ]
-      : built.messages
+    const all = built.messages
     const messages = all.filter((message) => message.content)
     const processed = postProcess(doc.squash ? squash(messages) : messages, doc.postprocess, postNames)
     const tokens = (messages: ReadonlyArray<StMessage>) =>
@@ -2539,13 +2540,6 @@ const messagesStage = sync("messages", (assembly) => {
     }
   })
   messages = messages.filter((m) => m.content)
-  if (assembly.tailCard)
-    messages.push({
-      role: "system",
-      content: assembly.tailCard.text,
-      pieces: [assembly.tailCard.piece],
-      kind: "volatile"
-    })
   if (doc.squash) messages = squash(messages)
   messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
   // DESIGN §2.2 requires one separate final user message, even in merging/single modes.

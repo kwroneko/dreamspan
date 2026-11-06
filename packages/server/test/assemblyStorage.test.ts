@@ -276,8 +276,8 @@ describe("context assembly from the database", () => {
       const snapshots: Array<ContextSnapshot> = []
       for (const agent of [
         undefined,
-        { instructions: "Write the scene.", cardsAtTail: false },
-        { instructions: "Write Mira.", cardsAtTail: true }
+        { instructions: "Write the scene.", speakerCardOnly: false },
+        { instructions: "Write Mira.", speakerCardOnly: true }
       ]) {
         const built = yield* reader.AssembleContext({
           userId,

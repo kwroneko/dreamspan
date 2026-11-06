@@ -15,7 +15,7 @@
 - **Tools are a registered catalog**, each with an effect class: `read`, `chat_state` or `external` (§7.3). Chat-state tools write state events attached to the generating version (`origin: rollout`), so swiping reverses them. Each write is keyed by its tool call, so re-running a tool on resume never duplicates its effect.
 - **Display:** steps stream live inside the version, expanded by default, and collapse when the message is complete, with a sticky per-user preference. Afterwards they sit inline as an "N steps" element. The header shows a step count and time badge. The existing request inspector becomes the run inspector, with the steps. An Activity panel lists the rollouts that produce no message.
 - **Decision models** are an optional registered engine, off by default. Each decision point has a heuristic fallback (§7.6 [D]).
-- **Orchestration modes** are a registry: `plain` (today's path, the default), `narrator` (one agent per turn with all cards) and `card-swap` (one agent, with the speaker's card at the tail). `per-character` is sketched, not built (Phase 4 marks it optional).
+- **Orchestration modes** are a registry: `plain` (today's path, the default), `narrator` (one agent per turn with all cards) and `card-swap` (one agent, with only the speaker's card sent where the preset puts cards; DESIGN §5.2 [D] 2026-11-06, formerly at the tail). `per-character` is sketched, not built (Phase 4 marks it optional).
 
 ## 1. Deltas from reference-harness and from the build
 
@@ -259,7 +259,7 @@ interface AgentPlan {
 - **Built-ins:**
   - `plain` (default): strategy `reply`, no tools. Today's behaviour, byte for byte.
   - `narrator`: strategy `agent`, every card loaded in the chat's card layout (`concat`), tools `expand_summary`, `search_summaries`, `search_chat`, `read_messages`, `lookup_lore`, `list_notes`, `write_note`, `edit_note`, `switch_note`, `set_presence`, `edit_card`, contract `both`. "One agent per turn with all cards loaded (reference-harness's way, the most cache-friendly)" (§7.1 [D]).
-  - `card-swap`: as `narrator`, with the card layout forced to `swap_tail` (the speaker's card at the tail; DESIGN §3.5: swapping only in that opt-in layout).
+  - `card-swap`: as `narrator`, with only the speaker's card sent, where the preset puts cards (DESIGN §5.2 [D] 2026-11-06; it was the speaker's card at the tail before).
   - `per-character` (optional this phase, **not built**): each character its own agent, with its own system prompt and only its own card, seeing history only where it was present. That needs presence-cut summaries (§7.1 [P]) and a presence-limited path read, and reuses everything else here. When built, `agents()` returns the speaker's agent with `assembly.view = { presentFor: speaker }`.
 - **Where it's chosen:** chat settings (`chatSettingSections` slot), a **Reply mode** select with each mode's description beside it, written as a branch-owned `orchestration.mode` event. A mode is per chat and follows the branch. Switching it changes the next reply only. The Tools list under it (checkboxes, each tool's label and a one-line explanation) writes `agent.tools`.
 - A plugin registers a mode the same way: a new id, or a replacement for a built-in.

@@ -196,6 +196,8 @@ export interface Mode {
   readonly projection: string
   /** Lorebook entries only below the history (DESIGN §1.3): the chat's setting, on unless turned off. */
   readonly loreBelowHistory: boolean
+  /** Card-swap (`cards.rotation`, DESIGN §5.2): only the speaker's card where the preset puts cards; off unless turned on. */
+  readonly cardsRotation: boolean
 }
 
 /** A message's text after the regex scripts, at the depth they ran at. */
@@ -273,7 +275,7 @@ export interface Assembly {
   /** Absent when the `notes` stage is disabled: downstream stages read that as no notes (ARCHITECTURE §15). */
   notes?: ReadonlyArray<NoteInput>
   skippedNotes?: ReadonlyArray<NoteInput>
-  /** Enabled preset prompts left out by their condition this turn, for the request inspector. */
+  /** Enabled preset prompts left out by their condition, and cards card-swap left out, this turn, for the request inspector. */
   skippedPrompts?: Array<Source>
   noteDecisions?: ReadonlyMap<string, Extract<SourceActivation, { kind: "note" }>>
   sendIfEmpty?: boolean
@@ -305,8 +307,6 @@ export interface Assembly {
   renderEndOfRequest?: () => StMessage | undefined
   /** The end-of-request message (DESIGN §2.2), the request's last; absent: none this turn. */
   endOfRequest?: StMessage
-  /** Card-swap: the speaker's card, sent just before the end of the request. */
-  tailCard?: { readonly text: string; readonly piece: number }
   composition?: Composition
   messages?: Array<RequestMessage & { readonly pieces: ReadonlyArray<number>; readonly kind: Stability }>
   /** The names ST folds into the text where a provider has no `name` field. */

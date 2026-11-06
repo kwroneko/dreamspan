@@ -313,7 +313,31 @@ describe("agent note tools", () => {
       assert.deepInclude(fields(changed)["description"], { on: false, own: true })
       assert.deepInclude(
         changed.notes.find((n) => n.title === "Locked"),
-        { on: true, own: false }
+        { on: true, own: false, chosen: true }
+      )
+      assert.deepInclude(fields(changed)["personality"], { chosen: true })
+      assert.deepInclude(fields(changed)["scenario"], { chosen: false })
+
+      // Reset: the chat's choice dropped, the card's and note's own settings hold again.
+      for (const target of [{ card: mira.entityId, field: "personality" as const }, { note: locked.entityId }])
+        yield* api.ChangeCast({ ...at, change: { _tag: "AgentPermission", target, on: null } })
+      const reset = yield* api.GetAgentPermissions(at)
+      assert.deepInclude(fields(reset)["personality"], { on: false, own: false, chosen: false })
+      assert.deepInclude(fields(reset)["description"], { on: false, own: true, chosen: true })
+      assert.deepInclude(
+        reset.notes.find((n) => n.title === "Locked"),
+        { on: false, own: false, chosen: false }
+      )
+
+      // The library's note list leaves out the notes agent replies wrote, from every branch.
+      const library = yield* api.ListLibrary({ kind: "note" })
+      assert.include(
+        library.map((ref) => ref.label),
+        "Locked"
+      )
+      assert.notInclude(
+        library.map((ref) => ref.label),
+        "Injury"
       )
 
       // The first version shown again: the agent's note isn't listed there, for the user or the agent.

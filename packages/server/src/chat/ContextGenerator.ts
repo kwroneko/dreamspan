@@ -213,7 +213,7 @@ export const layer = Layer.effect(
                             tools.map((t) => t.id),
                             plan.contract
                           ) ?? "",
-                        cardsAtTail: plan.assembly?.cardsAtTail ?? false
+                        speakerCardOnly: plan.assembly?.speakerCardOnly ?? false
                       }
                     }
                   : {})

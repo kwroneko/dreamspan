@@ -144,10 +144,10 @@ export const makeAgentHandlers = Effect.gen(function* () {
           reader,
           displayEnd: true
         })
-        const chosen = (key: string | null, own: boolean) => ({
-          on: (key === null ? undefined : state.agentPermissions[key]) ?? own,
-          own
-        })
+        const chosen = (key: string | null, own: boolean) => {
+          const choice = key === null ? undefined : state.agentPermissions[key]
+          return { on: choice ?? own, own, chosen: choice !== undefined }
+        }
         const ids = [...new Set([...state.participants, ...state.playedByMe])] as Array<EntityId>
         const cards = ids.length
           ? yield* reader.AgentCards({

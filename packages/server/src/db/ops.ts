@@ -3352,7 +3352,7 @@ export class ReadOps extends RpcGroup.make(
       timeZone: Schema.String,
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String))),
       /** An agent reply's assembly (spec/AGENTIC.md §6). */
-      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, cardsAtTail: Schema.Boolean })),
+      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, speakerCardOnly: Schema.Boolean })),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
       decisions: Schema.optionalKey(
         Schema.Struct({

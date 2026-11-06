@@ -280,16 +280,16 @@ describe("notes that replace prompts", () => {
     expect(sent(allowed)).toContain("system: From the card.")
   })
 
-  it("replaces the field in a card-swap agent reply's tail card", async () => {
-    const outfit = chatNote("note-outfit", "Mira, at the tail, in a red scarf.", {
+  it("replaces the field in a card-swap agent reply's speaker card", async () => {
+    const outfit = chatNote("note-outfit", "Mira, swapped in, in a red scarf.", {
       replaces: { kind: "card_field", field: "description", card: "mira" as never }
     })
     const swap = await Effect.runPromise(
       assembleFixture(fixture({ notes: [outfit], events: on("note-outfit") }), {
-        agent: { instructions: "Write Mira's reply.", cardsAtTail: true }
+        agent: { instructions: "Write Mira's reply.", speakerCardOnly: true }
       })
     )
-    expect(sent(swap)).toContain("Mira, at the tail, in a red scarf.")
+    expect(sent(swap)).toContain("Mira, swapped in, in a red scarf.")
     expect(sent(swap)).not.toContain("grey coat")
     expect(sent(swap).match(/red scarf/g)).toHaveLength(1)
     expect(swap.noteReplacements?.map((r) => r.status)).toEqual(["replaced"])

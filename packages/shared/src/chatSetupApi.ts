@@ -305,6 +305,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   replySingle: Schema.optionalKey(Schema.Boolean),
   /** How replies are written (`orchestration.mode`, a reply mode's id); absent is the default, plain. */
   replyMode: Schema.optionalKey(Schema.String),
+  /** True: card-swap, only the speaker's card where the preset puts cards (`cards.rotation`); absent is off. */
+  cardsRotation: Schema.optionalKey(Schema.Boolean),
   /** The tools agent modes offer (`agent.tools`); absent: each mode's own. */
   agentTools: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Active and departed cards, including former personas, to retain historical names and portraits. */
@@ -357,6 +359,8 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("ReplyOrder", { order: Schema.String.check(Schema.isMaxLength(200)) }),
   /** One reply per user action, or the reply order's whole round as in ST (`reply.single`). */
   Schema.TaggedStruct("ReplySingle", { on: Schema.Boolean }),
+  /** Card-swap from here on (`cards.rotation`): only the speaker's card where the preset puts cards. */
+  Schema.TaggedStruct("CardsRotation", { on: Schema.Boolean }),
   /** How replies are written from here on (`orchestration.mode`): a reply mode's id. */
   Schema.TaggedStruct("ReplyMode", { mode: Schema.String.check(Schema.isMaxLength(200)) }),
   /** The tools agent modes offer from here on (`agent.tools`), by id. */
@@ -365,14 +369,14 @@ export const CastChange = Schema.Union([
   }),
   /**
    * Whether agent replies may change a note, or a card's field, in this chat from here on
-   * (`agent.permission`), over the note's or card's own setting.
+   * (`agent.permission`), over the note's or card's own setting; null follows that setting again.
    */
   Schema.TaggedStruct("AgentPermission", {
     target: Schema.Union([
       Schema.Struct({ note: EntityId }),
       Schema.Struct({ card: EntityId, field: Schema.Literals(REPLACEABLE_CARD_FIELDS) })
     ]),
-    on: Schema.Boolean
+    on: Schema.NullOr(Schema.Boolean)
   }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])

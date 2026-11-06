@@ -19,9 +19,9 @@ import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 /**
  * One thing agent replies may or may not change in a chat (spec/AGENTIC.md §4.3): `on` is what
  * holds at the position, `own` the note's or card's own setting, which the chat's
- * `agent.permission` overrides.
+ * `agent.permission` overrides when `chosen`.
  */
-const PermissionState = { on: Schema.Boolean, own: Schema.Boolean }
+const PermissionState = { on: Schema.Boolean, own: Schema.Boolean, chosen: Schema.Boolean }
 
 /** What agent replies may change in a chat at a position: its notes, and its cards' fields. */
 export const AgentPermissions = Schema.Struct({
