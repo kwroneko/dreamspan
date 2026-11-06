@@ -8,7 +8,7 @@
 // line, preview, time and corner actions, grouped as the panel groups them (branchmenu).
 import type { Fork, SlotId } from "@rp/shared/chat.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
@@ -19,6 +19,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
+import { WindowedList } from "../../ui/WindowedList.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { sidebarCleared } from "../characters/shellData.tsx"
 import {
@@ -49,6 +50,7 @@ const GROUP_TITLES: Record<BranchGroup, string> = {
   named: "Named branches",
   other: "Branches"
 }
+const forkKey = (fork: Fork) => fork.id
 
 /**
  * One branch: the row opens it; the pencil after its name renames it in place; the corners pin
@@ -79,7 +81,7 @@ function BranchRow({
   const [renaming, setRenaming] = useState(false)
   const pinned = fork.pinnedAt !== null
   return (
-    <li
+    <div
       data-fork={fork.id}
       data-branch-row
       onClick={(event) => {
@@ -171,7 +173,7 @@ function BranchRow({
           onClick={onDelete}
         />
       </div>
-    </li>
+    </div>
   )
 }
 
@@ -222,12 +224,6 @@ function BranchList({
   const deleted = useDeletedToast()
   const pins = useAction()
   const [failure, setFailure] = useState<string | null>(null)
-  const scroller = useRef<HTMLDivElement>(null)
-  const loaded = forks !== null
-  // Opened with dozens of branches, the one shown is in view.
-  useEffect(() => {
-    scroller.current?.querySelector("[aria-current]")?.closest("li")?.scrollIntoView({ block: "nearest" })
-  }, [loaded])
   const keepPanel = search.panel ? { panel: search.panel } : {}
   if (forks === null) return <p className="px-1 py-2 text-sm text-muted">Loading the branches…</p>
   const live = forks.length
@@ -282,18 +278,27 @@ function BranchList({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The rows' 8 px gutter is inside the scrollport, so focus rings and borders aren't cut. */}
-      <div ref={scroller} data-branch-scroll className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 py-1">
-        <ol aria-label="Branches" className="flex flex-col gap-1">
-          {ordered.map((fork, i) => {
-            const group = branchGroup(fork)
-            const heading = groups.size > 1 && (i === 0 || branchGroup(ordered[i - 1]!) !== group)
-            const label = branchLabel(fork)
-            return [
-              heading && (
-                <li key={`${group}-heading`} role="none" className={i === 0 ? "" : "pt-2"}>
-                  <h3 className="truncate px-1 text-xs font-semibold text-muted">{GROUP_TITLES[group]}</h3>
-                </li>
-              ),
+      <WindowedList
+        items={ordered}
+        itemKey={forkKey}
+        initialIndex={Math.max(
+          0,
+          ordered.findIndex((fork) => fork.id === shown?.id)
+        )}
+        listLabel="Branches"
+        data-branch-scroll
+        className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 py-1"
+        renderItem={(fork, i) => {
+          const group = branchGroup(fork)
+          const heading = groups.size > 1 && (i === 0 || branchGroup(ordered[i - 1]!) !== group)
+          const label = branchLabel(fork)
+          return (
+            <>
+              {heading && (
+                <h3 className={`mb-1 truncate px-1 text-xs font-semibold text-muted ${i === 0 ? "" : "pt-2"}`}>
+                  {GROUP_TITLES[group]}
+                </h3>
+              )}
               <BranchRow
                 key={fork.id}
                 fork={fork}
@@ -306,10 +311,10 @@ function BranchList({
                 onPin={() => void pin(fork)}
                 onDelete={() => void remove(fork)}
               />
-            ]
-          })}
-        </ol>
-      </div>
+            </>
+          )
+        }}
+      />
       {failure !== null && (
         <p role="alert" className="pt-2 text-xs text-danger">
           {failure}
