@@ -33,7 +33,10 @@ const VersionOrigin = Schema.Literals([
   "imported",
   "changeset",
   "scratchpad",
-  "duplicate"
+  "duplicate",
+  "merge",
+  /** An agent reply carried on from a stopped one (`sourceVersionId`; spec/AGENTIC.md §4.2). */
+  "resumed"
 ])
 
 export class Chat extends Schema.Class<Chat>("Chat")({
@@ -137,6 +140,7 @@ export const ContextIssue = Schema.Struct({
     "layout_ignored",
     "cache_breakpoints",
     "role_projection_missing",
+    "merge_layout_missing",
     "note_replacement"
   ]),
   message: Schema.String

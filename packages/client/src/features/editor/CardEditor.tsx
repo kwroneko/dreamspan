@@ -31,7 +31,7 @@ import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { CardSources } from "../cardSources/index.tsx"
 import type { Caller } from "./caller.ts"
 import { CardTextEditor } from "./CardTextEditor.tsx"
-import { CARD_LOREBOOK_SECTION, cardEditorSections } from "./cardSections.ts"
+import { CARD_LOREBOOK_SECTION, cardDefinitionSections, cardEditorSections } from "./cardSections.ts"
 import { CARD_TAB_DEFINITION, type CardTabProps, cardEditorTabs } from "./cardTabs.ts"
 import { FieldTools, TextField } from "./controls.tsx"
 import { LorebookForm } from "./LorebookForm.tsx"
@@ -395,6 +395,7 @@ function DefinitionTab({ store, call, layout }: CardTabProps) {
           <PromptUseNote store={store} call={call} field="post_history_instructions" />
         </div>
       </div>
+      <SlotOutlet slot={cardDefinitionSections} props={{ store }} />
     </div>
   )
 }

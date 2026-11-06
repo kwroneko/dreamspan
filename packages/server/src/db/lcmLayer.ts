@@ -3,7 +3,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { readSummary } from "./lcmReads.ts"
+import { readSummary, SummaryReads } from "./lcmReads.ts"
 import {
   followsInDisplay,
   insertedOnPath,
@@ -30,6 +30,19 @@ export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId, view?
   const valid = (id: string): Effect.Effect<boolean, import("effect/sql").SqlError.SqlError> =>
     Effect.gen(function* () {
       if (memo.has(id)) return memo.get(id)!
+      // Without inserted slots in view, the check is structural: the same in every fork.
+      const kept = view?.pieces ? null : yield* SummaryReads
+      const known = kept?.valid.get(id)
+      if (known !== undefined) {
+        memo.set(id, known)
+        return known
+      }
+      const answer = yield* check(id)
+      kept?.valid.set(id, answer)
+      return answer
+    })
+  const check = (id: string): Effect.Effect<boolean, import("effect/sql").SqlError.SqlError> =>
+    Effect.gen(function* () {
       memo.set(id, false)
       const [summary] = yield* sql<{
         chat_id: string

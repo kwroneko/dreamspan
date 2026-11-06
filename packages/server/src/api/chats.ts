@@ -205,7 +205,8 @@ export const makeChatHandlers = Effect.gen(function* () {
           forkId: result.forkId
         })
       }
-      const entry = yield* publishSlot(user, result.slotId)
+      // As the fork it was posted in shows it: naming it saves finding the fork through the slot.
+      const entry = yield* publishSlot(user, result.slotId, result.forkId)
       hub.publish(params.chatId, { _tag: "Chat", chat: result.chat })
       // The rest of the round waits behind the reply just posted.
       if (outcome.queue !== undefined) hub.publish(params.chatId, { _tag: "Queue", queue: outcome.queue })

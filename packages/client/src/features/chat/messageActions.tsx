@@ -71,6 +71,11 @@ export interface MessageAction {
   readonly group?: string
   /** Whether this action applies to this kind of message. */
   readonly available?: (context: MessageActionContext) => boolean
+  /**
+   * Offered on a merged chat's entry too (spec/CHAT-MERGE.md §7). Off by default: that entry
+   * isn't a message anyone wrote, so editing or generating versions of it means nothing.
+   */
+  readonly onMerges?: boolean
   /** Temporary unavailability keeps the button in place and explains why. */
   readonly disabled?: (context: MessageActionContext) => string | null
   /** Shown on the message as a button until the user unticks it. */
@@ -93,12 +98,18 @@ export const viewOf = (view: (props: MessageActionProps) => MessageActionView) =
 
 export const messageActions = makeRegistry<MessageAction>()
 export const availableMessageActions = (context: MessageActionContext, snapshot = messageActions.snapshot()) =>
-  [...snapshot.entries].sort((a, b) => a.order - b.order).filter((entry) => entry.available?.(context) !== false)
+  [...snapshot.entries]
+    .sort((a, b) => a.order - b.order)
+    .filter(
+      (entry) =>
+        (context.entry.version.origin !== "merge" || entry.onMerges === true) && entry.available?.(context) !== false
+    )
 
 /** Resolve the effective action, including plugin disablement and availability. */
 export const invokeMessageAction = (id: string, context: MessageActionContext, source: "button" | "keyboard") => {
   const action = messageActions.get(id)
   if (action?.available?.(context) === false || action?.disabled?.(context)) return
+  if (context.entry.version.origin === "merge" && action?.onMerges !== true) return
   return action?.run?.(context, source)
 }
 

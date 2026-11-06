@@ -2,7 +2,9 @@ import { CardDoc } from "@rp/shared/docs/card.ts"
 import { galleryAssets } from "@rp/shared/gallery.ts"
 import { Schema } from "effect"
 import { revisionNumber } from "./revisionNumbers.ts"
-import { inFork } from "./forkState.ts"
+import { inFork, viewAt } from "./forkState.ts"
+import { stateEventsThrough } from "./stateRead.ts"
+import { agentWrittenNotes, notesNamed } from "./agentNotes.ts"
 import { chatFork, readSnippet } from "./snippets.ts"
 // The editors' read handlers (ARCHITECTURE.md "Editing the library"), in the reader workers.
 import { EditorSnapshot, NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
@@ -175,6 +177,18 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           const owner = doc["owner"] as { card?: EntityId } | undefined
           return owner?.card ?? null
         }
+        // A note an agent reply wrote (its first revision is the reply's) belongs to that reply
+        // (DESIGN §7.3 [D]): it's listed only where an event names it, which the reply's own
+        // `note.activate` does wherever the reply is shown, so another swipe or branch never lists it.
+        const byAgent = yield* agentWrittenNotes(
+          sql,
+          notes.filter((n) => cardOf(n.doc) === null).map((n) => n.row.entity_id)
+        )
+        const named =
+          byAgent.size > 0
+            ? notesNamed(yield* stateEventsThrough(sql, chatId, slotId, yield* viewAt(sql, chatId, slotId)))
+            : new Set<string>()
+        const listed = notes.filter((n) => !byAgent.has(n.row.entity_id) || named.has(n.row.entity_id))
         // A linked slot shows its shared note's text, as the assembler sends it.
         const entry = ({ row, doc }: (typeof notes)[number]) =>
           Effect.gen(function* () {
@@ -190,8 +204,8 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           })
         return yield* Effect.forEach(
           [
-            ...notes.filter((n) => cardOf(n.doc) === null),
-            ...cards.flatMap((card) => notes.filter((n) => cardOf(n.doc) === card))
+            ...listed.filter((n) => cardOf(n.doc) === null),
+            ...cards.flatMap((card) => listed.filter((n) => cardOf(n.doc) === card))
           ],
           entry
         )

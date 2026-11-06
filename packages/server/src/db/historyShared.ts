@@ -11,7 +11,7 @@ export const historyFork = Effect.fnUntraced(function* (
   chatId: string,
   forkId: string
 ) {
-  const [fork] = yield* sql<{ id: string; chat_id: string; tip_slot_id: string | null; lineage_json: string }>`
+  const [fork] = yield* sql<{ id: string; chat_id: string; tip_slot_id: string | null }>`
     SELECT f.* FROM forks f JOIN chats c ON c.id=f.chat_id WHERE f.id=${forkId} AND c.id=${chatId}
       AND c.owner_user_id=${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL AND f.purged_at IS NULL`
   if (!fork) return yield* new NotFound({ entity: "fork", id: forkId })

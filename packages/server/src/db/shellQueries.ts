@@ -1,4 +1,5 @@
 import { effectiveOverrideSql, eventAppliesSql, eventOrder, shownInSql, slotDeletedInSql } from "./forkState.ts"
+import { lineageCte } from "./forkLabels.ts"
 import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 
 // Shared with query-plan regressions. Both take the forks to summarize as a JSON array of ids
@@ -43,14 +44,14 @@ export const shellEventsQuery = `SELECT f.id AS fork_id, e.fork_id AS source_for
 /**
  * Of the forks given (a JSON array of ids), the ones nothing in their lineage selects, replaces
  * or deletes a message for: each of their slots shows what `shellSlotsQuery` reads for a chat
- * without overrides, its own columns, whichever of them it is on the path of. A fork without a
- * lineage is never one.
+ * without overrides, its own columns, whichever of them it is on the path of. The lineage is
+ * walked by parent (`lineageCte`), stopping at the first entry with such a row.
  */
 export const shellPlainForksQuery = `SELECT f.id FROM json_each(?) j CROSS JOIN forks f ON f.id = j.value
-  WHERE f.lineage_json IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM json_each(f.lineage_json) l CROSS JOIN fork_overrides o
-    WHERE o.fork_id = l.value ->> 0 AND o.kind IN ('select', 'replace', 'delete_slot')
-      AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807))`
+  WHERE NOT EXISTS (
+    WITH RECURSIVE ${lineageCte("lineage", "f.id")}
+    SELECT 1 FROM lineage l CROSS JOIN fork_overrides o
+    WHERE o.fork_id = l.fork_id AND o.kind IN ('select', 'replace', 'delete_slot') AND o.seq <= l.bound)`
 
 /**
  * Every slot of the chats given (a JSON array of ids) as `shellSlotsQuery` reads it for a fork

@@ -33,6 +33,17 @@ export interface GenerationRequest {
     /** Its reply sections: one left open (a cutoff inside it) is where the text goes on. */
     readonly sections?: ReplySections
   }
+  /**
+   * An agent reply carried on (spec/AGENTIC.md §4.2): its rollout is made already
+   * (`StartResumedVersion`), with the stopped one's frozen snapshot; the run goes on from the
+   * kept transcript (pi-agent-core messages), the cut-off text first when there's one.
+   */
+  readonly resume?: {
+    readonly rolloutId: string
+    readonly snapshot: string
+    readonly transcript: ReadonlyArray<unknown>
+    readonly continuation?: string
+  }
 }
 
 /**

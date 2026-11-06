@@ -6,6 +6,8 @@
 // the Activity panel lists it with tokens and cost. The presence point's state events attach to
 // the reply's version with the decision rollout as their origin, so a swipe takes them back.
 import type { ConnectionDecisions } from "@rp/shared/decisions.ts"
+import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { FoldableEvent } from "@rp/shared/state.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
@@ -13,6 +15,10 @@ import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { ownedModel } from "./generationSettings.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
+import { selectionIn } from "./forkState.ts"
+import { stateEventsThrough } from "./stateRead.ts"
+import { withoutPurged } from "./stateRefs.ts"
+import { decisionStateStamp } from "../decision/stateStamp.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 
@@ -77,8 +83,13 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
     const graph = makeGraphWrites(sql, bin.drafts)
     /** A decision rollout of the user's, with what its effects attach to. */
     const decisionRollout = (userId: UserId, rolloutId: string) =>
-      sql<{ readonly chat_id: string; readonly status: string }>`
-        SELECT r.chat_id, r.status FROM rollouts r JOIN chats c ON c.id = r.chat_id
+      sql<{
+        readonly chat_id: string
+        readonly status: string
+        readonly slot_id: string | null
+        readonly fork_id: string | null
+      }>`
+        SELECT r.chat_id, r.status, r.slot_id, r.fork_id FROM rollouts r JOIN chats c ON c.id = r.chat_id
         WHERE r.id = ${rolloutId} AND r.kind = 'decision' AND c.owner_user_id = ${userId}`.pipe(
         Effect.flatMap(([row]) =>
           row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "decision", id: rolloutId }))
@@ -167,7 +178,7 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
           yield* sql`UPDATE rollout_payloads SET transcript_json = ${result} WHERE rollout_id = ${rolloutId}`
         }).pipe(transaction(sql, "FinishDecisionRollout")),
 
-      ApplyDecisionEffect: ({ userId, rolloutId, versionId, events }) =>
+      ApplyDecisionEffect: ({ userId, rolloutId, versionId, expectedState, events }) =>
         Effect.gen(function* () {
           const decision = yield* decisionRollout(userId, rolloutId)
           const [version] = yield* sql<{ readonly slot_id: string; readonly fork_id: string | null }>`
@@ -175,17 +186,30 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
             LEFT JOIN rollouts g ON g.id = v.rollout_id
             WHERE v.id = ${versionId} AND s.chat_id = ${decision.chat_id} AND v.deleted_at IS NULL`
           if (!version) return yield* new NotFound({ entity: "version", id: versionId })
+          if (version.slot_id !== decision.slot_id)
+            return yield* new NotFound({ entity: "decision version", id: versionId })
+          const fork = decision.fork_id ?? version.fork_id
+          // Recheck in the write transaction: provider latency must not overwrite a newer choice.
+          if (
+            decision.status !== "completed" ||
+            (yield* selectionIn(sql, fork, version.slot_id))?.shown_id !== versionId
+          )
+            return false
+          const rows = yield* stateEventsThrough(sql, decision.chat_id as ChatId, version.slot_id as SlotId, fork)
+          const current = yield* withoutPurged(
+            sql,
+            rows.map((row) => ({
+              scope: row.scope,
+              data: { key: row.key, value: JSON.parse(row.value_json) }
+            })) as Array<FoldableEvent>
+          )
+          if (decisionStateStamp(current) !== expectedState) return false
           for (const data of events)
-            yield* graph.insertStateEvent(
-              userId,
-              decision.chat_id,
-              version.slot_id,
-              versionId,
-              null,
-              data,
-              version.fork_id,
-              { origin: "rollout", ref: rolloutId }
-            )
+            yield* graph.insertStateEvent(userId, decision.chat_id, version.slot_id, versionId, null, data, fork, {
+              origin: "rollout",
+              ref: rolloutId
+            })
+          return events.length > 0
         }).pipe(transaction(sql, "ApplyDecisionEffect"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   })

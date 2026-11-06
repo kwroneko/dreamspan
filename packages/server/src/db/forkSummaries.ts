@@ -103,10 +103,20 @@ export const computeForkSummaries = (
       )
       const needsPath = (r: ForkRow) => !plain.has(r.id) || (r.parent_fork_id !== null && !plain.has(r.parent_fork_id))
       const overridden = records.filter(needsPath)
-      if (overridden.length > batchSize) {
+      const pathCount = new Set(
+        overridden
+          .flatMap((r) => (r.parent_fork_id === null ? [r.id] : [r.id, r.parent_fork_id]))
+          .filter((id) => !plain.has(id))
+      ).size
+      // Many frozen children can share one overridden parent. Their own paths
+      // still use the shared tree; only distinct overridden paths consume rows.
+      if (overridden.length > batchSize && pathCount > batchSize) {
         const summaries = yield* computeForkSummaries(
           sql,
-          records.filter((r) => plain.has(r.id)),
+          // A plain child's parent can have newer overrides outside the child's
+          // frozen lineage. It still needs a path batch to read that parent;
+          // including it here would recurse on the same records indefinitely.
+          records.filter((r) => !needsPath(r)),
           false
         )
         for (let at = 0; at < overridden.length; at += batchSize)

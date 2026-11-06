@@ -156,6 +156,8 @@ export interface AssemblyRequest {
   readonly macros: MacroLookup
   /** The role projections in effect, by id (`roles` stage). */
   readonly projections: ProjectionRegistry
+  /** The merge layouts in effect (`merge-layout` stage); absent: the built-ins. */
+  readonly mergeLayouts?: import("./merges.ts").MergeLayoutRegistry
   /** The image token rules in effect (`image-tokens` stage); none: every image is unknown. */
   readonly imageTokens?: Registry<ImageTokenRule>
   /** The regex script lists in effect (`scripts` stage), in order; absent: the built-ins. */
@@ -213,6 +215,8 @@ export interface ProjectedEntry {
   readonly name: string
   readonly persona: boolean
   readonly piece: number
+  /** Sent as a system message without a name: a merged chat's section and join (`merge-layout`). */
+  readonly system?: true
 }
 
 /**
@@ -411,6 +415,10 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       // How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md).
       ...(request.summaryJob ? {} : { replySections: replySectionsOf(preset.doc) }),
       ...(request.agent ? { agentAssembly: request.agent } : {}),
+      // The books an agent's lookup_lore reads: those this context's lore came from (AGENTIC §4.5).
+      ...(request.agent && assembly.lorebooks?.length
+        ? { agentLore: assembly.lorebooks.map(({ id, entity, revision }) => ({ id, entity, revision })) }
+        : {}),
       ...(request.decisions ? { decisionAssembly: request.decisions } : {}),
       ...(assembly.loreDecision ? { loreDecision: assembly.loreDecision } : {}),
       inputs: {

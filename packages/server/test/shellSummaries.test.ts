@@ -90,6 +90,58 @@ const setup = Effect.gen(function* () {
 })
 
 describe("shell fork summaries", () => {
+  for (const parentCount of [1, 17])
+    it.live(`summarizes plain children of ${parentCount} overridden parents`, () =>
+      Effect.gen(function* () {
+        const { writer, reader, userId, harbor, append, version, check } = yield* setup
+        const main = harbor.currentForkId!
+        const root = yield* append(harbor.id, null, "Original", null, main)
+        const parents: Array<ForkId> = []
+        if (parentCount === 1) parents.push(main)
+        else
+          for (let n = 0; n < parentCount; n++)
+            parents.push(
+              (yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: root.slotId })).fork.id
+            )
+        const children: Array<ForkId> = []
+        // Frozen children share a tree with few changed parents; many changed
+        // parents require path batches disjoint from the plain forks.
+        for (let n = 0; n < 17; n++)
+          children.push(
+            (yield* writer.CreateFork({
+              userId,
+              chatId: harbor.id,
+              fromForkId: parents[n % parentCount]!,
+              atSlotId: root.slotId
+            })).fork.id
+          )
+        for (const forkId of parents)
+          yield* writer.AddVersion({
+            userId,
+            slotId: root.slotId,
+            forkId,
+            version: version("Parent alternative", null),
+            select: true,
+            commitDraft: null
+          })
+        const changed = new Set<string>(parents)
+        const expected = children.length + parents.length + (changed.has(main) ? 0 : 1)
+        const shell = yield* check("plain children and overridden parents", [harbor.id])
+        const forks = shell.forks.filter((f) => f.chat.id === harbor.id)
+        assert.lengthOf(forks, expected)
+        assert.isTrue(forks.every((f) => f.preview === (changed.has(f.forkId) ? "Parent alternative" : "Original")))
+        for (const id of children) {
+          const child = forks.find((f) => f.forkId === id)!
+          assert.strictEqual(child.preview, "Original")
+          assert.strictEqual(child.messages, 1)
+          assert.deepStrictEqual(child.split, { at: child.createdAt, after: 1 })
+        }
+        const listed = yield* reader.ListForks({ userId, chatId: harbor.id })
+        assert.lengthOf(listed, expected)
+        assert.isTrue(listed.every((f) => f.tipExcerpt === (changed.has(f.id) ? "Parent alternative" : "Original")))
+      }).pipe(Effect.provide(database()))
+    )
+
   it.live("fork exclusion and lineage compaction preserve every existing fork summary", () =>
     Effect.gen(function* () {
       const t = yield* setup

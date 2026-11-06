@@ -43,8 +43,8 @@ it.live("history reads stay on the selected path with 5,000 messages, 300 forks 
       },
       {
         sql: `WITH RECURSIVE ns(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ns WHERE n<299)
-          INSERT INTO forks(id,chat_id,parent_fork_id,branched_at,tip_slot_id,created_at,lineage_json)
-          SELECT 'scale-f-'||n,?,?,0,'scale-s-4999',1,json_array(json_array('scale-f-'||n,NULL)) FROM ns`,
+          INSERT INTO forks(id,chat_id,parent_fork_id,branched_at,tip_slot_id,created_at)
+          SELECT 'scale-f-'||n,?,?,0,'scale-s-4999',1 FROM ns`,
         params: [chat.id, chat.currentForkId]
       },
       {

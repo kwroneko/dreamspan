@@ -11,6 +11,7 @@ import { DatabaseSync } from "node:sqlite"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
+import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
@@ -284,6 +285,56 @@ describe("agent read tools", () => {
       assert.strictEqual(results[2], "“Weather” is off from the next message on.")
       assert.isFalse(yield* shown)
       assert.notStrictEqual(before, false)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("lookup_lore finds the enabled entries of the reply's lorebooks, by words or by title", () => {
+    const config = testConfig()
+    const lore: ReadonlyArray<readonly [string, unknown]> = [
+      ["lookup_lore", { query: "light" }],
+      ["lookup_lore", { entry: "The harbour" }],
+      ["lookup_lore", { query: "dragons" }],
+      ["send_message", { message: "Ansel waves." }]
+    ]
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const done = ((request.body?.messages ?? []) as Array<{ role: string }>).filter(
+              (m) => m.role === "tool"
+            ).length
+            const [name, args] = lore[Math.min(done, lore.length - 1)]!
+            sse(res, call(`call_${done}`, name, args))
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }],
+        mira: {
+          character_book: loreBook(
+            [
+              loreEntry({ comment: "The lighthouse", keys: ["lighthouse"], content: "Ansel keeps the light." }, 0),
+              loreEntry({ comment: "The harbour", keys: ["harbour"], content: "Boats come in at dawn." }, 1),
+              loreEntry({ comment: "Dragons", keys: ["dragons"], content: "None here.", enabled: false }, 2)
+            ],
+            { name: "Ledger lore" }
+          ).document
+        }
+      })
+      assert.strictEqual(version.content, "Ansel waves.")
+      const steps = yield* api.GetRolloutSteps({ versionId: version.id })
+      assert.deepStrictEqual(
+        steps.map((s) => (s.kind === "tool" ? s.result : s.kind)),
+        [
+          "“The lighthouse” (Ledger lore; keys: lighthouse):\nAnsel keeps the light.",
+          "“The harbour” (Ledger lore; keys: harbour):\nBoats come in at dawn.",
+          "No lorebook entry matches “dragons”."
+        ]
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

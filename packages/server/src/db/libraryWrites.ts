@@ -1,6 +1,7 @@
 import { makeForkMergeQueries } from "./forkMerge.ts"
 import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
 import { makeForkMergeWriteHandlers } from "./forkMergeWrites.ts"
+import { makeRolloutEffectHandlers } from "./rolloutEffects.ts"
 import { withMain } from "@rp/shared/presetOrder.ts"
 import { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { getAt, parseField } from "@rp/shared/editing.ts"
@@ -301,7 +302,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly subtitle: string
       readonly doc: EncodedDoc
       readonly schemaVersion: number
-      readonly origin: "user" | "import"
+      readonly origin: "user" | "import" | "generation"
       readonly originRef: string | null
       readonly sourcePath: string | null
       readonly sourceHash: string | null
@@ -982,6 +983,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       ...handlers,
       ...makeEditorWriteHandlers(steps, bin),
       ...makeCardForkWriteHandlers(steps),
-      ...makeForkMergeWriteHandlers(steps)
+      ...makeForkMergeWriteHandlers(steps),
+      ...makeRolloutEffectHandlers(steps)
     }
   })

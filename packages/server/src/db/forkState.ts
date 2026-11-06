@@ -1,15 +1,17 @@
 // What belongs to a fork rather than to a message (spec/FORK-INDEPENDENCE-DELTA.md §2.2;
 // schema/forkOverrides.ts). A fork G sees its own overrides, its parent's with seq up to
-// when G was made, its grandparent's up to when the parent was made, and so on, as its
-// `lineage_json` lists them. The effective value of a key in G is the first lineage entry
-// with a row for it, the newest row there; without one, the base column. Reads cost the
-// lineage's length per key, never the path's or the chat's.
+// when G was made, its grandparent's up to when the parent was made, and so on: its lineage.
+// The effective value of a key in G is the nearest lineage entry with a row for it, the newest
+// row there; without one, the base column. Fork labels (db/forkLabels.ts, spec/FORK-COST.md)
+// index that as a step function, so each lookup is one index probe, whatever G's depth or the
+// chat's number of forks, and making a fork copies nothing.
 import { stateKeys } from "@rp/shared/state.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Context, Effect } from "effect"
 import type { SqlClient, Statement } from "effect/sql"
 import { forkThrough } from "./forks.ts"
+import { endSql, pointSql } from "./forkLabels.ts"
 import { type ForkRow, versionExtras, type VersionRow } from "./rows.ts"
 
 /**
@@ -18,36 +20,34 @@ import { type ForkRow, versionExtras, type VersionRow } from "./rows.ts"
  */
 const ForkView = Context.Reference<string | null>("rp/ForkView", { defaultValue: () => null })
 
-/** A fork made from one whose lineage would grow past this starts afresh with a copy of its rows. */
-export const LINEAGE_CAP = 64
-
 /** A fork: an id bound as a parameter, or an SQL expression (`sql.literal("c.current_fork_id")`). */
 export type ForkRef = string | null | Statement.Fragment
 
+/** SQL: the step of `kind` for `target` in force at fork `fork`'s point: one probe of `fork_steps`. */
+const stepSql = (kind: string, fork: string, target: string) => `(SELECT fx_s.override_id FROM fork_steps fx_s
+    WHERE fx_s.kind = '${kind}' AND fx_s.target_id = ${target} AND fx_s.label <= ${pointSql(fork)}
+    ORDER BY fx_s.label DESC LIMIT 1)`
+
 /**
  * SQL: the id of the effective override of `kind` for `target` in the fork `fork` (both SQL
- * expressions, which can't name `ef`, `el` or `eo`), or null. One lookup by index per fork in
- * the lineage, by `fork_overrides_point`: the joins are `CROSS JOIN`s to keep the lineage
- * outside, since SQLite 3.53 (Node 24.22) otherwise takes `fork_overrides_target`, which reads
- * every fork's overrides of the target.
+ * expressions, which can't name tables aliased `fx_*`), or null: one probe of `fork_steps` at
+ * the fork's point (db/forkLabels.ts). A `hide` is the slot's own or that of a published LCM
+ * range holding it (`hide_range`), each one probe; the one written nearest the fork wins (the
+ * writer with the longer base is the deeper one in the lineage), the newest of one writer's.
  */
 export const effectiveOverrideSql = (kind: string, fork: string, target: string) => {
-  const own = `SELECT eo.id, el.key AS position, eo.seq
-    FROM forks ef CROSS JOIN json_each(ef.lineage_json) el CROSS JOIN fork_overrides eo
-    WHERE ef.id = ${fork} AND eo.fork_id = el.value ->> 0 AND eo.kind = '${kind}'
-      AND eo.target_id = ${target} AND eo.seq <= coalesce(el.value ->> 1, 9223372036854775807)`
-  // Separate lookups retain the point index even with thousands of individual hides.
-  const ranges =
-    kind === "hide"
-      ? `UNION ALL
-    SELECT eo.id, el.key AS position, eo.seq
-    FROM forks ef CROSS JOIN json_each(ef.lineage_json) el CROSS JOIN fork_overrides eo
-    WHERE ef.id = ${fork} AND eo.fork_id = el.value ->> 0 AND eo.kind = 'hide_range'
-      AND eo.seq <= coalesce(el.value ->> 1, 9223372036854775807) AND EXISTS (
-        SELECT 1 FROM lcm_enable_slots es JOIN lcm_enable_runs er ON er.id = es.run_id
-        WHERE es.run_id = eo.target_id AND es.slot_id = ${target} AND es.shown = 1 AND er.published = 1)`
-      : ""
-  return `(SELECT id FROM (${own} ${ranges}) ORDER BY position, seq DESC LIMIT 1)`
+  if (kind !== "hide") return stepSql(kind, fork, target)
+  return `(SELECT id FROM (
+    SELECT fx_o.id, length(fx_ol.base) AS depth, fx_o.seq FROM fork_overrides fx_o
+      JOIN fork_labels fx_ol ON fx_ol.fork_id = fx_o.fork_id
+    WHERE fx_o.id = ${stepSql("hide", fork, target)}
+    UNION ALL
+    SELECT fx_o.id, length(fx_ol.base) AS depth, fx_o.seq
+    FROM lcm_enable_slots fx_es JOIN lcm_enable_runs fx_er ON fx_er.id = fx_es.run_id
+      CROSS JOIN fork_overrides fx_o JOIN fork_labels fx_ol ON fx_ol.fork_id = fx_o.fork_id
+    WHERE fx_es.slot_id = ${target} AND fx_es.shown = 1 AND fx_er.published = 1
+      AND fx_o.id = ${stepSql("hide_range", fork, "fx_es.run_id")}
+  ) ORDER BY depth DESC, seq DESC LIMIT 1)`
 }
 
 /**
@@ -94,7 +94,7 @@ const replacedInSql = (fork: string, version: string) =>
 
 /**
  * SQL: from slot `s`, as `ss_`, joined to the fork's selection override `so_` and its
- * replacement override `sr_` of what that selects, so each is one lookup per lineage entry.
+ * replacement override `sr_` of what that selects, each one probe (`effectiveOverrideSql`).
  */
 const selectionJoins = (fork: string, s: string) => `FROM slots ss_
   LEFT JOIN fork_overrides so_ ON so_.id = ${effectiveOverrideSql("select", fork, "ss_.id")}
@@ -326,10 +326,9 @@ export const writeSelect = (
 ) => writeOverride(sql, fork, { kind: "select", targetId: slotId, slotId, valueId: versionId, flag: null }, origin)
 
 /**
- * A new fork of `parent`, made now: its lineage is itself, then the parent up to the chat's
- * state seq now, then the parent's lineage. Entries bounded at 0 are left out (no row has seq
- * 0). Past `LINEAGE_CAP` forks, the parent's effective rows are copied into the new fork,
- * which then reads only its own: that costs the overrides, not the path.
+ * A new fork of `parent`, made now: one `forks` row, which the label trigger places in the fork
+ * tree below the parent's point (db/forkLabels.ts). It sees the parent's rows up to the chat's
+ * state seq now and nothing the parent writes later. Copies nothing, whatever the history.
  */
 export const insertFork = (
   sql: SqlClient.SqlClient,
@@ -343,57 +342,11 @@ export const insertFork = (
 ) =>
   Effect.gen(function* () {
     const id = uuidv7()
-    const [chat] = yield* sql<{ seq: number }>`SELECT state_seq AS seq FROM chats WHERE id = ${fork.chatId}`
-    const branchedAt = chat!.seq
-    const ancestors = (JSON.parse(fork.parent.lineage_json ?? "[]") as Array<[string, number]>).slice(1)
-    const inherited = [[fork.parent.id, branchedAt] as [string, number], ...ancestors].filter(([, bound]) => bound > 0)
-    const fresh = inherited.length + 1 > LINEAGE_CAP
-    const lineage = fresh ? [[id, null]] : [[id, null], ...inherited]
-    yield* sql`INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, base_slot_id, tip_slot_id, created_at, lineage_json)
-      VALUES (${id}, ${fork.chatId}, ${fork.parent.id}, ${branchedAt}, ${fork.baseSlotId}, ${fork.tipSlotId}, ${fork.at},
-        ${JSON.stringify(lineage)})`
-    if (fresh) {
-      // Keep immutable event identities: pinned assembly and suppression still name them.
-      yield* sql`INSERT INTO fork_event_snapshots(fork_id, event_id)
-        SELECT ${id}, e.id FROM state_events e WHERE e.chat_id = ${fork.chatId}
-          AND e.fork_id IS NOT NULL AND ${withFork(sql, fork.parent.id, (f) => eventVisibleSql(f, "e"))}`
-
-      const rows = yield* sql<{
-        kind: string
-        target_id: string
-        slot_id: string | null
-        slot_depth: number | null
-        value_id: string | null
-        flag: number | null
-        bin_item_id: string | null
-        changeset_id: string | null
-        summaries_done: number
-        origin: string
-      }>`
-        SELECT kind, target_id, slot_id, slot_depth, value_id, flag, bin_item_id, changeset_id, summaries_done, origin
-        FROM (
-          SELECT o.*, l.key AS lineage_order, row_number() OVER (PARTITION BY o.kind, o.target_id ORDER BY l.key, o.seq DESC) AS n
-          FROM json_each(${JSON.stringify(inherited)}) l
-            JOIN fork_overrides o ON o.fork_id = l.value ->> 0 AND o.seq <= l.value ->> 1
-        ) WHERE n = 1 ORDER BY lineage_order DESC, seq`
-      let copiedSeq = branchedAt
-      for (const row of rows)
-        yield* sql`INSERT INTO fork_overrides ${sql.insert({
-          id: uuidv7(),
-          chat_id: fork.chatId,
-          fork_id: id,
-          seq: ++copiedSeq,
-          ...row
-        })}`
-      copiedSeq++
-      yield* sql`INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision, seq)
-        SELECT h.slot_id, ${id}, h.chat_id, h.depth, sum(h.revision), ${copiedSeq}
-        FROM json_each(${JSON.stringify(inherited)}) l JOIN history_changes h
-          ON h.fork_id = l.value ->> 0 AND h.seq <= l.value ->> 1
-        WHERE h.chat_id = ${fork.chatId} GROUP BY h.slot_id`
-      yield* sql`UPDATE chats SET state_seq = ${copiedSeq} WHERE id = ${fork.chatId}`
-    }
-    const [row] = yield* sql<ForkRow>`SELECT * FROM forks WHERE id = ${id}`
+    const [row] = yield* sql<ForkRow>`
+      INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, base_slot_id, tip_slot_id, created_at)
+      SELECT ${id}, ${fork.chatId}, ${fork.parent.id}, state_seq, ${fork.baseSlotId}, ${fork.tipSlotId}, ${fork.at}
+      FROM chats WHERE id = ${fork.chatId}
+      RETURNING *`
     return row!
   })
 
@@ -428,12 +381,17 @@ export const versionAsShown = (sql: SqlClient.SqlClient, fork: string, versionId
     ([row]) => row ?? null
   )
 
-/** An event is shared legacy state, or was written within this fork's frozen lineage. */
-const eventVisibleSql = (fork: string, e: string) => `(${e}.fork_id IS NULL OR EXISTS (
-  SELECT 1 FROM forks vf CROSS JOIN json_each(vf.lineage_json) vl
-  WHERE vf.id = ${fork} AND ((${e}.fork_id = vl.value ->> 0
-    AND ${e}.fork_seq <= coalesce(vl.value ->> 1, 9223372036854775807))
-    OR EXISTS (SELECT 1 FROM fork_event_snapshots vs WHERE vs.fork_id = vl.value ->> 0 AND vs.event_id = ${e}.id))))`
+/**
+ * SQL: whether a row written in fork `writer` at `label` (SQL expressions) is in fork `fork`'s
+ * lineage: the writer is `fork` or one it was made from (directly or not) after the row was
+ * written. Two comparisons of labels (db/forkLabels.ts).
+ */
+export const labelVisibleSql = (fork: string, writer: string, label: string) =>
+  `(${label} <= ${pointSql(fork)} AND ${pointSql(fork)} < ${endSql(writer)})`
+
+/** An event is shared state, or was written within this fork's lineage. */
+const eventVisibleSql = (fork: string, e: string) =>
+  `(${e}.fork_id IS NULL OR ${labelVisibleSql(fork, `${e}.fork_id`, `${e}.fork_label`)})`
 
 /** Visibility and per-fork undo apply in every state reader. */
 export const eventAppliesSql = (fork: string, e: string) => `(${eventVisibleSql(fork, e)}

@@ -23,11 +23,15 @@ it.live(
           params: [me.id]
         },
         {
-          sql: `INSERT INTO forks (id, chat_id, parent_fork_id, created_at, pinned_at, lineage_json)
+          sql: `INSERT INTO forks (id, chat_id, parent_fork_id, created_at, pinned_at)
         WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<99)
         SELECT c.id || '-' || n.i, c.id, c.id, c.created_at+n.i,
-          CASE WHEN n.i=1 AND c.created_at%10=0 THEN 1 END,
-          json_array(json_array(c.id || '-' || n.i, NULL), json_array(c.id, 0)) FROM chats c CROSS JOIN n`
+          CASE WHEN n.i=1 AND c.created_at%10=0 THEN 1 END FROM chats c CROSS JOIN n`
+        },
+        {
+          // The browse filter counts global chat pins, independently of branch pins above.
+          sql: `INSERT INTO chat_pins (user_id, chat_id)
+        SELECT owner_user_id, id FROM chats WHERE created_at%10=0`
         },
         {
           sql: `INSERT INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, messages, leaf, end_at, cast_json, joined_json, departed_json, activity_json)
