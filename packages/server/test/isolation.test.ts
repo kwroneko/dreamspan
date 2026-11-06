@@ -4069,6 +4069,16 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  RolloutReceipt: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      yield* refused(
+        reader.RolloutReceipt({ userId: actor.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "call_1" }),
+        "NotFound"
+      )
+      assert.isNull(
+        yield* reader.RolloutReceipt({ userId: owner.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "missing" })
+      )
+    }),
   ApplyRolloutEffect: (_reader, actor, owner, writer) =>
     refused(
       writer.ApplyRolloutEffect({

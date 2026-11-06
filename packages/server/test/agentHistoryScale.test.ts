@@ -66,6 +66,8 @@ it.live("history reads stay on the selected path with 5,000 messages, 300 forks 
       cache: new Map(),
       reader: {
         ...reader,
+        // Exercise the paged fallback used by forks with inserted messages, rather than FTS.
+        SearchChat: (() => Effect.succeed(null)) as Reader["Service"]["SearchChat"],
         ReadPath: (input) => {
           windows++
           return reader.ReadPath(input)
