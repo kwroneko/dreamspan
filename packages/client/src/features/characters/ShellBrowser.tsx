@@ -7,6 +7,7 @@ import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
+import { OpenBesideButton } from "../workbench/OpenBeside.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
 import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
@@ -385,6 +386,7 @@ export function ForkRow({
   entity?: EntityId | null
 }) {
   const open = useOpenFork(fork, scopeChat, splitNavigation)
+  const besideHref = useRouter().buildLocation(forkLink(fork)).href
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
@@ -495,7 +497,10 @@ export function ForkRow({
         data-layout-overlay="Corner actions share the full-width open control in narrow chat rows"
         className="my-1 flex shrink-0 flex-col items-end justify-between self-stretch"
       >
-        <PinButton fork={fork} branch={perFork} />
+        <span className="flex items-center gap-0.5">
+          <OpenBesideButton href={besideHref} name={title} className="fork-row-beside" />
+          <PinButton fork={fork} branch={perFork} />
+        </span>
         {!perFork && <BranchesButton fork={fork} entity={entity} />}
       </div>
     </div>

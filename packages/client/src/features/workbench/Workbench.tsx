@@ -164,21 +164,24 @@ const appPath = (anchor: HTMLAnchorElement) => {
 function useLinkGestures(store: WorkbenchStore) {
   useEffect(() => {
     const click = (event: MouseEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      )
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return
+      const target = event.target instanceof Element ? event.target : null
+      // An "Open beside" button (OpenBeside.tsx), and Alt-click on a link: VS Code's Open to the Side.
+      const beside = target?.closest("[data-open-beside]")?.getAttribute("data-open-beside")
+      if (beside) {
+        event.preventDefault()
+        store.openBeside(beside)
         return
-      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null
+      }
+      const anchor = target?.closest("a[href]")
       if (!(anchor instanceof HTMLAnchorElement)) return
       const href = appPath(anchor)
       if (href === null) return
       event.preventDefault()
-      store.open(href)
+      if (event.altKey) {
+        if (matchMedia(WIDE).matches) store.openBeside(href)
+        else store.open(href)
+      } else store.open(href)
     }
     const dblclick = (event: MouseEvent) => {
       const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null
@@ -371,14 +374,41 @@ function SplitView({
   )
 }
 
+/** Where over a frame a dragged tab drops: into it, or into a new frame on that side. */
+type DropZone = "center" | "left" | "right" | "top" | "bottom"
+
+/** VS Code's: the outer quarter on each side splits there; nearest edge first in a corner. */
+const dropZone = (element: HTMLElement, event: DragEvent): DropZone => {
+  const box = element.getBoundingClientRect()
+  const x = (event.clientX - box.left) / box.width
+  const y = (event.clientY - box.top) / box.height
+  const edges: Array<[DropZone, number]> = [
+    ["left", x],
+    ["right", 1 - x],
+    ["top", y],
+    ["bottom", 1 - y]
+  ]
+  const [zone, distance] = edges.reduce((a, b) => (b[1] < a[1] ? b : a))
+  return distance < 0.25 ? zone : "center"
+}
+
+/** The part of the frame the tab will take, shaded while it's dragged over. */
+const ZONE_OVERLAY: Record<DropZone, string> = {
+  center: "inset-0",
+  left: "inset-y-0 left-0 w-1/2",
+  right: "inset-y-0 right-0 w-1/2",
+  top: "inset-x-0 top-0 h-1/2",
+  bottom: "inset-x-0 bottom-0 h-1/2"
+}
+
 /** Native listeners: a tab's content is a portal, so React's events don't pass the frame. */
 function useFrameEvents(
   element: HTMLElement | null,
   frameId: string,
   store: WorkbenchStore,
-  onDrop: (tabId: string) => void
+  onDrop: (tabId: string, zone: DropZone) => void
 ) {
-  const [over, setOver] = useState(false)
+  const [over, setOver] = useState<DropZone | null>(null)
   useEffect(() => {
     if (!element) return
     const focus = () => store.focusFrame(frameId)
@@ -387,17 +417,17 @@ function useFrameEvents(
       if (!isTab(event)) return
       event.preventDefault()
       if (event.dataTransfer) event.dataTransfer.dropEffect = "move"
-      setOver(true)
+      setOver(dropZone(element, event))
     }
     const dragleave = (event: DragEvent) => {
-      if (!element.contains(event.relatedTarget as globalThis.Node | null)) setOver(false)
+      if (!element.contains(event.relatedTarget as globalThis.Node | null)) setOver(null)
     }
     const drop = (event: DragEvent) => {
       if (!isTab(event)) return
       event.preventDefault()
-      setOver(false)
+      setOver(null)
       const tabId = event.dataTransfer?.getData(TAB_MIME)
-      if (tabId) onDrop(tabId)
+      if (tabId) onDrop(tabId, dropZone(element, event))
     }
     element.addEventListener("pointerdown", focus, true)
     element.addEventListener("focusin", focus)
@@ -430,7 +460,16 @@ function FrameView({
   const focused = layout.focused === frame.id
   const [body, setBody] = useState<HTMLDivElement | null>(null)
   useSlot(slotRef, frame.id, body)
-  const over = useFrameEvents(body, frame.id, store, (tabId) => store.move(tabId, frame.id))
+  const over = useFrameEvents(body, frame.id, store, (tabId, zone) => {
+    if (zone === "center") store.move(tabId, frame.id)
+    else
+      store.moveToSplit(
+        tabId,
+        zone === "left" || zone === "right" ? "row" : "column",
+        frame.id,
+        zone === "left" || zone === "top"
+      )
+  })
   const strip = frame.tabs.length >= 2 || split
   return (
     <section
@@ -445,8 +484,9 @@ function FrameView({
         {over && (
           <div
             aria-hidden="true"
-            data-layout-overlay="Drop target covers the frame while a tab is dragged"
-            className="pointer-events-none absolute inset-0 z-40 border-2 border-accent bg-accent/10"
+            data-drop-zone={over}
+            data-layout-overlay="Drop target covers the part of the frame a dragged tab will take"
+            className={`pointer-events-none absolute z-40 border-2 border-accent bg-accent/10 ${ZONE_OVERLAY[over]}`}
           />
         )}
       </div>
@@ -787,13 +827,13 @@ export function SplitButtons(): ReactNode {
       <span className="contents @max-[40rem]/header:hidden">
         <IconButton
           label="Split right"
-          hint="Splits the view along a vertical line: a new frame opens on the right."
+          hint="Shows this in a second frame on the right too, to open something beside it."
           icon="split-right"
           onClick={() => split("row")}
         />
         <IconButton
           label="Split down"
-          hint="Splits the view along a horizontal line: a new frame opens below."
+          hint="Shows this in a second frame below too, to open something beside it."
           icon="split-down"
           onClick={() => split("column")}
         />
@@ -812,10 +852,18 @@ export function SplitButtons(): ReactNode {
             </button>
           }
         >
-          <MenuItem icon="split-right" description="A new frame opens on the right." onClick={() => split("row")}>
+          <MenuItem
+            icon="split-right"
+            description="Shows this in a second frame on the right too."
+            onClick={() => split("row")}
+          >
             Split right
           </MenuItem>
-          <MenuItem icon="split-down" description="A new frame opens below." onClick={() => split("column")}>
+          <MenuItem
+            icon="split-down"
+            description="Shows this in a second frame below too."
+            onClick={() => split("column")}
+          >
             Split down
           </MenuItem>
         </Menu>
