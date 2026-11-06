@@ -96,8 +96,6 @@ export interface ForkRow {
   readonly last_chatted_at: number | null
   readonly deleted_at: number | null
   readonly row_version: number
-  /** `[[fork, bound], …]`, itself first (forkState.ts). */
-  readonly lineage_json: string | null
 }
 
 /** A fork with its tip's text (`tip_excerpt`) and whether it's its chat's current one. */

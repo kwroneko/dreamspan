@@ -16,8 +16,10 @@ import {
   effectiveOverride,
   slotDeletedIn,
   versionDeletedIn,
-  eventApplies
+  eventApplies,
+  withFork
 } from "./forkState.ts"
+import { lineageCte } from "./forkLabels.ts"
 import { pathEvents, pathSegments } from "./pathSegments.ts"
 import { forkImportSlot } from "./stImportFork.ts"
 import { placedInsertions } from "./displayPath.ts"
@@ -564,11 +566,10 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
               if (inserted.some((x) => x.anchorId === null) || row!.n > 0) return true
             }
             const [row] = yield* sql<{ changed: number }>`
-              ${pathSegments(sql, chatId, prior, null)}, changed(slot_id) AS (
-                SELECT o.slot_id FROM forks f CROSS JOIN json_each(f.lineage_json) l
-                JOIN fork_overrides o ON o.fork_id = l.value ->> 0
-                  AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807)
-                WHERE f.id = ${fileFork.id} AND o.origin = 'user' AND o.slot_depth >= ${depth}
+              ${pathSegments(sql, chatId, prior, null)}, ${withFork(sql, fileFork.id, (f) => lineageCte("lineage", f))}, changed(slot_id) AS (
+                SELECT o.slot_id FROM lineage l CROSS JOIN fork_overrides o
+                  ON o.fork_id = l.fork_id AND o.seq <= l.bound
+                WHERE o.origin = 'user' AND o.slot_depth >= ${depth}
                 UNION ALL
                 SELECT v.slot_id FROM version_history h JOIN versions v ON v.id = h.version_id
                   JOIN slots s ON s.id = v.slot_id

@@ -8,20 +8,21 @@
 // - a slot's shown fields (`slots` columns, its versions): the forks whose tip is it or below it.
 //   A new slot reaches none (no fork's path holds it until a fork's tip moves, below);
 //   Every retained version contributes participation, even an unselected alternative.
-// - a fork's row (tip, lineage, deletion): that fork. Where a fork splits off reads its
+// - a fork's row (tip, deletion): that fork. Where a fork splits off reads its
 //   parent's path too: a fork's tip moving reaches its children whose tips are below a slot
 //   one of its paths holds and the other doesn't (the slots between the two tips and their
 //   common ancestor); its deletion, restore or removal, or a tip from or to none, all its children.
 // - an override or a state event a fork wrote, at its sequence number: the forks whose lineage
-//   holds that fork up to at least that number. A snapshot of a fork: every fork whose
-//   lineage holds it. Insert placement overrides follow this rule too: a new fork's
-//   exclusion after its base and compaction's copies change no existing fork's display.
+//   holds that fork up to at least that number, the forks whose points lie from the writer's
+//   point at that number to its end (db/forkLabels.ts). Insert placement overrides follow this
+//   rule too: a new fork's exclusion after its base changes no existing fork's display.
 // - anything else (a moved slot, an insertion, a chat-wide event, an event changed in place):
 //   every fork of the chat, as before.
 // A summary that wasn't valid when the write began stays stale. Only the writer writes; a
 // write on another connection notes nothing, so summaries from before it never match again.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
+import { pointAtSql } from "./forkLabels.ts"
 
 const SELF = "self"
 const FORK = "fork"
@@ -44,7 +45,6 @@ const overrideTouch = (row: string) =>
   touch(FORK, `${row}.chat_id`, `${row}.fork_id`, `${row}.seq`, `${row}.kind IN ${READ_OVERRIDES}`)
 
 const slotChat = (slot: string) => `(SELECT chat_id FROM slots WHERE id = ${slot})`
-const forkChat = (fork: string) => `(SELECT chat_id FROM forks WHERE id = ${fork})`
 
 const statements: ReadonlyArray<string> = [
   `CREATE TEMP TABLE IF NOT EXISTS shell_moved (chat_id TEXT PRIMARY KEY, stamp INTEGER NOT NULL)`,
@@ -90,7 +90,7 @@ const statements: ReadonlyArray<string> = [
     ]
   }),
   // A new event is visible where its fork's lineage reaches its number; one changed or
-  // removed in place may be in other forks' snapshots too.
+  // removed in place, anywhere in the chat.
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_event_insert AFTER INSERT ON main.state_events BEGIN
     ${touch(CHAT, "NEW.chat_id", "NULL", "NULL", "NEW.fork_id IS NULL OR NEW.fork_seq IS NULL")}
     ${touch(FORK, "NEW.chat_id", "NEW.fork_id", "NEW.fork_seq", "NEW.fork_id IS NOT NULL AND NEW.fork_seq IS NOT NULL")} END`,
@@ -102,7 +102,7 @@ const statements: ReadonlyArray<string> = [
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_fork_insert AFTER INSERT ON main.forks
     BEGIN ${touch(SELF, "NEW.chat_id", "NEW.id")} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_fork_update AFTER UPDATE OF chat_id, parent_fork_id, tip_slot_id,
-    deleted_at, purged_at, lineage_json ON main.forks
+    deleted_at, purged_at ON main.forks
     BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(SELF, "NEW.chat_id", "NEW.id")}
     INSERT INTO shell_touches (kind, chat_id, ref, from_slot, to_slot) SELECT '${TIP}', NEW.chat_id, NEW.id,
       OLD.tip_slot_id, NEW.tip_slot_id WHERE OLD.tip_slot_id IS NOT NEW.tip_slot_id
@@ -117,11 +117,7 @@ const statements: ReadonlyArray<string> = [
       OR OLD.purged_at IS NOT NEW.purged_at OR ((OLD.tip_slot_id IS NULL) <> (NEW.tip_slot_id IS NULL))`
     )} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_fork_delete AFTER DELETE ON main.forks
-    BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(KIN, "OLD.chat_id", "OLD.id")} END`,
-  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_snapshot_insert AFTER INSERT ON main.fork_event_snapshots
-    BEGIN ${touch(FORK, forkChat("NEW.fork_id"), "NEW.fork_id")} END`,
-  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_snapshot_delete AFTER DELETE ON main.fork_event_snapshots
-    BEGIN ${touch(FORK, forkChat("OLD.fork_id"), "OLD.fork_id")} END`
+    BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(KIN, "OLD.chat_id", "OLD.id")} END`
 ]
 
 /** Whether this thread's connection notes touches: only the writer's does. */
@@ -169,8 +165,8 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
           UNION ALL SELECT g.fork_id, g.chat_id, p.chain_id, h.depth, p.depth FROM segments g
             JOIN slots head ON head.id = g.chain_id JOIN slots p ON p.id = head.parent_slot_id
             JOIN slots h ON h.id = p.chain_id WHERE p.depth < g.lo AND h.depth <= p.depth),
-        -- Each fork written once, from its lowest number (null: every lineage entry holding it),
-        -- so the chat's lineages are read once per fork, not once per row it wrote.
+        -- Each fork written once, from its lowest number (null: every fork whose lineage holds
+        -- it), so the forks it reaches are found once per fork, not once per row it wrote.
         written(chat_id, ref, seq) AS (
           SELECT t.chat_id, t.ref, CASE WHEN count(t.seq) = count(*) THEN min(t.seq) END
           FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id WHERE t.kind = ${FORK} GROUP BY t.chat_id, t.ref),
@@ -200,10 +196,11 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
           UNION ALL SELECT f.id FROM shifted h JOIN forks f ON f.parent_fork_id = h.fork AND f.tip_slot_id = h.id
           UNION ALL SELECT g.fork_id FROM segments g JOIN touched t ON t.chat_id = g.chat_id
             AND t.chain_id = g.chain_id AND t.depth BETWEEN g.lo AND g.hi
-          -- instr first: only the lineages naming the fork are parsed.
-          UNION ALL SELECT f.id FROM written w JOIN forks f ON f.chat_id = w.chat_id AND instr(f.lineage_json, w.ref) > 0
-            CROSS JOIN json_each(f.lineage_json) l
-            WHERE l.value ->> 0 = w.ref AND (w.seq IS NULL OR l.value ->> 1 IS NULL OR l.value ->> 1 >= w.seq))
+          -- The writer's range from its point at that number: one range of fork_labels_point.
+          UNION ALL SELECT x.fork_id FROM written w JOIN fork_labels wl ON wl.fork_id = w.ref
+            JOIN fork_labels x ON x.chat_id = w.chat_id
+              AND x.point >= CASE WHEN w.seq IS NULL THEN wl.base ELSE ${sql.literal(pointAtSql("w.ref", "w.seq"))} END
+              AND x.point < wl.label_end)
         UPDATE fork_summaries SET stamp = (SELECT c.shell_stamp FROM chats c WHERE c.id = fork_summaries.chat_id)
         WHERE fork_id IN (
           SELECT s.fork_id FROM kept k JOIN fork_summaries s ON s.chat_id = k.chat_id AND s.stamp = k.stamp

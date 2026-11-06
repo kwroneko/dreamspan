@@ -11,12 +11,14 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
-import { LINEAGE_CAP } from "../src/db/forkState.ts"
 import { historyRevision } from "../src/db/historyChanges.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { cardDoc } from "./support/docs.ts"
 import { testWorkers } from "./support/bundles.ts"
+
+/** A chain of forks deeper than tests otherwise make: fork labels have no cap. */
+const DEEP = 70
 
 const NOW = Date.UTC(2026, 0, 1)
 
@@ -494,7 +496,7 @@ describe("fork deletion review regressions", () => {
       yield* writer.SetSlotHidden({ userId, slotId: h1.slotId, forkId: main, hidden: true })
       assert.strictEqual(yield* revision(), before)
       let descendant = child
-      for (let i = 0; i < LINEAGE_CAP; i++)
+      for (let i = 0; i < DEEP; i++)
         descendant = (yield* writer.CreateFork({ userId, chatId, fromForkId: descendant, atSlotId: h2.slotId })).fork.id
       const inheritedRevision = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -555,9 +557,9 @@ describe("fork deletion review regressions", () => {
       yield* writer.SetSlotHidden({ userId, slotId: h1.slotId, forkId: main, hidden: true })
       assert.isFalse(yield* hidden(child))
       assert.isTrue(yield* hidden(main))
-      // Compaction must preserve both the range and the relative precedence of later hides.
+      // A deep chain keeps both the range and the relative precedence of later hides.
       let descendant = child
-      for (let i = 0; i < LINEAGE_CAP; i++) {
+      for (let i = 0; i < DEEP; i++) {
         yield* writer.SetSlotHidden({ userId, slotId: h2.slotId, forkId: descendant, hidden: i % 2 === 0 })
         descendant = (yield* writer.CreateFork({ userId, chatId, fromForkId: descendant, atSlotId: h2.slotId })).fork.id
       }

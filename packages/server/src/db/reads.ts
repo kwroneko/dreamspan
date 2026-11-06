@@ -134,8 +134,8 @@ const viewJoin = (sql: SqlClient.SqlClient, fork: string | null) => sql`
 /**
  * The window of at most `limit` slots ending at `leaf`, root first, deleted ones included,
  * as fork `fork` shows them (null: as inserted): a range of depths from each chain segment
- * it overlaps, the segments driving the join. Each slot's selection costs one lookup per
- * fork in the fork's lineage, whatever the chat's length or number of forks.
+ * it overlaps, the segments driving the join. Each slot's selection costs one index probe,
+ * whatever the chat's length, the fork's depth or the number of forks.
  */
 export const pathWindow = (
   sql: SqlClient.SqlClient,

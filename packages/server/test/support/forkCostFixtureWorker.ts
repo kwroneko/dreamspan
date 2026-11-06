@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { parentPort, workerData } from "node:worker_threads"
 import { writeStBranchFamily } from "./stFolder.ts"
+import { rebuildForkLabels } from "../../src/db/forkLabels.ts"
 
 const { dbPath, root, chatId, messages, branches, note, revision } = workerData as {
   dbPath: string
@@ -18,7 +19,9 @@ const { dbPath, root, chatId, messages, branches, note, revision } = workerData 
 const fixture = writeStBranchFamily(root, { branches: branches - 1, messages, swipeShare: 0.8, bodyRepeats: 1 })
 const db = new DatabaseSync(dbPath)
 db.exec(
-  "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=30000; PRAGMA cache_size=-524288; PRAGMA temp_store=MEMORY; BEGIN IMMEDIATE"
+  "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=30000; PRAGMA cache_size=-524288; PRAGMA temp_store=MEMORY; BEGIN IMMEDIATE;" +
+    // Labels and steps are computed once at the end (rebuildForkLabels), not row by row.
+    " INSERT INTO fork_label_pause VALUES (1)"
 )
 try {
   const lane = (db.prepare("SELECT id FROM lanes WHERE chat_id=?").get(chatId) as { id: string }).id
@@ -28,9 +31,8 @@ try {
   const slot =
     db.prepare(`INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,fork_id,inserted,created_at)
     VALUES(?,?,?,?,?,?,?,?,1)`)
-  const fork =
-    db.prepare(`INSERT INTO forks(id,chat_id,parent_fork_id,base_slot_id,tip_slot_id,branched_at,lineage_json,created_at)
-    VALUES(?,?,?,?,?,?,?,1)`)
+  const fork = db.prepare(`INSERT INTO forks(id,chat_id,parent_fork_id,base_slot_id,tip_slot_id,branched_at,created_at)
+    VALUES(?,?,?,?,?,?,1)`)
   const override =
     db.prepare(`INSERT INTO fork_overrides(id,chat_id,fork_id,seq,kind,target_id,slot_id,slot_depth,value_id,flag)
     VALUES(?,?,?,?,?,?,?,?,?,?)`)
@@ -38,7 +40,6 @@ try {
     db.prepare(`INSERT INTO state_events(id,chat_id,slot_id,seq,key,value_json,origin,fork_id,fork_seq,created_at)
     VALUES(?,?,?,?,?,?,'user',?,?,1)`)
   const paths: Array<Array<{ id: string; selected: string; versions: number }>> = []
-  const lineages: Array<Array<[string, number | null]>> = []
   let seq = 10
   let versions = 0
   let overrides = 0
@@ -56,12 +57,9 @@ try {
   ) => override.run(`${chatId}-o${++overrides}`, chatId, f, ++seq, kind, target, s, depth, value, flag)
   for (const [b, file] of fixture.files.entries()) {
     const f = forkId(b)
-    const inherited = b === 0 ? [] : lineages[file.parent]!.map(([id, bound]) => [id, bound ?? seq] as [string, number])
-    const lineage: Array<[string, number | null]> = [[f, null], ...inherited]
-    lineages.push(lineage)
     const path = b === 0 ? [] : paths[file.parent]!.slice(0, file.prefix)
     const base = path.at(-1)?.id ?? null
-    if (b > 0) fork.run(f, chatId, forkId(file.parent), base, base, seq, JSON.stringify(lineage))
+    if (b > 0) fork.run(f, chatId, forkId(file.parent), base, base, seq)
     const lines = readFileSync(join(root, file.path), "utf8").split("\n")
     for (let depth = file.prefix; depth < messages; depth++) {
       const row = JSON.parse(lines[depth + 1]!) as { mes: string; is_user: boolean; swipes?: Array<string> }
@@ -161,6 +159,8 @@ try {
     db.prepare("UPDATE summaries SET sealed=1 WHERE id=?").run(id)
   }
   db.prepare("UPDATE chats SET current_fork_id=?,state_seq=? WHERE id=?").run(chatId, seq, chatId)
+  db.exec("DELETE FROM fork_label_pause")
+  console.log("FORKCOST_LABELS", JSON.stringify(rebuildForkLabels(db, chatId)))
   db.exec("COMMIT; PRAGMA wal_checkpoint(TRUNCATE)")
   const result = {
     slots: fixture.uniqueMessages + branches * 8,

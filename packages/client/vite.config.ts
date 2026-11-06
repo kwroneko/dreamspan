@@ -35,6 +35,16 @@ export default defineConfig({
     proxy: {
       "/rpc": { target: server.replace(/^http/, "ws"), ws: true },
       "/auth": { target: server },
+      "/library": {
+        target: server,
+        bypass(req) {
+          // Editor URLs share this prefix with media and upload APIs.
+          // Let Vite's SPA fallback serve browser navigations, including refreshes.
+          if ((req.method === "GET" || req.method === "HEAD") && req.headers.accept?.includes("text/html")) {
+            return req.url
+          }
+        }
+      },
       "/healthz": { target: server }
     }
   }

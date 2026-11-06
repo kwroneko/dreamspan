@@ -11,6 +11,8 @@
 import type { SqlClient } from "effect/sql"
 import { Effect } from "effect"
 import { pathSegments } from "./pathSegments.ts"
+import { lineageCte } from "./forkLabels.ts"
+import { withFork } from "./forkState.ts"
 
 /** Depths `lo` to `hi` of a chain, at positions `start` onwards. */
 interface RunPiece {
@@ -61,9 +63,9 @@ export const displayLength = (pieces: ReadonlyArray<PathPiece>) => {
 
 /**
  * The inserted slots fork `forkId` places: its effective `insert` rows with flag 1, the
- * first lineage entry with a row for the slot, newest there. One range scan of
- * `fork_overrides_point` on `(fork_id, kind)` per lineage entry, so it costs the fork's
- * insertions, not the chat's length.
+ * nearest lineage entry with a row for the slot, newest there. The lineage is walked by
+ * parent (`lineageCte`) with one range scan of `fork_overrides_point` on `(fork_id, kind)` per
+ * entry, so it costs the fork's depth and insertions, not the chat's length.
  */
 export const placedInsertions = (sql: SqlClient.SqlClient, chatId: string, forkId: string) =>
   Effect.map(placedInsertionsSql(sql, chatId, forkId), (rows) =>
@@ -87,13 +89,13 @@ export const placedInsertionsSql = (sql: SqlClient.SqlClient, chatId: string, fo
     anchor_chain_id: string | null
     anchor_depth: number | null
   }>`
+    WITH RECURSIVE ${withFork(sql, forkId, (f) => lineageCte("lineage", f))}
     SELECT x.id, x.chain_id, x.depth, x.parent_slot_id AS anchor_id, a.chain_id AS anchor_chain_id,
       a.depth AS anchor_depth
     FROM (
-      SELECT o.target_id, o.flag, row_number() OVER (PARTITION BY o.target_id ORDER BY l.key, o.seq DESC) AS n
-      FROM forks f CROSS JOIN json_each(f.lineage_json) l CROSS JOIN fork_overrides o
-      WHERE f.id = ${forkId} AND f.chat_id = ${chatId} AND o.fork_id = l.value ->> 0 AND o.kind = 'insert'
-        AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807)
+      SELECT o.target_id, o.flag, row_number() OVER (PARTITION BY o.target_id ORDER BY l.n, o.seq DESC) AS n
+      FROM lineage l CROSS JOIN fork_overrides o
+      WHERE o.fork_id = l.fork_id AND o.kind = 'insert' AND o.seq <= l.bound
     ) e CROSS JOIN slots x ON x.id = e.target_id LEFT JOIN slots a ON a.id = x.parent_slot_id
     WHERE e.n = 1 AND e.flag = 1 AND x.chat_id = ${chatId}`
 
@@ -184,7 +186,7 @@ const segmentsTo = (sql: SqlClient.SqlClient, chatId: string, slotId: string | n
  * Fork `forkId`'s placed insertions and its display path to its tip, or null when it places
  * none (or there's no such fork): the display path is then the structural one, and callers keep
  * the structural code that predates insertions. One probe of `fork_overrides_point` per lineage
- * entry when it's null.
+ * entry (`placedInsertions`) when it's null.
  */
 const forkDisplay = (sql: SqlClient.SqlClient, chatId: string, forkId: string | null) =>
   Effect.gen(function* () {

@@ -248,9 +248,9 @@
     },
     {
       "type": "index",
-      "name": "fork_event_snapshots_event",
-      "tbl_name": "fork_event_snapshots",
-      "sql": "CREATE INDEX fork_event_snapshots_event ON fork_event_snapshots(event_id)"
+      "name": "fork_labels_point",
+      "tbl_name": "fork_labels",
+      "sql": "CREATE INDEX fork_labels_point ON fork_labels(chat_id, point)"
     },
     {
       "type": "index",
@@ -1052,15 +1052,27 @@
     },
     {
       "type": "table",
-      "name": "fork_event_snapshots",
-      "tbl_name": "fork_event_snapshots",
-      "sql": "CREATE TABLE fork_event_snapshots ( fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, event_id TEXT NOT NULL REFERENCES state_events(id) ON DELETE CASCADE, PRIMARY KEY (fork_id, event_id) ) STRICT, WITHOUT ROWID"
+      "name": "fork_label_pause",
+      "tbl_name": "fork_label_pause",
+      "sql": "CREATE TABLE fork_label_pause (paused INTEGER NOT NULL) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "fork_labels",
+      "tbl_name": "fork_labels",
+      "sql": "CREATE TABLE fork_labels ( fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, base BLOB NOT NULL, -- How many forks were made from it so far. epoch INTEGER NOT NULL CHECK (epoch >= 0), -- base·enc(epoch): where its own rows are written and its lookups are made. point BLOB NOT NULL, -- base·ff: everything from base·enc(0) up to here is it and the forks made from it. label_end BLOB NOT NULL ) STRICT"
     },
     {
       "type": "table",
       "name": "fork_overrides",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event', 'insert', 'image_exclude')), -- image_exclude: the message's own version and an image of it, \"<version id>:<media id>\". target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "fork_steps",
+      "tbl_name": "fork_steps",
+      "sql": "CREATE TABLE fork_steps ( kind TEXT NOT NULL, target_id TEXT NOT NULL, label BLOB NOT NULL, -- The effective override of (kind, target) from this label on; null: none, the base column. override_id TEXT, PRIMARY KEY (kind, target_id, label) ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "table",
@@ -1072,13 +1084,13 @@
       "type": "table",
       "name": "forks",
       "tbl_name": "forks",
-      "sql": "CREATE TABLE forks ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The fork it was made from (lineage); null for a chat's first. parent_fork_id TEXT REFERENCES forks(id) DEFERRABLE INITIALLY DEFERRED, -- The chat's state_seq when it was made. branched_at INTEGER NOT NULL DEFAULT 0, -- The message it was made at: its history is root to base, then what it appends. base_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, -- Its path ends here; null before the first message. tip_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, name TEXT, name_user INTEGER NOT NULL DEFAULT 0 CHECK (name_user IN (0, 1)), pinned_at INTEGER, created_at INTEGER NOT NULL, last_chatted_at INTEGER, deleted_at INTEGER, bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, purged_at INTEGER, row_version INTEGER NOT NULL DEFAULT 1 , lineage_json TEXT CHECK (lineage_json IS NULL OR json_valid(lineage_json))) STRICT"
+      "sql": "CREATE TABLE forks ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The fork it was made from; null for a chat's first. Its place in the fork tree is in fork_labels. parent_fork_id TEXT REFERENCES forks(id) DEFERRABLE INITIALLY DEFERRED, -- The chat's state_seq when it was made. branched_at INTEGER NOT NULL DEFAULT 0, -- The message it was made at: its history is root to base, then what it appends. base_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, -- Its path ends here; null before the first message. tip_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, name TEXT, name_user INTEGER NOT NULL DEFAULT 0 CHECK (name_user IN (0, 1)), pinned_at INTEGER, created_at INTEGER NOT NULL, last_chatted_at INTEGER, deleted_at INTEGER, bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, purged_at INTEGER, row_version INTEGER NOT NULL DEFAULT 1 ) STRICT"
     },
     {
       "type": "table",
       "name": "history_changes",
       "tbl_name": "history_changes",
-      "sql": "CREATE TABLE history_changes ( slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- The fork the reduction was made in; '' for every fork (a message nobody shows). fork_id TEXT NOT NULL DEFAULT '', chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, depth INTEGER NOT NULL, revision INTEGER NOT NULL, -- The chat's state_seq of this reduction, retained for descendant lineage bounds. seq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (slot_id, fork_id, seq) ) STRICT"
+      "sql": "CREATE TABLE history_changes ( slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- The fork the reduction was made in; '' for every fork (a message nobody shows). fork_id TEXT NOT NULL DEFAULT '', chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, depth INTEGER NOT NULL, revision INTEGER NOT NULL, -- The chat's state_seq of this reduction. seq INTEGER NOT NULL DEFAULT 0, -- Its fork's point when written (db/forkLabels.ts); null for every fork. label BLOB, PRIMARY KEY (slot_id, fork_id, seq) ) STRICT"
     },
     {
       "type": "table",
@@ -1240,7 +1252,7 @@
       "type": "table",
       "name": "state_events",
       "tbl_name": "state_events",
-      "sql": "CREATE TABLE state_events ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, slot_id TEXT REFERENCES slots(id) ON DELETE CASCADE, version_id TEXT REFERENCES versions(id) ON DELETE CASCADE, seq INTEGER NOT NULL, key TEXT NOT NULL, scope TEXT, value_json TEXT NOT NULL CHECK (json_valid(value_json)), origin TEXT NOT NULL CHECK (origin IN ('user', 'rollout', 'changeset', 'import')), origin_ref TEXT, created_at INTEGER NOT NULL, superseded_by_changeset TEXT REFERENCES changesets(id), slot_chain_id TEXT, slot_depth INTEGER, fork_id TEXT REFERENCES forks(id), fork_seq INTEGER, CHECK ((fork_id IS NULL AND fork_seq IS NULL) OR (fork_id IS NOT NULL AND fork_seq IS NOT NULL AND fork_seq > 0)), CHECK (key <> 'card.swap' OR (slot_id IS NULL AND version_id IS NULL AND scope IS NULL AND fork_id IS NOT NULL)), CHECK (version_id IS NULL OR slot_id IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE state_events ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, slot_id TEXT REFERENCES slots(id) ON DELETE CASCADE, version_id TEXT REFERENCES versions(id) ON DELETE CASCADE, seq INTEGER NOT NULL, key TEXT NOT NULL, scope TEXT, value_json TEXT NOT NULL CHECK (json_valid(value_json)), origin TEXT NOT NULL CHECK (origin IN ('user', 'rollout', 'changeset', 'import')), origin_ref TEXT, created_at INTEGER NOT NULL, superseded_by_changeset TEXT REFERENCES changesets(id), slot_chain_id TEXT, slot_depth INTEGER, fork_id TEXT REFERENCES forks(id), fork_seq INTEGER, -- Its fork's point when written (db/forkLabels.ts): visible where label <= point < the fork's end. fork_label BLOB, CHECK ((fork_id IS NULL AND fork_seq IS NULL) OR (fork_id IS NOT NULL AND fork_seq IS NOT NULL AND fork_seq > 0)), CHECK (key <> 'card.swap' OR (slot_id IS NULL AND version_id IS NULL AND scope IS NULL AND fork_id IS NOT NULL)), CHECK (version_id IS NULL OR slot_id IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1724,15 +1736,15 @@
     },
     {
       "type": "trigger",
-      "name": "fork_event_snapshots_immutable",
-      "tbl_name": "fork_event_snapshots",
-      "sql": "CREATE TRIGGER fork_event_snapshots_immutable BEFORE UPDATE ON fork_event_snapshots BEGIN SELECT RAISE(ABORT, 'a fork event snapshot is immutable'); END"
+      "name": "fork_labels_fixed",
+      "tbl_name": "fork_labels",
+      "sql": "CREATE TRIGGER fork_labels_fixed BEFORE UPDATE OF fork_id, chat_id, base, label_end ON fork_labels BEGIN SELECT RAISE(ABORT, 'a fork keeps its place in the fork tree'); END"
     },
     {
       "type": "trigger",
-      "name": "fork_event_snapshots_same_chat",
-      "tbl_name": "fork_event_snapshots",
-      "sql": "CREATE TRIGGER fork_event_snapshots_same_chat BEFORE INSERT ON fork_event_snapshots WHEN (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT (SELECT chat_id FROM state_events WHERE id = NEW.event_id) BEGIN SELECT RAISE(ABORT, 'a snapshot event belongs to its fork chat'); END"
+      "name": "fork_labels_made",
+      "tbl_name": "forks",
+      "sql": "CREATE TRIGGER fork_labels_made AFTER INSERT ON forks WHEN NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN INSERT INTO fork_labels (fork_id, chat_id, base, epoch, point, label_end) SELECT NEW.id, NEW.chat_id, b, 0, unhex(hex(b) || (CASE WHEN 0 < 224 THEN printf('%02X', 0 + 1) ELSE 'F0' || printf('%04X', 0 - 224) END)), unhex(hex(b) || 'FF') FROM (SELECT coalesce((SELECT point FROM fork_labels WHERE fork_id = NEW.parent_fork_id), x'') AS b); UPDATE fork_labels SET epoch = epoch + 1, point = unhex(hex(base) || (CASE WHEN epoch + 1 < 224 THEN printf('%02X', epoch + 1 + 1) ELSE 'F0' || printf('%04X', epoch + 1 - 224) END)) WHERE fork_id = NEW.parent_fork_id; END"
     },
     {
       "type": "trigger",
@@ -1757,6 +1769,12 @@
       "name": "fork_overrides_flag_set",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TRIGGER fork_overrides_flag_set BEFORE UPDATE OF flag ON fork_overrides WHEN NEW.kind IN ('star', 'picker_hide') AND NEW.flag IS NULL BEGIN SELECT RAISE(ABORT, 'a flag is set on one of its message''s own versions'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_go_with_chat",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_go_with_chat BEFORE DELETE ON fork_overrides WHEN EXISTS (SELECT 1 FROM chats WHERE id = OLD.chat_id) BEGIN SELECT RAISE(ABORT, 'an override goes only with its chat'); END"
     },
     {
       "type": "trigger",
@@ -1838,6 +1856,18 @@
     },
     {
       "type": "trigger",
+      "name": "fork_overrides_steps",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_steps AFTER INSERT ON fork_overrides WHEN NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN INSERT OR IGNORE INTO fork_steps (kind, target_id, label, override_id) SELECT NEW.kind, NEW.target_id, l.label_end, (SELECT p.override_id FROM fork_steps p WHERE p.kind = NEW.kind AND p.target_id = NEW.target_id AND p.label <= l.label_end ORDER BY p.label DESC LIMIT 1) FROM fork_labels l WHERE l.fork_id = NEW.fork_id; INSERT OR REPLACE INTO fork_steps (kind, target_id, label, override_id) SELECT NEW.kind, NEW.target_id, l.point, NEW.id FROM fork_labels l WHERE l.fork_id = NEW.fork_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_steps_gone",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_steps_gone AFTER DELETE ON fork_overrides BEGIN DELETE FROM fork_steps WHERE kind = OLD.kind AND target_id = OLD.target_id; END"
+    },
+    {
+      "type": "trigger",
       "name": "fork_overrides_summary_choice",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TRIGGER fork_overrides_summary_choice BEFORE INSERT ON fork_overrides WHEN NEW.kind IN ('summary_choice','summary_superseded') AND NOT EXISTS ( SELECT 1 FROM summaries s WHERE s.id=NEW.value_id AND s.chat_id=NEW.chat_id) BEGIN SELECT RAISE(ABORT, 'a summary choice stays in its chat'); END"
@@ -1886,27 +1916,15 @@
     },
     {
       "type": "trigger",
-      "name": "forks_lineage_fixed",
-      "tbl_name": "forks",
-      "sql": "CREATE TRIGGER forks_lineage_fixed BEFORE UPDATE OF lineage_json ON forks WHEN OLD.lineage_json IS NOT NULL AND NEW.lineage_json IS NOT OLD.lineage_json BEGIN SELECT RAISE(ABORT, 'a fork keeps its lineage'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "forks_lineage_given",
-      "tbl_name": "forks",
-      "sql": "CREATE TRIGGER forks_lineage_given BEFORE INSERT ON forks WHEN (NEW.lineage_json IS NULL AND NEW.parent_fork_id IS NOT NULL) OR (NEW.lineage_json IS NOT NULL AND NEW.lineage_json ->> '$[0][0]' IS NOT NEW.id) BEGIN SELECT RAISE(ABORT, 'a fork made from another is inserted with its lineage, itself first'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "forks_lineage_root",
-      "tbl_name": "forks",
-      "sql": "CREATE TRIGGER forks_lineage_root AFTER INSERT ON forks WHEN NEW.lineage_json IS NULL BEGIN UPDATE forks SET lineage_json = json_array(json_array(NEW.id, NULL)) WHERE id = NEW.id; END"
-    },
-    {
-      "type": "trigger",
       "name": "forks_origin_fixed",
       "tbl_name": "forks",
       "sql": "CREATE TRIGGER forks_origin_fixed BEFORE UPDATE OF parent_fork_id, base_slot_id, branched_at ON forks WHEN NEW.parent_fork_id IS NOT OLD.parent_fork_id OR NEW.base_slot_id IS NOT OLD.base_slot_id OR NEW.branched_at IS NOT OLD.branched_at BEGIN SELECT RAISE(ABORT, 'a fork keeps the parent, base and moment it was made at'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "forks_parent_fixed",
+      "tbl_name": "forks",
+      "sql": "CREATE TRIGGER forks_parent_fixed BEFORE UPDATE OF parent_fork_id, branched_at ON forks WHEN NEW.parent_fork_id IS NOT OLD.parent_fork_id OR NEW.branched_at IS NOT OLD.branched_at BEGIN SELECT RAISE(ABORT, 'a fork keeps its parent and the moment it was made'); END"
     },
     {
       "type": "trigger",
@@ -1925,6 +1943,12 @@
       "name": "forks_tip_mirrored",
       "tbl_name": "forks",
       "sql": "CREATE TRIGGER forks_tip_mirrored AFTER UPDATE OF tip_slot_id ON forks BEGIN UPDATE chats SET active_leaf_slot_id = NEW.tip_slot_id WHERE id = NEW.chat_id AND current_fork_id = NEW.id AND active_leaf_slot_id IS NOT NEW.tip_slot_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "history_changes_label",
+      "tbl_name": "history_changes",
+      "sql": "CREATE TRIGGER history_changes_label AFTER INSERT ON history_changes WHEN NEW.fork_id <> '' AND NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN UPDATE history_changes SET label = (SELECT point FROM fork_labels WHERE fork_id = NEW.fork_id) WHERE slot_id = NEW.slot_id AND fork_id = NEW.fork_id AND seq = NEW.seq; END"
     },
     {
       "type": "trigger",
@@ -2186,18 +2210,6 @@
     },
     {
       "type": "trigger",
-      "name": "shell_fork_event_snapshots_delete",
-      "tbl_name": "fork_event_snapshots",
-      "sql": "CREATE TRIGGER shell_fork_event_snapshots_delete AFTER DELETE ON fork_event_snapshots BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = (SELECT chat_id FROM forks WHERE id = OLD.fork_id); END"
-    },
-    {
-      "type": "trigger",
-      "name": "shell_fork_event_snapshots_insert",
-      "tbl_name": "fork_event_snapshots",
-      "sql": "CREATE TRIGGER shell_fork_event_snapshots_insert AFTER INSERT ON fork_event_snapshots BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = (SELECT chat_id FROM forks WHERE id = NEW.fork_id); END"
-    },
-    {
-      "type": "trigger",
       "name": "shell_fork_overrides_delete",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TRIGGER shell_fork_overrides_delete AFTER DELETE ON fork_overrides WHEN OLD.kind IN ('select', 'replace', 'delete_slot', 'insert', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = OLD.chat_id; END"
@@ -2230,7 +2242,7 @@
       "type": "trigger",
       "name": "shell_forks_update",
       "tbl_name": "forks",
-      "sql": "CREATE TRIGGER shell_forks_update AFTER UPDATE OF chat_id, parent_fork_id, tip_slot_id, deleted_at, purged_at, lineage_json ON forks BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+      "sql": "CREATE TRIGGER shell_forks_update AFTER UPDATE OF chat_id, parent_fork_id, tip_slot_id, deleted_at, purged_at ON forks BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
     },
     {
       "type": "trigger",
@@ -2411,6 +2423,18 @@
       "name": "state_events_chain_unplaced",
       "tbl_name": "state_events",
       "sql": "CREATE TRIGGER state_events_chain_unplaced BEFORE INSERT ON state_events WHEN NEW.slot_id IS NULL AND (NEW.slot_chain_id IS NOT NULL OR NEW.slot_depth IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'a chat-wide state event has no chain'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "state_events_fork_label",
+      "tbl_name": "state_events",
+      "sql": "CREATE TRIGGER state_events_fork_label AFTER INSERT ON state_events WHEN NEW.fork_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN UPDATE state_events SET fork_label = (SELECT point FROM fork_labels WHERE fork_id = NEW.fork_id) WHERE id = NEW.id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "state_events_fork_label_fixed",
+      "tbl_name": "state_events",
+      "sql": "CREATE TRIGGER state_events_fork_label_fixed BEFORE UPDATE OF fork_label ON state_events WHEN OLD.fork_label IS NOT NULL AND NEW.fork_label IS NOT OLD.fork_label AND NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN SELECT RAISE(ABORT, 'a state event keeps its fork label'); END"
     },
     {
       "type": "trigger",
