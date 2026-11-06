@@ -96,11 +96,15 @@ describe("archiving a preset", () => {
         const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
         assert.strictEqual(next.preset?.ref ?? null, preset.ref.id)
 
-        // A chat's own copy isn't a library entry to archive.
+        // A variant is an entry of its own: archiving it leaves the original as it was.
         const writer = yield* Writer
         const userId = (yield* api.Whoami()).id as UserId
-        const override = yield* writer.CreateChatOverride({ userId, refId: preset.ref.id, chatId: chat.id })
-        assert.strictEqual(yield* failure(api.SetRefArchived({ refId: override.id, archived: true })), "EditRefused")
+        yield* api.SetRefArchived({ refId: preset.ref.id, archived: false })
+        const variant = yield* writer.ForkRef({ userId, refId: preset.ref.id, label: "Narrator", subtitle: "noir" })
+        yield* api.SetRefArchived({ refId: variant.id, archived: true })
+        const presets = yield* api.ListLibrary({ kind: "preset" })
+        assert.isTrue(presets.some((ref) => ref.id === preset.ref.id))
+        assert.isFalse(presets.some((ref) => ref.id === variant.id))
       }).pipe(Effect.scoped, withServer(config))
     },
     // A reply on a mock provider: about 3 s idle, over 30 s at a load average of 140.

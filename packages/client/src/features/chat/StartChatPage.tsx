@@ -1,4 +1,5 @@
 import type { Draft } from "@rp/shared/drafts.ts"
+import { useSidePanelPlace } from "../workbench/tab.tsx"
 import { greetingPick } from "@rp/shared/greetings.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
@@ -27,7 +28,16 @@ import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { Effect, Option } from "effect"
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import {
+  type CSSProperties,
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
@@ -142,6 +152,7 @@ function Pending({
   /** A group's characters as the group names them: its pending copy's key. */
   groupMembers: ReadonlyArray<string> | null
 }) {
+  const composerId = useId()
   const action = useAction()
   const navigate = useNavigate()
   const navigationSearch = useSearch({ strict: false }) as { panel?: string; character?: string; guidance?: string }
@@ -242,6 +253,7 @@ function Pending({
   // The side panel: the saved chat's, its tab in the URL and remembered the same way.
   const urlPanel = useIsPanelTab(navigationSearch.panel) ? navigationSearch.panel! : null
   const { panel, show, wide } = usePanel(urlPanel, view)
+  const place = useSidePanelPlace(wide)
   const title = pendingTitle(pending, state)
   const prefs = viewPrefs.prefs
 
@@ -446,16 +458,15 @@ function Pending({
                   Guidance
                 </span>
               )}
-              <label htmlFor="composer" className="sr-only">
-                {guidance ? "Guidance" : "Message"}
-              </label>
+              {/* Named on itself, not by a label's `for`: two frames can each show a composer. */}
               <AutoGrowTextarea
-                id="composer"
+                aria-label={guidance ? "Guidance" : "Message"}
+                id={composerId}
                 data-testid="composer"
                 value={text}
                 // Short, so it fits one line on a phone, as the chat's composer does.
                 placeholder={guidance ? "Guidance for the next message…" : "Message…"}
-                aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
+                aria-describedby={text.trim() !== "" || guidance ? `${composerId}-hint` : undefined}
                 onKeyDown={(event) =>
                   composerKeyDown(async () => {
                     await invokePendingComposer(controls)
@@ -472,7 +483,7 @@ function Pending({
               />
             </ComposerBox>
             {(guidance || text.trim() !== "") && (
-              <p id="composer-hint" className="text-xs text-muted">
+              <p id={`${composerId}-hint`} className="text-xs text-muted">
                 {guidance
                   ? `Guidance: one-turn guidance for ${speakerName}'s first reply. It leaves the box when you submit it.`
                   : "Write doesn't use this text: turn guidance on to direct the reply with it."}
@@ -484,10 +495,11 @@ function Pending({
             </StripRow>
           </div>
         </div>
-        {panel !== null && (
+        {panel !== null && place.show && (
           <ChatSidePanel
             tab={panel}
             wide={wide}
+            host={place.host}
             title={title}
             onTab={show}
             onClose={() => show(null)}

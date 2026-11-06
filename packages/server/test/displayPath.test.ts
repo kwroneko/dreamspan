@@ -53,7 +53,6 @@ const world = Effect.gen(function* () {
   const newChat = Effect.gen(function* () {
     const chatId = `chat${++chats}`
     yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (${chatId}, 'u', 'rp', 'active', 1)`
-    yield* sql`INSERT INTO lanes (id, chat_id, name, created_at) VALUES (${`${chatId}-lane`}, ${chatId}, 'main', 1)`
     return chatId
   })
 
@@ -71,8 +70,8 @@ const world = Effect.gen(function* () {
       const depth = parent === null ? 0 : (yield* place(parent)).depth + 1
       yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
         VALUES (${versionId}, ${id}, 0, 'complete', 'human', ${id}, 'verbatim', 'user_written', 1, 1)`
-      yield* sql`INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, fork_id, inserted)
-        VALUES (${id}, ${chatId}, ${`${chatId}-lane`}, ${parent}, ${depth}, ${versionId}, 1, ${forkId}, ${inserted ? 1 : 0})`
+      yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, fork_id, inserted)
+        VALUES (${id}, ${chatId}, ${parent}, ${depth}, ${versionId}, 1, ${forkId}, ${inserted ? 1 : 0})`
       return id
     }).pipe(sql.withTransaction)
 

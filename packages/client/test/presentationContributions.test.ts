@@ -15,7 +15,6 @@ import {
   chatComposer,
   chatComposerNotes,
   chatColumns,
-  chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
   ChatSurfaceProviders,
@@ -99,7 +98,7 @@ acceptsAlternative(summaryPreviews)
 acceptsAlternative(queuedPreviews)
 acceptsAlternative(chatComposer)
 acceptsAlternative(chatComposerNotes)
-acceptsAlternative(chatOverlays)
+// chat.overlays has no default since a chat's large editors became workbench tabs.
 acceptsAlternative(chatColumns)
 acceptsAlternative(chatSettingSections)
 acceptsAlternative(accountSettingSections)

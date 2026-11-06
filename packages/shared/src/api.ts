@@ -22,6 +22,7 @@ import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import { EditorApi, ForkMergeApi, GalleryApi } from "./editorApi.ts"
+import { WorkbenchApi } from "./workbenchApi.ts"
 import {
   AccountRejected,
   Forbidden,
@@ -314,7 +315,7 @@ export class AppCoreApi extends RpcGroup.make(
   // (POST /library/import, /library/export), since RPC messages are JSON.
   /** Data from the worker exporter registry, in preference order. */
   Rpc.make("ListExportFormats", { success: Schema.Array(ExportFormatInfo), error: ServerError }),
-  /** The user's upstream refs and variants of one kind, by label. */
+  /** The user's entries of one kind, forks included, by label. */
   Rpc.make("ListLibrary", {
     payload: {
       kind: EntityKind,
@@ -404,6 +405,8 @@ export const AuthenticatedForkMergeApi = ForkMergeApi.middleware(Authentication)
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
+export const AuthenticatedWorkbenchApi = WorkbenchApi.middleware(Authentication)
+
 /** The whole API: what the client calls and the server serves. */
 export class AuthenticatedSplitChatApi extends SplitChatApi.middleware(Authentication) {}
 /** Merging another chat into this one (mergeApi.ts). */
@@ -423,6 +426,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedGalleryApi)
+  .merge(AuthenticatedWorkbenchApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi) {}

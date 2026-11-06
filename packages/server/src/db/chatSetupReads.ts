@@ -87,7 +87,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         SELECT e.id AS entity_id, r.label, r.subtitle, cs.fields AS card_fields, cs.book AS card_book, cs.book_entries AS card_book_entries
         FROM entities e
         JOIN entity_refs r ON r.id = (
-          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
+          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id
           LIMIT 1)
         LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL`
@@ -211,7 +211,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           SELECT e.id AS entity_id, r.id AS ref_id, r.head_revision_id, r.label, r.subtitle
           FROM entities e
           JOIN entity_refs r ON r.id = (
-            SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
+            SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id
             LIMIT 1)
           WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
             AND e.deleted_at IS NULL AND e.archived_at IS NULL

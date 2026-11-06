@@ -188,7 +188,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         )
         if (!job) return yield* new NotFound({ entity: "summary job", id: jobId })
         const chain = yield* lcmPath(sql, userId, job.chatId, job.lastSlotId, job.firstSlotId)
-        if (chain[0]?.id !== job.firstSlotId || chain.some((s) => s.generating || s.merged))
+        if (chain[0]?.id !== job.firstSlotId || chain.some((s) => s.generating))
           return yield* new AssemblyFailed({
             reason: "invalid_document",
             message: "The summary job does not cover a ready primary-parent chain."

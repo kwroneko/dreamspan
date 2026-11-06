@@ -9,7 +9,7 @@ import type { ForkId, PathEntry } from "@rp/shared/chat.ts"
 import {
   cloneElement,
   Fragment,
-  useLayoutEffect,
+  useEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -198,34 +198,33 @@ const pinHint = (label: string, pinned: boolean, shown: boolean) =>
 /**
  * How many of the pinned buttons fit beside "More actions" in the toolbar's width: the toolbar
  * never wraps the message or scrolls sideways, so the rest stay in the menu (where every
- * action is anyway) until the row is wider. Buttons measure as rendered; a hidden one by its
- * last width, or an icon button's.
+ * action is anyway) until the row is wider. PinnedButton and More actions both use the
+ * same icon button size. ResizeObserver supplies both widths without forcing
+ * a layout for every message while React is still mounting the other rows.
  */
 function useFit(pinned: string) {
   const root = useRef<HTMLDivElement>(null)
   const [fit, setFit] = useState(Number.POSITIVE_INFINITY)
-  useLayoutEffect(() => {
+  useEffect(() => {
     const element = root.current
     if (element === null) return
-    const widths = new WeakMap<Element, number>()
-    const measure = () => {
-      const more = element.querySelector<HTMLElement>(":scope > [data-more]")
-      let room = element.clientWidth - (more?.offsetWidth ?? 32)
-      let count = 0
-      for (const item of element.querySelectorAll<HTMLElement>(":scope > [data-pin]")) {
-        const shown = item.dataset.pin === "shown"
-        const width = shown ? item.offsetWidth : (widths.get(item) ?? 32)
-        if (shown) widths.set(item, width)
-        if (width > room) break
-        room -= width
-        count += 1
-      }
-      setFit(count)
+    const more = element.querySelector<HTMLElement>(":scope > [data-more]")
+    const measure = (width: number, button: number) => setFit(Math.max(0, Math.floor((width - button) / button)))
+    if (typeof ResizeObserver === "undefined") {
+      measure(element.clientWidth, more?.offsetWidth || 32)
+      return
     }
-    measure()
-    if (typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(measure)
+    let width = 0
+    let button = 32
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === element) width = entry.contentRect.width
+        else if (entry.contentRect.width > 0) button = entry.contentRect.width
+      }
+      measure(width, button)
+    })
     observer.observe(element)
+    if (more) observer.observe(more)
     return () => observer.disconnect()
   }, [pinned])
   return { root, fit }
@@ -264,7 +263,7 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
           data-pin={index < fit ? "shown" : "hidden"}
           className={index < fit ? "inline-flex shrink-0" : "hidden"}
         >
-          <action.describe {...props} show={(view) => <PinnedButton view={explain(action, view)} />} />
+          {index < fit && <action.describe {...props} show={(view) => <PinnedButton view={explain(action, view)} />} />}
         </span>
       ))}
       {actions.length > 0 && (

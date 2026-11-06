@@ -67,11 +67,11 @@ export const makeImportReadHandlers = Effect.gen(function* () {
         // shared note is in the bin: it has nothing to send. The first is ST's Character's Note.
         const notes = yield* sql<{ id: string; doc_json: string; shared: string | null }>`
           SELECT r.id, h.doc_json, (SELECT json_extract(sh.doc_json, '$.content') FROM entities se
-              JOIN entity_refs sr ON sr.entity_id = se.id AND sr.ref_kind = 'upstream'
+              JOIN entity_refs sr ON sr.entity_id = se.id
               JOIN entity_revisions sh ON sh.id = sr.head_revision_id
               WHERE se.id = json_extract(h.doc_json, '$.link') AND se.owner_user_id = ${userId}
                 AND se.kind = 'note' AND se.deleted_at IS NULL) AS shared
-          FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+          FROM entities e JOIN entity_refs r ON r.entity_id = e.id
           JOIN entity_revisions h ON h.id = r.head_revision_id
           WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
             AND json_extract(h.doc_json, '$.owner.card') = ${ref.entity_id}
@@ -97,8 +97,7 @@ export const makeImportReadHandlers = Effect.gen(function* () {
     CardReplaceSource: ({ userId, refId }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
-        if (ref.kind !== "card" || ref.ref_kind !== "upstream")
-          return yield* new NotFound({ entity: "card", id: refId })
+        if (ref.kind !== "card") return yield* new NotFound({ entity: "card", id: refId })
         const json = yield* docJson(ref.head_revision_id)
         const doc = JSON.parse(json) as Record<string, unknown>
         const [avatar] =

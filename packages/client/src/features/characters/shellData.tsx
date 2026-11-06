@@ -10,14 +10,17 @@ import type {
   ShellForksView,
   ShellSection
 } from "@rp/shared/chatSetupApi.ts"
-import { useNavigate, useSearch } from "@tanstack/react-router"
+import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
+import { openOnPlainClick } from "../../ui/links.ts"
+import { OPEN_BESIDE_HINT, OpenBesideButton, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
+import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
+import { OVER_PICTURE, Tooltip } from "../../ui/Tooltip.tsx"
 import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
 import type { CardSort } from "./cardRecency.ts"
 
@@ -178,6 +181,24 @@ export function useShellNavigation() {
   }
 }
 
+/**
+ * Where a character's tile links: the chat it opens (its latest), else a new one, with the
+ * sidebar on the character's chats and its card's panel, as a click opens it (`useOpenCharacter`),
+ * so Open beside, Alt-click and a new browser tab open the character too (owner, 2026-11-06).
+ */
+const characterLink = (card: ShellCard) => {
+  const latest = card.open ?? null
+  const entity = card.card.entityId
+  const character = { character: entity, panel: `card:${entity}` }
+  return latest
+    ? {
+        to: "/chats/$chatId" as const,
+        params: { chatId: latest.chatId },
+        search: { ...character, fork: latest.forkId, ...(latest.slot ? { slot: latest.slot } : {}) }
+      }
+    : { to: "/cards/$entityId/chat" as const, params: { entityId: entity }, search: character }
+}
+
 export function useOpenCharacter() {
   const navigation = useShellNavigation()
   const result = useAtomValue(shellAtom)
@@ -228,6 +249,8 @@ export function useOpenCharacter() {
 export interface TilePick {
   /** When supplied, the tile opens this editor and the pick becomes a separate button. */
   readonly onOpen?: (card: ShellCard) => void
+  /** Where `onOpen` goes, so the tile is a link (it opens in a new browser tab too). */
+  readonly href?: (card: ShellCard) => string
   readonly onPick: (card: ShellCard) => void
   readonly label: (card: ShellCard, status: string | undefined) => string
   readonly hint: (card: ShellCard, status: string | undefined) => ReactNode
@@ -299,25 +322,13 @@ function CharacterTile({
   marked: boolean
 }) {
   const open = useOpenCharacter()
+  const besideHref = useRouter().buildLocation(characterLink(card)).href
+  const canBeside = useCanOpenBeside()
+  const [menu, setMenu] = useState(false)
   const c = card.card
   const state = pick?.state(status) ?? {}
-  const button = (
-    // Fills the grid row, its last line at the bottom, so tiles in a row match (DESIGN §2.1).
-    <button
-      type="button"
-      onClick={() => {
-        if (pick?.onOpen) return pick.onOpen(card)
-        if (!pick) return open(c.entityId)
-        if (!state.done && !state.pending) pick.onPick(card)
-      }}
-      aria-label={pick && !pick.onOpen ? pick.label(card, status) : `Open ${c.label}${marked ? " (persona)" : ""}`}
-      data-layout-audit-ignore={
-        pick?.onOpen ? "inset: The open area fills the tile above its joined footer" : undefined
-      }
-      {...(!pick?.onOpen && (state.done || state.pending) ? { "aria-disabled": true } : {})}
-      {...(!pick?.onOpen && state.pending ? { "aria-busy": true } : {})}
-      className={`group flex min-w-0 flex-1 flex-col overflow-hidden ${pick?.onOpen ? "rounded-t-lg focus-visible:ring-inset" : "rounded-lg border border-border"} bg-surface text-left outline-none focus-visible:ring-2 focus-visible:ring-focus ${!pick?.onOpen && (state.done || state.pending) ? "cursor-default" : "hover:border-focus"}`}
-    >
+  const inner = (
+    <>
       <span
         className={`relative aspect-[2/3] w-full overflow-hidden ${!pick?.onOpen && state.done ? "opacity-50" : ""}`}
       >
@@ -335,23 +346,81 @@ function CharacterTile({
           <SortDate card={card} sort={sort} />
         </span>
       </span>
+    </>
+  )
+  // Fills the grid row, its last line at the bottom, so tiles in a row match (DESIGN §2.1).
+  const tileClass = `group flex min-w-0 flex-1 flex-col overflow-hidden ${pick?.onOpen ? "rounded-t-lg focus-visible:ring-inset" : "rounded-lg border border-border"} bg-surface text-left outline-none focus-visible:ring-2 focus-visible:ring-focus ${!pick?.onOpen && (state.done || state.pending) ? "cursor-default" : "hover:border-focus"}`
+  const button = !pick ? (
+    // A link to the chat it opens, so it opens in a new browser tab too.
+    <Link
+      {...characterLink(card)}
+      onClick={openOnPlainClick(() => open(c.entityId))}
+      aria-label={`Open ${c.label}${marked ? " (persona)" : ""}`}
+      className={tileClass}
+    >
+      {inner}
+    </Link>
+  ) : pick.onOpen && pick.href ? (
+    <a
+      href={pick.href(card)}
+      onClick={openOnPlainClick(() => pick.onOpen?.(card))}
+      aria-label={`Open ${c.label}${marked ? " (persona)" : ""}`}
+      data-layout-audit-ignore="inset: The open area fills the tile above its joined footer"
+      className={tileClass}
+    >
+      {inner}
+    </a>
+  ) : (
+    <button
+      type="button"
+      onClick={() => {
+        if (pick.onOpen) return pick.onOpen(card)
+        if (!state.done && !state.pending) pick.onPick(card)
+      }}
+      aria-label={!pick.onOpen ? pick.label(card, status) : `Open ${c.label}${marked ? " (persona)" : ""}`}
+      data-layout-audit-ignore={pick.onOpen ? "inset: The open area fills the tile above its joined footer" : undefined}
+      {...(!pick.onOpen && (state.done || state.pending) ? { "aria-disabled": true } : {})}
+      {...(!pick.onOpen && state.pending ? { "aria-busy": true } : {})}
+      className={tileClass}
+    >
+      {inner}
     </button>
   )
   return (
     <div
       className={`tile-toggle-surface relative flex min-w-0 flex-col ${pick?.onOpen ? "overflow-hidden rounded-lg border border-border bg-surface" : ""}`}
     >
-      <Tooltip
-        label={
-          pick
-            ? pick.onOpen
-              ? `Open ${c.label} in the full editor`
-              : pick.hint(card, status)
-            : `Opens ${c.label}’s card.`
-        }
-      >
-        {button}
-      </Tooltip>
+      {pick ? (
+        <Tooltip label={pick.onOpen ? `Open ${c.label} in the full editor` : pick.hint(card, status)}>{button}</Tooltip>
+      ) : (
+        // The same menu as a chat row's (ShellBrowser's ForkRow).
+        <ContextMenu
+          label={`Actions for ${c.label}`}
+          open={menu}
+          onOpenChange={setMenu}
+          trigger={
+            <Tooltip label={`Opens ${c.label}’s card.${canBeside ? " Right-click to open it beside." : ""}`}>
+              {button}
+            </Tooltip>
+          }
+        >
+          <MenuItem icon="chat" description="Opens it here, as a click does." onClick={() => open(c.entityId)}>
+            Open
+          </MenuItem>
+          {canBeside && (
+            <MenuItem icon="split-right" description={OPEN_BESIDE_HINT} onClick={() => openBeside(besideHref)}>
+              Open beside
+            </MenuItem>
+          )}
+          <MenuItem
+            icon="external"
+            description="Opens it in a new tab of the browser."
+            onClick={() => window.open(besideHref, "_blank", "noopener")}
+          >
+            Open in a new browser tab
+          </MenuItem>
+        </ContextMenu>
+      )}
       {pick?.onOpen && (
         <Button
           data-layout-audit-ignore="inset: The footer joins the tile border edge to edge"
@@ -367,11 +436,13 @@ function CharacterTile({
         </Button>
       )}
       <span data-layout-overlay="Favourite action sits over the portrait" className="absolute top-2 left-2">
-        <FavouriteStar
-          card={card}
-          className="tile-toggle bg-surface/85 hover:bg-surface/85 data-popup-open:bg-surface/85"
-        />
+        <FavouriteStar card={card} className={`tile-toggle ${OVER_PICTURE}`} />
       </span>
+      {!pick && (
+        <span data-layout-overlay="Open beside sits over the portrait" className="absolute top-2 right-2">
+          <OpenBesideButton href={besideHref} name={c.label} className={`tile-beside ${OVER_PICTURE}`} />
+        </span>
+      )}
       {state.mark && (
         <span
           data-layout-overlay="Chat membership sits over the portrait"

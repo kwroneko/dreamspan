@@ -99,7 +99,7 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
     SELECT v.id, r.id AS ref, json_extract(v.doc_json, '$.name') AS name, json_extract(v.doc_json, '$.title') AS title,
       json_extract(v.doc_json, '$.placement') AS placement, json_extract(v.doc_json, '$.owner.card') AS card
     FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
-    JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+    JOIN entity_refs r ON r.entity_id = e.id
     WHERE v.id IN ${sql.in(revisions)} AND e.owner_user_id = ${userId}`
       : []
     const names = new Map(rows.map((r) => [r.id, r.name]))

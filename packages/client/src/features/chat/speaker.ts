@@ -7,6 +7,7 @@
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { useSyncExternalStore } from "react"
+import { focusComposer } from "./composerFocus.ts"
 import type { ChatSession, Outcome } from "./session.ts"
 
 export interface ChoiceState {
@@ -20,9 +21,16 @@ export interface ChoiceState {
   readonly speaker: EntityId | null
   /** Who replies to the next send, picked for that one reply; null: the next in turn. */
   readonly replyFrom: EntityId | null
+  /** Next is No one: a send asks for no reply until another choice; a pick still gets its one reply. */
+  readonly noReplies: boolean
 }
 
-type Change = { readonly guidance?: boolean; readonly speaker?: EntityId | null; readonly replyFrom?: EntityId | null }
+type Change = {
+  readonly guidance?: boolean
+  readonly speaker?: EntityId | null
+  readonly replyFrom?: EntityId | null
+  readonly noReplies?: boolean
+}
 
 /** How long a choice that couldn't be read waits before it's read again. */
 const RETRY_MS = 2000
@@ -34,6 +42,7 @@ class ComposerChoices {
     saving: false,
     speaker: null,
     replyFrom: null,
+    noReplies: false,
     guidance: false
   }
   private readonly listeners = new Set<() => void>()
@@ -70,7 +79,7 @@ class ComposerChoices {
   bind(draftId: string | null, guidance = false) {
     if (draftId === this.state.draftId) return
     this.reads++
-    this.setState({ draftId, loaded: false, saving: false, speaker: null, replyFrom: null, guidance })
+    this.setState({ draftId, loaded: false, saving: false, speaker: null, replyFrom: null, noReplies: false, guidance })
     if (draftId !== null) void this.read()
   }
 
@@ -95,6 +104,7 @@ class ComposerChoices {
       saving: false,
       speaker: choice?.speakerEntityId ?? null,
       replyFrom: choice?.replyFromEntityId ?? null,
+      noReplies: choice?.noReplies ?? false,
       guidance: choice?.guidance ?? false
     })
     if (this.early !== null) {
@@ -113,6 +123,7 @@ class ComposerChoices {
       saving: false,
       speaker: choice.speakerEntityId,
       replyFrom: choice.replyFromEntityId,
+      noReplies: choice.noReplies,
       guidance: choice.guidance
     })
   }
@@ -147,7 +158,8 @@ class ComposerChoices {
           draftId,
           ...(change.guidance === undefined ? {} : { guidance: change.guidance }),
           ...(change.speaker === undefined ? {} : { speakerEntityId: change.speaker }),
-          ...(change.replyFrom === undefined ? {} : { replyFromEntityId: change.replyFrom })
+          ...(change.replyFrom === undefined ? {} : { replyFromEntityId: change.replyFrom }),
+          ...(change.noReplies === undefined ? {} : { noReplies: change.noReplies })
         })
       )
     )
@@ -183,5 +195,5 @@ export const useComposerChoice = (session: ChatSession): ChoiceState => {
 /** Makes `id` the composer's speaker and puts the cursor in the composer ("Write as"). */
 export const writeAs = (session: ChatSession, id: EntityId) => {
   void composerChoice(session).change({ speaker: id })
-  document.getElementById("composer")?.focus({ preventScroll: true })
+  focusComposer({ preventScroll: true })
 }

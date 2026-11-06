@@ -11,6 +11,7 @@ import type { SqlClient } from "effect/sql"
 import { displayEndOf } from "./displayPath.ts"
 import { chatFork } from "./snippets.ts"
 import { stateEventsThrough } from "./stateRead.ts"
+import { agentWrittenNotes, notesNamed } from "./agentNotes.ts"
 
 const ownerOf = (doc: Doc) => doc.owner as { card?: string; chat?: string } | undefined
 const keyOf = (doc: Doc, events: ReadonlyArray<FoldableEvent> = []) => {
@@ -36,10 +37,15 @@ export const replacementConflict = Effect.fnUntraced(function* (
   if (previous && keyOf(previous) === target) return null
   const notes = yield* sql<{ entity: string; revision: string; doc_json: string }>`
     SELECT e.id AS entity, r.head_revision_id AS revision, h.doc_json
-    FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+    FROM entities e JOIN entity_refs r ON r.entity_id = e.id
     JOIN entity_revisions h ON h.id = r.head_revision_id
     WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL AND e.id != ${entity ?? ""}`
   const heads = notes.map((n) => ({ ...n, doc: JSON.parse(n.doc_json) as Doc }))
+  // A note an agent reply wrote exists only where that reply is shown (agentNotes.ts).
+  const byAgent = yield* agentWrittenNotes(
+    sql,
+    heads.filter((n) => ownerOf(n.doc)?.chat !== undefined).map((n) => n.entity)
+  )
   const reason = (other: Doc) =>
     `Only one note can replace this target. Unlink the note “${String(other.title || "Untitled note")}” first.`
   // Two notes of one card already conflict without a chat. This also protects unused cards.
@@ -65,9 +71,11 @@ export const replacementConflict = Effect.fnUntraced(function* (
     if (owner.card && (!cards.has(owner.card) || (entity !== null && state.noteRevisions[entity] !== undefined)))
       continue
     const key = keyOf(doc, events)
+    const named = notesNamed(rows)
     for (const note of heads) {
       const noteOwner = ownerOf(note.doc)
       if (noteOwner?.chat !== view.chat_id && !(noteOwner?.card && cards.has(noteOwner.card))) continue
+      if (byAgent.has(note.entity) && !named.has(note.entity)) continue
       const bound = state.noteRevisions[note.entity]
       let theirs = note.doc
       if (bound && bound !== note.revision) {

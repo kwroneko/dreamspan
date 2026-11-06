@@ -38,7 +38,7 @@ export function PanelVariant({ store }: { store: EditorStore }) {
   const onCreated = useContext(PanelVariantNavigation)
   const snapshot = useEditorState(store).snapshot
   const [open, setOpen] = useState(false)
-  if (snapshot?.ref.kind !== "lorebook" || snapshot.ref.refKind === "chat_override") return null
+  if (snapshot?.ref.kind !== "lorebook") return null
   return (
     <>
       <Button

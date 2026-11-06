@@ -242,7 +242,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         SELECT e.id, e.created_at, r.created_at AS added_at, r.id AS ref, r.head_revision_id AS revision,
           cs.fields AS card_fields, cs.book AS card_book, cs.book_entries AS card_book_entries,
           EXISTS(SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
-        FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id AND ref_kind = 'upstream' LIMIT 1)
+        FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id LIMIT 1)
         LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL
         ORDER BY r.label COLLATE NOCASE, e.id`
@@ -581,7 +581,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         })
       const [prefs] = yield* sql<{
         pins_collapsed: number
-      }>`SELECT pins_collapsed FROM shell_preferences WHERE user_id = ${userId}`
+      }>`SELECT json_extract(value_json, '$') AS pins_collapsed FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = 'shell.pinsCollapsed'`
       const links = new Map<string, SplitChatLink>()
       const parents = new Map<string, string>()
       for (const [id, current] of groupCurrent) {

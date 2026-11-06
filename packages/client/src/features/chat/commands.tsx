@@ -168,12 +168,13 @@ export const runCommandShortcut = (event: CommandKeyEvent, context: ChatCommandC
   return true
 }
 
-export function useChatCommandKeys(context: ChatCommandContext) {
+export function useChatCommandKeys(context: ChatCommandContext, enabled = true) {
   useEffect(() => {
+    if (!enabled) return
     const invoke = (event: KeyboardEvent) => {
       if (runCommandShortcut(event, context)) event.preventDefault()
     }
     window.addEventListener("keydown", invoke)
     return () => window.removeEventListener("keydown", invoke)
-  }, [context])
+  }, [context, enabled])
 }

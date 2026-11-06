@@ -1,3 +1,4 @@
+import { WorkbenchDevice, WorkbenchLayoutJson } from "@rp/shared/workbenchApi.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
@@ -189,7 +190,7 @@ export { LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/error
 /** The largest path window one GetPath returns. */
 const MAX_PATH_WINDOW = 1000
 
-/** The operation doesn't apply to this kind of ref (e.g. forking a chat override). */
+/** The operation doesn't apply to this kind of ref (e.g. ForkRef on a card, which forks with its names). */
 export class RefOperationRefused extends Schema.TaggedError<RefOperationRefused>()("RefOperationRefused", {
   refId: Schema.String,
   reason: Schema.String
@@ -844,6 +845,7 @@ export class WriteOps extends RpcGroup.make(
       guidance: Schema.optionalKey(Schema.Boolean),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      noReplies: Schema.optionalKey(Schema.Boolean),
       /** Consume a one-reply pick only if it still names this card. */
       consumeReplyFromEntityId: Schema.optionalKey(EntityId)
     },
@@ -1069,38 +1071,23 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * Archives or restores the entity of a library entry (an upstream or a variant, never a chat
-   * override): hidden from lists, nothing deleted, in use where it is used. Archiving keeps the
-   * first time it was archived.
+   * Archives or restores a library entry (a fork is an entry of its own, so its parent and
+   * siblings stay as they are): hidden from lists, nothing deleted, in use where it is used.
+   * Archiving keeps the first time it was archived.
    */
   Rpc.make("SetRefArchived", {
     payload: { userId: UserId, refId: RefId, archived: Schema.Boolean },
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
-  /** A new variant following `refId` (an upstream or another variant). */
+  /**
+   * A fork of a preset, lorebook or note (spec/LIBRARY-FORKS.md): a new entry of the same kind
+   * from `refId`'s head, tied to it only by its lineage; cards fork with ForkCard.
+   */
   Rpc.make("ForkRef", {
     payload: { userId: UserId, refId: RefId, label: Schema.String, subtitle: Schema.String },
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
-  }),
-  /** Changes for one chat only, following `refId` (DESIGN §4). */
-  Rpc.make("CreateChatOverride", {
-    payload: { userId: UserId, refId: RefId, chatId: ChatId },
-    success: LibraryRef,
-    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
-  }),
-  /** Turns a chat override into a library variant (DESIGN §4). */
-  Rpc.make("PromoteOverride", {
-    payload: {
-      userId: UserId,
-      refId: RefId,
-      label: Schema.String,
-      subtitle: Schema.String,
-      expectedRowVersion: Schema.Int
-    },
-    success: LibraryRef,
-    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
   Rpc.make("CommitForkMerge", {
     payload: {
@@ -2152,7 +2139,7 @@ export class WriteOps extends RpcGroup.make(
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
-  /** ForkRef, optionally moving the ref's unsaved drafts to the new variant. */
+  /** ForkRef, optionally moving the ref's unsaved drafts to the fork. */
   Rpc.make("ForkWithDrafts", {
     payload: {
       userId: UserId,
@@ -2550,6 +2537,17 @@ export class WriteOps extends RpcGroup.make(
     error: StorageError
   }),
   /**
+   * Saves a device's center column layout (device-scoped key `workbench` in `settings`). An account
+   * keeps the layouts of its most recently saving devices only.
+   */
+  Rpc.make("SetWorkbenchLayout", {
+    payload: { userId: UserId, device: WorkbenchDevice, layout: WorkbenchLayoutJson },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /** Forgets every device's center column layout of the user. */
+  Rpc.make("ForgetWorkbenchLayouts", { payload: { userId: UserId }, success: Schema.Void, error: StorageError }),
+  /**
    * Records that a one-time notice was shown for `key` (the impersonation notice: a preset's
    * ref). Answers whether this call recorded it, so of two tabs only one shows it.
    */
@@ -2897,7 +2895,7 @@ export class ReadOps extends RpcGroup.make(
     success: RecoveredText,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** The user's library of one kind: upstream refs and variants, not chat overrides. */
+  /** The user's library of one kind: every entry, forks included. */
   Rpc.make("ListLibrary", {
     payload: {
       userId: UserId,
@@ -2947,11 +2945,6 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, refId: RefId },
     success: MergePreview,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
-  }),
-  Rpc.make("ListChatOverrides", {
-    payload: { userId: UserId, chatId: ChatId },
-    success: Schema.Array(LibraryRef),
-    error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("ListConnections", {
     payload: { userId: UserId },
@@ -3167,7 +3160,8 @@ export class ReadOps extends RpcGroup.make(
   }),
   /**
    * The live chat's own notes, then these cards', by their upstream refs, oldest first, each
-   * linked one with its shared note (whose text is in `doc.content`).
+   * linked one with its shared note (whose text is in `doc.content`). A note an agent reply
+   * wrote is among them only where that reply is shown (DESIGN §7.3 [D]).
    */
   Rpc.make("ChatNoteEntries", {
     payload: {
@@ -3178,7 +3172,12 @@ export class ReadOps extends RpcGroup.make(
       cards: Schema.Array(EntityId)
     },
     success: Schema.Array(
-      Schema.Struct({ ref: LibraryRef, doc: Doc, card: Schema.NullOr(EntityId), linked: Schema.NullOr(LinkedNote) })
+      Schema.Struct({
+        ref: LibraryRef,
+        doc: Doc,
+        card: Schema.NullOr(EntityId),
+        linked: Schema.NullOr(LinkedNote)
+      })
     ),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -3491,6 +3490,12 @@ export class ReadOps extends RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
+  Rpc.make("RolloutReceipt", {
+    payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String },
+    success: Schema.NullOr(Schema.String),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /**
    * What resuming an agent reply needs of its run (agentReads.ts): the rollout, its status and
    * mode, the frozen snapshot and the transcript as last saved, and the version's own status.
@@ -3667,6 +3672,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
   /** The user's display choices; the defaults where none are stored. */
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
+  /** A device's saved center column layout, if any. */
+  Rpc.make("GetWorkbenchLayout", {
+    payload: { userId: UserId, device: WorkbenchDevice },
+    success: Schema.NullOr(WorkbenchLayoutJson),
+    error: StorageError
+  }),
   // --- Branches (DESIGN §3.2) and forks.
   /** The live forks of a chat of the user's, most recently current first. */
   Rpc.make("ListForks", {

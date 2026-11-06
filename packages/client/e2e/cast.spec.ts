@@ -159,11 +159,12 @@ test("the full editor opens the card used everywhere over the chat, and goes bac
   const chat = page.url()
   await page.getByRole("button", { name: "More for Mira" }).click()
   await page.getByRole("menuitem", { name: "Open Mira in the full editor", exact: true }).click()
-  const editor = page.getByRole("dialog", { name: "Card editor", exact: true })
+  const editor = page.getByRole("region", { name: "Card editor", exact: true })
   await expect(editor.getByText(/Used by \d+ chats?/)).toBeVisible()
   await expectTextBox(editor.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
-  expect(new URL(page.url()).pathname).toBe(new URL(chat).pathname)
-  expect(new URL(page.url()).searchParams.has("editor")).toBe(true)
+  // The editor is a tab beside the chat, bound to it.
+  expect(new URL(page.url()).pathname).toMatch(/^\/library\//)
+  expect(`/chats/${new URL(page.url()).searchParams.get("chat")}`).toBe(new URL(chat).pathname)
   await editor.getByRole("button", { name: "Close", exact: true }).click()
   await expect(editor).toHaveCount(0)
   expect(page.url()).toBe(chat)
@@ -174,7 +175,7 @@ test("the latest reply's › makes a new version, shown without a hover even at 
   const latest = replies(page).last()
   const next = latest.getByRole("group", { name: "Versions" }).getByRole("button", { name: "Generate another version" })
   // Not hovered: the pointer is on the composer.
-  await page.locator("#composer").hover()
+  await page.getByTestId("composer").hover()
   await expect(next).toHaveCSS("opacity", "1")
   // The reply's own › is the one way to swipe it: the composer has no second copy.
   await expect(page.getByRole("button", { name: /regenerate the latest/i })).toHaveCount(0)

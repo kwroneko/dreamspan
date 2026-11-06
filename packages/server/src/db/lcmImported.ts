@@ -35,7 +35,7 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
     const lib = makeLibraryQueries(sql)
     const fork = yield* viewAt(sql, chatId, leafSlotId)
     const rows = yield* lib.refsWhere(
-      `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+      `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL
        AND EXISTS (SELECT 1 FROM entity_revisions h WHERE h.id = r.head_revision_id
          AND json_extract(h.doc_json, '$.owner.chat') = ? AND json_extract(h.doc_json, '$.kind') = 'imported_summary')`,
       [userId, chatId]
@@ -52,7 +52,6 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
       const [run] = yield* sql<{
         n: number
         root: number
-        merged: number
         generating: number
         hidden: number
       }>`WITH RECURSIVE chain(id, parent, depth) AS (
@@ -61,11 +60,10 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
             WHERE c.id <> ${first}
         ) SELECT count(*) AS n,
           coalesce(sum(c.id = ${first} AND c.parent IS NULL), 0) AS root,
-          coalesce(sum(EXISTS (SELECT 1 FROM slot_parents m WHERE m.slot_id = c.id)), 0) AS merged,
           coalesce(sum(coalesce(v.status = 'generating', 0)), 0) AS generating,
           coalesce(sum(${contextExcludedIn(sql, fork)}), 0) AS hidden
           FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}`
-      if (!run || run.n < 1 || run.root !== 1 || run.merged > 0 || run.generating > 0) continue
+      if (!run || run.n < 1 || run.root !== 1 || run.generating > 0) continue
       return {
         noteEntity: row.entity_id,
         content: note.value.content,
@@ -82,7 +80,7 @@ export const importedSummary = (sql: SqlClient.SqlClient, userId: UserId, chatId
 export const importedSummaryNotes = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
   Effect.map(
     makeLibraryQueries(sql).refsWhere(
-      `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+      `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL
        AND EXISTS (SELECT 1 FROM entity_revisions h WHERE h.id = r.head_revision_id
          AND json_extract(h.doc_json, '$.owner.chat') = ? AND json_extract(h.doc_json, '$.kind') = 'imported_summary')`,
       [userId, chatId]

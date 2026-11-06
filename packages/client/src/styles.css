@@ -6,6 +6,10 @@
   .tile-toggle-surface:not(:hover):not(:focus-within) .tile-toggle[aria-pressed="false"] {
     opacity: 0;
   }
+  /* A character tile's Open beside, the same way. */
+  .tile-toggle-surface:not(:hover):not(:focus-within) .tile-beside {
+    opacity: 0;
+  }
 }
 
 /*

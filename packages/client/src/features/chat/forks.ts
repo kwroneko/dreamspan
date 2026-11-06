@@ -66,6 +66,19 @@ export const branchLabel = (fork: Fork) =>
 /** Its last message's time, else when it was made. */
 export const branchLastAt = (fork: Pick<Fork, "createdAt" | "endAt">) => fork.endAt ?? fork.createdAt
 
+/** The groups a chat's branches are listed in, as the left panel lists them (owner, 2026-11-04). */
+export type BranchGroup = "pinned" | "named" | "other"
+export const branchGroup = (fork: Pick<Fork, "pinnedAt" | "name">): BranchGroup =>
+  fork.pinnedAt !== null ? "pinned" : fork.name !== null && fork.name !== "" ? "named" : "other"
+const groupOrder: Record<BranchGroup, number> = { pinned: 0, named: 1, other: 2 }
+/** Pinned, then named, then the rest, each by last message, newest first. */
+export const orderBranches = <F extends Pick<Fork, "pinnedAt" | "name" | "createdAt" | "endAt">>(
+  forks: ReadonlyArray<F>
+): Array<F> =>
+  [...forks].sort(
+    (a, b) => groupOrder[branchGroup(a)] - groupOrder[branchGroup(b)] || branchLastAt(b) - branchLastAt(a)
+  )
+
 /** What the chat opening on a branch means, wherever it's marked. */
 export const OPENS_HERE_HINT =
   "The chat opens on this branch: the one you last wrote in or made. An imported chat opens where it was last open."

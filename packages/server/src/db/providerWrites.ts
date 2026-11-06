@@ -1,3 +1,4 @@
+import { writeSetting } from "./settings.ts"
 import { admitRequest } from "./lcmBackfill.ts"
 // Connection, model and ledger write handlers (spec/PROVIDERS.md §2, §3, §9). They run
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
@@ -107,13 +108,8 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
   const handlers = {
     SetCostSettings: ({ userId, expectedRevision, rules }) =>
       Effect.gen(function* () {
-        const [row] = yield* sql<{ revision: number }>`SELECT revision FROM cost_settings WHERE user_id = ${userId}`
-        const actual = row?.revision ?? 0
-        if (actual !== expectedRevision)
-          return yield* new StaleWrite({ entity: "cost settings", id: userId, expected: expectedRevision, actual })
         for (const rule of rules) if (rule.connectionId !== null) yield* ownedConnection(userId, rule.connectionId)
-        const revision = actual + 1
-        yield* sql`INSERT INTO cost_settings(user_id, revision, rules_json) VALUES (${userId}, ${revision}, ${JSON.stringify(rules)}) ON CONFLICT(user_id) DO UPDATE SET revision = excluded.revision, rules_json = excluded.rules_json`
+        const revision = yield* writeSetting(sql, "user", userId, "cost", rules, expectedRevision)
         return { revision, rules }
       }).pipe(transaction(sql, "SetCostSettings")),
     CreateConnection: ({ userId, connectionId, kind, api, settings, credential }) =>
@@ -332,11 +328,9 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
       }).pipe(transaction(sql, "SetModelHidden")),
 
     SetAppSetting: ({ key, value }) =>
-      sql`INSERT INTO app_settings (key, value_json) VALUES (${key}, ${JSON.stringify(value)})
-          ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json`.pipe(
-        Effect.asVoid,
-        transaction(sql, "SetAppSetting")
-      ),
+      writeSetting(sql, "app", "", key, value)
+        .pipe(Effect.catchTag("StaleWrite", Effect.die))
+        .pipe(Effect.asVoid, transaction(sql, "SetAppSetting")),
 
     RecordImageTokenCount: ({ userId, sha256, kind, modelKey, detail, tokens }) =>
       sql`INSERT INTO image_token_counts ${sql.insert({

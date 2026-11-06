@@ -132,7 +132,7 @@ it.live(
           const child = yield* start()
           yield* eventually(() => childOutput.includes("Listening on"), 60_000)
           yield* fixtureSql(config.dataDir, [
-            { sql: "UPDATE user_settings SET value_json='{}' WHERE key='generation.lcm'" },
+            { sql: "UPDATE settings SET value_json='{}' WHERE key='generation.lcm'" },
             {
               sql: `INSERT INTO state_events (id, chat_id, slot_id, version_id, seq, key, scope, value_json, origin, created_at)
                 SELECT ?, ?, NULL, NULL, (SELECT max(seq) + 1 FROM state_events WHERE chat_id = ?2 AND slot_id IS NULL),

@@ -18,7 +18,10 @@ lcmTest("HTTP folder imports keep ST's instruction as an editable default used a
     assert.strictEqual(defaults.lcm?.tail, prompt)
     assert.deepStrictEqual(defaults.model, h.primary)
     const [stored] = yield* fixtureSql(h.dataDir, [
-      { sql: "SELECT value_json FROM user_settings WHERE user_id=? AND key='import.st.memory'", params: [h.userId] }
+      {
+        sql: "SELECT value_json FROM settings WHERE scope='user' AND scope_id=? AND key='import.st.memory'",
+        params: [h.userId]
+      }
     ])
     assert.deepInclude(JSON.parse(stored![0]!.value_json as string), memory)
     const chats = yield* h.api.ListChats({ limit: 50, before: null })

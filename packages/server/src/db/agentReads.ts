@@ -330,6 +330,16 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("LookupLore")),
 
+    RolloutReceipt: ({ userId, rolloutId, toolCallId }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{ readonly result: string | null }>`
+          SELECT receipt.result_json AS result FROM rollouts r JOIN chats c ON c.id = r.chat_id
+          LEFT JOIN rollout_receipts receipt ON receipt.rollout_id = r.id AND receipt.tool_call_id = ${toolCallId}
+          WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        if (!row) return yield* new NotFound({ entity: "rollout", id: rolloutId })
+        return row.result === null ? null : (JSON.parse(row.result) as string)
+      }).pipe(query("RolloutReceipt")),
+
     RolloutMaterial: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{

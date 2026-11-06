@@ -1,3 +1,4 @@
+import { validateStorageKindWrites } from "./storageKinds.ts"
 import { Effect } from "effect"
 import { SqlClient, SqlError } from "effect/sql"
 import { toStorageError } from "./connection.ts"
@@ -26,7 +27,11 @@ const typedErrors =
 export const transaction =
   (sql: SqlClient.SqlClient, operation: string) =>
   <A, E, R>(body: Effect.Effect<A, E | SqlError.SqlError, R>) =>
-    sql.withTransaction(Effect.tap(body, () => settleSummaries(sql))).pipe(typedErrors(operation), timed(operation))
+    sql
+      .withTransaction(
+        Effect.tap(body, () => Effect.andThen(validateStorageKindWrites(sql, operation), settleSummaries(sql)))
+      )
+      .pipe(typedErrors(operation), timed(operation))
 
 /**
  * A read operation: one read transaction, so all its statements see the same snapshot,

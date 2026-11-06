@@ -120,7 +120,7 @@ export const registerItemActions = () => [
   libraryItemActions.register({
     id: "library.archive",
     order: 25,
-    available: ({ entry }) => entry.kind === "preset" && entry.refKind !== "chat_override",
+    available: ({ entry }) => entry.kind === "preset",
     direct: ArchiveAction
   }),
   libraryItemActions.register({
@@ -133,9 +133,10 @@ export const registerItemActions = () => [
   libraryItemActions.register({
     id: "library.update",
     order: 40,
-    // Presets and lorebooks merge a new version of their file; a card takes one wholesale
+    // Original presets and lorebooks merge a new version of their file (a variant takes its
+    // original's through Merge); a card takes one wholesale
     // through "Import a new version…" (features/cardImport), until cards have a merge too.
-    available: ({ entry }) => entry.refKind === "upstream" && entry.kind !== "card",
+    available: ({ entry }) => entry.kind !== "card" && entry.parentEntityId === null,
     menu: UpdateItem,
     description: "Imports a new version of its file, merged with your own edits."
   }),

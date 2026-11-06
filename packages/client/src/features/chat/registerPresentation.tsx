@@ -16,7 +16,6 @@ import {
   messagePreviews,
   summaryPreviews,
   chatColumns,
-  chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
   messageVersions,
@@ -31,6 +30,8 @@ import { LcmBoundary } from "./LcmBoundary.tsx"
 import { CoverageRail } from "./CoverageRail.tsx"
 import { HistoryMessagePreview, HistorySummaryPreview, HistoryPreviewProvider } from "./historyPreview.tsx"
 import { ChatPortraitProvider } from "./ChatPortraitProvider.tsx"
+import { BoundPortraits } from "./BoundPortraits.tsx"
+import { boundEditorSurroundings } from "../editor/workspaceViews.ts"
 import { PortraitColumn } from "./PortraitColumn.tsx"
 import { AssemblyRefusal } from "./AssemblyRefusal.tsx"
 import { LearnContextLimit } from "./LearnContextLimit.tsx"
@@ -77,9 +78,6 @@ const LcmFields = deferred<Parameters<typeof import("./LcmFields.tsx").LcmFields
 )
 const PresetWorkspace = deferred<Parameters<typeof import("../editor/PresetWorkspace.tsx").PresetWorkspace>[0]>(() =>
   import("../editor/PresetWorkspace.tsx").then((m) => ({ default: m.PresetWorkspace }))
-)
-const PresetOverlayHost = deferred<Parameters<typeof import("../editor/PresetWorkspace.tsx").PresetOverlayHost>[0]>(
-  () => import("../editor/PresetWorkspace.tsx").then((m) => ({ default: m.PresetOverlayHost }))
 )
 const BranchControl = deferred<Parameters<typeof import("./BranchControl.tsx").BranchControl>[0]>(() =>
   import("./BranchControl.tsx").then((m) => ({ default: m.BranchControl }))
@@ -171,11 +169,12 @@ export const registerPresentation = () => [
   chatSurfaceProviders.register({
     id: "chat.preset-workspace",
     order: 20,
-    component: ({ children, session, view, wide, onOpenPanel }) => (
+    component: ({ children, session, view, cast, wide, onOpenPanel }) => (
       <PresetWorkspace
         compact={!wide}
         context={view.history?.presetContext ?? null}
         chat={{ chatId: session.id, forkId: view.forkId }}
+        live={{ session, cast }}
         onOpen={() => {
           if (!wide) onOpenPanel(null)
         }}
@@ -194,10 +193,7 @@ export const registerPresentation = () => [
     )
   }),
   chatColumns.register({ id: "chat.portrait-column", order: 10, component: PortraitColumn }),
-  chatOverlays.register({
-    id: "chat.preset-overlay",
-    order: 10,
-    component: (props) => <PresetOverlayHost {...props} />
-  }),
+  // An editor opened from the chat, in its own tab, opens pictures in the same column beside it.
+  boundEditorSurroundings.register({ id: "chat.portraits", order: 10, component: BoundPortraits }),
   ...registerImages()
 ]

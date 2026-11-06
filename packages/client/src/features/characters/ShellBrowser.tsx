@@ -6,10 +6,13 @@ import { sidebarChatBrowse } from "./ChatBrowseBar.tsx"
 import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import { useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
+import { Link, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
+import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
+import { openOnPlainClick } from "../../ui/links.ts"
 import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useMemo, useRef, useState } from "react"
+import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncView, ErrorAlert, FailureView, useAction } from "../../actions.tsx"
 import type { ForkId } from "@rp/shared/chat.ts"
 import { InlineRename } from "../../ui/InlineRename.tsx"
@@ -23,7 +26,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Icon } from "../../ui/Icon.tsx"
-import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton, OVER_PICTURE, Tooltip } from "../../ui/Tooltip.tsx"
 import { forkLabel, formatMoment, OPENS_HERE_HINT } from "../chat/forks.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
@@ -36,6 +39,7 @@ import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
+import { WindowedList } from "../../ui/WindowedList.tsx"
 import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
 import {
   CharacterGrid,
@@ -135,14 +139,21 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean, splitNavigation = fals
   }
   return open
 }
+/** Where a fork's row links: the chat on that fork (a plain click opens it with the panel's place). */
+const forkLink = (fork: ShellFork) => ({
+  to: "/chats/$chatId" as const,
+  params: { chatId: fork.sourceChatId ?? fork.chat.id },
+  search: { fork: fork.forkId }
+})
+
 export function GroupTile({ fork }: { fork: ShellFork }) {
   const open = useOpenFork(fork, true)
   return (
     <div className="tile-toggle-surface relative flex flex-col overflow-hidden rounded-lg border border-border bg-surface">
       <Tooltip label="Opens this chat.">
-        <button
-          type="button"
-          onClick={open}
+        <Link
+          {...forkLink(fork)}
+          onClick={openOnPlainClick(open)}
           data-layout-audit-ignore="inset: Whole group tile is the open control"
           aria-label={`Open chat ${fork.chatName}`}
           className="flex w-full flex-1 flex-col text-left"
@@ -163,10 +174,10 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
             </span>
             {fork.branches > 1 && <span className="mt-auto text-xs text-muted">{fork.branches} branches</span>}
           </span>
-        </button>
+        </Link>
       </Tooltip>
       <span data-layout-overlay="Pin action sits over the group portrait" className="absolute right-2 top-2">
-        <PinButton fork={fork} className="tile-toggle bg-surface" />
+        <PinButton fork={fork} className={`tile-toggle ${OVER_PICTURE}`} />
       </span>
     </div>
   )
@@ -377,6 +388,9 @@ export function ForkRow({
   entity?: EntityId | null
 }) {
   const open = useOpenFork(fork, scopeChat, splitNavigation)
+  const besideHref = useRouter().buildLocation(forkLink(fork)).href
+  const canBeside = useCanOpenBeside()
+  const [menu, setMenu] = useState(false)
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
@@ -392,96 +406,122 @@ export function ForkRow({
       data-fork-row
       className={`fork-row @container/fork-row relative flex w-full shrink-0 max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
-      <Tooltip
-        label={`${title}. ${
-          perFork
-            ? `Opens this branch${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
-            : "Opens the chat on the branch you last used."
-        }`}
-      >
-        <button
-          type="button"
-          onClick={open}
-          aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}`}
-          aria-current={here ? "page" : undefined}
-          data-chat-id={fork.chat.id}
-          data-fork-id={fork.forkId}
-          className="fork-row-open flex min-w-0 flex-1 items-center self-stretch gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          {!branchOnly && (
-            <Tooltip label={`Characters: ${fork.cast.map((c) => c.name).join(", ")}`}>
-              <span
-                tabIndex={0}
-                aria-label={`Characters: ${fork.cast.map((c) => c.name).join(", ")}`}
-                data-row-portraits
-                data-layout-audit-ignore="overlap: The count tile sits partly behind the last fully visible portrait; gap: Portraits have a positive gap while the count tile intentionally overlaps the last portrait"
-                className="relative flex w-fit shrink-0 gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                {fork.cast.slice(0, 2).map((c) => (
-                  <Avatar
-                    key={c.entityId}
-                    id={c.entityId}
-                    name={c.name}
-                    mediaId={c.avatarMediaId}
-                    crop={c.avatarCrop}
-                    size="md"
-                  />
-                ))}
-                <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow" />
-              </span>
-            </Tooltip>
-          )}
-          <span data-row-text className="flex min-w-0 flex-1 flex-col self-stretch">
-            {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
-            <span data-chat-title className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]">
-              <span className="font-medium">{title}</span>
-              {opensHere && (
-                <>
-                  {" "}
-                  <Badge>opens here</Badge>
-                </>
+      <ContextMenu
+        label={`Actions for ${title}`}
+        open={menu}
+        onOpenChange={setMenu}
+        trigger={
+          <Tooltip
+            label={`${title}. ${
+              perFork
+                ? `Opens this branch${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
+                : "Opens the chat on the branch you last used."
+            }${canBeside ? " Right-click to open it beside." : ""}`}
+          >
+            <Link
+              {...forkLink(fork)}
+              onClick={openOnPlainClick(open)}
+              aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}`}
+              aria-current={here ? "page" : undefined}
+              data-chat-id={fork.chat.id}
+              data-fork-id={fork.forkId}
+              className="fork-row-open flex min-w-0 flex-1 items-center self-stretch gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              {!branchOnly && (
+                <Tooltip label={`Characters: ${fork.cast.map((c) => c.name).join(", ")}`}>
+                  <span
+                    tabIndex={0}
+                    aria-label={`Characters: ${fork.cast.map((c) => c.name).join(", ")}`}
+                    data-row-portraits
+                    data-layout-audit-ignore="overlap: The count tile sits partly behind the last fully visible portrait; gap: Portraits have a positive gap while the count tile intentionally overlaps the last portrait"
+                    className="relative flex w-fit shrink-0 gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  >
+                    {fork.cast.slice(0, 2).map((c) => (
+                      <Avatar
+                        key={c.entityId}
+                        id={c.entityId}
+                        name={c.name}
+                        mediaId={c.avatarMediaId}
+                        crop={c.avatarCrop}
+                        size="md"
+                      />
+                    ))}
+                    <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow" />
+                  </span>
+                </Tooltip>
               )}
-            </span>
-            {branchLine !== null && (
-              <span
-                className="line-clamp-2 text-xs text-ellipsis break-normal [overflow-wrap:normal]"
-                title={branchLine}
-              >
-                {branchLine}
+              <span data-row-text className="flex min-w-0 flex-1 flex-col self-stretch">
+                {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
+                <span
+                  data-chat-title
+                  className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]"
+                >
+                  <span className="font-medium">{title}</span>
+                  {opensHere && (
+                    <>
+                      {" "}
+                      <Badge>opens here</Badge>
+                    </>
+                  )}
+                </span>
+                {branchLine !== null && (
+                  <span
+                    className="line-clamp-2 text-xs text-ellipsis break-normal [overflow-wrap:normal]"
+                    title={branchLine}
+                  >
+                    {branchLine}
+                  </span>
+                )}
+                {details && fork.cast.length > 1 && (
+                  <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
+                    with {fork.cast.map((c) => c.label).join(", ")}
+                  </span>
+                )}
+                {details && (
+                  <span data-chat-meta className="text-xs text-muted [overflow-wrap:anywhere]">
+                    started{" "}
+                    {formatDay(
+                      chatName(importState(fork.chat.title).title, fork.cast, fork.chat.createdAt ?? null).started ??
+                        new Date(fork.createdAt)
+                    )}{" "}
+                    · {fork.messages.toLocaleString()} {fork.messages === 1 ? "message" : "messages"}
+                  </span>
+                )}
+                <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
+                  {fork.preview || "No messages yet"}
+                </span>
+                {relation !== null && (
+                  <span data-row-relation className="text-xs text-muted">
+                    {/* Wraps only between its two parts. */}
+                    <span className="whitespace-nowrap">{relation[0]}</span> ·{" "}
+                    <span className="whitespace-nowrap">{relation[1]}</span>
+                  </span>
+                )}
+                <span data-row-when className="mt-auto text-xs text-muted">
+                  {perFork ? "Last message " : ""}
+                  {perFork ? formatMoment(last) : formatWhen(last)}
+                </span>
               </span>
-            )}
-            {details && fork.cast.length > 1 && (
-              <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
-                with {fork.cast.map((c) => c.label).join(", ")}
-              </span>
-            )}
-            {details && (
-              <span data-chat-meta className="text-xs text-muted [overflow-wrap:anywhere]">
-                started{" "}
-                {formatDay(
-                  chatName(importState(fork.chat.title).title, fork.cast, fork.chat.createdAt ?? null).started ??
-                    new Date(fork.createdAt)
-                )}{" "}
-                · {fork.messages.toLocaleString()} {fork.messages === 1 ? "message" : "messages"}
-              </span>
-            )}
-            <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
-              {fork.preview || "No messages yet"}
-            </span>
-            {relation !== null && (
-              <span data-row-relation className="text-xs text-muted">
-                {/* Wraps only between its two parts. */}
-                <span className="whitespace-nowrap">{relation[0]}</span> ·{" "}
-                <span className="whitespace-nowrap">{relation[1]}</span>
-              </span>
-            )}
-            <span data-row-when className="mt-auto text-xs text-muted">
-              {perFork ? "Last message " : ""}
-              {perFork ? formatMoment(last) : formatWhen(last)}
-            </span>
-          </span>
-        </button>
-      </Tooltip>
+            </Link>
+          </Tooltip>
+        }
+      >
+        <MenuItem icon="chat" description="Opens it here, as a click does." onClick={open}>
+          Open
+        </MenuItem>
+        {canBeside && (
+          <MenuItem icon="split-right" description={OPEN_BESIDE_HINT} onClick={() => openBeside(besideHref)}>
+            Open beside
+          </MenuItem>
+        )}
+        <MenuItem
+          icon="external"
+          description="Opens it in a new tab of the browser."
+          onClick={() => window.open(besideHref, "_blank", "noopener")}
+        >
+          Open in a new browser tab
+        </MenuItem>
+      </ContextMenu>
       <div
         data-row-actions
         data-layout-overlay="Corner actions share the full-width open control in narrow chat rows"
@@ -499,7 +539,10 @@ export function ForkRow({
  * 2026-11-01): switch branches without leaving the list above; its header lists them as the
  * panel's list instead. Collapsed or expanded per device.
  */
+const shellForkKey = (fork: ShellFork) => fork.forkId
+
 export function OpenChatBranches() {
+  const scrollOffset = useRef(0)
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const { scope, setScope, grid } = useShellNavigation()
@@ -594,23 +637,29 @@ export function OpenChatBranches() {
           onClick={() => setScope({ entity: null, chat: displayedChat ?? null })}
         />
       </div>
-      <div
-        data-foot-body
-        inert={!open}
-        aria-hidden={!open}
-        style={open ? undefined : { height: 0, maxHeight: 0, visibility: "hidden" }}
-        className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
-      >
-        {rows.map((f) => (
-          <ForkRow
-            key={f.forkId}
-            fork={f}
-            perFork
-            branchOnly
-            here={displayedFork ? f.forkId === displayedFork : f.current}
-          />
-        ))}
-      </div>
+      {open ? (
+        <WindowedList
+          data-foot-body
+          items={rows}
+          itemKey={shellForkKey}
+          initialOffset={() => scrollOffset.current}
+          onScroll={(event) => {
+            scrollOffset.current = event.currentTarget.scrollTop
+          }}
+          className="min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
+          renderItem={(f) => (
+            <ForkRow
+              key={f.forkId}
+              fork={f}
+              perFork
+              branchOnly
+              here={displayedFork ? f.forkId === displayedFork : f.current}
+            />
+          )}
+        />
+      ) : (
+        <div data-foot-body inert aria-hidden style={{ height: 0, maxHeight: 0, visibility: "hidden" }} />
+      )}
     </section>
   )
 }

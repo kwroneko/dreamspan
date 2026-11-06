@@ -281,15 +281,23 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         AND (${binned ? 1 : 0} OR e.deleted_at IS NULL)
         AND (${entity ?? null} IS NULL OR e.id = ${entity ?? null})`.pipe(Effect.map(([row]) => row))
 
-  /** A ref the user owns, of this chat if it's an override, with its head's document. */
+  /**
+   * A ref the user owns, with its head's document, and the file it or its nearest ancestor was
+   * imported from: a fork answers to its original's ST name (a card's linked lorebook).
+   */
   const refHead = (refId: string, kind: string, entity?: string) =>
     sql<{ id: string; entity_id: string; head_revision_id: string; doc_json: string; source_path: string | null }>`
       SELECT r.id, r.entity_id, r.head_revision_id, h.doc_json,
-        coalesce(r.source_path, (SELECT u.source_path FROM entity_refs u WHERE u.entity_id = r.entity_id AND u.ref_kind = 'upstream')) AS source_path
+        coalesce(r.source_path, (
+          WITH RECURSIVE up(id, depth) AS (
+            SELECT e.forked_from_entity_id, 1 WHERE e.forked_from_entity_id IS NOT NULL
+            UNION SELECT a.forked_from_entity_id, up.depth + 1 FROM entities a JOIN up ON a.id = up.id
+              WHERE a.forked_from_entity_id IS NOT NULL)
+          SELECT u.source_path FROM up JOIN entity_refs u ON u.entity_id = up.id
+          WHERE u.source_path IS NOT NULL ORDER BY up.depth LIMIT 1)) AS source_path
       FROM entity_refs r
       JOIN entities e ON e.id = r.entity_id JOIN entity_revisions h ON h.id = r.head_revision_id
       WHERE r.id = ${refId} AND e.owner_user_id = ${userId} AND e.kind = ${kind} AND e.deleted_at IS NULL
-        AND (r.chat_id IS NULL OR r.chat_id = ${chatId})
         AND (${entity ?? null} IS NULL OR e.id = ${entity ?? null})`.pipe(Effect.map(([row]) => row))
 
   /** A card's single upstream ref when no revision is pinned. */
@@ -297,7 +305,6 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     sql<{ id: string }>`
       SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
       WHERE r.entity_id = ${entity} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL
-        AND r.ref_kind = 'upstream'
       LIMIT 1`.pipe(Effect.map(([row]) => row?.id ?? null))
 
   const card = (entity: string, binding: { ref?: string | undefined; revision?: string | undefined } | undefined) =>
@@ -722,7 +729,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const rows = yield* sql<{ entity: string; revision: string; doc_json: string; card: string | null }>`
           SELECT e.id AS entity, r.head_revision_id AS revision, h.doc_json,
             json_extract(h.doc_json, '$.owner.card') AS card
-          FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+          FROM entities e JOIN entity_refs r ON r.entity_id = e.id
           JOIN entity_revisions h ON h.id = r.head_revision_id
           WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
             AND (json_extract(h.doc_json, '$.owner.chat') = ${chatId}
@@ -946,8 +953,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         if (chain.summary) {
           const [available] =
             yield* sql`SELECT r.id FROM entity_refs r JOIN entities e ON e.id=r.entity_id WHERE r.id=${chain.summary}
-            AND e.owner_user_id=${userId} AND e.kind='preset' AND e.deleted_at IS NULL AND e.archived_at IS NULL
-            AND (r.chat_id IS NULL OR r.chat_id=${chatId})`
+            AND e.owner_user_id=${userId} AND e.kind='preset' AND e.deleted_at IS NULL AND e.archived_at IS NULL`
           if (available) {
             const found = yield* presetFrom(chain.summary, "user")
             if (found) return found

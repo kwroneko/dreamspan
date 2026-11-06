@@ -27,7 +27,8 @@ import {
 } from "../../ui/Block.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
-import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
+import { Menu, MenuItem, MenuLinkItem, MenuSeparator } from "../../ui/Menu.tsx"
+import { openOnPlainClick } from "../../ui/links.ts"
 import { type OpenBlocks, useOpenBlocks } from "../../ui/openBlocks.ts"
 import { revealAdded } from "../../ui/reveal.ts"
 import { Badge } from "../../ui/Surface.tsx"
@@ -371,13 +372,18 @@ export function NoteBlock({
                   trigger={<BlockMenuButton label={`Actions for ${title}`} />}
                 >
                   {workspace && !large && (
-                    <MenuItem
+                    <MenuLinkItem
                       icon="expand"
                       description="Opens this note in the main column, where it stays open while the side panel changes."
-                      onClick={() => workspace.open(ref.id, NOTE_FOCUS)}
+                      render={
+                        <a
+                          href={workspace.href(ref.id, NOTE_FOCUS)}
+                          onClick={openOnPlainClick(() => workspace.open(ref.id, NOTE_FOCUS))}
+                        />
+                      }
                     >
                       Large editor
-                    </MenuItem>
+                    </MenuLinkItem>
                   )}
                   {loaded && <SlotOutlet slot={noteMenuItems} props={{ store, title }} />}
                   <MenuItem

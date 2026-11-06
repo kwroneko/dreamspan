@@ -638,9 +638,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         SELECT id, title FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
       if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
       // The legacy physical-chat operation must not erase its split-off groups either.
-      const [split] = yield* sql`SELECT 1 FROM forks f JOIN user_settings m
-        ON m.user_id = ${userId} AND m.key = 'split-chat:' || f.id AND m.value_json = 'true'
-        WHERE f.chat_id = ${chatId} LIMIT 1`
+      const [split] = yield* sql`SELECT 1 FROM forks f WHERE f.chat_id = ${chatId} AND f.split_chat = 1 LIMIT 1`
       if (split) {
         const { groupId, members } = yield* loadChatGroup(userId, chatId, null)
         return yield* removeChatGroup(userId, chatId, groupId, members, chat.title || "Untitled chat")
@@ -676,7 +674,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     Effect.gen(function* () {
       const [entity] = yield* sql<{ id: string; kind: string; label: string | null; bytes: number }>`
         SELECT e.id, e.kind,
-          (SELECT label FROM entity_refs WHERE entity_id = e.id AND ref_kind = 'upstream' LIMIT 1) AS label,
+          (SELECT label FROM entity_refs WHERE entity_id = e.id LIMIT 1) AS label,
           (SELECT coalesce(sum(${sql.literal(`${bytes("doc_json")} + ${bytes("search_text")}`)}), 0) FROM entity_revisions WHERE entity_id = e.id) AS bytes
         FROM entities e WHERE e.id = ${entityId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`
       if (!entity) return yield* new NotFound({ entity: "entity", id: entityId })
@@ -966,10 +964,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         yield* dropSelections(item.chat_id, item.slot_id, item.target_id)
       }
 
-      // A chat goes with everything in it, its other bin items included. A connection
-      // using one of its overrides as its preset loses that preset.
-      yield* run(`UPDATE connections SET preset_override_ref_id = NULL
-                  WHERE preset_override_ref_id IN (SELECT id FROM entity_refs WHERE chat_id IN (${targets("chat")}))`)
+      // A chat goes with everything in it, its other bin items included.
       yield* run(`DELETE FROM bin_items WHERE kind <> 'chat' AND chat_id IN (${targets("chat")})`)
       yield* run(`DELETE FROM chats WHERE id IN (${targets("chat")})`)
 

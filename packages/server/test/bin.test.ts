@@ -451,71 +451,68 @@ describe("recycle bin", () => {
     }).pipe(Effect.provide(database(dir)))
   })
 
-  it.live(
-    "a chat holding a connection's preset override can be evicted, and a failed eviction never blocks a delete",
-    () => {
-      const dir = tempDir("bin")
-      return Effect.gen(function* () {
-        const { writer, reader, userId, a, b, bin, newChat, path } = yield* setup()
-        const preset = yield* writer.CreateEntity({
-          userId,
-          kind: "preset",
-          label: "Narrator",
-          subtitle: "",
-          doc: presetDoc(),
-          schemaVersion: 1,
-          origin: "user",
-          sourcePath: null
-        })
-        const story = yield* newChat("Story")
-        const override = yield* writer.CreateChatOverride({ userId, refId: preset.ref.id, chatId: story.id })
-        const connection = yield* writer.CreateConnection({
-          userId,
-          connectionId: uuidv7() as ConnectionId,
-          kind: "openai-chat",
-          api: "openai-completions",
-          settings: {
-            name: "Local",
-            baseUrl: "http://127.0.0.1:8081/v1",
-            compat: {},
-            cacheTtlS: null,
-            maxConcurrent: null,
-            presetOverrideRefId: override.id
-          },
-          credential: { existing: null }
-        })
-        yield* writer.DeleteChat({ userId, chatId: story.id })
-        // The bin holds one item, so this delete evicts the chat for good.
-        yield* writer.DeleteMessage({ userId, slotId: b.slotId })
-        assert.deepStrictEqual(
-          (yield* bin()).map((i) => i.excerpt),
-          ["b"]
-        )
-        const after = yield* reader.GetConnection({ userId, connectionId: connection.id })
-        assert.isNull(after.presetOverrideRefId)
-
-        // A purge that fails at its last step is rolled back whole, skipped and left in the
-        // bin; the delete goes through.
-        const sqlite = (statement: string) => {
-          const db = new DatabaseSync(databaseFile(dir))
-          db.exec(statement)
-          db.close()
-        }
-        sqlite(`CREATE TRIGGER purge_fails BEFORE DELETE ON bin_items BEGIN SELECT RAISE(ABORT, 'injected'); END`)
-        yield* writer.DeleteMessage({ userId, slotId: a.slotId })
-        const items = yield* bin()
-        assert.deepStrictEqual(
-          items.map((i) => i.excerpt),
-          ["a", "b"]
-        )
-        sqlite(`DROP TRIGGER purge_fails`)
-        yield* writer.RestoreBinItem({ userId, itemId: items[1]!.id })
-        assert.deepStrictEqual(yield* path(), ["root", "b", "c"])
-      }).pipe(
-        Effect.provide(database(dir, { deletedItems: 1, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
+  it.live("a chat holding a connection's preset can be evicted, and a failed eviction never blocks a delete", () => {
+    const dir = tempDir("bin")
+    return Effect.gen(function* () {
+      const { writer, reader, userId, a, b, bin, newChat, path } = yield* setup()
+      const preset = yield* writer.CreateEntity({
+        userId,
+        kind: "preset",
+        label: "Narrator",
+        subtitle: "",
+        doc: presetDoc(),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const story = yield* newChat("Story")
+      const connection = yield* writer.CreateConnection({
+        userId,
+        connectionId: uuidv7() as ConnectionId,
+        kind: "openai-chat",
+        api: "openai-completions",
+        settings: {
+          name: "Local",
+          baseUrl: "http://127.0.0.1:8081/v1",
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: preset.ref.id
+        },
+        credential: { existing: null }
+      })
+      yield* writer.DeleteChat({ userId, chatId: story.id })
+      // The bin holds one item, so this delete evicts the chat for good; the connection's
+      // preset is a library entry, not the chat's, so it stays.
+      yield* writer.DeleteMessage({ userId, slotId: b.slotId })
+      assert.deepStrictEqual(
+        (yield* bin()).map((i) => i.excerpt),
+        ["b"]
       )
-    }
-  )
+      const after = yield* reader.GetConnection({ userId, connectionId: connection.id })
+      assert.strictEqual(after.presetOverrideRefId, preset.ref.id)
+
+      // A purge that fails at its last step is rolled back whole, skipped and left in the
+      // bin; the delete goes through.
+      const sqlite = (statement: string) => {
+        const db = new DatabaseSync(databaseFile(dir))
+        db.exec(statement)
+        db.close()
+      }
+      sqlite(`CREATE TRIGGER purge_fails BEFORE DELETE ON bin_items BEGIN SELECT RAISE(ABORT, 'injected'); END`)
+      yield* writer.DeleteMessage({ userId, slotId: a.slotId })
+      const items = yield* bin()
+      assert.deepStrictEqual(
+        items.map((i) => i.excerpt),
+        ["a", "b"]
+      )
+      sqlite(`DROP TRIGGER purge_fails`)
+      yield* writer.RestoreBinItem({ userId, itemId: items[1]!.id })
+      assert.deepStrictEqual(yield* path(), ["root", "b", "c"])
+    }).pipe(
+      Effect.provide(database(dir, { deletedItems: 1, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
+    )
+  })
 
   it.live("eviction never takes the item just deleted, and takes nothing if it can't make room", () => {
     const dir = tempDir("bin")

@@ -102,10 +102,6 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
                 inputs.map((i) => i.slotId)
               )
               const at = (slot: string) => positionIn(pieces, places.get(slot))
-              const [merged] = inputs.length
-                ? yield* sql`SELECT 1 FROM slot_parents WHERE slot_id IN ${sql.in(inputs.map((i) => i.slotId))} LIMIT 1`
-                : []
-              if (merged) return yield* refused("summary must cover a primary-parent chain without merges")
               if (
                 children.length ||
                 inputs[0]?.slotId !== job.first_slot_id ||
@@ -161,13 +157,11 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
             const chain = yield* sql<{
               id: string
               parent_slot_id: string | null
-              merged: number
             }>`WITH RECURSIVE chain AS (
           SELECT id, parent_slot_id, depth FROM slots WHERE id = ${job.last_slot_id} AND chat_id = ${job.chat_id}
           UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN chain p ON p.parent_slot_id = s.id WHERE p.id <> ${job.first_slot_id} AND s.depth >= (SELECT depth FROM slots WHERE id = ${job.first_slot_id})
-        ) SELECT id, parent_slot_id, EXISTS(SELECT 1 FROM slot_parents p WHERE p.slot_id = chain.id) AS merged FROM chain ORDER BY depth`
-            if (chain[0]?.id !== job.first_slot_id || chain.some((s) => s.merged))
-              return yield* refused("summary must cover a primary-parent chain without merges")
+        ) SELECT id, parent_slot_id FROM chain ORDER BY depth`
+            if (chain[0]?.id !== job.first_slot_id) return yield* refused("summary must cover a primary-parent chain")
             if (!content.trim()) return yield* refused("a completed summary cannot be empty")
             if (job.level === 1) {
               if (children.length || inputs.length !== chain.length || inputs.some((i, n) => i.slotId !== chain[n]!.id))

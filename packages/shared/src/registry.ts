@@ -26,10 +26,10 @@ export interface Registry<A extends { readonly id: string }> {
   readonly list: () => ReadonlyArray<A>
 }
 
-export const makeRegistry = <A extends { readonly id: string }>(): Registry<A> => {
+export const makeRegistry = <A extends { readonly id: string }>(initial: ReadonlyArray<A> = []): Registry<A> => {
   // Each id keeps a stack of registrations; the newest is in effect. A registration
   // removes itself, wherever it is in the stack, so scopes may close in any order.
-  const stacks = new Map<string, Array<Registration<A>>>()
+  const stacks = new Map<string, Array<Registration<A>>>(initial.map((value) => [value.id, [{ value }]]))
 
   const push = (id: string, value: A | typeof DISABLED) =>
     Effect.acquireRelease(

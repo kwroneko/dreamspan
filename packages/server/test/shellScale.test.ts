@@ -29,8 +29,8 @@ describe("group read scale", () => {
             params: [now]
           },
           {
-            sql: `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
-            ${series(1000)} SELECT printf('r-%04d', i), printf('e-%04d', i), 'upstream', printf('v-%04d', i),
+            sql: `INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+            ${series(1000)} SELECT printf('r-%04d', i), printf('e-%04d', i), printf('v-%04d', i),
               'Card ' || i, ?, ? FROM n`,
             params: [now, now]
           },
@@ -52,11 +52,6 @@ describe("group read scale", () => {
             params: [now]
           },
           {
-            sql: `INSERT INTO lanes (id, chat_id, name, created_at) ${series(5000)}
-            SELECT 'l-' || i, printf('c-%05d', i), 'main', ? FROM n`,
-            params: [now]
-          },
-          {
             sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
             ${series(5000)}, depths(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM depths WHERE d < 9)
             SELECT 'v-slot-' || i || '-' || d, 'slot-' || i || '-' || d, 0, 'complete', 'human', 'verbatim', 'imported',
@@ -65,9 +60,9 @@ describe("group read scale", () => {
             params: [now, now]
           },
           {
-            sql: `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
+            sql: `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
             ${series(5000)}, depths(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM depths WHERE d < 9)
-            SELECT 'slot-' || i || '-' || d, printf('c-%05d', i), 'l-' || i,
+            SELECT 'slot-' || i || '-' || d, printf('c-%05d', i),
               CASE WHEN d = 0 THEN NULL ELSE 'slot-' || i || '-' || (d - 1) END, d, 'v-slot-' || i || '-' || d, ? FROM n, depths ORDER BY d, i`,
             params: [now]
           },
@@ -117,8 +112,10 @@ describe("group read scale", () => {
         )
         assert.isBelow(groupsTook, 2000)
         // Cards are described once in people, not repeated in every fork (3.8 MB when they were).
-        // The whole read is for tools and tests now; with fheader's branch fields it's ~2.35 MB here.
-        assert.isBelow(bytes, 3_000_000)
+        // The whole read is for tools and tests. Split, participation, pin and arrival
+        // metadata grew this fixture to 3,206,083 bytes on master (2026-11-05).
+        // Allow under 10% headroom; the app's paged response keeps its own bound below.
+        assert.isBelow(bytes, 3_500_000)
         // What the app sends a page load (fux1): the cards, and the first 100 rows of the chat list.
         const cards = yield* api.GetShellCards()
         const page = yield* api.GetShellForks({

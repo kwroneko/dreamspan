@@ -181,7 +181,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       // The notes and the favourite are the card's own.
       const [note] = yield* api.ListCardNotes({ cardRefId: refId })
       assert.strictEqual(note!.doc.content, "Wren smells of oil.")
-      const favourites = db.prepare("SELECT value_json FROM user_settings WHERE key = 'cards.favourites'").get() as {
+      const favourites = db
+        .prepare("SELECT value_json FROM settings WHERE scope='user' AND key = 'cards.favourites'")
+        .get() as {
         value_json: string
       }
       assert.include(JSON.parse(favourites.value_json).on, entityId)

@@ -181,9 +181,7 @@ export function NotesTab({
   }, [focusCard])
 
   const cardRef = (card: EntityId) =>
-    AsyncResult.isSuccess(refs)
-      ? refs.value.find((ref) => ref.entityId === card && ref.refKind === "upstream")?.id
-      : undefined
+    AsyncResult.isSuccess(refs) ? refs.value.find((ref) => ref.entityId === card)?.id : undefined
   // A note made here is for here: it's on from the latest message (DESIGN §4.1), and open.
   const add = async (group: Group, shared?: SharedNote) => {
     const link = shared ? { link: shared.ref.entityId } : {}

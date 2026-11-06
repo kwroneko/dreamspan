@@ -82,19 +82,14 @@ test.beforeAll(async () => {
       // version records them (castpresence, DESIGN §3.5 [P], ARCHITECTURE §3.8); a join alone
       // doesn't count.
       {
-        sql: `INSERT INTO lanes (id, chat_id, name, created_at)
-          SELECT 'lane-' || id, id, 'main', ? FROM chats WHERE id LIKE 'scale-%'`,
-        params: [now]
-      },
-      {
         sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
           SELECT 'version-' || id, 'slot-' || id, 0, 'complete', 'human', 'verbatim', 'imported', json_array(?), created_at, created_at
           FROM chats WHERE id LIKE 'scale-%'`,
         params: [scale]
       },
       {
-        sql: `INSERT INTO slots (id, chat_id, lane_id, depth, selected_version_id, created_at)
-          SELECT 'slot-' || id, id, 'lane-' || id, 0, 'version-' || id, created_at FROM chats WHERE id LIKE 'scale-%'`
+        sql: `INSERT INTO slots (id, chat_id, depth, selected_version_id, created_at)
+          SELECT 'slot-' || id, id, 0, 'version-' || id, created_at FROM chats WHERE id LIKE 'scale-%'`
       },
       { sql: "UPDATE chats SET active_leaf_slot_id = 'slot-' || id WHERE id LIKE 'scale-%'" },
       { sql: "UPDATE forks SET tip_slot_id = 'slot-' || chat_id WHERE chat_id LIKE 'scale-%'" }
@@ -142,7 +137,7 @@ const phone = async (browser: import("@playwright/test").Browser) => {
 
 const chatLinks = (page: Page) => {
   const list = page.getByRole("main").getByRole("list", { name: "Chats" })
-  return list.getByRole("link").or(list.getByRole("button", { name: /^Open chat / }))
+  return list.getByRole("link").or(list.getByRole("link", { name: /^Open chat / }))
 }
 
 test("a first message typed before the chat exists survives leaving it, and goes once sent", async ({ browser }) => {
@@ -154,7 +149,7 @@ test("a first message typed before the chat exists survives leaving it, and goes
   // A pending chat has the chat's header on a phone, as any chat: its ← opens the menu.
   await page.getByRole("button", { name: "Chats and menu" }).click()
   await page.locator(".fixed.inset-0").getByRole("link", { name: "Home", exact: true }).last().click()
-  await page.getByRole("main").getByRole("button", { name: "Open Fen", exact: true }).click()
+  await page.getByRole("main").getByRole("link", { name: "Open Fen", exact: true }).click()
   await page.getByRole("button", { name: "Close", exact: true }).click()
   await expect(box).toHaveValue(text)
   // A reload, too: it's kept in the browser, not the page.
@@ -210,12 +205,12 @@ test("the phone's chats page loads older chats and finds those not loaded", asyn
 test("Continue and the tile open the chat with the last message, not a newer empty one", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/`)
-  await page.getByRole("main").getByRole("button", { name: "Open Aria Vance", exact: true }).click()
+  await page.getByRole("main").getByRole("link", { name: "Open Aria Vance", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${used}`))
   await page.goto(`${server().url}/cards/${aria}`)
   const main = page.getByRole("main")
   // Her conversation and the group; the chat she only joined isn't one of hers (castpresence).
-  await expect(main.getByRole("button", { name: /^Open chat / })).toHaveCount(2)
+  await expect(main.getByRole("link", { name: /^Open chat / })).toHaveCount(2)
   await main.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${used}`))
 })

@@ -39,11 +39,11 @@ it.live(
             },
             {
               sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < ${n})
-                INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,created_at,fork_id,chain_id)
-                SELECT ?||'-s'||x, ?, (SELECT lane_id FROM slots WHERE id = ?),
+                INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id,chain_id)
+                SELECT ?||'-s'||x, ?,
                   CASE WHEN x = 1 THEN ? ELSE ?||'-s'||(x-1) END,
                   (SELECT depth FROM slots WHERE id = ?) + x, ?||'-v'||x, x, ?, (SELECT chain_id FROM slots WHERE id = ?) FROM n`,
-              params: [tag, chat, tip, tip, tag, tip, tag, forkId, tip]
+              params: [tag, chat, tip, tag, tip, tag, forkId, tip]
             },
             { sql: "UPDATE forks SET tip_slot_id = ? WHERE id = ?", params: [`${tag}-s${n}`, forkId] }
           ])

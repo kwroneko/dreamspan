@@ -54,15 +54,15 @@ export function DocumentSwitcher({
           shown={() => label}
           onValueChange={(next) => {
             if (next === refId) return
-            if (typeof search.editor === "string") {
-              void navigate({
-                to: ".",
-                search: (prev: Record<string, unknown>) => ({ ...prev, editor: next, focus, editorDialog: undefined }),
-                resetScroll: false
-              })
-            } else {
-              void navigate({ to: "/library/$refId", params: { refId: next }, search: focus ? { focus } : {} })
-            }
+            // An editor opened from a chat stays bound to that chat.
+            const chat = typeof search.chat === "string" ? { chat: search.chat } : {}
+            const chatFork = typeof search.chatFork === "string" ? { chatFork: search.chatFork } : {}
+            const chatTab = typeof search.chatTab === "string" ? { chatTab: search.chatTab } : {}
+            void navigate({
+              to: "/library/$refId",
+              params: { refId: next },
+              search: { ...(focus ? { focus } : {}), ...chat, ...chatFork, ...chatTab }
+            })
           }}
         />
       </span>

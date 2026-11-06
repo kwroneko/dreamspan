@@ -98,7 +98,6 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
               depth: number
               version_id: string | null
               amend_count: number
-              merged: number
               generating: number
               images_json: string | null
               withheld_json: string | null
@@ -110,7 +109,6 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
               ) SELECT c.id, c.parent, c.depth,
                 CASE WHEN ${effective(sql, fork)} THEN v.id END AS version_id,
                 CASE WHEN ${effective(sql, fork)} THEN (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) ELSE 0 END AS amend_count,
-                EXISTS(SELECT 1 FROM slot_parents p WHERE p.slot_id = c.id) AS merged,
                 coalesce(v.status = 'generating', 0) AS generating,
                 CASE WHEN ${effective(sql, fork)} THEN (SELECT json_group_array(a.media_id) FROM (SELECT media_id FROM version_attachments
                   WHERE version_id = v.id AND NOT ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "media_id")} ORDER BY ordinal) a) END AS images_json,
@@ -121,7 +119,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
               ORDER BY c.depth DESC`
             if (
               !rows.length ||
-              rows.some((r, n) => r.depth !== source.slotCount - 1 - run.gathered - n || r.merged || r.generating)
+              rows.some((r, n) => r.depth !== source.slotCount - 1 - run.gathered - n || r.generating)
             )
               return yield* reject("StageLcmEnable", "The imported range changed. Review the offer again.")
             yield* sql`INSERT INTO lcm_enable_slots ${sql.insert(rows.map((r) => ({ run_id: runId, ordinal: r.depth, slot_id: r.id, version_id: r.version_id, amend_count: r.amend_count })))}`

@@ -90,7 +90,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
         const after = yield* api.OpenEditor({ refId: original.refId })
         assert.strictEqual(after.doc.description, "Changed file definition")
         assert.strictEqual(after.doc.personality, "Local choice")
-        assert.strictEqual(after.ref.followsRefId, null)
+        assert.strictEqual(after.ref.parentEntityId, null)
         assert.isFalse(after.ref.updateAvailable)
         const forkAfter = yield* api.OpenEditor({ refId: fork.id })
         assert.deepStrictEqual(forkAfter.doc, forkBefore.doc)

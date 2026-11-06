@@ -14,7 +14,7 @@ import { ComposerControls, invokeComposerControl, type ComposerControlContext } 
 // so typing re-renders nothing else.
 import type { CastCard, EntityId, MessageImages } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
@@ -29,6 +29,7 @@ import { HistoryIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { useComposerTurn } from "./composerTurn.ts"
 import { StripRow } from "./nextReplyStrip.tsx"
+import { NO_ONE } from "./ReplyFrom.tsx"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
@@ -232,6 +233,7 @@ export function Composer({
   onSettings: (tab: "model" | "preset" | "cast") => void
   attachmentInput?: AttachmentInput
 }) {
+  const composerId = useId()
   const { compact: phone, ref: composerRef } = useCompactComposer()
   const castView = useCast()
   const { cast } = castView
@@ -313,8 +315,8 @@ export function Composer({
   const pickedReply = choice.replyFrom !== null && faces.includes(choice.replyFrom) ? choice.replyFrom : null
   const hasImages = (attachmentInput?.count ?? 0) > 0
   const replyPlan = useMemo(
-    () => planReply(cast, turnEntries, speaker, pickedReply, draftText, hasImages),
-    [cast, turnEntries, speaker, pickedReply, draftText, hasImages]
+    () => planReply(cast, turnEntries, speaker, pickedReply, draftText, hasImages, choice.noReplies),
+    [cast, turnEntries, speaker, pickedReply, draftText, hasImages, choice.noReplies]
   )
   const { next, replier } = replyPlan
   const replierName = nameOf(castView, replier)
@@ -431,7 +433,15 @@ export function Composer({
       await captured?.begin(from)
       let accepted = false
       // The text submitted decides, should it differ from the box the preview read.
-      const plan = planReply(cast, turnEntries, speaker, pickedReply, from.text, (captured?.images.length ?? 0) > 0)
+      const plan = planReply(
+        cast,
+        turnEntries,
+        speaker,
+        pickedReply,
+        from.text,
+        (captured?.images.length ?? 0) > 0,
+        choice.noReplies
+      )
       try {
         const { sent, outcome, draft, recovered } = await session.send(
           from.text,
@@ -511,7 +521,7 @@ export function Composer({
   const replies = replyPlan.round.length > 0 ? "reply" : "replies"
   const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} ${replies}` : "Send"
   const sendHint = hasText
-    ? `${sendLabel}${roundNames ? `, then ${roundNames} ${replies}` : ""} (${submitHint})`
+    ? `${sendLabel}${roundNames ? `, then ${roundNames} ${replies}` : choice.noReplies ? ", with no reply" : ""} (${submitHint})`
     : roundNames
       ? `${roundNames} ${replies} now, with nothing sent from you`
       : "Type a message to send"
@@ -578,8 +588,19 @@ export function Composer({
       next,
       round: replyPlan.round,
       picked: pickedReply,
+      noReplies: choice.noReplies,
       loading: turnEntries === null,
-      onPick: (id) => void choices.change({ replyFrom: id }).then(report)
+      // Auto and No one stay until another choice; a character is picked for one reply on top.
+      onPick: (pick) =>
+        void choices
+          .change(
+            pick === NO_ONE
+              ? { replyFrom: null, noReplies: true }
+              : pick === null
+                ? { replyFrom: null, noReplies: false }
+                : { replyFrom: pick }
+          )
+          .then(report)
     },
     leaf,
     leafGenerating,
@@ -652,17 +673,16 @@ export function Composer({
         }
         end={<ComposerControls placement="actions" context={controls} />}
       >
-        <label htmlFor="composer" className="sr-only">
-          {guidance ? "Guidance" : "Message"}
-        </label>
+        {/* Named on itself, not by a label's `for`: two frames can each show a composer. */}
         <AutoGrowTextarea
-          id="composer"
+          aria-label={guidance ? "Guidance" : "Message"}
+          id={composerId}
           data-testid="composer"
           data-has-attachments={attachmentInput?.count ? true : undefined}
           value={text}
           readOnly={editing === null && !textReady}
           aria-busy={editing === null && !textReady}
-          aria-describedby="composer-hint"
+          aria-describedby={`${composerId}-hint`}
           placeholder={
             editing !== null
               ? "Guidance for this reply…"
@@ -681,7 +701,7 @@ export function Composer({
         />
       </ComposerBox>
       {/* What the text is for, read with the box; its tooltip on the guidance switch shows it. */}
-      <p id="composer-hint" className="sr-only">
+      <p id={`${composerId}-hint`} className="sr-only">
         {controls.hint}
       </p>
       {impersonationNotice && (

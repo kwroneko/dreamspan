@@ -5,6 +5,7 @@ import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 import type { ComponentProps, ReactElement, ReactNode } from "react"
 import { Button, tooltipPopupClass } from "./Button.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
+import { openOnPlainClick } from "./links.ts"
 
 /** Shares one delay among the tooltips inside, so moving along a toolbar shows each at once. */
 export function TooltipProvider({ children }: { children: ReactNode }) {
@@ -58,6 +59,13 @@ export const iconButtonClass = (tone: "muted" | "danger" = "muted") =>
     tone === "danger" ? "text-muted hover:text-danger" : "text-muted hover:text-text"
   }`
 
+/**
+ * An icon button laid over a picture (a tile's star, Open beside, pin): its backing stays
+ * opaque while hovered and while its tooltip is open, where `hover:bg-hover` and
+ * `data-popup-open:bg-hover` would let a dark picture swallow the icon.
+ */
+export const OVER_PICTURE = "bg-surface/85 hover:bg-surface/85 data-popup-open:bg-surface/85"
+
 /** A button that's just an icon: `label` is its accessible name and its tooltip. */
 export function IconButton({
   label,
@@ -76,6 +84,44 @@ export function IconButton({
       <BaseButton aria-label={label} className={`${iconButtonClass(tone)} ${className}`} {...props}>
         <Icon name={icon} filled={filled} />
       </BaseButton>
+    </Tooltip>
+  )
+}
+
+/**
+ * An `IconButton` that's a link (owner, 2026-11-05: what opens in the center column can open in
+ * a new browser tab): a plain click runs `onOpen`, a middle click is the browser's.
+ */
+export function IconLink({
+  label,
+  hint,
+  icon,
+  href,
+  onOpen,
+  disabled = false,
+  className = ""
+}: {
+  label: string
+  hint?: ReactNode
+  icon: IconName
+  href: string
+  onOpen: () => void
+  disabled?: boolean
+  className?: string
+}) {
+  return (
+    <Tooltip label={hint ?? label}>
+      <a
+        {...(disabled ? { "aria-disabled": true, role: "link" } : { href })}
+        aria-label={label}
+        className={`${iconButtonClass()} ${disabled ? "opacity-50" : ""} ${className}`}
+        onClick={(event) => {
+          if (disabled) return event.preventDefault()
+          openOnPlainClick(onOpen)(event)
+        }}
+      >
+        <Icon name={icon} />
+      </a>
     </Tooltip>
   )
 }

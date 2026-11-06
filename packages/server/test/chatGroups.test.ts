@@ -404,8 +404,8 @@ describe("group read scale", () => {
           params: [now]
         },
         {
-          sql: `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
-            ${series(1000)} SELECT printf('r-%04d', i), printf('e-%04d', i), 'upstream', printf('v-%04d', i),
+          sql: `INSERT INTO entity_refs (id, entity_id, head_revision_id, label, created_at, updated_at)
+            ${series(1000)} SELECT printf('r-%04d', i), printf('e-%04d', i), printf('v-%04d', i),
               'Card ' || i, ?, ? FROM n`,
           params: [now, now]
         },
@@ -427,20 +427,18 @@ describe("group read scale", () => {
           params: [now]
         },
         {
-          sql: `INSERT INTO lanes (id, chat_id, name, created_at) ${series(5000)}
-            SELECT 'l-' || i, printf('c-%05d', i), 'main', ? FROM n`,
-          params: [now]
-        },
-        {
-          sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, created_at, updated_at)
+          // Imported authored versions retain their cast; joins alone establish no membership.
+          sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
             ${series(5000)}, depths(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM depths WHERE d < 9)
-            SELECT 'v-slot-' || i || '-' || d, 'slot-' || i || '-' || d, 0, 'complete', 'human', 'verbatim', 'imported', ?, ? FROM n, depths`,
+            SELECT 'v-slot-' || i || '-' || d, 'slot-' || i || '-' || d, 0, 'complete', 'human', 'verbatim', 'imported',
+              (SELECT json_group_array(DISTINCT json_extract(e.value_json, '$.entity')) FROM state_events e
+                WHERE e.chat_id = printf('c-%05d', i) AND e.key = 'participant.join'), ?, ? FROM n, depths`,
           params: [now, now]
         },
         {
-          sql: `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
+          sql: `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
             ${series(5000)}, depths(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM depths WHERE d < 9)
-            SELECT 'slot-' || i || '-' || d, printf('c-%05d', i), 'l-' || i,
+            SELECT 'slot-' || i || '-' || d, printf('c-%05d', i),
               CASE WHEN d = 0 THEN NULL ELSE 'slot-' || i || '-' || (d - 1) END, d, 'v-slot-' || i || '-' || d, ? FROM n, depths ORDER BY d, i`,
           params: [now]
         },

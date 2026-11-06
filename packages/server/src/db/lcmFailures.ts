@@ -67,7 +67,7 @@ export const recordFailedSummary = (
     const chain = yield* lcmPath(sql, userId, job.chat_id, job.last_slot_id, job.first_slot_id).pipe(
       Effect.catchTag("NotFound", () => Effect.succeed([]))
     )
-    if (!chain.length || chain[0]!.id !== job.first_slot_id || chain.some((s) => s.merged)) return null
+    if (!chain.length || chain[0]!.id !== job.first_slot_id) return null
     const children: Array<{ summaryId: string; revisionId: string }> = []
     if (job.level > 1) {
       const ids = JSON.parse(job.input_child_ids ?? "[]") as string[]
@@ -131,7 +131,7 @@ export const fallbackModel = (sql: SqlClient.SqlClient, userId: UserId) =>
       connection: string | null
       model: string | null
     }>`SELECT json_extract(value_json, '$.fallback.connection') AS connection, json_extract(value_json, '$.fallback.model') AS model
-      FROM user_settings WHERE user_id = ${userId} AND key = 'generation.lcm'`
+      FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = 'generation.lcm'`
     return row?.connection && row.model && (yield* ownedModel(sql, userId, row.connection, row.model))
       ? { connection: row.connection, model: row.model }
       : null

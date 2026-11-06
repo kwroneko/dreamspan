@@ -137,7 +137,7 @@ for (const width of [1440, 390])
         .getByRole("button", { name: "Close", exact: true })
         .click()
       await page.goto(`${server().url}/`)
-      await expect(page.getByRole("button", { name: `Open ${parent.label}`, exact: true }).first()).toBeVisible()
+      await expect(page.getByRole("link", { name: `Open ${parent.label}`, exact: true }).first()).toBeVisible()
       await page
         .getByRole("button", { name: `Forks of ${parent.label}`, exact: true })
         .first()

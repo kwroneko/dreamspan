@@ -259,7 +259,7 @@ for (const width of [1440, 390])
       // The large editor shows the tab's drafts, at the prompt asked for.
       await panel.getByRole("button", { name: "Actions for 🔥 Pacing", exact: true }).click()
       await page.getByRole("menuitem", { name: "Open in the large editor", exact: true }).click()
-      const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
+      const overlay = page.getByRole("region", { name: "Preset editor", exact: true })
       await expect(overlay).toBeVisible()
       await expect(overlay.locator('[data-prompt="synthetic-1"]')).toBeInViewport()
       await expectTextBox(
@@ -429,8 +429,8 @@ for (const width of [2560, 1440, 390])
       const name = `Large ${width} ${scheme}`
       const { chatId } = await setUp(page, name)
       const panel = await open(page, chatId)
-      await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
-      const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
+      await panel.getByRole("link", { name: "Open the preset in the large editor", exact: true }).click()
+      const overlay = page.getByRole("region", { name: "Preset editor", exact: true })
       await expect(overlay).toBeVisible()
       const shot = async (what: string) => {
         await noOverflow(page)

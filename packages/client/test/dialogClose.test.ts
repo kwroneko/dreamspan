@@ -11,7 +11,9 @@ vi.hoisted(() => vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1
 
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
-  useRef: () => ({ current: null })
+  useRef: () => ({ current: null }),
+  // The only context read (ui/away.ts): a window on screen.
+  use: () => false
 }))
 
 function closeControls(node: ReactNode): ReactElement<{ onClick: () => void }>[] {

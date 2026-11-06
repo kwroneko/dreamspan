@@ -1299,6 +1299,30 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.deepStrictEqual(yield* actor.api.GetDisplayPrefs({}), before)
       })
   },
+  GetWorkbenchLayout: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetWorkbenchLayout({ device: "d" })
+        yield* owner.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ owner: true }) })
+        assert.deepStrictEqual(yield* actor.api.GetWorkbenchLayout({ device: "d" }), before)
+      })
+  },
+  SetWorkbenchLayout: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetWorkbenchLayout({ device: "d" })
+        yield* actor.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ actor: true }) })
+        assert.deepStrictEqual(yield* owner.api.GetWorkbenchLayout({ device: "d" }), before)
+      })
+  },
+  ForgetWorkbenchLayouts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetWorkbenchLayout({ device: "d", layout: JSON.stringify({ owner: true }) })
+        yield* actor.api.ForgetWorkbenchLayouts({})
+        assert.strictEqual(yield* owner.api.GetWorkbenchLayout({ device: "d" }), JSON.stringify({ owner: true }))
+      })
+  },
   ImpersonationNotice: {
     // It reads only the caller's own current preset, and marks only the caller's notices.
     probe: (actor, owner) =>
@@ -1940,6 +1964,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           modes.modes.map((m) => m.id),
           "plain"
         )
+      })
+  },
+  GetAgentPermissions: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetAgentPermissions({ chatId: owner.chat.chatId, slotId: null }), "NotFound")
+        assert.isArray((yield* owner.api.GetAgentPermissions({ chatId: owner.chat.chatId, slotId: null })).cards)
       })
   },
   ListActivity: {
@@ -4062,6 +4093,16 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  RolloutReceipt: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      yield* refused(
+        reader.RolloutReceipt({ userId: actor.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "call_1" }),
+        "NotFound"
+      )
+      assert.isNull(
+        yield* reader.RolloutReceipt({ userId: owner.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "missing" })
+      )
+    }),
   ApplyRolloutEffect: (_reader, actor, owner, writer) =>
     refused(
       writer.ApplyRolloutEffect({

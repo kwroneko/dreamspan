@@ -91,7 +91,7 @@ describe("split confirmation title", () => {
         const group = yield* api.GetSplitChats({ chatId: chat.id, forkId: fork.id })
         yield* fixtureSql(config.dataDir, [
           {
-            sql: `CREATE TRIGGER refuse_split BEFORE ${split ? "INSERT" : "DELETE"} ON user_settings WHEN ${split ? "NEW" : "OLD"}.key GLOB 'split-chat:*' BEGIN SELECT RAISE(ABORT, 'planted marker failure'); END`
+            sql: `CREATE TRIGGER refuse_split BEFORE UPDATE OF split_chat ON forks WHEN NEW.split_chat <> OLD.split_chat BEGIN SELECT RAISE(ABORT, 'planted marker failure'); END`
           }
         ])
         const failed = yield* Effect.flip(

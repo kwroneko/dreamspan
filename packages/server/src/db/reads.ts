@@ -1,6 +1,6 @@
 import { LibraryRef } from "@rp/shared/library.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
-import { revisionNumber, revisionUse } from "./revisionNumbers.ts"
+import { previousRevisionSql, revisionNumber, revisionOnLine, revisionUse } from "./revisionNumbers.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { composerImages } from "./composerImages.ts"
@@ -9,11 +9,19 @@ export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
-import { type ChatId, Fork, type ForkId, type MessageImages, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import {
+  type ChatId,
+  type EntityId,
+  Fork,
+  type ForkId,
+  type MessageImages,
+  type SlotId,
+  type VersionId
+} from "@rp/shared/chat.ts"
 import { chatForkSummaries } from "./forkSummaries.ts"
 import { Branch, type PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
+import { MergePreview, type RefId, Revision, type RevisionId } from "@rp/shared/library.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
@@ -75,7 +83,7 @@ const decodeStateEvent = Schema.decodeUnknownEffect(FoldableEvent)
  * every entry (5 s for a 60-slot window of the 100,000-message perf fixture).
  */
 const siblingCount = (also = "") => {
-  const reachable = `x.lane_id = s.lane_id ${also} AND ${reachableSlot("x")}`
+  const reachable = `x.chat_id = s.chat_id ${also} AND ${reachableSlot("x")}`
   // An inserted message is the only one at its place (spec/MESSAGE-INSERT.md §2.4).
   return `CASE WHEN s.inserted = 1 THEN ${also === "" ? 1 : 0}
     WHEN s.parent_slot_id IS NULL
@@ -87,14 +95,9 @@ const siblingCount = (also = "") => {
 const startsFork = (s: string) =>
   `(SELECT f.id FROM forks f WHERE f.id = ${s}.fork_id AND f.base_slot_id IS ${s}.parent_slot_id)`
 
-/**
- * The name a slot shows among its alternates: a name the user gave (or took off) the fork it
- * starts, else its own label (an ST import's, or a continuation's name from before forks),
- * else its fork's name.
- */
-const branchLabel = (s: string) => `nullif(coalesce((SELECT CASE WHEN f.name_user = 1 THEN coalesce(f.name, '')
-    ELSE coalesce(${s}.branch_name, f.name) END
-  FROM forks f WHERE f.id = ${s}.fork_id AND f.base_slot_id IS ${s}.parent_slot_id), ${s}.branch_name), '')`
+/** The name of the fork this slot starts, empty when the fork has no name. */
+const branchLabel = (s: string) => `nullif((SELECT f.name FROM forks f
+  WHERE f.id = ${s}.fork_id AND f.base_slot_id IS ${s}.parent_slot_id), '')`
 
 /**
  * A path entry's columns: the slot's, and its shown version's under their own names. The
@@ -104,7 +107,7 @@ const branchLabel = (s: string) => `nullif(coalesce((SELECT CASE WHEN f.name_use
  * another fork's does. The count of versions is the message's own: a fork's copies stand in
  * for them.
  */
-const pathColumns = (fork: string) => `${shownVersionColumns}, s.lane_id, s.parent_slot_id, s.depth, s.inserted,
+const pathColumns = (fork: string) => `${shownVersionColumns}, s.parent_slot_id, s.depth, s.inserted,
   s.row_version + max(coalesce(so.seq, 0), coalesce(ro.seq, 0), coalesce(dso.seq, 0), coalesce(hso.seq, 0))
     AS row_version,
   coalesce(hso.flag, ${contextExcluded()}) AS context_excluded, coalesce(hso.flag, s.hidden_by_user) AS hidden_by_user,
@@ -517,7 +520,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         SELECT b.*, (SELECT v.doc_json FROM entity_refs r JOIN entities e ON e.id = r.entity_id
           JOIN entity_revisions v ON v.id = r.head_revision_id
           WHERE b.kind = 'entity' AND e.kind = 'card' AND e.id = b.target_id
-          ORDER BY r.ref_kind = 'upstream' DESC, r.created_at, r.id LIMIT 1) AS card_doc_json
+          LIMIT 1) AS card_doc_json
         FROM bin_items b WHERE user_id = ${userId}
           AND (${before?.id ?? null} IS NULL OR (deleted_at, id) < (${before?.deletedAt ?? null}, ${before?.id ?? null}))
         ORDER BY deleted_at DESC, id DESC LIMIT ${limit}`.pipe(
@@ -586,7 +589,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     ListLibrary: ({ userId, kind, tag, archived, withFilterData }) =>
       lib
         .refsWhere(
-          `e.owner_user_id = ? AND e.kind = ? AND r.ref_kind <> 'chat_override' AND e.deleted_at IS NULL
+          `e.owner_user_id = ? AND e.kind = ? AND e.deleted_at IS NULL
            AND (e.archived_at IS NOT NULL) = ?
            AND (? IS NULL OR EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = ?))`,
           [userId, kind, archived ? 1 : 0, tag, tag]
@@ -637,15 +640,20 @@ export const makeReadHandlers = Effect.gen(function* () {
             ? yield* noteHere(sql, lib, userId, ref, chatNote)
             : null
         let start: string | null = resolved?.ref.head_revision_id ?? ref.head_revision_id
+        // A fork's line runs on through what it was forked from (owner, 2026-11-06: a fork's
+        // History is a git branch's log), so the cursor can be an entry's it was forked from.
         if (before !== undefined) {
-          const [cursor] = yield* sql<{ parent: string | null }>`
-            SELECT json_extract(parents, '$[0]') AS parent FROM entity_revisions
-            WHERE id = ${before} AND entity_id = ${ref.entity_id}`
+          if (!(yield* revisionOnLine(sql, start, before)))
+            return yield* new NotFound({ entity: "revision", id: before })
+          const [cursor] = yield* sql<{ previous: string | null }>`
+            SELECT ${sql.literal(previousRevisionSql("r"))} AS previous FROM entity_revisions r
+            WHERE r.id = ${before}`
           if (!cursor) return yield* new NotFound({ entity: "revision", id: before })
-          start = cursor.parent
+          start = cursor.previous
         }
         const rows = yield* sql<{
           id: string
+          entity_id: string
           parents: string
           origin: Revision["origin"]
           origin_ref: string | null
@@ -653,15 +661,18 @@ export const makeReadHandlers = Effect.gen(function* () {
           doc_hash: string
           created_at: number
           n: number
+          previous: string | null
+          forked_from_entity_id: string | null
         }>`
           WITH RECURSIVE history(id, n) AS (
             SELECT ${start}, 1
             UNION ALL
-            SELECT json_extract(r.parents, '$[0]'), h.n + 1 FROM entity_revisions r JOIN history h ON r.id = h.id
-            WHERE json_extract(r.parents, '$[0]') IS NOT NULL AND h.n < ${limit}
+            SELECT ${sql.literal(previousRevisionSql("r"))}, h.n + 1 FROM entity_revisions r JOIN history h ON r.id = h.id
+            WHERE ${sql.literal(previousRevisionSql("r"))} IS NOT NULL AND h.n < ${limit}
           )
-          SELECT r.id, r.parents, r.origin, r.origin_ref, r.message, r.doc_hash, r.created_at, h.n
-          FROM history h JOIN entity_revisions r ON r.id = h.id ORDER BY h.n`
+          SELECT r.id, r.entity_id, r.parents, r.origin, r.origin_ref, r.message, r.doc_hash, r.created_at, h.n,
+            ${sql.literal(previousRevisionSql("r"))} AS previous, e.forked_from_entity_id
+          FROM history h JOIN entity_revisions r ON r.id = h.id JOIN entities e ON e.id = r.entity_id ORDER BY h.n`
         const first = start === null ? 0 : yield* revisionNumber(sql, start)
         const changedAt = resolved
           ? yield* noteChangedAt(
@@ -671,10 +682,39 @@ export const makeReadHandlers = Effect.gen(function* () {
               rows.map((row) => row.id)
             )
           : null
+        // A fork's first revision continues down the line at the revision it was forked from.
+        const forkPoint = (row: (typeof rows)[number]) =>
+          row.previous !== null && JSON.parse(row.parents).length === 0 && row.forked_from_entity_id !== null
+        const own = ref.entity_id
+        const entryIds = [
+          ...new Set(
+            rows.flatMap((row) => [
+              ...(row.entity_id !== own ? [row.entity_id] : []),
+              ...(forkPoint(row) ? [row.forked_from_entity_id!] : [])
+            ])
+          )
+        ]
+        const entries = new Map(
+          entryIds.length === 0
+            ? []
+            : (yield* sql<{ id: string; ref_id: string | null; label: string | null; subtitle: string | null }>`
+                SELECT e.id, CASE WHEN e.deleted_at IS NULL THEN rf.id END AS ref_id, rf.label, rf.subtitle FROM entities e
+                LEFT JOIN entity_refs rf ON rf.entity_id = e.id WHERE e.id IN ${sql.in(entryIds)}`).map((e) => [
+                e.id,
+                {
+                  entityId: e.id as EntityId,
+                  refId: e.ref_id as RefId | null,
+                  label: e.label ?? "",
+                  subtitle: e.subtitle ?? ""
+                }
+              ])
+        )
         const out = []
         for (const row of rows) {
           const at = changedAt?.get(row.id)
           const usedBy = row.origin === "generation" ? yield* revisionUse(sql, userId, row.origin_ref) : null
+          const entry = row.entity_id !== own ? entries.get(row.entity_id) : undefined
+          const from = forkPoint(row) ? entries.get(row.forked_from_entity_id!) : undefined
           out.push(
             new Revision({
               id: row.id as RevisionId,
@@ -685,7 +725,9 @@ export const makeReadHandlers = Effect.gen(function* () {
               createdAt: row.created_at,
               number: first - row.n + 1,
               ...(usedBy ? { usedBy } : {}),
-              ...(at ? { changedAt: at } : {})
+              ...(at ? { changedAt: at } : {}),
+              ...(entry ? { entry } : {}),
+              ...(from ? { forkedFrom: { revisionId: row.previous as RevisionId, ...from } } : {})
             })
           )
         }
@@ -717,16 +759,6 @@ export const makeReadHandlers = Effect.gen(function* () {
           theirsRevisionId: plan.theirsHead as RevisionId
         })
       }).pipe(query("PreviewMerge")),
-
-    ListChatOverrides: ({ userId, chatId }) =>
-      Effect.gen(function* () {
-        yield* ownedChat(userId, chatId)
-        const rows = yield* lib.refsWhere("r.chat_id = ? AND e.owner_user_id = ? AND e.deleted_at IS NULL", [
-          chatId,
-          userId
-        ])
-        return rows.map(toLibraryRef)
-      }).pipe(query("ListChatOverrides")),
 
     // --- Chats
 
@@ -894,10 +926,9 @@ export const makeReadHandlers = Effect.gen(function* () {
         const [slot] = yield* sql<{
           chat_id: string
           parent_slot_id: string | null
-          lane_id: string
           inserted: number
         }>`
-          SELECT s.chat_id, s.parent_slot_id, s.lane_id, s.inserted FROM slots s JOIN chats c ON c.id = s.chat_id
+          SELECT s.chat_id, s.parent_slot_id, s.inserted FROM slots s JOIN chats c ON c.id = s.chat_id
           WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
         // Each alternate's first words as the fork named shows them, else the fork through it.
@@ -915,11 +946,11 @@ export const makeReadHandlers = Effect.gen(function* () {
             : slot.parent_slot_id === null
               ? yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${slot.chat_id}
-                  AND x.depth = 0 AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                  AND x.depth = 0 AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id`
               : yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
-                  AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
+                  AND x.chat_id = ${slot.chat_id} AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id`
         return rows.map(
           (row, index) => new Branch({ slotId: row.id, index, name: row.branch_name, preview: row.preview })

@@ -102,8 +102,10 @@ export function centerHeaderTests() {
           const bottoms = await header.evaluate((el) => {
             const side = document.querySelector("aside .h-shell-header")
             const tabs = document.querySelector('[role=tablist][aria-label="Chat panel"]')?.closest(".h-shell-header")
+            // Once a frame has two tabs, its tab strip sits above the header (features/workbench).
+            const strip = document.querySelector("[data-tab-strip]")?.getBoundingClientRect().height ?? 0
             return {
-              center: el.getBoundingClientRect().bottom,
+              center: el.getBoundingClientRect().bottom - strip,
               height: el.getBoundingClientRect().height,
               side: side?.getBoundingClientRect().bottom ?? null,
               panel: tabs?.getBoundingClientRect().bottom ?? null
@@ -208,8 +210,8 @@ export function centerHeaderTests() {
         await capture("preset-overlay")
         await page.getByRole("combobox", { name: "Switch preset" }).click()
         await page.getByRole("option", { name: `Preset B ${width}`, exact: true }).click()
-        await expect(page).toHaveURL(new RegExp(`editor=${presetB.id}`))
-        await expect(page.getByRole("dialog", { name: "Preset editor" })).toBeVisible()
+        await expect(page).toHaveURL(new RegExp(`/library/${presetB.id}`))
+        await expect(page.getByRole("region", { name: "Preset editor" })).toBeVisible()
         const folder = process.env.LAYOUT_AUDIT_WORK ?? info.outputDir
         mkdirSync(folder, { recursive: true })
         writeFileSync(join(folder, `header-bottoms-${width}.json`), JSON.stringify(measurements, null, 2))

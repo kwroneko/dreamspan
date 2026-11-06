@@ -37,7 +37,7 @@ for (const width of [1440, 390]) {
     }
     await page.goto(server().url)
     // Browsing hides bare versions; the editor keeps the labelled version field.
-    await expect(page.getByRole("button", { name: "Open Aria Vance", exact: true }).first()).toBeVisible()
+    await expect(page.getByRole("link", { name: "Open Aria Vance", exact: true }).first()).toBeVisible()
     await shoot("grid")
     const groups = await admin((api) => api.ListChatGroups())
     const group = groups[0]!
@@ -159,7 +159,7 @@ for (const width of [1440, 390]) {
         .getByRole("group", { name: "Left panel", exact: true })
         .getByRole("button", { name: "Characters", exact: true })
         .click()
-      await expect(sidebar.getByRole("button", { name: `Open Aria revised ${width}`, exact: true })).toBeVisible()
+      await expect(sidebar.getByRole("link", { name: `Open Aria revised ${width}`, exact: true })).toBeVisible()
     }
     await shoot("sidebar-save")
     await page.getByRole("button", { name: "History", exact: true }).click()

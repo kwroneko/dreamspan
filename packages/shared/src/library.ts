@@ -8,15 +8,6 @@ import { ChatId, EntityId } from "./chat.ts"
 export const EntityKind = Schema.Literals(["card", "preset", "lorebook", "note", "preset_overlay"])
 export type EntityKind = typeof EntityKind.Type
 
-/**
- * upstream: the base line (imported, or the original of something the user created).
- * Cards have exactly one upstream ref. The other kinds also support:
- * variant: a named fork that follows another ref, so upstream updates flow into it.
- * chat_override: changes for one chat only; it can be promoted to a variant.
- */
-export const RefKind = Schema.Literals(["upstream", "variant", "chat_override"])
-export type RefKind = typeof RefKind.Type
-
 export const RefId = idSchema("RefId", "ref")
 export type RefId = typeof RefId.Type
 export const RevisionId = idSchema("RevisionId", "revision")
@@ -30,7 +21,11 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   id: RefId,
   entityId: EntityId,
   kind: EntityKind,
-  refKind: RefKind,
+  /**
+   * The entry it was forked from (a fork is an entity of its own, spec/LIBRARY-FORKS.md);
+   * null for an original. A preset's or lorebook's fork is a "variant" on screen.
+   */
+  parentEntityId: Schema.NullOr(EntityId),
   /** For cards, label and subtitle derive from this revision’s name and character_version. */
   label: Schema.String,
   subtitle: Schema.String,
@@ -40,9 +35,7 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   lorebookEntries: Schema.optionalKey(Schema.Int),
   filterData: Schema.optionalKey(Schema.Struct({ name: Schema.String, tags: Schema.Array(Schema.String) })),
   headRevisionId: RevisionId,
-  followsRefId: Schema.NullOr(RefId),
-  chatId: Schema.NullOr(ChatId),
-  /** The ref it follows has moved on since the last merge. */
+  /** What it merges from (its own imports, else a preset's or lorebook's parent) moved on since the last merge. */
   updateAvailable: Schema.Boolean,
   /** Whether this entry has an import line to update from a file. */
   hasImport: Schema.optionalKey(Schema.Boolean),
@@ -75,6 +68,16 @@ export const RevisionUse = Schema.Struct({
 })
 export type RevisionUse = typeof RevisionUse.Type
 
+/** The entry a revision on a fork's History belongs to, when that's an entry it was forked from. */
+export const RevisionEntry = Schema.Struct({
+  entityId: EntityId,
+  /** Null when the entry is in the bin or gone. */
+  refId: Schema.NullOr(RefId),
+  label: Schema.String,
+  subtitle: Schema.String
+})
+export type RevisionEntry = typeof RevisionEntry.Type
+
 export class Revision extends Schema.Class<Revision>("Revision")({
   id: RevisionId,
   parents: Schema.Array(RevisionId),
@@ -84,8 +87,18 @@ export class Revision extends Schema.Class<Revision>("Revision")({
   message: Schema.NullOr(Schema.String),
   docHash: Schema.String,
   createdAt: Schema.Number,
-  /** Its place along the ref's first-parent line, from 1 for the first revision. */
+  /**
+   * Its place along the ref's line, from 1 for the first revision: the first-parent line, run on
+   * through the revisions a fork was forked from (owner, 2026-11-06).
+   */
   number: Schema.optionalKey(Schema.Int),
+  /**
+   * On a fork's History, a revision it inherited: the entry it belongs to, one this fork (or a
+   * fork it was forked from) was forked from. Restoring it makes a new revision of the fork.
+   */
+  entry: Schema.optionalKey(RevisionEntry),
+  /** A fork's first revision: the revision it was forked from, the next one down its History. */
+  forkedFrom: Schema.optionalKey(Schema.Struct({ revisionId: RevisionId, ...RevisionEntry.fields })),
   usedBy: Schema.optionalKey(RevisionUse),
   /**
    * A chat's own note's revision listed at a position: where it took effect, by message number

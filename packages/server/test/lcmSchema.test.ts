@@ -39,7 +39,6 @@ const user = () => {
 
 const chat = (ownerId: string, status = "active") => {
   const chatId = id("c")
-  const laneId = id("l")
   tx(() => {
     run(
       `INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (?, ?, 'rp', ?, ?)`,
@@ -48,9 +47,8 @@ const chat = (ownerId: string, status = "active") => {
       status,
       now()
     )
-    run(`INSERT INTO lanes (id, chat_id, name, created_at) VALUES (?, ?, 'main', ?)`, laneId, chatId, now())
   })
-  return { chatId, laneId }
+  return { chatId }
 }
 
 const versionSql = `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
@@ -58,7 +56,7 @@ const versionSql = `INSERT INTO versions (id, slot_id, ordinal, status, writer, 
 
 /** Appends a slot with one version: the version first, then the slot (deferred keys). */
 const slot = (
-  c: { chatId: string; laneId: string },
+  c: { chatId: string },
   parent: { slotId: string; depth: number } | null,
   version: { writer?: "human" | "model"; content?: string; status?: string } = {}
 ) => {
@@ -80,10 +78,9 @@ const slot = (
       now()
     )
     run(
-      `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
       slotId,
       c.chatId,
-      c.laneId,
       parent?.slotId ?? null,
       depth,
       versionId,

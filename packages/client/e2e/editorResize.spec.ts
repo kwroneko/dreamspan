@@ -50,8 +50,9 @@ const resizeAndUse = async (page: Page, editor: Locator, use: () => Promise<void
       await page.evaluate(
         () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
       )
-      // A second, modal dialog would cover the editor and mark its ancestor inert.
-      await expect(page.getByRole("dialog")).toHaveCount(1)
+      // The editor is a tab of its own: a modal dialog (the panel's phone sheet) would cover it
+      // and mark its ancestor inert.
+      await expect(page.getByRole("dialog")).toHaveCount(0)
       await expect(editor).toBeVisible()
       await use()
     },
@@ -97,16 +98,16 @@ for (const kind of ["lorebook", "preset", "card"] as const) {
         .first()
         .click()
       await panel.getByRole("button", { name: "Expand all", exact: true }).click()
-      await panel.getByRole("button", { name: "Large editor", exact: true }).click()
+      await panel.getByRole("link", { name: "Large editor", exact: true }).click()
     } else {
       await panel
-        .getByRole("button", {
+        .getByRole("link", {
           name: kind === "preset" ? "Open the preset in the large editor" : "Open Resize card in the full editor",
           exact: true
         })
         .click()
     }
-    const editor = page.getByRole("dialog", {
+    const editor = page.getByRole("region", {
       name: kind === "lorebook" ? "Lorebook editor" : kind === "preset" ? "Preset editor" : "Card editor",
       exact: true
     })

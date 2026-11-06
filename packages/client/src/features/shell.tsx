@@ -14,10 +14,15 @@ export const appBanners = defineSlot<Record<string, never>>("app.banners")
  * or the bar above any other page).
  */
 export const sidebarToggle = defineSlot<{ place: "sidebar" | "header" }>("shell.sidebar.toggle")
+/**
+ * What fills the center column: the first entry registered (the workbench's frames and tabs,
+ * features/workbench), else the routed page itself.
+ */
+export const centerColumn = defineSlot<Record<string, never>>("shell.center")
 // The app shell: it lets nobody past without a session (the server decides; this only
 // routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
+import { Link, Outlet, useLocation, useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../actions.tsx"
@@ -37,12 +42,18 @@ import { ShellBrowser } from "./characters/ShellBrowser.tsx"
 import { ShellNavigation, useShellNavigation } from "./characters/shellData.tsx"
 import { sidebarSearch } from "./characters/sidebarSearch.ts"
 import { setPageTitle, useNotices } from "./notices.tsx"
+import { useTabAtLeftEdge, useTabFocused, useTabMeta } from "./workbench/tab.tsx"
 
-/** Sets the tab's title while a screen is shown. */
+/**
+ * Sets the browser tab's title while a screen is shown, and names its workbench tab; only the
+ * focused one names the browser's.
+ */
 export const useTitle = (title: string) => {
+  const focused = useTabFocused()
+  useTabMeta(title)
   useEffect(() => {
-    setPageTitle(`${title} · rp-harness`)
-  }, [title])
+    if (focused) setPageTitle(`${title} · rp-harness`)
+  }, [title, focused])
 }
 
 export function CenteredPage({ children }: { children: ReactNode }) {
@@ -250,7 +261,9 @@ function useSidebarHidden(): [boolean, (hidden: boolean) => void] {
 function SidebarToggle({ place }: { place: "sidebar" | "header" }) {
   const [hidden, setHidden] = useSidebarHidden()
   const ref = useRef<HTMLButtonElement>(null)
-  const shown = place === "sidebar" ? !hidden : hidden
+  // Beside the sidebar's place: a frame further right leaves it to the leftmost.
+  const leftEdge = useTabAtLeftEdge()
+  const shown = place === "sidebar" ? !hidden : hidden && leftEdge
   useEffect(() => {
     // The one on screen: a page can hold another out of view (the tablet bar's, in a chat).
     if (shown && focusNext === place && ref.current?.checkVisibility()) {
@@ -384,39 +397,51 @@ function AppShell() {
 /**
  * Chats, and chats not made yet (a card's or a group's first greetings), fill the height and
  * scroll their own messages, the composer always in view; other screens scroll as pages.
+ * A workbench tab shows its page through this too.
  */
-function Main() {
+export function CenterPage() {
   const pathname = useLocation({ select: (location) => location.pathname })
   const fill = /^\/(?:chats\/[^/]+|cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.test(pathname)
-  const page = (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-5xl px-4 py-6">
-        <Outlet />
-      </div>
-    </div>
+  // An editor opened from a chat scrolls itself, as the chat's large editors did (BoundScroll).
+  const bound = useSearch({ strict: false, select: (search) => typeof search.chat === "string" && search.chat !== "" })
+  if (fill) return <Outlet />
+  const own = bound && pathname.startsWith("/library/")
+  return (
+    <CenterHeaderHost
+      leading={
+        <>
+          <IconButton
+            label="Chats and menu"
+            hint="Opens the app menu."
+            icon="back"
+            className="lg:hidden"
+            onClick={openAppMenu}
+          />
+          <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
+        </>
+      }
+    >
+      {own ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <Outlet />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-5xl px-4 py-6">
+            <Outlet />
+          </div>
+        </div>
+      )}
+    </CenterHeaderHost>
   )
+}
+
+function Main() {
+  const snapshot = useSyncExternalStore(centerColumn.subscribe, centerColumn.snapshot, centerColumn.snapshot)
+  const entry = [...snapshot.entries].sort((a, b) => a.order - b.order)[0]
   return (
     <main id="content" className="flex min-h-0 flex-1 flex-col">
-      {fill ? (
-        <Outlet />
-      ) : (
-        <CenterHeaderHost
-          leading={
-            <>
-              <IconButton
-                label="Chats and menu"
-                hint="Opens the app menu."
-                icon="back"
-                className="lg:hidden"
-                onClick={openAppMenu}
-              />
-              <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
-            </>
-          }
-        >
-          {page}
-        </CenterHeaderHost>
-      )}
+      {entry ? <entry.component /> : <CenterPage />}
     </main>
   )
 }

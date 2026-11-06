@@ -5,7 +5,7 @@ import { ChatBrowse, ChatFilterCounts } from "./chatBrowse.ts"
 // anything else is NotFound.
 import { Schema } from "effect"
 import { AvatarCrop } from "./media.ts"
-import { ReplaceTarget } from "./docs/note.ts"
+import { REPLACEABLE_CARD_FIELDS, ReplaceTarget } from "./docs/note.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import {
   MessageImages,
@@ -362,6 +362,17 @@ export const CastChange = Schema.Union([
   /** The tools agent modes offer from here on (`agent.tools`), by id. */
   Schema.TaggedStruct("AgentTools", {
     tools: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100))
+  }),
+  /**
+   * Whether agent replies may change a note, or a card's field, in this chat from here on
+   * (`agent.permission`), over the note's or card's own setting.
+   */
+  Schema.TaggedStruct("AgentPermission", {
+    target: Schema.Union([
+      Schema.Struct({ note: EntityId }),
+      Schema.Struct({ card: EntityId, field: Schema.Literals(REPLACEABLE_CARD_FIELDS) })
+    ]),
+    on: Schema.Boolean
   }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])

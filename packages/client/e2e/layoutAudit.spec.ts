@@ -20,7 +20,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel, openSummarySettings } from "./support/panel.ts"
 import { showAppNavigation, hideAppNavigation } from "./support/appMenu.ts"
 import { level1 } from "./support/summaries.ts"
-import { modelChip, presetChip } from "./support/strip.ts"
+import { modelChip, nextChip, presetChip } from "./support/strip.ts"
 import { portraitPng } from "./support/portrait.ts"
 import { writeScaleFolder } from "./support/stScaleFolder.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
@@ -739,8 +739,8 @@ test.describe("synthetic library and every app surface", () => {
           const preset = await openPanel(page, "Prompt preset")
           await expect(preset.getByRole("list", { name: "Preset blocks" })).toBeVisible()
           await audit("panel-preset", '[aria-label="Preset blocks"], [aria-label="Prompt order"]')
-          await preset.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
-          await expect(page.getByRole("dialog", { name: "Preset editor", exact: true })).toBeVisible()
+          await preset.getByRole("link", { name: "Open the preset in the large editor", exact: true }).click()
+          await expect(page.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
           await audit("large-preset", '[aria-label="Preset blocks"], [aria-label="Prompt order"]')
           return
         }
@@ -1220,8 +1220,8 @@ test.describe("synthetic library and every app surface", () => {
             await scope.evaluate((el) => el.removeAttribute("data-lorebook-audit"))
           }
           await inspect(editor, "lorebook-panel")
-          await editor.getByRole("button", { name: "Large editor", exact: true }).click()
-          await inspect(page.getByRole("dialog", { name: "Lorebook editor", exact: true }), "lorebook-large")
+          await editor.getByRole("link", { name: "Large editor", exact: true }).click()
+          await inspect(page.getByRole("region", { name: "Lorebook editor", exact: true }), "lorebook-large")
           await page.goto(`${server.url}/library/${bookRef}`)
           await inspect(page.getByRole("main"), "lorebook-page")
           return
@@ -1293,8 +1293,8 @@ test.describe("synthetic library and every app surface", () => {
             await expect(unsaved).toHaveCount(0)
           }
           await inspectRows(panel, "promptrows-definitions")
-          await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
-          await inspectRows(page.getByRole("dialog", { name: "Preset editor", exact: true }), "promptrows-large")
+          await panel.getByRole("link", { name: "Open the preset in the large editor", exact: true }).click()
+          await inspectRows(page.getByRole("region", { name: "Preset editor", exact: true }), "promptrows-large")
           return
         }
         if (process.env.LAYOUT_AUDIT_PRESETS_ONLY === "1") {
@@ -1314,8 +1314,8 @@ test.describe("synthetic library and every app surface", () => {
           }
           await expect(panel.locator('[data-prompt="charDefinitions"]')).toBeVisible()
           await audit("panel-Prompt-preset-definitions")
-          await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
-          const large = page.getByRole("dialog", { name: "Preset editor", exact: true })
+          await panel.getByRole("link", { name: "Open the preset in the large editor", exact: true }).click()
+          const large = page.getByRole("region", { name: "Preset editor", exact: true })
           await expect(large.getByRole("list", { name: "Prompt order", exact: true })).toBeVisible({ timeout: 60000 })
           await audit("preset-large")
           return
@@ -1429,6 +1429,27 @@ test.describe("synthetic library and every app surface", () => {
             await page.keyboard.press("Escape")
           }
           await audit("lockchat-locked-chips", '[role="group"][aria-label="Next reply"]')
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_NOONE_ONLY === "1") {
+          // Next's No one: the Who replies next menu with its row, and the pill once it's chosen.
+          await go("noone-chips", `/chats/${chatId}`)
+          await audit("noone-chips", '[role="group"][aria-label="Next reply"]')
+          await nextChip(page).click()
+          const menu = page.getByRole("radiogroup", { name: "Who replies next", exact: true })
+          await menu.getByRole("radio", { name: "No one", exact: true }).hover()
+          await page.screenshot({ path: join(work, `${width}-${theme}-noone-menu.png`), animations: "disabled" })
+          await audit("noone-menu", '[role="dialog"]')
+          await menu.getByRole("radio", { name: "No one", exact: true }).click()
+          await expect(nextChip(page)).toHaveAccessibleName(
+            "Next: no one, until you choose otherwise. Choose who replies next"
+          )
+          await page.mouse.move(0, 0)
+          await page.screenshot({ path: join(work, `${width}-${theme}-noone-pill.png`), animations: "disabled" })
+          await audit("noone-pill", '[role="group"][aria-label="Next reply"]')
+          await nextChip(page).click()
+          await page.screenshot({ path: join(work, `${width}-${theme}-noone-chosen-menu.png`), animations: "disabled" })
+          await audit("noone-chosen-menu", '[role="dialog"]')
           return
         }
         if (process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1") {
@@ -2273,7 +2294,7 @@ test.describe("revision dialogs", () => {
           await expect(compare).toHaveAccessibleDescription("Click to hide this revision's comparison")
           const measureGaps = async (state: string) => {
             const measured = await dialog
-              .getByRole("tablist", { name: "Revision changes", exact: true })
+              .getByRole("tablist", { name: "Revision comparison mode", exact: true })
               .evaluate((list) => {
                 const section = list.closest('section[aria-label^="Comparison of revision"]')!
                 const previous = section.previousElementSibling!.getBoundingClientRect()

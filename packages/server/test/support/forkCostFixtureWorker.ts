@@ -24,13 +24,12 @@ db.exec(
     " INSERT INTO fork_label_pause VALUES (1)"
 )
 try {
-  const lane = (db.prepare("SELECT id FROM lanes WHERE chat_id=?").get(chatId) as { id: string }).id
   const version =
     db.prepare(`INSERT INTO versions(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at)
     VALUES(?,?,?,'complete',?,?,'verbatim',?,1,1)`)
   const slot =
-    db.prepare(`INSERT INTO slots(id,chat_id,lane_id,parent_slot_id,depth,selected_version_id,fork_id,inserted,created_at)
-    VALUES(?,?,?,?,?,?,?,?,1)`)
+    db.prepare(`INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,fork_id,inserted,created_at)
+    VALUES(?,?,?,?,?,?,?,1)`)
   const fork = db.prepare(`INSERT INTO forks(id,chat_id,parent_fork_id,base_slot_id,tip_slot_id,branched_at,created_at)
     VALUES(?,?,?,?,?,?,1)`)
   const override =
@@ -77,7 +76,7 @@ try {
         )
         versions++
       }
-      slot.run(id, chatId, lane, path.at(-1)?.id ?? null, depth, `${id}-v0`, f, 0)
+      slot.run(id, chatId, path.at(-1)?.id ?? null, depth, `${id}-v0`, f, 0)
       path.push({ id, selected: `${id}-v${texts.length - 1}`, versions: texts.length })
     }
     paths.push(path)
@@ -105,7 +104,7 @@ try {
       const depth = Math.floor(((i + 1) * messages) / 10)
       const id = `${f}-insert${i}`
       version.run(`${id}-v0`, id, 0, "human", "An inserted synthetic message.", "user_written")
-      slot.run(id, chatId, lane, path[depth]!.id, depth + 1, `${id}-v0`, f, 1)
+      slot.run(id, chatId, path[depth]!.id, depth + 1, `${id}-v0`, f, 1)
       put(f, "insert", id, path[depth]!.id, depth, null, 1)
       if (b === 0) mainInsertions.set(depth, id)
       versions++

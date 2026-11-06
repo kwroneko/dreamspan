@@ -59,8 +59,8 @@ for (const width of [1800, 390])
       const panel = await setup(page, width)
       let scope = panel
       if (view === "large editor") {
-        await panel.getByRole("button", { name: "Large editor", exact: true }).click()
-        scope = page.getByRole("dialog", { name: "Lorebook editor", exact: true })
+        await panel.getByRole("link", { name: "Large editor", exact: true }).click()
+        scope = page.getByRole("region", { name: "Lorebook editor", exact: true })
       }
       await scope.getByRole("button", { name: /^Keys of Harbour:/ }).click()
       await expect(keys(scope)).toBeFocused()
@@ -93,8 +93,8 @@ for (const width of [1800, 390])
 
 test("entry expansion is independent in the side panel and large editor and survives reload", async ({ page }) => {
   let panel = await setup(page)
-  await panel.getByRole("button", { name: "Large editor", exact: true }).click()
-  const editor = page.getByRole("dialog", { name: "Lorebook editor", exact: true })
+  await panel.getByRole("link", { name: "Large editor", exact: true }).click()
+  const editor = page.getByRole("region", { name: "Lorebook editor", exact: true })
   await toggle(editor, false).click()
   await expect(toggle(editor, true)).toBeVisible()
   await expect(toggle(panel, false)).toBeVisible()
@@ -146,8 +146,8 @@ for (const view of ["side panel", "large editor"])
       const panel = await setup(page, 1800, 174)
       let scope = panel
       if (view === "large editor") {
-        await panel.getByRole("button", { name: "Large editor", exact: true }).click()
-        scope = page.getByRole("dialog", { name: "Lorebook editor", exact: true })
+        await panel.getByRole("link", { name: "Large editor", exact: true }).click()
+        scope = page.getByRole("region", { name: "Lorebook editor", exact: true })
       }
       const cdp = await context.newCDPSession(page)
       await cdp.send("Emulation.setCPUThrottlingRate", { rate })

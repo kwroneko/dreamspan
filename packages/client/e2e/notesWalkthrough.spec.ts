@@ -109,7 +109,7 @@ test.beforeAll(async ({ browser }) => {
   const cast = await admin((api) => api.GetCast({ chatId: chat.id, slotId: chat.activeLeafSlotId }))
   inn = { chatId: chat.id, leaf: chat.activeLeafSlotId!, cast: cast.cards }
   ariaRef = (await admin((api) => api.ListLibrary({ kind: "card" }))).find(
-    (r) => r.label === "Aria Vance" && r.refKind === "upstream"
+    (r) => r.label === "Aria Vance" && r.parentEntityId === null
   )!.id
 
   // A note of the inn's own, on Aria's turn only, and a shared note in the library.

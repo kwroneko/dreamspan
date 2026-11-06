@@ -35,8 +35,8 @@ export function RevisionEntry({
   current: boolean
   selected: boolean
   onSelect: () => void
-  /** Sets the message (empty removes it); false keeps the field open. */
-  onMessage: (message: string) => Promise<boolean>
+  /** Sets the message (empty removes it); false keeps the field open. None: it only reads. */
+  onMessage?: ((message: string) => Promise<boolean>) | undefined
 }) {
   const name = revisionName(number)
   return (

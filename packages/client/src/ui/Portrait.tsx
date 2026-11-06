@@ -12,6 +12,7 @@ import { mediaUrl, pictureUrl } from "./mediaImage.ts"
 import { close, even, keepOnly, move, replace, show, split, type Stack, toggle } from "./portraitStack.ts"
 import { Segmented } from "./Segmented.tsx"
 import { ToolbarSlider } from "./Slider.tsx"
+import { useAway } from "./away.ts"
 import { IconButton, Tooltip } from "./Tooltip.tsx"
 import { ViewerHeader } from "./ViewerHeader.tsx"
 import { useViewPrefs } from "./viewPrefs.ts"
@@ -119,8 +120,9 @@ export function EnsurePortraitViewer({ children }: { children: ReactNode }) {
 
 /** The phone's viewer: the whole screen, the image fitted to it or at 100% to pan and pinch. */
 function PortraitScreen({ portrait, onClose }: { portrait: Portrait; onClose: () => void }) {
+  const away = useAway()
   return (
-    <BaseDialog.Root open onOpenChange={(open) => !open && onClose()}>
+    <BaseDialog.Root open={!away} onOpenChange={(open) => !open && onClose()}>
       <BaseDialog.Portal>
         <BaseDialog.Popup
           data-layout-overlay="The full-screen viewer covers the page"

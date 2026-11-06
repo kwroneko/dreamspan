@@ -33,13 +33,13 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
     GetCostSettings: ({ userId }) =>
       sql<{
         revision: number
-        rules_json: string
-      }>`SELECT revision, rules_json FROM cost_settings WHERE user_id = ${userId}`.pipe(
+        value_json: string
+      }>`SELECT revision, value_json FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = 'cost'`.pipe(
         Effect.map(([row]) =>
           row
             ? {
                 revision: row.revision,
-                rules: JSON.parse(row.rules_json) as import("@rp/shared/costFormulas.ts").CostSettings["rules"]
+                rules: JSON.parse(row.value_json) as import("@rp/shared/costFormulas.ts").CostSettings["rules"]
               }
             : { revision: 0, rules: [] }
         ),
@@ -137,7 +137,9 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
     GetModel: ({ userId, modelId }) => ownedModel(userId, modelId).pipe(Effect.map(toModel), query("GetModel")),
 
     GetAppSetting: ({ key }) =>
-      sql<{ value_json: string }>`SELECT value_json FROM app_settings WHERE key = ${key}`.pipe(
+      sql<{
+        value_json: string
+      }>`SELECT value_json FROM settings WHERE scope = 'app' AND scope_id = '' AND key = ${key}`.pipe(
         Effect.map(([row]) => (row ? (JSON.parse(row.value_json) as unknown) : null)),
         query("GetAppSetting")
       ),

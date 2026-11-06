@@ -20,7 +20,7 @@ import type { FieldPath } from "@rp/shared/editing.ts"
 import { useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, IconLink } from "../../ui/Tooltip.tsx"
 import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
 import { RefVariants } from "./RefVariants.tsx"
 import { BookSettings } from "./LorebookForm.tsx"
@@ -78,7 +78,9 @@ export function LorebookPanelEditor(props: ComponentProps<typeof LorebookPanelBo
         key={store.refId}
         store={store}
         fallbackName={props.root.length === 0 ? (store.snapshot?.ref.label ?? props.fallbackName) : props.fallbackName}
-        {...(selected && workspace ? { onOpenLarge: () => workspace.open(store.refId) } : {})}
+        {...(selected && workspace
+          ? { onOpenLarge: () => workspace.open(store.refId), largeHref: workspace.href(store.refId) }
+          : {})}
       />
     </PanelVariantNavigation>
   )
@@ -91,6 +93,7 @@ function LorebookPanelBody({
   note,
   onClose,
   onOpenLarge,
+  largeHref,
   saveControls = true
 }: {
   store: EditorStore
@@ -102,8 +105,9 @@ function LorebookPanelBody({
   /** One line on what an edit reaches: "Part of Aria's card: saving it saves the card." */
   note?: string
   onClose?: () => void
-  /** The book in the large editor over the chat. */
+  /** The book in the large editor, in a tab beside the chat; `largeHref` is that tab's link. */
   onOpenLarge?: () => void
+  largeHref?: string
 }) {
   const call = useCaller()
   const state = useEditorState(store)
@@ -134,14 +138,23 @@ function LorebookPanelBody({
             <IconButton label="Close the lorebook" hint="Closes this lorebook." icon="close" onClick={onClose} />
           )}
           {saveControls && <SaveRevision store={store} />}
-          {onOpenLarge && (
-            <IconButton
-              label="Large editor"
-              hint="Large editor: opens the lorebook over the chat, its entries in a table with their columns."
-              icon="expand"
-              onClick={onOpenLarge}
-            />
-          )}
+          {onOpenLarge &&
+            (largeHref ? (
+              <IconLink
+                label="Large editor"
+                hint="Large editor: opens the lorebook beside the chat, its entries in a table with their columns."
+                icon="expand"
+                href={largeHref}
+                onOpen={onOpenLarge}
+              />
+            ) : (
+              <IconButton
+                label="Large editor"
+                hint="Large editor: opens the lorebook beside the chat, its entries in a table with their columns."
+                icon="expand"
+                onClick={onOpenLarge}
+              />
+            ))}
         </div>
         {state.saveError && (
           <ErrorAlert

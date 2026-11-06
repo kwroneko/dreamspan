@@ -121,7 +121,7 @@ for (const width of [1440, 390])
       await expect(tab.locator("[data-card-tokens]")).toHaveText(/^~\d+ tokens · ~\d+ permanent$/)
       // The actions are buttons, each with its explanation; no More menu.
       await expect(tab.getByRole("link", { name: `New chat with ${name}`, exact: true })).toBeVisible()
-      await expect(tab.getByRole("button", { name: `Open ${name} in the full editor`, exact: true })).toBeVisible()
+      await expect(tab.getByRole("link", { name: `Open ${name} in the full editor`, exact: true })).toBeVisible()
       await expect(tab.getByRole("button", { name: `Fork for this chat: ${name}`, exact: true })).toHaveAttribute(
         "aria-describedby",
         /.+/
