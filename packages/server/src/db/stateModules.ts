@@ -1,3 +1,4 @@
+import { storageKinds } from "./storageKinds.ts"
 // Trusted code references only: never accept these from chat/library content or public RPC.
 // Each worker request carries the active module stack, so scope exit and respawns agree.
 import { Context, Effect, Layer, Schema, Scope, Exit } from "effect"
@@ -12,16 +13,22 @@ const Snapshot = Schema.Struct({ modules: Sources, schemaModule: Schema.String }
 const HEADER = "rp-state-modules"
 
 /** Passing the registry also works when the worker bundles its own copy of shared/state. */
-export type InstallStateModule = (keys: typeof stateKeys) => Effect.Effect<void, StateKeyRegistrationError, Scope.Scope>
+export type InstallStateModule = (
+  keys: typeof stateKeys,
+  kinds: typeof storageKinds
+) => Effect.Effect<void, StateKeyRegistrationError, Scope.Scope>
 
 const install = Effect.fnUntraced(function* (source: ModuleSource, validate: typeof Schema.is = Schema.is) {
   const exports = yield* Effect.promise(() => import(source.module) as Promise<Record<string, unknown>>)
   const entry = exports[source.exportName]
   if (typeof entry !== "function") throw new Error(`State module ${source.id}: missing export ${source.exportName}`)
-  yield* (entry as InstallStateModule)({
-    ...stateKeys,
-    register: (key) => stateKeys.register(key, validate(key.value as Schema.Schema<unknown>))
-  })
+  yield* (entry as InstallStateModule)(
+    {
+      ...stateKeys,
+      register: (key) => stateKeys.register(key, validate(key.value as Schema.Schema<unknown>))
+    },
+    storageKinds
+  )
 })
 
 export class StateModules extends Context.Service<

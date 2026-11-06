@@ -276,7 +276,6 @@ it("leaf planning counts image tokens even when the text would fit the recent wi
     versionId: `version-${i}` as LcmSlot["versionId"],
     amendCount: 0,
     generating: 0,
-    merged: 0,
     children: 1,
     content: "Look",
     images: [{ mediaId: `image-${i}`, estimate: { tokens: 765, basis: "formula" as const } }]

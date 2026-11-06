@@ -11,7 +11,7 @@ import { Effect } from "effect"
 import { currentText, replaceEffects, replacing } from "../noteTargets.ts"
 import type { RolloutTool } from "../tools.ts"
 import { safely } from "./history.ts"
-import { castMember, notesAt, replaceOnce } from "./notes.ts"
+import { castMember, noteRefusal, notesAt, replaceOnce } from "./notes.ts"
 
 /** How the model and the notes name each field. */
 const FIELD_NAMES: Record<ReplaceableCardField, string> = {
@@ -81,6 +81,7 @@ export const editCard: RolloutTool<{
         const owner = replacing(notes, target)
         if (owner && !owner.editable)
           return { text: `A note you may not change replaces ${member.name}'s ${label}.`, isError: true }
+        if (owner?.linked) return { text: noteRefusal(owner)!, isError: true }
         const current = currentText(notes, target, card.fields[field] ?? "")
         const tailTitle = `${member.name}'s current ${label}`
         const tail = notes.find((n) => n.card === null && n.title === tailTitle) ?? null
@@ -91,6 +92,8 @@ export const editCard: RolloutTool<{
         const fromField = replaceOnce(current, args.find, "")
         // The passage is still in the field: it leaves it, into the tail note.
         if (!("error" in fromField)) {
+          const refused = tail && args.replace.trim() ? noteRefusal(tail) : null
+          if (refused) return { text: refused, isError: true }
           const inPlace = replaceEffects(
             notes,
             target,
@@ -139,7 +142,9 @@ export const editCard: RolloutTool<{
           return { text: result }
         }
         // Changed before: the passage now stands in the tail note.
-        if (tail !== null && tail.editable) {
+        if (tail !== null) {
+          const refused = noteRefusal(tail)
+          if (refused) return { text: refused, isError: true }
           const inTail = replaceOnce(tail.content, args.find, args.replace)
           if (!("error" in inTail)) {
             const { result } = yield* context.writer.ApplyRolloutEffect({

@@ -51,7 +51,7 @@ test("group member listing hides bare card versions", async ({ page }) => {
     .click()
   const groups = page.getByRole("main").getByLabel("Groups", { exact: true })
   // The tile counts its members; the tooltip names them without bare versions.
-  await expect(groups.getByRole("button").filter({ hasText: "2 members" })).toBeVisible()
+  await expect(groups.getByRole("link").filter({ hasText: "2 members" })).toBeVisible()
   await expect(groups.getByTitle("Review A, Review B", { exact: true })).toBeVisible()
 })
 test("the sidebar refreshes card name and version after an ordinary editor Save", async ({ page }) => {
@@ -77,14 +77,14 @@ test("the sidebar refreshes card name and version after an ordinary editor Save"
     .getByRole("button", { name: "Characters" })
     .click()
   await expect(sidebar).toContainText("Cache original")
-  await expect(sidebar.getByRole("button", { name: "Open Cache original", exact: true })).toBeVisible()
+  await expect(sidebar.getByRole("link", { name: "Open Cache original", exact: true })).toBeVisible()
   // The name chats use changes, so the rename asks about past messages on confirm.
   await renameCard(page, "display", "Cache renamed")
   await page.getByRole("dialog").getByRole("button", { name: "Just change it", exact: true }).click()
   await renameCard(page, "version", "2")
   await saveButton(page).click()
   await expect(page.getByRole("heading", { name: "Cache renamed", exact: true })).toBeVisible()
-  await expect(sidebar.getByRole("button", { name: "Open Cache renamed", exact: true })).toBeVisible()
+  await expect(sidebar.getByRole("link", { name: "Open Cache renamed", exact: true })).toBeVisible()
 })
 test("three name drafts and diffs work, but history must refuse a colliding restore", async ({ page }) => {
   test.setTimeout(180000)

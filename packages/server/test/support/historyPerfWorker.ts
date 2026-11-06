@@ -23,13 +23,12 @@ const length = workload === "long" ? 100000 : 10000
 const db = new DatabaseSync(file)
 try {
   {
-    const lane = (db.prepare("SELECT id FROM lanes WHERE chat_id = ?").get(chatId) as { id: string }).id
     db.exec("PRAGMA foreign_keys = ON; BEGIN")
     const version =
       db.prepare(`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
       VALUES (?, ?, 0, ?, 'model', ?, 'verbatim', 'generated', 1, 1)`)
     const slot = db.prepare(
-      `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?, 1)`
+      `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, 1)`
     )
     for (let i = 0; i <= length; i++) {
       version.run(
@@ -38,17 +37,16 @@ try {
         i === length ? "generating" : "complete",
         i === length ? "" : "x".repeat(100)
       )
-      slot.run(`perf-s-${i}`, chatId, lane, i ? `perf-s-${i - 1}` : null, i, `perf-v-${i}`)
+      slot.run(`perf-s-${i}`, chatId, i ? `perf-s-${i - 1}` : null, i, `perf-v-${i}`)
     }
     db.prepare("UPDATE chats SET active_leaf_slot_id = ? WHERE id = ?").run(`perf-s-${length}`, chatId)
     db.exec("COMMIT")
   }
   if (workload !== "long") {
-    const lane = (db.prepare("SELECT id FROM lanes WHERE chat_id = ?").get(chatId) as { id: string }).id
     db.exec("BEGIN")
     const slot = db.prepare(`INSERT INTO slots
-      (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1)`)
+      (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
+      VALUES (?, ?, ?, ?, ?, 1)`)
     const version = db.prepare(`INSERT INTO versions
       (id, slot_id, ordinal, status, writer, content, macro_mode, origin, rollout_id, created_at, updated_at)
       VALUES (?, ?, ?, 'complete', 'model', 'Synthetic reply', 'verbatim', 'generated', ?, 1, 1)`)
@@ -60,7 +58,7 @@ try {
     db.prepare("UPDATE versions SET rollout_id = 'perf-root' WHERE id = 'perf-v-1'").run()
     for (let i = 1; i <= (workload === "siblings" ? 500 : 1); i++) {
       version.run(`perf-bv-${i}`, `perf-b-${i}`, 0, null)
-      slot.run(`perf-b-${i}`, chatId, lane, i === 1 ? "perf-s-1" : `perf-b-${i - 1}`, i + 1, `perf-bv-${i}`)
+      slot.run(`perf-b-${i}`, chatId, i === 1 ? "perf-s-1" : `perf-b-${i - 1}`, i + 1, `perf-bv-${i}`)
     }
     for (let i = 1; i <= 500; i++) {
       const slotId = workload === "siblings" ? `perf-b-${i}` : "perf-b-1"

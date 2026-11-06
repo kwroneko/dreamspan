@@ -83,7 +83,7 @@ test("a sidebar pick of another chat leaves the previous chat's character", asyn
   await page.goto(`${server().url}/chats/${first.chat}?panel=card:${first.card}`)
   const panel = page.getByRole("complementary", { name: "Chat panel" })
   await expect(panel.getByRole("heading", { name: "Odalys Fenwick", exact: true })).toBeVisible({ timeout: 30_000 })
-  await page.getByRole("button", { name: /^Open chat Marguerite Quill/ }).click()
+  await page.getByRole("link", { name: /^Open chat Marguerite Quill/ }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${second.chat}`))
   await showsSecond(page)
 })

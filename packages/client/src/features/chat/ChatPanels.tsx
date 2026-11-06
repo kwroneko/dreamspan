@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The chat panel host: descriptors own its tabs and bodies; the host owns layout and retention.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
@@ -7,6 +8,8 @@ import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
+import { Away } from "../../ui/away.ts"
+import { useTabShown } from "../workbench/tab.tsx"
 import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
 import { UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
 import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
@@ -174,6 +177,7 @@ export function ChatSidePanel({
   title,
   onTab,
   onClose,
+  host = null,
   ...content
 }: {
   tab: PanelTab
@@ -182,6 +186,8 @@ export function ChatSidePanel({
   title: string
   onTab: (tab: PanelTab) => void
   onClose: () => void
+  /** Beside the workbench's frames rather than beside the chat (features/workbench). */
+  host?: HTMLElement | null
 } & SidePanelContent) {
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
@@ -309,7 +315,7 @@ export function ChatSidePanel({
         </div>
       </Sheet>
     )
-  return (
+  const aside = (
     <aside
       aria-label="Chat panel"
       style={{ width }}
@@ -328,6 +334,8 @@ export function ChatSidePanel({
       {panels}
     </aside>
   )
+  // Shown beside the frames even while this chat's tab is behind another (its editor's, say).
+  return host ? createPortal(<Away value={false}>{aside}</Away>, host) : aside
 }
 /**
  * The side panel's tab: the URL's, else on a wide screen the one this browser last had open
@@ -395,6 +403,14 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
     },
     [navigate, userId]
   )
+  // A phone's sheet covers everything: once this chat's tab is behind another (an editor opened
+  // from it, or a resize below the breakpoint while it was) the sheet closes rather than coming
+  // back over the chat, as opening a large editor from it closes it. The layout says so, not
+  // the tab's place on screen, which a resize moves for a moment while the frames remount.
+  const away = !useTabShown(wide)
+  useEffect(() => {
+    if (!wide && away && latest.current.panel !== null) show(null)
+  }, [wide, away, show])
   /** Search params that keep the panel's tab: the one shown when the call is made. */
   const withPanel = useCallback(
     (search: Record<string, string>) => {

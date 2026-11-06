@@ -115,8 +115,8 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   await expect(page.getByRole("region", { name: "Search and replace" }).getByRole("status")).toHaveText("1 match.")
   // The character grid and the card's page, with its avatar and its definition.
   await page.goto(`${server().url}/`)
-  await page.getByRole("main").getByRole("button", { name: "Open Wren", exact: true }).click()
+  await page.getByRole("main").getByRole("link", { name: "Open Wren", exact: true }).click()
   // Its new chat, the card in the side panel's character tab, as in any chat.
-  await expect(page.getByRole("button", { name: "Open Wren in the full editor", exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Open Wren in the full editor", exact: true })).toBeVisible()
   expect(violations).toEqual([])
 })

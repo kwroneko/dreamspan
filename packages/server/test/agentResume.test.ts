@@ -232,6 +232,113 @@ const narrator = (toolIds: ReadonlyArray<string>, contract: "final_text" | "both
 const mode = [{ key: "orchestration.mode" as const, value: { mode: "narrator" } }]
 
 describe("resuming agent replies", () => {
+  it.live("a crash after send_message's result restores the sent text without another model turn", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      yield* narrator([], "both")
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) =>
+            sse(
+              res,
+              tools(request.body as unknown as Body) === 0
+                ? toolCall("send_message", { message: "Mira keeps the ledger." }, "sent")
+                : completionChunks(["Unexpected next turn."], { prompt_tokens: 20, completion_tokens: 1 })
+            )
+          )
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: mode
+      })
+      assert.strictEqual(version.content, "Mira keeps the ledger.")
+      const row = rolloutOf(config.dataDir, version.id)
+      // The transcript's terminal tool result reached disk; FinishRollout has not yet run.
+      const db = new DatabaseSync(databaseFile(config.dataDir))
+      db.exec("PRAGMA busy_timeout = 5000")
+      db.prepare("UPDATE rollouts SET status = 'interrupted' WHERE id = ?").run(row.id as string)
+      db.close()
+      const me = yield* api.Whoami()
+      const reader = yield* Reader
+      const slot = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      const entry = yield* api.ResumeVersion({ versionId: version.id, expectedRowVersion: slot.entry.rowVersion })
+      yield* eventually(() => finished(events, entry.version.id) !== undefined)
+      assert.strictEqual(finished(events, entry.version.id)!.content, version.content)
+      assert.strictEqual(bodies(mock.requests()).length, 1, "the terminal send is already durable")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  for (const interruptedCall of [0, 1, 2])
+    it.live(`replays the committed note call ${interruptedCall + 1} before validating changed state`, () => {
+      const config = testConfig()
+      const script = [
+        ["write_note", { title: "Injury", content: "A grey bandage." }],
+        ["edit_note", { note: "Injury", find: "grey", replace: "red" }],
+        ["edit_card", { character: "Mira", field: "description", find: "grey coat", replace: "red gown" }]
+      ] as const
+      return Effect.gen(function* () {
+        yield* narrator(script.map(([name]) => name))
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const done = tools(request.body as unknown as Body)
+              const next = script[done]
+              sse(
+                res,
+                next
+                  ? toolCall(next[0], next[1], `call_${done}`)
+                  : completionChunks(["Done."], { prompt_tokens: 20, completion_tokens: 1 })
+              )
+            })
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const api = yield* client()
+        const { version, events } = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          mira: { description: "She wears a grey coat.", agent_editable_fields: ["description"] },
+          state: mode
+        })
+        const row = rolloutOf(config.dataDir, version.id)
+        // Crash after committing the effect but before saving that call's result.
+        const transcript = JSON.parse(row.transcript as string) as Array<{ role: string }>
+        const callAt = transcript.findIndex((m) => m.role === "assistant") + interruptedCall * 2
+        const db = new DatabaseSync(databaseFile(config.dataDir))
+        db.exec("PRAGMA busy_timeout = 5000")
+        db.prepare("UPDATE rollout_payloads SET transcript_json = ? WHERE rollout_id = ?").run(
+          JSON.stringify(transcript.slice(0, callAt + 1)),
+          row.id as string
+        )
+        db.prepare("UPDATE rollouts SET status = 'interrupted' WHERE id = ?").run(row.id as string)
+        db.close()
+        const before = bodies(mock.requests())
+        const me = yield* api.Whoami()
+        const reader = yield* Reader
+        const slot = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+        const entry = yield* api.ResumeVersion({ versionId: version.id, expectedRowVersion: slot.entry.rowVersion })
+        yield* eventually(() => finished(events, entry.version.id) !== undefined)
+        assert.strictEqual(finished(events, entry.version.id)!.content, "Done.")
+        const after = bodies(mock.requests()).slice(before.length)
+        assert.deepStrictEqual(after[0], before[interruptedCall + 1], "the receipt restores the original result")
+        const inspect = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
+        const resumed = rolloutOf(config.dataDir, entry.version.id)
+        const receipts = inspect
+          .prepare("SELECT tool_call_id FROM rollout_receipts WHERE rollout_id = ?")
+          .all(resumed.id as string)
+        assert.strictEqual(receipts.length, 3)
+        const revisions = inspect
+          .prepare("SELECT count(*) AS n FROM entity_revisions WHERE origin_ref = ?")
+          .get(`${resumed.id}:call_${interruptedCall}`)
+        assert.strictEqual(revisions!.n, 0, "a receipted call makes no new note revisions")
+        inspect.close()
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+
   it.live("a stop mid-tool resumes as a new version that runs the call again, unseen by the model", () => {
     const config = testConfig()
     return Effect.gen(function* () {

@@ -57,7 +57,7 @@ const tiles = (page: Page) =>
   page
     .getByRole("main")
     .getByLabel("Characters", { exact: true })
-    .getByRole("button", { name: /^Open / })
+    .getByRole("link", { name: /^Open / })
 const labels = (buttons: ReturnType<typeof tiles>) =>
   buttons.evaluateAll((nodes) =>
     nodes.map((n) =>
@@ -90,7 +90,7 @@ for (const width of [1440, 390]) {
     if (width === 1440) {
       // The left panel's grid uses the same key.
       await sidebar(page).getByRole("group", { name: "Left panel", exact: true }).getByText("Characters").click()
-      const side = sidebar(page).getByRole("button", { name: /^Open (?!chat )/ })
+      const side = sidebar(page).getByRole("link", { name: /^Open (?!chat )/ })
       await expect(side.first()).toBeVisible()
       expect((await labels(side)).slice(3)).toEqual(["Bob", "Alice", "Cara"])
     }
@@ -102,7 +102,7 @@ test("a group tile counts its members and shows three faces with no empty slot",
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
   await page.getByRole("group", { name: "Show", exact: true }).getByRole("button", { name: "Groups" }).click()
-  const tile = page.getByRole("main").getByLabel("Groups", { exact: true }).getByRole("button", {
+  const tile = page.getByRole("main").getByLabel("Groups", { exact: true }).getByRole("link", {
     name: "Open chat The Trio"
   })
   await expect(tile).toContainText("3 members")
@@ -134,7 +134,7 @@ for (const width of [1440, 390]) {
     await expect(panel.getByRole("button", { name: /unsaved texts?$/ })).toHaveCount(0)
     await panel.getByRole("group", { name: "Left panel", exact: true }).getByText("Characters").click()
     await panel.getByLabel("Find a character").fill("Cara")
-    await panel.getByRole("button", { name: "Open Cara", exact: true }).click()
+    await panel.getByRole("link", { name: "Open Cara", exact: true }).click()
     await expect(page).toHaveURL(/\/cards\/[^/]+\/chat\?/)
     await expect(page.getByRole("main")).toContainText("Cara waves.")
     if (width === 390) await expect(page.getByRole("button", { name: "Close the menu" })).toHaveCount(0)
@@ -146,7 +146,7 @@ test("the chat open in the middle is marked in the left panel's list", async ({ 
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(server().url)
   const row = sidebar(page)
-    .getByRole("button", { name: /^Open chat Bob/ })
+    .getByRole("link", { name: /^Open chat Bob/ })
     .first()
   await row.click()
   await expect(page).toHaveURL(/\/chats\//)

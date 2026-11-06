@@ -1,30 +1,34 @@
 // The header's branch control (DESIGN §3.2; registered as `chat.branches` in
 // `chatBranchControls`): "Branch: From #14 ▾" whenever the chat has more than one branch. It
 // lists every branch (its name, its last message's first words, when it was last chatted in),
-// the one shown marked, and switches, renames and deletes them. The UI says "branch" for what
-// the data model calls a fork. A popover on a wide screen, a sheet on a phone; the chat's ⋯
+// the one shown marked, and switches, renames, pins and deletes them. The UI says "branch" for
+// what the data model calls a fork. A popover on a wide screen, a sheet on a phone; the chat's ⋯
 // menu opens the same list (`requestBranches`), in a dialog while the header shows no control.
+// Its rows are the left panel's branch rows (ShellBrowser `BranchListRow`): the same box, title
+// line, preview, time and corner actions, grouped as the panel groups them (branchmenu).
 import type { Fork, SlotId } from "@rp/shared/chat.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
-import { type FormEvent, useEffect, useState } from "react"
-import type { AppError } from "../../errors.ts"
-import { Button } from "../../ui/Button.tsx"
-import { Dialog } from "../../ui/Dialog.tsx"
-import { Input } from "../../ui/Field.tsx"
-import { Icon } from "../../ui/Icon.tsx"
+import { type ReactNode, useEffect, useRef, useState } from "react"
+import { useAction } from "../../actions.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Icon, type IconName } from "../../ui/Icon.tsx"
+import { InlineRename } from "../../ui/InlineRename.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
-import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { openOnPlainClick } from "../../ui/links.ts"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { sidebarCleared } from "../characters/shellData.tsx"
 import {
+  type BranchGroup,
+  branchGroup,
   branchLabel,
   branchLastAt,
   formatMoment,
   OPENS_HERE_HINT,
+  orderBranches,
   useBranchesRequest,
   forksChanged,
   useChatForks
@@ -39,118 +43,119 @@ export interface BranchControlProps {
   readonly onJump: (slotId: SlotId) => void
 }
 
-/** One branch in the list: switch to it by its row; rename it in place; delete it. */
+/** The left panel's headings for the same groups. */
+const GROUP_TITLES: Record<BranchGroup, string> = {
+  pinned: "Pinned branches",
+  named: "Named branches",
+  other: "Branches"
+}
+
+/**
+ * One branch: the row opens it; the pencil after its name renames it in place; the corners pin
+ * it (top) and delete it (bottom), as the left panel's rows have their actions.
+ */
 function BranchRow({
   fork,
   label,
   shown,
   only,
+  link,
   onSwitch,
   onRename,
+  onPin,
   onDelete
 }: {
   fork: Fork
   label: string
   shown: boolean
   only: boolean
+  /** Where the row's link goes: a middle or modified click opens the branch in a new tab. */
+  link: { readonly chatId: string; readonly search: Readonly<Record<string, string>> }
   onSwitch: () => void
-  onRename: (name: string) => Promise<AppError | null>
+  onRename: (name: string) => Promise<boolean>
+  onPin: () => void
   onDelete: () => void
 }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(label)
-  const [error, setError] = useState<AppError | null>(null)
-  const [pending, setPending] = useState(false)
-  const save = async (event: FormEvent) => {
-    event.preventDefault()
-    if (pending) return
-    setPending(true)
-    const failed = await onRename(draft)
-    setPending(false)
-    setError(failed)
-    if (failed === null) setEditing(false)
-  }
-  if (editing)
-    return (
-      <li className="rounded-md border border-focus p-2">
-        <form className="flex flex-col gap-2" onSubmit={(event) => void save(event)}>
-          <Input
-            aria-label={`Name of branch ${label}`}
-            value={draft}
-            maxLength={100}
-            autoFocus
-            onChange={(event) => setDraft(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.stopPropagation()
-                setEditing(false)
-              }
-            }}
-          />
-          {error && <p className="text-xs text-danger">{error.message}</p>}
-          <div className="flex justify-end gap-2">
-            <Button
-              hint="Closes this dialog without applying changes."
-              variant="ghost"
-              className="h-8"
-              onClick={() => setEditing(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              hint="Saves the branch’s new name."
-              type="submit"
-              variant="primary"
-              className="h-8"
-              pending={pending}
-            >
-              Rename
-            </Button>
-          </div>
-        </form>
-      </li>
-    )
+  const [renaming, setRenaming] = useState(false)
+  const pinned = fork.pinnedAt !== null
   return (
     <li
       data-fork={fork.id}
-      className={`flex items-start gap-1 rounded-md border p-2 ${shown ? "border-accent bg-accent/5" : "border-transparent hover:bg-surface-raised"}`}
+      data-branch-row
+      onClick={(event) => {
+        // The title line isn't inside the open link (its pencil is a button of its own).
+        const target = event.target as HTMLElement
+        if (event.currentTarget.contains(target) && !target.closest("button, input, a")) onSwitch()
+      }}
+      className={`relative grid min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${shown ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
     >
-      <Tooltip label="Opens this chat branch.">
-        <button
-          type="button"
-          aria-current={shown || undefined}
-          aria-label={`${label}${shown ? ", shown" : ""}${fork.current ? ", the chat opens here" : ""}: ${fork.tipExcerpt.slice(0, 80) || "no messages"}`}
-          onClick={onSwitch}
-          className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
+      <div data-row-text className="min-w-0">
+        <div data-branch-title-line className="flex h-5 min-w-0 items-center gap-x-1 text-sm">
+          <InlineRename
+            compact
+            value={fork.name ?? ""}
+            label={label}
+            fieldLabel={`Name of branch ${label}`}
+            hint="Renames this branch."
+            allowEmpty
+            maxLength={100}
+            placeholder="Branch name"
+            className={renaming ? "min-w-0 flex-1" : "min-w-0"}
+            onEditingChange={setRenaming}
+            onRename={onRename}
+          >
             <span className="min-w-0 truncate font-medium">{label}</span>
-            {shown && <span className="text-xs font-medium text-accent">shown</span>}
-            {fork.current && (
-              <Tooltip label={OPENS_HERE_HINT}>
-                <span tabIndex={0} className="rounded outline-none focus-visible:ring-2 focus-visible:ring-focus">
-                  <Badge tone="neutral">opens here</Badge>
-                </span>
-              </Tooltip>
-            )}
-            <span className="ml-auto text-xs text-muted tabular-nums" title="Its last message">
-              {formatMoment(branchLastAt(fork))}
+          </InlineRename>
+          {fork.current && !renaming && (
+            <Tooltip label={OPENS_HERE_HINT}>
+              <span
+                data-opens-here
+                tabIndex={0}
+                className="ms-auto flex shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <Badge>opens here</Badge>
+              </span>
+            </Tooltip>
+          )}
+        </div>
+        <Tooltip label={`Opens this branch${shown ? ", shown now" : ""}.`}>
+          <Link
+            to="/chats/$chatId"
+            params={{ chatId: link.chatId }}
+            search={link.search}
+            // Marked current only when it is the branch shown, not whenever the chat's path matches.
+            activeOptions={{ exact: true, includeSearch: true }}
+            aria-current={shown || undefined}
+            aria-label={`${label}${shown ? ", shown" : ""}${fork.current ? ", the chat opens here" : ""}${pinned ? ", pinned" : ""}: ${fork.tipExcerpt.slice(0, 80) || "no messages"}`}
+            onClick={openOnPlainClick(onSwitch)}
+            className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
+              {fork.tipExcerpt || "No messages yet"}
             </span>
-          </span>
-          <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
-            {fork.tipExcerpt || "No messages yet"}
-          </span>
-        </button>
-      </Tooltip>
-      <div className={`flex shrink-0 items-center ${rowActionInsetClass}`}>
+            <span data-row-when className="block text-xs text-muted tabular-nums">
+              Last message {formatMoment(branchLastAt(fork))}
+            </span>
+          </Link>
+        </Tooltip>
+      </div>
+      <div
+        data-row-actions
+        data-layout-overlay="Corner actions share the row's open area"
+        className="flex shrink-0 flex-col items-end justify-between self-stretch"
+      >
         <IconButton
-          label={`Rename ${label}`}
-          icon="edit"
-          onClick={() => {
-            setDraft(fork.name ?? "")
-            setError(null)
-            setEditing(true)
-          }}
+          label={`${pinned ? "Unpin" : "Pin"} ${label}`}
+          hint={
+            pinned
+              ? "Click to unpin this branch within this chat"
+              : "Click to pin this branch above the other branches in this chat"
+          }
+          icon="pin"
+          filled={pinned}
+          aria-pressed={pinned}
+          className={pinned ? "text-text!" : ""}
+          onClick={onPin}
         />
         <IconButton
           label={`Delete ${label}`}
@@ -170,6 +175,35 @@ function BranchRow({
   )
 }
 
+/** A footer action: one row each, icon first, as a menu's items. Unavailable ones stay, greyed. */
+function FooterAction({
+  icon,
+  hint,
+  disabled = false,
+  onClick,
+  children
+}: {
+  icon: IconName
+  hint: string
+  disabled?: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <Button
+      variant="ghost"
+      hint={hint}
+      disabled={disabled}
+      focusableWhenDisabled
+      onClick={onClick}
+      className="h-8 w-full min-w-0 justify-start! gap-2! px-2! font-normal!"
+    >
+      <Icon name={icon} size={16} className="shrink-0" />
+      <span className="min-w-0 truncate">{children}</span>
+    </Button>
+  )
+}
+
 /** The list itself, wherever it's shown. */
 function BranchList({
   session,
@@ -186,24 +220,44 @@ function BranchList({
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { panel?: string }
   const deleted = useDeletedToast()
+  const pins = useAction()
+  const [failure, setFailure] = useState<string | null>(null)
+  const scroller = useRef<HTMLDivElement>(null)
+  const loaded = forks !== null
+  // Opened with dozens of branches, the one shown is in view.
+  useEffect(() => {
+    scroller.current?.querySelector("[aria-current]")?.closest("li")?.scrollIntoView({ block: "nearest" })
+  }, [loaded])
   const keepPanel = search.panel ? { panel: search.panel } : {}
   if (forks === null) return <p className="px-1 py-2 text-sm text-muted">Loading the branches…</p>
   const live = forks.length
-  // By their last message, newest first, as the left panel lists them.
-  const ordered = [...forks].sort((a, b) => branchLastAt(b) - branchLastAt(a))
+  const ordered = orderBranches(forks)
+  const groups = new Set(ordered.map(branchGroup))
+  // The URL names a branch only while it isn't the one the chat opens on.
+  const linkSearch = (fork: Fork) =>
+    fork.id === view.chat?.currentForkId ? keepPanel : { ...keepPanel, fork: fork.id }
   const open = (fork: Fork) => {
     onDone()
     if (fork.id === shown?.id) return
     void navigate({
       to: ".",
-      search: fork.id === view.chat?.currentForkId ? keepPanel : { ...keepPanel, fork: fork.id }
+      search: linkSearch(fork)
     })
   }
   const rename = async (fork: Fork, name: string) => {
     const result = await session.call((client) => client("NameFork", { forkId: fork.id, name }))
-    if (!result.ok) return result.error
+    setFailure(result.ok ? null : result.error.message)
+    if (!result.ok) return false
     forksChanged(session.id)
-    return null
+    return true
+  }
+  const pin = async (fork: Fork) => {
+    const result = await pins.run(
+      (client) => client("PinFork", { forkId: fork.id, pinned: fork.pinnedAt === null }),
+      ["pins"]
+    )
+    setFailure(result.ok ? null : result.error.message)
+    if (result.ok) forksChanged(session.id)
   }
   const remove = async (fork: Fork) => {
     const isShown = fork.id === shown?.id
@@ -224,66 +278,94 @@ function BranchList({
   const latest = forks.find((f) => f.current)
   // ST's "Back to parent chat": the branch this one was made from, while it's live.
   const parent = shown?.parentForkId ? forks.find((f) => f.id === shown.parentForkId) : undefined
+  const atLatest = latest === undefined || latest.id === shown?.id
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <ol aria-label="Branches" className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-        {ordered.map((fork) => (
-          <BranchRow
-            key={fork.id}
-            fork={fork}
-            label={branchLabel(fork)}
-            shown={fork.id === shown?.id}
-            only={live <= 1}
-            onSwitch={() => open(fork)}
-            onRename={(name) => rename(fork, name)}
-            onDelete={() => void remove(fork)}
-          />
-        ))}
-      </ol>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2 text-sm">
-        {latest !== undefined && shown !== undefined && latest.id !== shown.id && (
-          <Tooltip label={OPENS_HERE_HINT}>
-            <button type="button" className="text-accent hover:underline" onClick={() => open(latest)}>
-              Back to the branch the chat opens on
-            </button>
-          </Tooltip>
-        )}
-        {parent !== undefined && parent.id !== latest?.id && (
-          <Tooltip label="The branch this one was made from.">
-            <button type="button" className="text-accent hover:underline" onClick={() => open(parent)}>
-              Back to “{branchLabel(parent)}”
-            </button>
-          </Tooltip>
-        )}
-        {start !== null && (
-          <Tooltip label="Shows the message this branch was made at.">
-            <button
-              type="button"
-              className="text-accent hover:underline"
-              onClick={() => {
-                onDone()
-                onJump(start)
-              }}
-            >
-              Go to where this branch starts
-            </button>
-          </Tooltip>
-        )}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* The rows' 8 px gutter is inside the scrollport, so focus rings and borders aren't cut. */}
+      <div ref={scroller} data-branch-scroll className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 py-1">
+        <ol aria-label="Branches" className="flex flex-col gap-1">
+          {ordered.map((fork, i) => {
+            const group = branchGroup(fork)
+            const heading = groups.size > 1 && (i === 0 || branchGroup(ordered[i - 1]!) !== group)
+            const label = branchLabel(fork)
+            return [
+              heading && (
+                <li key={`${group}-heading`} role="none" className={i === 0 ? "" : "pt-2"}>
+                  <h3 className="truncate px-1 text-xs font-semibold text-muted">{GROUP_TITLES[group]}</h3>
+                </li>
+              ),
+              <BranchRow
+                key={fork.id}
+                fork={fork}
+                label={label}
+                shown={fork.id === shown?.id}
+                only={live <= 1}
+                link={{ chatId: session.id, search: linkSearch(fork) }}
+                onSwitch={() => open(fork)}
+                onRename={(name) => rename(fork, name)}
+                onPin={() => void pin(fork)}
+                onDelete={() => void remove(fork)}
+              />
+            ]
+          })}
+        </ol>
+      </div>
+      {failure !== null && (
+        <p role="alert" className="pt-2 text-xs text-danger">
+          {failure}
+        </p>
+      )}
+      <div className="-mx-3 mt-2 flex flex-col gap-0.5 border-t border-border px-3 pt-2">
+        <FooterAction
+          icon="home"
+          hint={atLatest ? "This is the branch the chat opens on." : OPENS_HERE_HINT}
+          disabled={atLatest}
+          onClick={() => latest && open(latest)}
+        >
+          Back to the branch the chat opens on
+        </FooterAction>
+        <FooterAction
+          icon="back"
+          hint={
+            parent ? "The branch this one was made from." : "This branch wasn't made from another that's still here."
+          }
+          disabled={parent === undefined}
+          onClick={() => parent && open(parent)}
+        >
+          {parent ? <>Back to “{branchLabel(parent)}”</> : "Back to the branch this one was made from"}
+        </FooterAction>
+        <FooterAction
+          icon="branch"
+          hint={
+            start !== null
+              ? "Shows the message this branch was made at."
+              : "This branch starts at the chat's first message."
+          }
+          disabled={start === null}
+          onClick={() => {
+            if (start === null) return
+            onDone()
+            onJump(start)
+          }}
+        >
+          Go to where this branch starts
+        </FooterAction>
         <Tooltip label="Show this chat's branches in the sidebar.">
           <Link
             to="."
-            className="text-accent hover:underline"
+            className={`${buttonClass("ghost")} h-8 w-full min-w-0 justify-start! gap-2! px-2! font-normal!`}
             onClick={onDone}
             search={(prev: Record<string, unknown>) => ({ ...prev, ...sidebarCleared, forks: session.id })}
           >
-            Show in the left panel
+            <Icon name="sidebar" size={16} className="shrink-0" />
+            <span className="min-w-0 truncate">Show in the left panel</span>
           </Link>
         </Tooltip>
+        <p className="px-2 pt-1 text-xs text-muted">
+          {live <= 1 ? "The only branch: delete the chat instead. " : ""}To start another, choose Branch from here in a
+          message&rsquo;s menu.
+        </p>
       </div>
-      <p className="text-xs text-muted">
-        {live <= 1 ? "The only branch: delete the chat instead. " : ""}To start another, choose Branch from here in a
-        message&rsquo;s menu.
-      </p>
     </div>
   )
 }
@@ -308,7 +390,8 @@ export function BranchControl(props: BranchControlProps) {
   const label = shown ? branchLabel(shown) : "Branch"
   // Sending in a branch that isn't the one the chat opens on makes it that; the header says which it is.
   const off = shown !== undefined && !shown.current
-  const ordered = forks === null ? [] : [...forks].sort((a, b) => branchLastAt(b) - branchLastAt(a))
+  // Its place in the list as the list orders it.
+  const ordered = forks === null ? [] : orderBranches(forks)
   const place = `${shown && forks ? `${ordered.indexOf(shown) + 1} of ${forks.length}` : ""}${off ? ", not the one the chat opens on" : ""}`
   const title = "Branches of this chat"
   const body = <BranchList {...props} forks={forks} shown={shown} onDone={() => setOpen(false)} />
@@ -334,15 +417,9 @@ export function BranchControl(props: BranchControlProps) {
           <Icon name="branch" size={16} />
           <span className="truncate">{label}</span>
         </Button>
-        {narrow ? (
-          <Sheet open={open} onOpenChange={setOpen} title={title}>
-            <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 py-3">{body}</div>
-          </Sheet>
-        ) : (
-          <Dialog open={open} onOpenChange={setOpen} title={title}>
-            {body}
-          </Dialog>
-        )}
+        <Sheet open={open} onOpenChange={setOpen} title={title}>
+          <div className="flex min-h-0 flex-1 flex-col px-3 py-3">{body}</div>
+        </Sheet>
       </>
     )
   return (
@@ -352,8 +429,11 @@ export function BranchControl(props: BranchControlProps) {
       trigger={
         <>
           <Icon name="branch" size={14} className="shrink-0" />
-          <span className="truncate">
-            <span className="text-muted">Branch:</span> {label}
+          {/* A narrow header (a split frame) keeps the icon, the name moving to the explanation:
+              never a name cut to a letter or two. */}
+          <span className="min-w-16 truncate @max-[32rem]/header:hidden">
+            <span className="text-muted @max-[40rem]/header:hidden">Branch: </span>
+            {label}
             {off && <span className="text-xs text-muted"> · not where it opens</span>}
           </span>
           <Icon name="down" size={14} className="shrink-0 text-muted" />
@@ -362,11 +442,9 @@ export function BranchControl(props: BranchControlProps) {
       triggerLabel={`Branch: ${label}, ${place}: switch branch`}
       triggerDisabled={!many}
       hint={
-        many
-          ? "Switch to another of this chat’s branches, or rename or delete them."
-          : forks === null
-            ? "Loading branches…"
-            : "No other branches yet."
+        forks === null
+          ? "Loading branches…"
+          : `Branch “${label}”${off ? " (not where the chat opens)" : ""}. ${many ? "Switch to another of this chat’s branches, or rename or delete them." : "No other branches yet."}`
       }
       hintSide="bottom"
       triggerClassName="inline-flex h-8 max-w-72 min-w-0 shrink! items-center gap-1.5 rounded-md border border-border px-2 text-sm text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
@@ -374,6 +452,7 @@ export function BranchControl(props: BranchControlProps) {
       side="bottom"
       align="end"
       wide
+      tall
     >
       {body}
     </Popover>

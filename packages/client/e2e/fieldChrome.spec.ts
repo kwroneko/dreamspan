@@ -91,7 +91,12 @@ const expectStill = async (page: Page, box: Locator, text: string) => {
   await expect(frame.getByText("edited", { exact: true })).toBeVisible()
   expect(moved(before, await boxesOutside(frame))).toEqual([])
   expect(await size()).toEqual(outer)
-  await page.locator("body").click({ position: { x: 1, y: 1 } })
+  // Leave the box (a click in the corner would land on the phone's tab strip, which shows once a
+  // second tab is open).
+  await box.evaluate((element) => {
+    const active = element.ownerDocument.activeElement
+    if (active instanceof HTMLElement) active.blur()
+  })
   await page.mouse.move(0, 0)
   await expect(frame.locator("[data-field-edited]")).toBeVisible()
   expect(

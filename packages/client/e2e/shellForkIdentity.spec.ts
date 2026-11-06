@@ -47,7 +47,7 @@ for (const width of [1440, 390])
       await page.goto(server().url)
       const pins = page.getByRole("main").getByRole("region", { name: "Pinned chats", exact: true })
       // Global pins are chats, represented once by the current branch.
-      const pin = pins.getByRole("button", { name: `Open chat ${data.chatName}`, exact: true })
+      const pin = pins.getByRole("link", { name: `Open chat ${data.chatName}`, exact: true })
       await expect(pin).toHaveCount(1)
       await expect(pin).toBeVisible()
       await expect(page.locator("html")).toHaveCSS("color-scheme", theme)
@@ -69,21 +69,21 @@ for (const width of [1440, 390])
       // A group tile is the chat, shown once: it opens the chat's current branch by its id.
       await page
         .getByRole("main")
-        .getByRole("button", { name: `Open chat ${data.chatName}`, exact: true })
+        .getByRole("link", { name: `Open chat ${data.chatName}`, exact: true })
         .last()
         .click()
       await expect(page).toHaveURL(new RegExp(`fork=${data.currentForkId}`))
       await page.goto(server().url)
       await page
         .getByRole("main")
-        .getByRole("button", { name: `Open ${data.a.label}`, exact: true })
+        .getByRole("link", { name: `Open ${data.a.label}`, exact: true })
         .click()
       await expect(page).toHaveURL(/fork=/)
       // Opening a character scopes the left list on desktop; its chat's row opens that chat at its
       // current branch, never another one.
       if (width === 1440) {
         await page
-          .getByRole("button", { name: `Open chat ${data.chatName}`, exact: true })
+          .getByRole("link", { name: `Open chat ${data.chatName}`, exact: true })
           .last()
           .click()
         await expect

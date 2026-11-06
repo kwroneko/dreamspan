@@ -462,5 +462,5 @@ test("a new chat of a group: each character greets in turn, and the first send m
     .getByRole("group", { name: "Show", exact: true })
     .getByRole("button", { name: "Groups", exact: true })
     .click()
-  await expect(page.getByRole("main").getByRole("button", { name: "Open chat The Pier", exact: true })).toHaveCount(2)
+  await expect(page.getByRole("main").getByRole("link", { name: "Open chat The Pier", exact: true })).toHaveCount(2)
 })

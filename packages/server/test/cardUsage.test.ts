@@ -283,11 +283,6 @@ describe("card usage", () => {
           params: [now]
         },
         {
-          sql: `INSERT INTO lanes (id, chat_id, name, created_at)
-            SELECT 'lane-' || id, id, 'main', ? FROM chats`,
-          params: [now]
-        },
-        {
           sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
             SELECT 'version-' || c.id, 'slot-' || c.id, 0, 'complete', 'human', 'verbatim', 'imported',
               (SELECT json_group_array(DISTINCT json_extract(e.value_json, '$.entity')) FROM state_events e
@@ -295,8 +290,8 @@ describe("card usage", () => {
           params: [now, now]
         },
         {
-          sql: `INSERT INTO slots (id, chat_id, lane_id, depth, selected_version_id, created_at)
-            SELECT 'slot-' || id, id, 'lane-' || id, 0, 'version-' || id, ? FROM chats`,
+          sql: `INSERT INTO slots (id, chat_id, depth, selected_version_id, created_at)
+            SELECT 'slot-' || id, id, 0, 'version-' || id, ? FROM chats`,
           params: [now]
         }
       ])

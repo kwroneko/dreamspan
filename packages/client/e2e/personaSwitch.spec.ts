@@ -58,7 +58,7 @@ const homePersonas = async (page: Page) => {
   await main.getByRole("group", { name: "Show", exact: true }).getByRole("button", { name: "Personas" }).click()
   return main
     .getByLabel("Characters", { exact: true })
-    .getByRole("button", { name: /^Open / })
+    .getByRole("link", { name: /^Open / })
     .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-label")).sort())
 }
 
@@ -89,19 +89,19 @@ test("the side panel's character tab: on and off, and the left panel's Personas 
   await show.click()
   await page.getByRole("option", { name: /^Personas/ }).click()
   const tiles = left.getByLabel("Characters", { exact: true })
-  await expect(tiles.getByRole("button", { name: /^Open Pia/ })).toBeVisible()
-  await expect(tiles.getByRole("button", { name: /^Open Rook/ })).toHaveCount(0)
+  await expect(tiles.getByRole("link", { name: /^Open Pia/ })).toBeVisible()
+  await expect(tiles.getByRole("link", { name: /^Open Rook/ })).toHaveCount(0)
 
   await toggle.click()
   await expect(toggle).toHaveAttribute("aria-pressed", "true")
-  await expect(tiles.getByRole("button", { name: /^Open Rook/ })).toBeVisible()
+  await expect(tiles.getByRole("link", { name: /^Open Rook/ })).toBeVisible()
   // The switch is a row the header already had room for: the header keeps its height.
   expect(Math.abs((await header.boundingBox())!.height - height)).toBeLessThanOrEqual(1)
   await shoot(page.getByRole("complementary", { name: "Chat panel" }), "panel-on")
 
   await toggle.click()
   await expect(toggle).toHaveAttribute("aria-pressed", "false")
-  await expect(tiles.getByRole("button", { name: /^Open Rook/ })).toHaveCount(0)
+  await expect(tiles.getByRole("link", { name: /^Open Rook/ })).toHaveCount(0)
 })
 
 for (const width of [1440, 390]) {

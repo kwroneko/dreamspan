@@ -352,11 +352,11 @@ test("the card's large editor control follows Save in the header", async ({ page
     for (const name of [PLAIN, PERSONA]) {
       const panel = await open(page, name)
       const header = panel.locator("[data-card-header]")
-      const expand = header.getByRole("button", { name: `Open ${name} in the full editor`, exact: true })
+      const expand = header.getByRole("link", { name: `Open ${name} in the full editor`, exact: true })
       await expect(expand).toBeVisible()
       await expect(expand.locator("svg")).toBeVisible()
       await expect(expand).toHaveText("")
-      await expect(panel.getByRole("button", { name: `Open ${name} in the full editor`, exact: true })).toHaveCount(1)
+      await expect(panel.getByRole("link", { name: `Open ${name} in the full editor`, exact: true })).toHaveCount(1)
       const save = await box(header.getByRole("group", { name: "Save", exact: true }))
       const control = await box(expand)
       expect(control.x).toBeGreaterThanOrEqual(save.x + save.width)
@@ -368,7 +368,7 @@ test("the card's large editor control follows Save in the header", async ({ page
       await expand.hover()
       await expect(page.getByText("Opens this card in the large editor.", { exact: true })).toBeVisible()
       await expand.click()
-      await expect(page.getByRole("dialog", { name: "Card editor", exact: true })).toBeVisible()
+      await expect(page.getByRole("region", { name: "Card editor", exact: true })).toBeVisible()
     }
   }
 })

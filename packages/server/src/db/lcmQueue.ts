@@ -130,7 +130,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           const chain = yield* lcmPath(sql, userId, chatId, last, first, chunk.inputs.length)
           if (
             chain[0]?.id !== first ||
-            chain.some((s) => s.generating || s.merged) ||
+            chain.some((s) => s.generating) ||
             JSON.stringify(chain.map(slotInput)) !== JSON.stringify(chunk.inputs)
           )
             return yield* reject("EnqueueSummaries", "The summary chain or its inputs changed; plan again.")

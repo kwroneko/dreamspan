@@ -12,7 +12,7 @@ import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { Badge, Disclosure } from "../../ui/Surface.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconLink } from "../../ui/Tooltip.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { RecoveredNotice, RestoredNotice } from "../editor/controls.tsx"
 import { PresetSettings } from "../editor/PresetEditor.tsx"
@@ -57,12 +57,15 @@ function PresetColumn({ store }: { store: EditorStore }) {
             <Badge>preset</Badge>
           </div>
           <SaveRevision store={store} />
-          <IconButton
-            label="Open the preset in the large editor"
-            hint="Opens this preset in the large editor"
-            icon="expand"
-            onClick={() => workspace?.open(store.refId)}
-          />
+          {workspace && (
+            <IconLink
+              label="Open the preset in the large editor"
+              hint="Opens this preset in the large editor"
+              icon="expand"
+              href={workspace.href(store.refId)}
+              onOpen={() => workspace.open(store.refId)}
+            />
+          )}
         </div>
         {state.saveError && (
           <ErrorAlert

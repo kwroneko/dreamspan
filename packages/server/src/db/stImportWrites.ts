@@ -138,8 +138,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
     )
 
   const ownedSlot = (chatId: string, slotId: string) =>
-    sql<{ id: string; depth: number; lane_id: string; deleted_at: number | null }>`
-      SELECT id, depth, lane_id, deleted_at FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`.pipe(
+    sql<{ id: string; depth: number; deleted_at: number | null }>`
+      SELECT id, depth, deleted_at FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`.pipe(
       Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "slot", id: slotId }))))
     )
 
@@ -407,7 +407,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             title: unfinishedTitle(title),
             created_at: createdAt
           })}`
-          yield* sql`INSERT INTO lanes ${sql.insert({ id: uuidv7(), chat_id: chatId, name: "main", created_at: at })}`
           yield* sql`INSERT INTO state_events ${sql.insert({
             id: uuidv7(),
             chat_id: chatId,
@@ -503,13 +502,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             WHERE id = ${entity} AND owner_user_id = ${userId} AND kind = 'card' AND deleted_at IS NULL`
             if (row?.n !== 1) return yield* new NotFound({ entity: "entity", id: entity })
           }
-          let parent: { id: string; depth: number; lane_id: string } | null =
+          let parent: { id: string; depth: number } | null =
             input.parentSlotId === null ? null : yield* ownedSlot(chatId, input.parentSlotId)
-          const laneId =
-            parent?.lane_id ??
-            (yield* sql<{
-              id: string
-            }>`SELECT id FROM lanes WHERE chat_id = ${chatId} ORDER BY created_at, id LIMIT 1`)[0]!.id
           // The slots on the path to where earlier imports of the file left it, by depth, from
           // the batch's first message down: walked once, and only if a message doesn't match exactly.
           let priorPath: Map<number, string> | null = null
@@ -591,7 +585,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           if (batch !== null) {
             yield* insertStMessageBatch(sql, batch, {
               chatId,
-              laneId,
               forkId: fileFork.id,
               parentId: parent?.id ?? null,
               depth: parent === null ? 0 : parent.depth + 1
@@ -772,7 +765,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
                   differing++
                   invalidatesPrefix = true
                 }
-                parent = { id: match.slot_id, depth: match.depth, lane_id: laneId }
+                parent = { id: match.slot_id, depth: match.depth }
                 slotIds.push(match.slot_id as SlotId)
                 continue
               }
@@ -786,7 +779,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             if (offset === 0 && prepared !== null) {
               yield* insertStMessageBatch(sql, prepared, {
                 chatId,
-                laneId,
                 forkId: fileFork.id,
                 parentId: parent?.id ?? null,
                 depth: parent === null ? 0 : parent.depth + 1
@@ -806,7 +798,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             yield* sql`INSERT INTO slots ${sql.insert({
               id: slotId,
               chat_id: chatId,
-              lane_id: laneId,
               fork_id: fileFork.id,
               parent_slot_id: parent?.id ?? null,
               depth,
@@ -815,7 +806,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
               created_at: message.versions[chosen]!.at
             })}`
             firstAdded ??= slotId
-            parent = { id: slotId, depth, lane_id: laneId }
+            parent = { id: slotId, depth }
             slotIds.push(slotId as SlotId)
             added++
           }

@@ -66,7 +66,7 @@ for (const width of [1440, 390]) {
     await assertState(page)
     await search(page).fill("Alice")
     await expect(
-      main(page).getByLabel("Groups", { exact: true }).getByRole("button", { name: "Open chat Alice and Bob" })
+      main(page).getByLabel("Groups", { exact: true }).getByRole("link", { name: "Open chat Alice and Bob" })
     ).toBeVisible()
 
     const context = await browser.newContext({ viewport: { width, height: 900 } })

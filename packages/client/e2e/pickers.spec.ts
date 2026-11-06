@@ -266,12 +266,12 @@ for (const width of [1440, 390]) {
     await dialog.getByLabel("Name").fill(name)
     await page.screenshot({ path: join(shots, `new-preset-${width}.png`) })
     await dialog.getByRole("button", { name: "Create", exact: true }).click()
-    await expect(page.getByRole("dialog", { name: "Preset editor", exact: true })).toBeVisible()
+    await expect(page.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
     await expect
       .poll(async () => (await rpc((api) => api.GetGenerationDefaults())).preset)
       .toBe(byLabel(await presets(), name).id)
     await page
-      .getByRole("dialog", { name: "Preset editor", exact: true })
+      .getByRole("region", { name: "Preset editor", exact: true })
       .getByRole("button", { name: "Close", exact: true })
       .first()
       .click()

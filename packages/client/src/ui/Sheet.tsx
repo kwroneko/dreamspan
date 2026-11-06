@@ -4,6 +4,7 @@ import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { type ReactNode, useRef } from "react"
 import { ImageControls } from "./ImageControls.tsx"
 import { WindowClose } from "./WindowClose.tsx"
+import { useAway } from "./away.ts"
 
 export function Sheet({
   open,
@@ -22,8 +23,9 @@ export function Sheet({
   children: ReactNode
 }) {
   const closeRef = useRef<HTMLButtonElement>(null)
+  const away = useAway()
   return (
-    <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
+    <BaseDialog.Root open={open && !away} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal container={container}>
         <BaseDialog.Popup
           data-layout-overlay="Modal sheet covers the page"

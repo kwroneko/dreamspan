@@ -427,11 +427,6 @@ describe("group read scale", () => {
           params: [now]
         },
         {
-          sql: `INSERT INTO lanes (id, chat_id, name, created_at) ${series(5000)}
-            SELECT 'l-' || i, printf('c-%05d', i), 'main', ? FROM n`,
-          params: [now]
-        },
-        {
           // Imported authored versions retain their cast; joins alone establish no membership.
           sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
             ${series(5000)}, depths(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM depths WHERE d < 9)
@@ -441,9 +436,9 @@ describe("group read scale", () => {
           params: [now, now]
         },
         {
-          sql: `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
+          sql: `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
             ${series(5000)}, depths(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM depths WHERE d < 9)
-            SELECT 'slot-' || i || '-' || d, printf('c-%05d', i), 'l-' || i,
+            SELECT 'slot-' || i || '-' || d, printf('c-%05d', i),
               CASE WHEN d = 0 THEN NULL ELSE 'slot-' || i || '-' || (d - 1) END, d, 'v-slot-' || i || '-' || d, ? FROM n, depths ORDER BY d, i`,
           params: [now]
         },

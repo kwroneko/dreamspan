@@ -39,7 +39,6 @@ const user = () => {
 
 const chat = (ownerId: string, status = "active") => {
   const chatId = id("c")
-  const laneId = id("l")
   tx(() => {
     run(
       `INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (?, ?, 'rp', ?, ?)`,
@@ -48,9 +47,8 @@ const chat = (ownerId: string, status = "active") => {
       status,
       now()
     )
-    run(`INSERT INTO lanes (id, chat_id, name, created_at) VALUES (?, ?, 'main', ?)`, laneId, chatId, now())
   })
-  return { chatId, laneId }
+  return { chatId }
 }
 
 const versionSql = `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
@@ -58,7 +56,7 @@ const versionSql = `INSERT INTO versions (id, slot_id, ordinal, status, writer, 
 
 /** Appends a slot with one version: the version first, then the slot (deferred keys). */
 const slot = (
-  c: { chatId: string; laneId: string },
+  c: { chatId: string },
   parent: { slotId: string; depth: number } | null,
   version: { writer?: "human" | "model"; content?: string; status?: string } = {}
 ) => {
@@ -80,10 +78,9 @@ const slot = (
       now()
     )
     run(
-      `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
       slotId,
       c.chatId,
-      c.laneId,
       parent?.slotId ?? null,
       depth,
       versionId,
@@ -237,50 +234,6 @@ describe("graph shape", () => {
     ).toThrow(/active leaf/)
   })
 
-  it("keeps merge parents in the chat, and the graph acyclic", () => {
-    const c = chat(user())
-    const other = chat(user())
-    const root = slot(c, null)
-    const left = slot(c, root)
-    const right = slot(c, root)
-    const merge = slot(c, left)
-    const parent = (slotId: string, parentId: string, ordinal: number) =>
-      run(`INSERT INTO slot_parents (slot_id, parent_slot_id, ordinal) VALUES (?, ?, ?)`, slotId, parentId, ordinal)
-    expect(() => parent(merge.slotId, slot(other, null).slotId, 1)).toThrow(/same chat/)
-    parent(merge.slotId, left.slotId, 0)
-    parent(merge.slotId, right.slotId, 1)
-    // A cycle: a slot below the merge becoming its parent, or a slot its own parent.
-    const below = slot(c, merge)
-    expect(() => parent(merge.slotId, below.slotId, 2)).toThrow(/before anything is appended/)
-    expect(() => parent(left.slotId, merge.slotId, 1)).toThrow(/before anything is appended/)
-    expect(() => parent(below.slotId, below.slotId, 1)).toThrow(/before anything is appended/)
-    expect(() =>
-      run(`UPDATE slot_parents SET parent_slot_id = ? WHERE slot_id = ?`, below.slotId, merge.slotId)
-    ).toThrow(/append-only/)
-  })
-
-  it("forks a lane only from a slot of its own chat", () => {
-    const c = chat(user())
-    const theirs = slot(chat(user()), null)
-    const ours = slot(c, null)
-    const lane = (from: string) =>
-      run(
-        `INSERT INTO lanes (id, chat_id, name, forked_from_slot_id, created_at) VALUES (?, ?, 'thread', ?, 1)`,
-        id("l"),
-        c.chatId,
-        from
-      )
-    expect(() => lane(theirs.slotId)).toThrow(/own chat/)
-    lane(ours.slotId)
-    expect(() =>
-      run(
-        `UPDATE lanes SET forked_from_slot_id = ? WHERE chat_id = ? AND forked_from_slot_id IS NOT NULL`,
-        theirs.slotId,
-        c.chatId
-      )
-    ).toThrow(/own chat/)
-  })
-
   it("takes a version's source only from its own slot, and lets the source go", () => {
     const owner = user()
     const theirs = slot(chat(user()), null, { content: "theirs" })
@@ -413,7 +366,7 @@ describe("edits are non-destructive (invariant 1)", () => {
       reply.slotId
     )
     tx(() => run(`DELETE FROM chats WHERE id = ?`, c.chatId))
-    for (const table of ["slots", "versions", "state_events", "drafts", "lanes"]) {
+    for (const table of ["slots", "versions", "state_events", "drafts"]) {
       expect(get<{ n: number }>(`SELECT count(*) AS n FROM ${table}`).n).toBe(0)
     }
     expect(all<{ id: string }>(`SELECT id FROM entity_refs`).map((r) => r.id)).toEqual(["base"])
@@ -456,14 +409,17 @@ describe("edits are non-destructive (invariant 1)", () => {
     expect(() => run(`UPDATE entity_revisions SET doc_json = '{}' WHERE id = 'r1'`)).toThrow(/immutable/)
   })
 
-  it("keeps legacy slot labels frozen now that imports name forks", () => {
-    const message = slot(chat(user()), null)
-    expect(() => run("UPDATE slots SET branch_name = 'Imported road' WHERE id = ?", message.slotId)).toThrow(
-      /names belong to forks/
-    )
-    expect(() => run("UPDATE slots SET branch_name_user = 1 WHERE id = ?", message.slotId)).toThrow(
-      /names belong to forks/
-    )
+  it("has no unused thread tables or slot labels", () => {
+    expect(all("SELECT name FROM sqlite_master WHERE name IN ('lanes', 'slot_parents')")).toEqual([])
+    const columns = (table: string) => all<{ name: string }>(`PRAGMA table_info(${table})`).map((r) => r.name)
+    expect(columns("chats")).not.toContain("current_leaf_slot_id")
+    for (const name of ["lane_id", "placement_group_id", "branch_name", "branch_name_user"])
+      expect(columns("slots")).not.toContain(name)
+  })
+
+  it("makes every application table STRICT", () => {
+    const tables = all<{ name: string; type: string; strict: number }>("PRAGMA table_list")
+    expect(tables.filter((t) => t.type === "table" && !t.name.startsWith("sqlite_") && t.strict !== 1)).toEqual([])
   })
 
   it("freezes a rollout's context snapshot (invariant 6)", () => {
@@ -1070,7 +1026,7 @@ describe("fork-scoped state events", () => {
 
 describe("inserted messages (spec/MESSAGE-INSERT.md §2.2)", () => {
   /** A slot inserted below `anchor` (null: above the first message), with one version of `origin`. */
-  const inserted = (c: { chatId: string; laneId: string }, anchor: { slotId: string; depth: number } | null) => {
+  const inserted = (c: { chatId: string }, anchor: { slotId: string; depth: number } | null) => {
     const slotId = id("x")
     const versionId = id("v")
     tx(() => {
@@ -1083,11 +1039,10 @@ describe("inserted messages (spec/MESSAGE-INSERT.md §2.2)", () => {
         now()
       )
       run(
-        `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+        `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
+         VALUES (?, ?, ?, ?, ?, ?, 1)`,
         slotId,
         c.chatId,
-        c.laneId,
         anchor?.slotId ?? null,
         anchor === null ? 0 : anchor.depth + 1,
         versionId,

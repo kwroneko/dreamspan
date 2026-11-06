@@ -129,7 +129,7 @@ for (const mode of ["1440", "390", "wide-panel"] as const)
         }
         const sidebarGrid = page
           .getByLabel("Characters", { exact: true })
-          .filter({ has: page.getByRole("button", { name: "Open Portrait 00", exact: true }) })
+          .filter({ has: page.getByRole("link", { name: "Open Portrait 00", exact: true }) })
           .filter({ hasNot: page.getByRole("button", { name: / to this chat$|: in this chat$/ }) })
         if (mode === "wide-panel") {
           await page.getByRole("separator", { name: "Resize chat panel", exact: true }).dblclick()

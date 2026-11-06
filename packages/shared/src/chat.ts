@@ -8,8 +8,6 @@ import { ReplySections } from "./replySections.ts"
 
 export const ChatId = idSchema("ChatId", "chat")
 export type ChatId = typeof ChatId.Type
-export const LaneId = idSchema("LaneId", "lane")
-export type LaneId = typeof LaneId.Type
 export const SlotId = idSchema("SlotId", "slot")
 export type SlotId = typeof SlotId.Type
 export const VersionId = idSchema("VersionId", "version")
@@ -25,19 +23,8 @@ export const VersionStatus = Schema.Literals(["generating", "complete", "stopped
 export type VersionStatus = typeof VersionStatus.Type
 const Writer = Schema.Literals(["human", "model"])
 const MacroMode = Schema.Literals(["template", "verbatim"])
-const VersionOrigin = Schema.Literals([
-  "generated",
-  "user_written",
-  "edited",
-  "greeting",
-  "imported",
-  "changeset",
-  "scratchpad",
-  "duplicate",
-  "merge",
-  /** An agent reply carried on from a stopped one (`sourceVersionId`; spec/AGENTIC.md §4.2). */
-  "resumed"
-])
+// The writer validates origins against its replaceable storage-kind registry.
+const VersionOrigin = Schema.String
 
 export class Chat extends Schema.Class<Chat>("Chat")({
   id: ChatId,
@@ -254,7 +241,6 @@ export class Version extends Schema.Class<Version>("Version")({
 /** One position on a path, with the version selected there. */
 export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
   slotId: SlotId,
-  laneId: LaneId,
   parentSlotId: Schema.NullOr(SlotId),
   depth: Schema.Int,
   rowVersion: Schema.Int,
@@ -267,14 +253,13 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
   versionCount: Schema.Int,
   /**
    * The alternate branches at this position (DESIGN §3.2): the slot and its siblings in
-   * its lane, those a path can reach (live, or deleted alone with replies left), and this
+   * its chat, those a path can reach (live, or deleted alone with replies left), and this
    * slot's place among them, oldest first.
    */
   branchCount: Schema.Int,
   branchIndex: Schema.Int,
   /**
-   * The name of the branch this slot starts among its alternates: its own label (from an
-   * ST import, or one given before forks), else the name of the fork it starts; absent: unnamed.
+   * The name of the fork this slot starts among its alternates; absent: unnamed.
    */
   branchName: Schema.optionalKey(Schema.String),
   /** The fork that appended it; absent for one from before forks, or an ST import's. */

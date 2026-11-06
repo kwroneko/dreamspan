@@ -13,7 +13,8 @@ import {
   useId,
   useState
 } from "react"
-import { Button, buttonClass } from "./Button.tsx"
+import { Button, buttonClass, LinkButton } from "./Button.tsx"
+import { openOnPlainClick } from "./links.ts"
 import { HighlightExplanation, useItemExplanation } from "./Explanation.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 import { Tooltip } from "./Tooltip.tsx"
@@ -101,23 +102,48 @@ export function Menu({
 const MenuActionsContext = createContext(false)
 export const useMenuActions = () => useContext(MenuActionsContext)
 
-/** An existing action shown as a menu item inside a Menu, or a button elsewhere. */
+/**
+ * An existing action shown as a menu item inside a Menu, or a button elsewhere. With `href`
+ * it opens something in the center column, so it's a link (a new browser tab on a middle click).
+ */
 export function MenuAction({
   hint,
   children,
   onClick,
   disabled,
+  href,
   ...props
 }: {
   hint: string
   children: ReactNode
   onClick: () => void
   disabled?: boolean | undefined
+  href?: string | undefined
   variant?: ComponentProps<typeof Button>["variant"]
   className?: string
   "aria-label"?: string
 }) {
   const inMenu = useMenuActions()
+  if (href && !disabled)
+    return inMenu ? (
+      <MenuLinkItem
+        description={hint}
+        render={<a href={href} aria-label={props["aria-label"]} onClick={openOnPlainClick(onClick)} />}
+      >
+        {children}
+      </MenuLinkItem>
+    ) : (
+      <LinkButton
+        hint={hint}
+        href={href}
+        onOpen={onClick}
+        {...(props.variant ? { variant: props.variant } : {})}
+        {...(props.className ? { className: props.className } : {})}
+        {...(props["aria-label"] ? { "aria-label": props["aria-label"] } : {})}
+      >
+        {children}
+      </LinkButton>
+    )
   return inMenu ? (
     <MenuItem description={hint} onClick={onClick} disabled={disabled} aria-label={props["aria-label"]}>
       {children}

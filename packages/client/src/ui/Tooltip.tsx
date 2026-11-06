@@ -5,6 +5,7 @@ import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 import type { ComponentProps, ReactElement, ReactNode } from "react"
 import { Button, tooltipPopupClass } from "./Button.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
+import { openOnPlainClick } from "./links.ts"
 
 /** Shares one delay among the tooltips inside, so moving along a toolbar shows each at once. */
 export function TooltipProvider({ children }: { children: ReactNode }) {
@@ -76,6 +77,44 @@ export function IconButton({
       <BaseButton aria-label={label} className={`${iconButtonClass(tone)} ${className}`} {...props}>
         <Icon name={icon} filled={filled} />
       </BaseButton>
+    </Tooltip>
+  )
+}
+
+/**
+ * An `IconButton` that's a link (owner, 2026-11-05: what opens in the center column can open in
+ * a new browser tab): a plain click runs `onOpen`, a middle click is the browser's.
+ */
+export function IconLink({
+  label,
+  hint,
+  icon,
+  href,
+  onOpen,
+  disabled = false,
+  className = ""
+}: {
+  label: string
+  hint?: ReactNode
+  icon: IconName
+  href: string
+  onOpen: () => void
+  disabled?: boolean
+  className?: string
+}) {
+  return (
+    <Tooltip label={hint ?? label}>
+      <a
+        {...(disabled ? { "aria-disabled": true, role: "link" } : { href })}
+        aria-label={label}
+        className={`${iconButtonClass()} ${disabled ? "opacity-50" : ""} ${className}`}
+        onClick={(event) => {
+          if (disabled) return event.preventDefault()
+          openOnPlainClick(onOpen)(event)
+        }}
+      >
+        <Icon name={icon} />
+      </a>
     </Tooltip>
   )
 }

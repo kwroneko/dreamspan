@@ -5,6 +5,7 @@ import { composerChoice } from "./speaker.ts"
 // chat; Keyboard shortcuts lists the commands that have keys). What they render loads with
 // the chat (headerParts.tsx, chatExport.tsx), not with the app.
 import { type ComponentType, lazy, Suspense } from "react"
+import { CenterHeaderEnd } from "../../ui/CenterHeader.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import type { ChatHeaderActionProps, PendingHeaderActionProps } from "./ChatHeader.tsx"
 import { castCharacters } from "./chatTitle.ts"
@@ -45,8 +46,12 @@ const SplitChatCommandDialog = deferred<ChatCommandDialogProps>(() =>
 export const registerChatHeader = () => [
   chatHeaderActions.register({ id: "chat.pin", order: 10, component: part("HeaderPin") }),
   chatHeaderActions.register({ id: "chat.menu", order: 20, component: part("HeaderMenu") }),
+  // The center header's own end controls (the split buttons) sit before the panel toggle,
+  // which stays at the edge beside the panel.
+  chatHeaderActions.register({ id: "chat.header-end", order: 25, component: CenterHeaderEnd }),
   chatHeaderActions.register({ id: "chat.panel", order: 30, component: part("HeaderPanel") }),
   // A chat not made yet has no pin (no branch to pin) and no ⋯ (its commands need a saved chat).
+  pendingChatHeaderActions.register({ id: "chat.header-end", order: 15, component: CenterHeaderEnd }),
   pendingChatHeaderActions.register({ id: "chat.panel", order: 20, component: PendingPanel }),
   chatCommands.register({
     id: "chat.rename",

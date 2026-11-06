@@ -50,7 +50,8 @@ const shellSummaries: ReadonlyArray<string> = [
     cast_json TEXT NOT NULL CHECK (json_valid(cast_json)),
     joined_json TEXT NOT NULL CHECK (json_valid(joined_json)),
     departed_json TEXT NOT NULL CHECK (json_valid(departed_json)),
-    activity_json TEXT NOT NULL CHECK (json_valid(activity_json))
+    activity_json TEXT NOT NULL CHECK (json_valid(activity_json)),
+    added_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(added_json))
   ) STRICT`,
   `CREATE TABLE shell_user_stamps (user_id TEXT PRIMARY KEY, stamp INTEGER NOT NULL) STRICT`,
   `CREATE TRIGGER shell_slots_insert AFTER INSERT ON slots BEGIN ${bumpChat("NEW.chat_id")} END`,
@@ -100,7 +101,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE drafts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
-    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'entity_field', 'summary_edit', 'user_field', 'queue_edit', 'insert')),
+    target_kind TEXT NOT NULL,
     target_id TEXT NOT NULL,
     field TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
@@ -113,6 +114,7 @@ export const baseline: ReadonlyArray<string> = [
     cleared_version INTEGER NOT NULL DEFAULT 0,
     deletions_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(deletions_json)),
     updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
+    guidance INTEGER NOT NULL DEFAULT 0 CHECK (guidance IN (0, 1)),
     UNIQUE (user_id, target_kind, target_id, field)
   ) STRICT`,
   `CREATE TABLE user_prefs (
@@ -192,7 +194,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE entities (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL REFERENCES users(id),
-    kind TEXT NOT NULL CHECK (kind IN ('card', 'preset', 'lorebook', 'note', 'preset_overlay')),
+    kind TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     archived_at INTEGER
   , deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, forked_from_entity_id TEXT REFERENCES entities(id), forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, forked_in_chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, forked_at INTEGER) STRICT`,
@@ -205,7 +207,7 @@ export const baseline: ReadonlyArray<string> = [
     doc_json TEXT NOT NULL CHECK (json_valid(doc_json)),
     doc_hash TEXT NOT NULL,
     schema_version INTEGER NOT NULL,
-    origin TEXT NOT NULL CHECK (origin IN ('import', 'user', 'agent', 'changeset', 'merge', 'generation')),
+    origin TEXT NOT NULL,
     origin_ref TEXT,
     message TEXT,
     -- Plain text extracted from doc_json for full-text search.
@@ -289,7 +291,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE chats (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL REFERENCES users(id),
-    kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')),
+    kind TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')),
     title TEXT NOT NULL DEFAULT '',
     title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')),
@@ -301,45 +303,27 @@ export const baseline: ReadonlyArray<string> = [
     added_at INTEGER,
     st_group_id TEXT,
     st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3)
-  , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0,
+  , deleted_at INTEGER, bin_item_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0,
     -- Moved by triggers on every write the shell's fork summaries read (fork_summaries).
     shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT`,
   `CREATE INDEX chats_st_group ON chats(owner_user_id, st_group_id) WHERE st_group_id IS NOT NULL`,
   `CREATE INDEX chats_recent ON chats(owner_user_id, last_message_at DESC) WHERE status = 'active'`,
-  `CREATE TABLE lanes (
-    id TEXT PRIMARY KEY,
-    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    color TEXT,
-    forked_from_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
-    created_at INTEGER NOT NULL
-  ) STRICT`,
-  `CREATE INDEX lanes_chat ON lanes(chat_id)`,
   `CREATE TABLE slots (
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    lane_id TEXT NOT NULL REFERENCES lanes(id),
     parent_slot_id TEXT REFERENCES slots(id),
     depth INTEGER NOT NULL CHECK (depth >= 0),
     selected_version_id TEXT NOT NULL REFERENCES versions(id) DEFERRABLE INITIALLY DEFERRED,
     context_excluded INTEGER NOT NULL DEFAULT 0 CHECK (context_excluded IN (0, 1)),
-    placement_group_id TEXT,
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
-    last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), branch_name TEXT, st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1)), chain_id TEXT, fork_id TEXT,
+    last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), chain_id TEXT, fork_id TEXT,
     -- Inserted between messages (spec/MESSAGE-INSERT.md §2.2): placed per fork by an insert override.
     inserted INTEGER NOT NULL DEFAULT 0 CHECK (inserted IN (0, 1)),
     CHECK ((parent_slot_id IS NULL) = (depth = 0))
   ) STRICT`,
   `CREATE INDEX slots_parent ON slots(parent_slot_id)`,
   `CREATE INDEX slots_chat_depth ON slots(chat_id, depth)`,
-  `CREATE INDEX slots_placement_group ON slots(placement_group_id) WHERE placement_group_id IS NOT NULL`,
-  `CREATE TABLE slot_parents (
-    slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
-    parent_slot_id TEXT NOT NULL REFERENCES slots(id),
-    ordinal INTEGER NOT NULL,
-    PRIMARY KEY (slot_id, ordinal)
-  ) STRICT, WITHOUT ROWID`,
   `CREATE TABLE versions (
     seq INTEGER PRIMARY KEY,
     id TEXT NOT NULL UNIQUE,
@@ -365,9 +349,7 @@ export const baseline: ReadonlyArray<string> = [
     rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)),
     reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)),
     frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
-    origin TEXT NOT NULL CHECK (origin IN
-      ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate', 'merge',
-        'resumed')),
+    origin TEXT NOT NULL,
     source_version_id TEXT REFERENCES versions(id),
     greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)),
     direction TEXT,
@@ -384,7 +366,7 @@ export const baseline: ReadonlyArray<string> = [
     hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
     changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT,
+    updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT, fork_id TEXT,
     UNIQUE (slot_id, ordinal),
     CHECK (status <> 'failed' OR error_json IS NOT NULL)
   ) STRICT`,
@@ -428,7 +410,7 @@ export const baseline: ReadonlyArray<string> = [
     version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL,
     media_id TEXT NOT NULL REFERENCES media_assets(id),
-    kind TEXT NOT NULL CHECK (kind IN ('image')),
+    kind TEXT NOT NULL,
     alt_text TEXT,
     PRIMARY KEY (version_id, ordinal)
   ) STRICT, WITHOUT ROWID`,
@@ -450,7 +432,7 @@ export const baseline: ReadonlyArray<string> = [
     key TEXT NOT NULL,
     scope TEXT,
     value_json TEXT NOT NULL CHECK (json_valid(value_json)),
-    origin TEXT NOT NULL CHECK (origin IN ('user', 'rollout', 'changeset', 'import')),
+    origin TEXT NOT NULL,
     origin_ref TEXT,
     created_at INTEGER NOT NULL,
     superseded_by_changeset TEXT REFERENCES changesets(id), slot_chain_id TEXT, slot_depth INTEGER,
@@ -465,8 +447,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE rollouts (
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL CHECK (kind IN
-      ('generation', 'summarize', 'condense', 'decision', 'workshop', 'idle_job', 'edit')),
+    kind TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN
       ('created', 'running', 'completed', 'stopped', 'failed', 'interrupted', 'discarded')),
     slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
@@ -526,13 +507,13 @@ export const baseline: ReadonlyArray<string> = [
   ) STRICT, WITHOUT ROWID`,
   `CREATE TABLE changeset_groups (
     id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL,
-    origin TEXT NOT NULL CHECK (origin IN ('user', 'agent')), created_at INTEGER NOT NULL
+    origin TEXT NOT NULL, created_at INTEGER NOT NULL
   ) STRICT`,
   `CREATE TABLE changesets (
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
-    origin TEXT NOT NULL CHECK (origin IN ('user', 'agent')),
+    origin TEXT NOT NULL,
     rollout_id TEXT REFERENCES rollouts(id),
     fork_id TEXT NOT NULL REFERENCES forks(id), seq INTEGER NOT NULL,
     group_id TEXT NOT NULL REFERENCES changeset_groups(id),
@@ -543,7 +524,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE changeset_items (
     id INTEGER PRIMARY KEY,
     changeset_id TEXT NOT NULL REFERENCES changesets(id) ON DELETE CASCADE,
-    target_kind TEXT NOT NULL CHECK (target_kind IN ('version_replace', 'summary_revision', 'state_event')),
+    target_kind TEXT NOT NULL,
     target_id TEXT NOT NULL,
     before_json TEXT CHECK (before_json IS NULL OR json_valid(before_json)),
     after_json TEXT CHECK (after_json IS NULL OR json_valid(after_json)),
@@ -603,11 +584,8 @@ export const baseline: ReadonlyArray<string> = [
     WHEN NEW.parent_slot_id IS NOT NULL AND NOT EXISTS (
       SELECT 1 FROM slots p WHERE p.id = NEW.parent_slot_id AND p.chat_id = NEW.chat_id AND p.depth + 1 = NEW.depth)
     BEGIN SELECT RAISE(ABORT, 'a slot''s parent must be in the same chat, one level up'); END`,
-  `CREATE TRIGGER slots_lane_same_chat BEFORE INSERT ON slots
-    WHEN (SELECT chat_id FROM lanes WHERE id = NEW.lane_id) IS NOT NEW.chat_id
-    BEGIN SELECT RAISE(ABORT, 'a slot''s lane must be in the same chat'); END`,
-  `CREATE TRIGGER slots_shape_fixed BEFORE UPDATE OF chat_id, lane_id, parent_slot_id, depth ON slots
-    WHEN NEW.chat_id IS NOT OLD.chat_id OR NEW.lane_id IS NOT OLD.lane_id
+  `CREATE TRIGGER slots_shape_fixed BEFORE UPDATE OF chat_id, parent_slot_id, depth ON slots
+    WHEN NEW.chat_id IS NOT OLD.chat_id
       OR NEW.parent_slot_id IS NOT OLD.parent_slot_id OR NEW.depth IS NOT OLD.depth
     BEGIN SELECT RAISE(ABORT, 'the graph is append-only: a slot never moves'); END`,
   `CREATE TRIGGER slots_selection_own_version BEFORE INSERT ON slots
@@ -746,8 +724,7 @@ export const baseline: ReadonlyArray<string> = [
     chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
     rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL,
     version_id TEXT REFERENCES versions(id) ON DELETE SET NULL,
-    purpose TEXT NOT NULL CHECK (purpose IN
-      ('generation', 'summarize', 'condense', 'decision', 'workshop', 'idle_job', 'edit', 'test')),
+    purpose TEXT NOT NULL,
     -- What was requested.
     api TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -858,7 +835,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE "bin_items" (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
-    kind TEXT NOT NULL CHECK (kind IN ('chat', 'message', 'branch', 'version', 'entity', 'connection', 'card_asset')),
+    kind TEXT NOT NULL,
     target_id TEXT NOT NULL,
     chat_id TEXT,
     title TEXT NOT NULL,
@@ -915,9 +892,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE INDEX state_events_version ON state_events(version_id) WHERE version_id IS NOT NULL`,
   `CREATE INDEX chats_active_leaf ON chats(active_leaf_slot_id) WHERE active_leaf_slot_id IS NOT NULL`,
   `CREATE INDEX rollouts_leaf_slot ON rollouts(leaf_slot_id) WHERE leaf_slot_id IS NOT NULL`,
-  `CREATE INDEX lanes_forked_from ON lanes(forked_from_slot_id) WHERE forked_from_slot_id IS NOT NULL`,
-  `CREATE INDEX slot_parents_parent ON slot_parents(parent_slot_id)`,
-  `CREATE INDEX slots_lane ON slots(lane_id)`,
   `CREATE INDEX rollouts_parent ON rollouts(parent_rollout_id) WHERE parent_rollout_id IS NOT NULL`,
   `CREATE INDEX changesets_rollout ON changesets(rollout_id) WHERE rollout_id IS NOT NULL`,
   `CREATE INDEX versions_changeset ON versions(changeset_id) WHERE changeset_id IS NOT NULL`,
@@ -948,24 +922,6 @@ export const baseline: ReadonlyArray<string> = [
     WHEN NEW.active_leaf_slot_id IS NOT NULL
       AND (SELECT chat_id FROM slots WHERE id = NEW.active_leaf_slot_id) IS NOT NEW.id
     BEGIN SELECT RAISE(ABORT, 'a chat''s active leaf must be one of its slots'); END`,
-  `CREATE TRIGGER lanes_fork_same_chat BEFORE INSERT ON lanes
-    WHEN NEW.forked_from_slot_id IS NOT NULL
-      AND (SELECT chat_id FROM slots WHERE id = NEW.forked_from_slot_id) IS NOT NEW.chat_id
-    BEGIN SELECT RAISE(ABORT, 'a lane forks from a slot of its own chat'); END`,
-  `CREATE TRIGGER lanes_fork_same_chat_update BEFORE UPDATE OF chat_id, forked_from_slot_id ON lanes
-    WHEN NEW.chat_id IS NOT OLD.chat_id OR (NEW.forked_from_slot_id IS NOT NULL
-      AND (SELECT chat_id FROM slots WHERE id = NEW.forked_from_slot_id) IS NOT NEW.chat_id)
-    BEGIN SELECT RAISE(ABORT, 'a lane stays in its chat and forks from a slot of its own chat'); END`,
-  `CREATE TRIGGER slot_parents_same_chat BEFORE INSERT ON slot_parents
-    WHEN (SELECT chat_id FROM slots WHERE id = NEW.parent_slot_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id)
-    BEGIN SELECT RAISE(ABORT, 'a merge parent must be in the same chat'); END`,
-  `CREATE TRIGGER slot_parents_acyclic BEFORE INSERT ON slot_parents
-    WHEN NEW.parent_slot_id = NEW.slot_id
-      OR EXISTS (SELECT 1 FROM slots WHERE parent_slot_id = NEW.slot_id)
-      OR EXISTS (SELECT 1 FROM slot_parents WHERE parent_slot_id = NEW.slot_id)
-    BEGIN SELECT RAISE(ABORT, 'a slot''s merge parents are recorded before anything is appended below it'); END`,
-  `CREATE TRIGGER slot_parents_fixed BEFORE UPDATE ON slot_parents
-    BEGIN SELECT RAISE(ABORT, 'the graph is append-only: merge parents never change'); END`,
   `CREATE TRIGGER rollouts_slot_id_same_chat BEFORE INSERT ON rollouts WHEN NEW.slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'rollouts.slot_id must be in the same chat'); END`,
   `CREATE TRIGGER rollouts_slot_id_same_chat_update BEFORE UPDATE OF slot_id, chat_id
       ON rollouts WHEN NEW.slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'rollouts.slot_id must be in the same chat'); END`,
@@ -1181,7 +1137,7 @@ export const baseline: ReadonlyArray<string> = [
     content TEXT NOT NULL,
     rollout_id TEXT REFERENCES rollouts(id),
     token_count INTEGER NOT NULL,
-    origin TEXT NOT NULL CHECK (origin IN ('generated', 'user', 'changeset', 'imported')),
+    origin TEXT NOT NULL,
     created_at INTEGER NOT NULL
   ) STRICT`,
   `CREATE INDEX summary_revisions_summary ON summary_revisions(summary_id, seq)`,
@@ -1447,7 +1403,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER summary_inputs_chain BEFORE INSERT ON summary_inputs WHEN NOT EXISTS (
     SELECT 1 FROM summaries s JOIN slots i ON i.id = NEW.slot_id
     WHERE s.id = NEW.summary_id AND s.level = 1 AND NEW.ordinal >= 0 AND NEW.ordinal < s.slot_count
-      AND NOT EXISTS (SELECT 1 FROM slot_parents p WHERE p.slot_id = NEW.slot_id)
       AND NEW.ordinal = coalesce((SELECT ordinal + 1 FROM summary_inputs WHERE summary_id = s.id ORDER BY ordinal DESC LIMIT 1), 0)
       AND CASE WHEN NEW.ordinal = 0 THEN NEW.slot_id = s.first_slot_id
       WHEN i.parent_slot_id = (SELECT slot_id FROM summary_inputs WHERE summary_id = s.id AND ordinal = NEW.ordinal - 1) THEN 1
@@ -1468,7 +1423,6 @@ export const baseline: ReadonlyArray<string> = [
       UNION ALL SELECT s.id, s.parent_slot_id, c.n + 1 FROM slots s JOIN chain c ON s.id = c.parent_slot_id
         WHERE c.n < NEW.slot_count AND s.chat_id = NEW.chat_id
     ) SELECT 1 FROM chain WHERE id = NEW.first_slot_id AND n = NEW.slot_count
-      AND NOT EXISTS (SELECT 1 FROM chain c JOIN slot_parents p ON p.slot_id = c.id)
     )
     AND NOT EXISTS (
       -- A display range may leave an inserted subtree for an older inserted sibling or
@@ -1488,8 +1442,6 @@ export const baseline: ReadonlyArray<string> = [
             AND EXISTS (SELECT 1 FROM tail a JOIN slots x ON x.parent_slot_id = a.id
               WHERE x.inserted = 1 AND a.depth >= h.depth AND a.id <> NEW.last_slot_id))
           OR (h.inserted = 1 AND h.id <> t.id AND (t.inserted = 0 OR h.id > t.id)))
-          AND NOT EXISTS (SELECT 1 FROM tail a JOIN slot_parents p ON p.slot_id = a.id WHERE a.depth >= t.depth)
-          AND NOT EXISTS (SELECT 1 FROM head a JOIN slot_parents p ON p.slot_id = a.id WHERE a.depth >= h.depth)
     ) BEGIN SELECT RAISE(ABORT, 'summary endpoints must form its declared primary-parent chain'); END`,
   `CREATE INDEX state_events_participants ON state_events(json_extract(value_json, '$.entity'), chat_id)
       WHERE key IN ('participant.join', 'card.swap') AND superseded_by_changeset IS NULL`,
@@ -1540,14 +1492,14 @@ export const baseline: ReadonlyArray<string> = [
         label = coalesce((SELECT json_extract(doc_json, '$.name') FROM entity_revisions WHERE id = NEW.head_revision_id), ''),
         subtitle = coalesce((SELECT json_extract(doc_json, '$.character_version') FROM entity_revisions WHERE id = NEW.head_revision_id), '')
         WHERE id = NEW.id; END`,
-  `CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL, PRIMARY KEY(user_id, chat_id, fork_id))`,
-  `CREATE TABLE shell_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id), pins_collapsed INTEGER NOT NULL DEFAULT 0)`,
+  `CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, PRIMARY KEY(user_id, chat_id)) STRICT`,
+  `CREATE TABLE shell_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id), pins_collapsed INTEGER NOT NULL DEFAULT 0) STRICT`,
   `CREATE INDEX chats_owner_live ON chats(owner_user_id, id) WHERE deleted_at IS NULL`,
   `CREATE UNIQUE INDEX slots_chain ON slots(chain_id, depth)`,
   `CREATE INDEX state_events_chain ON state_events(chat_id, slot_chain_id, slot_depth)`,
   `CREATE TRIGGER slots_chain_assigned AFTER INSERT ON slots BEGIN
     UPDATE slots SET chain_id = coalesce(
-      (SELECT p.chain_id FROM slots p WHERE p.id = NEW.parent_slot_id AND p.lane_id = NEW.lane_id
+      (SELECT p.chain_id FROM slots p WHERE p.id = NEW.parent_slot_id AND p.chat_id = NEW.chat_id
         AND NOT EXISTS (SELECT 1 FROM slots c WHERE c.chain_id = p.chain_id AND c.depth = NEW.depth AND c.id <> NEW.id)),
       NEW.id)
     WHERE id = NEW.id;
@@ -1659,9 +1611,7 @@ export const baseline: ReadonlyArray<string> = [
     fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE,
     -- The chat's state_seq when written; a row updated in place takes the newer one.
     seq INTEGER NOT NULL CHECK (seq > 0),
-    kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star',
-      'picker_hide', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event',
-      'insert', 'image_exclude')),
+    kind TEXT NOT NULL,
     -- image_exclude: the message's own version and an image of it, "<version id>:<media id>".
     target_id TEXT NOT NULL,
     -- The slot the row is about, and its depth, for reading a window of a path.
@@ -1674,7 +1624,7 @@ export const baseline: ReadonlyArray<string> = [
     summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)),
     -- Who chose it: the user, or an ST re-import following the file (which the user's choice
     -- then overrules: stImportWrites.ts).
-    origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import'))
+    origin TEXT NOT NULL DEFAULT 'user'
   ) STRICT`,
   `CREATE INDEX fork_overrides_chat ON fork_overrides(chat_id, kind)`,
   `CREATE INDEX fork_overrides_point ON fork_overrides(fork_id, kind, target_id, seq)`,
@@ -1697,9 +1647,6 @@ export const baseline: ReadonlyArray<string> = [
     ON fork_overrides BEGIN SELECT RAISE(ABORT, 'an override keeps its fork, kind and target'); END`,
   `CREATE TRIGGER fork_overrides_seq_forward BEFORE UPDATE OF seq ON fork_overrides WHEN NEW.seq < OLD.seq
     BEGIN SELECT RAISE(ABORT, 'an override''s seq only moves forward'); END`,
-  `CREATE TRIGGER slots_branch_name_frozen BEFORE UPDATE OF branch_name, branch_name_user ON slots
-    WHEN NEW.branch_name IS NOT OLD.branch_name OR NEW.branch_name_user IS NOT OLD.branch_name_user
-    BEGIN SELECT RAISE(ABORT, 'branch names belong to forks'); END`,
   `CREATE TRIGGER slots_selection_frozen BEFORE UPDATE OF selected_version_id ON slots
     WHEN NEW.selected_version_id IS NOT OLD.selected_version_id
     BEGIN SELECT RAISE(ABORT, 'a slot keeps the selection it was inserted with; a fork selects with an override'); END`,
@@ -1853,7 +1800,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER lcm_reply_maintenance_fork BEFORE INSERT ON lcm_reply_maintenance
     WHEN (SELECT chat_id FROM forks WHERE id=NEW.fork_id) IS NOT NEW.chat_id
     BEGIN SELECT RAISE(ABORT, 'maintenance belongs to a fork of its chat'); END`,
-  `CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json)))`,
+  `CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json))) STRICT`,
   // A merge of another chat into this one (spec/CHAT-MERGE.md §2): its join message (slot_id),
   // and its second parent, recorded softly: the source columns name another fork or chat and
   // have no foreign key, so deleting the source never blocks or changes the destination.

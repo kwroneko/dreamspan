@@ -5,7 +5,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { textField, valueField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { loginCookie, withCookie } from "./support/rpc.ts"
+import { forgetWorkbench, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -26,6 +26,7 @@ const preset = JSON.parse(
 )
 
 async function seed(page: Page, name: string) {
+  await forgetWorkbench(server(), adminCookie)
   const separator = adminCookie.indexOf("=")
   await page.context().addCookies([
     {
@@ -113,7 +114,7 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
           await page.goto(`${server().url}/chats/${data.chat.id}${large ? `?editor=${data[kind].id}` : ""}`)
           let scope: Locator
           if (large)
-            scope = page.getByRole("dialog", {
+            scope = page.getByRole("region", {
               name: kind === "card" ? "Card editor" : kind === "preset" ? "Preset editor" : "Lorebook editor",
               exact: true
             })
@@ -145,12 +146,12 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
             : cluster.locator("xpath=ancestor::*[@data-editor-header][1]")
           await expect(header).toHaveCount(1)
           if (kind !== "card" && !large) {
-            const expand = header.getByRole("button", {
+            const expand = header.getByRole("link", {
               name: kind === "preset" ? "Open the preset in the large editor" : "Large editor",
               exact: true
             })
             await expect(expand).toBeVisible()
-            await expect(header.getByRole("button").last()).toHaveAttribute(
+            await expect(header.locator("button, a").last()).toHaveAttribute(
               "aria-label",
               kind === "preset" ? "Open the preset in the large editor" : "Large editor"
             )
@@ -162,7 +163,8 @@ for (const width of audit ? [390, 1024, 1440] : [1440])
           await header.evaluate((el) => el.scrollIntoView({ block: "start", behavior: "instant" }))
           const position = await cluster.boundingBox()
           const bounds = await header.boundingBox()
-          expect(position!.x + position!.width).toBeGreaterThan(bounds!.x + bounds!.width - 100)
+          // In a tab's header, Close, the split buttons and the panel's toggle follow it.
+          expect(position!.x + position!.width).toBeGreaterThan(bounds!.x + bounds!.width - (large ? 200 : 100))
           if (large)
             expect(Math.abs(position!.y + position!.height / 2 - bounds!.y - bounds!.height / 2)).toBeLessThanOrEqual(1)
           else expect(Math.abs(position!.y - bounds!.y)).toBeLessThanOrEqual(4)
@@ -255,7 +257,7 @@ for (const kind of ["card", "preset", "book"] as const)
     await page.setViewportSize({ width: 1440, height: 1000 })
     const data = await seed(page, `unvisited-${kind}`)
     await page.goto(`${server().url}/chats/${data.chat.id}?panel=chat&editor=${data[kind].id}`)
-    const scope = page.getByRole("dialog", {
+    const scope = page.getByRole("region", {
       name: kind === "card" ? "Card editor" : kind === "preset" ? "Preset editor" : "Lorebook editor",
       exact: true
     })
@@ -270,7 +272,8 @@ for (const kind of ["card", "preset", "book"] as const)
       "Changed in the large editor."
     )
     const name = kind === "card" ? "Wren unvisited-card" : kind === "preset" ? "Prompt preset" : "Lorebooks"
-    const tab = page.getByRole("tab", { name, exact: true })
+    // The side panel's tab, not the workbench's tab of the same name.
+    const tab = page.getByRole("complementary", { name: "Chat panel" }).getByRole("tab", { name, exact: true })
     if (await tab.isVisible()) await expect(tab.locator("[data-unsaved-dot]")).toBeVisible()
     else
       await expect(

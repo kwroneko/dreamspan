@@ -8,7 +8,8 @@ import {
   Link,
   Outlet,
   retainSearchParams,
-  type AnyRoute
+  type AnyRoute,
+  type RouterHistory
 } from "@tanstack/react-router"
 import type { IconName } from "./ui/Icon.tsx"
 import type { ReactNode } from "react"
@@ -73,9 +74,15 @@ function NotFound() {
   )
 }
 
-/** A router over the routes registered so far. */
-export const buildRouter = () => {
+/**
+ * A router over the routes registered so far. A workbench tab (features/workbench) has its
+ * own, over its own history, with the shell's layout entries swapped for its page frame.
+ */
+export const buildRouter = (
+  options: { history?: RouterHistory; layouts?: Readonly<Record<string, () => ReactNode>> } = {}
+) => {
   const rootRoute = createRootRoute({ component: Outlet, notFoundComponent: NotFound })
+  const component = (entry: RouteEntry) => options.layouts?.[entry.id] ?? entry.component
   const children = (parentId: string, parent: AnyRoute): Array<AnyRoute> =>
     routes
       .list()
@@ -86,10 +93,13 @@ export const buildRouter = () => {
           : {}
         const route =
           entry.path === undefined
-            ? createRoute({ getParentRoute: () => parent, id: entry.id, component: entry.component, ...search })
-            : createRoute({ getParentRoute: () => parent, path: entry.path, component: entry.component, ...search })
+            ? createRoute({ getParentRoute: () => parent, id: entry.id, component: component(entry), ...search })
+            : createRoute({ getParentRoute: () => parent, path: entry.path, component: component(entry), ...search })
         const nested = children(entry.id, route)
         return nested.length > 0 ? route.addChildren(nested) : route
       })
-  return createRouter({ routeTree: rootRoute.addChildren(children("root", rootRoute)) })
+  return createRouter({
+    routeTree: rootRoute.addChildren(children("root", rootRoute)),
+    ...(options.history ? { history: options.history } : {})
+  })
 }

@@ -25,7 +25,6 @@ export interface LcmSlot {
   versionId: Summary["inputs"][number]["versionId"]
   amendCount: number
   generating: number
-  merged: number
   /** Live children that aren't inserted: alternates below it, which make it a branch point. */
   children: number
 }
@@ -58,7 +57,6 @@ export const lcmPath = (
         FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND NOT ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "a.media_id")} ORDER BY a.ordinal) AS images_json,
       (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
       coalesce(v.status = 'generating',0) AS generating,
-      EXISTS(SELECT 1 FROM slot_parents m WHERE m.slot_id = p.id) AS merged,
       (SELECT count(*) FROM slots child WHERE child.parent_slot_id = p.id AND child.deleted_at IS NULL AND child.inserted = 0) AS children
       FROM path p JOIN slots s ON s.id = p.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
       ORDER BY p.position`
