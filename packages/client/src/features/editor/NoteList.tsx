@@ -116,6 +116,8 @@ export function NoteBlock({
     | {
         readonly onClose: () => void
         readonly choices?: ReadonlyArray<{ value: RefId; label: string; updatedAt?: number }>
+        /** "New note" at the end of the header switcher's list. */
+        readonly create?: { label: string; hint: string; run: () => Promise<RefId | null> }
       }
     | undefined
   /** Just added: once it has read its note, it scrolls into view and flashes. */
@@ -252,7 +254,14 @@ export function NoteBlock({
   const toggle = large ? (
     <Tooltip label={<span className="[overflow-wrap:anywhere]">{title}</span>} enabled={titleTruncated}>
       <h2 aria-label={title} className="min-w-0 truncate text-base font-semibold">
-        <DocumentSwitcher refId={ref.id} label={title} kind="note" focus={NOTE_FOCUS} items={large?.choices} />
+        <DocumentSwitcher
+          refId={ref.id}
+          label={title}
+          kind="note"
+          focus={NOTE_FOCUS}
+          items={large?.choices}
+          create={large?.create}
+        />
       </h2>
     </Tooltip>
   ) : (

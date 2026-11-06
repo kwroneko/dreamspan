@@ -3,24 +3,35 @@
 // switches with its complete picker, on the preset picker's pattern: a filter, the sorts, a
 // muted line under each name, keyboard and pointer alike, only the rows in view mounted.
 // Presets use the side panel's own picker (`preset.picker`), so the two can't drift apart;
-// cards and personas the card lists' filter, sort and Include personas; lorebooks, notes and
-// snippets a Name / Modified list. The bodies are registered slot entries (`card.picker`,
-// `document.picker`), so a plugin can replace them.
+// cards and personas the card lists' filter, sort and Include personas, each row with its
+// portrait; lorebooks, notes and snippets a Name / Modified list. Each sort is an account choice
+// on the server, as the preset lists' is. A kind with a way to make one ends its list with
+// "New …". The bodies are registered slot entries (`card.picker`, `document.picker`), so a
+// plugin can replace them.
 import { useAtomValue } from "@effect/atom-react"
+import type { CardSwitcherView, DocumentSort } from "@rp/shared/chatApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useId, useRef, useState } from "react"
-import { useSession } from "../../session.ts"
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
+import { Avatar } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
-import { browseCards, mixesPersonas, useCardBrowse, type CardBrowse } from "../characters/cardBrowse.tsx"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
+import { browseCards, mixesPersonas, type CardBrowse } from "../characters/cardBrowse.tsx"
 import { CardBrowseBar } from "../characters/CardBrowseBar.tsx"
 import { shortAgo } from "../characters/cardRecency.ts"
 import { formatAgo } from "../characters/data.ts"
 import { browsable, shellAtom } from "../characters/shellData.tsx"
-import { type PickerBodyProps, type PickerItem, PickerList, PickerPopover, PickerSearch } from "./PickerParts.tsx"
+import {
+  type PickerBodyProps,
+  PickerFooterButton,
+  type PickerItem,
+  PickerList,
+  PickerPopover,
+  PickerSearch
+} from "./PickerParts.tsx"
 import { PresetPickerPopover } from "./PresetPicker.tsx"
 import { exactTime, fold } from "./presetList.ts"
 import { useEditedPresetSelection } from "./presetSelection.ts"
@@ -61,42 +72,73 @@ export interface DocumentPickerProps extends PickerBodyProps {
   readonly choices: ReadonlyArray<DocumentChoice>
   readonly value: RefId
   readonly onChoose: (value: RefId) => void
+  /** The row at the end of the list making a new one, where the kind has a way to make one. */
+  readonly create?: NewDocument | undefined
+}
+
+/** "New card…", "New snippet": what the row says, what it makes, and making it. */
+export interface NewDocument {
+  readonly label: string
+  readonly hint: string
+  /** Called once the popover has closed; a dialog it opens outlives the popover. */
+  readonly start: () => void
+}
+
+/** The kind's "New …" row under its list, as the preset picker's "New preset…". */
+function NewRow({ create, onChosen }: { create: NewDocument | undefined; onChosen: () => void }) {
+  if (!create) return null
+  return (
+    <PickerFooterButton
+      hint={create.hint}
+      icon="plus"
+      onClick={() => {
+        onChosen()
+        create.start()
+      }}
+    >
+      {create.label}
+    </PickerFooterButton>
+  )
 }
 
 /** The registered lorebook, note and snippet switcher body (`document.picker`). */
 export const documentPickers = defineSlot<DocumentPickerProps>("document.picker")
 
-type DocumentView = "name" | "modified"
-const DOCUMENT_VIEWS: ReadonlyArray<{ value: DocumentView; label: string; description: string }> = [
+const DOCUMENT_VIEWS: ReadonlyArray<{ value: DocumentSort; label: string; description: string }> = [
   { value: "name", label: "Name", description: "Sort by name, A to Z" },
   { value: "modified", label: "Modified", description: "Sort by when each was last edited, latest first" }
 ]
 
-/** A list's sort, remembered per account in this browser for each kind. */
+/** Which account choice holds each kind's sort (`settings`, as the preset lists' does). */
+const SORT_KEYS = { lorebook: "lorebookSort", note: "noteSort", snippet: "snippetSort" } as const
+
+/** A list's sort, remembered per account for each kind, on every device. */
 function useRememberedView(subject: string) {
-  const key = `rp.picker.${subject}.${useSession().user.id}`
-  const [view, setView] = useState<DocumentView>(() => {
-    try {
-      return localStorage.getItem(key) === "modified" ? "modified" : "name"
-    } catch {
-      return "name"
-    }
-  })
-  const change = (next: DocumentView) => {
-    setView(next)
-    try {
-      localStorage.setItem(key, next)
-    } catch {
-      /* Not remembered, still applied. */
-    }
+  const { prefs, change } = useViewPrefs()
+  const key = (SORT_KEYS as Record<string, (typeof SORT_KEYS)[keyof typeof SORT_KEYS] | undefined>)[subject]
+  const [unsaved, setUnsaved] = useState<DocumentSort>("name")
+  const view = key ? prefs[key] : unsaved
+  const set = (next: DocumentSort) => {
+    if (next === view) return
+    if (key) void change({ [key]: next })
+    else setUnsaved(next)
   }
-  return [view, change] as const
+  return [view, set] as const
 }
 
 const byName = (a: DocumentChoice, b: DocumentChoice) =>
   a.label.localeCompare(b.label) || (a.subtitle ?? "").localeCompare(b.subtitle ?? "") || a.value.localeCompare(b.value)
 
-export function DocumentPicker({ subject, choices, value, onChoose, onChosen, focus, focusRef }: DocumentPickerProps) {
+export function DocumentPicker({
+  subject,
+  choices,
+  value,
+  onChoose,
+  create,
+  onChosen,
+  focus,
+  focusRef
+}: DocumentPickerProps) {
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
   const [stored, setView] = useRememberedView(subject)
@@ -135,7 +177,7 @@ export function DocumentPicker({ subject, choices, value, onChoose, onChosen, fo
         controls={listId}
       />
       {dated && (
-        <Segmented<DocumentView>
+        <Segmented<DocumentSort>
           label={`Sort ${subject}s`}
           value={view}
           onValueChange={setView}
@@ -155,6 +197,7 @@ export function DocumentPicker({ subject, choices, value, onChoose, onChosen, fo
         fallbackFocus={focus === "search" ? focusRef : search}
         empty={`Nothing is called “${query.trim()}”.`}
       />
+      <NewRow create={create} onChosen={onChosen} />
     </>
   )
 }
@@ -164,6 +207,8 @@ export interface CardPickerProps extends PickerBodyProps {
   /** The card edited is in the persona folder: the list opens on Personas. */
   readonly persona: boolean
   readonly onChoose: (value: RefId) => void
+  /** "New card…" at the end of the list. */
+  readonly create?: NewDocument | undefined
 }
 
 /** The registered card and persona switcher body (`card.picker`). */
@@ -196,9 +241,31 @@ const cardLine = (
     .filter(Boolean)
     .join(" · ")
 
-export function CardPicker({ value, persona, onChoose, onChosen, focus, focusRef }: CardPickerProps) {
+/**
+ * The switcher's sort, direction and Include personas, per account on every device, as the
+ * preset lists' sort is. A new sort starts its own way round, as the card lists' does.
+ */
+function useCardSwitcherView() {
+  const { prefs, change } = useViewPrefs()
+  const view = prefs.cardSwitcher
+  const update = (next: Partial<CardSwitcherView>) => {
+    const merged: CardSwitcherView = {
+      ...view,
+      ...(next.sort !== undefined && next.sort !== view.sort ? { reversed: false } : {}),
+      ...next
+    }
+    if (merged.sort !== view.sort || merged.reversed !== view.reversed || merged.withPersonas !== view.withPersonas)
+      void change({ cardSwitcher: merged })
+  }
+  return [view, update] as const
+}
+
+/** A card row's portrait, as the speaker switcher's rows show theirs. */
+const CARD_ROW_SIZE = 64
+
+export function CardPicker({ value, persona, onChoose, create, onChosen, focus, focusRef }: CardPickerProps) {
   const shell = useAtomValue(shellAtom)
-  const [remembered, update] = useCardBrowse("switcher")
+  const [remembered, update] = useCardSwitcherView()
   const [filter, setFilter] = useState<CardBrowse["filter"]>(persona ? "personas" : "all")
   const browse: CardBrowse = { ...remembered, filter }
   const [query, setQuery] = useState("")
@@ -210,6 +277,15 @@ export function CardPicker({ value, persona, onChoose, onChosen, focus, focusRef
     value: card.card.refId,
     label: card.card.label,
     detail: cardLine(card, browse.sort),
+    leading: (
+      <Avatar
+        id={card.card.entityId}
+        name={card.card.name}
+        mediaId={card.card.avatarMediaId}
+        crop={card.card.avatarCrop}
+        size="md"
+      />
+    ),
     ...(marked && card.persona ? { badge: <PersonaBadge /> } : {}),
     tooltip: lines([
       card.card.refId === value
@@ -244,6 +320,7 @@ export function CardPicker({ value, persona, onChoose, onChosen, focus, focusRef
         id={listId}
         title={filter === "personas" ? "Personas" : "Cards"}
         items={items}
+        rowSize={CARD_ROW_SIZE}
         value={value}
         onChoose={(next) => {
           onChosen()
@@ -259,6 +336,7 @@ export function CardPicker({ value, persona, onChoose, onChosen, focus, focusRef
               : "No cards here."
         }
       />
+      <NewRow create={create} onChosen={onChosen} />
     </>
   )
 }
@@ -274,6 +352,7 @@ export function HeaderSwitcher({
   label,
   choices,
   persona = false,
+  create,
   open
 }: {
   kind: "preset" | "card" | "document"
@@ -284,6 +363,8 @@ export function HeaderSwitcher({
   /** The documents a `document` switcher offers. */
   choices?: ReadonlyArray<DocumentChoice>
   persona?: boolean
+  /** "New …" at the end of a card or document list (presets have their own). */
+  create?: NewDocument | undefined
   open: (refId: RefId) => void
 }) {
   const hint = `Switches to another ${subject} in this editor.`
@@ -300,11 +381,11 @@ export function HeaderSwitcher({
     >
       {(body) =>
         kind === "card" ? (
-          <SlotOutlet slot={cardPickers} props={{ ...body, value, persona, onChoose: open }} />
+          <SlotOutlet slot={cardPickers} props={{ ...body, value, persona, onChoose: open, create }} />
         ) : (
           <SlotOutlet
             slot={documentPickers}
-            props={{ ...body, subject, choices: choices ?? [], value, onChoose: open }}
+            props={{ ...body, subject, choices: choices ?? [], value, onChoose: open, create }}
           />
         )
       }

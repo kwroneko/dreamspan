@@ -2,7 +2,8 @@
 // with any large number of them"): 300 prompt presets, 300 lorebooks and 2,000 cards, all made
 // up here. Each switcher opens its kind's complete picker with only the rows in view mounted,
 // filters as you type, and chooses by keyboard (Down, Enter) and by mouse; the preset editor's
-// header and the side panel's Prompt preset tab open the same picker.
+// header and the side panel's Prompt preset tab open the same picker. Sorts are the account's,
+// card rows have portraits, and kinds with a way to make one end with a New row.
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { RefId } from "@rp/shared/library.ts"
@@ -281,4 +282,94 @@ test("arrow keys walk a long list and the preset editor's picker is the side pan
     await dialog.getByRole("group", { name: "Show presets", exact: true }).getByRole("button").allTextContents()
   ).toEqual(header)
   expect(await dialog.locator("[data-picker-row]").count()).toBeLessThanOrEqual(60)
+})
+
+test("sorts follow the account, card rows show portraits, and New rows make and open one", async ({ page }) => {
+  test.setTimeout(240_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const [, lorebook, card, , , snippet] = KINDS as [Kind, Kind, Kind, Kind, Kind, Kind]
+
+  // A lorebook switcher's sort is the account's, kept on the server, not in this browser.
+  await page.goto(`${server().url}/library/${fixtures.books[0]}`)
+  await settle(page)
+  let { dialog } = await openSwitcher(page, lorebook)
+  const sorts = dialog.getByRole("group", { name: "Sort lorebooks", exact: true })
+  await sorts.getByRole("button", { name: "Modified", exact: true }).click()
+  await expect(sorts.getByRole("button", { name: "Modified", exact: true })).toHaveAttribute("aria-pressed", "true")
+  // Lorebooks have no way to make one, so no New row.
+  await expect(dialog.getByRole("button", { name: /^New / })).toHaveCount(0)
+  await expect
+    .poll(() => admin((api) => api.GetDisplayPrefs({}).pipe(Effect.map((prefs) => prefs.lorebookSort))))
+    .toBe("modified")
+  await page.evaluate(() => localStorage.clear())
+  await page.reload()
+  await settle(page)
+  ;({ dialog } = await openSwitcher(page, lorebook))
+  await expect(
+    dialog.getByRole("group", { name: "Sort lorebooks", exact: true }).getByRole("button", { name: "Modified" })
+  ).toHaveAttribute("aria-pressed", "true")
+  await admin((api) => api.SetDisplayPrefs({ prefs: { lorebookSort: "name" } }))
+
+  // The card switcher's sort comes from the account too; each row has the card's portrait.
+  await admin((api) =>
+    api.SetDisplayPrefs({ prefs: { cardSwitcher: { sort: "name", reversed: true, withPersonas: false } } })
+  )
+  await page.goto(`${server().url}/library/${fixtures.cards[0]}`)
+  await settle(page)
+  ;({ dialog } = await openSwitcher(page, card))
+  // Name, Z to A: it opens at the card shown (Card 0000, last), so filter to the top of the list.
+  await expect(dialog.getByRole("radio", { name: "Card 0000", exact: true })).toBeVisible()
+  await dialog.getByRole("searchbox", { name: card.search }).fill("card 199")
+  await expect(dialog.getByRole("radio").first()).toHaveAccessibleName("Card 1999")
+  await expect(dialog.getByRole("radio").last()).toHaveAccessibleName("Card 1990")
+  await dialog.getByRole("searchbox", { name: card.search }).fill("")
+  const rows = dialog.locator("[data-picker-row]")
+  expect(await rows.count()).toBeLessThanOrEqual(60)
+  expect(await rows.locator("[data-portrait]").count()).toBe(await rows.count())
+  await admin((api) =>
+    api.SetDisplayPrefs({ prefs: { cardSwitcher: { sort: "recent", reversed: false, withPersonas: false } } })
+  )
+
+  // New card…: the library's form, then the card opens in this editor.
+  await dialog.getByRole("button", { name: "New card…", exact: true }).click()
+  const form = page.getByRole("dialog", { name: "New card", exact: true })
+  await form.getByRole("textbox", { name: "Display name" }).fill("Card made here")
+  await form.getByRole("button", { name: "Create", exact: true }).click()
+  await expect(form).toHaveCount(0)
+  await expect(page).not.toHaveURL(new RegExp(fixtures.cards[0]!))
+  await expect(trigger(page, card)).toContainText("Card made here")
+
+  // New snippet: an empty one, opened in this editor.
+  await page.goto(`${server().url}${snippet.path(fixtures)}`)
+  await settle(page)
+  ;({ dialog } = await openSwitcher(page, snippet))
+  await dialog.getByRole("button", { name: "New snippet", exact: true }).click()
+  await expect(page).not.toHaveURL(new RegExp(fixtures.snippets[0]!))
+  await expect(trigger(page, snippet)).toContainText("Untitled snippet")
+
+  // Over a chat, New note: a note for this chat, on, opened in the large editor.
+  const wren = await admin((api) => api.CreateCard({ label: "Switcher Wren", name: "Wren" }))
+  const { chat } = await admin((api) =>
+    api.StartChat({
+      cards: [wren.entityId],
+      persona: null,
+      greeting: null,
+      first: { _tag: "Send", content: "A made-up harbour at dawn.", speakerEntityId: null }
+    })
+  )
+  await admin((api) => api.CreateChatNote({ chatId: chat.id, title: "Tide table" }))
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const notes = await openPanel(page, "Notes")
+  await notes.getByRole("button", { name: "Actions for Tide table", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Large editor", exact: true }).click()
+  const overlay = page.getByRole("region", { name: "Note editor" })
+  await expect(overlay).toBeVisible()
+  const noteSwitch = overlay.getByRole("button", { name: "Switch note", exact: true })
+  await noteSwitch.click()
+  dialog = page.getByRole("dialog", { name: "Note", exact: true })
+  await dialog.getByRole("button", { name: "New note", exact: true }).click()
+  await expect(noteSwitch).toContainText("Note")
+  await expect(noteSwitch).not.toContainText("Tide table")
+  await expect(notes.getByRole("switch", { name: "Note: on in this chat" })).toBeChecked()
 })

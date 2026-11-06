@@ -2,9 +2,11 @@ import { useAtomValue } from "@effect/atom-react"
 import type { EntityKind, RefId } from "@rp/shared/library.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
+import { useState } from "react"
 import { shellAtom } from "../characters/shellData.tsx"
 import { libraryListAtom } from "../library/queries.ts"
-import { type DocumentChoice, HeaderSwitcher } from "../pickers/DocumentPickers.tsx"
+import { type DocumentChoice, HeaderSwitcher, type NewDocument } from "../pickers/DocumentPickers.tsx"
+import { NewCardDialog } from "./NewCard.tsx"
 
 /**
  * An editor's header switcher: its kind's complete picker (pickers/DocumentPickers.tsx).
@@ -16,7 +18,8 @@ export function DocumentSwitcher({
   kind,
   items,
   focus,
-  subject: suppliedSubject
+  subject: suppliedSubject,
+  create
 }: {
   refId: RefId
   label: string
@@ -25,6 +28,11 @@ export function DocumentSwitcher({
   items?: ReadonlyArray<DocumentChoice> | undefined
   subject?: string | undefined
   focus?: string | undefined
+  /**
+   * Makes a new one of those documents and gives its ref, which then opens here ("New snippet",
+   * "New note"). Cards have theirs built in; lorebooks and library notes have no way to make one.
+   */
+  create?: { label: string; hint: string; run: () => Promise<RefId | null> } | undefined
 }) {
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const navigate = useNavigate()
@@ -44,8 +52,16 @@ export function DocumentSwitcher({
     return <HeaderSwitcher kind="preset" subject="preset" value={refId} label={label} open={open} />
   if (kind === "card") return <CardSwitcher refId={refId} label={label} open={open} />
   const subject = suppliedSubject ?? kind
+  const made: NewDocument | undefined = create && {
+    label: create.label,
+    hint: create.hint,
+    start: () =>
+      void create.run().then((next) => {
+        if (next !== null) open(next)
+      })
+  }
   return items ? (
-    <ChoicesSwitcher refId={refId} label={label} subject={subject} choices={items} open={open} />
+    <ChoicesSwitcher refId={refId} label={label} subject={subject} choices={items} open={open} create={made} />
   ) : (
     <LibrarySwitcher refId={refId} label={label} subject={subject} kind={kind} open={open} />
   )
@@ -54,15 +70,25 @@ export function DocumentSwitcher({
 function CardSwitcher({ refId, label, open }: { refId: RefId; label: string; open: (refId: RefId) => void }) {
   const shell = useAtomValue(shellAtom)
   const persona = AsyncResult.isSuccess(shell) && shell.value.personas.some((p) => p.card.refId === refId)
+  // The library's New card form, outliving the list it's started from; the card opens here.
+  const [making, setMaking] = useState(false)
   return (
-    <HeaderSwitcher
-      kind="card"
-      subject={persona ? "persona" : "card"}
-      value={refId}
-      label={label}
-      persona={persona}
-      open={open}
-    />
+    <>
+      <HeaderSwitcher
+        kind="card"
+        subject={persona ? "persona" : "card"}
+        value={refId}
+        label={label}
+        persona={persona}
+        create={{
+          label: "New card…",
+          hint: "Opens a form to create a card, which then opens in this editor.",
+          start: () => setMaking(true)
+        }}
+        open={open}
+      />
+      <NewCardDialog open={making} onOpenChange={setMaking} onCreated={open} />
+    </>
   )
 }
 
@@ -88,15 +114,27 @@ function ChoicesSwitcher({
   label,
   subject,
   choices,
+  create,
   open
 }: {
   refId: RefId
   label: string
   subject: string
   choices: ReadonlyArray<DocumentChoice>
+  create?: NewDocument | undefined
   open: (refId: RefId) => void
 }) {
   // A card's own lorebook isn't one of the library's: it's offered too, under its own name.
   const all = choices.some((choice) => choice.value === refId) ? choices : [{ value: refId, label }, ...choices]
-  return <HeaderSwitcher kind="document" subject={subject} value={refId} label={label} choices={all} open={open} />
+  return (
+    <HeaderSwitcher
+      kind="document"
+      subject={subject}
+      value={refId}
+      label={label}
+      choices={all}
+      create={create}
+      open={open}
+    />
+  )
 }

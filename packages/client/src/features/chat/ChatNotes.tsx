@@ -106,6 +106,44 @@ function useChatNotes(session: ChatSession, leafSlotId: SlotId | null) {
     setGenerations(new Map(generations).set(refId, (generations.get(refId) ?? 0) + 1))
     refresh()
   }
+  const refs = useAtomValue(cardRefs)
+  const call = useCaller()
+  const cardRef = (card: EntityId) =>
+    AsyncResult.isSuccess(refs) ? refs.value.find((ref) => ref.entityId === card)?.id : undefined
+  /**
+   * A note made here is for here: it's on from the latest message (DESIGN §4.1). Gives the note
+   * made, or null when it couldn't be (the error is shown).
+   */
+  const add = async (group: Group, shared?: SharedNote): Promise<RefId | null> => {
+    const link = shared ? { link: shared.ref.entityId } : {}
+    const refId = group.card === null ? null : cardRef(group.card)
+    if (group.card !== null && refId === undefined) {
+      setError({
+        tag: "NotFound",
+        message: `${group.name}'s card isn't in the library.`,
+        problems: [],
+        reason: null
+      })
+      return null
+    }
+    const made = refId
+      ? await call(
+          (client) => client("CreateCardNote", { cardRefId: refId, title: "Note", chatNote: position, ...link }),
+          ["library"]
+        )
+      : await call(
+          (client) => client("CreateChatNote", { chatId, forkId: view.forkId, title: "Note", ...link }),
+          ["library"]
+        )
+    if (!made.ok) {
+      setError(made.error)
+      return null
+    }
+    const on = await session.changeCast({ _tag: "Note", entityId: made.value.entityId, active: true })
+    setError(on.ok ? null : on.error)
+    refresh()
+    return made.value.id
+  }
   /** Every cast card, with notes or not, then any other card a note belongs to. */
   const cardsOf = (notes: ReadonlyArray<ChatNote>): ReadonlyArray<NoteCard> =>
     (
@@ -145,7 +183,7 @@ function useChatNotes(session: ChatSession, leafSlotId: SlotId | null) {
       // A chat's own note is edited on its branch; a card's note is the card's, deleted from the card.
       ...(own ? { chatNote: position, onDeleted } : {})
     }))
-  return { view, atom, listed, refresh, error, setError, position, cardsOf, entries, relinked }
+  return { atom, listed, error, add, call, position, cardsOf, entries, relinked }
 }
 
 /**
@@ -162,13 +200,17 @@ export function NotesTab({
   leafSlotId: SlotId | null
   focusCard?: EntityId | null
 }) {
-  const chatId = session.id
-  const { view, atom, listed, refresh, error, setError, position, cardsOf, entries, relinked } = useChatNotes(
-    session,
-    leafSlotId
-  )
-  const refs = useAtomValue(cardRefs)
-  const call = useCaller()
+  const {
+    atom,
+    listed,
+    error,
+    add: addNote,
+    call,
+    position,
+    cardsOf,
+    entries,
+    relinked
+  } = useChatNotes(session, leafSlotId)
   const [picking, setPicking] = useState<Group | null>(null)
   // The note just added: it scrolls into view and flashes once it shows (owner, 2026-11-02).
   const [added, setAdded] = useState<string | null>(null)
@@ -180,35 +222,13 @@ export function NotesTab({
     if (focusCard !== null) sections.current.get(focusCard)?.scrollIntoView({ block: "start", behavior: "smooth" })
   }, [focusCard])
 
-  const cardRef = (card: EntityId) =>
-    AsyncResult.isSuccess(refs) ? refs.value.find((ref) => ref.entityId === card)?.id : undefined
-  // A note made here is for here: it's on from the latest message (DESIGN §4.1), and open.
+  // A note added here is open, its settings too unless it's a shared note's.
   const add = async (group: Group, shared?: SharedNote) => {
-    const link = shared ? { link: shared.ref.entityId } : {}
-    const refId = group.card === null ? null : cardRef(group.card)
-    if (group.card !== null && refId === undefined)
-      return setError({
-        tag: "NotFound",
-        message: `${group.name}'s card isn't in the library.`,
-        problems: [],
-        reason: null
-      })
-    const made = refId
-      ? await call(
-          (client) => client("CreateCardNote", { cardRefId: refId, title: "Note", chatNote: position, ...link }),
-          ["library"]
-        )
-      : await call(
-          (client) => client("CreateChatNote", { chatId, forkId: view.forkId, title: "Note", ...link }),
-          ["library"]
-        )
-    if (!made.ok) return setError(made.error)
-    const on = await session.changeCast({ _tag: "Note", entityId: made.value.entityId, active: true })
-    setError(on.ok ? null : on.error)
-    blocks.setOpen(made.value.id, true)
-    if (!shared) settings.setOpen(made.value.id, true)
-    setAdded(made.value.id)
-    refresh()
+    const made = await addNote(group, shared)
+    if (made === null) return
+    blocks.setOpen(made, true)
+    if (!shared) settings.setOpen(made, true)
+    setAdded(made)
   }
   return (
     <div className="flex flex-col gap-3">
@@ -327,8 +347,7 @@ function ChatNoteLargeIn({
   session: ChatSession
   leafSlotId: SlotId | null
 }) {
-  const { atom, error, cardsOf, entries, relinked } = useChatNotes(session, leafSlotId)
-  const call = useCaller()
+  const { atom, error, add, call, cardsOf, entries, relinked } = useChatNotes(session, leafSlotId)
   const { settings } = useNoteBlocks(1)
   const close = () => onClose?.()
   return (
@@ -380,7 +399,12 @@ function ChatNoteLargeIn({
                     value: note.ref.id,
                     label: noteTitle(note.doc["title"], note.doc["content"], note.ref.label).title,
                     updatedAt: note.ref.updatedAt
-                  }))
+                  })),
+                  create: {
+                    label: "New note",
+                    hint: "Adds a new note to this chat, on from the latest message, opened in this editor",
+                    run: () => add({ card: null })
+                  }
                 }}
               />
             </ul>

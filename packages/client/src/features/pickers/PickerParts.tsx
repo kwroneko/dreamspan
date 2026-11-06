@@ -160,6 +160,8 @@ export interface PickerItem {
   readonly detail?: string
   /** Beside the name ("Archived"). */
   readonly badge?: ReactNode
+  /** Before the name and its line: a card's portrait. */
+  readonly leading?: ReactNode
   /** What choosing it does, and the exact times behind the line. */
   readonly tooltip: ReactNode
   readonly action?: PickerRowAction
@@ -177,11 +179,14 @@ export function PickerList({
   onChoose,
   empty,
   focusRef,
-  fallbackFocus
+  fallbackFocus,
+  rowSize = 48
 }: {
   id: string
   title: string
   items: ReadonlyArray<PickerItem>
+  /** A row's usual height in px, for the rows not yet measured. */
+  rowSize?: number
   value: string
   onChoose: (value: string) => void
   empty: ReactNode
@@ -229,7 +234,7 @@ export function PickerList({
       className="flex min-h-0 flex-col overflow-y-auto p-2"
       items={items}
       itemKey={itemKey}
-      estimateSize={48}
+      estimateSize={rowSize}
       gap={false}
       initialIndex={Math.max(
         0,
@@ -252,15 +257,26 @@ export function PickerList({
                 aria-label={item.label}
                 {...(item.detail ? { "aria-description": item.detail } : {})}
                 onClick={() => onChoose(item.value)}
-                className="grid w-full min-w-0 grid-cols-[1rem_1fr] items-start gap-x-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus aria-checked:font-medium"
+                className={`grid w-full min-w-0 items-start gap-x-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus aria-checked:font-medium ${item.leading ? "grid-cols-[1rem_auto_minmax(0,1fr)]" : "grid-cols-[1rem_1fr]"}`}
               >
-                <span className="pt-0.5 text-accent">{checked && <Icon name="check" size={14} />}</span>
-                <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 [overflow-wrap:anywhere]">
+                <span className={`pt-0.5 text-accent ${item.leading ? "row-span-2 self-center" : ""}`}>
+                  {checked && <Icon name="check" size={14} />}
+                </span>
+                {item.leading && (
+                  <span aria-hidden className="row-span-2 flex self-center">
+                    {item.leading}
+                  </span>
+                )}
+                <span
+                  className={`flex min-w-0 flex-wrap items-center gap-x-1.5 [overflow-wrap:anywhere] ${item.leading ? "self-end" : ""}`}
+                >
                   <span className="min-w-0">{item.label}</span>
                   {item.badge}
                 </span>
                 {item.detail && (
-                  <span className="col-start-2 text-xs font-normal text-muted [overflow-wrap:anywhere]">
+                  <span
+                    className={`text-xs font-normal text-muted [overflow-wrap:anywhere] ${item.leading ? "col-start-3 self-start" : "col-start-2"}`}
+                  >
                     {item.detail}
                   </span>
                 )}
