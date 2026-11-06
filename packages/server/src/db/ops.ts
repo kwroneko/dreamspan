@@ -3491,6 +3491,12 @@ export class ReadOps extends RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
+  Rpc.make("RolloutReceipt", {
+    payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String },
+    success: Schema.NullOr(Schema.String),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /**
    * What resuming an agent reply needs of its run (agentReads.ts): the rollout, its status and
    * mode, the frozen snapshot and the transcript as last saved, and the version's own status.

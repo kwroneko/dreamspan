@@ -104,7 +104,7 @@ const named = (notes: ReadonlyArray<NoteView>, title: string) => {
 }
 
 /** Why the agent may not change a note, or null when it may. */
-const refusal = (note: NoteView) =>
+export const noteRefusal = (note: NoteView) =>
   !note.editable
     ? `You may not change “${note.title}”.`
     : note.linked
@@ -285,7 +285,7 @@ export const editNote: RolloutTool<{
       Effect.gen(function* () {
         const target = named((yield* notesAt(context)).notes, args.note)
         if ("isError" in target) return target
-        const refused = refusal(target)
+        const refused = noteRefusal(target)
         if (refused) return { text: refused, isError: true }
         const next =
           args.content !== undefined
