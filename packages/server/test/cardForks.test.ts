@@ -147,6 +147,90 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect(
+    "restoring a parent's revision on a fork makes the fork's own revision, with the fork's names and notes' card",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const parent = yield* card(api, "Lio", { nickname: "Lio", character_version: "dawn", scenario: "Calm seas." })
+        const note = yield* api.CreateCardNote({ cardRefId: parent.ref.id, title: "Ship" })
+        yield* draft(api, parent.ref.id, textField(["scenario"]), "Storm season.")
+        yield* commit(api, parent.ref.id)
+        const before = yield* api.OpenEditor({ refId: parent.ref.id })
+        const forked = yield* api.ForkCard({
+          refId: parent.ref.id,
+          name: "Lio",
+          nickname: "Captain Lio",
+          characterVersion: "noir"
+        })
+        yield* draft(api, forked.id, textField(["description"]), "Weathered.")
+        yield* commit(api, forked.id)
+        const history = yield* api.ListRevisions({ refId: forked.id, limit: 10 })
+        assert.deepStrictEqual(
+          history.map((r) => [r.number, r.entry?.refId ?? null, r.forkedFrom?.revisionId ?? null]),
+          [
+            [4, null, null],
+            [3, null, before.ref.headRevisionId],
+            [2, parent.ref.id, null],
+            [1, parent.ref.id, null]
+          ]
+        )
+        const opened = yield* api.OpenEditor({ refId: forked.id })
+        assert.strictEqual(opened.revisionNumber, 4)
+
+        // The parent's first revision: its text comes back; the fork's names stay the fork's.
+        yield* api.RestoreRevision({
+          refId: forked.id,
+          revisionId: history[3]!.id,
+          expectedRowVersion: opened.ref.rowVersion
+        })
+        const restored = yield* api.OpenEditor({ refId: forked.id })
+        assert.deepStrictEqual(
+          [
+            restored.doc.scenario,
+            restored.doc.description,
+            restored.doc.name,
+            restored.doc.nickname,
+            restored.doc.character_version
+          ],
+          ["Calm seas.", before.doc.description, "Lio", "Captain Lio", "noir"]
+        )
+        assert.deepStrictEqual([restored.ref.label, restored.ref.subtitle, restored.revisionNumber], ["Lio", "noir", 5])
+        const [top] = yield* api.ListRevisions({ refId: forked.id, limit: 1 })
+        assert.deepStrictEqual([top!.parents, top!.entry], [[opened.ref.headRevisionId], undefined])
+        const unchanged = yield* api.OpenEditor({ refId: parent.ref.id })
+        assert.deepStrictEqual(
+          [unchanged.ref.headRevisionId, unchanged.doc.scenario],
+          [before.ref.headRevisionId, "Storm season."]
+        )
+        assert.strictEqual(
+          yield* outcome(api.SetRevisionMessage({ refId: forked.id, revisionId: history[2]!.id, message: "Mine" })),
+          "NotFound"
+        )
+
+        // A note the fork copied: the parent note's revision comes back owned by the fork's card.
+        const [copy] = yield* api.ListCardNotes({ cardRefId: forked.id })
+        yield* draft(api, copy!.ref.id, textField(["content"]), "A schooner.")
+        yield* commit(api, copy!.ref.id)
+        const noteHistory = yield* api.ListRevisions({ refId: copy!.ref.id, limit: 10 })
+        assert.deepStrictEqual(
+          noteHistory.map((r) => r.entry?.refId ?? null),
+          [null, null, note.id]
+        )
+        yield* api.RestoreRevision({
+          refId: copy!.ref.id,
+          revisionId: noteHistory[2]!.id,
+          expectedRowVersion: (yield* api.OpenEditor({ refId: copy!.ref.id })).ref.rowVersion
+        })
+        const [back] = yield* api.ListCardNotes({ cardRefId: forked.id })
+        assert.deepStrictEqual([back!.doc.content, back!.doc.owner], ["", { card: forked.entityId }])
+        assert.deepStrictEqual(
+          (yield* api.ListCardNotes({ cardRefId: parent.ref.id })).map((n) => n.ref.id),
+          [note.id]
+        )
+      })
+  )
+
   it.effect("fork names accept the same unbounded strings as card fields", () =>
     Effect.gen(function* () {
       const api = yield* client()
@@ -183,124 +267,137 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("a fork copies its parent's document, tags and notes, and none of its history or source", () =>
-    Effect.gen(function* () {
-      const api = yield* client()
-      const writer = yield* Writer
-      const userId = yield* me(api)
-      const lore = docFor("lorebook", "Harbor lore")
-      const parent = yield* card(
-        api,
-        "Mira",
-        {
-          nickname: "Mira Vey",
-          character_version: "harbor",
-          description: "A lighthouse keeper.",
-          avatar_media_id: "media-avatar",
-          asset_media_ids: { "embeded://map.png": "media-map" },
-          character_book: lore as never,
-          extensions: { world: "Harbor" },
-          modules: [
-            { id: "m1", title: "Secrets", content: "She hides a key.", exportable: false, agent_editable: true }
-          ]
-        },
-        "Mira.png"
-      )
-      yield* writer.SetEntityTags({ userId, entityId: parent.entityId, tags: ["harbor", "persona"] })
-      const note = yield* api.CreateCardNote({ cardRefId: parent.ref.id, title: "Outfit" })
-      const noteDoc = (yield* api.ListCardNotes({ cardRefId: parent.ref.id }))[0]!.doc
-      yield* writer.SetEntityTags({ userId, entityId: note.entityId, tags: ["wardrobe"] })
-      // An earlier revision, which the fork's history doesn't carry.
-      yield* draft(api, parent.ref.id, textField(["scenario"]), "Storm season.")
-      yield* commit(api, parent.ref.id)
-      const head = yield* api.OpenEditor({ refId: parent.ref.id })
-
-      const forked = yield* api.ForkCard({
-        refId: parent.ref.id,
-        name: "Mira",
-        nickname: "Captain Vey",
-        characterVersion: "noir"
-      })
-      assert.notStrictEqual(forked.entityId, parent.entityId)
-      assert.deepStrictEqual(
-        [forked.kind, forked.parentEntityId, forked.label, forked.subtitle],
-        ["card", parent.entityId, "Mira", "noir"]
-      )
-      assert.strictEqual(head.ref.modelName, "Mira Vey")
-      assert.strictEqual(forked.modelName, "Captain Vey")
-      assert.isTrue(head.ref.hasImport)
-      assert.isFalse(forked.hasImport)
-      assert.isFalse(forked.updateAvailable)
-      const opened = yield* api.OpenEditor({ refId: forked.id })
-      assert.deepStrictEqual(opened.doc, { ...head.doc, nickname: "Captain Vey", character_version: "noir" })
-      assert.deepStrictEqual(
-        opened.variants.map((v) => v.id),
-        []
-      )
-
-      // Its history starts at the fork, naming the revision it copied.
-      const history = yield* api.ListRevisions({ refId: forked.id, limit: 10 })
-      assert.strictEqual(history.length, 1)
-      assert.deepStrictEqual([history[0]!.parents, history[0]!.origin], [[], "user"])
-      const [[row]] = (yield* fixtureSql(
-        config.dataDir,
-        [
+  it.effect(
+    "a fork copies its parent's document, tags and notes, not its source; its History runs on through the parent's",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const writer = yield* Writer
+        const userId = yield* me(api)
+        const lore = docFor("lorebook", "Harbor lore")
+        const parent = yield* card(
+          api,
+          "Mira",
           {
-            sql: `SELECT r.source_path, r.source_hash, v.origin_ref, e.forked_from_entity_id, e.forked_from_revision_id,
+            nickname: "Mira Vey",
+            character_version: "harbor",
+            description: "A lighthouse keeper.",
+            avatar_media_id: "media-avatar",
+            asset_media_ids: { "embeded://map.png": "media-map" },
+            character_book: lore as never,
+            extensions: { world: "Harbor" },
+            modules: [
+              { id: "m1", title: "Secrets", content: "She hides a key.", exportable: false, agent_editable: true }
+            ]
+          },
+          "Mira.png"
+        )
+        yield* writer.SetEntityTags({ userId, entityId: parent.entityId, tags: ["harbor", "persona"] })
+        const note = yield* api.CreateCardNote({ cardRefId: parent.ref.id, title: "Outfit" })
+        const noteDoc = (yield* api.ListCardNotes({ cardRefId: parent.ref.id }))[0]!.doc
+        yield* writer.SetEntityTags({ userId, entityId: note.entityId, tags: ["wardrobe"] })
+        // An earlier revision, which the fork's History lists as its parent's.
+        yield* draft(api, parent.ref.id, textField(["scenario"]), "Storm season.")
+        yield* commit(api, parent.ref.id)
+        const head = yield* api.OpenEditor({ refId: parent.ref.id })
+
+        const forked = yield* api.ForkCard({
+          refId: parent.ref.id,
+          name: "Mira",
+          nickname: "Captain Vey",
+          characterVersion: "noir"
+        })
+        assert.notStrictEqual(forked.entityId, parent.entityId)
+        assert.deepStrictEqual(
+          [forked.kind, forked.parentEntityId, forked.label, forked.subtitle],
+          ["card", parent.entityId, "Mira", "noir"]
+        )
+        assert.strictEqual(head.ref.modelName, "Mira Vey")
+        assert.strictEqual(forked.modelName, "Captain Vey")
+        assert.isTrue(head.ref.hasImport)
+        assert.isFalse(forked.hasImport)
+        assert.isFalse(forked.updateAvailable)
+        const opened = yield* api.OpenEditor({ refId: forked.id })
+        assert.deepStrictEqual(opened.doc, { ...head.doc, nickname: "Captain Vey", character_version: "noir" })
+        assert.deepStrictEqual(
+          opened.variants.map((v) => v.id),
+          []
+        )
+
+        // Its History is a git branch's log (owner, 2026-11-06): its first revision, naming the
+        // revision it copied, then the parent's line down from that one.
+        const history = yield* api.ListRevisions({ refId: forked.id, limit: 10 })
+        assert.deepStrictEqual(
+          history.map((r) => [r.parents.length, r.origin, r.number, r.entry?.refId ?? null]),
+          [
+            [0, "user", 3, null],
+            [1, "user", 2, parent.ref.id],
+            [0, "import", 1, parent.ref.id]
+          ]
+        )
+        assert.deepStrictEqual(
+          [history[0]!.forkedFrom?.revisionId, history[0]!.forkedFrom?.refId, history[1]!.id],
+          [head.ref.headRevisionId, parent.ref.id, head.ref.headRevisionId]
+        )
+        const [[row]] = (yield* fixtureSql(
+          config.dataDir,
+          [
+            {
+              sql: `SELECT r.source_path, r.source_hash, v.origin_ref, e.forked_from_entity_id, e.forked_from_revision_id,
                     e.forked_in_chat_id, e.archived_at, r.last_used_at
                   FROM entity_refs r JOIN entities e ON e.id = r.entity_id JOIN entity_revisions v ON v.id = r.head_revision_id
                   WHERE r.id = ?`,
-            params: [forked.id]
-          }
-        ],
-        { readOnly: true }
-      )) as unknown as [[Record<string, unknown>]]
-      assert.deepStrictEqual(row, {
-        source_path: null,
-        source_hash: null,
-        origin_ref: JSON.stringify({ forked: head.ref.headRevisionId }),
-        forked_from_entity_id: parent.entityId,
-        forked_from_revision_id: head.ref.headRevisionId,
-        forked_in_chat_id: null,
-        archived_at: null,
-        last_used_at: null
-      })
+              params: [forked.id]
+            }
+          ],
+          { readOnly: true }
+        )) as unknown as [[Record<string, unknown>]]
+        assert.deepStrictEqual(row, {
+          source_path: null,
+          source_hash: null,
+          origin_ref: JSON.stringify({ forked: head.ref.headRevisionId }),
+          forked_from_entity_id: parent.entityId,
+          forked_from_revision_id: head.ref.headRevisionId,
+          forked_in_chat_id: null,
+          archived_at: null,
+          last_used_at: null
+        })
 
-      // Tags, the persona folder included.
-      for (const tag of ["harbor", "persona"]) {
-        const tagged = yield* (yield* Reader).ListLibrary({ userId, kind: "card", tag, archived: false })
-        assert.isTrue(
-          tagged.some((ref) => ref.id === forked.id),
-          tag
+        // Tags, the persona folder included.
+        for (const tag of ["harbor", "persona"]) {
+          const tagged = yield* (yield* Reader).ListLibrary({ userId, kind: "card", tag, archived: false })
+          assert.isTrue(
+            tagged.some((ref) => ref.id === forked.id),
+            tag
+          )
+        }
+        // Its own copy of each note: the same content, owned by the fork; the parent's stays its own.
+        const copies = yield* api.ListCardNotes({ cardRefId: forked.id })
+        assert.strictEqual(copies.length, 1)
+        assert.notStrictEqual(copies[0]!.ref.entityId, note.entityId)
+        assert.deepStrictEqual(copies[0]!.doc, { ...noteDoc, owner: { card: forked.entityId } })
+        assert.strictEqual(copies[0]!.ref.label, "Outfit")
+        const wardrobe = yield* (yield* Reader).ListLibrary({ userId, kind: "note", tag: "wardrobe", archived: false })
+        assert.isTrue(wardrobe.some((r) => r.id === copies[0]!.ref.id))
+        const own = yield* api.ListCardNotes({ cardRefId: parent.ref.id })
+        assert.deepStrictEqual(
+          own.map((n) => [n.ref.id, n.doc]),
+          [[note.id, noteDoc]]
         )
-      }
-      // Its own copy of each note: the same content, owned by the fork; the parent's stays its own.
-      const copies = yield* api.ListCardNotes({ cardRefId: forked.id })
-      assert.strictEqual(copies.length, 1)
-      assert.notStrictEqual(copies[0]!.ref.entityId, note.entityId)
-      assert.deepStrictEqual(copies[0]!.doc, { ...noteDoc, owner: { card: forked.entityId } })
-      assert.strictEqual(copies[0]!.ref.label, "Outfit")
-      const wardrobe = yield* (yield* Reader).ListLibrary({ userId, kind: "note", tag: "wardrobe", archived: false })
-      assert.isTrue(wardrobe.some((r) => r.id === copies[0]!.ref.id))
-      const own = yield* api.ListCardNotes({ cardRefId: parent.ref.id })
-      assert.deepStrictEqual(
-        own.map((n) => [n.ref.id, n.doc]),
-        [[note.id, noteDoc]]
-      )
-      // Editing the copy leaves the parent's note alone.
-      yield* draft(api, copies[0]!.ref.id, textField(["content"]), "A raincoat.")
-      yield* commit(api, copies[0]!.ref.id)
-      assert.deepStrictEqual((yield* api.ListCardNotes({ cardRefId: parent.ref.id }))[0]!.doc, noteDoc)
+        // Editing the copy leaves the parent's note alone.
+        yield* draft(api, copies[0]!.ref.id, textField(["content"]), "A raincoat.")
+        yield* commit(api, copies[0]!.ref.id)
+        assert.deepStrictEqual((yield* api.ListCardNotes({ cardRefId: parent.ref.id }))[0]!.doc, noteDoc)
 
-      const family = yield* api.CardFamily({ entityId: forked.entityId })
-      assert.strictEqual(family.rootEntityId, parent.entityId)
-      const member = family.members.find((m) => m.entityId === forked.entityId)!
-      assert.deepStrictEqual(
-        [member.parentEntityId, member.forkedFromRevisionId, member.forkedInChatId, member.refId, member.state],
-        [parent.entityId, head.ref.headRevisionId, null, forked.id, "live"]
-      )
-      assert.isNumber(member.forkedAt)
-    })
+        const family = yield* api.CardFamily({ entityId: forked.entityId })
+        assert.strictEqual(family.rootEntityId, parent.entityId)
+        const member = family.members.find((m) => m.entityId === forked.entityId)!
+        assert.deepStrictEqual(
+          [member.parentEntityId, member.forkedFromRevisionId, member.forkedInChatId, member.refId, member.state],
+          [parent.entityId, head.ref.headRevisionId, null, forked.id, "live"]
+        )
+        assert.isNumber(member.forkedAt)
+      })
   )
 
   it.effect("a copied note's condition names the fork where it named the card, and keeps the others", () =>

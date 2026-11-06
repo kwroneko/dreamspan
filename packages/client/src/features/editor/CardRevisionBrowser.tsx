@@ -4,15 +4,18 @@ import { cardNames } from "@rp/shared/cardNames.ts"
 import { Effect } from "effect"
 import { checkCardNames } from "./checkCardNames.ts"
 import { useCardNameCheck } from "./cardNameCheck.ts"
-// Compare immutable revisions with their first parent or the live working document.
-import { type Doc, Revision } from "@rp/shared/library.ts"
+// Compare immutable revisions with their first parent or the live working document. A fork's
+// History runs on through the revisions it was forked from, as a git branch's log does (owner,
+// 2026-11-06), with where it was forked marked between.
+import { type Doc, Revision, type RevisionEntry as InheritedFrom } from "@rp/shared/library.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import { Link } from "@tanstack/react-router"
 import { readableChatTitle } from "../chat/chatTitle.ts"
 import { ReadableDiff, readableLines } from "../../ui/ReadableDiff.tsx"
 import { RevisionEntry, revisionName } from "../../ui/RevisionEntry.tsx"
 import { promptLabel } from "./promptLabel.ts"
-import { useEffect, useState } from "react"
+import { useContext, useEffect, useState } from "react"
+import { PanelVariantNavigation } from "./panelActions.tsx"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -140,6 +143,40 @@ function RevisionTitle({ revision }: { revision: Revision }) {
   )
 }
 
+const entryName = (entry: InheritedFrom) =>
+  `${entry.label || "a deleted entry"}${entry.subtitle ? ` · ${entry.subtitle}` : ""}`
+
+/** An entry a fork was forked from, a link to it while it's in the library. */
+function EntryName({ entry, onOpen }: { entry: InheritedFrom; onOpen?: (() => void) | undefined }) {
+  const select = useContext(PanelVariantNavigation)
+  const name = entryName(entry)
+  if (entry.refId === null) return <span className="[overflow-wrap:anywhere]">{name}</span>
+  return (
+    <Tooltip label={`Opens ${name} for editing.`}>
+      <Link
+        to="/library/$refId"
+        params={{ refId: entry.refId }}
+        className="text-accent underline-offset-4 hover:underline [overflow-wrap:anywhere]"
+        onClick={(event) => {
+          // A plain click; a new tab or window keeps this open.
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+          // A side panel's editor shows the other entry in place.
+          if (select) {
+            event.preventDefault()
+            select(entry.refId!)
+          }
+          onOpen?.()
+        }}
+      >
+        {name}
+      </Link>
+    </Tooltip>
+  )
+}
+
+/** The revision before this one down its line: its first parent, or what a fork was forked from. */
+const previousRevision = (revision: Revision) => revision.parents[0] ?? revision.forkedFrom?.revisionId
+
 const originBadges: Partial<Record<Revision["origin"], string>> = {
   import: "Imported",
   merge: "Updated",
@@ -165,7 +202,7 @@ function RevisionComparison({
     let live = true
     void Promise.all([
       store.revisionDoc(revision.id),
-      revision.parents[0] ? store.revisionDoc(revision.parents[0]) : Promise.resolve({})
+      previousRevision(revision) ? store.revisionDoc(previousRevision(revision)!) : Promise.resolve({})
     ]).then(
       ([doc, parent]) => {
         if (live) setDocs({ doc, parent })
@@ -185,7 +222,7 @@ function RevisionComparison({
   const beforeLabel =
     mode === "current"
       ? selectedName
-      : revision.parents.length === 0
+      : previousRevision(revision) === undefined
         ? "Empty"
         : revisionName(revision.number === undefined ? undefined : revision.number - 1)
   const afterLabel = mode === "parent" ? selectedName : "Current state"
@@ -228,7 +265,7 @@ function RevisionComparison({
               value: "parent",
               label: "Changes from previous revision",
               description:
-                revision.parents.length === 0
+                previousRevision(revision) === undefined
                   ? "Shows this first revision's changes from an empty document"
                   : "Shows this revision's changes from the previous revision",
               panel: comparison
@@ -249,12 +286,15 @@ function RevisionComparison({
 export function CardRevisionBrowser({
   store,
   call,
-  settingLines
+  settingLines,
+  onOpenEntry
 }: {
   store: EditorStore
   call: Caller
   /** How the kind's settings read (a note's position), past the generic reading. */
   settingLines?: SettingLines | undefined
+  /** A link to an entry this was forked from was followed (a dialog closes). */
+  onOpenEntry?: (() => void) | undefined
 }) {
   // A chat's own note: its line as the branch shown has it, and where each change took effect.
   const chatNote = store.chatNote ? { chatNote: store.chatNote } : {}
@@ -309,7 +349,9 @@ export function CardRevisionBrowser({
   const selectedDoc = restoreDoc?.id === selected?.id ? restoreDoc?.doc : undefined
   const names = cardNames(selectedDoc ?? {})
   const nameCheck = useCardNameCheck(names.displayName, names.version, state.snapshot!.ref)
-  const clash = selectedDoc && state.snapshot!.ref.kind === "card" ? nameCheck : null
+  // An inherited revision restores with the fork's own names (the server keeps them).
+  const card = state.snapshot!.ref.kind === "card"
+  const clash = selectedDoc && card && !selected?.entry ? nameCheck : null
   useEffect(() => {
     let live = true
     const at = store.chatNote ? { chatNote: store.chatNote } : {}
@@ -343,7 +385,7 @@ export function CardRevisionBrowser({
       const result = await call(
         (client) =>
           Effect.gen(function* () {
-            if (state.snapshot!.ref.kind === "card")
+            if (card && !revision.entry)
               yield* checkCardNames(client, names.displayName, names.version, state.snapshot!.ref)
             return yield* client("RestoreRevision", {
               refId: store.refId,
@@ -366,81 +408,112 @@ export function CardRevisionBrowser({
     <div className="flex min-w-0 flex-col gap-4">
       <ErrorAlert error={error} />
       <ol aria-label="Revisions" className="flex min-w-0 flex-col gap-3">
-        {revisions.map((revision) => (
-          <li
-            key={revision.id}
-            className={`min-w-0 rounded-lg border bg-surface-raised p-3 ${selected?.id === revision.id ? "border-accent" : "border-border"}`}
-          >
-            <RevisionEntry
-              number={revision.number}
-              createdAt={revision.createdAt}
-              title={
-                revision.origin === "generation" || revision.changedAt?.length ? (
-                  <RevisionTitle revision={revision} />
-                ) : null
-              }
-              originLabel={originBadges[revision.origin]}
-              restore={
-                <>
-                  <Button
-                    className="h-8 px-2"
-                    disabled={
-                      revision.id === head ||
-                      restoringId !== null ||
-                      (selected?.id === revision.id && (!selectedDoc || clash !== null))
-                    }
-                    focusableWhenDisabled
-                    hint={
-                      revision.id === head
-                        ? "This is the latest revision"
-                        : restoringId
-                          ? "A revision is being restored"
-                          : selected?.id === revision.id && clash
-                            ? clash
-                            : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
-                    }
-                    onClick={() => void restore(revision)}
-                  >
-                    Restore to {revisionName(revision.number).toLowerCase()}
-                  </Button>
-                  <SlotOutlet slot={revisionActions} props={{ store, revision }} />
-                </>
-              }
-              message={revision.message}
-              current={revision.id === head}
-              selected={selected?.id === revision.id}
-              onSelect={() => setSelected(selected?.id === revision.id ? null : revision)}
-              onMessage={async (message) => {
-                const result = await call(
-                  (client) => client("SetRevisionMessage", { refId: store.refId, revisionId: revision.id, message }),
-                  ["library"]
-                )
-                if (!result.ok) {
-                  setError(result.error)
-                  return false
+        {revisions.map((revision) => {
+          const box = `min-w-0 rounded-lg border bg-surface-raised p-3 ${selected?.id === revision.id ? "border-accent" : "border-border"}`
+          const content = (
+            <>
+              <RevisionEntry
+                number={revision.number}
+                createdAt={revision.createdAt}
+                title={
+                  revision.entry || revision.origin === "generation" || revision.changedAt?.length ? (
+                    <>
+                      {revision.entry && (
+                        <span className="block text-muted">
+                          From <EntryName entry={revision.entry} onOpen={onOpenEntry} />
+                        </span>
+                      )}
+                      <RevisionTitle revision={revision} />
+                    </>
+                  ) : null
                 }
-                setRevisions((list) =>
-                  list.map((r) =>
-                    r.id === revision.id ? new Revision({ ...r, message: message === "" ? null : message }) : r
-                  )
-                )
-                return true
-              }}
-            />
-            {selected?.id === revision.id && (
-              <section aria-label={`Comparison of revision ${revision.number}`} className="min-w-0 pt-2">
-                {clash && (
-                  <p role="status" className="mb-2 text-sm text-muted">
-                    {clash}
-                  </p>
-                )}
-                <RevisionComparison key={selected.id} store={store} revision={selected} settingLines={settingLines} />
-              </section>
-            )}
-          </li>
-        ))}
+                originLabel={originBadges[revision.origin]}
+                restore={
+                  <>
+                    <Button
+                      className="h-8 px-2"
+                      disabled={
+                        revision.id === head ||
+                        restoringId !== null ||
+                        (selected?.id === revision.id && (!selectedDoc || clash !== null))
+                      }
+                      focusableWhenDisabled
+                      hint={
+                        revision.id === head
+                          ? "This is the latest revision"
+                          : restoringId
+                            ? "A revision is being restored"
+                            : selected?.id === revision.id && clash
+                              ? clash
+                              : revision.entry
+                                ? `Restores the content of ${revisionName(revision.number).toLowerCase()} here, as a new revision; ${entryName(revision.entry)} doesn't change`
+                                : `Restores the content of ${revisionName(revision.number).toLowerCase()}`
+                      }
+                      onClick={() => void restore(revision)}
+                    >
+                      Restore to {revisionName(revision.number).toLowerCase()}
+                    </Button>
+                    <SlotOutlet slot={revisionActions} props={{ store, revision }} />
+                  </>
+                }
+                message={revision.message}
+                current={revision.id === head}
+                selected={selected?.id === revision.id}
+                onSelect={() => setSelected(selected?.id === revision.id ? null : revision)}
+                // An inherited revision's message is its original's to edit.
+                onMessage={
+                  revision.entry
+                    ? undefined
+                    : async (message) => {
+                        const result = await call(
+                          (client) =>
+                            client("SetRevisionMessage", { refId: store.refId, revisionId: revision.id, message }),
+                          ["library"]
+                        )
+                        if (!result.ok) {
+                          setError(result.error)
+                          return false
+                        }
+                        setRevisions((list) =>
+                          list.map((r) =>
+                            r.id === revision.id ? new Revision({ ...r, message: message === "" ? null : message }) : r
+                          )
+                        )
+                        return true
+                      }
+                }
+              />
+              {selected?.id === revision.id && (
+                <section aria-label={`Comparison of revision ${revision.number}`} className="min-w-0 pt-2">
+                  {clash && (
+                    <p role="status" className="mb-2 text-sm text-muted">
+                      {clash}
+                    </p>
+                  )}
+                  <RevisionComparison key={selected.id} store={store} revision={selected} settingLines={settingLines} />
+                </section>
+              )}
+            </>
+          )
+          // A fork's first revision: where it was forked, between it and the revision it came from.
+          return revision.forkedFrom ? (
+            <li key={revision.id} className="flex min-w-0 flex-col gap-3">
+              <div className={box}>{content}</div>
+              <p data-fork-point className="flex min-w-0 items-center gap-2 px-1 text-sm text-muted">
+                <Icon name="branch" size={16} className="shrink-0" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">
+                  Forked here from <EntryName entry={revision.forkedFrom} onOpen={onOpenEntry} />
+                </span>
+              </p>
+            </li>
+          ) : (
+            <li key={revision.id} className={box}>
+              {content}
+            </li>
+          )
+        })}
       </ol>
-      {(revisions.at(-1)?.parents.length ?? 0) > 0 && (
+      {revisions.length > 0 && previousRevision(revisions.at(-1)!) !== undefined && (
         <Button pending={pending} hint="Loads earlier revisions" onClick={() => void more()}>
           Earlier revisions
         </Button>

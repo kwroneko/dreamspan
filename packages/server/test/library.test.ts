@@ -224,52 +224,168 @@ describe("library", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("a fork is an entry of its own: its history starts at the fork, and archiving it leaves the original", () =>
-    Effect.gen(function* () {
-      const { writer, reader, userId, upstream, doc, edit, reimport } = yield* setup()
-      const variant = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "noir" })
-      assert.notStrictEqual(variant.entityId, upstream.entityId)
-      assert.strictEqual(variant.parentEntityId, upstream.entityId)
-      assert.isNull(upstream.parentEntityId)
-      assert.isFalse(variant.hasImport)
-      assert.deepStrictEqual(yield* doc(variant.id), preset(MAIN))
+  it.live(
+    "a fork is an entry of its own: its history runs on through the original's, and archiving it leaves the original",
+    () =>
+      Effect.gen(function* () {
+        const { writer, reader, userId, upstream, doc, edit, reimport } = yield* setup()
+        const variant = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "noir" })
+        assert.notStrictEqual(variant.entityId, upstream.entityId)
+        assert.strictEqual(variant.parentEntityId, upstream.entityId)
+        assert.isNull(upstream.parentEntityId)
+        assert.isFalse(variant.hasImport)
+        assert.deepStrictEqual(yield* doc(variant.id), preset(MAIN))
 
-      const history = yield* reader.RefHistory({ userId, refId: variant.id, limit: 10 })
-      assert.deepStrictEqual(
-        history.map((r) => [r.origin, r.parents, r.message]),
-        [["user", [], "Forked from Narrator · upstream"]]
-      )
+        // A git branch's log (owner, 2026-11-06): the fork's revisions, then the original's.
+        const history = yield* reader.RefHistory({ userId, refId: variant.id, limit: 10 })
+        assert.deepStrictEqual(
+          history.map((r) => [r.origin, r.parents, r.message, r.number, r.entry?.refId ?? null]),
+          [
+            ["user", [], "Forked from Narrator · upstream", 2, null],
+            ["import", [], history[1]!.message, 1, upstream.id]
+          ]
+        )
+        assert.deepStrictEqual(history[0]!.forkedFrom, {
+          revisionId: upstream.headRevisionId,
+          entityId: upstream.entityId,
+          refId: upstream.id,
+          label: "Narrator",
+          subtitle: "upstream"
+        })
 
-      // A fork of a fork merges from its own parent, not from the original.
-      const child = yield* writer.ForkRef({ userId, refId: variant.id, label: "Narrator", subtitle: "noir, rainy" })
-      assert.strictEqual(child.parentEntityId, variant.entityId)
-      yield* edit(variant.id, preset(MAIN, [{ identifier: "scene", content: "It is raining." }]))
-      yield* reimport(preset(MAIN, [], 0.5))
-      const listed = yield* reader.ListLibrary({ userId, kind: "preset", tag: null, archived: false })
-      const available = new Map(listed.map((r) => [r.id, r.updateAvailable]))
-      assert.deepStrictEqual(
-        [available.get(upstream.id), available.get(variant.id), available.get(child.id)],
-        [false, true, true]
-      )
-      yield* writer.MergeFollowed({ userId, refId: child.id })
-      assert.deepStrictEqual(
-        (yield* doc(child.id)).prompts.map((p) => p.identifier),
-        ["main", "scene"]
-      )
-      assert.strictEqual((yield* doc(child.id)).prefill.assistant, "1")
+        // A fork of a fork merges from its own parent, not from the original.
+        const child = yield* writer.ForkRef({ userId, refId: variant.id, label: "Narrator", subtitle: "noir, rainy" })
+        assert.strictEqual(child.parentEntityId, variant.entityId)
+        yield* edit(variant.id, preset(MAIN, [{ identifier: "scene", content: "It is raining." }]))
+        yield* reimport(preset(MAIN, [], 0.5))
+        const listed = yield* reader.ListLibrary({ userId, kind: "preset", tag: null, archived: false })
+        const available = new Map(listed.map((r) => [r.id, r.updateAvailable]))
+        assert.deepStrictEqual(
+          [available.get(upstream.id), available.get(variant.id), available.get(child.id)],
+          [false, true, true]
+        )
+        yield* writer.MergeFollowed({ userId, refId: child.id })
+        assert.deepStrictEqual(
+          (yield* doc(child.id)).prompts.map((p) => p.identifier),
+          ["main", "scene"]
+        )
+        assert.strictEqual((yield* doc(child.id)).prefill.assistant, "1")
 
-      // Archiving a fork archives that fork only.
-      yield* writer.SetEntityArchived({ userId, entityId: variant.entityId, archived: true })
-      const live = yield* reader.ListLibrary({ userId, kind: "preset", tag: null, archived: false })
-      assert.sameMembers(
-        live.map((r) => r.id),
-        [upstream.id, child.id]
-      )
-      assert.deepStrictEqual(
-        (yield* reader.ListLibrary({ userId, kind: "preset", tag: null, archived: true })).map((r) => r.id),
-        [variant.id]
-      )
-    }).pipe(Effect.provide(database()))
+        // Archiving a fork archives that fork only.
+        yield* writer.SetEntityArchived({ userId, entityId: variant.entityId, archived: true })
+        const live = yield* reader.ListLibrary({ userId, kind: "preset", tag: null, archived: false })
+        assert.sameMembers(
+          live.map((r) => r.id),
+          [upstream.id, child.id]
+        )
+        assert.deepStrictEqual(
+          (yield* reader.ListLibrary({ userId, kind: "preset", tag: null, archived: true })).map((r) => r.id),
+          [variant.id]
+        )
+      }).pipe(Effect.provide(database()))
+  )
+
+  it.live(
+    "a fork's History runs back through every fork to the first original; restoring an inherited revision makes the fork's own",
+    () =>
+      Effect.gen(function* () {
+        const { writer, reader, userId, upstream, doc, rowVersion, edit } = yield* setup()
+        const r1 = upstream.headRevisionId
+        const r2 = (yield* edit(upstream.id, preset("Second."))).ref.headRevisionId
+        const r3 = (yield* edit(upstream.id, preset("Third."))).ref.headRevisionId
+        const variant = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "noir" })
+        // The original's later revisions aren't the fork's.
+        const r4 = (yield* edit(upstream.id, preset("Fourth."))).ref.headRevisionId
+        const v2 = (yield* edit(variant.id, preset("Noir."))).ref.headRevisionId
+        const child = yield* writer.ForkRef({ userId, refId: variant.id, label: "Narrator", subtitle: "rainy" })
+        const c2 = (yield* edit(child.id, preset("Rain."))).ref.headRevisionId
+
+        const history = yield* reader.RefHistory({ userId, refId: child.id, limit: 10 })
+        assert.deepStrictEqual(
+          history.map((r) => [r.id, r.number, r.entry?.refId ?? null, r.forkedFrom?.revisionId ?? null]),
+          [
+            [c2, 7, null, null],
+            [child.headRevisionId, 6, null, v2],
+            [v2, 5, variant.id, null],
+            [variant.headRevisionId, 4, variant.id, r3],
+            [r3, 3, upstream.id, null],
+            [r2, 2, upstream.id, null],
+            [r1, 1, upstream.id, null]
+          ]
+        )
+        assert.deepStrictEqual(
+          [history[1]!.forkedFrom!.refId, history[1]!.forkedFrom!.subtitle, history[3]!.forkedFrom!.refId],
+          [variant.id, "noir", upstream.id]
+        )
+        assert.isFalse(history.some((r) => r.id === r4))
+
+        // Pages run across the fork points.
+        const pages = []
+        let before: (typeof history)[number]["id"] | undefined
+        for (;;) {
+          const page = yield* reader.RefHistory({ userId, refId: child.id, limit: 3, ...(before ? { before } : {}) })
+          if (page.length === 0) break
+          pages.push(page.map((r) => r.number))
+          before = page.at(-1)!.id
+        }
+        assert.deepStrictEqual(pages, [[7, 6, 5], [4, 3, 2], [1]])
+
+        // Restoring the first original's revision makes a new revision of the fork, never of the
+        // revision's own entry.
+        const restored = yield* writer.RestoreRevision({
+          userId,
+          refId: child.id,
+          revisionId: r2,
+          expectedRowVersion: yield* rowVersion(child.id)
+        })
+        assert.deepStrictEqual(yield* doc(child.id), preset("Second."))
+        const [top] = yield* reader.RefHistory({ userId, refId: child.id, limit: 1 })
+        assert.deepStrictEqual(
+          [top!.id, top!.parents, top!.number, top!.entry],
+          [restored.ref.headRevisionId, [c2], 8, undefined]
+        )
+        assert.deepStrictEqual(
+          [(yield* reader.GetRef({ userId, refId: upstream.id })).ref.headRevisionId, yield* doc(upstream.id)],
+          [r4, preset("Fourth.")]
+        )
+        assert.strictEqual((yield* reader.GetRef({ userId, refId: variant.id })).ref.headRevisionId, v2)
+
+        // An inherited revision's message is its own entry's to set, not the fork's.
+        assert.strictEqual(
+          yield* tag(writer.SetRevisionMessage({ userId, refId: child.id, revisionId: r2, message: "Mine" })),
+          "NotFound"
+        )
+        yield* writer.SetRevisionMessage({ userId, refId: upstream.id, revisionId: r2, message: "Second draft" })
+        const relabelled = yield* reader.RefHistory({ userId, refId: child.id, limit: 10 })
+        assert.strictEqual(relabelled.find((r) => r.id === r2)!.message, "Second draft")
+
+        // Another entry's revision, off the fork's line, is neither a page start nor restorable.
+        const stranger = yield* writer.CreateEntity({
+          userId,
+          kind: "preset",
+          label: "Other",
+          subtitle: "",
+          doc: preset("Other."),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        assert.strictEqual(
+          yield* tag(reader.RefHistory({ userId, refId: child.id, limit: 3, before: stranger.ref.headRevisionId })),
+          "NotFound"
+        )
+        assert.strictEqual(
+          yield* tag(
+            writer.RestoreRevision({
+              userId,
+              refId: child.id,
+              revisionId: stranger.ref.headRevisionId,
+              expectedRowVersion: yield* rowVersion(child.id)
+            })
+          ),
+          "NotFound"
+        )
+      }).pipe(Effect.provide(database()))
   )
 
   for (const kind of ["lorebook", "note"] as const)
@@ -544,7 +660,8 @@ describe("library", () => {
       const origins = (refId: RefId) =>
         reader.RefHistory({ userId, refId, limit: 10 }).pipe(Effect.map((revs) => revs.map((r) => r.origin)))
       assert.deepStrictEqual(yield* origins(created.ref.id), ["merge", "user"])
-      assert.deepStrictEqual(yield* origins(variant.id), ["user"])
+      // The fork: its own first revision, then the one it was forked from; not the import since.
+      assert.deepStrictEqual(yield* origins(variant.id), ["user", "user"])
 
       // That import is now the merge base, so the next one merges cleanly.
       const next = yield* reimport(cardDoc("Mira Vale"))

@@ -29,7 +29,7 @@ export function RevisionsDialog({
       title={title}
       description="Select Compare to review changes or restore a revision."
     >
-      <CardRevisionBrowser store={store} call={call} settingLines={settingLines} />
+      <CardRevisionBrowser store={store} call={call} settingLines={settingLines} onOpenEntry={onClose} />
     </Dialog>
   )
 }

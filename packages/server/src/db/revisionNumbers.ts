@@ -1,16 +1,29 @@
-// A revision's number along its first-parent line, from 1 for the first: what "changed since
-// revision N" and History's "Revision N" count (owner, 2026-11-01).
+// A revision's number along its line, from 1 for the first: what "changed since revision N"
+// and History's "Revision N" count (owner, 2026-11-01). A fork's line runs on through the
+// revisions it was forked from, as a git branch's log does (owner, 2026-11-06), so its numbers
+// continue its original's.
 import type { RevisionUse } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
+
+/**
+ * The revision before `r` (an `entity_revisions` alias) on its line: its first parent, or, for
+ * a fork's first revision, the revision it was forked from (another entity's, and that one's
+ * own line continues the same way, back to the first fork's original).
+ */
+export const previousRevisionSql = (r: string) =>
+  `coalesce(json_extract(${r}.parents, '$[0]'), (SELECT e.forked_from_revision_id FROM entities e
+    WHERE e.id = ${r}.entity_id AND json_array_length(${r}.parents) = 0
+      AND e.forked_from_revision_id = CASE WHEN json_valid(${r}.origin_ref)
+        THEN json_extract(${r}.origin_ref, '$.forked') END))`
 
 export const revisionNumber = (sql: SqlClient.SqlClient, revisionId: string) =>
   sql<{ n: number | null }>`
     WITH RECURSIVE line(id, n) AS (
       SELECT ${revisionId}, 1
       UNION ALL
-      SELECT json_extract(r.parents, '$[0]'), l.n + 1 FROM entity_revisions r JOIN line l ON r.id = l.id
-      WHERE json_extract(r.parents, '$[0]') IS NOT NULL
+      SELECT ${sql.literal(previousRevisionSql("r"))}, l.n + 1 FROM entity_revisions r JOIN line l ON r.id = l.id
+      WHERE ${sql.literal(previousRevisionSql("r"))} IS NOT NULL
     )
     SELECT max(n) AS n FROM line`.pipe(Effect.map(([row]) => row?.n ?? 1))
 

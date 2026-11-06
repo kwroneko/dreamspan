@@ -68,6 +68,16 @@ export const RevisionUse = Schema.Struct({
 })
 export type RevisionUse = typeof RevisionUse.Type
 
+/** The entry a revision on a fork's History belongs to, when that's an entry it was forked from. */
+export const RevisionEntry = Schema.Struct({
+  entityId: EntityId,
+  /** Null when the entry is in the bin or gone. */
+  refId: Schema.NullOr(RefId),
+  label: Schema.String,
+  subtitle: Schema.String
+})
+export type RevisionEntry = typeof RevisionEntry.Type
+
 export class Revision extends Schema.Class<Revision>("Revision")({
   id: RevisionId,
   parents: Schema.Array(RevisionId),
@@ -77,8 +87,18 @@ export class Revision extends Schema.Class<Revision>("Revision")({
   message: Schema.NullOr(Schema.String),
   docHash: Schema.String,
   createdAt: Schema.Number,
-  /** Its place along the ref's first-parent line, from 1 for the first revision. */
+  /**
+   * Its place along the ref's line, from 1 for the first revision: the first-parent line, run on
+   * through the revisions a fork was forked from (owner, 2026-11-06).
+   */
   number: Schema.optionalKey(Schema.Int),
+  /**
+   * On a fork's History, a revision it inherited: the entry it belongs to, one this fork (or a
+   * fork it was forked from) was forked from. Restoring it makes a new revision of the fork.
+   */
+  entry: Schema.optionalKey(RevisionEntry),
+  /** A fork's first revision: the revision it was forked from, the next one down its History. */
+  forkedFrom: Schema.optionalKey(Schema.Struct({ revisionId: RevisionId, ...RevisionEntry.fields })),
   usedBy: Schema.optionalKey(RevisionUse),
   /**
    * A chat's own note's revision listed at a position: where it took effect, by message number

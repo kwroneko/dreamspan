@@ -1,6 +1,6 @@
 import { LibraryRef } from "@rp/shared/library.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
-import { revisionNumber, revisionUse } from "./revisionNumbers.ts"
+import { previousRevisionSql, revisionNumber, revisionUse } from "./revisionNumbers.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { composerImages } from "./composerImages.ts"
@@ -9,11 +9,19 @@ export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
-import { type ChatId, Fork, type ForkId, type MessageImages, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import {
+  type ChatId,
+  type EntityId,
+  Fork,
+  type ForkId,
+  type MessageImages,
+  type SlotId,
+  type VersionId
+} from "@rp/shared/chat.ts"
 import { chatForkSummaries } from "./forkSummaries.ts"
 import { Branch, type PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
+import { MergePreview, type RefId, Revision, type RevisionId } from "@rp/shared/library.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
@@ -637,15 +645,24 @@ export const makeReadHandlers = Effect.gen(function* () {
             ? yield* noteHere(sql, lib, userId, ref, chatNote)
             : null
         let start: string | null = resolved?.ref.head_revision_id ?? ref.head_revision_id
+        // A fork's line runs on through what it was forked from (owner, 2026-11-06: a fork's
+        // History is a git branch's log), so the cursor can be an entry's it was forked from.
         if (before !== undefined) {
-          const [cursor] = yield* sql<{ parent: string | null }>`
-            SELECT json_extract(parents, '$[0]') AS parent FROM entity_revisions
-            WHERE id = ${before} AND entity_id = ${ref.entity_id}`
+          const [cursor] = yield* sql<{ previous: string | null }>`
+            WITH RECURSIVE ancestors(id) AS (
+              SELECT ${ref.entity_id}
+              UNION
+              SELECT e.forked_from_entity_id FROM entities e JOIN ancestors a ON e.id = a.id
+                WHERE e.forked_from_revision_id IS NOT NULL
+            )
+            SELECT ${sql.literal(previousRevisionSql("r"))} AS previous FROM entity_revisions r
+            WHERE r.id = ${before} AND r.entity_id IN (SELECT id FROM ancestors)`
           if (!cursor) return yield* new NotFound({ entity: "revision", id: before })
-          start = cursor.parent
+          start = cursor.previous
         }
         const rows = yield* sql<{
           id: string
+          entity_id: string
           parents: string
           origin: Revision["origin"]
           origin_ref: string | null
@@ -653,15 +670,18 @@ export const makeReadHandlers = Effect.gen(function* () {
           doc_hash: string
           created_at: number
           n: number
+          previous: string | null
+          forked_from_entity_id: string | null
         }>`
           WITH RECURSIVE history(id, n) AS (
             SELECT ${start}, 1
             UNION ALL
-            SELECT json_extract(r.parents, '$[0]'), h.n + 1 FROM entity_revisions r JOIN history h ON r.id = h.id
-            WHERE json_extract(r.parents, '$[0]') IS NOT NULL AND h.n < ${limit}
+            SELECT ${sql.literal(previousRevisionSql("r"))}, h.n + 1 FROM entity_revisions r JOIN history h ON r.id = h.id
+            WHERE ${sql.literal(previousRevisionSql("r"))} IS NOT NULL AND h.n < ${limit}
           )
-          SELECT r.id, r.parents, r.origin, r.origin_ref, r.message, r.doc_hash, r.created_at, h.n
-          FROM history h JOIN entity_revisions r ON r.id = h.id ORDER BY h.n`
+          SELECT r.id, r.entity_id, r.parents, r.origin, r.origin_ref, r.message, r.doc_hash, r.created_at, h.n,
+            ${sql.literal(previousRevisionSql("r"))} AS previous, e.forked_from_entity_id
+          FROM history h JOIN entity_revisions r ON r.id = h.id JOIN entities e ON e.id = r.entity_id ORDER BY h.n`
         const first = start === null ? 0 : yield* revisionNumber(sql, start)
         const changedAt = resolved
           ? yield* noteChangedAt(
@@ -671,10 +691,39 @@ export const makeReadHandlers = Effect.gen(function* () {
               rows.map((row) => row.id)
             )
           : null
+        // A fork's first revision continues down the line at the revision it was forked from.
+        const forkPoint = (row: (typeof rows)[number]) =>
+          row.previous !== null && JSON.parse(row.parents).length === 0 && row.forked_from_entity_id !== null
+        const own = ref.entity_id
+        const entryIds = [
+          ...new Set(
+            rows.flatMap((row) => [
+              ...(row.entity_id !== own ? [row.entity_id] : []),
+              ...(forkPoint(row) ? [row.forked_from_entity_id!] : [])
+            ])
+          )
+        ]
+        const entries = new Map(
+          entryIds.length === 0
+            ? []
+            : (yield* sql<{ id: string; ref_id: string | null; label: string | null; subtitle: string | null }>`
+                SELECT e.id, CASE WHEN e.deleted_at IS NULL THEN rf.id END AS ref_id, rf.label, rf.subtitle FROM entities e
+                LEFT JOIN entity_refs rf ON rf.entity_id = e.id WHERE e.id IN ${sql.in(entryIds)}`).map((e) => [
+                e.id,
+                {
+                  entityId: e.id as EntityId,
+                  refId: e.ref_id as RefId | null,
+                  label: e.label ?? "",
+                  subtitle: e.subtitle ?? ""
+                }
+              ])
+        )
         const out = []
         for (const row of rows) {
           const at = changedAt?.get(row.id)
           const usedBy = row.origin === "generation" ? yield* revisionUse(sql, userId, row.origin_ref) : null
+          const entry = row.entity_id !== own ? entries.get(row.entity_id) : undefined
+          const from = forkPoint(row) ? entries.get(row.forked_from_entity_id!) : undefined
           out.push(
             new Revision({
               id: row.id as RevisionId,
@@ -685,7 +734,9 @@ export const makeReadHandlers = Effect.gen(function* () {
               createdAt: row.created_at,
               number: first - row.n + 1,
               ...(usedBy ? { usedBy } : {}),
-              ...(at ? { changedAt: at } : {})
+              ...(at ? { changedAt: at } : {}),
+              ...(entry ? { entry } : {}),
+              ...(from ? { forkedFrom: { revisionId: row.previous as RevisionId, ...from } } : {})
             })
           )
         }
