@@ -217,6 +217,8 @@ export function ModelPickerPopover({
 }) {
   // Read account pins and sort while the host loads its model lists, before opening.
   useViewPrefs()
+  // A quick reopen can interrupt the exit animation before the old body unmounts.
+  const [opening, setOpening] = useState(0)
   return (
     <PickerPopover
       title="Model"
@@ -225,10 +227,13 @@ export function ModelPickerPopover({
       {...(triggerClassName === undefined ? {} : { triggerClassName })}
       hint={hint}
       {...(side === undefined ? {} : { side })}
-      onOpen={selection.refresh}
+      onOpen={() => {
+        setOpening((previous) => previous + 1)
+        selection.refresh()
+      }}
       {...(footer === undefined ? {} : { footer })}
     >
-      {(body) => <SlotOutlet slot={modelPickers} props={{ ...body, selection }} />}
+      {(body) => <SlotOutlet key={opening} slot={modelPickers} props={{ ...body, selection }} />}
     </PickerPopover>
   )
 }
