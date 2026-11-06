@@ -113,6 +113,23 @@ const boundCast = (macroBindings: Record<string, string> = {}) =>
   })
 
 describe("ChatSession", () => {
+  it("closing one view preserves another view's live text and reasoning", () => {
+    const registry = AtomRegistry.make()
+    const first = new ChatSession(chatId, null, registry, "user")
+    const second = new ChatSession(chatId, null, registry, "user")
+    const live = (s: InstanceType<typeof ChatSession>) => s as unknown as { track: (version: Version) => void }
+    live(first).track(reply)
+    live(second).track(reply)
+    registry.set(liveText(reply.id), "The tide is rising")
+    registry.set(liveReasoning(reply.id), "Keep writing")
+    first.dispose()
+    expect(registry.get(liveText(reply.id))).toBe("The tide is rising")
+    expect(registry.get(liveReasoning(reply.id))).toBe("Keep writing")
+    second.dispose()
+    expect(registry.get(liveText(reply.id))).toBeNull()
+    registry.dispose()
+  })
+
   it("reads a shared message's cast in the new fork when position subscribers recheck synchronously", async () => {
     vi.useFakeTimers()
     const { s } = session()

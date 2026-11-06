@@ -14,7 +14,7 @@ import { ComposerControls, invokeComposerControl, type ComposerControlContext } 
 // so typing re-renders nothing else.
 import type { CastCard, EntityId, MessageImages } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
@@ -232,6 +232,7 @@ export function Composer({
   onSettings: (tab: "model" | "preset" | "cast") => void
   attachmentInput?: AttachmentInput
 }) {
+  const composerId = useId()
   const { compact: phone, ref: composerRef } = useCompactComposer()
   const castView = useCast()
   const { cast } = castView
@@ -655,13 +656,13 @@ export function Composer({
         {/* Named on itself, not by a label's `for`: two frames can each show a composer. */}
         <AutoGrowTextarea
           aria-label={guidance ? "Guidance" : "Message"}
-          id="composer"
+          id={composerId}
           data-testid="composer"
           data-has-attachments={attachmentInput?.count ? true : undefined}
           value={text}
           readOnly={editing === null && !textReady}
           aria-busy={editing === null && !textReady}
-          aria-describedby="composer-hint"
+          aria-describedby={`${composerId}-hint`}
           placeholder={
             editing !== null
               ? "Guidance for this reply…"
@@ -680,7 +681,7 @@ export function Composer({
         />
       </ComposerBox>
       {/* What the text is for, read with the box; its tooltip on the guidance switch shows it. */}
-      <p id="composer-hint" className="sr-only">
+      <p id={`${composerId}-hint`} className="sr-only">
         {controls.hint}
       </p>
       {impersonationNotice && (

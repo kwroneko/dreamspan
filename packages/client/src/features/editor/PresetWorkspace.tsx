@@ -82,7 +82,7 @@ export function PresetWorkspace({
   const tab = useWorkbenchTab()
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as Record<string, unknown>
-  const href = (ref: RefId, focus?: string) => editorHref(ref, focus, chat)
+  const href = (ref: RefId, focus?: string) => editorHref(ref, focus, chat, tab?.tabId)
   const open = (ref: RefId, focus?: string) => {
     // The chat it's opened from stays open beside its editor.
     if (tab) workbench?.pin(tab.tabId)
@@ -132,8 +132,8 @@ export function PresetWorkspace({
   const chatId = chat?.chatId
   useEffect(() => {
     if (!chatId || !holder.current) return
-    return publishLive(chatId, holder)
-  }, [chatId, holder])
+    return publishLive(tab?.tabId ?? chatId, holder)
+  }, [chatId, tab?.tabId, holder])
   useEffect(liveChanged, [context, live?.cast, chat?.forkId])
   return <Context value={workspace}>{children}</Context>
 }
@@ -153,12 +153,12 @@ const liveChanged = () => {
   liveShown = new Map([...liveChats].map(([id, holder]) => [id, holder.current]))
   for (const listener of liveListeners) listener()
 }
-const publishLive = (chatId: string, holder: { readonly current: LiveChat | null }) => {
-  liveChats.set(chatId, holder)
+const publishLive = (sourceId: string, holder: { readonly current: LiveChat | null }) => {
+  liveChats.set(sourceId, holder)
   liveChanged()
   return () => {
-    if (liveChats.get(chatId) !== holder) return
-    liveChats.delete(chatId)
+    if (liveChats.get(sourceId) !== holder) return
+    liveChats.delete(sourceId)
     liveChanged()
   }
 }
@@ -166,7 +166,14 @@ const subscribeLive = (listener: () => void) => {
   liveListeners.add(listener)
   return () => void liveListeners.delete(listener)
 }
-const useLiveChat = (chatId: string) => useSyncExternalStore(subscribeLive, () => liveShown.get(chatId) ?? null)
+const useLiveChat = (chatId: string, sourceId: string | undefined, forkId: string | undefined) =>
+  useSyncExternalStore(subscribeLive, () => {
+    const source = sourceId ? liveShown.get(sourceId) : undefined
+    if (source?.session.id === chatId) return source
+    // Older links have no source tab; match their branch before falling back to another view.
+    const candidates = [...liveShown.values()].filter((live) => live?.session.id === chatId)
+    return candidates.findLast((live) => live?.workspace.chat?.forkId === forkId) ?? candidates.at(-1) ?? null
+  })
 
 /**
  * An editor, named as a region: in a workbench tab the tab is the region, so its header (the
@@ -200,12 +207,18 @@ export function BoundScroll({ children }: { children: ReactNode }) {
 }
 
 /** An entry's editor, as a tab of its own: bound to the chat it's opened from (live.ts). */
-export const editorHref = (ref: RefId, focus: string | undefined, chat: WorkspaceChat | undefined) => {
+export const editorHref = (
+  ref: RefId,
+  focus: string | undefined,
+  chat: WorkspaceChat | undefined,
+  sourceId?: string
+) => {
   const params = new URLSearchParams()
   if (focus) params.set("focus", focus)
   if (chat) {
     params.set("chat", chat.chatId)
     if (chat.forkId) params.set("chatFork", chat.forkId)
+    if (sourceId) params.set("chatTab", sourceId)
   }
   const query = params.toString()
   return `/library/${encodeURIComponent(ref)}${query ? `?${query}` : ""}`
@@ -233,7 +246,12 @@ export function ChatBoundEditor({
     session: ChatSession | undefined
   }) => ReactNode
 }) {
-  const live = useLiveChat(chatId)
+  const search = useSearch({ strict: false }) as { chatTab?: unknown; chatFork?: unknown }
+  const live = useLiveChat(
+    chatId,
+    typeof search.chatTab === "string" ? search.chatTab : undefined,
+    typeof search.chatFork === "string" ? search.chatFork : undefined
+  )
   const views = useSyncExternalStore(workspaceViews.subscribe, workspaceViews.snapshot, workspaceViews.snapshot)
   if (!live) return children({ store: undefined, context: undefined, current: undefined, session: undefined })
   const registered = focus === undefined ? undefined : views.entries.find((v) => v.id === focus)

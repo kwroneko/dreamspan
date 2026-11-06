@@ -318,9 +318,14 @@ export const closeFrame = (layout: Layout, frameId: string): Layout => {
 }
 
 const insertTab = (f: Frame, tab: Tab, index?: number): Frame => {
+  const from = f.tabs.findIndex((t) => t.id === tab.id)
   const tabs = f.tabs.filter((t) => t.id !== tab.id)
-  const at = index === undefined ? tabs.length : Math.max(0, Math.min(index, tabs.length))
-  return { ...f, tabs: [...tabs.slice(0, at), tab, ...tabs.slice(at)], active: tab.id }
+  // The strip reports a boundary in its original list, before removing the dragged tab.
+  const boundary = index === undefined ? tabs.length : index - (from >= 0 && from < index ? 1 : 0)
+  const pinned = tabs.filter((t) => t.sticky).length
+  const at = tab.sticky ? Math.max(0, Math.min(boundary, pinned)) : Math.max(pinned, Math.min(boundary, tabs.length))
+  // Moving deliberately keeps the tab; the destination can already have a preview.
+  return { ...f, tabs: [...tabs.slice(0, at), { ...tab, preview: false }, ...tabs.slice(at)], active: tab.id }
 }
 
 /**
@@ -448,6 +453,15 @@ const MAX_DEPTH = 6
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
+const appHref = (href: string) => {
+  if (!href.startsWith("/")) return false
+  try {
+    return new URL(href, "http://tab.invalid").origin === "http://tab.invalid"
+  } catch {
+    return false
+  }
+}
+
 /** A saved layout, repaired: unknown or broken parts are left out. Null when nothing usable. */
 export const restoreLayout = (value: unknown, accept: (href: string) => boolean = () => true): Layout | null => {
   if (!isRecord(value) || value["version"] !== 1) return null
@@ -461,7 +475,7 @@ export const restoreLayout = (value: unknown, accept: (href: string) => boolean 
       const tabs: Array<Tab> = []
       for (const t of Array.isArray(raw["tabs"]) ? raw["tabs"] : []) {
         if (!isRecord(t) || typeof t["id"] !== "string" || typeof t["href"] !== "string") continue
-        if (seen.has(t["id"]) || !t["href"].startsWith("/") || !accept(t["href"]) || count >= MAX_TABS) continue
+        if (seen.has(t["id"]) || !appHref(t["href"]) || !accept(t["href"]) || count >= MAX_TABS) continue
         seen.add(t["id"])
         count++
         const sticky = t["sticky"] === true
@@ -472,8 +486,12 @@ export const restoreLayout = (value: unknown, accept: (href: string) => boolean 
           ...(sticky ? { sticky } : {})
         })
       }
-      const active = tabs.some((t) => t.id === raw["active"]) ? (raw["active"] as string) : (tabs[0]?.id ?? null)
-      return { type: "frame", id: raw["id"], tabs, active }
+      const preview = tabs.find((t) => t.preview && t.id === raw["active"]) ?? tabs.find((t) => t.preview)
+      const ordered = [...tabs.filter((t) => t.sticky), ...tabs.filter((t) => !t.sticky)].map((t) =>
+        t.preview && t.id !== preview?.id ? { ...t, preview: false } : t
+      )
+      const active = ordered.some((t) => t.id === raw["active"]) ? (raw["active"] as string) : (ordered[0]?.id ?? null)
+      return { type: "frame", id: raw["id"], tabs: ordered, active }
     }
     if (
       raw["type"] === "split" &&

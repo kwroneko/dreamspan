@@ -243,7 +243,7 @@ for (const width of [1440, 390])
       await page.keyboard.press("Escape")
       await expect(choices(page, "Who replies next")).toHaveCount(0)
       // What the box is for, read with it (and shown on the guidance switch's tooltip).
-      await expect(page.locator("#composer-hint")).toContainText("One-turn guidance for Sam's")
+      await expect(page.getByTestId("composer")).toHaveAccessibleDescription(/One-turn guidance for Sam's/)
       await expect(page.getByRole("button", { name: /^Speaking as Sam/ })).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       if (process.env.RP_SCREENS) {

@@ -95,7 +95,9 @@ test("paste, chat drop, removal, upload retry, and image-only send", async ({ pa
         const data = new DataTransfer()
         data.items.add(new File([bytes], name, { type: "image/png" }))
         const target =
-          kind === "paste" ? document.querySelector("#composer")! : document.querySelector('[data-testid="messages"]')!
+          kind === "paste"
+            ? document.querySelector('[data-testid="composer"]')!
+            : document.querySelector('[data-testid="messages"]')!
         target.dispatchEvent(
           kind === "paste"
             ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true })
