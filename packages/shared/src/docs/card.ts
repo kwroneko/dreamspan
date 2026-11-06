@@ -4,7 +4,7 @@
 import { Schema } from "effect"
 import { StoredCrop } from "../media.ts"
 import { LorebookDoc } from "./lorebook.ts"
-import { Placement } from "./note.ts"
+import { Placement, REPLACEABLE_CARD_FIELDS } from "./note.ts"
 import { RegexScript } from "./regexScript.ts"
 
 export const CARD_SCHEMA_VERSION = 1
@@ -81,6 +81,12 @@ export const CardDoc = Schema.Struct({
    * §11: a file never grants itself capabilities); only SetRegexApproval changes it.
    */
   regex_approved: Schema.optionalKey(Schema.Boolean),
+  /**
+   * The fields an agent reply may change in a chat (DESIGN §4.1a, spec/AGENTIC.md §4.3): never the
+   * card itself, a note replacing the field there (§4.6). Absent: none. A chat can override it.
+   * Import never sets it and export never writes it, as `regex_approved`.
+   */
+  agent_editable_fields: Schema.optionalKey(Schema.Array(Schema.Literals(REPLACEABLE_CARD_FIELDS))),
   /** The card's `data.extensions`, verbatim, with plugin namespaces (PLUGINS §3.3). */
   extensions: Extensions,
   /** Keys in `data` the specs don't define, kept so an export writes them back. */

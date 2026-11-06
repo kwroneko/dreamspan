@@ -4,19 +4,35 @@
 // character away on the reply's version, never overriding the user's own Mute. Each call is a
 // rollout of kind `decision` with its ledger rows rolled up, for the Activity panel.
 import { assert, describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Fiber, Layer, Option } from "effect"
 import type { ServerResponse } from "node:http"
 import { DatabaseSync } from "node:sqlite"
-import type { EntityId } from "@rp/shared/chat.ts"
+import { type EntityId, NewVersion } from "@rp/shared/chat.ts"
+import type { RefId } from "@rp/shared/library.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { databaseFile } from "../src/db/connection.ts"
-import { Reader } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { DecisionEngine } from "../src/decision/engine.ts"
+import { Generator } from "../src/chat/Generator.ts"
+import * as ContextGenerator from "../src/chat/ContextGenerator.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, generateReply } from "./support/generation.ts"
 import { loreEntry } from "./support/loreFixtures.ts"
 import { completionChunks, json, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
+
+const engineCapture = () => {
+  let engine: DecisionEngine["Service"]
+  const generator = Layer.effect(
+    Generator,
+    Effect.gen(function* () {
+      engine = Option.getOrThrow(yield* Effect.serviceOption(DecisionEngine))
+      return yield* Generator
+    })
+  ).pipe(Layer.provide(ContextGenerator.layer))
+  return { generator, get: () => engine }
+}
 
 /** The chat model streams a reply; the decision endpoint answers what `decide` says. */
 const mockWith = (decide: (request: Recorded) => unknown, reply = "*Mira nods.* Go on.") =>
@@ -85,6 +101,212 @@ const rows = <T>(dataDir: string, sql: string, ...params: Array<string>) => {
 }
 
 describe("decision models", () => {
+  it.live("lore: an answer for an earlier entry revision cannot admit its replacement", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      let pending: ServerResponse | undefined
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            if (request.path === "/decide") {
+              pending = res
+              return
+            }
+            sse(res, completionChunks(["A reply."], { prompt_tokens: 10, completion_tokens: 2 }))
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      yield* decisionConnection(api, mock.url, { lore: { on: true, threshold: 0.7 } })
+      const fiber = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        lorebook: book
+      }).pipe(Effect.forkScoped)
+      yield* eventually(() => pending !== undefined)
+      const userId = (yield* api.Whoami()).id
+      const [chat] = yield* api.ListChats({ limit: 10, before: null })
+      const reader = yield* Reader
+      const writer = yield* Writer
+      const state = foldState(yield* reader.StateEventsAt({ userId, chatId: chat!.id, slotId: null }))
+      const { ref } = yield* reader.GetRef({ userId, refId: state.lorebooks[0]! as RefId })
+      yield* writer.EditRef({
+        userId,
+        refId: ref.id,
+        expectedRowVersion: ref.rowVersion,
+        doc: {
+          ...book,
+          entries: [
+            { ...book.entries[0]!, decision_hint: "A glacier surrounds the characters.", content: "REPLACEMENT LORE" }
+          ]
+        },
+        message: null,
+        commitDraft: null
+      })
+      json(pending!, 200, { answers: { e0: { noul: 0.99 } } })
+      const { version } = yield* Fiber.join(fiber)
+      assert.strictEqual(version.status, "complete")
+      assert.notInclude(sentText(mock.requests()), "REPLACEMENT LORE")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("disabling the registered lore point preserves keyword-only replies", () => {
+    const config = testConfig()
+    const capture = engineCapture()
+    return Effect.gen(function* () {
+      const mock = yield* mockWith(() => ({ answers: { e0: { noul: 0.99 } } }))
+      const api = yield* client()
+      yield* decisionConnection(api, mock.url, { lore: { on: true, threshold: 0.7 } })
+      const engine = capture.get()
+      yield* engine.points.disable("lore")
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        lorebook: book
+      })
+      assert.strictEqual(version.status, "complete")
+      assert.notInclude(sentText(mock.requests()), "The Gull")
+      assert.deepStrictEqual(
+        mock.requests().filter((r) => r.path === "/decide"),
+        []
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, capture.generator)))
+  })
+
+  for (const [name, fields, budget] of [
+    ["message delay", { delay: 100 }, null],
+    ["trigger", { triggers: ["continue"] }, null],
+    ["probability", { probability: 0 }, null],
+    ["book budget", {}, 1]
+  ] as const)
+    it.live(`lore: a model admission respects the entry's ${name}`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* mockWith((request) => ({
+          answers: Object.fromEntries(Object.keys(request.body?.questions ?? {}).map((id) => [id, { noul: 0.99 }]))
+        }))
+        const api = yield* client()
+        yield* decisionConnection(api, mock.url, { lore: { on: true, threshold: 0.7 } })
+        const { version } = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          lorebook: { ...book, token_budget: budget, entries: [{ ...book.entries[0]!, ...fields }] }
+        })
+        assert.strictEqual(version.status, "complete")
+        assert.notInclude(sentText(mock.requests()), "The Gull")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+
+  it.live("presence: an old reply cannot judge the selected alternative's text", () => {
+    const config = testConfig()
+    const capture = engineCapture()
+    return Effect.gen(function* () {
+      const mock = yield* mockWith(() => ({ answers: { c0: { noul: 0.99 }, c1: { noul: 0.01 } } }))
+      const api = yield* client()
+      const { version, chat } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        characters: ["Wren"]
+      })
+      const userId = (yield* api.Whoami()).id
+      const writer = yield* Writer
+      yield* writer.AddVersion({
+        userId,
+        slotId: version.slotId,
+        forkId: chat.currentForkId!,
+        select: true,
+        commitDraft: null,
+        version: new NewVersion({
+          content: "An unrelated alternative.",
+          speakerEntityId: null,
+          writer: "human",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        })
+      })
+      yield* decisionConnection(api, mock.url, { presence: { on: true, threshold: 0.85 } })
+      const engine = capture.get()
+      assert.isFalse(
+        yield* engine.afterReply({
+          userId,
+          chatId: chat.id,
+          slotId: version.slotId,
+          versionId: version.id,
+          forkId: chat.currentForkId
+        })
+      )
+      assert.deepStrictEqual(
+        mock.requests().filter((r) => r.path === "/decide"),
+        []
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, capture.generator)))
+  })
+
+  it.live("presence: a manual mute made while the model answers stays in force", () => {
+    const config = testConfig()
+    const capture = engineCapture()
+    return Effect.gen(function* () {
+      let pending: ServerResponse | undefined
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            if (request.path === "/decide") {
+              pending = res
+              return
+            }
+            sse(res, completionChunks(["Wren returns."], { prompt_tokens: 10, completion_tokens: 2 }))
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, characters } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        characters: ["Wren"]
+      })
+      const userId = (yield* api.Whoami()).id
+      const writer = yield* Writer
+      const entity = characters[0]!.entityId
+      const mute = (source?: "decision") =>
+        writer.AddStateEvent({
+          userId,
+          chatId: chat.id,
+          slotId: version.slotId,
+          forkId: chat.currentForkId,
+          versionId: null,
+          scope: null,
+          data: { key: "presence.set", value: { entity, present: false, ...(source ? { source } : {}) } }
+        })
+      yield* mute("decision")
+      yield* decisionConnection(api, mock.url, { presence: { on: true, threshold: 0.85 } })
+      const engine = capture.get()
+      const fiber = yield* engine
+        .afterReply({
+          userId,
+          chatId: chat.id,
+          slotId: version.slotId,
+          versionId: version.id,
+          forkId: chat.currentForkId
+        })
+        .pipe(Effect.forkScoped)
+      yield* eventually(() => pending !== undefined)
+      yield* mute()
+      json(pending!, 200, { answers: { c0: { noul: 0.99 }, c1: { noul: 0.99 } } })
+      yield* Fiber.join(fiber)
+      const reader = yield* Reader
+      const events = yield* reader.StateEventsAt({
+        userId,
+        chatId: chat.id,
+        slotId: version.slotId,
+        forkId: chat.currentForkId
+      })
+      assert.include(foldState(events).absent, entity)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, capture.generator)))
+  })
+
   it.live("a point that isn't on for any connection sends nothing", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -168,12 +390,19 @@ describe("decision models", () => {
       const frozen = JSON.parse(snapshot!.context_snapshot_json) as {
         decisionAssembly?: unknown
         loreDecision?: unknown
+        request?: unknown
       }
       const admitted = (frozen.decisionAssembly as { lore: Array<{ entry: string; probability: number }> }).lore
       assert.strictEqual(admitted.length, 1)
       assert.match(admitted[0]!.entry, /:0$/)
       assert.strictEqual(admitted[0]!.probability, 0.93)
       assert.isUndefined(frozen.loreDecision)
+      const reader = yield* Reader
+      const userId = (yield* api.Whoami()).id
+      const rebuilt = yield* reader.RebuildContext({ userId, snapshot: snapshot!.context_snapshot_json })
+      assert.strictEqual(rebuilt._tag, "Rebuilt")
+      if (rebuilt._tag === "Rebuilt") assert.deepStrictEqual(JSON.parse(rebuilt.snapshot).request, frozen.request)
+      assert.strictEqual(mock.requests().filter((r) => r.path === "/decide").length, 1)
       // The inspector says why it went in.
       const context = yield* api.GetRunContext({ versionId: version.id })
       assert.isTrue(
@@ -308,6 +537,46 @@ describe("decision models", () => {
         "SELECT status, slot_id FROM rollouts WHERE kind = 'decision'"
       )
       assert.deepStrictEqual({ ...decision }, { status: "completed", slot_id: version.slotId })
+      const sourceFork = chat.currentForkId!
+      const { fork: peer } = yield* api.CreateFork({
+        chatId: chat.id,
+        fromForkId: sourceFork,
+        atSlotId: version.slotId
+      })
+      const writer = yield* Writer
+      const alternative = yield* writer.AddVersion({
+        userId: me.id,
+        slotId: version.slotId,
+        forkId: sourceFork,
+        select: true,
+        commitDraft: null,
+        version: new NewVersion({
+          content: "Everyone stays.",
+          speakerEntityId: null,
+          writer: "human",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        })
+      })
+      const absentIn = (forkId: typeof sourceFork) =>
+        reader
+          .StateEventsAt({
+            userId: me.id,
+            chatId: chat.id,
+            slotId: version.slotId,
+            forkId
+          })
+          .pipe(Effect.map((events) => foldState(events).absent))
+      assert.deepStrictEqual(yield* absentIn(sourceFork), [ansel.entityId])
+      assert.deepStrictEqual(yield* absentIn(peer.id), [ansel.entityId, wren.entityId])
+      yield* api.SelectVersion({
+        slotId: version.slotId,
+        versionId: version.id,
+        expectedVersionId: alternative.id,
+        forkId: sourceFork
+      })
+      assert.deepStrictEqual(yield* absentIn(sourceFork), [ansel.entityId, wren.entityId])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

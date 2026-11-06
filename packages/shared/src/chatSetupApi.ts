@@ -5,7 +5,7 @@ import { ChatBrowse, ChatFilterCounts } from "./chatBrowse.ts"
 // anything else is NotFound.
 import { Schema } from "effect"
 import { AvatarCrop } from "./media.ts"
-import { ReplaceTarget } from "./docs/note.ts"
+import { REPLACEABLE_CARD_FIELDS, ReplaceTarget } from "./docs/note.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import {
   MessageImages,
@@ -295,6 +295,10 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   macroNames: Schema.Struct({ user: Schema.String, char: Schema.String }),
   rolesProjection: Schema.NullOr(RolesProjection),
   roleProjections: Schema.Array(RoleProjectionOption),
+  /** How merged chats are laid out in the context (`merge.layout`, an open id); absent: the default, parallel span. */
+  mergeLayout: Schema.optionalKey(Schema.String),
+  /** The merge layouts installed, as the chat's settings offer them (spec/CHAT-MERGE.md §4). */
+  mergeLayouts: Schema.optionalKey(Schema.Array(RoleProjectionOption)),
   /** Who replies when nobody is picked (`reply.order`, a reply policy's id); absent is the default, natural order. */
   replyOrder: Schema.optionalKey(Schema.String),
   /** True: one reply per user action instead of the reply order's round (`reply.single`); absent is off, as in ST. */
@@ -339,6 +343,8 @@ export const CastChange = Schema.Union([
   /** A stable prompt-name pin; null removes it and follows the cast/personas again. */
   Schema.TaggedStruct("MacroBinding", { name: Schema.Literals(["user", "char"]), value: Schema.NullOr(Schema.String) }),
   Schema.TaggedStruct("Roles", { projection: RolesProjection }),
+  /** How merged chats are laid out (`merge.layout`): a merge layout's id. */
+  Schema.TaggedStruct("MergeLayout", { layout: Schema.String }),
   /** A note on or off (`note.activate`, `note.deactivate`): the chat's own, or a participant card's. */
   Schema.TaggedStruct("Lorebook", { ref: RefId, active: Schema.Boolean }),
   /** A card's own lorebook on or off (`lorebook.embedded`). */
@@ -356,6 +362,17 @@ export const CastChange = Schema.Union([
   /** The tools agent modes offer from here on (`agent.tools`), by id. */
   Schema.TaggedStruct("AgentTools", {
     tools: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100))
+  }),
+  /**
+   * Whether agent replies may change a note, or a card's field, in this chat from here on
+   * (`agent.permission`), over the note's or card's own setting.
+   */
+  Schema.TaggedStruct("AgentPermission", {
+    target: Schema.Union([
+      Schema.Struct({ note: EntityId }),
+      Schema.Struct({ card: EntityId, field: Schema.Literals(REPLACEABLE_CARD_FIELDS) })
+    ]),
+    on: Schema.Boolean
   }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])

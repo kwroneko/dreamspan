@@ -23,7 +23,7 @@ import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
 import { pathView } from "./lcmDisplay.ts"
-import { readSummary } from "./lcmReads.ts"
+import { readingOnce, readSummary } from "./lcmReads.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
@@ -177,7 +177,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           })
         ].slice(0, MAX_JOBS_PER_PLAN)
         return { ...result, chunks, backfill: settled({ ...result, chunks }) }
-      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("PlanSummaries"), (effect) =>
+      }).pipe(readingOnce, inFork(sql, chatId, forkId, leafSlotId), query("PlanSummaries"), (effect) =>
         withAssemblyModules(assembler, effect)
       ),
     AssembleSummary: ({ userId, jobId, attempt, instructions }) =>

@@ -327,15 +327,25 @@ export const keepsRegexApproval = (ours: Doc, next: Doc) =>
   ours.regex_approved === true && canonicalJson(ours.regex) === canonicalJson(next.regex)
 
 /**
- * The agent's permission to edit a note or a card module is given only by the user setting
- * it (DESIGN §4.1a): anything else (a restore, a merge, a resolved update) keeps it off where
+ * The agent's permission to edit a note, a card module or a card's field is given only by the
+ * user setting it (DESIGN §4.1a): anything else (a restore, a merge, a resolved update) keeps it off where
  * the head has it off.
  */
 export const withoutGrantedAgentEdits = (kind: EntityKind, ours: Doc, next: Doc): Doc => {
   if (kind === "note") {
     return next.agent_editable === true && ours.agent_editable !== true ? { ...next, agent_editable: false } : next
   }
-  if (kind !== "card" || !Array.isArray(next.modules)) return next
+  if (kind !== "card") return next
+  // A field the agent may change (`agent_editable_fields`) is one the head already lets it.
+  if (Array.isArray(next.agent_editable_fields)) {
+    const granted = new Set(Array.isArray(ours.agent_editable_fields) ? ours.agent_editable_fields : [])
+    const kept = next.agent_editable_fields.filter((field: unknown) => granted.has(field))
+    if (kept.length !== next.agent_editable_fields.length) {
+      const { agent_editable_fields: _, ...rest } = next
+      next = kept.length ? { ...rest, agent_editable_fields: kept } : rest
+    }
+  }
+  if (!Array.isArray(next.modules)) return next
   const allowed = new Set(
     (Array.isArray(ours.modules) ? ours.modules : []).flatMap((module: unknown) =>
       isObject(module) && module.agent_editable === true ? [module.id] : []

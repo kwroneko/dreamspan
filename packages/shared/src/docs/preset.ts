@@ -101,7 +101,13 @@ const UtilityPrompts = Schema.Struct({
    * (`CARD_JOIN_PREFIX`, `CARD_JOIN_SUFFIX`).
    */
   card_join_prefix: Schema.optionalKey(Schema.String),
-  card_join_suffix: Schema.optionalKey(Schema.String)
+  card_join_suffix: Schema.optionalKey(Schema.String),
+  /**
+   * A merged chat's framing line and its join marker (spec/CHAT-MERGE.md §4): `{{title}}` and
+   * `{{cast}}` are the merge's. Absent means the defaults (`MERGE_SECTION_DEFAULT`, `MERGE_JOIN_DEFAULT`).
+   */
+  merge_section_prompt: Schema.optionalKey(Schema.String),
+  merge_join_prompt: Schema.optionalKey(Schema.String)
 })
 export type UtilityPrompts = typeof UtilityPrompts.Type
 

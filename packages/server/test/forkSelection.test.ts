@@ -10,7 +10,6 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
-import { LINEAGE_CAP } from "../src/db/forkState.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
 import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
@@ -207,7 +206,7 @@ describe("per-fork selection", () => {
     }).pipe(Effect.provide(serverLayer(config)))
   )
 
-  it.live(`past ${LINEAGE_CAP} forks a lineage starts afresh with a copy of what it inherits`, () =>
+  it.live("a chain of 70 forks inherits its ancestors' choices, and making it copies nothing", () =>
     Effect.gen(function* () {
       const { m0, m1, main, one, two, texts, select, fork, rows, writer, userId } = yield* setup
       const alt = yield* writer.AddVersion({
@@ -219,32 +218,33 @@ describe("per-fork selection", () => {
       })
       yield* select(m1.slotId, main, two)
       const chain: Array<ForkId> = [main]
-      for (let i = 0; i < LINEAGE_CAP + 6; i++) {
+      for (let i = 0; i < 70; i++) {
         const next = yield* fork(chain.at(-1)!, m1.slotId)
-        // Every fork chooses something along the way, so each lineage entry has a bound.
         if (i === 10) yield* select(m0.slotId, next, alt.id as VersionId)
         chain.push(next)
       }
-      const lineages = yield* rows(
-        `SELECT id, json_array_length(lineage_json) AS n FROM forks WHERE id IN (${chain.map(() => "?").join(",")})`,
+      // Only the fork that chose has a row of its own; the others read theirs through the chain.
+      const own = yield* rows(
+        `SELECT fork_id, count(*) AS n FROM fork_overrides WHERE fork_id IN (${chain.map(() => "?").join(",")})
+          GROUP BY fork_id`,
         ...chain
       )
-      assert.isAtMost(Math.max(...lineages.map((row) => row.n as number)), LINEAGE_CAP)
-      const restarted = lineages.filter((row) => row.n === 1 && row.id !== main).map((row) => row.id as ForkId)
-      assert.lengthOf(restarted, 1)
-      // The fork that started afresh carries the rows it inherited as its own.
-      const copied = yield* rows(
-        "SELECT target_id, value_id FROM fork_overrides WHERE fork_id = ? ORDER BY target_id",
-        restarted[0]!
-      )
-      assert.sameDeepMembers(copied, [
-        { target_id: m0.slotId, value_id: alt.id },
-        { target_id: m1.slotId, value_id: two }
+      assert.sameDeepMembers(own, [
+        { fork_id: main, n: 1 },
+        { fork_id: chain[11], n: 1 }
       ])
-      for (const forkId of chain.slice(12)) assert.deepStrictEqual(yield* texts(forkId), ["m0 again", "two"])
+      // Each fork's point lies in every ancestor's range (db/forkLabels.ts).
+      const labels = yield* rows(
+        `SELECT hex(point) AS point, hex(label_end) AS end FROM fork_labels WHERE fork_id IN (${chain.map(() => "?").join(",")})`,
+        ...chain
+      )
+      assert.lengthOf(labels, chain.length)
+      for (const forkId of chain.slice(11)) assert.deepStrictEqual(yield* texts(forkId), ["m0 again", "two"])
+      for (const forkId of chain.slice(1, 11)) assert.deepStrictEqual(yield* texts(forkId), ["m0", "two"])
       // Nothing done at the top of the chain reaches down it.
       yield* select(m1.slotId, main, one)
       assert.deepStrictEqual(yield* texts(chain.at(-1)!), ["m0 again", "two"])
+      assert.deepStrictEqual(yield* texts(main), ["m0", "one"])
     }).pipe(Effect.provide(serverLayer(config)))
   )
 

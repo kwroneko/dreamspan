@@ -2,6 +2,9 @@ import { defineSlot } from "../../slots.tsx"
 import type { EditorStore } from "./store.ts"
 import type { Caller } from "./caller.ts"
 
+/** Sections at the end of the card's Definition tab, about its prompt fields, sharing its store. */
+export const cardDefinitionSections = defineSlot<{ store: EditorStore }>("card.editor.definition-sections")
+
 /** Additional card document sections, sharing the card's draft and revision store. */
 export const cardEditorSections = defineSlot<{ store: EditorStore; call: Caller }>("card.editor.sections")
 

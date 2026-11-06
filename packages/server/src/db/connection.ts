@@ -34,7 +34,9 @@ export const readerConnection = (filename: string) =>
       const sql = yield* SqlClient.SqlClient
       yield* sql.unsafe("PRAGMA query_only = ON")
       yield* sql.unsafe("PRAGMA temp_store = MEMORY")
-      yield* sql.unsafe("PRAGMA cache_size = -32768")
+      // 256 MB: a long path's slot, version and step pages at hundreds of forks (spec/FORK-COST.md §2.3).
+      // SQLite allocates it as pages are read, so small libraries don't pay it.
+      yield* sql.unsafe("PRAGMA cache_size = -262144")
     })
   ).pipe(Layer.provideMerge(SqliteClient.layer({ filename, readonly: true })))
 

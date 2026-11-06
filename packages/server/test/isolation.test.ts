@@ -1774,6 +1774,53 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.GetSplitChats({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
   },
+  // Merging another chat in (spec/CHAT-MERGE.md): neither side may be someone else's chat.
+  PreviewChatMerge: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const mine = { chatId: actor.chat.chatId, forkId: actor.chat.forkId }
+        const theirs = { chatId: owner.chat.chatId, forkId: owner.chat.forkId }
+        for (const [into, source] of [
+          [mine, theirs],
+          [theirs, mine]
+        ] as const)
+          yield* refused(actor.api.PreviewChatMerge({ ...into, at: null, source, includeLeftOut: false }), "NotFound")
+      })
+  },
+  MergeChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const mine = { chatId: actor.chat.chatId, forkId: actor.chat.forkId }
+        const theirs = { chatId: owner.chat.chatId, forkId: owner.chat.forkId }
+        for (const [into, source] of [
+          [mine, theirs],
+          [theirs, mine]
+        ] as const)
+          yield* refused(
+            actor.api.MergeChat({
+              ...into,
+              at: null,
+              source,
+              includeLeftOut: false,
+              title: "planted",
+              framing: null,
+              digest: ""
+            }),
+            "NotFound"
+          )
+      })
+  },
+  GetMerge: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        yield* refused(actor.api.GetMerge({ chatId: owner.chat.chatId, slotId: theirs.slotId }), "NotFound")
+      })
+  },
+  MergeMessages: {
+    probe: (actor, owner) =>
+      refused(actor.api.MergeMessages({ chatId: owner.chat.chatId, mergeId: "none", offset: 0, limit: 10 }), "NotFound")
+  },
   SetSplitChat: {
     probe: (actor, owner) => refused(actor.api.SetSplitChat({ forkId: owner.chat.forkId, split: true }), "NotFound")
   },
@@ -1881,6 +1928,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.deepStrictEqual(yield* owner.api.GetRolloutSteps({ versionId: owner.chat.generatingId }), [])
       })
   },
+  // Resuming another user's reply is refused as if it weren't there; the owner's, which
+  // isn't an agent reply, as not resumable.
+  ResumeVersion: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const versionId = owner.chat.generatingId
+        yield* refused(actor.api.ResumeVersion({ versionId, expectedRowVersion: 0 }), "NotFound")
+        yield* refused(owner.api.ResumeVersion({ versionId, expectedRowVersion: 0 }), "NotResumable")
+      })
+  },
+  ResumeFromStep: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const versionId = owner.chat.generatingId
+        yield* refused(actor.api.ResumeFromStep({ versionId, step: 0, expectedRowVersion: 0 }), "NotFound")
+      })
+  },
   GetRunTranscript: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -1900,6 +1964,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           modes.modes.map((m) => m.id),
           "plain"
         )
+      })
+  },
+  GetAgentPermissions: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetAgentPermissions({ chatId: owner.chat.chatId, slotId: null }), "NotFound")
+        assert.isArray((yield* owner.api.GetAgentPermissions({ chatId: owner.chat.chatId, slotId: null })).cards)
       })
   },
   ListActivity: {

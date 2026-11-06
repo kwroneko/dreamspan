@@ -12,7 +12,8 @@ export const lcmStage: AssemblerStage = {
   id: "lcm",
   run: (assembly) =>
     Effect.gen(function* () {
-      if (!need(assembly, "state").lcm?.enabled) return assembly
+      // A rewrite (a text through its scripts, as a reply streams) uses no summaries.
+      if (!need(assembly, "state").lcm?.enabled || assembly.request.rewrite) return assembly
       const sources = yield* AssemblySources
       assembly.lcmSettings = resolveLcm(
         need(assembly, "state").lcm,

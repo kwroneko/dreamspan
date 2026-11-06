@@ -10,6 +10,15 @@ import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from "@rp/shared/snippetsApi.ts"
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
+import {
+  MergeChanged,
+  MergeChatInput,
+  MergedMessage,
+  MergeInfo,
+  ChatMergePreview,
+  MergeRefused,
+  MergeRequest
+} from "@rp/shared/mergeApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
@@ -126,7 +135,7 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
-import { ActivityCursor, ActivityPage, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
+import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import { ConnectionDecisions, DecisionPointSetting } from "@rp/shared/decisions.ts"
@@ -238,6 +247,14 @@ export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
 }) {}
 
 /** The inserted message as its fork shows it, at its position on the fork's display path. */
+/** A merge's join message (spec/CHAT-MERGE.md §8): where its fork shows it, and the chat. */
+export class MergeResult extends Schema.Class<MergeResult>("MergeResult")({
+  slotId: SlotId,
+  forkId: ForkId,
+  position: Schema.Int,
+  chat: Chat
+}) {}
+
 export class InsertResult extends Schema.Class<InsertResult>("InsertResult")({
   slotId: SlotId,
   forkId: ForkId,
@@ -455,6 +472,17 @@ const ShellCardsRead = Schema.Struct({ ...ShellCards.fields, fresh: Schema.Array
 const ShellForksRead = Schema.Struct({ ...ShellForks.fields, fresh: Schema.Array(ChatSummariesAt) })
 
 export class WriteOps extends RpcGroup.make(
+  /**
+   * Merges another chat's fork into `forkId` below `at` (spec/CHAT-MERGE.md §8): recomputes the
+   * preview and refuses with the new one when its digest changed (`MergeChanged`), then writes
+   * the join message (appended at the fork's tip, else inserted), the merge's rows, the cast
+   * union's joins, and chats in the fork. One transaction.
+   */
+  Rpc.make("MergeChat", {
+    payload: { userId: UserId, ...MergeChatInput.fields },
+    success: MergeResult,
+    error: Schema.Union([NotFound, StaleWrite, MergeRefused, MergeChanged, StorageError])
+  }),
   Rpc.make("DeleteChatGroup", {
     payload: {
       userId: UserId,
@@ -2365,6 +2393,25 @@ export class WriteOps extends RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       events: Schema.Array(StoredStateEventData),
+      /**
+       * Notes the call writes (spec/AGENTIC.md §4.3), before its events: `create` makes a chat
+       * note (an agent's, `origin: generation`) and turns it on, `revise` makes a revision of a
+       * note on `parent` and binds it; both attached to the version, from the next message on.
+       */
+      notes: Schema.optionalKey(
+        Schema.Array(
+          Schema.Union([
+            Schema.Struct({ create: Schema.Record(Schema.String, Schema.Unknown) }),
+            Schema.Struct({
+              revise: Schema.Struct({
+                note: EntityId,
+                parent: Schema.String,
+                doc: Schema.Record(Schema.String, Schema.Unknown)
+              })
+            })
+          ])
+        )
+      ),
       result: Schema.String
     },
     success: Schema.Struct({ result: Schema.String, replayed: Schema.Boolean }),
@@ -2374,6 +2421,31 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A resumed agent reply (spec/AGENTIC.md §4.2), in one transaction: a new generating version
+   * of `versionId`'s slot, selected in the fork, sourced from it, with origin `resumed`; its
+   * rollout, a child of the stopped one, with the same frozen snapshot, model and mode and the
+   * transcript kept; the stopped version's state events copied, of its tool calls only those of
+   * `keptCalls`, with their receipts; and the discarded tail as a `rollout_branches` row. Refused
+   * (`NotResumable`) while another resume of the version is still being written.
+   */
+  Rpc.make("StartResumedVersion", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      expectedRowVersion: Schema.Int,
+      rolloutId: Schema.String,
+      version: NewVersion,
+      transcript: Schema.String,
+      steps: Schema.Int,
+      keptCalls: Schema.Array(Schema.String),
+      /** What was cut, and why (`resume`, `edit`); none when nothing was. */
+      branch: Schema.NullOr(Schema.Struct({ reason: Schema.String, messages: Schema.String }))
+    },
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
+    error: Schema.Union([NotFound, StaleWrite, NotResumable, StorageError])
   }),
   /** At startup: rollouts a previous process left running are interrupted. */
   Rpc.make("InterruptRollouts", { success: Schema.Struct({ interrupted: Schema.Int }), error: StorageError }),
@@ -2424,9 +2496,11 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       versionId: VersionId,
+      /** The state the point read: a later user/tool change or swipe makes the effect stale. */
+      expectedState: Schema.String,
       events: Schema.Array(StoredStateEventData)
     },
-    success: Schema.Void,
+    success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The account defaults, including its new-chat persona; choices must be owned and live. */
@@ -2518,6 +2592,24 @@ export class WriteOps extends RpcGroup.make(
 ) {}
 
 export class ReadOps extends RpcGroup.make(
+  /** What a merge would bring (spec/CHAT-MERGE.md §3), as `MergeChat` computes it. */
+  Rpc.make("PreviewChatMerge", {
+    payload: { userId: UserId, ...MergeRequest.fields },
+    success: ChatMergePreview,
+    error: Schema.Union([NotFound, StaleWrite, MergeRefused, StorageError])
+  }),
+  /** The merge whose join message is `slotId`. */
+  Rpc.make("GetMerge", {
+    payload: { userId: UserId, chatId: ChatId, slotId: SlotId },
+    success: MergeInfo,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A merge's frozen copy of the merged messages, in order. */
+  Rpc.make("MergeMessages", {
+    payload: { userId: UserId, chatId: ChatId, mergeId: Schema.String, offset: Schema.Int, limit: Schema.Int },
+    success: Schema.Array(MergedMessage),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("GetSplitChats", {
     payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
     success: SplitChats,
@@ -3087,7 +3179,8 @@ export class ReadOps extends RpcGroup.make(
   }),
   /**
    * The live chat's own notes, then these cards', by their upstream refs, oldest first, each
-   * linked one with its shared note (whose text is in `doc.content`).
+   * linked one with its shared note (whose text is in `doc.content`). A note an agent reply
+   * wrote is among them only where that reply is shown (DESIGN §7.3 [D]).
    */
   Rpc.make("ChatNoteEntries", {
     payload: {
@@ -3098,7 +3191,12 @@ export class ReadOps extends RpcGroup.make(
       cards: Schema.Array(EntityId)
     },
     success: Schema.Array(
-      Schema.Struct({ ref: LibraryRef, doc: Doc, card: Schema.NullOr(EntityId), linked: Schema.NullOr(LinkedNote) })
+      Schema.Struct({
+        ref: LibraryRef,
+        doc: Doc,
+        card: Schema.NullOr(EntityId),
+        linked: Schema.NullOr(LinkedNote)
+      })
     ),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -3257,6 +3355,7 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
   }),
   Rpc.make("RoleProjections", { success: Schema.Array(RoleProjectionOption) }),
+  Rpc.make("MergeLayouts", { success: Schema.Array(RoleProjectionOption) }),
   Rpc.make("AssembleContext", {
     payload: {
       partialBatch: Schema.optionalKey(Schema.Boolean),
@@ -3275,7 +3374,10 @@ export class ReadOps extends RpcGroup.make(
       agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, cardsAtTail: Schema.Boolean })),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
       decisions: Schema.optionalKey(
-        Schema.Struct({ lore: Schema.Array(Schema.Struct({ entry: Schema.String, probability: Schema.Number })) })
+        Schema.Struct({
+          stamp: Schema.String,
+          lore: Schema.Array(Schema.Struct({ entry: Schema.String, probability: Schema.Number }))
+        })
       )
     },
     success: Schema.Struct({
@@ -3287,6 +3389,7 @@ export class ReadOps extends RpcGroup.make(
       /** What the `lore` decision point would ask about; absent when no entry the keys left out has a question. */
       loreDecision: Schema.optionalKey(
         Schema.Struct({
+          stamp: Schema.String,
           candidates: Schema.Array(
             Schema.Struct({ key: Schema.String, title: Schema.String, question: Schema.String })
           ),
@@ -3323,6 +3426,103 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("RolloutSteps", {
     payload: { userId: UserId, versionId: VersionId },
     success: Schema.Array(RolloutStep),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The agent's `search_chat` over full-text search (agentReads.ts, spec/AGENTIC.md §4.5): the
+   * messages on the path to `leafSlotId` in the fork, as the fork shows them, whose text has a
+   * word starting with each of `tokens` (all of them; none: any), newest first, before display
+   * position `before` when given; hidden and unfinished ones left out, template messages
+   * (greetings) always, for the caller to fill in and match. Null when the fork places inserted
+   * messages, whose numbering the display path gives: the caller reads the path instead.
+   */
+  Rpc.make("SearchChat", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      tokens: Schema.Array(Schema.String),
+      before: Schema.NullOr(Schema.Int),
+      limit: Schema.Int
+    },
+    success: Schema.NullOr(
+      Schema.Array(
+        Schema.Struct({
+          position: Schema.Int,
+          speakerEntityId: Schema.NullOr(Schema.String),
+          writer: Schema.String,
+          macroMode: Schema.String,
+          content: Schema.String
+        })
+      )
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The agent's `lookup_lore` (agentReads.ts, spec/AGENTIC.md §4.5): the enabled entries of the
+   * lorebooks the rollout's context was assembled with (its snapshot's `agentLore`), named by
+   * `entry` (a title or uid), or holding every word of `query` (case aside) in their keys, title or
+   * text, those matching by key first. Reads only: what's admitted to the context is the assembler's.
+   */
+  /**
+   * The cards an agent reply's tools may name (spec/AGENTIC.md §4.6), each as the chat uses it
+   * (`bindings`, else the chat's override, else the library entry, as ChatCards picks it): its
+   * name, the text of each field a note can replace, and the fields its card lets agents change.
+   */
+  Rpc.make("AgentCards", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      entityIds: Schema.Array(EntityId),
+      bindings: CardBindings
+    },
+    success: Schema.Array(
+      Schema.Struct({
+        entityId: EntityId,
+        name: Schema.String,
+        fields: Schema.Record(Schema.String, Schema.String),
+        editableFields: Schema.Array(Schema.String)
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("LookupLore", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      query: Schema.NullOr(Schema.String),
+      entry: Schema.NullOr(Schema.String),
+      limit: Schema.Int
+    },
+    success: Schema.Struct({
+      books: Schema.Int,
+      entries: Schema.Array(
+        Schema.Struct({
+          book: Schema.String,
+          uid: Schema.Int,
+          title: Schema.String,
+          keys: Schema.Array(Schema.String),
+          content: Schema.String
+        })
+      )
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * What resuming an agent reply needs of its run (agentReads.ts): the rollout, its status and
+   * mode, the frozen snapshot and the transcript as last saved, and the version's own status.
+   */
+  Rpc.make("RolloutMaterial", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Struct({
+      rolloutId: Schema.String,
+      status: Schema.String,
+      versionStatus: Schema.String,
+      mode: Schema.NullOr(Schema.String),
+      snapshot: Schema.String,
+      transcript: Schema.NullOr(Schema.String)
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** An agent reply's transcript after its request, verbatim, with its offered tools (agentReads.ts). */

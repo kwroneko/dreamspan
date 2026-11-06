@@ -39,6 +39,7 @@ import { makeDecisionReadHandlers } from "./decisions.ts"
 import type { ReadOps } from "./ops.ts"
 import { usedEntries } from "./usedEntries.ts"
 import { query } from "./tx.ts"
+import { readingOnce } from "./lcmReads.ts"
 
 /** How many generating replies' prepared rewrites a worker keeps, and for how long unused. */
 const LIVE_MAX = 32
@@ -54,6 +55,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
     ...(yield* makeTokenCountingReadHandlers),
     ...(yield* makeDecisionReadHandlers),
     RoleProjections: () => assembler.projectionOptions,
+    MergeLayouts: () => assembler.mergeLayoutOptions,
     AssembleContext: ({
       userId,
       chatId,
@@ -106,7 +108,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               })
             )
           )
-      }).pipe(inFork(sql, chatId, forkId, slotId), query("AssembleContext")),
+      }).pipe(readingOnce, inFork(sql, chatId, forkId, slotId), query("AssembleContext")),
 
     RebuildContext: ({ userId, snapshot: json }) =>
       Effect.gen(function* () {

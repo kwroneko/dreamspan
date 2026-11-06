@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 49
+export const ASSEMBLER_VERSION = 50
 
 export type Role = "system" | "user" | "assistant"
 
@@ -300,12 +300,15 @@ export interface AgentAssembly {
 
 /** What decision models decided for this context (spec/AGENTIC.md §7): the lorebook entries admitted. */
 export interface DecisionAssembly {
+  /** The entry revisions and recent message versions the model judged. */
+  readonly stamp: string
   /** `<book>:<uid>` of each entry admitted, with the model's probability. */
   readonly lore: ReadonlyArray<{ readonly entry: string; readonly probability: number }>
 }
 
 /** What the `lore` decision point asks about: the entries the keys left out that have a question. */
 export interface LoreDecisionInput {
+  readonly stamp: string
   readonly candidates: ReadonlyArray<{ readonly key: string; readonly title: string; readonly question: string }>
   readonly recent: ReadonlyArray<{ readonly from: string; readonly text: string }>
 }
@@ -314,6 +317,11 @@ export interface LoreDecisionInput {
 export interface ContextSnapshot {
   /** An agent reply's assembly options, for a rebuild. */
   readonly agentAssembly?: AgentAssembly
+  /**
+   * An agent reply's lorebooks as assembly read them (attached, the preset's, cards' embedded
+   * ones, `card:<entity>` with the card's revision), for its lookup_lore tool.
+   */
+  readonly agentLore?: ReadonlyArray<{ readonly id: string; readonly entity: string; readonly revision: string }>
   /** The decision models' admissions, for a rebuild (spec/AGENTIC.md §7). */
   readonly decisionAssembly?: DecisionAssembly
   /** The `lore` decision point's input; AssembleContext takes it out before the snapshot is stored. */
@@ -585,8 +593,25 @@ export interface HistoryImage extends RequestImage {
 export const historyLeafOf = (target: Target) =>
   target.historyLeaf === undefined ? target.parentSlotId : target.historyLeaf
 
+/**
+ * A merge's join message (spec/CHAT-MERGE.md §2): what the layout needs of its `chat_merges`
+ * row. Read with the entry and pinned with it, so a rebuild lays it out the same way.
+ */
+export interface HistoryMerge {
+  readonly id: string
+  readonly title: string
+  /** The merge's own framing line; null: the preset's. */
+  readonly framing: string | null
+  /** The destination message the parallel span starts at; null: directly before the join. */
+  readonly start: string | null
+  /** The source's cast at the merge, by the names the model knows them by. */
+  readonly cast: ReadonlyArray<string>
+}
+
 /** One message of the path, as assembly reads it. */
 export interface HistoryEntry {
+  /** A merge's join message (spec/CHAT-MERGE.md); absent on any other message. */
+  readonly merge?: HistoryMerge
   readonly images?: ReadonlyArray<HistoryImage>
   readonly slotId: string
   readonly versionId: string

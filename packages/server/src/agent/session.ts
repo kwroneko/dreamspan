@@ -23,7 +23,8 @@ import type { ReplyOutputStrategy } from "../chat/replyOutput.ts"
 import type { Providers, ProviderError } from "../providers/Providers.ts"
 import type { AgentPlan } from "./modes.ts"
 import { countSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
-import { budgetResult, frozenTool, sendMessageDefinition, type RolloutTool } from "./tools.ts"
+import { danglingCalls } from "./resume.ts"
+import { budgetResult, type FrozenTool, frozenTool, sendMessageDefinition, type RolloutTool } from "./tools.ts"
 import { rolloutRequest } from "./wire.ts"
 
 declare module "@earendil-works/pi-agent-core" {
@@ -43,6 +44,10 @@ export interface AgentRun {
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
   readonly onState?: () => void
+  /** The tool definitions to offer as a snapshot froze them (a resume); absent: `tools`' own. */
+  readonly offered?: ReadonlyArray<FrozenTool>
+  /** Carrying on a stopped run (resume.ts): its kept transcript, and text cut off to continue. */
+  readonly resume?: { readonly transcript: ReadonlyArray<unknown>; readonly continuation?: string }
 }
 
 export interface AgentStrategyInput {
@@ -58,6 +63,9 @@ export interface AgentStrategyInput {
 export const WRITE_NOW = "Write the reply now."
 
 export const SEND_NUDGE = "Send your reply with send_message."
+
+/** A tool result's `details` when a stop cut the call off: resume runs the call again. */
+const INTERRUPTED = { interrupted: true } as const
 
 /** The contract's tool (DESIGN §7.2): the message, ending the turn; one a turn. */
 const sendMessageTool = (onSend: (message: string) => boolean): AgentTool => ({
@@ -131,16 +139,25 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         emit(message)
         return true
       })
+      // A resume offers the definitions its snapshot froze, exactly as they were sent.
+      const frozen = (run.offered ?? tools.map(frozenTool)).filter((t) => t.name !== SEND_MESSAGE)
       const piTools: ReadonlyArray<Tool> = [
-        ...tools.map((t) => ({ name: t.id, description: t.description, parameters: t.parameters })),
+        ...frozen.map((t) => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters as Tool["parameters"]
+        })),
         ...(sends ? [{ name: sendTool.name, description: sendTool.description, parameters: sendTool.parameters }] : [])
       ]
-      const frozen = tools.map(frozenTool)
       const emit = (chunk: GenerationChunk) => void Queue.offerUnsafe(queue, chunk)
 
       /** The typed failure behind an `error` turn, for the version's failure class. */
       let failure: GenerationFailed | undefined
-      let requests = 0
+      const seed = run.resume?.transcript as ReadonlyArray<AgentMessage> | undefined
+      // A resumed run counts the requests it made before, so its turn cap still holds.
+      let requests = seed?.filter((m) => m.role === "assistant").length ?? 0
+      /** Text a stop cut off: the first request sends it as the reply's start, and its output goes on from it. */
+      let continuation = run.resume?.continuation
       /** What this turn streamed into the body: any output, and text in particular. */
       const body = { text: false, prose: false }
       const streamFn: StreamFn = (piModel, transcript, options) => {
@@ -156,17 +173,29 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           return events
         }
         requests++
-        const last = requests >= plan.turnCap
-        const wire = rolloutRequest(prefix, model.api, liveSuffix(transcript.messages), last ? undefined : piTools, {
-          explicitTail: model.cacheBreakpoints === "explicit"
-        })
+        const carried = continuation
+        continuation = undefined
+        const last = requests >= plan.turnCap || carried !== undefined
+        const suffix = liveSuffix(transcript.messages)
+        const wire = rolloutRequest(
+          prefix,
+          model.api,
+          carried === undefined
+            ? suffix
+            : [...suffix, { ...emptyAssistant(piModel), content: [{ type: "text", text: carried }] }],
+          last ? undefined : piTools,
+          { explicitTail: model.cacheBreakpoints === "explicit" }
+        )
         // Text streams into the body as it comes; a tool call in the same turn makes it an
         // intermediate step, and the body starts over (DESIGN §7.2: not the message).
         body.text = false
         body.prose = false
         let called = false
         let done: AssistantMessage | undefined
-        let partial = emptyAssistant(piModel)
+        let partial: AssistantMessage = {
+          ...emptyAssistant(piModel),
+          content: carried === undefined ? [] : [{ type: "text", text: carried }]
+        }
         const fiber = runFork(
           providers
             .stream({
@@ -197,6 +226,19 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     // call, or thinking before another tool, was a step.
                     if (!called && (sending ? body.prose : body.text)) emit({ restart: true })
                     called = true
+                    // Kept on a turn cut off after it, so a resume resamples rather than continues it.
+                    partial = {
+                      ...partial,
+                      content: [
+                        ...partial.content,
+                        {
+                          type: "toolCall",
+                          id: `partial-${partial.content.length}`,
+                          name: event.name,
+                          arguments: (event.arguments ?? {}) as Record<string, never>
+                        }
+                      ]
+                    }
                   } else if (event.type === "text" || event.type === "thinking") {
                     // Preserve the failed/aborted turn too; a stop must not replace its
                     // already visible text with an empty assistant in the transcript.
@@ -231,6 +273,14 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         options?.signal?.addEventListener("abort", abort, { once: true })
         fiber.addObserver((exit) => {
           options?.signal?.removeEventListener("abort", abort)
+          if (Exit.isSuccess(exit) && done && carried !== undefined) {
+            // The reply goes on from the text cut off: one turn, as if it had never stopped.
+            const at = done.content.findIndex((p) => p.type === "text")
+            const content = done.content.slice()
+            if (at < 0) content.unshift({ type: "text", text: carried })
+            else content[at] = { type: "text", text: carried + (content[at] as { text: string }).text }
+            done = { ...done, content }
+          }
           if (Exit.isSuccess(exit) && done) {
             const reason = done.stopReason === "toolUse" || done.stopReason === "length" ? done.stopReason : "stop"
             events.push({ type: "done", reason, message: done })
@@ -279,7 +329,17 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         parameters: tool.parameters,
         executionMode: "sequential",
         execute: async (toolCallId, params, signal) => {
-          const result = await runPromise(tool.execute(context(toolCallId), params as never), { signal })
+          // A stop interrupts the tool; its result says so, and a resume runs the call again.
+          const exit = await runPromise(Effect.exit(tool.execute(context(toolCallId), params as never)), {
+            signal
+          }).catch(() => undefined)
+          if (signal?.aborted || exit === undefined || Exit.isFailure(exit))
+            return {
+              content: [{ type: "text", text: signal?.aborted ? "Stopped." : "The tool failed." }],
+              details: signal?.aborted ? INTERRUPTED : null,
+              isError: true
+            }
+          const result = exit.value
           if (tool.effect === "chat_state" && !result.isError) run.onState?.()
           return {
             content: [{ type: "text", text: budgetResult(result.text) }],
@@ -290,8 +350,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       }))
 
       if (sends) agentTools.push(sendTool)
-      let nudged = false
-      let nudgeSent = false
+      let nudged = seed?.some((m) => m.role === "rpHarness" && m.content === SEND_NUDGE) ?? false
+      let nudgeSent = nudged
       const agent: Agent = new Agent({
         initialState: {
           model: {
@@ -308,10 +368,14 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           } as unknown as Model<Api>,
           thinkingLevel: "off",
           tools: agentTools,
-          messages: [
-            { role: "rpRequest", timestamp: Date.now() },
-            ...(plan.turnCap <= 1 ? [{ role: "rpHarness" as const, content: WRITE_NOW, timestamp: Date.now() }] : [])
-          ]
+          messages: seed
+            ? seed.slice()
+            : [
+                { role: "rpRequest", timestamp: Date.now() },
+                ...(plan.turnCap <= 1
+                  ? [{ role: "rpHarness" as const, content: WRITE_NOW, timestamp: Date.now() }]
+                  : [])
+              ]
         },
         convertToLlm: (messages) => liveSuffix(messages),
         streamFn,
@@ -326,9 +390,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         },
         // One message a turn (DESIGN §7.2): a sent message ends the loop. Under `send_message`
         // alone, a reply written as plain text is asked once to be sent; then it's taken as it is.
-        finishTurn: ({ message }) => {
-          // The cap's request is the last, whatever it asked for.
-          if (sent !== undefined || requests >= plan.turnCap) return { action: "end" }
+        finishTurn: ({ message }, signal) => {
+          // The cap's request is the last, whatever it asked for; a stop ends the loop here.
+          if (sent !== undefined || requests >= plan.turnCap || signal?.aborted) return { action: "end" }
           const plain = !message.content.some((p) => p.type === "toolCall")
           const failed = message.stopReason === "error" || message.stopReason === "aborted"
           if (plain && !failed && plan.contract === "send_message" && !nudged && requests < plan.turnCap) {
@@ -393,7 +457,50 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           await flush()
         })
       )
-      // The tail is the frozen request: the loop sends it, with no user turn of its own.
+      // A resumed run first runs the calls it had made without results (receipts make a
+      // chat-state call already written answer as it did), then goes on as the loop would.
+      const dangling = danglingCalls(agent.state.messages)
+      if (dangling.length > 0) {
+        const signal = new AbortController()
+        yield* Effect.addFinalizer(() => Effect.sync(() => signal.abort()))
+        for (const call of dangling) {
+          const tool = agentTools.find((t) => t.name === call.name)
+          const result = tool
+            ? yield* Effect.promise(() =>
+                tool.execute(call.id, call.arguments as never, signal.signal).catch((error: unknown) => ({
+                  content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
+                  details: null,
+                  isError: true
+                }))
+              )
+            : {
+                content: [{ type: "text" as const, text: `There's no tool “${call.name}”.` }],
+                details: null,
+                isError: true
+              }
+          agent.state.messages = [
+            ...agent.state.messages,
+            {
+              role: "toolResult",
+              toolCallId: call.id,
+              toolName: call.name,
+              content: result.content,
+              details: result.details,
+              isError: result.isError === true,
+              timestamp: Date.now()
+            }
+          ]
+        }
+        yield* Effect.promise(() => flush())
+      }
+      showSteps(false)
+      // The call carried on was the message itself.
+      if (sent !== undefined) {
+        yield* Effect.promise(() => flushing)
+        showSteps(true)
+        return yield* Queue.end(queue)
+      }
+      // The tail is the frozen request (or the kept transcript): the loop sends it, with no user turn of its own.
       const started = yield* Effect.tryPromise(() => agent.continue()).pipe(Effect.option)
       if (Option.isNone(started) && !failure)
         failure = new GenerationFailed({ class: "server", message: "The agent couldn't start." })
