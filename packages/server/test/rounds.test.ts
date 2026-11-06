@@ -102,6 +102,96 @@ const roundOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("rounds", () => {
+  it.live("a queued round recovered at startup gets a start when its remaining replies continue", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, sent, mira, tobin, wren, describe } = yield* setup(api)
+      const first = yield* posted(
+        api.Generate({ chatId: chat.id, parentSlotId: sent.slotId, branch: false, speakerEntityId: mira })
+      )
+      yield* gate(first.entry.version.id)
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: first.entry.slotId,
+        branch: false,
+        content: "Recovered without a reply.",
+        replySpeakerEntityId: tobin,
+        round: [wren, mira],
+        autoPick: true
+      })
+      yield* (yield* Writer).InterruptGenerations()
+      const held = (yield* api.ListQueued({ chatId: chat.id })).filter((q) => q.round)
+      assert.lengthOf(held, 2)
+      assert.isTrue(held.every((q) => q.round!.held && q.round!.startSlotId === undefined))
+      yield* api.Round({ chatId: chat.id, forkId: null, action: "continue" })
+      const resumed = yield* pathBecomes(api, chat.id, describe, [
+        "you: m0",
+        "Mira (interrupted)",
+        "you: Recovered without a reply.",
+        "Wren (generating)"
+      ])
+      const remaining = (yield* api.ListQueued({ chatId: chat.id })).filter((q) => q.round)
+      assert.lengthOf(remaining, 1)
+      assert.strictEqual(remaining[0]!.round!.startSlotId, resumed[3]!.slotId)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
+  it.live("a queued round starts at its own first reply, after earlier queued actions", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, sent, mira, tobin, wren, describe } = yield* setup(api)
+      const first = yield* posted(
+        api.Generate({ chatId: chat.id, parentSlotId: sent.slotId, branch: false, speakerEntityId: mira })
+      )
+      yield* api.Generate({
+        chatId: chat.id,
+        parentSlotId: first.entry.slotId,
+        branch: false,
+        speakerEntityId: tobin
+      })
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: first.entry.slotId,
+        branch: false,
+        content: "Start my round here.",
+        replySpeakerEntityId: wren,
+        round: [mira, tobin],
+        autoPick: true
+      })
+      yield* release(first.entry.version.id)
+      const earlier = yield* pathBecomes(api, chat.id, describe, ["you: m0", "Mira (complete)", "Tobin (generating)"])
+      let round = (yield* api.ListQueued({ chatId: chat.id })).filter((q) => q.round)
+      assert.lengthOf(round, 2)
+      assert.isTrue(round.every((q) => q.round!.decides))
+      assert.isTrue(
+        round.every((q) => q.round!.startSlotId === undefined),
+        "the round has not started yet"
+      )
+      yield* release(earlier[2]!.version.id)
+      const started = yield* pathBecomes(api, chat.id, describe, [
+        "you: m0",
+        "Mira (complete)",
+        "Tobin (complete)",
+        "you: Start my round here.",
+        "Wren (generating)"
+      ])
+      round = (yield* api.ListQueued({ chatId: chat.id })).filter((q) => q.round)
+      assert.isTrue(round.every((q) => q.round!.startSlotId === started[4]!.slotId))
+      yield* release(started[4]!.version.id)
+      yield* pathBecomes(api, chat.id, describe, [
+        "you: m0",
+        "Mira (complete)",
+        "Tobin (complete)",
+        "you: Start my round here.",
+        "Wren (complete)",
+        "Mira (generating)"
+      ])
+      round = (yield* api.ListQueued({ chatId: chat.id })).filter((q) => q.round)
+      assert.lengthOf(round, 1)
+      assert.strictEqual(round[0]!.round!.startSlotId, started[4]!.slotId)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
   for (const stopped of [false, true]) {
     it.live(`swiping the ${stopped ? "stopped" : "running"} reply preserves the round's hold state`, () =>
       Effect.gen(function* () {
