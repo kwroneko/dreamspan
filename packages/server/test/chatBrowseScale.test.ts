@@ -30,6 +30,11 @@ it.live(
           json_array(json_array(c.id || '-' || n.i, NULL), json_array(c.id, 0)) FROM chats c CROSS JOIN n`
         },
         {
+          // The browse filter counts global chat pins, independently of branch pins above.
+          sql: `INSERT INTO chat_pins (user_id, chat_id)
+        SELECT owner_user_id, id FROM chats WHERE created_at%10=0`
+        },
+        {
           sql: `INSERT INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, messages, leaf, end_at, cast_json, joined_json, departed_json, activity_json)
         SELECT f.id, c.id, ?, c.shell_stamp, coalesce(u.stamp,0), 'Synthetic', c.created_at%100, NULL,
           c.created_at, '[]', '[]', '[]', '[]' FROM chats c JOIN forks f ON f.chat_id=c.id
