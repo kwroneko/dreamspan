@@ -2273,7 +2273,7 @@ test.describe("revision dialogs", () => {
           await expect(compare).toHaveAccessibleDescription("Click to hide this revision's comparison")
           const measureGaps = async (state: string) => {
             const measured = await dialog
-              .getByRole("tablist", { name: "Revision changes", exact: true })
+              .getByRole("tablist", { name: "Revision comparison mode", exact: true })
               .evaluate((list) => {
                 const section = list.closest('section[aria-label^="Comparison of revision"]')!
                 const previous = section.previousElementSibling!.getBoundingClientRect()
