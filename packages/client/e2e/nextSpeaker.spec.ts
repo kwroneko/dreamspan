@@ -14,9 +14,12 @@ import { expectLayout, layoutAudit } from "./support/layoutAudit.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { nextChip } from "./support/strip.ts"
+import { nextChip, nextReply } from "./support/strip.ts"
 
-const server = serverPerFile(withAdmin)
+// Decisions wait a minute here, not "Who replies next"'s 3 s: the tests hold one while they look
+// at the page, so a slow screenshot or audit can't let Auto's pick in. The real deadline has its
+// own test (server test/nextSpeaker.test.ts, "no answer within the deadline").
+const server = serverPerFile({ ...withAdmin, DECISION_TIMEOUT_MS: "60000" })
 const shots = process.env["NEXTSPEAKER_SHOTS"]
 let cookie: string
 let provider: FakeProvider
@@ -230,6 +233,9 @@ test("off, nothing is sent and Auto picks", async ({ page }) => {
   const before = asked.length
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(nextChip(page)).toBeEnabled()
+  // Off, the pill names Auto's pick, as always.
+  await expect(nextChip(page)).toContainText(PLANNED)
+  await expect(nextChip(page)).not.toContainText("chosen when you send")
   await nextChip(page).hover()
   await expect(tooltip(page)).toContainText("replies next")
   await expect(tooltip(page)).not.toContainText("decision model")
@@ -266,10 +272,26 @@ for (const width of [1440, 390])
       const chatId = await groupChat()
       await page.goto(`${server().url}/chats/${chatId}`)
       await expect(nextChip(page)).toBeEnabled()
+      // On, with Auto: the pill names no one, since the model chooses when you send.
+      await expect(nextChip(page)).toHaveAccessibleName("Next: chosen when you send. Choose who replies next")
+      await expect(nextChip(page)).toContainText("Next: chosen when you send")
+      await expect(nextChip(page)).not.toContainText(PLANNED)
+      await expect(nextReply(page).getByRole("button", { name: "Reply now", exact: true })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Get a reply", exact: true })).toBeVisible()
       await nextChip(page).hover()
-      await expect(tooltip(page)).toContainText("The decision model picks who replies next; if it can't decide,")
+      await expect(tooltip(page)).toContainText(
+        "When you send, the decision model reads the chat and chooses who replies; if it can't decide, the chat's reply order does."
+      )
+      await expect(tooltip(page)).not.toContainText(PLANNED)
       if (shots) await page.screenshot({ path: `${shots}/pill-before-${width}-${colorScheme}.png` })
       await auditTooltip(page, `pill-before-${width}-${colorScheme}`)
+      await expectLayout(page, test.info(), `pill-chip-${width}-${colorScheme}`)
+      // The chooser's Auto row names no one either; a pick still names who replies.
+      await nextChip(page).click()
+      const auto = page.getByRole("radio", { name: /^Auto/ })
+      await expect(auto).toHaveAccessibleName("Auto")
+      await expect(auto).toBeChecked()
+      await page.keyboard.press("Escape")
 
       // While the decision model chooses, the reply names no one: never Auto's pick, then Ash.
       const before = asked.length

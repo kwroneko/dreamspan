@@ -59,11 +59,13 @@ export function NextReplyChip({
   const who = replier === null ? (loading && !off ? "…" : "no one") : name(replier)
   // The whole round, in turn: the chip says "Next: Mira, Tobin, Wren", the hint as a sentence.
   const all = replier === null ? [] : [replier, ...round].map(name)
-  const chipWho = all.length > 1 ? all.join(", ") : who
-  const policyDetail = replyPolicyOf(view.cast)?.autoDetail ?? "Picked by the chat's reply order"
-  const detail = decides ? "Picked by the decision model; if it can't decide, by the chat's reply order" : policyDetail
-  const auto = next === null ? [] : [next.id, ...(picked === null && !off ? round : (next.then ?? []))].map(name)
+  // With "Who replies next" on (DESIGN §2.3), Auto's replies are the decision model's to choose
+  // when you send: the chip names no one, since Auto's plan is only its fallback.
   const modelPicks = decides && picked === null && !off && replier !== null
+  const chipWho = modelPicks ? "chosen when you send" : all.length > 1 ? all.join(", ") : who
+  const policyDetail = replyPolicyOf(view.cast)?.autoDetail ?? "Picked by the chat's reply order"
+  const detail = decides ? "Chosen by the decision model when you send" : policyDetail
+  const auto = next === null ? [] : [next.id, ...(picked === null && !off ? round : (next.then ?? []))].map(name)
   const last = lastPick
     ? `The decision model picked ${lastPick.name} for the last reply (${Math.round(lastPick.confidence * 100)}%). `
     : ""
@@ -85,9 +87,7 @@ export function NextReplyChip({
               : replier === null
                 ? `${last}No one is picked to reply`
                 : modelPicks
-                  ? `${last}The decision model picks who replies next; if it can't decide, ${
-                      all.length > 1 ? `${listNames(all)} reply, in turn` : `${who} replies`
-                    }. ${policyDetail}`
+                  ? `${last}When you send, the decision model reads the chat and chooses who replies; if it can't decide, the chat's reply order does.`
                   : all.length > 1
                     ? `${last}${listNames(all)} reply next, in turn. ${detail}`
                     : `${last}${who} replies next. ${detail}`
@@ -103,7 +103,7 @@ export function NextReplyChip({
       choices={[
         {
           value: AUTO,
-          label: auto.length === 0 ? "Auto" : `Auto: ${auto.join(", ")}`,
+          label: auto.length === 0 || decides ? "Auto" : `Auto: ${auto.join(", ")}`,
           detail
         },
         {

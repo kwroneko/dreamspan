@@ -1,6 +1,6 @@
 import { serverEnvironment } from "../serverEnvironment.ts"
 // The development server: main.ts, or the fake generator instead of the real one when
-// FAKE_GENERATOR_TPS is set.
+// FAKE_GENERATOR_TPS is set, and every decision point's deadline DECISION_TIMEOUT_MS when set.
 // For `npm run dev:server`, the browser tests and the performance harness. The production
 // entry point (main.ts) can't wire the fake generator, and the image doesn't contain this
 // directory (.dockerignore).
@@ -8,6 +8,7 @@ import { NodeRuntime } from "@effect/platform-node"
 import { Cause, Config, Effect, Exit, Layer, Option, Runtime, Schema } from "effect"
 import * as ContextGenerator from "../chat/ContextGenerator.ts"
 import { AppConfig } from "../config.ts"
+import { DecisionEngine } from "../decision/engine.ts"
 import { serverWith } from "../server.ts"
 import * as FakeGenerator from "./fakeGenerator.ts"
 
@@ -37,14 +38,24 @@ const options = Config.all({
   /** Set, each fake reply's text starts with a tagged section of about this many tokens (spec/REPLY-SECTIONS.md). */
   sectionTokens: Config.option(Config.Int(serverEnvironment.FAKE_GENERATOR_SECTION)),
   /** Set, each fake reply's body starts with a `<cot>` chain of thought of about this many tokens (regex scripts). */
-  cotTokens: Config.option(Config.Int(serverEnvironment.FAKE_GENERATOR_COT))
+  cotTokens: Config.option(Config.Int(serverEnvironment.FAKE_GENERATOR_COT)),
+  /**
+   * Set, every decision point waits this many milliseconds for its answer instead of its own
+   * deadline: browser tests that hold a decision while they look at the page.
+   */
+  decisionTimeoutMs: Config.option(Config.Int(serverEnvironment.DECISION_TIMEOUT_MS))
 })
 
 Effect.gen(function* () {
   if (process.env[serverEnvironment.NODE_ENV] === "production") return yield* new FakeGeneratorInProduction()
-  const { tokensPerSecond, tokens, seed, burstMs, reasoningTokens, sectionTokens, cotTokens } = yield* options
+  const { tokensPerSecond, tokens, seed, burstMs, reasoningTokens, sectionTokens, cotTokens, decisionTimeoutMs } =
+    yield* options
+  const decisions = Option.match(decisionTimeoutMs, {
+    onNone: () => DecisionEngine.layer,
+    onSome: (timeoutMs) => DecisionEngine.layerWith({ timeoutMs })
+  })
   const server = Option.match(tokensPerSecond, {
-    onNone: () => serverWith(ContextGenerator.layer),
+    onNone: () => serverWith(ContextGenerator.layer, undefined, undefined, decisions),
     onSome: (rate) =>
       serverWith(
         FakeGenerator.layer({
@@ -55,7 +66,10 @@ Effect.gen(function* () {
           reasoningTokens: Option.getOrUndefined(reasoningTokens),
           sectionTokens: Option.getOrUndefined(sectionTokens),
           cotTokens: Option.getOrUndefined(cotTokens)
-        })
+        }),
+        undefined,
+        undefined,
+        decisions
       )
   })
   return yield* Layer.launch(server.pipe(Layer.provide(AppConfig.layer)))

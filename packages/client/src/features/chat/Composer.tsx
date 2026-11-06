@@ -540,12 +540,31 @@ export function Composer({
 
   const hasText = text.trim() !== "" || !!attachmentInput?.count
   const replies = replyPlan.round.length > 0 ? "reply" : "replies"
-  const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} ${replies}` : "Send"
+  // With the decision model choosing (DESIGN §2.3), Auto's plan is only its fallback: not named.
+  const sendLabel = hasText
+    ? name
+      ? `Send as ${name}`
+      : "Send"
+    : decides
+      ? "Get a reply"
+      : replierName
+        ? `${replierName} ${replies}`
+        : "Send"
   const sendHint = hasText
-    ? `${sendLabel}${roundNames ? `, then ${roundNames} ${replies}` : choice.noReplies ? ", with no reply" : ""} (${submitHint})`
-    : roundNames
-      ? `${roundNames} ${replies} now, with nothing sent from you`
-      : "Type a message to send"
+    ? `${sendLabel}${
+        decides
+          ? ", then the decision model chooses who replies"
+          : roundNames
+            ? `, then ${roundNames} ${replies}`
+            : choice.noReplies
+              ? ", with no reply"
+              : ""
+      } (${submitHint})`
+    : decides
+      ? "A reply now, with nothing sent from you; the decision model chooses who"
+      : roundNames
+        ? `${roundNames} ${replies} now, with nothing sent from you`
+        : "Type a message to send"
   // Generate writes the speaker's turn: for a card the user plays, the model writes it for them.
   const editedName = editing === null ? null : nameOf(castView, editing.speakerEntityId)
   // Keep the action named while the cast is loading; the full name includes its speaker.
