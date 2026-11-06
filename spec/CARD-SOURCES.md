@@ -159,7 +159,7 @@ On phones, home holds the same Show row (it scrolls sideways, as now). The carde
 The existing model for imported cards applies unchanged. An adopted card has an **import line** (ARCHITECTURE §11.1), and the archive's version is the revision on it. A newer archive version is "a newer imported version", the same as a newer file:
 
 - **Detecting it** sends nothing extra. A results page carries each held card's current version, so a held card that shows up in results is checked for free. A card's Metadata → Sources row for cardex has **Check for a newer version** (hover: "Asks cardex whether <name> has changed since you added it."). Automatic background checks are a decision for the owner (§9, D4).
-- **Offering it:** the existing notice under the editor's actions ("A newer imported version is waiting" → here "A newer version is on cardex") with **Review and merge**, which stages the archive's new file on the import line (`mode=merge` staging) and opens the existing merge review. The card's import dialog's **Replace** works on it too, and a third choice, **Add as a separate card**, adopts the new version as a card of its own (§9, D5).
+- **Offering it:** the existing notice under the editor's actions ("A newer imported version is waiting" → here "A newer version is on cardex") with **Review and merge**, which stages the archive's new file on the import line (`mode=merge` staging) and opens the existing merge review. The card's import dialog's **Replace** works on it too, and a third choice, **Add as a separate card**, adopts the new version as a card of its own ([D] owner, 2026-11-06; §9).
 - **Nothing is applied without that review.** Forks of the card aren't touched. They see only their parent's later revisions, as now, once the user has merged into the parent.
 
 ## 4. The "not yet yours" state
@@ -320,7 +320,9 @@ Blind roleplay (DESIGN §12 [L]) needs nothing new from sources. It's a consumer
 
 ## 9. Decisions for the owner
 
-Each has the default this spec uses. The name of the tab is settled ("cardex", owner 2026-11-06), so it isn't asked here.
+Each has the default this spec uses. Settled, so not asked here: the tab's name ("cardex", owner 2026-11-06) and what an update offers.
+
+- **[D] What an update offers** (owner, 2026-11-06: "Ignore that older design note.", via the coordinator). A newer archive version of a card you added offers **Review and merge**, **Replace**, or **Add as a separate card** (§3.8), the same as a newer file of an imported card, with Review and merge first. The October open item "take it as a separate card or a fork, never merged into the user's copy" (DESIGN §12) is superseded.
 
 - **D1. Is cardex on or off for a new account?**
   - *What:* whether "cardex" appears among the Show choices before the user has turned anything on.
@@ -347,12 +349,6 @@ Each has the default this spec uses. The name of the tab is settled ("cardex", o
   - *Example:* you added Mio a month ago and the author fixed her greeting last week. With the default, you see "update available" when Mio appears in cardex results, or when you press **Check for a newer version** in Mio's Metadata.
   - *Default:* **only those two.** Nothing goes to cardex in the background, and cardex never learns which of your cards you open.
   - *Otherwise:* a switch "Check my cards from cardex for updates once a day" (off by default), or automatic checks when you open such a card. Both send the ids of cards you use to cardex without you looking at it.
-- **D5. What "update available" offers**
-  - *What:* the choices for taking a newer archive version of a card you have. In October an open item read "take it as a separate card or a fork, never merged into the user's copy". Since 1 November, cards have Merge and Replace for new imported versions, as git-style explicit merges.
-  - *When:* after D4 finds a newer version.
-  - *Example:* the notice says "A newer version is on cardex" with **Review and merge** (pick changes one by one, keeping your edits). The Import dialog's **Replace** (take it wholesale) and **Add as a separate card** (the new version as another card, yours untouched) are also offered.
-  - *Default:* **all three, Review and merge first**, the same as a newer file today.
-  - *Otherwise:* only Add as a separate card, as the October note said. Your copy then never changes, but fixes from the author can't be taken into a card you've edited.
 
 ## 10. The public API: what was found, and what we need
 
@@ -378,6 +374,6 @@ Each phase is shippable and tested on its own (synthetic fixtures only, at 1440 
 2. **Browsing.** The "cardex" Show option on home and in the sidebar; search; the generated Filters panel and chips; source sorts; URL keys; result tiles; infinite scroll; thumbnails; the error states. Results are never mixed (a test lists every local surface with the option open). Also the recently viewed row.
 3. **Trying and adding.** Remote draft chats and Inspect pages; the panel's editors on the cached document; `remote-card` drafts; the assembler's cached-document source for the estimate; the three triggers through `AdoptRemoteCard` (one transaction each, the first send with `StartChat`); `card_origins` and the source-hash index (baseline); held cards in results; double-add refusal; the inert regex scripts. Tests: an adoption stores exactly §4.5's rows; a failed one stores none; the card-plus-chat atomicity.
 4. **The cardex adapter**, once its API documentation is in hand: capabilities, mappings, rate limits, its Sources recognizer. It's checked against the live API by hand only, never in the test suite, and no real card ever lands in a fixture.
-5. **Updates.** Version markers from results, Check for a newer version, the "A newer version is on cardex" notice wired to the existing merge staging, Replace and Add as a separate card (after D4 and D5).
+5. **Updates.** Version markers from results, Check for a newer version, the "A newer version is on cardex" notice wired to the existing merge staging, Replace and Add as a separate card (after D4).
 6. **Tried cards** (after D3, and once cardarchive has landed): the "Only tried" criterion registered into Archive unused cards…, backed by `card_origins` and one reader query that counts the user's own messages per card across its chats (the dialog's 5,000-card scale test covers it).
 7. **Blind roleplay** (§7), when the owner schedules it.

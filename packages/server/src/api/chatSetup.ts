@@ -64,6 +64,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "reply.order", value: change.order }
     case "ReplySingle":
       return { key: "reply.single", value: { on: change.on } }
+    case "CardsRotation":
+      return { key: "cards.rotation", value: { on: change.on } }
     case "ReplyMode":
       return { key: "orchestration.mode", value: { mode: change.mode } }
     case "AgentTools":
@@ -260,6 +262,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       ...(state.replyOrder === null ? {} : { replyOrder: state.replyOrder }),
       ...(state.replySingle === true ? { replySingle: true } : {}),
       ...(state.orchestration ? { replyMode: state.orchestration.mode } : {}),
+      ...(state.cardsRotation === true ? { cardsRotation: true } : {}),
       ...(state.agentTools ? { agentTools: state.agentTools } : {}),
       roleProjections,
       ...(state.mergeLayout === null ? {} : { mergeLayout: state.mergeLayout }),

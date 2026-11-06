@@ -1,6 +1,7 @@
 import { exercisePhoneFooters } from "./support/phoneFooters.ts"
 import { seedSplitChats } from "./support/splitChats.ts"
 import { centerHeaderTests } from "./support/centerHeaders.ts"
+import { seedCardArchive } from "./support/cardArchive.ts"
 // Run before UI approval: LAYOUT_AUDIT=1 PLAYWRIGHT_WORKERS=1 npx playwright test -c
 // packages/client/playwright.config.ts e2e/layoutAudit.spec.ts --project=chromium
 // LAYOUT_AUDIT_ST_FOLDER can point to an existing SYNTHETIC fixture only.
@@ -2496,3 +2497,34 @@ test("phone footer click overrides height collapse", async ({ page }, info) => {
     await local.stop()
   }
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`card archive surfaces: ${width} ${theme}`, async ({ page }, info) => {
+      test.setTimeout(180_000)
+      const local = await startServer(withAdmin)
+      try {
+        await seedCardArchive(local)
+        await apiLogin(page.request, local, ADMIN.handle, ADMIN.password)
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.goto(`${local.url}/?show=archived&side=characters&sideShow=archived`)
+        const main = page.getByRole("main")
+        await expect(main.getByRole("link", { name: "Open Pilot 001", exact: true })).toBeVisible()
+        await expectLayout(page, info, `cardarchive-home-${width}-${theme}`, { scope: "main" })
+        await main.screenshot({ path: info.outputPath("home.png") })
+        await main.getByRole("button", { name: "Archive unused cards…", exact: true }).click()
+        const dialog = page.getByRole("dialog", { name: "Archive unused cards", exact: true })
+        await expect(dialog.getByRole("checkbox", { name: "Pilot 008", exact: true })).toBeVisible()
+        await expectLayout(page, info, `cardarchive-dialog-${width}-${theme}`, { scope: '[role="dialog"]' })
+        await dialog.screenshot({ path: info.outputPath("dialog.png") })
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+        await showAppNavigation(page)
+        const list = page.locator("[data-shell-list]").filter({ visible: true })
+        await expect(list.getByRole("link", { name: "Open Pilot 001", exact: true })).toBeVisible()
+        await expectLayout(page, info, `cardarchive-sidebar-${width}-${theme}`, { scope: "[data-shell-list]" })
+        await list.screenshot({ path: info.outputPath("sidebar.png") })
+      } finally {
+        await local.stop()
+      }
+    })

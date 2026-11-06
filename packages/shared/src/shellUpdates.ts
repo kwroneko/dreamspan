@@ -8,23 +8,30 @@ const changed = <A>(previous: ReadonlyArray<A>, next: ReadonlyArray<A>, key: (ro
 export const shellCardsUpdate = (previous: ShellCards | undefined, next: ShellCards): ShellCardsUpdate => ({
   cards: changed(previous?.cards ?? [], next.cards, (row) => row.card.entityId),
   personas: changed(previous?.personas ?? [], next.personas, (row) => row.card.entityId),
+  archived: changed(previous?.archived ?? [], next.archived, (row) => row.card.entityId),
   order: {
     cards: next.cards.map((row) => row.card.entityId),
-    personas: next.personas.map((row) => row.card.entityId)
+    personas: next.personas.map((row) => row.card.entityId),
+    archived: next.archived.map((row) => row.card.entityId)
   },
   pinsCollapsed: next.pinsCollapsed
 })
 
 export const applyShellCards = (previous: ShellCards | undefined, update: ShellCardsUpdate): ShellCards => {
   const rows = new Map(
-    [...(previous?.cards ?? []), ...(previous?.personas ?? []), ...update.cards, ...update.personas].map((row) => [
-      row.card.entityId,
-      row
-    ])
+    [
+      ...(previous?.cards ?? []),
+      ...(previous?.personas ?? []),
+      ...(previous?.archived ?? []),
+      ...update.cards,
+      ...update.personas,
+      ...update.archived
+    ].map((row) => [row.card.entityId, row])
   )
   return {
     cards: update.order.cards.map((id) => rows.get(id)!),
     personas: update.order.personas.map((id) => rows.get(id)!),
+    archived: update.order.archived.map((id) => rows.get(id)!),
     pinsCollapsed: update.pinsCollapsed
   }
 }

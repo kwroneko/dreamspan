@@ -67,6 +67,9 @@ const PendingReplyFrom = deferred<Parameters<typeof import("./ReplyOrder.tsx").P
 const ReplyOrderSection = deferred<Parameters<typeof import("./ReplyOrder.tsx").ReplyOrderSection>[0]>(() =>
   import("./ReplyOrder.tsx").then((m) => ({ default: m.ReplyOrderSection }))
 )
+const CardLayoutSetting = deferred<Parameters<typeof import("./CardLayoutSetting.tsx").CardLayoutSetting>[0]>(() =>
+  import("./CardLayoutSetting.tsx").then((m) => ({ default: m.CardLayoutSetting }))
+)
 const OneReplySection = deferred<Parameters<typeof import("./ReplyOrder.tsx").OneReplySection>[0]>(() =>
   import("./ReplyOrder.tsx").then((m) => ({ default: m.OneReplySection }))
 )
@@ -139,6 +142,8 @@ export const registerPresentation = () => [
   // This chat leads with what a person touches; what few need comes after, collapsed.
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
+  // The card layout, before Reply mode: card swap works with or without tools.
+  chatSettingSections.register({ id: "settings.card-layout", order: 15, component: CardLayoutSetting }),
   chatSettingSections.register({ id: "settings.macro-bindings", order: 80, component: MacroBindings }),
   chatSettingSections.register({ id: "settings.merge-layout", order: 85, component: MergeLayoutSetting }),
   chatSettingSections.register({ id: "settings.roles", order: 90, component: RolesSetting }),

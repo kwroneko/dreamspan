@@ -45,6 +45,7 @@ interface ShellState {
   readonly splitChatIds: ReadonlySet<string>
   readonly cards: ReadonlyArray<ShellCard>
   readonly personas: ReadonlyArray<ShellCard>
+  readonly archived: ReadonlyArray<ShellCard>
   readonly forks: ReadonlyArray<Fork>
   readonly chatIndex: ReadonlyMap<string, Fork>
   readonly pinnedChats: ReadonlySet<string>
@@ -263,14 +264,15 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           ref: string
           revision: string
           persona: number
+          archived_at: number | null
         }
       >`
-        SELECT e.id, e.created_at, r.created_at AS added_at, r.id AS ref, r.head_revision_id AS revision,
+        SELECT e.id, e.archived_at, e.created_at, r.created_at AS added_at, r.id AS ref, r.head_revision_id AS revision,
           cs.fields AS card_fields, cs.book AS card_book, cs.book_entries AS card_book_entries,
           EXISTS(SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
         FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id LIMIT 1)
         LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
-        WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL
+        WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL
         ORDER BY r.label COLLATE NOCASE, e.id`
       // Built from what the read just made: no constructor checks (the RPC encodes it anyway).
       const metadata = rows.map((row) => ({ ...row, ...cardSummary(row) }))
@@ -590,6 +592,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               createdAt: m.created_at,
               addedAt: m.added_at,
               favourite: favourites.has(m.id),
+              archivedAt: m.archived_at,
               persona: m.persona === 1,
               open:
                 open === undefined
@@ -639,8 +642,9 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         links,
         parents,
         splitChatIds: new Set(ancestry.filter((f) => markers.has(f.id)).map((f) => f.chat_id)),
-        cards: shellCards.filter((c) => !byCard.get(c.card.entityId)!.persona),
-        personas: shellCards.filter((c) => byCard.get(c.card.entityId)!.persona),
+        cards: shellCards.filter((c) => c.archivedAt == null && !c.persona),
+        personas: shellCards.filter((c) => c.archivedAt == null && c.persona),
+        archived: shellCards.filter((c) => c.archivedAt != null),
         forks,
         chatIndex: new Map(perChat(forks).map((f) => [f.chat.id, f])),
         pinnedChats,
@@ -669,6 +673,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       Effect.map(shellState(userId, false), (state) => ({
         cards: state.cards,
         personas: state.personas,
+        archived: state.archived,
         pinsCollapsed: state.pinsCollapsed,
         fresh: state.fresh
       })).pipe(query("ShellCards")),

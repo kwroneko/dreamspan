@@ -28,6 +28,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { MessageBody, sourceOffsetAt } from "../../ui/messageCopy.tsx"
+import { Composition } from "./Composition.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
@@ -189,7 +190,7 @@ function Editor({
   onSave: () => void
   onCancel: () => void
 }) {
-  const { text, loading, error, conflict, imagesBusy } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  const { text, loading, error, conflict, imagesBusy, added } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   // The editor may mount after the saved text loads: it still opens at the first caret.
   const [initialCaret] = useState(caret)
   useEffect(() => {
@@ -275,9 +276,12 @@ function Editor({
             label,
             value: text,
             base,
-            autoFocus: true,
+            // Opened from the chat's other view, it leaves focus there (Composition.tsx).
+            autoFocus: !draft.mirror,
             caret: initialCaret,
             quietMarkers: true,
+            // Text just added to your version: marked and scrolled to, focus left where it is.
+            flash: added,
             // In place in the chat, already as wide as the message: no Open large.
             expand: false,
             onChange: (value) => draft.setText(value)
@@ -595,7 +599,8 @@ export const Message = memo(function Message({
   // selection made by the drag, or a cancelled pointer (the browser scrolled), is no swipe.
   const onPointerDown = (event: PointerEvent) => {
     swipeStart.current =
-      event.pointerType === "touch" && !editing && !outside(event) && swipeCanStart(event.target)
+      // Writing your own version, the versions above it still swipe (Composition.tsx).
+      event.pointerType === "touch" && editing !== "edit" && !outside(event) && swipeCanStart(event.target)
         ? { x: event.clientX, y: event.clientY }
         : null
   }
@@ -641,7 +646,7 @@ export const Message = memo(function Message({
   const onPointerUp = (event: PointerEvent) => {
     const start = swipeStart.current
     swipeStart.current = null
-    if (!start || editing || window.getSelection()?.toString()) return
+    if (!start || editing === "edit" || window.getSelection()?.toString()) return
     const dx = event.clientX - start.x
     swiped.current = Math.abs(dx) > SWIPE_PX && Math.abs(dx) > 2 * Math.abs(event.clientY - start.y)
     if (swiped.current) void swipe(dx < 0 ? 1 : -1)
@@ -713,6 +718,91 @@ export const Message = memo(function Message({
     )
   else if (empty)
     marks = <Mark icon="dropped" name="Not in the context" label="Not sent" reason={reason!} className="text-muted" />
+
+  const versionBody = (
+    <VersionBody
+      version={version}
+      session={session}
+      parentSlotId={entry.parentSlotId}
+      depth={positionOf(entry)}
+      placement={model ? 2 : 1}
+    />
+  )
+  // The version controls: in the footer, or in the bar over the version shown while composing.
+  const versionControls = (
+    <SlotOutlet
+      slot={messageVersions}
+      props={{
+        entry,
+        generated,
+        latest,
+        versions,
+        position,
+        onStep: (step) => void swipe(step),
+        onPick: async (picked) => report(await session.select(entry, picked)),
+        onFlag: (target, flags) => void flag(target, flags),
+        onOpen: () => void load(true)
+      }}
+    />
+  )
+  const editorView = editor !== undefined && (
+    <Editor
+      key={editing}
+      draft={editor}
+      session={session}
+      entry={entry}
+      caret={editing === "edit" ? caretAt : undefined}
+      onCaretTaken={caretTaken}
+      source={
+        editor.target._tag === "Edit"
+          ? [version, ...(versions ?? [])].find(
+              (item) => item.id === (editor.target._tag === "Edit" ? editor.target.versionId : null)
+            )
+          : undefined
+      }
+      {...(editing === "edit"
+        ? { label: "Message text", saveLabel: "Save" }
+        : {
+            label: "Your version",
+            saveLabel: "Add as a new version"
+          })}
+      onCancel={async () => {
+        // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
+        const outcome = await editor.discard()
+        report(outcome)
+        if (outcome.ok) session.closeEditor(editor)
+      }}
+      onSave={async () => {
+        // Saving an open edit names its original source, even if an import
+        // selected another version while its draft save was still in flight.
+        // Its revision must be fresh: the version list can still be cached
+        // after another tab amended a human version without changing the count.
+        const target = editor.target
+        const source =
+          target._tag === "Edit"
+            ? (await load(true))?.find((candidate) => candidate.id === target.versionId)
+            : undefined
+        if (target._tag === "Edit" && source === undefined) return
+        const submitted = await editor.ready()
+        const { text, draft, images } = submitted
+        const outcome =
+          editing === "edit"
+            ? await session.edit({ ...entry, version: source! }, text, draft, images)
+            : await session.writeVersion(entry, text, draft, images)
+        report(outcome)
+        if (!outcome.ok) return
+        // An edit of a generated version, or of one being written, is saved as a new one; so is
+        // your own version, which shows where it went among the many it was composed from.
+        if (editing === "write" || source!.writer !== "human" || source!.status === "generating")
+          setSavedAs((outcome.value as PathEntry).versionCount)
+        // Text typed while it was being saved stays in the editor, which stays open.
+        if (!editor.committed(submitted)) return
+        // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
+        if (draft === null) await editor.discard()
+        session.closeEditor(editor)
+      }}
+    />
+  )
 
   return (
     <article
@@ -805,70 +895,21 @@ export const Message = memo(function Message({
           </p>
         )}
         <SlotOutlet slot={messagePreviews} props={{ entry, session }} />
-        {editor !== undefined ? (
-          <Editor
-            key={editing}
-            draft={editor}
-            session={session}
+        {editor === undefined ? (
+          versionBody
+        ) : editing === "write" ? (
+          // Writing your own version: the version shown stays above it (DESIGN §3.1).
+          <Composition
             entry={entry}
-            caret={editing === "edit" ? caretAt : undefined}
-            onCaretTaken={caretTaken}
-            source={
-              editor.target._tag === "Edit"
-                ? [version, ...(versions ?? [])].find(
-                    (item) => item.id === (editor.target._tag === "Edit" ? editor.target.versionId : null)
-                  )
-                : undefined
-            }
-            {...(editing === "edit"
-              ? { label: "Message text", saveLabel: "Save" }
-              : {
-                  label: "Your version",
-                  saveLabel: "Add as a new version"
-                })}
-            onCancel={async () => {
-              // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
-              const outcome = await editor.discard()
-              report(outcome)
-              if (outcome.ok) session.closeEditor(editor)
-            }}
-            onSave={async () => {
-              // Saving an open edit names its original source, even if an import
-              // selected another version while its draft save was still in flight.
-              // Its revision must be fresh: the version list can still be cached
-              // after another tab amended a human version without changing the count.
-              const target = editor.target
-              const source =
-                target._tag === "Edit"
-                  ? (await load(true))?.find((candidate) => candidate.id === target.versionId)
-                  : undefined
-              if (target._tag === "Edit" && source === undefined) return
-              const submitted = await editor.ready()
-              const { text, draft, images } = submitted
-              const outcome =
-                editing === "edit"
-                  ? await session.edit({ ...entry, version: source! }, text, draft, images)
-                  : await session.writeVersion(entry, text, draft, images)
-              report(outcome)
-              if (!outcome.ok) return
-              // An edit of a generated version, or of one being written, is saved as a new one.
-              if (editing === "edit" && (source!.writer !== "human" || source!.status === "generating"))
-                setSavedAs((outcome.value as PathEntry).versionCount)
-              // Text typed while it was being saved stays in the editor, which stays open.
-              if (!editor.committed(submitted)) return
-              // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
-              if (draft === null) await editor.discard()
-              session.closeEditor(editor)
-            }}
-          />
+            draft={editor}
+            text={version.content}
+            versions={versionControls}
+            source={versionBody}
+          >
+            {editorView}
+          </Composition>
         ) : (
-          <VersionBody
-            version={version}
-            session={session}
-            parentSlotId={entry.parentSlotId}
-            depth={positionOf(entry)}
-            placement={model ? 2 : 1}
-          />
+          editorView
         )}
         {version.context !== null && version.context.issues.length > 0 && (
           // What the user should know about the context it was generated from (ARCHITECTURE §15).
@@ -919,20 +960,7 @@ export const Message = memo(function Message({
                 Saved as version {savedAs}
               </span>
             )}
-            <SlotOutlet
-              slot={messageVersions}
-              props={{
-                entry,
-                generated,
-                latest,
-                versions,
-                position,
-                onStep: (step) => void swipe(step),
-                onPick: async (picked) => report(await session.select(entry, picked)),
-                onFlag: (target, flags) => void flag(target, flags),
-                onOpen: () => void load(true)
-              }}
-            />
+            {editing !== "write" && versionControls}
           </footer>
         </div>
         {error && (

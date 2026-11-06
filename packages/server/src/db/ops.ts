@@ -1,3 +1,4 @@
+import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { WorkbenchDevice, WorkbenchLayoutJson } from "@rp/shared/workbenchApi.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
@@ -1065,6 +1066,16 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Archives or restores an entity. */
+  Rpc.make("ArchiveUnusedCards", {
+    payload: { userId: UserId, criteria: ArchiveCriteria, entityIds: Schema.Array(EntityId) },
+    success: CardArchiveReceipt,
+    error: StorageError
+  }),
+  Rpc.make("UndoCardArchive", {
+    payload: { userId: UserId, ...CardArchiveReceipt.fields },
+    success: Schema.Int,
+    error: StorageError
+  }),
   Rpc.make("SetEntityArchived", {
     payload: { userId: UserId, entityId: EntityId, archived: Schema.Boolean },
     success: Schema.Void,
@@ -2636,6 +2647,11 @@ export class ReadOps extends RpcGroup.make(
     success: ShellLibraryRead,
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("ListArchiveCandidates", {
+    payload: { userId: UserId, criteria: ArchiveCriteria },
+    success: Schema.Array(ArchiveCandidate),
+    error: StorageError
+  }),
   Rpc.make("ShellCards", { payload: { userId: UserId }, success: ShellCardsRead, error: StorageError }),
   /** Bounded post-write refreshes; null asks the caller to use the background read. */
   Rpc.make("ShellCardsLive", {
@@ -3363,7 +3379,7 @@ export class ReadOps extends RpcGroup.make(
       timeZone: Schema.String,
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String))),
       /** An agent reply's assembly (spec/AGENTIC.md §6). */
-      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, cardsAtTail: Schema.Boolean })),
+      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, speakerCardOnly: Schema.Boolean })),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
       decisions: Schema.optionalKey(
         Schema.Struct({

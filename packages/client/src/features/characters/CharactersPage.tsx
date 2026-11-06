@@ -1,3 +1,4 @@
+import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useSyncExternalStore } from "react"
@@ -22,7 +23,7 @@ function Home({ data }: { data: ShellLibrary }) {
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
   // Then the filters and search, having nothing to work on, stay out of the way too.
-  if (intro && data.cards.length === 0)
+  if (intro && data.cards.length === 0 && data.archived.length === 0)
     return (
       <div className="flex flex-col gap-5">
         <SlotOutlet slot={homeIntro} props={{ data }} />
@@ -53,6 +54,7 @@ function Home({ data }: { data: ShellLibrary }) {
         onSearch={(search) => setBrowse({ search })}
         searchLabel="Search characters and groups"
       />
+      {browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
       {browse.filter === "groups" ? (
         <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} />
       ) : (
@@ -64,12 +66,16 @@ function Home({ data }: { data: ShellLibrary }) {
                   ? "No characters here"
                   : browse.filter === "favourites"
                     ? "No favourites yet"
-                    : browse.filter === "personas"
-                      ? "No personas yet"
-                      : "No characters here"
+                    : browse.filter === "archived"
+                      ? "No archived cards"
+                      : browse.filter === "personas"
+                        ? "No personas yet"
+                        : "No characters here"
               }
             >
-              {browse.filter === "favourites" && !needle ? (
+              {browse.filter === "archived" ? (
+                <p>Archived cards stay here until you unarchive them.</p>
+              ) : browse.filter === "favourites" && !needle ? (
                 <p>Star a character to keep it here.</p>
               ) : browse.filter === "personas" && !needle ? (
                 <p>Cards you play as are kept here. In the library, a card’s menu adds it.</p>
@@ -84,6 +90,7 @@ function Home({ data }: { data: ShellLibrary }) {
           )}
         </CharacterGrid>
       )}
+      <SlotOutlet slot={cardSearchExtras} props={{ data, browse, search, className: COLUMNS }} />
     </div>
   )
 }

@@ -44,7 +44,10 @@ export const shellAtom = Atom.keepAlive(
         Effect.map(AppClient, (client) =>
           client("WatchShellCards", undefined).pipe(
             Stream.retry(Schedule.spaced("1 second")),
-            Stream.scan(() => ({ cards: [], personas: [], pinsCollapsed: false }) as ShellCards, applyShellCards),
+            Stream.scan(
+              (): ShellCards => ({ cards: [], personas: [], archived: [], pinsCollapsed: false }),
+              applyShellCards
+            ),
             Stream.drop(1)
           )
         )
@@ -54,7 +57,7 @@ export const shellAtom = Atom.keepAlive(
 )
 
 /** Every card the lists browse: the characters, then the persona folder's (each `persona`), for `browseCards`. */
-export const browsable = (data: ShellLibrary) => [...data.cards, ...data.personas]
+export const browsable = (data: ShellLibrary) => [...data.cards, ...data.personas, ...data.archived]
 
 /** A section's rows, with their cast's cards, and how many it has. */
 export interface ShellRows {
@@ -452,6 +455,7 @@ function CharacterTile({
           >
             Open in a new browser tab
           </MenuItem>
+          <CardSurface placement="tile-menu" entityId={c.entityId} />
         </ContextMenu>
       )}
       {pick?.onOpen && (
@@ -468,8 +472,14 @@ function CharacterTile({
           {state.pending ? "Adding…" : state.done ? "In this chat" : "Add to chat"}
         </Button>
       )}
-      <span data-layout-overlay="Favourite action sits over the portrait" className="absolute top-2 left-2">
+      <span
+        data-layout-overlay="Favourite action sits over the portrait"
+        className="absolute top-2 left-2 flex flex-col gap-1"
+      >
         <FavouriteStar card={card} className={`tile-toggle ${OVER_PICTURE}`} />
+        <span className={`tile-toggle rounded-md ${OVER_PICTURE}`}>
+          <CardSurface placement="archive-toggle" entityId={c.entityId} />
+        </span>
       </span>
       {!pick && (
         <span data-layout-overlay="Open beside sits over the portrait" className="absolute top-2 right-2">

@@ -2902,6 +2902,114 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
       )
     })
   })
+
+  describe("card swap (DESIGN §5.2; ST's Swap character cards)", () => {
+    const sela = card("Sela", {
+      description: "{{char}} mends nets.",
+      personality: "Patient.",
+      mes_example: "<START>\n{{user}}: Hello\n{{char}}: Hold this."
+    })
+    const depthNote = (owner: string, content: string): NoteInput => ({
+      ...note(content, 1, "system"),
+      entity: `note-${owner}`,
+      doc: { ...note(content, 1, "system").doc, owner: { card: owner as never } }
+    })
+    const three = (fields: Partial<AssemblyFixture> = {}) =>
+      cast(["mira", "oren", "sela"], {
+        cards: [...cards, { entity: "sela", doc: sela }],
+        target: { speaker: "oren" },
+        notes: [depthNote("mira", "Mira's depth prompt."), depthNote("oren", "Oren's depth prompt.")],
+        ...fields
+      })
+    const swap = { agent: { instructions: "", speakerCardOnly: true } }
+
+    it("sends only the speaker's card, at the preset's place, with the persona", async () => {
+      const plain = await assembled(three())
+      const swapped = await assembled(three(), swap)
+      // The per-field markers hold the speaker's fields alone, where the plain request has the joined ones.
+      expect(marker(plain, "charDescription")).toBe(
+        "<Mira>\nMira keeps the ledger for Tobin.\n</Mira>\n<Oren>\nOren runs the ferry.\n</Oren>\n<Sela>\nSela mends nets.\n</Sela>"
+      )
+      expect(marker(swapped, "charDescription")).toBe("<Oren>\nOren runs the ferry.\n</Oren>")
+      // Oren has no personality or scenario: those markers send nothing.
+      expect(marker(swapped, "charPersonality")).toBeUndefined()
+      expect(marker(swapped, "scenario")).toBeUndefined()
+      const text = contents(swapped).join("\n")
+      for (const other of ["keeps the ledger", "Exact.", "A flood.", "mends nets", "Patient.", "Hold this."])
+        expect(text).not.toContain(other)
+      // The speaker's examples and depth prompt only (ST sends no group depth prompts in swap mode).
+      expect(text).toContain("Closed.")
+      expect(text).toContain("Oren's depth prompt.")
+      expect(text).not.toContain("Mira's depth prompt.")
+      // The persona and everything else stay where the preset puts them: the same message as plain.
+      expect(marker(swapped, "personaDescription")).toBe("<Tobin>\nTobin draws maps.\n</Tobin>")
+      const index = (snapshot: ContextSnapshot, needle: string) =>
+        contents(snapshot).findIndex((m) => m.includes(needle))
+      expect(index(swapped, "Tobin draws maps.")).toBe(index(plain, "Tobin draws maps."))
+      expect(index(swapped, "Oren runs the ferry.")).toBe(index(plain, "Oren runs the ferry."))
+      expect(contents(swapped).at(-1)).toBe(contents(plain).at(-1))
+      expect(contents(swapped).filter((m) => m.includes("Oren runs the ferry."))).toHaveLength(1)
+    })
+
+    it("rotates in plain mode, without tools, as the chat's card layout (cards.rotation)", async () => {
+      const rotating = await assembled(three({ events: [at(null, { key: "cards.rotation", value: { on: true } })] }))
+      const byMode = await assembled(three(), swap)
+      // No agent assembly: a plain reply, no instructions, the same cards as the card-swap mode's.
+      expect(rotating.agentAssembly).toBeUndefined()
+      expect(marker(rotating, "charDescription")).toBe("<Oren>\nOren runs the ferry.\n</Oren>")
+      expect(contents(rotating)).toEqual(contents(byMode))
+      expect(rotating.skippedPrompts).toEqual(byMode.skippedPrompts)
+      // Turned off again: every card, as plain.
+      const off = await assembled(
+        three({
+          events: [
+            at(null, { key: "cards.rotation", value: { on: true } }),
+            at(null, { key: "cards.rotation", value: { on: false } })
+          ]
+        })
+      )
+      expect(contents(off)).toEqual(contents(await assembled(three())))
+    })
+
+    it("rotates with the speaker, in the whole-card Definitions marker too", async () => {
+      const definitions = withDefinitions(preset())
+      const mirasTurn = await assembled(three({ preset: definitions, target: { speaker: "mira" } }), swap)
+      expect(marker(mirasTurn, "charDefinitions")).toBe(
+        "<Mira>\nMira keeps the ledger for Tobin.\n\nExact.\n\nA flood.\n</Mira>\n\n<Tobin>\nTobin draws maps.\n</Tobin>"
+      )
+      const selasTurn = await assembled(three({ preset: definitions, target: { speaker: "sela" } }), swap)
+      expect(marker(selasTurn, "charDefinitions")).toBe(
+        "<Sela>\nSela mends nets.\n\nPatient.\n</Sela>\n\n<Tobin>\nTobin draws maps.\n</Tobin>"
+      )
+      expect(contents(selasTurn).join("\n")).toContain("Hold this.")
+      expect(contents(selasTurn).join("\n")).not.toContain("Closed.")
+    })
+
+    it("lists the other cards as not sent, with the reason", async () => {
+      const swapped = await assembled(three(), swap)
+      expect(swapped.skippedPrompts).toEqual(
+        expect.arrayContaining([
+          { kind: "card", entity: "mira", revision: expect.any(String), field: "definitions", swapped: true },
+          { kind: "card", entity: "sela", revision: expect.any(String), field: "definitions", swapped: true }
+        ])
+      )
+      expect(swapped.skippedPrompts?.some((s) => s.kind === "card" && s.entity === "oren")).toBe(false)
+      const mira = swapped.skippedPrompts!.find((s) => s.kind === "card" && s.entity === "mira")!
+      const describe = builtinSourceDescriptors.find((d) => d.id === "card")!.describe
+      const labels = {
+        names: new Map([[mira.kind === "card" ? mira.revision : "", "Mira"]]),
+        titles: new Map(),
+        promptNames: new Map(),
+        depthOf: new Map(),
+        ordinalOf: new Map(),
+        linkOf: () => ({})
+      }
+      expect(describe(mira, labels).label).toBe(
+        "Card “Mira”: definitions (card swap: sent only on its character's turn)"
+      )
+      expect((await assembled(three())).skippedPrompts ?? []).toEqual([])
+    })
+  })
 })
 
 describe("lorebooks: preset books, placement and pins (DESIGN §1.3)", () => {

@@ -289,7 +289,7 @@ describe("agent rollouts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("card swap budgets the tail card before sending a request", () => {
+  it.live("card swap budgets the speaker's card before sending a request", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
@@ -900,7 +900,7 @@ describe("agent rollouts", () => {
       const db = read(config.dataDir, version.id)
       assert.deepStrictEqual(db.snapshot.agentAssembly, {
         instructions: agentInstructions(offered, "both"),
-        cardsAtTail: false
+        speakerCardOnly: false
       })
       const reader = yield* Reader
       const me = yield* api.Whoami()
@@ -914,7 +914,7 @@ describe("agent rollouts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("card swap moves the speaker's card to the tail; agent.tools picks the tools", () => {
+  it.live("card swap keeps the speaker's card where the preset puts it; agent.tools picks the tools", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const registry = yield* ExecutionRegistry
@@ -943,8 +943,10 @@ describe("agent rollouts", () => {
       )
       const messages = first!.messages as Array<{ role: string; content: string }>
       const card = messages.flatMap((m, i) => (m.content.includes("keeps the ledger") ? [i] : []))
-      assert.deepStrictEqual(card, [messages.length - 2], "the card only just before the end of the request")
-      assert.strictEqual(messages.at(-2)?.role, "system")
+      // Once, in the preset's definitions above the history: nothing moves to the end of the request.
+      assert.strictEqual(card.length, 1)
+      assert.isBelow(card[0]!, messages.length - 2, "the card isn't moved to the end of the request")
+      assert.notInclude(messages.at(-2)!.content, "keeps the ledger")
       assert.include(messages.at(-1)!.content, agentInstructions(["look_up"], "both"))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })

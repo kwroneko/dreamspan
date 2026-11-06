@@ -53,7 +53,9 @@ const builtinDescription = (source: Source, labels: SourceLabels): SourceDescrip
     }
     case "card":
       return {
-        label: `${source.persona ? "Persona" : "Card"} “${names.get(source.revision) ?? "unnamed"}”: ${source.field}`,
+        label: `${source.persona ? "Persona" : "Card"} “${names.get(source.revision) ?? "unnamed"}”: ${source.field}${
+          source.swapped ? " (card swap: sent only on its character's turn)" : ""
+        }`,
         slotId: null,
         ...linkOf(source.revision)
       }

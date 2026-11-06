@@ -1,7 +1,7 @@
 import type { CardBrowse } from "./cardBrowse.tsx"
 
 /** The characters' filters, in their order (`cardBrowse.tsx`), here so the URL's parsing needs no UI. */
-export const CARD_FILTERS = ["all", "used", "unused", "favourites", "personas", "groups"] as const
+export const CARD_FILTERS = ["all", "used", "unused", "favourites", "personas", "groups", "archived"] as const
 
 /** Home's own params; retained only on home, independently of the sidebar's scope. */
 export const homeSearch = ["show", "sort", "reverse", "personas", "q", "pinsSort"] as const
