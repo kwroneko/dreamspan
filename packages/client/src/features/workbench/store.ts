@@ -77,6 +77,20 @@ const shellDiff = (before: string | null, after: string) => {
   return change
 }
 
+/**
+ * The sidebar's place a link carries when it opens beside or as a bare link: the params it
+ * names, the rest as the sidebar has them; a link naming the scope (`character`, `forks`,
+ * `side`) sets it whole, as the openers that scope it do (`sidebarCleared`).
+ */
+const SCOPE = ["character", "forks", "side"]
+const shellCarried = (href: string) => {
+  const now = new URL(href, "http://tab.invalid").searchParams
+  const change = new Map<string, string | null>()
+  for (const key of shellKeys()) if (now.has(key)) change.set(key, now.get(key))
+  if (SCOPE.some((key) => change.has(key))) for (const key of SCOPE) if (!change.has(key)) change.set(key, null)
+  return change
+}
+
 export class WorkbenchStore {
   layout: Layout
   private readonly listeners = new Set<() => void>()
@@ -413,9 +427,16 @@ export class WorkbenchStore {
    * Opens an item from inside a frame (a link in one of its tabs): in that frame, never another,
    * so a frame showing the same item elsewhere keeps its place. Unknown frames open as `open`.
    */
-  openIn(frameId: string | undefined, href: string, options: OpenOptions = {}) {
+  openIn(frameId: string | undefined, href: string, options: OpenOptions & { whole?: boolean } = {}) {
+    const { whole = false, ...rest } = options
     const frame = frames(this.layout.root).find((f) => f.id === frameId)?.id
-    return this.open(href, { ...options, ...(frame ? { frame } : {}) })
+    // `whole`: a link followed as a whole URL, its sidebar place included.
+    if (whole) this.shellChange = shellCarried(href)
+    try {
+      return this.open(href, { ...rest, ...(frame ? { frame } : {}) })
+    } finally {
+      this.shellChange = null
+    }
   }
   /** The frame a tab is in. */
   frameOf(tabId: string) {
@@ -432,7 +453,14 @@ export class WorkbenchStore {
       frame = newId("f")
       this.layout = splitFrame(this.layout, focused.id, "row", { newFrameId: frame, empty: true })
     }
-    return this.open(href, { frame, preview: false })
+    // The link's sidebar place comes with it, as a click on it would bring it (a character's
+    // tile scopes the sidebar to the character's chats).
+    this.shellChange = shellCarried(href)
+    try {
+      return this.open(href, { frame, preview: false })
+    } finally {
+      this.shellChange = null
+    }
   }
   /**
    * Moves a tab into a new frame beside a frame (its own by default): `before` puts it on the

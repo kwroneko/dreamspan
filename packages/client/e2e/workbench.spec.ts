@@ -53,6 +53,16 @@ test.beforeAll(async () => {
 const said = (page: Page, text: string) => page.locator("[data-frame]").getByText(text)
 const strip = (page: Page) => page.locator("[data-tab-strip]")
 const tabs = (page: Page) => page.getByRole("tab").and(page.locator("[data-tab] [role=tab]"))
+/** The sidebar on a character's chats (owner, 2026-11-06: opening a character shows them). */
+const expectCharacterSidebar = async (page: Page, name: string, chat: string, other: string) => {
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" })
+  const crumbs = sidebar.getByRole("navigation", { name: "Chat breadcrumbs" })
+  await expect(crumbs).toContainText("All chats")
+  await expect(crumbs).toContainText(name)
+  await expect(sidebar.getByRole("button", { name: `New chat with ${name}`, exact: true })).toBeVisible()
+  await expect(sidebar.getByRole("link", { name: new RegExp(`^Open chat ${chat}`) })).toBeVisible()
+  await expect(sidebar.getByRole("link", { name: new RegExp(`^Open chat ${other}`) })).toHaveCount(0)
+}
 const sidebarChat = (page: Page, title: string) =>
   page.getByRole("complementary", { name: "Sidebar" }).getByRole("link", { name: new RegExp(`^Open chat ${title}`) })
 
@@ -469,12 +479,17 @@ test("links open in their own frame, never another frame's tab of the item", asy
   await expect(frames).toHaveCount(2)
   await left.getByRole("link", { name: "Open Mira", exact: true }).click()
   await expect(left.getByText("The tide is out")).toBeVisible()
+  // Opening a character shows her chats in the sidebar, as before frames.
+  await expectCharacterSidebar(page, "Mira", "Harbour walk", "Lighthouse night")
+  await page.getByRole("complementary", { name: "Sidebar" }).getByRole("button", { name: "All chats" }).click()
+  await expect(sidebarChat(page, "Lighthouse night")).toBeVisible()
   // The same tile in the right frame opens it there too: the left chat keeps its place.
   await right.getByRole("link", { name: "Open Mira", exact: true }).click()
   await expect(right.getByText("The tide is out")).toBeVisible()
   await expect(left.getByText("The tide is out")).toBeVisible()
   await expect(right).toHaveAttribute("data-focused", "")
   await expect(frames).toHaveCount(2)
+  await expectCharacterSidebar(page, "Mira", "Harbour walk", "Lighthouse night")
 
   // A library entry the same way: the editor open on the left, its row clicked on the right.
   await fresh(page, 1440)
@@ -520,8 +535,24 @@ test("a character tile keeps Open beside while hovered, and has a chat row's men
     await expect(menu.getByRole("menuitem", { name: item, exact: true })).toBeVisible()
   if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "tile-menu")
   await menu.getByRole("menuitem", { name: "Open beside", exact: true }).click()
-  await expect(page.locator("[data-frame]")).toHaveCount(2)
-  await expect(page.locator("[data-frame]").nth(1).getByText("The lamp turns")).toBeVisible()
+  const frames = page.locator("[data-frame]")
+  await expect(frames).toHaveCount(2)
+  await expect(frames.nth(1).getByText("The lamp turns")).toBeVisible()
+  // Beside, the character opens as a click opens her: the sidebar on her chats.
+  await expectCharacterSidebar(page, "Wren", "Lighthouse night", "Harbour walk")
+
+  // An Alt-click and the menu's Open do the same, from the Home tab on the left.
+  const home = frames.nth(0)
+  await home.getByRole("link", { name: "Open Mira", exact: true }).click({ modifiers: ["Alt"] })
+  await expect(frames.nth(1).getByText("The tide is out")).toBeVisible()
+  await expectCharacterSidebar(page, "Mira", "Harbour walk", "Lighthouse night")
+  await home.getByRole("link", { name: "Open Wren", exact: true }).click({ button: "right" })
+  await page
+    .getByRole("menu", { name: "Actions for Wren" })
+    .getByRole("menuitem", { name: "Open", exact: true })
+    .click()
+  await expect(home.getByText("The lamp turns")).toBeVisible()
+  await expectCharacterSidebar(page, "Wren", "Lighthouse night", "Harbour walk")
 })
 
 // A tab's right-click menu (the frame's ⋯ has the same): pin, the Close variants, Reopen
