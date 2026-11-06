@@ -1,3 +1,4 @@
+import { settingsRegistry } from "./settings.ts"
 import { storageKinds } from "./storageKinds.ts"
 // Trusted code references only: never accept these from chat/library content or public RPC.
 // Each worker request carries the active module stack, so scope exit and respawns agree.
@@ -15,7 +16,8 @@ const HEADER = "rp-state-modules"
 /** Passing the registry also works when the worker bundles its own copy of shared/state. */
 export type InstallStateModule = (
   keys: typeof stateKeys,
-  kinds: typeof storageKinds
+  kinds: typeof storageKinds,
+  settings: typeof settingsRegistry
 ) => Effect.Effect<void, StateKeyRegistrationError, Scope.Scope>
 
 const install = Effect.fnUntraced(function* (source: ModuleSource, validate: typeof Schema.is = Schema.is) {
@@ -27,7 +29,11 @@ const install = Effect.fnUntraced(function* (source: ModuleSource, validate: typ
       ...stateKeys,
       register: (key) => stateKeys.register(key, validate(key.value as Schema.Schema<unknown>))
     },
-    storageKinds
+    storageKinds,
+    {
+      ...settingsRegistry,
+      register: (entry) => settingsRegistry.register(entry, validate(entry.schema as Schema.Schema<unknown>))
+    }
   )
 })
 

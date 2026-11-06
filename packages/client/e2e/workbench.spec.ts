@@ -9,6 +9,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
+import { expectTextBox, replaceEditorText } from "./support/textbox.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -52,6 +53,16 @@ test.beforeAll(async () => {
 const said = (page: Page, text: string) => page.locator("[data-frame]").getByText(text)
 const strip = (page: Page) => page.locator("[data-tab-strip]")
 const tabs = (page: Page) => page.getByRole("tab").and(page.locator("[data-tab] [role=tab]"))
+/** The sidebar on a character's chats (owner, 2026-11-06: opening a character shows them). */
+const expectCharacterSidebar = async (page: Page, name: string, chat: string, other: string) => {
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" })
+  const crumbs = sidebar.getByRole("navigation", { name: "Chat breadcrumbs" })
+  await expect(crumbs).toContainText("All chats")
+  await expect(crumbs).toContainText(name)
+  await expect(sidebar.getByRole("button", { name: `New chat with ${name}`, exact: true })).toBeVisible()
+  await expect(sidebar.getByRole("link", { name: new RegExp(`^Open chat ${chat}`) })).toBeVisible()
+  await expect(sidebar.getByRole("link", { name: new RegExp(`^Open chat ${other}`) })).toHaveCount(0)
+}
 const sidebarChat = (page: Page, title: string) =>
   page.getByRole("complementary", { name: "Sidebar" }).getByRole("link", { name: new RegExp(`^Open chat ${title}`) })
 
@@ -198,6 +209,100 @@ test("each device restores its own layout", async ({ page, browser }) => {
   } finally {
     await phoneContext.close()
   }
+})
+
+test("old editor links and modified opener clicks keep their browser navigation", async ({ page, context }) => {
+  test.setTimeout(120_000)
+  await fresh(page, 1440)
+  await page.goto(`${server().url}/chats/${fixtures.chatA}?editor=${fixtures.presetA}`)
+  await expect(page.getByRole("region", { name: "Preset editor", exact: true })).toBeVisible()
+  await expect(tabs(page)).toHaveCount(2)
+  await expect(page).toHaveURL(new RegExp(`/library/${fixtures.presetA}`))
+  await page.getByRole("tab", { name: "Harbour walk", exact: true }).click()
+  const original = page.url()
+  for (const click of [{ button: "middle" as const }, { modifiers: ["Control" as const] }]) {
+    const opened = context.waitForEvent("page")
+    await sidebarChat(page, "Lighthouse night").click(click)
+    const other = await opened
+    await expect(other).toHaveURL(new RegExp(`/chats/${fixtures.chatB}`))
+    await expect(said(other, "The lamp turns")).toBeVisible()
+    await expect(page).toHaveURL(original)
+    await other.close()
+  }
+})
+
+test("stale layouts keep deleted items closable and unknown versions start fresh", async ({ page }) => {
+  test.setTimeout(120_000)
+  await fresh(page, 1440)
+  await page.goto(`${server().url}/chats/${fixtures.chatA}`)
+  await expect(said(page, "The tide is out")).toBeVisible()
+  await sidebarChat(page, "Harbour walk").dblclick()
+  await expect.poll(() => savedLayout(page)).not.toBeNull()
+  const device = (await page.evaluate(() => localStorage.getItem("rp.device"))) ?? "shared"
+  const missing = "00000000-0000-4000-8000-000000000000"
+  await admin((api) =>
+    api.SetWorkbenchLayout({
+      device,
+      layout: JSON.stringify({
+        version: 1,
+        root: {
+          type: "frame",
+          id: "restored",
+          active: "live",
+          tabs: [
+            { id: "live", href: `/chats/${fixtures.chatA}`, preview: false },
+            { id: "gone-chat", href: `/chats/${missing}`, preview: false },
+            { id: "gone-item", href: `/library/${missing}`, preview: false }
+          ]
+        },
+        focused: "restored",
+        recent: ["live"]
+      })
+    })
+  )
+  await page.reload()
+  await expect(tabs(page)).toHaveCount(3)
+  const missingItem = page.locator('[data-tab="gone-item"]')
+  await missingItem.getByRole("tab").click()
+  await expect(page.getByText("This item was deleted or never existed", { exact: false })).toBeVisible()
+  await missingItem.getByRole("button", { name: /^Close / }).click()
+  const missingChat = page.locator('[data-tab="gone-chat"]')
+  await missingChat.getByRole("tab").click()
+  await expect(page.getByRole("alert").first()).toBeVisible()
+  await missingChat.getByRole("button", { name: /^Close / }).click()
+  await expect(said(page, "The tide is out")).toBeVisible()
+  await expect.poll(() => savedLayout(page)).not.toContain(missing)
+  await admin((api) => api.SetWorkbenchLayout({ device, layout: JSON.stringify({ version: 0, root: {} }) }))
+  await page.reload()
+  await expect(said(page, "The tide is out")).toBeVisible()
+  await expect(tabs(page)).toHaveCount(0)
+})
+
+test("an editor opened from one of two chat views shares that view's panel store", async ({ page }) => {
+  test.setTimeout(120_000)
+  await fresh(page, 1440)
+  await page.goto(`${server().url}/chats/${fixtures.chatA}`)
+  await openPanel(page, "Prompt preset")
+  await page.getByRole("button", { name: "Split right", exact: true }).click()
+  const left = page.locator("[data-frame]").first()
+  await left.getByRole("textbox", { name: "Message", exact: true }).click()
+  await page.getByRole("link", { name: "Open the preset in the large editor" }).click()
+  const editor = page.getByRole("region", { name: "Preset editor", exact: true })
+  await expect(editor).toBeVisible()
+  const panel = page.getByRole("tabpanel", { name: "Prompt preset", exact: true })
+  await panel.getByRole("button", { name: "Expand Main Prompt", exact: true }).click()
+  const field = panel.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
+  await replaceEditorText(field, "Shared with the originating chat view.")
+  await expectTextBox(
+    editor.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }),
+    "Shared with the originating chat view."
+  )
+  await page.locator("[data-frame]").nth(1).getByRole("button", { name: "Close Harbour walk", exact: true }).click()
+  await replaceEditorText(field, "Still shared after the other view closes.")
+  await expectTextBox(
+    editor.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }),
+    "Still shared after the other view closes."
+  )
 })
 
 // Half-width frames keep their header and composer readable: the branch picker shows its name
@@ -374,12 +479,17 @@ test("links open in their own frame, never another frame's tab of the item", asy
   await expect(frames).toHaveCount(2)
   await left.getByRole("link", { name: "Open Mira", exact: true }).click()
   await expect(left.getByText("The tide is out")).toBeVisible()
+  // Opening a character shows her chats in the sidebar, as before frames.
+  await expectCharacterSidebar(page, "Mira", "Harbour walk", "Lighthouse night")
+  await page.getByRole("complementary", { name: "Sidebar" }).getByRole("button", { name: "All chats" }).click()
+  await expect(sidebarChat(page, "Lighthouse night")).toBeVisible()
   // The same tile in the right frame opens it there too: the left chat keeps its place.
   await right.getByRole("link", { name: "Open Mira", exact: true }).click()
   await expect(right.getByText("The tide is out")).toBeVisible()
   await expect(left.getByText("The tide is out")).toBeVisible()
   await expect(right).toHaveAttribute("data-focused", "")
   await expect(frames).toHaveCount(2)
+  await expectCharacterSidebar(page, "Mira", "Harbour walk", "Lighthouse night")
 
   // A library entry the same way: the editor open on the left, its row clicked on the right.
   await fresh(page, 1440)
@@ -425,8 +535,24 @@ test("a character tile keeps Open beside while hovered, and has a chat row's men
     await expect(menu.getByRole("menuitem", { name: item, exact: true })).toBeVisible()
   if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "tile-menu")
   await menu.getByRole("menuitem", { name: "Open beside", exact: true }).click()
-  await expect(page.locator("[data-frame]")).toHaveCount(2)
-  await expect(page.locator("[data-frame]").nth(1).getByText("The lamp turns")).toBeVisible()
+  const frames = page.locator("[data-frame]")
+  await expect(frames).toHaveCount(2)
+  await expect(frames.nth(1).getByText("The lamp turns")).toBeVisible()
+  // Beside, the character opens as a click opens her: the sidebar on her chats.
+  await expectCharacterSidebar(page, "Wren", "Lighthouse night", "Harbour walk")
+
+  // An Alt-click and the menu's Open do the same, from the Home tab on the left.
+  const home = frames.nth(0)
+  await home.getByRole("link", { name: "Open Mira", exact: true }).click({ modifiers: ["Alt"] })
+  await expect(frames.nth(1).getByText("The tide is out")).toBeVisible()
+  await expectCharacterSidebar(page, "Mira", "Harbour walk", "Lighthouse night")
+  await home.getByRole("link", { name: "Open Wren", exact: true }).click({ button: "right" })
+  await page
+    .getByRole("menu", { name: "Actions for Wren" })
+    .getByRole("menuitem", { name: "Open", exact: true })
+    .click()
+  await expect(home.getByText("The lamp turns")).toBeVisible()
+  await expectCharacterSidebar(page, "Wren", "Lighthouse night", "Harbour walk")
 })
 
 // A tab's right-click menu (the frame's ⋯ has the same): pin, the Close variants, Reopen

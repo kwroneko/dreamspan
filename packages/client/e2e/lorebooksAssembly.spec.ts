@@ -78,7 +78,7 @@ test.beforeAll(async ({ browser }) => {
     })
   )
   ariaCard = (await admin((api) => api.ListLibrary({ kind: "card" }))).find(
-    (c) => c.label === "Aria Vance" && c.refKind === "upstream"
+    (c) => c.label === "Aria Vance" && c.parentEntityId === null
   )!
   const usage = await admin((api) => api.ListCardUsage())
   const aria = usage.find((c) => c.name === "Aria Vance")!

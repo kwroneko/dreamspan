@@ -1,3 +1,4 @@
+import { readSetting, putUserSetting } from "./settings.ts"
 import type { StImportPrefix } from "./stImportPrefix.ts"
 import { insertStMessageBatch, prepareStMessageBatch } from "./stMessageBatch.ts"
 import { recordCardArrival, recordChatArrival } from "./stArrival.ts"
@@ -310,7 +311,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       yield* sql`INSERT INTO entity_refs ${sql.insert({
         id: uuidv7(),
         entity_id: entityId,
-        ref_kind: "upstream",
         head_revision_id: parent,
         merge_base_revision_id: parent,
         label: note.title,
@@ -351,23 +351,20 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       Effect.gen(function* () {
         yield* current(userId, importId, importId)
         if (!(yield* ownedPreset(sql, userId, refId))) return yield* new NotFound({ entity: "preset", id: refId })
-        const changed = yield* sql`INSERT INTO user_settings (user_id,key,value_json)
-          VALUES (${userId},${DEFAULT_PRESET},${JSON.stringify(refId)})
-          ON CONFLICT(user_id,key) DO UPDATE SET value_json=excluded.value_json
-          WHERE json_type(user_settings.value_json) = 'null' RETURNING user_id`
-        return changed.length > 0
+        const previous = yield* readSetting(sql, "user", userId, DEFAULT_PRESET)
+        if (previous.value !== null) return false
+        yield* putUserSetting(sql, userId, DEFAULT_PRESET, refId)
+        return true
       }).pipe(transaction(sql, "StImportDefaultPreset")),
     StImportSummarySettings: ({ userId, importId, prompt, settings }) =>
       Effect.gen(function* () {
         yield* current(userId, importId, importId)
-        yield* sql`INSERT INTO user_settings (user_id,key,value_json) VALUES (${userId},'import.st.memory',${settings})
-          ON CONFLICT(user_id,key) DO UPDATE SET value_json=excluded.value_json`
+        yield* putUserSetting(sql, userId, "import.st.memory", JSON.parse(settings))
         if (prompt === null) return
-        // Re-importing must not undo an instruction the user has chosen since the import.
-        yield* sql`INSERT INTO user_settings (user_id,key,value_json)
-          VALUES (${userId},'generation.lcm',${JSON.stringify({ tail: prompt })})
-          ON CONFLICT(user_id,key) DO UPDATE SET value_json=json_set(user_settings.value_json,'$.tail',${prompt})
-          WHERE json_type(user_settings.value_json,'$.tail') IS NULL`
+        // Re-importing keeps an instruction the user has chosen since the import.
+        const { value } = yield* readSetting(sql, "user", userId, "generation.lcm")
+        const stored = (value ?? {}) as Record<string, unknown>
+        if (stored.tail === undefined) yield* putUserSetting(sql, userId, "generation.lcm", { ...stored, tail: prompt })
       }).pipe(transaction(sql, "StImportSummarySettings")),
 
     StImportBegin: ({ userId, importId }) =>
@@ -878,7 +875,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           if (localTargets.has(`note:${id}`)) return true
           const [row] = yield* sql<{ changed: number }>`SELECT e.deleted_at IS NOT NULL OR EXISTS (
             SELECT 1 FROM entity_refs r JOIN entity_revisions h ON h.id = r.head_revision_id
-            WHERE r.entity_id = e.id AND r.ref_kind = 'upstream' AND h.origin <> 'import'
+            WHERE r.entity_id = e.id AND h.origin <> 'import'
           ) AS changed FROM entities e WHERE e.id = ${id}`
           return row?.changed === 1
         })
@@ -896,7 +893,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             // the chat has one such note. A new note here showed up in every fork, switched off
             // in all but this one (owner, 2026-11-01).
             const [ref] = yield* sql<{ head_revision_id: string }>`
-              SELECT head_revision_id FROM entity_refs WHERE entity_id = ${replaced} AND ref_kind = 'upstream'`
+              SELECT head_revision_id FROM entity_refs WHERE entity_id = ${replaced}`
             const revision = yield* insertNoteRevisions(
               replaced,
               chatId,

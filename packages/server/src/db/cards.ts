@@ -153,7 +153,7 @@ export const loadCastCards = (sql: SqlClient.SqlClient, userId: UserId, ids: Rea
           EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
         FROM entities e
         JOIN entity_refs r ON r.id = (
-          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
+          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id
           LIMIT 1)
         LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
@@ -193,7 +193,7 @@ export const loadCards = (sql: SqlClient.SqlClient, userId: UserId, ids: Readonl
           EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
         FROM entities e
         JOIN entity_refs r ON r.id = (
-          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
+          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id
           LIMIT 1)
         JOIN entity_revisions rev ON rev.id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL

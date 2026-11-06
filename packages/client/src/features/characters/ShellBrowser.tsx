@@ -39,6 +39,7 @@ import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
+import { WindowedList } from "../../ui/WindowedList.tsx"
 import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
 import {
   CharacterGrid,
@@ -538,7 +539,10 @@ export function ForkRow({
  * 2026-11-01): switch branches without leaving the list above; its header lists them as the
  * panel's list instead. Collapsed or expanded per device.
  */
+const shellForkKey = (fork: ShellFork) => fork.forkId
+
 export function OpenChatBranches() {
+  const scrollOffset = useRef(0)
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const { scope, setScope, grid } = useShellNavigation()
@@ -633,23 +637,29 @@ export function OpenChatBranches() {
           onClick={() => setScope({ entity: null, chat: displayedChat ?? null })}
         />
       </div>
-      <div
-        data-foot-body
-        inert={!open}
-        aria-hidden={!open}
-        style={open ? undefined : { height: 0, maxHeight: 0, visibility: "hidden" }}
-        className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
-      >
-        {rows.map((f) => (
-          <ForkRow
-            key={f.forkId}
-            fork={f}
-            perFork
-            branchOnly
-            here={displayedFork ? f.forkId === displayedFork : f.current}
-          />
-        ))}
-      </div>
+      {open ? (
+        <WindowedList
+          data-foot-body
+          items={rows}
+          itemKey={shellForkKey}
+          initialOffset={() => scrollOffset.current}
+          onScroll={(event) => {
+            scrollOffset.current = event.currentTarget.scrollTop
+          }}
+          className="min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
+          renderItem={(f) => (
+            <ForkRow
+              key={f.forkId}
+              fork={f}
+              perFork
+              branchOnly
+              here={displayedFork ? f.forkId === displayedFork : f.current}
+            />
+          )}
+        />
+      ) : (
+        <div data-foot-body inert aria-hidden style={{ height: 0, maxHeight: 0, visibility: "hidden" }} />
+      )}
     </section>
   )
 }

@@ -127,7 +127,7 @@ const entityByLabel = (label: string, tag?: string) => {
   const conn = db()
   const row = conn
     .prepare(
-      `SELECT e.id FROM entities e JOIN entity_refs r ON r.entity_id = e.id WHERE r.label = ? AND r.ref_kind = 'upstream'
+      `SELECT e.id FROM entities e JOIN entity_refs r ON r.entity_id = e.id WHERE r.label = ?
        ${tag ? "AND EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = ?)" : ""}`
     )
     .get(...(tag ? [label, tag] : [label]))

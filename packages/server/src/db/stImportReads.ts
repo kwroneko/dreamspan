@@ -99,7 +99,7 @@ export const makeStImportReadHandlers = Effect.gen(function* () {
           cast.length === 0
             ? []
             : yield* sql<{ entity_id: string; label: string }>`SELECT entity_id, label FROM entity_refs
-                WHERE ref_kind = 'upstream' AND ${sql.in("entity_id", cast)}`
+                WHERE ${sql.in("entity_id", cast)}`
         const byId = new Map(labels.map((ref) => [ref.entity_id, ref.label]))
         return {
           chatId: row.id as ChatId,
@@ -130,7 +130,7 @@ export const makeStImportReadHandlers = Effect.gen(function* () {
         }>`
           SELECT r.id AS ref_id, e.id AS entity_id, e.kind, r.label, r.source_path, r.source_hash, e.deleted_at
           FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-          WHERE e.owner_user_id = ${userId} AND r.ref_kind = 'upstream' AND r.source_path IS NOT NULL
+          WHERE e.owner_user_id = ${userId} AND r.source_path IS NOT NULL
             AND e.kind IN ('card', 'lorebook', 'preset')
           ORDER BY r.id`
         return {

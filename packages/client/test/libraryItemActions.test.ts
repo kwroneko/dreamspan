@@ -25,12 +25,10 @@ const ref = (fields: Partial<LibraryRef>) =>
     id: "ref" as RefId,
     entityId: "entity" as EntityId,
     kind: "card",
-    refKind: "upstream",
     label: "Synthetic",
     subtitle: "",
     headRevisionId: "rev" as RevisionId,
-    followsRefId: null,
-    chatId: null,
+    parentEntityId: null,
     updateAvailable: false,
     rowVersion: 1,
     updatedAt: 0,
@@ -57,12 +55,18 @@ it("offers each kind its own actions, a lorebook an Edit, a card no merging upda
     // Every kind opens in its editor's page, a lorebook too.
     expect(ids({ ...card, entry: ref({ kind: "lorebook" }) })).toEqual(["library.edit", "library.update"])
     // A preset has its archive button beside Edit, as in the preset pickers.
-    expect(ids({ ...card, entry: ref({ kind: "preset", refKind: "variant" }) })).toEqual([
+    // A variant merges its original's new versions instead of importing a file.
+    expect(ids({ ...card, entry: ref({ kind: "preset", parentEntityId: "parent" as EntityId }) })).toEqual([
       "library.edit",
       "library.archive",
       "library.export"
     ])
-    expect(ids({ ...card, entry: ref({ kind: "preset", refKind: "chat_override" }) })).not.toContain("library.archive")
+    expect(ids({ ...card, entry: ref({ kind: "preset" }) })).toEqual([
+      "library.edit",
+      "library.archive",
+      "library.update",
+      "library.export"
+    ])
   } finally {
     for (const undo of dispose) undo()
   }

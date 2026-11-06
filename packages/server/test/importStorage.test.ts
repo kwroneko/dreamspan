@@ -83,7 +83,8 @@ describe("library import storage", () => {
       const { reader, ana, importCard } = yield* setup
       const imported = yield* importCard(ana, "A cartographer.")
       assert.isTrue(imported.created)
-      assert.strictEqual(imported.ref.refKind, "upstream")
+      assert.isNull(imported.ref.parentEntityId)
+      assert.isTrue(imported.ref.hasImport)
 
       const { doc } = yield* reader.GetRef({ userId: ana, refId: imported.ref.id })
       assert.isString(doc.avatar_media_id)

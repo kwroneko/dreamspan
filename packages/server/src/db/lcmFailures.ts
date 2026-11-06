@@ -131,7 +131,7 @@ export const fallbackModel = (sql: SqlClient.SqlClient, userId: UserId) =>
       connection: string | null
       model: string | null
     }>`SELECT json_extract(value_json, '$.fallback.connection') AS connection, json_extract(value_json, '$.fallback.model') AS model
-      FROM user_settings WHERE user_id = ${userId} AND key = 'generation.lcm'`
+      FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = 'generation.lcm'`
     return row?.connection && row.model && (yield* ownedModel(sql, userId, row.connection, row.model))
       ? { connection: row.connection, model: row.model }
       : null

@@ -77,39 +77,6 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const { drafts } = bin
     const forkMerge = makeForkMergeQueries(sql)
 
-    /** The user's live chat, or NotFound. */
-    const liveChat = (userId: UserId, chatId: string) =>
-      sql<{
-        id: string
-      }>`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`.pipe(
-        Effect.flatMap(([chat]) => (chat ? Effect.void : Effect.fail(new NotFound({ entity: "chat", id: chatId }))))
-      )
-
-    /**
-     * A chat override following `ref`, starting at `head` (its head unless the chat used an
-     * older revision): changes for that chat only (DESIGN §4).
-     */
-    const insertOverride = (ref: RefRow, chatId: string, head: string = ref.head_revision_id) =>
-      Effect.gen(function* () {
-        const id = uuidv7()
-        const at = Date.now()
-        yield* sql`INSERT INTO entity_refs ${sql.insert({
-          id,
-          entity_id: ref.entity_id,
-          ref_kind: "chat_override",
-          head_revision_id: head,
-          follows_ref_id: ref.id,
-          merge_base_revision_id: head,
-          forked_from_revision_id: head,
-          label: ref.label,
-          subtitle: "",
-          chat_id: chatId,
-          created_at: at,
-          updated_at: at
-        })}`
-        return yield* reload(id)
-      })
-
     const insertRevision = (options: {
       readonly entityId: string
       readonly schemaVersion: number
@@ -223,12 +190,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const mergeMessage = (ref: RefRow) =>
       ref.followed_label === null ? "Merged a new import" : `Merged changes from ${ref.followed_label}`
 
-    const recordMerge = (
-      ref: RefRow,
-      revisionId: string,
-      theirs: string,
-      sourceRefId = ref.follows_ref_id ?? ref.parent_ref_id
-    ) =>
+    const recordMerge = (ref: RefRow, revisionId: string, theirs: string, sourceRefId = ref.parent_ref_id) =>
       sql`INSERT INTO library_merges ${sql.insert({
         revision_id: revisionId,
         ref_id: ref.id,
@@ -265,7 +227,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           doc: encode(yield* withoutGrants(ref, plan.merged)),
           parents: [ref.head_revision_id, plan.theirsHead],
           origin: "merge",
-          originRef: ref.follows_ref_id,
+          originRef: ref.parent_ref_id,
           message: mergeMessage(ref),
           ...(modifiedAt === undefined ? {} : { modifiedAt })
         })
@@ -274,7 +236,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         return plan.outcome
       })
 
-    /** Forks keep their own head until an explicit merge, including chat overrides. */
+    /** Forks keep their own head until an explicit merge. */
     const changed = (refId: string) =>
       Effect.map(reload(refId), (ref) => new RefChange({ ref: toLibraryRef(ref), followers: [] }))
 
@@ -328,7 +290,6 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         yield* sql`INSERT INTO entity_refs ${sql.insert({
           id: refId,
           entity_id: entityId,
-          ref_kind: "upstream",
           head_revision_id: first,
           // An imported upstream has merged its import (see refSelect in library.ts).
           merge_base_revision_id: options.origin === "import" ? first : null,
@@ -342,7 +303,47 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         return yield* reload(refId)
       })
 
-    /** A new import of an upstream ref, merged with the ref's own edits and passed on to its followers. */
+    /**
+     * A fork (spec/LIBRARY-FORKS.md), every kind's: a new entity of the source's kind whose only
+     * tie to it is the lineage on its entity row. One revision, `parents: []` (its history starts
+     * here), the source revision's document unless `doc` replaces it; its own ref with `label`
+     * and `subtitle`, no import source; the source's tags. The parent's later revisions reach it
+     * only through an explicit merge (forkMerge.ts), from the revision it was forked from.
+     */
+    const forkEntity = (options: {
+      readonly userId: UserId
+      readonly ref: RefRow
+      readonly label: string
+      readonly subtitle: string
+      readonly source?: string
+      readonly doc?: Doc
+      readonly message?: string
+    }) =>
+      Effect.gen(function* () {
+        const { ref } = options
+        const source = options.source ?? ref.head_revision_id
+        const fork = yield* createUpstream({
+          userId: options.userId,
+          kind: ref.kind,
+          label: options.label,
+          subtitle: options.subtitle,
+          doc: encode(options.doc ?? (yield* lib.loadDoc(source))),
+          schemaVersion: (yield* revision(source)).schema_version,
+          origin: "user",
+          originRef: JSON.stringify({ forked: source }),
+          sourcePath: null,
+          sourceHash: null,
+          message: options.message ?? `Forked from ${ref.label}${ref.subtitle ? ` · ${ref.subtitle}` : ""}`
+        })
+        yield* sql`UPDATE entities SET forked_from_entity_id = ${ref.entity_id}, forked_from_revision_id = ${source},
+                     forked_at = ${Date.now()} WHERE id = ${fork.entity_id}`
+        // Folders, the persona folder included.
+        yield* sql`INSERT INTO entity_tags (entity_id, tag)
+                     SELECT ${fork.entity_id}, tag FROM entity_tags WHERE entity_id = ${ref.entity_id}`
+        return yield* reload(fork.id)
+      })
+
+    /** A new import of an entry, merged with its own edits. */
     const importInto = (
       ref: RefRow,
       options: {
@@ -356,9 +357,6 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       }
     ) =>
       Effect.gen(function* () {
-        if (ref.ref_kind !== "upstream") {
-          return yield* new RefOperationRefused({ refId: ref.id, reason: "Only upstream refs take imports." })
-        }
         // Until per-kind migrations exist, every revision of an entity has one schema
         // version, so merges never span versions.
         const current = yield* revision(ref.head_revision_id)
@@ -413,9 +411,6 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       options: { readonly expectedHeadRevisionId: string }
     ) =>
       Effect.gen(function* () {
-        if (ref.ref_kind !== "upstream") {
-          return yield* new RefOperationRefused({ refId: ref.id, reason: "Only upstream refs take imports." })
-        }
         if (ref.head_revision_id !== options.expectedHeadRevisionId) {
           return yield* new RefOperationRefused({
             refId: ref.id,
@@ -591,7 +586,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           const [existing] = yield* sql<{ id: string }>`
             SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
             JOIN entity_revisions h ON h.id = r.head_revision_id
-            WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+            WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
               AND json_extract(h.doc_json, '$.owner.card') = ${cardEntityId}
               AND json_extract(h.doc_json, '$.kind') = 'character_author_note'
             ORDER BY e.id LIMIT 1`
@@ -653,8 +648,6 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       SetRefArchived: ({ userId, refId, archived }) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
-          if (ref.ref_kind === "chat_override")
-            return yield* new RefOperationRefused({ refId, reason: "A chat's own copy can't be archived." })
           yield* sql`UPDATE entities
             SET archived_at = CASE WHEN ${archived ? 1 : 0} = 1 THEN coalesce(archived_at, ${Date.now()}) END
             WHERE id = ${ref.entity_id}`
@@ -699,58 +692,9 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
           if (ref.kind === "card")
-            return yield* new RefOperationRefused({ refId, reason: "Cards use independent forks." })
-          if (ref.ref_kind === "chat_override") {
-            return yield* new RefOperationRefused({
-              refId,
-              reason: "A chat override can't be forked; promote it to a variant instead."
-            })
-          }
-          const id = uuidv7()
-          const at = Date.now()
-          yield* sql`INSERT INTO entity_refs ${sql.insert({
-            id,
-            entity_id: ref.entity_id,
-            ref_kind: "variant",
-            head_revision_id: ref.head_revision_id,
-            follows_ref_id: ref.id,
-            merge_base_revision_id: ref.head_revision_id,
-            forked_from_revision_id: ref.head_revision_id,
-            label,
-            subtitle,
-            created_at: at,
-            updated_at: at
-          })}`
-          return toLibraryRef(yield* reload(id))
+            return yield* new RefOperationRefused({ refId, reason: "Cards fork with their names (ForkCard)." })
+          return toLibraryRef(yield* forkEntity({ userId, ref, label, subtitle }))
         }).pipe(transaction(sql, "ForkRef")),
-
-      CreateChatOverride: ({ userId, refId, chatId }) =>
-        Effect.gen(function* () {
-          const ref = yield* lib.ownedRef(userId, refId)
-          if (ref.kind === "card")
-            return yield* new RefOperationRefused({ refId, reason: "Cards use independent forks." })
-          if (ref.ref_kind === "chat_override") {
-            return yield* new RefOperationRefused({ refId, reason: "This is already a chat override." })
-          }
-          yield* liveChat(userId, chatId)
-          return toLibraryRef(yield* insertOverride(ref, chatId))
-        }).pipe(transaction(sql, "CreateChatOverride")),
-
-      PromoteOverride: ({ userId, refId, label, subtitle, expectedRowVersion }) =>
-        Effect.gen(function* () {
-          const ref = yield* lib.ownedRef(userId, refId)
-          if (ref.kind === "card")
-            return yield* new RefOperationRefused({ refId, reason: "Cards use independent forks." })
-          if (ref.ref_kind !== "chat_override") {
-            return yield* new RefOperationRefused({ refId, reason: "Only chat overrides can be promoted." })
-          }
-          yield* checkRowVersion(ref, expectedRowVersion)
-          const head = ref.head_revision_id
-          yield* sql`UPDATE entity_refs SET head_revision_id = ${head}, ref_kind = 'variant', chat_id = NULL, label = ${label}, subtitle = ${subtitle},
-                     row_version = row_version + 1, updated_at = ${Date.now()}
-                   WHERE id = ${refId}`
-          return toLibraryRef(yield* reload(refId))
-        }).pipe(transaction(sql, "PromoteOverride")),
 
       MergeFollowed: ({ userId, refId }) =>
         Effect.flatMap(lib.ownedRef(userId, refId), mergeAndFlow).pipe(transaction(sql, "MergeFollowed")),
@@ -758,6 +702,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       ResolveMerge: ({ userId, refId, doc, theirsRevisionId, expectedRowVersion }) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
+          yield* lib.checkMergeBase(ref)
           if (ref.followed_head === null) {
             return yield* new RefOperationRefused({
               refId,
@@ -796,7 +741,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             doc: encode(yield* withoutGrants(ref, valid.doc)),
             parents: [ref.head_revision_id, theirsRevisionId],
             origin: "merge",
-            originRef: ref.follows_ref_id,
+            originRef: ref.parent_ref_id,
             message: `${mergeMessage(ref)}, resolved by hand`
           })
           yield* recordMerge(ref, merge, theirsRevisionId)
@@ -866,7 +811,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               (yield* sql<{ id: string }>`
                 SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
                 WHERE ${sql.in("r.id", lorebookIds)} AND e.owner_user_id = ${userId} AND e.kind = 'lorebook'
-                  AND e.deleted_at IS NULL AND r.ref_kind <> 'chat_override'`).map((row) => row.id)
+                  AND e.deleted_at IS NULL`).map((row) => row.id)
             )
             const lorebooks = lorebookIds.filter((id) => live.has(id)).map((id) => ({ id, enabled: true }))
             if (lorebooks.length > 0) doc = encode({ ...(JSON.parse(doc.json) as Doc), lorebooks })
@@ -976,6 +921,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       revision,
       recordMedia,
       createUpstream,
+      forkEntity,
       checkReferences,
       withoutGrants
     }

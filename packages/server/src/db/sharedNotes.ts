@@ -17,7 +17,7 @@ export const linkCounts = (sql: SqlClient.SqlClient, userId: UserId, entities: R
     WITH wanted(link) AS (SELECT value FROM json_each(${JSON.stringify(entities)})),
     links(note, link) AS (
       SELECT e.id, json_extract(h.doc_json, '$.link')
-      FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+      FROM entities e JOIN entity_refs r ON r.entity_id = e.id
       JOIN entity_revisions h ON h.id = r.head_revision_id
       WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
       UNION
@@ -50,7 +50,7 @@ export const sharedNote = (sql: SqlClient.SqlClient, userId: UserId, entityId: s
     }>`
     SELECT r.id AS ref_id, r.head_revision_id AS head, json_extract(h.doc_json, '$.title') AS title,
       json_extract(h.doc_json, '$.content') AS content, e.deleted_at IS NOT NULL AS deleted, json_extract(h.doc_json, '$.owner.shared') AS scope
-    FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
+    FROM entities e JOIN entity_refs r ON r.entity_id = e.id
     JOIN entity_revisions h ON h.id = r.head_revision_id
     WHERE e.id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'note' AND e.purged_at IS NULL
       AND json_extract(h.doc_json, '$.owner.shared') IS NOT NULL`

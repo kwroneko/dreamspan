@@ -25,9 +25,7 @@ export function useLibraryLorebooks(): ReadonlyArray<LibraryRef> | null {
 /** Cards' upstream refs by entity, where a card's own lorebook is edited; null while loading. */
 export function useCardRefs(): ReadonlyMap<string, LibraryRef> | null {
   const result = useAtomValue(cardsAtom)
-  return AsyncResult.isSuccess(result)
-    ? new Map(result.value.filter((ref) => ref.refKind === "upstream").map((ref) => [ref.entityId as string, ref]))
-    : null
+  return AsyncResult.isSuccess(result) ? new Map(result.value.map((ref) => [ref.entityId as string, ref])) : null
 }
 
 export function useLoreFilterCards(): ReadonlyArray<LibraryRef> {

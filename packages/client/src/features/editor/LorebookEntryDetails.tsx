@@ -282,7 +282,7 @@ export function DelayUntilRecursion({ store, path }: { store: EditorStore; path:
 export function CharacterFilter({ store, path }: { store: EditorStore; path: FieldPath }) {
   const filter = useValue<LorebookEntry["character_filter"]>(store, path)
   const current = filter ?? { is_exclude: false, names: [], tags: [] }
-  const library = useLoreFilterCards().filter((ref) => ref.refKind === "upstream")
+  const library = useLoreFilterCards()
   const chosen = [
     ...(current.cards ?? []).map((card) => card.entity),
     ...current.names.map((name) => `filename:${name}`)

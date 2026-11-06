@@ -190,7 +190,7 @@ export { LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/error
 /** The largest path window one GetPath returns. */
 const MAX_PATH_WINDOW = 1000
 
-/** The operation doesn't apply to this kind of ref (e.g. forking a chat override). */
+/** The operation doesn't apply to this kind of ref (e.g. ForkRef on a card, which forks with its names). */
 export class RefOperationRefused extends Schema.TaggedError<RefOperationRefused>()("RefOperationRefused", {
   refId: Schema.String,
   reason: Schema.String
@@ -845,6 +845,7 @@ export class WriteOps extends RpcGroup.make(
       guidance: Schema.optionalKey(Schema.Boolean),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      noReplies: Schema.optionalKey(Schema.Boolean),
       /** Consume a one-reply pick only if it still names this card. */
       consumeReplyFromEntityId: Schema.optionalKey(EntityId)
     },
@@ -1070,38 +1071,23 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * Archives or restores the entity of a library entry (an upstream or a variant, never a chat
-   * override): hidden from lists, nothing deleted, in use where it is used. Archiving keeps the
-   * first time it was archived.
+   * Archives or restores a library entry (a fork is an entry of its own, so its parent and
+   * siblings stay as they are): hidden from lists, nothing deleted, in use where it is used.
+   * Archiving keeps the first time it was archived.
    */
   Rpc.make("SetRefArchived", {
     payload: { userId: UserId, refId: RefId, archived: Schema.Boolean },
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
-  /** A new variant following `refId` (an upstream or another variant). */
+  /**
+   * A fork of a preset, lorebook or note (spec/LIBRARY-FORKS.md): a new entry of the same kind
+   * from `refId`'s head, tied to it only by its lineage; cards fork with ForkCard.
+   */
   Rpc.make("ForkRef", {
     payload: { userId: UserId, refId: RefId, label: Schema.String, subtitle: Schema.String },
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
-  }),
-  /** Changes for one chat only, following `refId` (DESIGN §4). */
-  Rpc.make("CreateChatOverride", {
-    payload: { userId: UserId, refId: RefId, chatId: ChatId },
-    success: LibraryRef,
-    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
-  }),
-  /** Turns a chat override into a library variant (DESIGN §4). */
-  Rpc.make("PromoteOverride", {
-    payload: {
-      userId: UserId,
-      refId: RefId,
-      label: Schema.String,
-      subtitle: Schema.String,
-      expectedRowVersion: Schema.Int
-    },
-    success: LibraryRef,
-    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
   Rpc.make("CommitForkMerge", {
     payload: {
@@ -2153,7 +2139,7 @@ export class WriteOps extends RpcGroup.make(
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
-  /** ForkRef, optionally moving the ref's unsaved drafts to the new variant. */
+  /** ForkRef, optionally moving the ref's unsaved drafts to the fork. */
   Rpc.make("ForkWithDrafts", {
     payload: {
       userId: UserId,
@@ -2551,7 +2537,7 @@ export class WriteOps extends RpcGroup.make(
     error: StorageError
   }),
   /**
-   * Saves a device's center column layout (key `workbench:<device>` of `user_prefs`). An account
+   * Saves a device's center column layout (device-scoped key `workbench` in `settings`). An account
    * keeps the layouts of its most recently saving devices only.
    */
   Rpc.make("SetWorkbenchLayout", {
@@ -2909,7 +2895,7 @@ export class ReadOps extends RpcGroup.make(
     success: RecoveredText,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** The user's library of one kind: upstream refs and variants, not chat overrides. */
+  /** The user's library of one kind: every entry, forks included. */
   Rpc.make("ListLibrary", {
     payload: {
       userId: UserId,
@@ -2959,11 +2945,6 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, refId: RefId },
     success: MergePreview,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
-  }),
-  Rpc.make("ListChatOverrides", {
-    payload: { userId: UserId, chatId: ChatId },
-    success: Schema.Array(LibraryRef),
-    error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("ListConnections", {
     payload: { userId: UserId },

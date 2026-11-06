@@ -194,30 +194,6 @@
     },
     {
       "type": "index",
-      "name": "entity_refs_chat",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE INDEX entity_refs_chat ON entity_refs(chat_id) WHERE chat_id IS NOT NULL"
-    },
-    {
-      "type": "index",
-      "name": "entity_refs_entity",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE INDEX entity_refs_entity ON entity_refs(entity_id)"
-    },
-    {
-      "type": "index",
-      "name": "entity_refs_follows",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE INDEX entity_refs_follows ON entity_refs(follows_ref_id) WHERE follows_ref_id IS NOT NULL"
-    },
-    {
-      "type": "index",
-      "name": "entity_refs_fork_revision",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE INDEX entity_refs_fork_revision ON entity_refs(forked_from_revision_id) WHERE forked_from_revision_id IS NOT NULL"
-    },
-    {
-      "type": "index",
       "name": "entity_refs_head",
       "tbl_name": "entity_refs",
       "sql": "CREATE INDEX entity_refs_head ON entity_refs(head_revision_id)"
@@ -860,12 +836,6 @@
     },
     {
       "type": "table",
-      "name": "app_settings",
-      "tbl_name": "app_settings",
-      "sql": "CREATE TABLE app_settings ( key TEXT PRIMARY KEY, value_json TEXT NOT NULL CHECK (json_valid(value_json)) ) STRICT, WITHOUT ROWID"
-    },
-    {
-      "type": "table",
       "name": "bin_items",
       "tbl_name": "bin_items",
       "sql": "CREATE TABLE \"bin_items\" ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL, target_id TEXT NOT NULL, chat_id TEXT, title TEXT NOT NULL, excerpt TEXT NOT NULL, origin_json TEXT NOT NULL CHECK (json_valid(origin_json)), byte_size INTEGER NOT NULL, deleted_at INTEGER NOT NULL ) STRICT"
@@ -944,12 +914,6 @@
     },
     {
       "type": "table",
-      "name": "cost_settings",
-      "tbl_name": "cost_settings",
-      "sql": "CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json))) STRICT"
-    },
-    {
-      "type": "table",
       "name": "credentials",
       "tbl_name": "credentials",
       "sql": "CREATE TABLE credentials ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, -- Encrypted with the server secret, bound to \"credential:<id>:key\". key_enc BLOB NOT NULL, key_hint TEXT NOT NULL, -- Origins (scheme://host[:port]) the key may be sent to. origins_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(origins_json)), row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL , connection_owned INTEGER NOT NULL DEFAULT 0 CHECK (connection_owned IN (0, 1))) STRICT"
@@ -964,7 +928,7 @@
       "type": "table",
       "name": "drafts",
       "tbl_name": "drafts",
-      "sql": "CREATE TABLE drafts ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), target_kind TEXT NOT NULL, target_id TEXT NOT NULL, field TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)), -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key. base_revision TEXT, -- A library field's session a save or checkpoint ended: the revision now holding its text. committed_revision TEXT, row_version INTEGER NOT NULL DEFAULT 1, cleared_version INTEGER NOT NULL DEFAULT 0, deletions_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(deletions_json)), updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, guidance INTEGER NOT NULL DEFAULT 0 CHECK (guidance IN (0, 1)), UNIQUE (user_id, target_kind, target_id, field) ) STRICT"
+      "sql": "CREATE TABLE drafts ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), target_kind TEXT NOT NULL, target_id TEXT NOT NULL, field TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)), -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key. base_revision TEXT, -- A library field's session a save or checkpoint ended: the revision now holding its text. committed_revision TEXT, row_version INTEGER NOT NULL DEFAULT 1, cleared_version INTEGER NOT NULL DEFAULT 0, deletions_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(deletions_json)), updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, guidance INTEGER NOT NULL DEFAULT 0 CHECK (guidance IN (0, 1)), -- The composer's Next set to No one: a send asks for no reply until another choice (DESIGN §2.3). no_replies INTEGER NOT NULL DEFAULT 0 CHECK (no_replies IN (0, 1)), UNIQUE (user_id, target_kind, target_id, field) ) STRICT"
     },
     {
       "type": "table",
@@ -976,7 +940,7 @@
       "type": "table",
       "name": "entity_refs",
       "tbl_name": "entity_refs",
-      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id), ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), follows_ref_id TEXT REFERENCES entity_refs(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id), forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3), CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)), CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL UNIQUE REFERENCES entities(id), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3) ) STRICT"
     },
     {
       "type": "table",
@@ -1054,7 +1018,7 @@
       "type": "table",
       "name": "forks",
       "tbl_name": "forks",
-      "sql": "CREATE TABLE forks ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The fork it was made from; null for a chat's first. Its place in the fork tree is in fork_labels. parent_fork_id TEXT REFERENCES forks(id) DEFERRABLE INITIALLY DEFERRED, -- The chat's state_seq when it was made. branched_at INTEGER NOT NULL DEFAULT 0, -- The message it was made at: its history is root to base, then what it appends. base_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, -- Its path ends here; null before the first message. tip_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, name TEXT, name_user INTEGER NOT NULL DEFAULT 0 CHECK (name_user IN (0, 1)), pinned_at INTEGER, created_at INTEGER NOT NULL, last_chatted_at INTEGER, deleted_at INTEGER, bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, purged_at INTEGER, row_version INTEGER NOT NULL DEFAULT 1 ) STRICT"
+      "sql": "CREATE TABLE forks ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The fork it was made from; null for a chat's first. Its place in the fork tree is in fork_labels. parent_fork_id TEXT REFERENCES forks(id) DEFERRABLE INITIALLY DEFERRED, split_chat INTEGER NOT NULL DEFAULT 0 CHECK (split_chat IN (0, 1)), -- The chat's state_seq when it was made. branched_at INTEGER NOT NULL DEFAULT 0, -- The message it was made at: its history is root to base, then what it appends. base_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, -- Its path ends here; null before the first message. tip_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, name TEXT, name_user INTEGER NOT NULL DEFAULT 0 CHECK (name_user IN (0, 1)), pinned_at INTEGER, created_at INTEGER NOT NULL, last_chatted_at INTEGER, deleted_at INTEGER, bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, purged_at INTEGER, row_version INTEGER NOT NULL DEFAULT 1 ) STRICT"
     },
     {
       "type": "table",
@@ -1108,7 +1072,7 @@
       "type": "table",
       "name": "library_merges",
       "tbl_name": "library_merges",
-      "sql": "CREATE TABLE library_merges ( revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE, ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE, ours_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, theirs_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, source_ref_id TEXT REFERENCES entity_refs(id) ON DELETE SET NULL, selection_json TEXT NOT NULL, created_at INTEGER NOT NULL, undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL ) STRICT"
+      "sql": "CREATE TABLE library_merges ( revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE, ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE, ours_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, theirs_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, source_ref_id TEXT REFERENCES entity_refs(id) ON DELETE SET NULL, selection_json TEXT NOT NULL, created_at INTEGER NOT NULL, undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL ) STRICT"
     },
     {
       "type": "table",
@@ -1184,9 +1148,9 @@
     },
     {
       "type": "table",
-      "name": "shell_preferences",
-      "tbl_name": "shell_preferences",
-      "sql": "CREATE TABLE shell_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id), pins_collapsed INTEGER NOT NULL DEFAULT 0) STRICT"
+      "name": "settings",
+      "tbl_name": "settings",
+      "sql": "CREATE TABLE settings ( scope TEXT NOT NULL CHECK (scope IN ('app', 'user', 'device')), scope_id TEXT NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL CHECK (json_valid(value_json)), revision INTEGER NOT NULL CHECK (revision > 0), updated_at INTEGER NOT NULL, PRIMARY KEY (scope, scope_id, key), CHECK (scope <> 'app' OR scope_id = '') ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "table",
@@ -1292,18 +1256,6 @@
     },
     {
       "type": "table",
-      "name": "user_prefs",
-      "tbl_name": "user_prefs",
-      "sql": "CREATE TABLE user_prefs ( user_id TEXT NOT NULL REFERENCES users(id), key TEXT NOT NULL, value_json TEXT NOT NULL CHECK (json_valid(value_json)), PRIMARY KEY (user_id, key) ) STRICT, WITHOUT ROWID"
-    },
-    {
-      "type": "table",
-      "name": "user_settings",
-      "tbl_name": "user_settings",
-      "sql": "CREATE TABLE user_settings ( user_id TEXT NOT NULL REFERENCES users(id), key TEXT NOT NULL, value_json TEXT NOT NULL CHECK (json_valid(value_json)), PRIMARY KEY (user_id, key) ) STRICT, WITHOUT ROWID"
-    },
-    {
-      "type": "table",
       "name": "users",
       "tbl_name": "users",
       "sql": "CREATE TABLE users ( id TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('admin', 'user')), created_at INTEGER NOT NULL, disabled_at INTEGER , password_hash TEXT) STRICT"
@@ -1391,18 +1343,6 @@
       "name": "card_names_update",
       "tbl_name": "entity_refs",
       "sql": "CREATE TRIGGER card_names_update AFTER UPDATE OF head_revision_id, label, subtitle ON entity_refs WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card' AND (NEW.label IS NOT coalesce((SELECT json_extract(doc_json, '$.name') FROM entity_revisions WHERE id = NEW.head_revision_id), '') OR NEW.subtitle IS NOT coalesce((SELECT json_extract(doc_json, '$.character_version') FROM entity_revisions WHERE id = NEW.head_revision_id), '')) BEGIN UPDATE entity_refs SET label = coalesce((SELECT json_extract(doc_json, '$.name') FROM entity_revisions WHERE id = NEW.head_revision_id), ''), subtitle = coalesce((SELECT json_extract(doc_json, '$.character_version') FROM entity_revisions WHERE id = NEW.head_revision_id), '') WHERE id = NEW.id; END"
-    },
-    {
-      "type": "trigger",
-      "name": "card_ref_insert",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER card_ref_insert BEFORE INSERT ON entity_refs WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card' AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id)) BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "card_ref_update",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER card_ref_update BEFORE UPDATE ON entity_refs WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card' AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id)) BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END"
     },
     {
       "type": "trigger",
@@ -1643,24 +1583,6 @@
       "name": "entities_owner_fixed",
       "tbl_name": "entities",
       "sql": "CREATE TRIGGER entities_owner_fixed BEFORE UPDATE OF owner_user_id ON entities WHEN NEW.owner_user_id IS NOT OLD.owner_user_id BEGIN SELECT RAISE(ABORT, 'entities never change owner'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "entity_refs_chat_fixed",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER entity_refs_chat_fixed BEFORE UPDATE OF chat_id ON entity_refs WHEN NEW.chat_id IS NOT NULL AND NEW.chat_id IS NOT OLD.chat_id BEGIN SELECT RAISE(ABORT, 'a chat override never moves to another chat'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "entity_refs_chat_owner",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER entity_refs_chat_owner BEFORE INSERT ON entity_refs WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id) IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id) BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "entity_refs_chat_owner_update",
-      "tbl_name": "entity_refs",
-      "sql": "CREATE TRIGGER entity_refs_chat_owner_update BEFORE UPDATE OF chat_id, entity_id ON entity_refs WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id) IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id) BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END"
     },
     {
       "type": "trigger",
@@ -2001,14 +1923,14 @@
     {
       "type": "trigger",
       "name": "network_cache_insert",
-      "tbl_name": "app_settings",
-      "sql": "CREATE TRIGGER network_cache_insert AFTER INSERT ON app_settings WHEN NEW.key = 'network' BEGIN UPDATE connections SET cache_revision = cache_revision + 1; END"
+      "tbl_name": "settings",
+      "sql": "CREATE TRIGGER network_cache_insert AFTER INSERT ON settings WHEN NEW.scope = 'app' AND NEW.scope_id = '' AND NEW.key = 'network' BEGIN UPDATE connections SET cache_revision = cache_revision + 1; END"
     },
     {
       "type": "trigger",
       "name": "network_cache_update",
-      "tbl_name": "app_settings",
-      "sql": "CREATE TRIGGER network_cache_update AFTER UPDATE ON app_settings WHEN NEW.key = 'network' BEGIN UPDATE connections SET cache_revision = cache_revision + 1; END"
+      "tbl_name": "settings",
+      "sql": "CREATE TRIGGER network_cache_update AFTER UPDATE ON settings WHEN NEW.scope = 'app' AND NEW.scope_id = '' AND NEW.key = 'network' BEGIN UPDATE connections SET cache_revision = cache_revision + 1; END"
     },
     {
       "type": "trigger",
@@ -2135,6 +2057,18 @@
       "name": "sessions_owner_fixed",
       "tbl_name": "sessions",
       "sql": "CREATE TRIGGER sessions_owner_fixed BEFORE UPDATE OF user_id ON sessions WHEN NEW.user_id IS NOT OLD.user_id BEGIN SELECT RAISE(ABORT, 'sessions never change owner'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "settings_identity_fixed",
+      "tbl_name": "settings",
+      "sql": "CREATE TRIGGER settings_identity_fixed BEFORE UPDATE OF scope, scope_id, key ON settings WHEN NEW.scope IS NOT OLD.scope OR NEW.scope_id IS NOT OLD.scope_id OR NEW.key IS NOT OLD.key BEGIN SELECT RAISE(ABORT, 'settings never change identity'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "settings_owner_insert",
+      "tbl_name": "settings",
+      "sql": "CREATE TRIGGER settings_owner_insert BEFORE INSERT ON settings WHEN (NEW.scope = 'user' AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.scope_id)) OR (NEW.scope = 'device' AND (NOT json_valid(NEW.scope_id) OR NOT EXISTS (SELECT 1 FROM users WHERE id = json_extract(NEW.scope_id, '$[0]')))) BEGIN SELECT RAISE(ABORT, 'settings need an owner'); END"
     },
     {
       "type": "trigger",
@@ -2747,18 +2681,6 @@
       "name": "summary_revisions_retained",
       "tbl_name": "summary_revisions",
       "sql": "CREATE TRIGGER summary_revisions_retained BEFORE DELETE ON summary_revisions WHEN EXISTS (SELECT 1 FROM chats c JOIN summaries s ON s.chat_id = c.id WHERE s.id = OLD.summary_id) BEGIN SELECT RAISE(ABORT, 'summaries and revisions live as long as their chat'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "user_prefs_owner_fixed",
-      "tbl_name": "user_prefs",
-      "sql": "CREATE TRIGGER user_prefs_owner_fixed BEFORE UPDATE OF user_id ON user_prefs WHEN NEW.user_id IS NOT OLD.user_id BEGIN SELECT RAISE(ABORT, 'user_prefs never change owner'); END"
-    },
-    {
-      "type": "trigger",
-      "name": "user_settings_owner_fixed",
-      "tbl_name": "user_settings",
-      "sql": "CREATE TRIGGER user_settings_owner_fixed BEFORE UPDATE OF user_id ON user_settings WHEN NEW.user_id IS NOT OLD.user_id BEGIN SELECT RAISE(ABORT, 'user_settings never change owner'); END"
     },
     {
       "type": "trigger",

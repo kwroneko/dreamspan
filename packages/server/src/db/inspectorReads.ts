@@ -60,8 +60,8 @@ export const describer = (
         ? []
         : yield* sql<{ id: string; name: string | null; label: string | null; ref: string | null }>`
             SELECT v.id, COALESCE(json_extract(v.doc_json, '$.name'), json_extract(v.doc_json, '$.title')) AS name,
-              (SELECT r.label FROM entity_refs r WHERE r.entity_id = e.id AND r.ref_kind = 'upstream') AS label,
-              (SELECT r.id FROM entity_refs r WHERE r.entity_id = e.id AND r.ref_kind = 'upstream') AS ref
+              (SELECT r.label FROM entity_refs r WHERE r.entity_id = e.id) AS label,
+              (SELECT r.id FROM entity_refs r WHERE r.entity_id = e.id) AS ref
             FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
             WHERE v.id IN ${sql.in(revisions)} AND e.owner_user_id = ${userId}`
     const names = new Map(entities.map((row) => [row.id, row.name || row.label || "unnamed"]))

@@ -175,7 +175,7 @@ test("the latest reply's › makes a new version, shown without a hover even at 
   const latest = replies(page).last()
   const next = latest.getByRole("group", { name: "Versions" }).getByRole("button", { name: "Generate another version" })
   // Not hovered: the pointer is on the composer.
-  await page.locator("#composer").hover()
+  await page.getByTestId("composer").hover()
   await expect(next).toHaveCSS("opacity", "1")
   // The reply's own › is the one way to swipe it: the composer has no second copy.
   await expect(page.getByRole("button", { name: /regenerate the latest/i })).toHaveCount(0)

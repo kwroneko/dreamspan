@@ -80,6 +80,45 @@ const stage = (
   })
 
 describe("explicit library merges", () => {
+  for (const operation of ["preview", "merge", "resolve"] as const)
+    it.live(`a manually linked card refuses a legacy ${operation} without a known merge base`, () =>
+      Effect.gen(function* () {
+        const { writer, reader, userId, get } = yield* setup
+        const create = (version: string) =>
+          writer.CreateEntity({
+            userId,
+            kind: "card",
+            label: "Synthetic",
+            subtitle: version,
+            doc: cardDoc("Synthetic", { character_version: version }),
+            schemaVersion: 1,
+            origin: "user",
+            sourcePath: null
+          })
+        const parent = (yield* create("")).ref
+        const child = (yield* create("copy")).ref
+        yield* writer.SetCardParent({ userId, entityId: child.entityId, parentEntityId: parent.entityId })
+        const before = yield* get(child.id)
+        const result =
+          operation === "preview"
+            ? yield* reader.PreviewMerge({ userId, refId: child.id }).pipe(Effect.result)
+            : operation === "merge"
+              ? yield* writer.MergeFollowed({ userId, refId: child.id }).pipe(Effect.result)
+              : yield* writer
+                  .ResolveMerge({
+                    userId,
+                    refId: child.id,
+                    doc: before.doc,
+                    theirsRevisionId: parent.headRevisionId,
+                    expectedRowVersion: before.ref.rowVersion
+                  })
+                  .pipe(Effect.result)
+        assert.strictEqual(result._tag, "Failure")
+        assert.deepStrictEqual(yield* get(child.id), before)
+        assert.isNull((yield* reader.ForkMergeStatus({ userId, refId: child.id })).baseRevisionId)
+      }).pipe(Effect.provide(database()))
+    )
+
   it.live("fork point, historical choice, exclusions, base advancement, records, undo and re-merge", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, make, get, edit, merge } = yield* setup
@@ -141,6 +180,53 @@ describe("explicit library merges", () => {
     }).pipe(Effect.provide(database()))
   )
 
+  it.live("a variant's archive and bin state stays independent, and its merge survives purging the original", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, make, get, edit, merge } = yield* setup
+      const parent = (yield* make({ text: "base" })).ref
+      const child = yield* writer.ForkRef({ userId, refId: parent.id, label: "Child", subtitle: "" })
+      const peer = yield* writer.ForkRef({ userId, refId: parent.id, label: "Peer", subtitle: "" })
+      const updated = (yield* edit(parent.id, { text: "updated" })).ref
+      const merged = (yield* merge(child.id)).ref
+      const waitingPeer = yield* get(peer.id)
+      yield* writer.SetRefArchived({ userId, refId: child.id, archived: true })
+      const live = yield* reader.ListLibrary({ userId, kind: "preset_overlay", tag: null, archived: false })
+      assert.sameMembers(
+        live.map((r) => r.id),
+        [parent.id, peer.id]
+      )
+      const binnedChild = yield* writer.DeleteEntity({ userId, entityId: child.entityId })
+      assert.deepStrictEqual((yield* get(parent.id)).ref, updated)
+      assert.deepStrictEqual(yield* get(peer.id), waitingPeer)
+      yield* writer.RestoreBinItem({ userId, itemId: binnedChild.id })
+      assert.deepStrictEqual((yield* get(child.id)).doc, { text: "updated" })
+      assert.isNotNull((yield* get(child.id)).ref.archivedAt)
+      const binnedParent = yield* writer.DeleteEntity({ userId, entityId: parent.entityId })
+      assert.isNull((yield* reader.ForkMergeStatus({ userId, refId: child.id })).parentRefId)
+      assert.isTrue(
+        (yield* reader.RefHistory({ userId, refId: child.id, limit: 10 })).some((r) => r.entry !== undefined)
+      )
+      yield* writer.RestoreBinItem({ userId, itemId: binnedParent.id })
+      assert.strictEqual((yield* reader.ForkMergeStatus({ userId, refId: child.id })).parentRefId, parent.id)
+      const removed = yield* writer.DeleteEntity({ userId, entityId: parent.entityId })
+      yield* writer.PurgeBinItem({ userId, itemId: removed.id })
+      const after = yield* reader.ForkMergeStatus({ userId, refId: child.id })
+      assert.isNull(after.records[0]!.theirsRevisionId)
+      assert.isNull(after.records[0]!.sourceRefId)
+      assert.deepStrictEqual((yield* get(child.id)).doc, { text: "updated" })
+      assert.deepStrictEqual((yield* get(peer.id)).doc, { text: "base" })
+      const family = yield* reader.LibraryGenealogy({ userId, refId: child.id })
+      assert.strictEqual(family.members.find((m) => m.entityId === parent.entityId)!.state, "purged")
+      yield* writer.UndoForkMerge({
+        userId,
+        refId: child.id,
+        mergeRevisionId: merged.headRevisionId,
+        expectedRowVersion: (yield* get(child.id)).ref.rowVersion
+      })
+      assert.deepStrictEqual((yield* get(child.id)).doc, { text: "base" })
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("included conflicts must be resolved; stale previews and foreign revisions never write", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, make, get, edit, merge } = yield* setup
@@ -195,20 +281,13 @@ describe("explicit library merges", () => {
       const parent = (yield* make({ text: "base" })).ref
       const child = yield* writer.ForkRef({ userId, refId: parent.id, label: "Child", subtitle: "" })
       const peer = yield* writer.ForkRef({ userId, refId: parent.id, label: "Peer", subtitle: "" })
-      const chat = yield* writer.CreateChat({
-        userId,
-        kind: "rp",
-        status: "active",
-        title: "Synthetic",
-        participants: [],
-        greeting: null
-      })
-      const override = yield* writer.CreateChatOverride({ userId, refId: child.id, chatId: chat.id })
-      const family = yield* reader.LibraryGenealogy({ userId, refId: override.id })
+      const grandchild = yield* writer.ForkRef({ userId, refId: child.id, label: "Grandchild", subtitle: "" })
+      const family = yield* reader.LibraryGenealogy({ userId, refId: grandchild.id })
       assert.deepStrictEqual(
         new Set(family.members.map((m) => m.refId)),
-        new Set([parent.id, child.id, peer.id, override.id])
+        new Set([parent.id, child.id, peer.id, grandchild.id])
       )
+      assert.strictEqual(family.members.find((m) => m.refId === grandchild.id)?.parentRefId, child.id)
       assert.deepStrictEqual(yield* reader.LibraryGenealogy({ userId, refId: peer.id }), family)
       yield* edit(parent.id, { text: "new" })
       yield* writer.SaveDraft({

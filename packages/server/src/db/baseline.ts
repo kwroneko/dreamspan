@@ -123,24 +123,28 @@ export const baseline: ReadonlyArray<string> = [
     deletions_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(deletions_json)),
     updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
     guidance INTEGER NOT NULL DEFAULT 0 CHECK (guidance IN (0, 1)),
+    -- The composer's Next set to No one: a send asks for no reply until another choice (DESIGN §2.3).
+    no_replies INTEGER NOT NULL DEFAULT 0 CHECK (no_replies IN (0, 1)),
     UNIQUE (user_id, target_kind, target_id, field)
   ) STRICT`,
-  `CREATE TABLE user_prefs (
-    user_id TEXT NOT NULL REFERENCES users(id),
+  `CREATE TABLE settings (
+    scope TEXT NOT NULL CHECK (scope IN ('app', 'user', 'device')),
+    scope_id TEXT NOT NULL,
     key TEXT NOT NULL,
     value_json TEXT NOT NULL CHECK (json_valid(value_json)),
-    PRIMARY KEY (user_id, key)
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (scope, scope_id, key),
+    CHECK (scope <> 'app' OR scope_id = '')
   ) STRICT, WITHOUT ROWID`,
-  `CREATE TABLE app_settings (
-    key TEXT PRIMARY KEY,
-    value_json TEXT NOT NULL CHECK (json_valid(value_json))
-  ) STRICT, WITHOUT ROWID`,
-  `CREATE TABLE user_settings (
-    user_id TEXT NOT NULL REFERENCES users(id),
-    key TEXT NOT NULL,
-    value_json TEXT NOT NULL CHECK (json_valid(value_json)),
-    PRIMARY KEY (user_id, key)
-  ) STRICT, WITHOUT ROWID`,
+  `CREATE TRIGGER settings_identity_fixed BEFORE UPDATE OF scope, scope_id, key ON settings
+    WHEN NEW.scope IS NOT OLD.scope OR NEW.scope_id IS NOT OLD.scope_id OR NEW.key IS NOT OLD.key
+    BEGIN SELECT RAISE(ABORT, 'settings never change identity'); END`,
+  `CREATE TRIGGER settings_owner_insert BEFORE INSERT ON settings
+    WHEN (NEW.scope = 'user' AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.scope_id))
+      OR (NEW.scope = 'device' AND (NOT json_valid(NEW.scope_id)
+        OR NOT EXISTS (SELECT 1 FROM users WHERE id = json_extract(NEW.scope_id, '$[0]'))))
+    BEGIN SELECT RAISE(ABORT, 'settings need an owner'); END`,
   `CREATE TABLE media_assets (
     id TEXT PRIMARY KEY,
     sha256 TEXT NOT NULL UNIQUE,
@@ -247,33 +251,30 @@ export const baseline: ReadonlyArray<string> = [
     BEGIN DELETE FROM card_summaries WHERE revision_id = OLD.id; END`,
   `CREATE INDEX entity_revisions_entity ON entity_revisions(entity_id, seq)`,
   `CREATE INDEX entity_revisions_hash ON entity_revisions(entity_id, doc_hash)`,
+  // An entity's one ref: its head, what it last merged (from its own import line or, for a
+  // fork, its parent's revisions: so it may name another entity's revision), its label and
+  // import source. A fork is an entity of its own (`entities.forked_from_*`, spec/LIBRARY-FORKS.md).
   `CREATE TABLE entity_refs (
     id TEXT PRIMARY KEY,
-    entity_id TEXT NOT NULL REFERENCES entities(id),
-    ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')),
+    entity_id TEXT NOT NULL UNIQUE REFERENCES entities(id),
     head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id),
-    follows_ref_id TEXT REFERENCES entity_refs(id),
-    merge_base_revision_id TEXT REFERENCES entity_revisions(id),
-    forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
+    merge_base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
     label TEXT NOT NULL,
     subtitle TEXT NOT NULL DEFAULT '',
-    chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
     source_path TEXT,
     source_hash TEXT,
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     last_used_at INTEGER,
-    st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3),
-    CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)),
-    CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL)
+    st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3)
   ) STRICT`,
   `CREATE TABLE library_merges (
     revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE,
     ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE,
     ours_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
     base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
-    theirs_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    theirs_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
     source_ref_id TEXT REFERENCES entity_refs(id) ON DELETE SET NULL,
     selection_json TEXT NOT NULL,
     created_at INTEGER NOT NULL,
@@ -285,20 +286,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE INDEX library_merges_theirs ON library_merges(theirs_revision_id)`,
   `CREATE INDEX library_merges_source ON library_merges(source_ref_id) WHERE source_ref_id IS NOT NULL`,
   `CREATE INDEX library_merges_undo ON library_merges(undone_by_revision_id) WHERE undone_by_revision_id IS NOT NULL`,
-  `CREATE INDEX entity_refs_fork_revision ON entity_refs(forked_from_revision_id) WHERE forked_from_revision_id IS NOT NULL`,
-  `CREATE TRIGGER card_ref_insert BEFORE INSERT ON entity_refs
-    WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
-      AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL
-        OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id))
-    BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END`,
-  `CREATE TRIGGER card_ref_update BEFORE UPDATE ON entity_refs
-    WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
-      AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL
-        OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id))
-    BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END`,
-  `CREATE INDEX entity_refs_entity ON entity_refs(entity_id)`,
-  `CREATE INDEX entity_refs_chat ON entity_refs(chat_id) WHERE chat_id IS NOT NULL`,
-  `CREATE INDEX entity_refs_follows ON entity_refs(follows_ref_id) WHERE follows_ref_id IS NOT NULL`,
   `CREATE TABLE entity_tags (
     entity_id TEXT NOT NULL REFERENCES entities(id),
     tag TEXT NOT NULL,
@@ -1054,9 +1041,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER bin_items_chat_fixed BEFORE UPDATE OF chat_id ON bin_items
       WHEN NEW.chat_id IS NOT OLD.chat_id
       BEGIN SELECT RAISE(ABORT, 'bin_items rows never move to another chat'); END`,
-  `CREATE TRIGGER entity_refs_chat_fixed BEFORE UPDATE OF chat_id ON entity_refs
-    WHEN NEW.chat_id IS NOT NULL AND NEW.chat_id IS NOT OLD.chat_id
-    BEGIN SELECT RAISE(ABORT, 'a chat override never moves to another chat'); END`,
   `CREATE TRIGGER chats_owner_fixed BEFORE UPDATE OF owner_user_id ON chats
       WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
       BEGIN SELECT RAISE(ABORT, 'chats never change owner'); END`,
@@ -1066,14 +1050,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER connections_owner_fixed BEFORE UPDATE OF owner_user_id ON connections
       WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
       BEGIN SELECT RAISE(ABORT, 'connections never change owner'); END`,
-  `CREATE TRIGGER entity_refs_chat_owner BEFORE INSERT ON entity_refs
-    WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
-      IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id)
-    BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END`,
-  `CREATE TRIGGER entity_refs_chat_owner_update BEFORE UPDATE OF chat_id, entity_id ON entity_refs
-    WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
-      IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id)
-    BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END`,
   `CREATE TRIGGER entity_revisions_fts_delete AFTER DELETE ON entity_revisions
     BEGIN INSERT INTO entity_revisions_fts (entity_revisions_fts, rowid, search_text) VALUES ('delete', OLD.seq, OLD.search_text); END`,
   `CREATE TRIGGER credentials_owner_fixed BEFORE UPDATE OF owner_user_id ON credentials
@@ -1091,12 +1067,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER recovered_texts_owner_fixed BEFORE UPDATE OF user_id ON recovered_texts
       WHEN NEW.user_id IS NOT OLD.user_id
       BEGIN SELECT RAISE(ABORT, 'recovered_texts never change owner'); END`,
-  `CREATE TRIGGER user_prefs_owner_fixed BEFORE UPDATE OF user_id ON user_prefs
-      WHEN NEW.user_id IS NOT OLD.user_id
-      BEGIN SELECT RAISE(ABORT, 'user_prefs never change owner'); END`,
-  `CREATE TRIGGER user_settings_owner_fixed BEFORE UPDATE OF user_id ON user_settings
-      WHEN NEW.user_id IS NOT OLD.user_id
-      BEGIN SELECT RAISE(ABORT, 'user_settings never change owner'); END`,
   `CREATE TRIGGER media_refs_owner_fixed BEFORE UPDATE OF owner_user_id ON media_refs
       WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
       BEGIN SELECT RAISE(ABORT, 'media_refs never change owner'); END`,
@@ -1191,9 +1161,9 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER credentials_cache_revision AFTER UPDATE OF key_enc ON credentials
     WHEN NEW.key_enc IS NOT OLD.key_enc
     BEGIN UPDATE connections SET cache_revision = cache_revision + 1 WHERE credential_id = NEW.id; END`,
-  `CREATE TRIGGER network_cache_insert AFTER INSERT ON app_settings WHEN NEW.key = 'network'
+  `CREATE TRIGGER network_cache_insert AFTER INSERT ON settings WHEN NEW.scope = 'app' AND NEW.scope_id = '' AND NEW.key = 'network'
     BEGIN UPDATE connections SET cache_revision = cache_revision + 1; END`,
-  `CREATE TRIGGER network_cache_update AFTER UPDATE ON app_settings WHEN NEW.key = 'network'
+  `CREATE TRIGGER network_cache_update AFTER UPDATE ON settings WHEN NEW.scope = 'app' AND NEW.scope_id = '' AND NEW.key = 'network'
     BEGIN UPDATE connections SET cache_revision = cache_revision + 1; END`,
   `CREATE INDEX llm_requests_chat ON llm_requests(chat_id, started_at) WHERE chat_id IS NOT NULL`,
   `CREATE TRIGGER llm_requests_stagger_frozen BEFORE UPDATE OF cache_stagger_json ON llm_requests
@@ -1607,7 +1577,6 @@ export const baseline: ReadonlyArray<string> = [
         subtitle = coalesce((SELECT json_extract(doc_json, '$.character_version') FROM entity_revisions WHERE id = NEW.head_revision_id), '')
         WHERE id = NEW.id; END`,
   `CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, PRIMARY KEY(user_id, chat_id)) STRICT`,
-  `CREATE TABLE shell_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id), pins_collapsed INTEGER NOT NULL DEFAULT 0) STRICT`,
   `CREATE INDEX chats_owner_live ON chats(owner_user_id, id) WHERE deleted_at IS NULL`,
   `CREATE UNIQUE INDEX slots_chain ON slots(chain_id, depth)`,
   `CREATE INDEX state_events_chain ON state_events(chat_id, slot_chain_id, slot_depth)`,
@@ -1638,6 +1607,7 @@ export const baseline: ReadonlyArray<string> = [
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     -- The fork it was made from; null for a chat's first. Its place in the fork tree is in fork_labels.
     parent_fork_id TEXT REFERENCES forks(id) DEFERRABLE INITIALLY DEFERRED,
+    split_chat INTEGER NOT NULL DEFAULT 0 CHECK (split_chat IN (0, 1)),
     -- The chat's state_seq when it was made.
     branched_at INTEGER NOT NULL DEFAULT 0,
     -- The message it was made at: its history is root to base, then what it appends.
@@ -1914,7 +1884,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER lcm_reply_maintenance_fork BEFORE INSERT ON lcm_reply_maintenance
     WHEN (SELECT chat_id FROM forks WHERE id=NEW.fork_id) IS NOT NEW.chat_id
     BEGIN SELECT RAISE(ABORT, 'maintenance belongs to a fork of its chat'); END`,
-  `CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json))) STRICT`,
   // A merge of another chat into this one (spec/CHAT-MERGE.md §2): its join message (slot_id),
   // and its second parent, recorded softly: the source columns name another fork or chat and
   // have no foreign key, so deleting the source never blocks or changes the destination.

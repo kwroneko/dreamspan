@@ -108,6 +108,8 @@ export interface StripChoice<Value> {
   readonly label: string
   /** A second line, muted. */
   readonly detail?: string
+  /** The row's explanation on hover and focus, when it says more than choosing it for the next reply. */
+  readonly hint?: string
 }
 
 const fold = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()
@@ -174,12 +176,18 @@ export function ChoiceChip<Value>({
           className="shrink-0"
         />
       )}
-      <div id={listId} role="radiogroup" aria-label={title} className="flex min-h-0 flex-col overflow-y-auto">
+      <div
+        id={listId}
+        role="radiogroup"
+        aria-label={title}
+        data-layout-audit-ignore="inset: Unbordered choice list whose full-width rows are the hit targets, inset by the popover's padding"
+        className="flex min-h-0 flex-col overflow-y-auto"
+      >
         {shown.length === 0 && <p className="px-2 py-1.5 text-sm text-muted">Nothing is called “{query.trim()}”.</p>}
         {shown.map((choice) => {
           const checked = Object.is(choice.value, value)
           return (
-            <Tooltip label="Selects this option for the next reply.">
+            <Tooltip label={choice.hint ?? "Selects this option for the next reply."}>
               <button
                 key={String(choice.value)}
                 type="button"

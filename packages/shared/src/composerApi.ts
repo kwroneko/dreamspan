@@ -29,7 +29,9 @@ export class ComposerChoice extends Schema.Class<ComposerChoice>("ComposerChoice
   /** The card picked to speak as; null until one is, when the composer picks its default. */
   speakerEntityId: Schema.NullOr(EntityId),
   /** Who replies to the next send, picked for that one reply; null: the next in turn. */
-  replyFromEntityId: Schema.NullOr(EntityId)
+  replyFromEntityId: Schema.NullOr(EntityId),
+  /** Next is No one: a send asks for no reply, until another choice under Next (DESIGN §2.3). */
+  noReplies: Schema.Boolean
 }) {}
 
 /**
@@ -137,6 +139,7 @@ export class ComposerApi extends RpcGroup.make(
       guidance: Schema.optionalKey(Schema.Boolean),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      noReplies: Schema.optionalKey(Schema.Boolean),
       /** Consume a one-reply pick only if it still names this card. */
       consumeReplyFromEntityId: Schema.optionalKey(EntityId)
     },

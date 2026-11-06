@@ -22,8 +22,7 @@ function MemberName({ member, onOpen }: { member: Member; onOpen: () => void }) 
   const select = useContext(PanelVariantNavigation)
   const name = `${member.label || "Deleted entry"}${member.subtitle ? ` · ${member.subtitle}` : ""}`
   const linked = member.refId !== null && (member.state === "live" || member.state === "archived")
-  if (!linked || member.refKind === "chat_override")
-    return <span className="text-sm [overflow-wrap:anywhere]">{name}</span>
+  if (!linked) return <span className="text-sm [overflow-wrap:anywhere]">{name}</span>
   return (
     <Tooltip label="Opens this one for editing.">
       <Link
@@ -50,12 +49,14 @@ function Branch({
   family,
   member,
   current,
-  onOpen
+  onOpen,
+  depth = 0
 }: {
   family: Family
   member: Member
   current: RefId
   onOpen: () => void
+  depth?: number
 }) {
   const children = family.members.filter((m) => m.parentNodeId === member.nodeId && m.nodeId !== member.nodeId)
   const [open, setOpen] = useState(true)
@@ -90,7 +91,6 @@ function Branch({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <MemberName member={member} onOpen={onOpen} />
             {member.refId === current && <Badge tone="accent">this one</Badge>}
-            {member.refKind === "chat_override" && <Badge>one chat's copy</Badge>}
             {member.state !== "live" && (
               <Badge>
                 {member.state === "binned" ? "in the bin" : member.state === "purged" ? "deleted" : member.state}
@@ -101,9 +101,16 @@ function Branch({
         </div>
       </div>
       {open && children.length > 0 && (
-        <ul className="ml-4 flex min-w-0 flex-col gap-1 border-l border-border pl-2">
+        <ul className={`flex min-w-0 flex-col gap-1 ${depth < 6 ? "ml-4 border-l border-border pl-2" : ""}`}>
           {children.map((child) => (
-            <Branch key={child.nodeId} family={family} member={child} current={current} onOpen={onOpen} />
+            <Branch
+              key={child.nodeId}
+              family={family}
+              member={child}
+              current={current}
+              onOpen={onOpen}
+              depth={depth + 1}
+            />
           ))}
         </ul>
       )}
