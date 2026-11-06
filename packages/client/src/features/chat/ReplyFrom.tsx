@@ -57,61 +57,63 @@ export function NextReplyChip({
   const detail = replyPolicyOf(view.cast)?.autoDetail ?? "Picked by the chat's reply order"
   const auto = next === null ? [] : [next.id, ...(picked === null && !off ? round : (next.then ?? []))].map(name)
   return (
-    <ChoiceChip<EntityId | typeof AUTO | typeof NO_ONE>
-      disabled={disabled}
-      label={
-        off
-          ? "Next: no one, until you choose otherwise. Choose who replies next"
-          : `Next: ${chipWho}. Choose who replies next`
-      }
-      hint={
-        disabled
-          ? "Choose who replies next when a character can reply."
-          : off
-            ? "No one replies to what you send, until you choose otherwise here."
-            : picked !== null
-              ? `${who} replies next: your pick, for one reply`
-              : replier === null
-                ? "No one is picked to reply"
-                : all.length > 1
-                  ? `${listNames(all)} reply next, in turn. ${detail}`
-                  : `${who} replies next. ${detail}`
-      }
-      title="Who replies next"
-      chip={
-        <>
-          {/* Chosen, No one shows a struck-through bubble: apart from a chat with no one to reply. */}
-          {off && <Icon name="chat-off" size={12} className="text-muted" />}
-          <ChipText>Next: {chipWho}</ChipText>
-        </>
-      }
-      choices={[
-        {
-          value: AUTO,
-          label: auto.length === 0 ? "Auto" : `Auto: ${auto.join(", ")}`,
-          detail
-        },
-        {
-          value: NO_ONE,
-          label: "No one",
-          detail: "No reply to what you send, until you choose otherwise",
-          hint: "Stops replies to what you send, until you choose otherwise here."
-        },
-        ...candidates.map((id) => ({
-          value: id,
-          label: name(id),
-          detail: muted.includes(id) ? "Muted: replies only when picked" : "Replies next, for one reply"
-        }))
-      ]}
-      value={picked ?? (noReplies ? NO_ONE : AUTO)}
-      onChoose={(value) => onPick(value === AUTO ? null : value)}
-      footer={() => (
-        <p className="px-2 py-1 text-xs text-muted">
-          {noReplies
-            ? "A pick is for one reply, with no round after it; then No one again."
-            : "A pick is for one reply, with no round after it; then Auto picks again."}
-        </p>
-      )}
-    />
+    <span data-reply-picker className="contents">
+      <ChoiceChip<EntityId | typeof AUTO | typeof NO_ONE>
+        disabled={disabled}
+        label={
+          off
+            ? "Next: no one, until you choose otherwise. Choose who replies next"
+            : `Next: ${chipWho}. Choose who replies next`
+        }
+        hint={
+          disabled
+            ? "Choose who replies next when a character can reply."
+            : off
+              ? "No one replies to what you send, until you choose otherwise here."
+              : picked !== null
+                ? `${who} replies next: your pick, for one reply`
+                : replier === null
+                  ? "No one is picked to reply"
+                  : all.length > 1
+                    ? `${listNames(all)} reply next, in turn. ${detail}`
+                    : `${who} replies next. ${detail}`
+        }
+        title="Who replies next"
+        chip={
+          <>
+            {/* Chosen, No one shows a struck-through bubble: apart from a chat with no one to reply. */}
+            {off && <Icon name="chat-off" size={12} className="text-muted" />}
+            <ChipText>Next: {chipWho}</ChipText>
+          </>
+        }
+        choices={[
+          {
+            value: AUTO,
+            label: auto.length === 0 ? "Auto" : `Auto: ${auto.join(", ")}`,
+            detail
+          },
+          {
+            value: NO_ONE,
+            label: "No one",
+            detail: "No reply to what you send, until you choose otherwise",
+            hint: "Stops replies to what you send, until you choose otherwise here."
+          },
+          ...candidates.map((id) => ({
+            value: id,
+            label: name(id),
+            detail: muted.includes(id) ? "Muted: replies only when picked" : "Replies next, for one reply"
+          }))
+        ]}
+        value={picked ?? (noReplies ? NO_ONE : AUTO)}
+        onChoose={(value) => onPick(value === AUTO ? null : value)}
+        footer={() => (
+          <p className="px-2 py-1 text-xs text-muted">
+            {noReplies
+              ? "A pick is for one reply, with no round after it; then No one again."
+              : "A pick is for one reply, with no round after it; then Auto picks again."}
+          </p>
+        )}
+      />
+    </span>
   )
 }

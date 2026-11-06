@@ -1,3 +1,5 @@
+**Built 2026-11-06 (chatsettings):** §7.1's independent Tools and Cards settings, shared Context and links to existing turn picking replace user-facing modes; the internal registry has one default planner. This shared-context subset is obsolete as an implementation proposal; see ARCHITECTURE §16. Separate contexts remain proposed.
+
 **Built 2026-11-06 (settingsdb):** The consolidated settings decision in §10.1 is implemented and obsolete as an implementation proposal; see ARCHITECTURE §3.7. BASELINE CHANGED, fresh deploy, no migrations.
 
 **Built 2026-11-06 (schemaclean):** The owner-approved baseline-only schema policy, registry-validated extensible storage kinds and removal of unused thread scaffolding are implemented; see ARCHITECTURE §3.7. The former lanes/multi-parent foundation is removed, not a decision against future in-chat threads.
@@ -944,6 +946,7 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 **Phase 4 design** (2026-11-05): [spec/AGENTIC.md](AGENTIC.md), as deltas from reference-harness `latest`; its build units are its §11. Entries below marked unbuilt Phase 4 point to its sections.
 
 ### 7.1 Timeline vs. rollouts
+- **[D]** (owner, 2026-11-06, on “Narrator with tools”) “That's just how things work by default?” The modes leave This chat in favour of independent Context, Tools, Cards and Who replies settings. **Built** for shared context (chatsettings); ARCHITECTURE §16. Separate contexts remain unbuilt.
 - **[D]** The chat timeline exists independently of agent rollouts. A rollout forks from the timeline, produces output, and ends. Different agents with separate contexts can contribute to the same chat, and agentic and non-agentic chatting share one representation.
 - **[D]** Orchestration modes are configurable, and there will be more than two:
   - **a single agent per turn with all cards loaded** (reference-harness's way, the most cache-friendly)

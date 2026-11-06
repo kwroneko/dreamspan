@@ -180,23 +180,16 @@ export const makeAgentHandlers = Effect.gen(function* () {
           }))
         }
       }).pipe(internal("GetAgentPermissions")),
-    // As registered now: a plugin's mode or tool shows here as the built-ins do. External tools
-    // are never offered in a reply (spec/AGENTIC.md §4.1), so they aren't listed.
-    ListReplyModes: () =>
+    // External tools are never offered in an RP reply.
+    ListReplyTools: () =>
       Effect.sync(() => {
         const tools = registry.rolloutTools.list().filter((tool) => tool.effect !== "external")
         const registered = new Set(tools.map((tool) => tool.id))
+        const plan = registry.orchestrationModes.get("default")?.plan({
+          state: foldState([{ scope: null, data: { key: "agent.enabled", value: { on: true } } }])
+        })
         return {
-          modes: registry.orchestrationModes.list().map((mode) => {
-            const plan = mode.plan({ state: foldState([]), config: undefined })
-            return {
-              id: mode.id,
-              label: mode.label,
-              description: mode.description,
-              agentic: plan.strategy !== "reply",
-              tools: plan.tools.filter((id) => registered.has(id))
-            }
-          }),
+          defaultTools: (plan?.tools ?? []).filter((id) => registered.has(id)),
           tools: tools.map((tool) => ({
             id: tool.id,
             label: tool.label,

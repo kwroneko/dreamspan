@@ -13,6 +13,20 @@ const connection = "c1" as ConnectionId
 const model = (id: string) => id as ModelId
 
 describe("foldState", () => {
+  it("keeps tools, allowed tools and card rotation independent", () => {
+    expect(Schema.is(StateEventData)({ key: "orchestration.mode", value: { mode: "narrator" } })).toBe(false)
+    expect(foldState([]).agentEnabled).toBeNull()
+    const enabled = foldState([
+      e({ key: "agent.enabled", value: { on: true } }),
+      e({ key: "agent.tools", value: { tools: ["search_chat"] } }),
+      e({ key: "cards.rotation", value: { on: true } })
+    ])
+    const disabled = foldState([e({ key: "agent.enabled", value: { on: false } })], enabled)
+    expect(disabled.agentEnabled).toBe(false)
+    expect(disabled.agentTools).toEqual(["search_chat"])
+    expect(disabled.cardsRotation).toBe(true)
+  })
+
   it("selects only the last persona on events and supplied initial state", () => {
     const state = foldState([e({ key: "played_by_me.set", value: { entities: [mira, tomas, mira] } })])
     expect(state.playedByMe).toEqual([mira])

@@ -1484,7 +1484,7 @@ const composeStage = sync("compose", (assembly) => {
   // Card-swap (DESIGN §5.2), as ST's "Swap character cards" group mode: the preset's card
   // places hold only the speaking character's card, with its examples and definition notes; the other
   // characters' are left out. Everything else, the persona included, goes where the preset says.
-  // The chat's card layout (`cards.rotation`, with or without tools), or the card-swap reply mode.
+  // Card rotation applies with or without tools.
   const rotation = mode.cardsRotation || assembly.request.agent?.speakerCardOnly === true
   const swapped = rotation && speaker && cast.characters.includes(speaker) ? speaker : null
   const characters = swapped ? [swapped] : cast.characters
@@ -1597,7 +1597,7 @@ const composeStage = sync("compose", (assembly) => {
     ...macroCard(cast, assembly.notes),
     joinedVolatile: (Object.keys(macroFields) as Array<keyof typeof macroFields>).filter((key) => {
       const field = macroFields[key]
-      return field !== null && env.isChanging(field.piece)
+      return field !== null && ((swapped !== null && cast.characters.length > 1) || env.isChanging(field.piece))
     }),
     joined: {
       description: macroFields.description?.text ?? "",

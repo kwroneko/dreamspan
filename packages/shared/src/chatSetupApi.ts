@@ -328,11 +328,11 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   replyOrder: Schema.optionalKey(Schema.String),
   /** True: one reply per user action instead of the reply order's round (`reply.single`); absent is off, as in ST. */
   replySingle: Schema.optionalKey(Schema.Boolean),
-  /** How replies are written (`orchestration.mode`, a reply mode's id); absent is the default, plain. */
-  replyMode: Schema.optionalKey(Schema.String),
+  /** Tools and agent instructions (`agent.enabled`); absent is off. */
+  agentEnabled: Schema.optionalKey(Schema.Boolean),
   /** True: card-swap, only the speaker's card where the preset puts cards (`cards.rotation`); absent is off. */
   cardsRotation: Schema.optionalKey(Schema.Boolean),
-  /** The tools agent modes offer (`agent.tools`); absent: each mode's own. */
+  /** The tools agent replies offer (`agent.tools`); absent: the default list. */
   agentTools: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Active and departed cards, including former personas, to retain historical names and portraits. */
   cards: Schema.Array(CastCard)
@@ -386,9 +386,9 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("ReplySingle", { on: Schema.Boolean }),
   /** Card-swap from here on (`cards.rotation`): only the speaker's card where the preset puts cards. */
   Schema.TaggedStruct("CardsRotation", { on: Schema.Boolean }),
-  /** How replies are written from here on (`orchestration.mode`): a reply mode's id. */
-  Schema.TaggedStruct("ReplyMode", { mode: Schema.String.check(Schema.isMaxLength(200)) }),
-  /** The tools agent modes offer from here on (`agent.tools`), by id. */
+  /** Tools and agent instructions from here on (`agent.enabled`). */
+  Schema.TaggedStruct("AgentEnabled", { on: Schema.Boolean }),
+  /** The tools agent replies offer from here on (`agent.tools`), by id. */
   Schema.TaggedStruct("AgentTools", {
     tools: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100))
   }),

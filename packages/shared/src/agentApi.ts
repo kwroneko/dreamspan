@@ -6,7 +6,7 @@ import {
   ActivityCursor,
   ActivityPage,
   NotResumable,
-  ReplyModes,
+  ReplyTools,
   RolloutStep,
   RunTranscript,
   StepEdit
@@ -103,7 +103,7 @@ export class AgentApi extends RpcGroup.make(
     error: Schema.Union([NotFound, ServerError])
   }),
   /** The reply modes and the tools agent modes can offer, as registered now. */
-  Rpc.make("ListReplyModes", { payload: {}, success: ReplyModes, error: ServerError }),
+  Rpc.make("ListReplyTools", { payload: {}, success: ReplyTools, error: ServerError }),
   /** A chat's model work that made no message, newest first (spec/AGENTIC.md §5.4). */
   Rpc.make("ListActivity", {
     payload: {

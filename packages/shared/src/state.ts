@@ -53,7 +53,7 @@ export const StateEventData = Schema.Union([
   event("merge.layout", Schema.String),
   event("macro.binding", Schema.Struct({ name: Schema.String, value: Schema.String })),
   event("macro.unbind", Schema.Struct({ name: Schema.String })),
-  event("orchestration.mode", Schema.Struct({ mode: Schema.String, config: Schema.optional(Schema.Unknown) })),
+  event("agent.enabled", Schema.Struct({ on: Schema.Boolean })),
   /** Who replies when nobody is picked: a reply policy's id (built-ins `natural`, `list`, `pooled`, `manual`; resolved at use). */
   event("reply.order", Schema.String),
   /** On: one reply per user action, where ST replies with the reply order's whole round (DESIGN §2.3). */
@@ -64,7 +64,7 @@ export const StateEventData = Schema.Union([
    * the speaking character's card. A card-layout setting, with or without tools; absent is off.
    */
   event("cards.rotation", Schema.Struct({ on: Schema.Boolean })),
-  /** The tools an agent reply mode offers, by id, in place of the mode's own list (spec/AGENTIC.md §6). */
+  /** The tools an agent reply offers, by id, in place of the default list (spec/AGENTIC.md §6). */
   event("agent.tools", Schema.Struct({ tools: Schema.Array(Schema.String) })),
   /**
    * Whether agent replies may change a note, or a card's field (as a note replacing it), in this
@@ -170,7 +170,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "merge.layout": { ids: {} },
   "macro.binding": { ids: {} },
   "macro.unbind": { ids: {} },
-  "orchestration.mode": { ids: {} },
+  "agent.enabled": { ids: {} },
   "reply.order": { ids: {} },
   "reply.single": { ids: {} },
   "output.contract": { ids: {} },
@@ -384,7 +384,8 @@ export interface ChatState {
   /** The merge layout's id; null (no event) is `parallel`. */
   readonly mergeLayout: string | null
   readonly macroBindings: Readonly<Record<string, string>>
-  readonly orchestration: { readonly mode: string; readonly config?: unknown } | null
+  /** Tools and agent instructions; absent is off. */
+  readonly agentEnabled: boolean | null
   /** The reply policy picking who replies when nobody is picked; null (no event) is the default. */
   readonly replyOrder: string | null
   /** One reply per user action instead of a round; null (no event) is off, as in ST. */
@@ -392,7 +393,7 @@ export interface ChatState {
   readonly outputContract: "final_text" | "send_message" | "both" | null
   /** `cards.rotation`: only the speaker's card where the preset puts cards; null (no event) is off. */
   readonly cardsRotation: boolean | null
-  /** `agent.tools`: the tools agent modes offer; null: each mode's own. */
+  /** `agent.tools`: offered tools; null: the default list. */
   readonly agentTools: ReadonlyArray<string> | null
   /** `agent.permission`s by `permissionKey`: on or off, over the note's or card's own. */
   readonly agentPermissions: Readonly<Record<string, boolean>>
@@ -426,7 +427,7 @@ const emptyChatState: ChatState = {
   rolesProjection: null,
   mergeLayout: null,
   macroBindings: {},
-  orchestration: null,
+  agentEnabled: null,
   replyOrder: null,
   replySingle: null,
   outputContract: null,
@@ -555,8 +556,8 @@ const applyCore = (
     }
     case "macro.binding":
       return { ...state, macroBindings: { ...state.macroBindings, [data.value.name]: data.value.value } }
-    case "orchestration.mode":
-      return { ...state, orchestration: data.value }
+    case "agent.enabled":
+      return { ...state, agentEnabled: data.value.on }
     case "reply.order":
       return { ...state, replyOrder: data.value }
     case "reply.single":

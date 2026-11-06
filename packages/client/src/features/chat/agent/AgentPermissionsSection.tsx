@@ -15,7 +15,7 @@ import { Checkbox } from "../../../ui/Choice.tsx"
 import { Fieldset } from "../../../ui/Field.tsx"
 import { CARD_FIELD_LABELS } from "../../editor/noteTargets.ts"
 import type { ChatSession } from "../session.ts"
-import { PLAIN, useReplyModes } from "./replyModes.ts"
+import { useReplyTools } from "./replyTools.ts"
 
 type Target = Extract<CastChange, { readonly _tag: "AgentPermission" }>["target"]
 
@@ -57,12 +57,11 @@ function Row({ children, reset }: { children: ReactNode; reset: ReactNode }) {
 
 export function AgentPermissionsSection({ session }: { session: ChatSession }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
-  const { modes } = useReplyModes(session)
-  const mode = modes?.modes.find((m) => m.id === (view.cast?.replyMode ?? PLAIN))
-  if (!modes || !mode?.agentic || view.cast === null) return null
-  const tools = view.cast.agentTools ?? mode.tools
+  const { tools: available } = useReplyTools(session)
+  if (!available || view.cast?.agentEnabled !== true) return null
+  const tools = view.cast.agentTools ?? available.defaultTools
   const offered = (ids: ReadonlyArray<string>) => ids.some((id) => tools.includes(id))
-  const cardTool = modes.tools.find((t) => t.id === CARD_TOOL)
+  const cardTool = available.tools.find((t) => t.id === CARD_TOOL)
   return (
     <Permissions
       session={session}

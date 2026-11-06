@@ -1,6 +1,6 @@
 // What the model may change (spec/AGENTIC.md §4.3) in the browser: the card editor's Model may
 // change list (side panel and full editor), saved with the card; the chat's Model may change
-// section under Reply mode, starting from the card's and note's own settings, overriding them and
+// section under Tools, starting from the card's and note's own settings, overriding them and
 // Reset back to them; and a note the model wrote, listed in Notes only where the reply that wrote
 // it is shown, and never in the library's note list (the note editor's switcher). A
 // scripted loopback provider writes one note per reply. Layout audit on each surface, at 1440 and
@@ -172,13 +172,13 @@ for (const width of [1440, 390])
           const chatId = started.chat.id
           // A note of the user's own, which the library lists beside the model's, which it doesn't.
           yield* api.CreateChatNote({ chatId, title: `Lamp oil ${width} ${theme}`, content: "The lamp needs oil." })
-          const modes = yield* api.ListReplyModes({})
-          const narrator = modes.modes.find((m) => m.id === "narrator")!
-          yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "ReplyMode", mode: "narrator" } })
+          const modes = yield* api.ListReplyTools({})
+          const defaultTools = modes.defaultTools
+          yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "AgentEnabled", on: true } })
           yield* api.ChangeCast({
             chatId,
             slotId: null,
-            change: { _tag: "AgentTools", tools: [...narrator.tools, "write_note", "edit_note", "edit_card"] }
+            change: { _tag: "AgentTools", tools: [...defaultTools, "write_note", "edit_note", "edit_card"] }
           })
           const path = yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 5 })
           const reply = yield* api.Generate({ chatId, parentSlotId: path.entries.at(-1)!.slotId, branch: false })
@@ -303,13 +303,13 @@ for (const width of [1440, 390])
       })
       // Keep it linked so the Notes panel's layout audit also checks its shared banner.
       // Card swap, the chat's card layout: a switch of its own, with or without tools.
-      const swap = settings.getByRole("region", { name: "Card swap" })
+      const swap = settings.getByRole("region", { name: "Cards" })
       await expect(swap.getByRole("switch", { name: "Card swap" })).not.toBeChecked()
       await swap.getByRole("switch", { name: "Card swap" }).click()
       await expect(swap.getByRole("switch", { name: "Card swap" })).toBeChecked()
       await swap.scrollIntoViewIfNeeded()
       await shot("card-swap-setting")
-      await expectLayout(page, info, `card-swap-setting-${width}-${theme}`, { scope: '[aria-label="Card swap"]' })
+      await expectLayout(page, info, `card-swap-setting-${width}-${theme}`, { scope: '[aria-label="Cards"]' })
       if (width === 390) await closePanel(page)
 
       // Notes: only the shown swipe's note; the other swipe shown, only its own.
