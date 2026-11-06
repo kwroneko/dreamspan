@@ -1,6 +1,6 @@
 import { LibraryRef } from "@rp/shared/library.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
-import { previousRevisionSql, revisionNumber, revisionUse } from "./revisionNumbers.ts"
+import { previousRevisionSql, revisionNumber, revisionOnLine, revisionUse } from "./revisionNumbers.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { composerImages } from "./composerImages.ts"
@@ -643,15 +643,11 @@ export const makeReadHandlers = Effect.gen(function* () {
         // A fork's line runs on through what it was forked from (owner, 2026-11-06: a fork's
         // History is a git branch's log), so the cursor can be an entry's it was forked from.
         if (before !== undefined) {
+          if (!(yield* revisionOnLine(sql, start, before)))
+            return yield* new NotFound({ entity: "revision", id: before })
           const [cursor] = yield* sql<{ previous: string | null }>`
-            WITH RECURSIVE ancestors(id) AS (
-              SELECT ${ref.entity_id}
-              UNION
-              SELECT e.forked_from_entity_id FROM entities e JOIN ancestors a ON e.id = a.id
-                WHERE e.forked_from_revision_id IS NOT NULL
-            )
             SELECT ${sql.literal(previousRevisionSql("r"))} AS previous FROM entity_revisions r
-            WHERE r.id = ${before} AND r.entity_id IN (SELECT id FROM ancestors)`
+            WHERE r.id = ${before}`
           if (!cursor) return yield* new NotFound({ entity: "revision", id: before })
           start = cursor.previous
         }

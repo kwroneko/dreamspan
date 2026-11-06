@@ -91,11 +91,7 @@ export const makeForkMergeQueries = (sql: SqlClient.SqlClient) => {
     const ref = yield* lib.ownedRef(userId, refId)
     yield* noDrafts(userId, ref)
     const src = yield* versions(userId, ref)
-    if (src.parentRefId !== null && src.base === null)
-      return yield* refused(
-        ref,
-        "This parent was linked without a known fork revision; its genealogy link does not establish a merge base."
-      )
+    yield* lib.checkMergeBase(ref)
     const theirsId = theirsRevisionId ?? src.head
     if (theirsId === null || !src.versions.some((r) => r.id === theirsId))
       return yield* refused(ref, "Choose a new parent version after the fork or last merge.")

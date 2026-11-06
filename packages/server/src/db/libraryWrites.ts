@@ -702,6 +702,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       ResolveMerge: ({ userId, refId, doc, theirsRevisionId, expectedRowVersion }) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
+          yield* lib.checkMergeBase(ref)
           if (ref.followed_head === null) {
             return yield* new RefOperationRefused({
               refId,

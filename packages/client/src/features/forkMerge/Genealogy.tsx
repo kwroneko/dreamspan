@@ -49,12 +49,14 @@ function Branch({
   family,
   member,
   current,
-  onOpen
+  onOpen,
+  depth = 0
 }: {
   family: Family
   member: Member
   current: RefId
   onOpen: () => void
+  depth?: number
 }) {
   const children = family.members.filter((m) => m.parentNodeId === member.nodeId && m.nodeId !== member.nodeId)
   const [open, setOpen] = useState(true)
@@ -99,9 +101,16 @@ function Branch({
         </div>
       </div>
       {open && children.length > 0 && (
-        <ul className="ml-4 flex min-w-0 flex-col gap-1 border-l border-border pl-2">
+        <ul className={`flex min-w-0 flex-col gap-1 ${depth < 6 ? "ml-4 border-l border-border pl-2" : ""}`}>
           {children.map((child) => (
-            <Branch key={child.nodeId} family={family} member={child} current={current} onOpen={onOpen} />
+            <Branch
+              key={child.nodeId}
+              family={family}
+              member={child}
+              current={current}
+              onOpen={onOpen}
+              depth={depth + 1}
+            />
           ))}
         </ul>
       )}

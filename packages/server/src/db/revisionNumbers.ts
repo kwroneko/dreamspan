@@ -17,6 +17,17 @@ export const previousRevisionSql = (r: string) =>
       AND e.forked_from_revision_id = CASE WHEN json_valid(${r}.origin_ref)
         THEN json_extract(${r}.origin_ref, '$.forked') END))`
 
+/** Membership follows the copied revision, not every revision of an ancestor entity. */
+export const revisionOnLine = (sql: SqlClient.SqlClient, head: string, revisionId: string) =>
+  sql<{ found: number }>`
+    WITH RECURSIVE line(id) AS (
+      SELECT ${head}
+      UNION
+      SELECT ${sql.literal(previousRevisionSql("r"))} FROM entity_revisions r JOIN line l ON r.id = l.id
+      WHERE l.id <> ${revisionId} AND ${sql.literal(previousRevisionSql("r"))} IS NOT NULL
+    )
+    SELECT EXISTS(SELECT 1 FROM line WHERE id = ${revisionId}) AS found`.pipe(Effect.map(([row]) => row!.found === 1))
+
 export const revisionNumber = (sql: SqlClient.SqlClient, revisionId: string) =>
   sql<{ n: number | null }>`
     WITH RECURSIVE line(id, n) AS (

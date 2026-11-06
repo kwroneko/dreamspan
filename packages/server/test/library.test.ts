@@ -388,6 +388,34 @@ describe("library", () => {
       }).pipe(Effect.provide(database()))
   )
 
+  for (const operation of ["restore", "page"] as const)
+    it.live(`a fork cannot ${operation} from a parent's revision outside its inherited line`, () =>
+      Effect.gen(function* () {
+        const { writer, reader, userId, upstream, edit, rowVersion } = yield* setup()
+        const variant = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Variant", subtitle: "" })
+        const child = yield* writer.ForkRef({ userId, refId: variant.id, label: "Child", subtitle: "" })
+        const later = (yield* edit(upstream.id, preset("After the fork."))).ref
+        yield* edit(upstream.id, preset("Later still."))
+        const before = yield* reader.RefHistory({ userId, refId: child.id, limit: 10 })
+        assert.isFalse(before.some((r) => r.id === later.headRevisionId))
+        const result =
+          operation === "restore"
+            ? yield* writer
+                .RestoreRevision({
+                  userId,
+                  refId: child.id,
+                  revisionId: later.headRevisionId,
+                  expectedRowVersion: yield* rowVersion(child.id)
+                })
+                .pipe(Effect.result)
+            : yield* reader
+                .RefHistory({ userId, refId: child.id, limit: 10, before: later.headRevisionId })
+                .pipe(Effect.result)
+        assert.strictEqual(result._tag, "Failure")
+        assert.deepStrictEqual(yield* reader.RefHistory({ userId, refId: child.id, limit: 10 }), before)
+      }).pipe(Effect.provide(database()))
+    )
+
   for (const kind of ["lorebook", "note"] as const)
     it.live(`${kind} forks are entries of their own and wait for an explicit merge`, () =>
       Effect.gen(function* () {

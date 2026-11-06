@@ -78,6 +78,43 @@ const fork = (api: Api, refId: RefId, characterVersion: string, name?: string) =
   })
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("card forks", (it) => {
+  it.effect("a copied note merges later text while retaining its fork's owner and condition cards", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const parent = yield* card(api, "Note merge parent")
+      const other = yield* card(api, "Note merge companion")
+      const note = yield* api.CreateCardNote({ cardRefId: parent.ref.id, title: "Weather" })
+      yield* draft(
+        api,
+        note.id,
+        valueField(["condition"]),
+        JSON.stringify({ when: "turn", cards: [parent.entityId, other.entityId] })
+      )
+      yield* commit(api, note.id)
+      const child = yield* fork(api, parent.ref.id, "note merge fork")
+      const [copy] = yield* api.ListCardNotes({ cardRefId: child.id })
+      yield* draft(api, note.id, textField(["content"]), "Fog rolls in.")
+      yield* commit(api, note.id)
+      const preview = yield* api.PreviewForkMerge({ refId: copy!.ref.id })
+      assert.deepStrictEqual(preview.conflicts, [])
+      yield* api.CommitForkMerge({
+        refId: copy!.ref.id,
+        theirsRevisionId: preview.theirsRevisionId,
+        baseRevisionId: preview.baseRevisionId,
+        expectedRowVersion: preview.ref.rowVersion,
+        selection: { excluded: [], resolutions: [] },
+        message: null
+      })
+      const [merged] = yield* api.ListCardNotes({ cardRefId: child.id })
+      assert.strictEqual(merged!.doc.content, "Fog rolls in.")
+      assert.deepStrictEqual(merged!.doc.owner, { card: child.entityId })
+      assert.deepStrictEqual(merged!.doc.condition, { when: "turn", cards: [child.entityId, other.entityId] })
+      assert.deepStrictEqual((yield* api.ListCardNotes({ cardRefId: parent.ref.id }))[0]!.doc.owner, {
+        card: parent.entityId
+      })
+    })
+  )
+
   it.effect("a copied card note keeps the draft's original base and detects concurrent edits", () =>
     Effect.gen(function* () {
       const api = yield* client()

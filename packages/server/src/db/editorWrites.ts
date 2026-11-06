@@ -1,4 +1,5 @@
 import { chatFork } from "./snippets.ts"
+import { revisionOnLine } from "./revisionNumbers.ts"
 import { inFork } from "./forkState.ts"
 import { makeSnippetWrites } from "./snippetWrites.ts"
 // The editors' write handlers (ARCHITECTURE.md "Editing the library"). They run in the
@@ -235,6 +236,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
     Effect.gen(function* () {
       const own = yield* entityRevision(ref, revisionId)
       if (own !== null) return { ...own, kept: new Set<string>() }
+      if (!(yield* revisionOnLine(sql, ref.head_revision_id, revisionId))) return null
       const kept = new Set<string>()
       const seen = new Set<string>()
       let entity = ref.entity_id

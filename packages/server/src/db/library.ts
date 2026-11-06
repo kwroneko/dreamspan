@@ -27,7 +27,7 @@ export interface CardBinding {
   readonly ref?: string | undefined
   readonly revision?: string | undefined
 }
-import { NotFound } from "./ops.ts"
+import { NotFound, RefOperationRefused } from "./ops.ts"
 
 export interface RefRow {
   readonly id: string
@@ -130,9 +130,22 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
       Effect.map(([row]) => JSON.parse(row!.doc_json) as Doc)
     )
 
+  /** A genealogy link made by hand establishes no common starting document. */
+  const checkMergeBase = (ref: RefRow) =>
+    ref.parent_ref_id !== null && ref.merge_base_revision_id === null
+      ? Effect.fail(
+          new RefOperationRefused({
+            refId: ref.id,
+            reason:
+              "This parent was linked without a known fork revision; its genealogy link does not establish a merge base."
+          })
+        )
+      : Effect.void
+
   /** What merging `ref` with what it follows would do. */
   const planMerge = (ref: RefRow) =>
     Effect.gen(function* () {
+      yield* checkMergeBase(ref)
       const theirsHead = ref.followed_head
       const ours = yield* loadDoc(ref.head_revision_id)
       const upToDate = { outcome: "up_to_date" as MergeOutcome, merged: ours, conflicts: [] }
@@ -361,6 +374,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
     ownedRef,
     refsWhere,
     loadDoc,
+    checkMergeBase,
     planMerge,
     cardNote,
     cardNoteFrom,
