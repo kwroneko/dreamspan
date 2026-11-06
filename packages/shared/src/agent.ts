@@ -78,6 +78,8 @@ export const TranscriptEntry = Schema.Union([
     parts: Schema.Array(TurnPart),
     /** The provider's reason the turn ended: `stop`, `toolUse`, `error`, `aborted`… */
     stopReason: Schema.String,
+    /** Whether this request included the run's frozen tools (the capped request does not). */
+    toolsOffered: Schema.Boolean,
     error: Schema.optionalKey(Schema.String)
   }),
   Schema.Struct({
@@ -150,15 +152,21 @@ export const ActivityRow = Schema.Struct({
   estimated: Schema.Boolean,
   /** The summary it wrote, whose request the summary's page shows. */
   summaryId: Schema.NullOr(Schema.String),
+  /** The generated revision this row paid for, even when another revision is selected. */
+  summaryRevisionId: Schema.NullOr(Schema.String),
   /** The reply it was about (a judgment), to open in the chat. */
   slotId: Schema.NullOr(Schema.String)
 })
 export type ActivityRow = typeof ActivityRow.Type
 
+/** All sort keys are needed: several purposes and rollouts may start in one millisecond. */
+export const ActivityCursor = Schema.Struct({ startedAt: Schema.Number, id: Schema.String, kind: Schema.String })
+export type ActivityCursor = typeof ActivityCursor.Type
+
 export const ActivityPage = Schema.Struct({
   rows: Schema.Array(ActivityRow),
   /** Pass as `before` for the next older page; null at the end. */
-  before: Schema.NullOr(Schema.Number)
+  before: Schema.NullOr(ActivityCursor)
 })
 export type ActivityPage = typeof ActivityPage.Type
 

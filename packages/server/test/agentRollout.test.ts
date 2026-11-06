@@ -12,7 +12,7 @@ import { SEND_NUDGE, WRITE_NOW } from "../src/agent/session.ts"
 import { agentInstructions } from "../src/agent/modes.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { Reader } from "../src/db/Database.ts"
 import { anthropicSse, completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
@@ -90,6 +90,48 @@ const scripted = (request: Recorded, res: ServerResponse) => {
 }
 
 describe("agent rollouts", () => {
+  it.live("Reply mode and Tools affect the next reply on their branch without changing an earlier run", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider((_request, res) => sse(res, completionChunks(["Done."], {})))),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { chat, version, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {}
+      })
+      const main = (yield* api.GetChat({ chatId: chat.id })).currentForkId
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: main, atSlotId: version.slotId })
+      for (const change of [
+        { _tag: "ReplyMode", mode: "narrator" },
+        { _tag: "AgentTools", tools: [] }
+      ] as const)
+        yield* api.ChangeCast({ chatId: chat.id, forkId: fork.id, slotId: version.slotId, change })
+      const mainCast = yield* api.GetCast({ chatId: chat.id, forkId: main, slotId: version.slotId })
+      assert.isUndefined(mainCast.replyMode)
+      assert.isUndefined(mainCast.agentTools)
+      const branchCast = yield* api.GetCast({ chatId: chat.id, forkId: fork.id, slotId: version.slotId })
+      assert.strictEqual(branchCast.replyMode, "narrator")
+      assert.deepStrictEqual(branchCast.agentTools, [])
+      const next = yield* posted(
+        api.Generate({ chatId: chat.id, forkId: fork.id, parentSlotId: version.slotId, branch: false })
+      )
+      yield* eventually(() => finished(events, next.entry.version.id) !== undefined)
+      const bodies = mock
+        .requests()
+        .filter((r) => r.path === "/v1/chat/completions")
+        .map((r) => r.body!)
+      assert.notProperty(bodies[0], "tools")
+      assert.deepStrictEqual(
+        (bodies.at(-1)!.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
+        ["send_message"]
+      )
+      assert.isEmpty((yield* api.GetRunTranscript({ versionId: version.id })).tools)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   for (const turnCap of [1, 2]) {
     it.live(`the cap (${turnCap}) uses Write now even when send_message needs a nudge`, () => {
       const config = testConfig()
@@ -104,7 +146,7 @@ describe("agent rollouts", () => {
           (m) => Effect.promise(() => m.close())
         )
         const api = yield* client()
-        yield* generateReply(api, {
+        const { version } = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
           model: {},
           state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
@@ -117,6 +159,12 @@ describe("agent rollouts", () => {
         const last = bodies.at(-1)!
         assert.deepStrictEqual((last.messages as Array<unknown>).at(-1), { role: "user", content: WRITE_NOW })
         assert.isEmpty((last.tools as Array<unknown> | undefined) ?? [])
+        const transcript = yield* api.GetRunTranscript({ versionId: version.id })
+        // The inspector must distinguish the capped request, which was sent without tools.
+        assert.deepStrictEqual(
+          transcript.entries.filter((entry) => entry.role === "assistant").map((entry) => entry.toolsOffered),
+          bodies.map((body) => Array.isArray(body.tools) && body.tools.length > 0)
+        )
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     })
   }

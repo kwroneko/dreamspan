@@ -73,6 +73,41 @@ describe("ST 1.19.0 activation table", () => {
 })
 
 describe("lorebook matcher contract", () => {
+  it("decision admissions participate in groups, cooldown, recursion and timing receipts", () => {
+    const entries = [
+      entry({ keys: ["missing"], content: "dragon", sticky: 2 }),
+      entry({ keys: ["dragon"], content: "A dragon answers." }, 1),
+      entry({ constant: true, group: "only-one", order: 200, content: "The winner." }, 2),
+      entry({ keys: ["missing"], group: "only-one", content: "The loser." }, 3),
+      entry({ keys: ["missing"], content: "Cooling down." }, 4)
+    ]
+    const result = matchLorebooks(
+      [book(entries)],
+      {
+        messages: ["No keywords."],
+        decisions: new Map([
+          ["synthetic:0", 0.99],
+          ["synthetic:3", 0.99],
+          ["synthetic:4", 0.99]
+        ]),
+        effects: new Map([[loreEntryKey("synthetic", entries[4]!), { sticky: false, cooldown: true }]])
+      },
+      { budget: 1000, recursive: true },
+      () => 0.5,
+      (text) => text.length
+    )
+    expect(result.activated.map((a) => a.entry.uid)).toEqual([2, 0, 1])
+    expect(result.activated.find((a) => a.entry.uid === 0)).toMatchObject({
+      why: { kind: "decision", probability: 0.99 },
+      entry: { sticky: 2 }
+    })
+    expect(result.activated.find((a) => a.entry.uid === 1)?.step).toBe(1)
+    expect(result.skipped.map((s) => [s.entry.uid, s.reason])).toEqual([
+      [3, "group"],
+      [4, "cooldown"]
+    ])
+  })
+
   it("keeps book identity with overlapping uids and does not mutate inputs", () => {
     const books = [
       book([entry({ keys: ["cat"], content: "dragon" })], {}, "one"),

@@ -27,10 +27,17 @@ const tags = [{ name: "slow", description: "Timing, scale or soak: run by npm ru
  * oversubscribe it and fail tests on time limits, but never fewer than a quarter of the
  * cores, so a saturated host still gets a run that finishes. VITEST_MAX_WORKERS overrides
  * it (Vitest reads it after this config).
+ *
+ * Computed once per process: Vitest evaluates this file again for each project, and the load
+ * moves in between. Projects given different values refuse to start ("Projects … have
+ * different 'maxWorkers' but same 'sequence.groupOrder'").
  */
-const cores = availableParallelism()
-const free = Math.floor(cores - (loadavg()[0] ?? 0)) - 2
-const maxWorkers = Math.max(2, Math.floor(cores / 4), Math.min(cores - 2, free))
+const once = globalThis as { rpVitestMaxWorkers?: number }
+const maxWorkers = (once.rpVitestMaxWorkers ??= (() => {
+  const cores = availableParallelism()
+  const free = Math.floor(cores - (loadavg()[0] ?? 0)) - 2
+  return Math.max(2, Math.floor(cores / 4), Math.min(cores - 2, free))
+})())
 
 /**
  * Some tests import a large module graph in their body, and Vite transforms it on first use:

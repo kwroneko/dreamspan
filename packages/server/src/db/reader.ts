@@ -1,3 +1,4 @@
+import { makeMergeReadHandlers } from "./merges.ts"
 import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
 import { stateModuleHandlers } from "./stateModules.ts"
 import { moduleHandlers } from "../assembler/modules.ts"
@@ -55,6 +56,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               makeLcmReadHandlers,
               makeLcmUiReadHandlers,
               makeLcmEnableReadHandlers,
+              makeMergeReadHandlers,
               makeAgentReadHandlers
             ]),
             ([
@@ -72,6 +74,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               lcm,
               lcmUi,
               lcmEnable,
+              merges,
               agent
             ]) =>
               ReadOps.of(
@@ -91,6 +94,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                     ...lcm,
                     ...lcmUi,
                     ...lcmEnable,
+                    ...merges,
                     ...agent
                   })
                 )

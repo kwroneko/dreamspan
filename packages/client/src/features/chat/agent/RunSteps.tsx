@@ -43,7 +43,7 @@ function Tools({ tools }: { tools: ReadonlyArray<OfferedTool> }) {
   return (
     <section aria-label="Tools offered" className="flex flex-col gap-2">
       <h2 className="text-base font-semibold">Tools offered</h2>
-      <p className="text-sm text-muted">Sent with every request of this run, as the model saw them.</p>
+      <p className="text-sm text-muted">Available to this run, as defined when it started.</p>
       {tools.map((tool) => (
         <Box key={tool.name} title={tool.name} note={tool.label}>
           <div className="flex flex-col gap-1">
@@ -124,6 +124,9 @@ function Steps({ run, entries }: { run: RunContext; entries: ReadonlyArray<Trans
             )}
             {turn.answer && (
               <>
+                <p className="text-sm text-muted">
+                  {turn.answer.toolsOffered ? "The tools above were offered." : "No tools were offered."}
+                </p>
                 <h3 className="text-sm font-medium">The model's answer</h3>
                 {turn.answer.parts.length === 0 && <p className="text-sm text-muted">Nothing came back.</p>}
                 {turn.answer.parts.map((part, j) => (

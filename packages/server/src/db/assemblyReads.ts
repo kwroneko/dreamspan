@@ -54,6 +54,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
     ...(yield* makeTokenCountingReadHandlers),
     ...(yield* makeDecisionReadHandlers),
     RoleProjections: () => assembler.projectionOptions,
+    MergeLayouts: () => assembler.mergeLayoutOptions,
     AssembleContext: ({
       userId,
       chatId,

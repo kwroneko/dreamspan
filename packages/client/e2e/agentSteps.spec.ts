@@ -119,7 +119,7 @@ for (const width of [1440, 390])
         })
       )
       expect(leaf).toBeTruthy()
-      await expect(page.getByText("And the lantern?")).toBeVisible()
+      await expect(page.getByTestId("messages").getByText("And the lantern?")).toBeVisible()
       provider.hold()
       await replyButton().click()
       const reply = page.getByRole("article").last()
@@ -137,6 +137,14 @@ for (const width of [1440, 390])
       await shot("steps-running")
       await expectLayout(page, info, `steps-running-${width}-${theme}`, { scope: "article:last-of-type" })
 
+      // The header badge is another way to fold the running steps, and saves the same preference.
+      await reply.locator("[data-steps-badge]").click()
+      await expect(toggle).toHaveAttribute("aria-expanded", "false")
+      await expect.configure({ soft: true }).poll(prefs).toBe("collapsed")
+      await reply.locator("[data-steps-badge]").click()
+      await expect(toggle).toHaveAttribute("aria-expanded", "true")
+      await expect.poll(prefs).toBe("expanded")
+
       // Folding during the run sticks; opening again puts it back.
       await toggle.click()
       await expect(toggle).toHaveAttribute("aria-expanded", "false")
@@ -145,14 +153,26 @@ for (const width of [1440, 390])
       await expect(toggle).toHaveAttribute("aria-expanded", "true")
       await expect.poll(prefs).toBe("expanded")
 
+      // A second tab and a reload join mid-run with the same version's complete steps.
+      const other = await page.context().newPage()
+      await other.goto(`${server().url}/chats/${fixture.chat.id}`)
+      const otherPanel = other.getByRole("article").last().locator("[data-steps-panel]")
+      await expect(otherPanel).toHaveAttribute("data-steps-panel", "running")
+      await expect(otherPanel.locator('[data-step="tool"]')).toHaveCount(2)
+      await page.reload()
+      await expect(toggle).toHaveAttribute("aria-expanded", "true")
+      await expect(rows).toHaveCount(2)
+
       // The reply arrives: the steps fold to their count and time.
       provider.release()
       await expect(reply).toContainText(AGENT_REPLY)
       await expect(panel).toHaveAttribute("data-steps-panel", "done")
-      const done = panel.getByRole("button", { name: /^2 steps · \d+ s$/ })
+      await expect(otherPanel).toHaveAttribute("data-steps-panel", "done")
+      await other.close()
+      const done = panel.getByRole("button", { name: /^2 steps · / })
       await expect(done).toHaveAttribute("aria-expanded", "false")
       const badge = reply.locator("[data-steps-badge]")
-      await expect(badge).toHaveText(/^2 steps · \d+ s$/)
+      await expect(badge).toHaveText(/^2 steps · (?:\d+ min(?: \d+ s)?|\d+ s)$/)
       // The badge opens them, read from the transcript.
       await badge.click()
       await expect(done).toHaveAttribute("aria-expanded", "true")
@@ -169,6 +189,7 @@ for (const width of [1440, 390])
       await expect(tools2.getByRole("region", { name: "search_chat" })).toBeVisible()
       const steps = page.getByRole("region", { name: "Steps", exact: true })
       await expect(steps.getByText("Request 3", { exact: true })).toBeVisible()
+      await expect(steps.getByText("The tools above were offered.", { exact: true })).toHaveCount(3)
       await expect(steps.getByRole("region", { name: "Tool call: search_chat" }).first()).toContainText('"bridge"')
       await expect(steps.getByRole("region", { name: /^Result of search_chat/ }).first()).toBeVisible()
       await expect(steps.getByRole("region", { name: "Text" }).last()).toContainText(AGENT_REPLY)
@@ -180,7 +201,9 @@ for (const width of [1440, 390])
       // Activity: a summary written for this chat, with its tokens and cost.
       const rollout = uuidv7(),
         summary = uuidv7(),
-        revision = uuidv7()
+        revision = uuidv7(),
+        revisedRollout = uuidv7(),
+        revisedRevision = uuidv7()
       const entries = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         Effect.map(
           api.ReadPath({ chatId: fixture.chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }),
@@ -207,13 +230,25 @@ for (const width of [1440, 390])
           })),
           { sql: "UPDATE summaries SET sealed=1 WHERE id=?", params: [summary] },
           {
+            sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at,started_at,completed_at) VALUES(?,?,'summarize','completed','summarizer','background',4000,5000,4000,5000)",
+            params: [revisedRollout, fixture.chat.id]
+          },
+          {
+            sql: "INSERT INTO summary_revisions(id,summary_id,content,rollout_id,token_count,origin,created_at) VALUES(?,?,?,?,20,'generated',5000)",
+            params: [revisedRevision, summary, "A revised bridge summary.", revisedRollout]
+          },
+          {
+            sql: "INSERT INTO llm_requests(id,owner_user_id,connection_id,chat_id,rollout_id,purpose,api,provider,model_key,status,started_at,ended_at,input_uncached,cache_read,output,usage_source,cost,cost_currency,cost_formula) VALUES(?,?,?,?,?,'summarize','openai','synthetic','revision-summarizer','complete',4000,5000,80,0,20,'reported',0.025,'USD','reported')",
+            params: [uuidv7(), fixture.user.id, fixture.connection.id, fixture.chat.id, revisedRollout]
+          },
+          {
             sql: "INSERT INTO llm_requests(id,owner_user_id,connection_id,chat_id,rollout_id,purpose,api,provider,model_key,status,started_at,ended_at,input_uncached,cache_read,cache_write,output,usage_source,cost,cost_currency,cost_formula) VALUES(?,?,?,?,?,'summarize','openai','synthetic','synthetic-summarizer','complete',1000,3500,120,30,NULL,40,'reported',0.0123,'USD','reported')",
             params: [uuidv7(), fixture.user.id, fixture.connection.id, fixture.chat.id, rollout]
           }
         ])
       )
       const activity = await openPanel(page, "Activity")
-      const row = activity.locator('[data-activity="summarize"]')
+      const row = activity.locator('[data-activity="summarize"]').last()
       await expect(row).toContainText("Summarizing messages")
       await expect(row).toContainText("synthetic-summarizer")
       await expect(row).toContainText("0.0123 USD")
@@ -223,5 +258,13 @@ for (const width of [1440, 390])
       await expect(activity.locator('[data-activity="generation"]')).toHaveCount(0)
       await shot("activity")
       await expectLayout(page, info, `activity-${width}-${theme}`, { scope: '[aria-label="Activity"]' })
+      // A later generated revision links to its own request, even when another revision is selected.
+      const revised = activity.locator('[data-activity="summarize"]').first()
+      await expect(revised).toContainText("revision-summarizer")
+      await revised.getByRole("link", { name: "Open request" }).click()
+      await expect(page.locator('[aria-label="Summary generation details"]')).toContainText("revision-summarizer")
+      await expectLayout(page, info, `activity-request-${width}-${theme}`, {
+        scope: '[aria-label="Summary generation details"]'
+      })
     })
   }

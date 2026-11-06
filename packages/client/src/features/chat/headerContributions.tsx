@@ -35,6 +35,9 @@ const ExportChatDialog = deferred<ChatCommandDialogProps>(() =>
 const DeleteChatGroupDialog = deferred<ChatCommandDialogProps>(() =>
   import("./DeleteChatGroupDialog.tsx").then((m) => ({ default: m.DeleteChatGroupDialog }))
 )
+const MergeChatCommandDialog = deferred<ChatCommandDialogProps>(() =>
+  import("./MergeChatDialog.tsx").then((m) => ({ default: m.MergeChatCommandDialog }))
+)
 const SplitChatCommandDialog = deferred<ChatCommandDialogProps>(() =>
   import("./SplitChatDialog.tsx").then((m) => ({ default: m.SplitChatCommandDialog }))
 )
@@ -71,6 +74,15 @@ export const registerChatHeader = () => [
     available: ({ view, splitRootId }) =>
       splitRootId !== undefined && (view.forkId ?? view.chat?.currentForkId) !== splitRootId,
     dialog: SplitChatCommandDialog
+  }),
+  chatCommands.register({
+    id: "chat.merge",
+    label: "Merge another chat…",
+    description: "Brings another chat's messages into this one, after the newest message.",
+    order: 2.6,
+    icon: "merge",
+    available: ({ view }) => view.chat !== null && view.entries.length > 0,
+    dialog: MergeChatCommandDialog
   }),
   chatCommands.register({
     id: "chat.new-with-cast",

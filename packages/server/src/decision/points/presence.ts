@@ -12,6 +12,7 @@ import { foldState, type StoredStateEventData } from "@rp/shared/state.ts"
 type StoredEvent = typeof StoredStateEventData.Type
 import { Effect } from "effect"
 import type { DecisionPoint } from "../engine.ts"
+import { decisionStateStamp } from "../stateStamp.ts"
 
 /** A message's text as the state carries it, at most this long (the newest part kept). */
 const MESSAGE_CHARS = 4_000
@@ -106,6 +107,8 @@ export const presencePoint: DecisionPoint<PresenceInput, ReadonlyArray<PresenceC
         range: { _tag: "Bottom" },
         limit: 2
       })
+      // A completed reply may already have been swiped or edited before this background task runs.
+      if (window.entries.at(-1)?.version.id !== reply.versionId) return false
       const speakers = [
         ...new Set(window.entries.flatMap((e) => (e.version.speakerEntityId ? [e.version.speakerEntityId] : [])))
       ]
@@ -142,13 +145,13 @@ export const presencePoint: DecisionPoint<PresenceInput, ReadonlyArray<PresenceC
         key: "presence.set",
         value: { entity: change.entity as EntityId, present: change.present, source: "decision" }
       }))
-      yield* writer.ApplyDecisionEffect({
+      return yield* writer.ApplyDecisionEffect({
         userId: reply.userId,
         rolloutId: outcome.rolloutId,
         versionId: reply.versionId,
+        expectedState: decisionStateStamp(events),
         events: changes
       })
-      return true
     }).pipe(
       Effect.catchCause((cause) => Effect.logWarning("the presence decision failed", cause).pipe(Effect.as(false)))
     )

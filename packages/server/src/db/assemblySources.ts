@@ -42,6 +42,7 @@ import {
   type ModelInput,
   type CardInput,
   type HistoryEntry,
+  type HistoryMerge,
   type NoteInput,
   type LorebookInput,
   noteCard,
@@ -131,6 +132,7 @@ const sectionsOf = (json: string | null): { replySections?: ReplySections } =>
 
 interface HistoryRow {
   readonly images_json: string
+  readonly merge_json: string | null
   readonly slot_id: string
   readonly parent_slot_id: string | null
   readonly depth: number
@@ -600,7 +602,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             f.writer AS first_writer, f.origin AS first_origin,
             (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amend_count,
             v.macro_mode = 'template' AND EXISTS (SELECT 1 FROM state_events w WHERE w.version_id = v.id
-              AND w.key = 'var.set' AND w.origin = 'rollout') AS written`
+              AND w.key = 'var.set' AND w.origin = 'rollout') AS written,
+            (SELECT json_object('id', m.id, 'title', m.title, 'framing', m.framing, 'start', m.start_slot_id,
+                'cast', (SELECT json_group_array(c.value ->> 'name') FROM json_each(m.cast_json) c
+                  WHERE c.value ->> 'from' <> 'destination'))
+              FROM chat_merges m WHERE m.slot_id = s.id) AS merge_json`
         const joins = sql`JOIN versions v ON v.id = ${selected}
           JOIN versions o ON o.id = ${sql.literal(originalSql("v"))}
           JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)`
@@ -647,6 +653,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             versions: row.version_count,
             selectedOrdinal: row.ordinal,
             versionNumber: row.version_number,
+            ...(row.merge_json ? { merge: JSON.parse(row.merge_json) as HistoryMerge } : {}),
             amends: row.amend_count
           }))
         const older =

@@ -39,6 +39,7 @@ const harness = (options: {
   readonly on?: boolean
   readonly answer: Effect.Effect<unknown, ReturnType<typeof providerError>>
   readonly timeoutMs?: number
+  readonly resolve?: typeof point.resolve
 }) => {
   const started: Array<string> = []
   const finished: Array<{ status: string; error: string | null; result: Record<string, unknown> }> = []
@@ -73,9 +74,10 @@ const harness = (options: {
         )
       })
   } as never)
-  const layer = DecisionEngine.layerWith({ points: [point], timeoutMs: options.timeoutMs ?? 1_000 }).pipe(
-    Layer.provide([reader, writer, providers])
-  )
+  const layer = DecisionEngine.layerWith({
+    points: [{ ...point, resolve: options.resolve ?? point.resolve }],
+    timeoutMs: options.timeoutMs ?? 1_000
+  }).pipe(Layer.provide([reader, writer, providers]))
   const run = (asked = true) =>
     Effect.flatMap(DecisionEngine, (engine) =>
       engine.evaluate<{ asked: boolean }, string>("probe", { asked }, context)
@@ -84,6 +86,20 @@ const harness = (options: {
 }
 
 describe("decision engine", () => {
+  it.effect("a resolver defect falls back and closes the billed rollout", () =>
+    Effect.gen(function* () {
+      const h = harness({
+        answer: Effect.succeed({ q: { noul: 0.99 } }),
+        resolve: () => {
+          throw new Error("bad resolver")
+        }
+      })
+      assert.deepInclude(yield* h.run(), { value: "fallback", source: "heuristic" })
+      assert.strictEqual(h.finished.length, 1)
+      assert.strictEqual(h.finished[0]!.status, "failed")
+    })
+  )
+
   it("parseAnswers: typed answers; a missing or malformed answer fails the whole map", () => {
     const questions = {
       task: { type: "choice" as const, instructions: "x", criteria: { coding: "c", chat: "d" } },

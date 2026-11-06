@@ -1,4 +1,5 @@
 import { SplitChatApi } from "./splitChat.ts"
+import { ChatMergeApi } from "./mergeApi.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import { SnippetsApi } from "./snippetsApi.ts"
 import { HistoryApi } from "./historyApi.ts"
@@ -405,6 +406,8 @@ export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authe
 
 /** The whole API: what the client calls and the server serves. */
 export class AuthenticatedSplitChatApi extends SplitChatApi.middleware(Authentication) {}
+/** Merging another chat into this one (mergeApi.ts). */
+export class AuthenticatedChatMergeApi extends ChatMergeApi.middleware(Authentication) {}
 
 /** The chat's live updates (chatApi.ts), in a layer of their own like the fork merges. */
 export class AuthenticatedChatEventsApi extends ChatEventsApi.middleware(Authentication) {}
@@ -421,7 +424,8 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedSummaryRequestApi)
-  .merge(AuthenticatedSplitChatApi) {}
+  .merge(AuthenticatedSplitChatApi)
+  .merge(AuthenticatedChatMergeApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

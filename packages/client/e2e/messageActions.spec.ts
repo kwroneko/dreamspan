@@ -38,6 +38,7 @@ const DEFAULTS = {
   "message.add-guidance": false,
   "message.insert-below": false,
   "message.duplicate": false,
+  "message.merge": false,
   "message.visibility": false,
   "message.context": false,
   "message.delete-all": false
@@ -92,6 +93,7 @@ const EVERY_REPLY_ACTION = [
   "Branch from here",
   "Insert message below",
   "Duplicate",
+  "Merge a chat here…",
   "Hide from the model",
   // "Request it was generated from" is on a version with a recorded request: not the fake
   // generator's (inspector.spec.ts has it).

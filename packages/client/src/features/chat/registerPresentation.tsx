@@ -95,6 +95,9 @@ const SummariesSwitch = deferred<Parameters<typeof import("./ThisChatTab.tsx").S
 const SummarySettings = deferred<Parameters<typeof import("./ThisChatTab.tsx").SummarySettings>[0]>(() =>
   import("./ThisChatTab.tsx").then((m) => ({ default: m.SummarySettings }))
 )
+const MergeLayoutSetting = deferred<Parameters<typeof import("./ThisChatTab.tsx").MergeLayoutSetting>[0]>(() =>
+  import("./ThisChatTab.tsx").then((m) => ({ default: m.MergeLayoutSetting }))
+)
 const RolesSetting = deferred<Parameters<typeof import("./ThisChatTab.tsx").RolesSetting>[0]>(() =>
   import("./ThisChatTab.tsx").then((m) => ({ default: m.RolesSetting }))
 )
@@ -139,6 +142,7 @@ export const registerPresentation = () => [
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
   chatSettingSections.register({ id: "settings.macro-bindings", order: 80, component: MacroBindings }),
+  chatSettingSections.register({ id: "settings.merge-layout", order: 85, component: MergeLayoutSetting }),
   chatSettingSections.register({ id: "settings.roles", order: 90, component: RolesSetting }),
   summaryPanelSections.register({ id: "summaries.settings", order: 100, component: SummarySettings }),
   summarySettingFields.register({ id: "settings.summary-fields", order: 10, component: LcmFields }),

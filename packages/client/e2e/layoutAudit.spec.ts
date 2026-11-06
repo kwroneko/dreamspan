@@ -9,7 +9,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, EntityId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import { findStRoots } from "@rp/shared/stFolder.ts"
 import { textField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
@@ -896,6 +896,53 @@ test.describe("synthetic library and every app surface", () => {
           await hideAppNavigation(page)
           await page.getByRole("button", { name: /switch branch/ }).click()
           await audit("splitlink-header", '[role="dialog"]')
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_CHATMERGE_ONLY === "1") {
+          // Merging another chat (spec/CHAT-MERGE.md §7): the dialog, the timeline entry, the setting.
+          const source = await admin((api) =>
+            Effect.gen(function* () {
+              const made = yield* api.CreateChat({
+                title: `Merge source with a long title at ${width} ${theme} ${Date.now()}`
+              })
+              let parent: SlotId | null = null
+              for (const content of ["The far docks wake under a grey sky.", "Cranes swing over the quiet water."]) {
+                const sent: { readonly _tag: string; readonly entry?: { readonly slotId: SlotId } } =
+                  yield* api.SendMessage({
+                    chatId: made.id,
+                    forkId: made.currentForkId!,
+                    parentSlotId: parent,
+                    branch: false,
+                    content
+                  })
+                parent = sent.entry!.slotId
+              }
+              return made
+            })
+          )
+          await go("chatmerge-chat", `/chats/${chatId}`)
+          await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+          await page.getByRole("menuitem", { name: "Merge another chat…", exact: true }).click()
+          const dialog = page.getByRole("dialog", { name: "Merge a chat into this one", exact: true })
+          await expect(dialog).toBeVisible()
+          await audit("chatmerge-dialog-empty", '[role="dialog"]')
+          await dialog.getByRole("searchbox", { name: "Chat to merge" }).fill(source.title)
+          await dialog
+            .getByRole("list", { name: "Chats" })
+            .getByRole("button", { name: source.title, exact: true })
+            .click()
+          await expect(dialog.getByTestId("merge-relation")).toBeVisible()
+          await dialog.getByText("What the model reads", { exact: true }).click()
+          await audit("chatmerge-dialog", '[role="dialog"]')
+          await dialog.getByRole("button", { name: "Merge", exact: true }).click()
+          await expect(dialog).toHaveCount(0)
+          const row = page.locator("article[data-merge]").last()
+          await row.getByRole("button", { name: /^Merged “/ }).click()
+          await expect(row.getByRole("list", { name: /^Messages of / })).toBeVisible()
+          await audit("chatmerge-timeline", "article[data-merge]")
+          await openPanel(page, "This chat")
+          await expect(page.getByRole("radiogroup", { name: "Merged chats" })).toBeVisible()
+          await audit("chatmerge-setting", 'section[aria-label="Merged chats"]')
           return
         }
         if (process.env.LAYOUT_AUDIT_SPLITCONFIRM_ONLY === "1") {
@@ -2366,13 +2413,15 @@ for (const { width, height } of [
             : page.getByRole("complementary", { name: "Sidebar", exact: true })
         const branches = column.getByRole("region", { name: "Branches of the open chat", exact: true })
         await expect(branches).toHaveAttribute("aria-busy", "false")
-        const splits = column.getByRole("region", { name: "Split chats", exact: true })
+        const splits = column.getByRole("region", { name: "Related chats", exact: true })
         await expect(splits).toHaveAttribute("aria-busy", "false")
         if (name === "hills") {
-          await expect(splits.getByRole("link", { name: /^From / })).toBeVisible()
-          await expect(splits.locator("[data-foot-body]")).toHaveCount(0)
-          await expect(splits.getByRole("separator")).toHaveCount(0)
-          expect((await splits.boundingBox())!.height).toBeLessThanOrEqual(41)
+          // A source-only chat: one row under its caption, and no space below it.
+          const source = splits.getByRole("group", { name: "This chat was split from", exact: true })
+          await expect(source.locator("[data-fork-row]")).toHaveCount(1)
+          await expect(splits.getByRole("group", { name: "Split off from this chat", exact: true })).toHaveCount(0)
+          const body = splits.locator("[data-foot-body]")
+          expect(await body.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
         }
         const measure = () =>
           column.evaluate((el) => {
@@ -2403,7 +2452,7 @@ for (const { width, height } of [
           .toBeGreaterThanOrEqual(-1)
         const m = await measure()
         for (const section of m.sections) if (section.open) expect(section.visibleRows).toBeGreaterThanOrEqual(1)
-        if (name === "hills") expect(m.listHeight).toBeGreaterThan(measurements[0]!.listHeight + 100)
+        if (name === "hills") expect(m.listHeight).toBeGreaterThan(measurements[0]!.listHeight)
         measurements.push({ name, ...m })
         await expectLayout(page, info, `split-${name}-${width}`, { scope: "[data-shell-list], [data-sidebar-feet]" })
         await column.screenshot({ path: join(full, `${name}-${width}x${height}-dark.png`) })

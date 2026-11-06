@@ -1,3 +1,4 @@
+import { mergeLayoutStage } from "./merges.ts"
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
@@ -882,7 +883,8 @@ const withReplacement = <T extends Text | null>(
     return { text: "", piece }
   }
   const raw = note.doc.content.trim()
-  const original = /\{\{\s*original\s*\}\}/i.test(raw) ? (own()?.text ?? "") : undefined
+  const originalText = /\{\{\s*original\s*\}\}/i.test(raw) ? own() : undefined
+  const original = originalText === undefined ? undefined : (originalText?.text ?? "")
   const owner = noteCard(note.doc)
   const ownerCard =
     owner === null
@@ -893,7 +895,7 @@ const withReplacement = <T extends Text | null>(
     ...(ownerCard && !key.startsWith("card:") ? { names: { ...options.names, char: modelName(ownerCard.doc) } } : {}),
     ...(original === undefined ? {} : { original })
   })
-  if (changing) env.markVolatile(piece)
+  if (changing || (originalText && env.isVolatile(originalText.piece))) env.markVolatile(piece)
   record.piece = piece
   return finish(piece)
 }
@@ -1136,6 +1138,9 @@ const chatLine = (
   const text = scripted.text.replace(/\r/gm, "") || (projected.entry.images?.length ? "[Image]" : "")
   const pieces = [projected.piece]
   const images = projected.entry.images?.length ? { images: projected.entry.images } : {}
+  // A merged chat's section and join (assembler/merges.ts): system text, as summaries are sent.
+  if (projected.system)
+    return { role: "system", content: text, pieces, kind: scripted.volatile ? "volatile" : "history" }
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
     content: prefix ? `${projected.name}: ${text}` : text,
@@ -1256,21 +1261,45 @@ const summaryText = (assembly: Assembly, note: NoteInput): Text | null => {
   if (!content) return null
   const { template } = note.doc
   const formatted = template ? template.replace(/\{\{summary\}\}/gi, () => content) : `Summary: ${content}`
-  const env = need(assembly, "macros")
-  const piece = env.piece(`note:${note.entity}`, noteSource(assembly, note), formatted)
-  const text = env.text(piece).trim()
-  return { text, piece }
+  const expanded = noteText(assembly, note, null, formatted)
+  return expanded ? { ...expanded, text: expanded.text.trim() } : null
 }
 
 /** A note's text, expanded: a card's with `{{char}}` bound to the card, the chat's with the chat's bindings. */
-const noteText = (assembly: Assembly, note: NoteInput, owner: CardInput | null): Text | null => {
+const noteText = (
+  assembly: Assembly,
+  note: NoteInput,
+  owner: CardInput | null,
+  content = note.doc.content.trim()
+): Text | null => {
   const env = need(assembly, "macros")
-  const piece = env.piece(
-    `note:${note.entity}`,
-    noteSource(assembly, note),
-    note.doc.content.trim(),
-    owner ? { withoutCard: true, names: { char: modelName(owner.doc) } } : {}
+  const replacing = [...(assembly.replacements?.values() ?? [])].find(
+    (r) => r.note === note && r.record.status === "own_position"
   )
+  let original: Text | null | undefined
+  if (replacing && /\{\{\s*original\s*\}\}/i.test(content)) {
+    const target = replacing.record.target
+    if (target.kind === "preset_prompt") {
+      const prompt = need(assembly, "preset").doc.prompts.find((p) => p.identifier === target.identifier)
+      original = prompt ? presetText(assembly, target.identifier, prompt.content) : null
+    } else {
+      const cast = need(assembly, "cast")
+      const card = [...cast.characters, ...cast.personas].find((c) => c.entity === target.card)
+      original = card
+        ? ownCardText(
+            assembly,
+            card,
+            target.field,
+            cast.personas.includes(card) ? { user: modelName(card.doc) } : { char: modelName(card.doc) }
+          )
+        : null
+    }
+  }
+  const piece = env.piece(`note:${note.entity}`, noteSource(assembly, note), content, {
+    ...(owner ? { withoutCard: true, names: { char: modelName(owner.doc) } } : {}),
+    ...(original === undefined ? {} : { original: original?.text ?? "" })
+  })
+  if (original && env.isVolatile(original.piece)) env.markVolatile(piece)
   const text = env.text(piece)
   return { text, piece }
 }
@@ -1761,6 +1790,33 @@ const composeStage = sync("compose", (assembly) => {
     assembly.cardOverrides = []
     override(assembly, collection, disabled, "main", overrides.main, speaker)
     override(assembly, collection, disabled, "jailbreak", overrides.jailbreak, speaker)
+  }
+
+  // A conditional replacement changes its target's slot even when its text is empty,
+  // or a skipped Main note lets the card override it. Keep that boundary on the slot.
+  for (const { note, record } of assembly.replacements?.values() ?? []) {
+    if (!conditioned(note) || !["replaced", "own_position", "not_due"].includes(record.status)) continue
+    const target = record.target
+    let identifier: string
+    if (target.kind === "preset_prompt") identifier = target.identifier
+    else {
+      const card = [...cast.characters, ...cast.personas].find((c) => c.entity === target.card)
+      if (!card) continue
+      if (target.field === "system_prompt" || target.field === "post_history_instructions") {
+        if (card !== speaker) continue
+        identifier = target.field === "system_prompt" ? "main" : "jailbreak"
+      } else if (target.field === "mes_example") identifier = "dialogueExamples"
+      else {
+        if (card === atTail) continue
+        identifier = definitions
+          ? "charDefinitions"
+          : cast.personas.includes(card)
+            ? "personaDescription"
+            : { description: "charDescription", personality: "charPersonality", scenario: "scenario" }[target.field]
+      }
+    }
+    const index = collection.findIndex((p) => p.identifier === identifier)
+    if (index >= 0) collection[index] = { ...collection[index]!, barrier: true }
   }
 
   const previous = previousStart(assembly)
@@ -2666,6 +2722,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   resolveStage,
   imageTokensStage,
   rolesStage,
+  mergeLayoutStage,
   noteGateStage,
   replacementsStage,
   loreScanStage,

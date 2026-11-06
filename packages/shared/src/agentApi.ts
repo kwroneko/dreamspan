@@ -1,7 +1,7 @@
 // The agent RPCs (spec/AGENTIC.md §5, §6).
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ACTIVITY_PAGE, ActivityPage, NotResumable, ReplyModes, RolloutStep, RunTranscript, StepEdit } from "./agent.ts"
+import { ACTIVITY_PAGE, ActivityCursor, ActivityPage, NotResumable, ReplyModes, RolloutStep, RunTranscript, StepEdit } from "./agent.ts"
 import { ChatId, ForkId, PathEntry, VersionId } from "./chat.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
@@ -62,7 +62,7 @@ export class AgentApi extends RpcGroup.make(
   Rpc.make("ListActivity", {
     payload: {
       chatId: ChatId,
-      before: Schema.optionalKey(Schema.Number),
+      before: Schema.optionalKey(ActivityCursor),
       limit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: ACTIVITY_PAGE })))
     },
     success: ActivityPage,
