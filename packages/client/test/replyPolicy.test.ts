@@ -271,3 +271,43 @@ it("plans ST's whole round per reply order, and one reply with the switch on or 
   // A pick under Next is one reply, as ST's force talk.
   assert.deepStrictEqual(whole(natural, user, "Hello.", tobin), [tobin])
 })
+
+it("No one under Next: no reply to what you send, Auto's one reply when asked, a pick still replies", () => {
+  const [mira, tobin, wren, ana] = ["synthetic-mira", "synthetic-tobin", "synthetic-wren", "synthetic-ana"] as [
+    EntityId,
+    EntityId,
+    EntityId,
+    EntityId
+  ]
+  const cards = [card(mira, "Mira", 1), card(tobin, "Tobin", 1), card(wren, "Wren", 1), card(ana, "Ana", 1)]
+  const user = [turn("v1", ana, "Hello.")]
+  for (const replyOrder of ["natural", "list", "pooled", "manual"]) {
+    const cast = castOf([mira, tobin, wren, ana], cards, { playedByMe: [ana], replyOrder })
+    // A message or an image sent: no reply and no round, whoever is named.
+    for (const [input, images] of [
+      ["Mira, what now?", false],
+      ["", true]
+    ] as const) {
+      const sent = planReply(cast, user, ana, null, input, images, true)
+      assert.strictEqual(sent.replier, null, replyOrder)
+      assert.deepStrictEqual(sent.round, [], replyOrder)
+      assert.isFalse(sent.reply, replyOrder)
+    }
+    // Reply now or an empty Send asks: Auto's pick, one reply.
+    const asked = planReply(cast, user, ana, null, null, false, true)
+    assert.strictEqual(asked.replier, planReply(cast, user, ana, null, null).replier, replyOrder)
+    assert.deepStrictEqual(asked.round, [], replyOrder)
+    // A pick under Next replies to the message, one reply.
+    assert.deepStrictEqual(planReply(cast, user, ana, wren, "Hi.", false, true), {
+      next: planReply(cast, user, ana, null, "Hi.").next,
+      replier: wren,
+      round: [],
+      reply: true
+    })
+  }
+  // With one character, and with none: a message still gets no reply.
+  assert.isFalse(
+    planReply(castOf([mira, ana], cards, { playedByMe: [ana] }), user, ana, null, "Hi.", false, true).reply
+  )
+  assert.isFalse(planReply(null, [], null, null, "Hi.", false, true).reply)
+})

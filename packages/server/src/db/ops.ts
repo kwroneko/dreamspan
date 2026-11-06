@@ -845,6 +845,7 @@ export class WriteOps extends RpcGroup.make(
       guidance: Schema.optionalKey(Schema.Boolean),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       replyFromEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
+      noReplies: Schema.optionalKey(Schema.Boolean),
       /** Consume a one-reply pick only if it still names this card. */
       consumeReplyFromEntityId: Schema.optionalKey(EntityId)
     },

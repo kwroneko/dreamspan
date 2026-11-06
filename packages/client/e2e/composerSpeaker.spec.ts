@@ -182,9 +182,9 @@ test("Next: Auto's pick, a name in the box, a pick for one reply, and an empty S
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Ana/)
   await expect(nextChip(page)).toHaveAccessibleName(nextName("Mira"))
   await expect(nextReply(page).getByRole("button", { name: "Mira replies now", exact: true })).toBeEnabled()
-  // Auto and the characters only: the cards the user plays never reply.
+  // Auto, No one and the characters only: the cards the user plays never reply.
   await nextChip(page).click()
-  await expect(whoReplies(page).getByRole("radio")).toHaveCount(4)
+  await expect(whoReplies(page).getByRole("radio")).toHaveCount(5)
   await expect(whoReplies(page).getByRole("radio", { name: /^(Mira|Tobin|Wren)$/ })).toHaveCount(3)
   await expect(whoReplies(page).getByRole("radio", { name: "Ana", exact: true })).toHaveCount(0)
   await expect(whoReplies(page).getByRole("radio", { name: "Auto: Mira", exact: true })).toBeChecked()
@@ -304,12 +304,14 @@ test("the speaker stays chosen through a reload and in every tab; the switcher s
   await second.close()
 })
 
-test("a one-card chat keeps a disabled Next chip, and an empty Send asks its character", async ({ page }) => {
+test("a one-card chat's Next offers Auto, No one and its character, and an empty Send asks them", async ({ page }) => {
   const chatId = await chatWith(["Mira"])
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Ana/)
   await expect(nextReply(page)).toBeVisible()
-  await expect(nextChip(page)).toBeDisabled()
+  await nextChip(page).click()
+  await expect(whoReplies(page).getByRole("radio")).toHaveText([/^Auto: Mira/, /^No one/, /^Mira/])
+  await page.keyboard.press("Escape")
   await expect(nextReply(page).getByRole("button", { name: /replies now$/ })).toBeDisabled()
   await page.getByRole("button", { name: "Mira replies", exact: true }).click()
   await expect(lastHeader(page)).toContainText("Mira")

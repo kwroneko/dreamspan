@@ -132,4 +132,50 @@ describe("the composer's choice", () => {
       assert.strictEqual(yield* outcome(api.GetComposerChoice({ chatId: other.id, draftId: draft.id })), "NotFound")
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
+
+  it.live("keeps Next's No one through picks and sends, per fork, and a new branch inherits it", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const ana = yield* card(api, "Ana")
+      const mira = yield* card(api, "Mira")
+      const chat = yield* api.CreateChat({ title: "Lantern" })
+      const events: Array<ChatEvent> = []
+      yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+        Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+        Effect.forkScoped
+      )
+      yield* eventually(() => events.length > 0)
+      const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+      assert.isFalse((yield* api.GetComposerChoice({ chatId: chat.id, draftId: draft.id })).noReplies)
+      const off = yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, noReplies: true })
+      assert.isTrue(off.noReplies)
+      yield* eventually(() => events.some((e) => e._tag === "ComposerChoice" && e.choice.noReplies))
+      // A pick for one reply sits on top; using it leaves No one.
+      const picked = yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, replyFromEntityId: mira })
+      assert.deepStrictEqual([picked.replyFromEntityId, picked.noReplies], [mira, true])
+      const used = yield* api.SetComposerChoice({ chatId: chat.id, draftId: draft.id, consumeReplyFromEntityId: mira })
+      assert.deepStrictEqual([used.replyFromEntityId, used.noReplies], [null, true])
+      // A send leaves it with the fork's draft.
+      const typed = yield* typeInto(api, chat.id, null, "Hello.", draft)
+      const sent = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: null,
+          branch: false,
+          content: "Hello.",
+          speakerEntityId: ana,
+          composer: takenFrom(typed)
+        })
+      )
+      const moved = yield* api.OpenComposer({ chatId: chat.id, forkId: sent.chat.currentForkId })
+      assert.isTrue((yield* api.GetComposerChoice({ chatId: chat.id, draftId: moved.id })).noReplies)
+      // A new branch starts with it; changing it there leaves the first fork's alone.
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: null, atSlotId: null })
+      const branch = yield* api.OpenComposer({ chatId: chat.id, forkId: fork.id, copyFrom: moved.id })
+      assert.isTrue((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).noReplies)
+      yield* api.SetComposerChoice({ chatId: chat.id, draftId: branch.id, noReplies: false })
+      assert.isFalse((yield* api.GetComposerChoice({ chatId: chat.id, draftId: branch.id })).noReplies)
+      assert.isTrue((yield* api.GetComposerChoice({ chatId: chat.id, draftId: moved.id })).noReplies)
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
 })

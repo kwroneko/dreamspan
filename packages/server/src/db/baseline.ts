@@ -115,6 +115,8 @@ export const baseline: ReadonlyArray<string> = [
     deletions_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(deletions_json)),
     updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
     guidance INTEGER NOT NULL DEFAULT 0 CHECK (guidance IN (0, 1)),
+    -- The composer's Next set to No one: a send asks for no reply until another choice (DESIGN §2.3).
+    no_replies INTEGER NOT NULL DEFAULT 0 CHECK (no_replies IN (0, 1)),
     UNIQUE (user_id, target_kind, target_id, field)
   ) STRICT`,
   `CREATE TABLE user_prefs (

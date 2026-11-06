@@ -181,6 +181,8 @@ const paths = {
   compare: ["M12 3v18", "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"],
   note: ["M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z", "M15 3v6h6"],
   chat: ["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"],
+  /** A struck-through speech bubble (Lucide message-square-off): replies turned off under Next. */
+  "chat-off": ["M21 15V5a2 2 0 0 0-2-2H9", "m2 2 20 20", "M3.6 3.6c-.4.3-.6.8-.6 1.4v16l4-4h10"],
   model: [
     "M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
     "M9 9h6v6H9z",
