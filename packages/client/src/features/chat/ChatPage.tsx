@@ -170,23 +170,38 @@ function MessageList({
         ? 0
         : (boundaryIndex(view) ?? -1)
   const transforms = useTimelineTransforms()
-  const rows = [...transforms.entries]
-    .sort((a, b) => a.order - b.order)
-    .reduce(
-      (rows, entry) => entry.transform(rows, { view, lcm, summaries, divider, historyDivider }),
-      messageRows(entries)
-    )
+  const rows = useMemo(
+    () =>
+      [...transforms.entries]
+        .sort((a, b) => a.order - b.order)
+        .reduce(
+          (rows, entry) => entry.transform(rows, { view, lcm, summaries, divider, historyDivider }),
+          messageRows(entries)
+        ),
+    [transforms, view, lcm, summaries, divider, historyDivider, entries]
+  )
   const rowCount = rows.length
   /** The row an entry is shown at. */
   const rowOf = (entry: number) =>
     rows.findIndex((row) => positionOf(entries[entry]!) >= row.from && positionOf(entries[entry]!) <= row.to)
+  const estimateSize = useCallback((row: number) => rows[row]!.estimate, [rows])
+  const getItemKey = useCallback((row: number) => rows[row]!.key, [rows])
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parent.current,
-    estimateSize: (row) => rows[row]!.estimate,
-    getItemKey: (row) => rows[row]!.key,
-    overscan: 4,
+    estimateSize,
+    getItemKey,
+    // Start near the destination. Mounting the first window's first rows only to replace
+    // them with its last rows in the layout effect also mounted their controls and reads.
+    initialOffset: () => {
+      const target = restore?.slot ?? anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null)
+      const index = rows.findIndex((row) => row.key === target || row.lastSlotId === target)
+      let offset = 16
+      for (let i = 0; i < (index < 0 ? rows.length : index); i++) offset += rows[i]!.estimate + 6
+      return offset
+    },
+    overscan: 2,
     anchorTo: "end",
     followOnAppend: view.follow,
     paddingStart: 16,
