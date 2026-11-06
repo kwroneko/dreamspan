@@ -78,8 +78,8 @@ const setup = Effect.gen(function* () {
   yield* Effect.gen(function* () {
     yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
       VALUES ('v-inserted', 'inserted', 0, 'complete', 'human', 'insert', 'verbatim', 'user_written', 1, 1)`
-    yield* sql`INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, inserted, created_at)
-      VALUES ('inserted', ${CHAT}, 'l', 'r', 1, 'v-inserted', 1, 1)`
+    yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, inserted, created_at)
+      VALUES ('inserted', ${CHAT}, 'r', 1, 'v-inserted', 1, 1)`
     for (const id of SUMMARIES) {
       yield* sql`INSERT INTO summary_revisions (id, summary_id, content, token_count, origin, created_at)
         VALUES (${`revision-${id}`}, ${id}, 'summary', 1, 'user', 1)`
