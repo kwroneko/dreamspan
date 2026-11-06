@@ -281,6 +281,8 @@ test("the speaker stays chosen through a reload and in every tab; the switcher s
 
   // Arrow keys move through what's left; Escape closes without a change.
   await speakerChip(page).click()
+  // Keys typed before the search field has focus reach the composer instead.
+  await expect(search).toBeFocused()
   await page.keyboard.type("i")
   await expect(speakAs(page).getByRole("option")).toHaveCount(2)
   await page.keyboard.press("ArrowDown")
