@@ -8,6 +8,8 @@ export interface Tab {
   readonly href: string
   /** Opened by a single click: the next single-click open replaces it (shown in italics). */
   readonly preview: boolean
+  /** VS Code's pinned tab: first in its frame, kept by Close others, to the right and all. */
+  readonly sticky?: boolean
 }
 
 export interface Frame {
@@ -38,6 +40,8 @@ export interface Layout {
   readonly focused: string
   /** Tab ids, most recently focused first: what closing returns to. */
   readonly recent: ReadonlyArray<string>
+  /** The frame shown alone, the others kept (VS Code's Maximize Editor Group); not saved. */
+  readonly maximized?: string
 }
 
 /**
@@ -118,7 +122,13 @@ const updateFrames = (layout: Layout, f: (frame: Frame) => Node | null): Layout 
   const live = frames(root)
   const focused = live.some((fr) => fr.id === layout.focused) ? layout.focused : (live[0]?.id ?? "")
   const ids = new Set(live.flatMap((fr) => fr.tabs.map((t) => t.id)))
-  return { root, focused, recent: layout.recent.filter((id) => ids.has(id)) }
+  const maximized = live.length > 1 && live.some((fr) => fr.id === layout.maximized) ? layout.maximized : undefined
+  return {
+    root,
+    focused,
+    recent: layout.recent.filter((id) => ids.has(id)),
+    ...(maximized ? { maximized } : {})
+  }
 }
 
 const touch = (recent: ReadonlyArray<string>, tabId: string) => [tabId, ...recent.filter((id) => id !== tabId)]
@@ -129,14 +139,19 @@ export const focusTab = (layout: Layout, tabId: string): Layout => {
   if (!frame) return layout
   if (frame.active === tabId && layout.focused === frame.id && layout.recent[0] === tabId) return layout
   const next = updateFrames(layout, (f) => (f.id === frame.id ? { ...f, active: tabId } : f))
-  return { ...next, focused: frame.id, recent: touch(next.recent, tabId) }
+  // A frame hidden behind a maximized one comes back with all of them.
+  const { maximized, ...rest } = next
+  const kept = maximized === frame.id ? { maximized } : {}
+  return { ...rest, ...kept, focused: frame.id, recent: touch(next.recent, tabId) }
 }
 
 export const focusFrame = (layout: Layout, frameId: string): Layout => {
   const frame = findFrame(layout, frameId)
   if (!frame) return layout
   if (frame.active) return focusTab(layout, frame.active)
-  return layout.focused === frameId ? layout : { ...layout, focused: frameId }
+  if (layout.focused === frameId) return layout
+  const { maximized, ...rest } = layout
+  return { ...rest, ...(maximized === frameId ? { maximized } : {}), focused: frameId }
 }
 
 /** Keeps a preview tab open: the next single-click open adds a tab beside it. */
@@ -147,6 +162,51 @@ export const pinTab = (layout: Layout, tabId: string): Layout => {
     ...f,
     tabs: f.tabs.map((t) => (t.id === tabId ? { ...t, preview: false } : t))
   }))
+}
+
+/** Pins or unpins a tab (VS Code's Pin): pinned tabs come first, in the order pinned. */
+export const stickTab = (layout: Layout, tabId: string, sticky: boolean): Layout => {
+  const tab = findTab(layout, tabId)
+  if (!tab || (tab.sticky ?? false) === sticky) return layout
+  return updateFrames(layout, (f) => {
+    if (!f.tabs.some((t) => t.id === tabId)) return f
+    const { sticky: _, ...plain } = tab
+    const changed: Tab = sticky ? { ...plain, preview: false, sticky: true } : { ...plain, preview: false }
+    // Pinned: last of the pinned; unpinned: first of the rest.
+    const rest = f.tabs.filter((t) => t.id !== tabId)
+    return { ...f, tabs: [...rest.filter((t) => t.sticky), changed, ...rest.filter((t) => !t.sticky)] }
+  })
+}
+
+/** Which tabs a "Close …" closes, beside `tabId` in its frame; pinned tabs are kept. */
+export type CloseWhich = "others" | "right" | "all" | "saved"
+
+export const closeTabs = (
+  layout: Layout,
+  tabId: string,
+  which: CloseWhich,
+  unsaved: (tabId: string) => boolean = () => false
+): Layout => {
+  const frame = frameOfTab(layout, tabId)
+  if (!frame) return layout
+  const at = frame.tabs.findIndex((t) => t.id === tabId)
+  const closing = frame.tabs.filter((t, index) => {
+    if (t.sticky) return false
+    if (which === "others") return t.id !== tabId
+    if (which === "right") return index > at
+    if (which === "saved") return !unsaved(t.id)
+    return true
+  })
+  let next = layout
+  for (const t of closing) next = closeTab(next, t.id)
+  return findTab(next, tabId) ? focusTab(next, tabId) : next
+}
+
+/** Shows a frame alone, or all of them again (`null`). */
+export const maximizeFrame = (layout: Layout, frameId: string | null): Layout => {
+  const { maximized: _, ...rest } = layout
+  if (frameId === null || !findFrame(layout, frameId) || frames(layout.root).length < 2) return rest
+  return { ...rest, maximized: frameId, focused: frameId }
 }
 
 export const setTabHref = (layout: Layout, tabId: string, href: string): Layout => {
@@ -204,7 +264,11 @@ export const openTabAt = (
       tabs[previewAt] = tab
       return { ...f, tabs, active: options.background && f.active !== tab.id ? f.active : tab.id }
     }
-    const at = f.tabs.findIndex((t) => t.id === f.active)
+    // After the shown tab, and after the pinned ones.
+    const at = Math.max(
+      f.tabs.findIndex((t) => t.id === f.active),
+      f.tabs.findLastIndex((t) => t.sticky)
+    )
     const tabs = [...f.tabs.slice(0, at + 1), tab, ...f.tabs.slice(at + 1)]
     return { ...f, tabs, active: options.background && f.active ? f.active : tab.id }
   })
@@ -328,7 +392,8 @@ export const splitFrame = (
     return { ...node, children: node.children.map(replace) }
   }
   const root = replace(layout.root)
-  const next = { ...layout, root, focused: added.id }
+  const { maximized: _, ...rest } = layout
+  const next = { ...rest, root, focused: added.id }
   return copy ? focusTab(next, copy.id) : next
 }
 
@@ -399,7 +464,13 @@ export const restoreLayout = (value: unknown, accept: (href: string) => boolean 
         if (seen.has(t["id"]) || !t["href"].startsWith("/") || !accept(t["href"]) || count >= MAX_TABS) continue
         seen.add(t["id"])
         count++
-        tabs.push({ id: t["id"], href: t["href"], preview: t["preview"] === true })
+        const sticky = t["sticky"] === true
+        tabs.push({
+          id: t["id"],
+          href: t["href"],
+          preview: !sticky && t["preview"] === true,
+          ...(sticky ? { sticky } : {})
+        })
       }
       const active = tabs.some((t) => t.id === raw["active"]) ? (raw["active"] as string) : (tabs[0]?.id ?? null)
       return { type: "frame", id: raw["id"], tabs, active }
@@ -451,7 +522,7 @@ export const saveLayout = (layout: Layout, persist: (href: string) => string | n
           active: n.active,
           tabs: n.tabs.flatMap((t) => {
             const href = persist(t.href)
-            return href === null ? [] : [{ id: t.id, href, preview: t.preview }]
+            return href === null ? [] : [{ id: t.id, href, preview: t.preview, ...(t.sticky ? { sticky: true } : {}) }]
           })
         }
       : { type: "split", id: n.id, direction: n.direction, sizes: n.sizes, children: n.children.map(node) }

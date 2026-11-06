@@ -107,6 +107,9 @@ for (const width of [1440, 390])
             .first()
             .click()
         if (kind === "preset") {
+          // Once the preset has rendered: its prompts open, so their text shows the matches.
+          const toggleAll = root.getByRole("button", { name: /^(Expand|Collapse) all$/ })
+          await expect(toggleAll).toBeVisible()
           const expand = root.getByRole("button", { name: "Expand all", exact: true })
           if (await expand.count()) await expand.click()
         }

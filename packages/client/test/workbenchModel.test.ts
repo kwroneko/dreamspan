@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import {
   allTabs,
   closeTab,
+  closeTabs,
   focusFrame,
   focusedFrame,
   focusedTab,
@@ -11,13 +12,15 @@ import {
   initialLayout,
   type Layout,
   leftEdgeFrames,
+  maximizeFrame,
   moveTab,
   neighbours,
   openTab,
   pinTab,
   restoreLayout,
   saveLayout,
-  splitFrame
+  splitFrame,
+  stickTab
 } from "../src/features/workbench/model.ts"
 
 const keyOf = (href: string) => href.split("?")[0]!
@@ -137,6 +140,43 @@ describe("workbench layout", () => {
     expect(layout.root.type === "split" && layout.root.children.length).toBe(3)
     const sizes = layout.root.type === "split" ? layout.root.sizes : []
     expect(sizes.reduce((a, b) => a + b, 0)).toBeCloseTo(1)
+  })
+
+  it("pins tabs first; Close others, to the right, saved and all keep them", () => {
+    let layout = initialLayout("/a")
+    layout = pinTab(layout, focusedTab(layout)!.id)
+    for (const href of ["/b", "/c", "/d"]) layout = openTab(layout, href, keyOf, { preview: false })
+    const id = (href: string) => allTabs(layout).find((t) => t.href === href)!.id
+    layout = stickTab(layout, id("/c"), true)
+    expect(titles(layout)).toEqual([["/c", "/a", "/b", "/d"]])
+    expect(closeTabs(layout, id("/b"), "right").root).toMatchObject({
+      tabs: [{ href: "/c" }, { href: "/a" }, { href: "/b" }]
+    })
+    expect(titles(closeTabs(layout, id("/a"), "others"))).toEqual([["/c", "/a"]])
+    expect(titles(closeTabs(layout, id("/a"), "all"))).toEqual([["/c"]])
+    expect(titles(closeTabs(layout, id("/a"), "saved", (tabId) => tabId === id("/d")))).toEqual([["/c", "/d"]])
+    layout = stickTab(layout, id("/c"), false)
+    expect(titles(layout)).toEqual([["/c", "/a", "/b", "/d"]])
+    expect(
+      allTabs(restoreLayout(JSON.parse(JSON.stringify(saveLayout(stickTab(layout, id("/d"), true)))))!).find(
+        (t) => t.href === "/d"
+      )?.sticky
+    ).toBe(true)
+  })
+
+  it("maximizes a frame until another frame is focused", () => {
+    let layout = initialLayout("/a")
+    const first = focusedFrame(layout).id
+    layout = splitFrame(layout, first, "row")
+    const second = focusedFrame(layout).id
+    layout = maximizeFrame(layout, second)
+    expect(layout.maximized).toBe(second)
+    layout = openTab(layout, "/b", keyOf)
+    expect(layout.maximized).toBe(second)
+    layout = focusFrame(layout, first)
+    expect(layout.maximized).toBeUndefined()
+    expect(maximizeFrame(initialLayout("/a"), "x").maximized).toBeUndefined()
+    expect(saveLayout(maximizeFrame(layout, first))).not.toHaveProperty("maximized")
   })
 
   it("saves and restores, repairing what it can't use", () => {

@@ -52,6 +52,7 @@ export function useTabShown(wide: boolean) {
     const layout = tab.store.layout
     const frame = frameOfTab(layout, tab.tabId)
     if (!frame || frame.active !== tab.tabId) return false
+    if (wide && layout.maximized && layout.maximized !== frame.id) return false
     return wide || focusedFrame(layout).id === frame.id
   })
 }
