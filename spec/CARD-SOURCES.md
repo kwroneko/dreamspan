@@ -151,7 +151,7 @@ On phones, home holds the same Show row (it scrolls sideways, as now). The carde
   3. the SHA-256 of the archive's card file against the import lines' `source_hash`: the same file imported from disk.
 
   All three are indexed lookups for the up to ~50 ids of a page, in one reader request per page.
-- **Shown as yours.** A held tile has a small check badge on the portrait's corner ("You have this card"), and its lines are those of the user's own tile: version, "N chats · <ago>". A click does what a click on that card does at home: it continues the latest chat, or opens its pending chat. The hover actions are the local tile's (New chat, Inspect). If the family has several live cards (the original and forks), the click goes to the one adopted or imported from this source. A family whose original is in the bin goes to its newest live fork. A family with no live card isn't held.
+- **Shown as yours.** A held tile has a small check badge on the portrait's corner ("You have this card"), and its lines are those of the user's own tile: version, "N chats · <ago>". A click does what a click on that card does at home: it continues the latest chat, or opens its pending chat. The hover actions are the local tile's (New chat, Inspect). If the family has several live cards (the original and forks), the click goes to the one adopted or imported from this source. A family whose original is in the bin goes to its newest live fork. A family with no live card isn't held. An **archived** card still counts as held: its tile shows the check badge with "Archived" in its hover, and a click opens your copy, whose header offers Unarchive as usual. So a tried and archived card is never added a second time.
 - **Update available.** A held card whose recorded remote version differs from the one this result reports also gets the "update available" badge the library uses (§3.8).
 
 ### 3.8 When the archive's version changes
@@ -208,7 +208,7 @@ Three places, each one line or one badge. No banners, dialogs or interruptions w
 2. **The character tab**, at the top of the card header block, one muted line: **"From cardex · not in your cards"**, with **Add to my cards** at its end (hover: "Adds <name> to your cards without starting a chat."). It sits in the header block's own flow as a row of the header, so nothing shifts when it later goes away: on adding, the row is replaced by the card's normal header rows.
 3. **Send's and Generate's hover**, only for a remote card: "Sends your message and adds <name> to your cards." / "Has <name> write the first message and adds <name> to your cards."
 
-After the card is added, a notice "Added <name> to your cards." links to the card's library page. The badge and the line are gone, because it's now an ordinary card. The **Library** shows only added cards. They're ordinary cards, and their Metadata → Sources lists "cardex" with the card's page. Whether added-by-trying cards get any extra treatment is a decision for the owner (§9, D3).
+After the card is added, a notice "Added <name> to your cards." links to the card's library page. The badge and the line are gone, because it's now an ordinary card. The **Library** shows only added cards. They're ordinary cards, and their Metadata → Sources lists "cardex" with the card's page. Cards added only by trying them are cleared away by archiving, through a criterion in Archive unused cards… (§9, D3).
 
 ### 4.5 Lock-in triggers, and exactly what each creates
 
@@ -334,12 +334,13 @@ Each has the default this spec uses. The name of the tab is settled ("cardex", o
   - *Example:* you try a card, type "Hello" and press Send. With the default, the message goes and the card is now in your cards, with a notice "Added Mio to your cards". Asking would put a dialog between you and every tried card.
   - *Default:* **no question.** The header badge, the panel's line and Send's hover say beforehand that sending adds it (§4.4), and the notice says so after.
   - *Otherwise:* a dialog on each first send (with "Don't ask again"). It's safer for someone who didn't read the hover, but it slows the try-many-cards loop you described.
-- **D3. Cards added only by trying them: ordinary, or kept apart?**
-  - *What:* trying ten cards with one message each leaves ten cards in your library, each with a one-message chat (DESIGN §12 [O]).
+- **D3. Cards added only by trying them: how they're cleared away**
+  - *What:* trying ten cards with one message each leaves ten cards in your cards, each with a one-message chat (DESIGN §12 [O]). The app avoids making users delete things, so clearing them means archiving them, not moving them to the bin.
   - *When:* after a session of trying cards.
-  - *Example:* you try ten cards and like two. With the default, all ten are in All and in the Library. Library → Show → **Tried** lists the eight you didn't continue: cards added from a source whose chats together have at most one message of yours. **Move all to the bin** there clears them in one step.
-  - *Default:* **ordinary cards, plus that Tried view with its bulk bin.**
-  - *Otherwise:* tried cards stay out of home's All and the sidebar until they have a second message of yours (still in the Library, marked Tried). The home grid stays clean, but a card you just chatted with would seem to vanish from home.
+  - *Example:* you try ten cards and like two. All ten are ordinary cards in All and in the Library. Later, **Archive unused cards…** (the dialog job cardarchive is building, reached from the Archived view) has a third criterion, **"Only tried: added from cardex, with at most N of your messages in all its chats"** (N = 1 by default). It lists the eight you didn't continue, each with its checkbox, beside that dialog's other criteria. **Archive 8 cards** archives them in one step, with Undo. They leave All and every listing, and stay in the Archived view.
+  - *Why a criterion and not a view:* that dialog already does what's needed: it lists matching cards with checkboxes and a count, archives them as one reversible operation, and never includes favourites. Its "Never used" criterion can't catch tried cards, because sending a message counts as using a card. One clean-up place is better than a separate Tried view that would duplicate the dialog's selection and bulk action in the Library.
+  - *Default:* **ordinary cards, plus the "Only tried" criterion** in Archive unused cards…, off by default like "Not used in the last N months". When the cardex option is enabled, it shows in the dialog with its count ("12 cards"), so it's discoverable without being preselected. The criterion is a registered part of the dialog, contributed by the sources feature, so another source extends it ("added from <source>") and a plugin can replace it.
+  - *Otherwise:* a Library → Show → **Tried** view with its own "Archive all" button, or tried cards kept out of home's All until they have a second message of yours. The first duplicates the dialog. The second makes a card you just chatted with seem to vanish from home.
 - **D4. Checking for newer versions of cards you added from cardex**
   - *What:* how the app learns that the author updated a card you added.
   - *When:* at any time after adding.
@@ -378,5 +379,5 @@ Each phase is shippable and tested on its own (synthetic fixtures only, at 1440 
 3. **Trying and adding.** Remote draft chats and Inspect pages; the panel's editors on the cached document; `remote-card` drafts; the assembler's cached-document source for the estimate; the three triggers through `AdoptRemoteCard` (one transaction each, the first send with `StartChat`); `card_origins` and the source-hash index (baseline); held cards in results; double-add refusal; the inert regex scripts. Tests: an adoption stores exactly §4.5's rows; a failed one stores none; the card-plus-chat atomicity.
 4. **The cardex adapter**, once its API documentation is in hand: capabilities, mappings, rate limits, its Sources recognizer. It's checked against the live API by hand only, never in the test suite, and no real card ever lands in a fixture.
 5. **Updates.** Version markers from results, Check for a newer version, the "A newer version is on cardex" notice wired to the existing merge staging, Replace and Add as a separate card (after D4 and D5).
-6. **Tried cards** (after D3): the Library's Tried view and its bulk bin.
+6. **Tried cards** (after D3, and once cardarchive has landed): the "Only tried" criterion registered into Archive unused cards…, backed by `card_origins` and one reader query that counts the user's own messages per card across its chats (the dialog's 5,000-card scale test covers it).
 7. **Blind roleplay** (§7), when the owner schedules it.
