@@ -54,6 +54,43 @@ const fails = <A, E, R>(effect: Effect.Effect<A, E, R>, tag: string) =>
   })
 
 describe("connections", () => {
+  it.effect("stores only provider overrides on creation and update, preserving omitted settings", () =>
+    Effect.gen(function* () {
+      const { writer, reader, ana } = yield* setup
+      const connection = yield* writer.CreateConnection({
+        userId: ana,
+        connectionId: uuidv7() as ConnectionId,
+        kind: "anthropic-bedrock",
+        api: "anthropic-messages",
+        settings: {
+          ...settings(),
+          providerSettings: { auth: "api-key", lookback: false, maxMarkers: 4, region: "eu-west-3" }
+        },
+        credential: { existing: null }
+      })
+      assert.deepStrictEqual(connection.providerSettings, { region: "eu-west-3" })
+      const changed = yield* writer.UpdateConnection({
+        userId: ana,
+        connectionId: connection.id,
+        expectedRowVersion: connection.rowVersion,
+        settings: { ...settings(), providerSettings: { auth: "api-key", lookback: true, maxMarkers: 4 } }
+      })
+      assert.deepStrictEqual(changed.providerSettings, { lookback: true })
+      const renamed = yield* writer.UpdateConnection({
+        userId: ana,
+        connectionId: connection.id,
+        expectedRowVersion: changed.rowVersion,
+        settings: settings("Renamed")
+      })
+      assert.deepStrictEqual(renamed.providerSettings, { lookback: true })
+      assert.deepStrictEqual(
+        (yield* reader.GetConnection({ userId: ana, connectionId: connection.id })).providerSettings,
+        {
+          lookback: true
+        }
+      )
+    }).pipe(Effect.provide(database()))
+  )
   it.effect("are visible to their owner only", () =>
     Effect.gen(function* () {
       const { writer, reader, ana, bo, create } = yield* setup
