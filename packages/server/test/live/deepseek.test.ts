@@ -84,7 +84,7 @@ describe.skipIf(!liveEnabled)("live DeepSeek", () => {
       const t2 = (yield* chat.say("And a lantern?"))!
       checkTurn(f, p, "thinking turn 2", t2, model)
       const c = yield* chat.continueLast
-      checkTurn(f, p, "continue (nudge: no /beta prefix route)", c, model)
+      checkTurn(f, p, "continue with thinking", c, model)
       f.check(
         p.id,
         "continue: text extends the original",
@@ -138,11 +138,51 @@ describe.skipIf(!liveEnabled)("live DeepSeek", () => {
     })
   )
 
-  liveTest("prefill (needs a /beta route)", f, () =>
-    Effect.sync(() => {
-      f.check(p.id, "assistant prefill through /beta", null, {
-        actual: "blocked: no /deepseek/beta route (404)"
+  // A request whose last message carries `prefix: true` goes to DeepSeek's
+  // /beta/chat/completions itself, so its /deepseek/v1 route takes a prefill.
+  liveTest("prefill and continue (DeepSeek's /beta)", f, ({ api, recorder, dataDir }) =>
+    Effect.gen(function* () {
+      const pre = { ...p, id: "deepseek (prefill)" }
+      // A short output limit cuts the reply mid-sentence, so Continue has something to add (a
+      // finished reply continued live ended at once with no new tokens).
+      const chat = yield* startChat(api, recorder, dataDir, pre, {
+        cardTokens: 200,
+        overrides: { prefill: "assistant", settings: { samplers: { openai_max_tokens: 24 } } },
+        prefill: "*Mira sets down her pen and says,*"
       })
+      const model = yield* modelOf(api, chat)
+      const t = (yield* chat.say("Tell me about the fog."))!
+      checkTurn(f, pre, "prefilled reply (cut at 24 tokens)", t, model, ["length_cutoff"])
+      const msgs = (t.exchange?.request?.messages ?? []) as Array<{ role: string; content: unknown; prefix?: boolean }>
+      f.check(
+        pre.id,
+        "prefill: last wire message is the assistant prefill, marked prefix",
+        msgs.at(-1)?.role === "assistant" &&
+          msgs.at(-1)?.prefix === true &&
+          JSON.stringify(msgs.at(-1)?.content ?? "").includes("Mira sets down her pen"),
+        { actual: { role: msgs.at(-1)?.role, prefix: msgs.at(-1)?.prefix, issues: t.run?.issues } }
+      )
+      f.check(
+        pre.id,
+        "prefill: saved text leaves the prefill out",
+        !t.version.content.includes("sets down her pen and says"),
+        {
+          actual: t.version.content.slice(0, 120)
+        }
+      )
+      const c = yield* chat.continueLast
+      checkTurn(f, pre, "continue (cut at 24 tokens)", c, model, ["length_cutoff"])
+      const last = ((c.exchange?.request?.messages ?? []) as Array<{ role: string; prefix?: boolean }>).at(-1)
+      f.check(pre.id, "continue: sent as a prefix, not the nudge", last?.role === "assistant" && last.prefix === true, {
+        actual: { last, issues: c.run?.issues }
+      })
+      f.check(
+        pre.id,
+        "continue: text extends the original",
+        c.version.content.startsWith(t.version.content.trimEnd()) &&
+          c.version.content.length > t.version.content.length,
+        { actual: { before: t.version.content.length, after: c.version.content.length, error: c.version.error } }
+      )
     })
   )
 })
