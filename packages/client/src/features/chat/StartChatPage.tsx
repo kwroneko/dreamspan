@@ -361,7 +361,18 @@ function Pending({
 
   const controls: PendingComposerContext = {
     compact: phone,
-    speaker: { speaker: speakerId, recent: [], pending: true, onPick: (picked) => setSelectedSpeaker(picked.entityId) },
+    speaker: {
+      speaker: speakerId,
+      recent: [],
+      pending: true,
+      onPick: (picked) => setSelectedSpeaker(picked.entityId),
+      // Your persona, under Speak as, as at the saved chat's composer: it changes only this chat.
+      personas: {
+        current: persona,
+        listCards: pending.listCards,
+        onPick: (picked) => pending.setPersona(picked.entityId)
+      }
+    },
     speakerName,
     submitHint: composerSubmitHint(viewPrefs.prefs.enterSends),
     guidance,
