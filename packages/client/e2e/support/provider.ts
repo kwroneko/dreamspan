@@ -3,6 +3,19 @@
 // was sent. No real provider or key is ever used.
 import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
+import { expect, type Page } from "@playwright/test"
+
+/** On the new connection form, picks the provider the fake one stands for: a custom server. */
+export const chooseCustomServer = async (page: Page) => {
+  const picker = page.getByRole("combobox", { name: "Provider", exact: true })
+  await picker.click()
+  // By its label: on a phone the option's explanation is part of its name.
+  await page
+    .getByRole("option")
+    .filter({ has: page.getByText("OpenAI-compatible (custom)", { exact: true }) })
+    .click()
+  await expect(picker).toContainText("OpenAI-compatible")
+}
 
 export interface FakeProvider {
   readonly baseUrl: string

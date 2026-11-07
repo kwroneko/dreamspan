@@ -1,4 +1,4 @@
-// Compatibility shims per provider kind and model (liveapi F7, F9, F10, F11, F13), a reply with
+// Compatibility shims per provider, API type and model (liveapi F7, F9, F10, F11, F13), a reply with
 // nothing after its prefill (F12), and catalog facts for models added by id or listed behind a
 // router's id prefix (F1, F2).
 import { assert, describe, it } from "@effect/vitest"
@@ -16,8 +16,8 @@ const resource = (handler: Handler) =>
     (m) => Effect.promise(() => m.close())
   )
 
-const shim = (kind: string, api: string, model: string, payload: Record<string, unknown>) =>
-  applyShims(builtinShims, structuredClone(payload), { kind, api: api as never, model })
+const shim = (provider: string, api: string, model: string, payload: Record<string, unknown>) =>
+  applyShims(builtinShims, structuredClone(payload), { kind: provider, provider, api: api as never, model })
 
 describe("payload shims", () => {
   it("Claude Haiku 5 drops top_p; Haiku 4.5 keeps it (F7)", () => {
@@ -27,31 +27,39 @@ describe("payload shims", () => {
     assert.deepEqual(five.applied, ["claude-haiku-5-no-top-p"])
     assert.strictEqual(shim("anthropic", "anthropic-messages", "claude-haiku-4-5", sent).payload.top_p, 0.9)
     assert.notProperty(shim("openrouter", "openai-completions", "anthropic/claude-haiku-5.5", sent).payload, "top_p")
+    // Keyed by provider, not API type: Bedrock speaks the Messages API and gets it too.
+    assert.notProperty(
+      shim("anthropic-bedrock", "anthropic-messages", "us.anthropic.claude-haiku-5-5-v1:0", sent).payload,
+      "top_p"
+    )
+  })
+
+  it("an OpenAI rule applies to OpenAI and custom servers, not to OpenRouter's OpenAI models", () => {
+    const sent = { top_p: 0.9, temperature: 0.7, reasoning: { effort: "low" } }
+    assert.notProperty(shim("openai-compatible", "openai-responses", "gpt-5.4-nano", sent).payload, "top_p")
+    assert.strictEqual(shim("openrouter", "openai-completions", "openai/gpt-5.4-nano", sent).payload.top_p, 0.9)
   })
 
   it("Responses GPT-5.1 to 5.4 with an effort drop the samplers and ask for the summary (F9)", () => {
     const sent = { top_p: 0.9, temperature: 0.7, reasoning: { effort: "low" } }
-    const shimmed = shim("openai-responses", "openai-responses", "gpt-5.4-nano", sent).payload
+    const shimmed = shim("openai", "openai-responses", "gpt-5.4-nano", sent).payload
     assert.deepEqual(shimmed, { reasoning: { effort: "low", summary: "auto" } })
     // Behind a router prefix too; without an effort, or on 5.5, nothing changes.
-    assert.notProperty(shim("openai-responses", "openai-responses", "acme.gpt-5.1", sent).payload, "top_p")
+    assert.notProperty(shim("openai", "openai-responses", "acme.gpt-5.1", sent).payload, "top_p")
     const none = { ...sent, reasoning: { effort: "none" } }
-    assert.deepEqual(shim("openai-responses", "openai-responses", "gpt-5.4-nano", none).payload, none)
-    assert.deepEqual(shim("openai-responses", "openai-responses", "gpt-5.5", sent).payload, sent)
+    assert.deepEqual(shim("openai", "openai-responses", "gpt-5.4-nano", none).payload, none)
+    assert.deepEqual(shim("openai", "openai-responses", "gpt-5.5", sent).payload, sent)
   })
 
   it("Chat Completions GPT-5.4 with tools sends effort none (F10)", () => {
     const tools = [{ type: "function", function: { name: "look", parameters: {} } }]
     const sent = { tools, reasoning_effort: "low" }
-    assert.strictEqual(shim("openai-chat", "openai-completions", "gpt-5.4-nano", sent).payload.reasoning_effort, "none")
+    assert.strictEqual(shim("openai", "openai-completions", "gpt-5.4-nano", sent).payload.reasoning_effort, "none")
     assert.strictEqual(
-      shim("openai-chat", "openai-completions", "gpt-5.4-nano", { reasoning_effort: "low" }).payload.reasoning_effort,
+      shim("openai", "openai-completions", "gpt-5.4-nano", { reasoning_effort: "low" }).payload.reasoning_effort,
       "low"
     )
-    assert.strictEqual(
-      shim("openai-responses", "openai-responses", "gpt-5.4-nano", sent).payload.reasoning_effort,
-      "low"
-    )
+    assert.strictEqual(shim("openai", "openai-responses", "gpt-5.4-nano", sent).payload.reasoning_effort, "low")
   })
 
   it("a shim is replaced or disabled by id: only the registered list applies", () => {

@@ -42,7 +42,7 @@ import { docHash, searchText } from "./documents.ts"
 import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImportNote, WriteOps } from "./ops.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 import { transaction } from "./tx.ts"
-import { DEFAULT_PRESET, newChatLcmSettings, ownedPreset } from "./generationSettings.ts"
+import { DEFAULT_PERSONA, DEFAULT_PRESET, newChatLcmSettings, ownedPersona, ownedPreset } from "./generationSettings.ts"
 
 /** A message as the format worker wrote it (formats/stChat.ts). */
 const Message = Schema.Struct({
@@ -347,6 +347,16 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
     )
 
   const handlers = {
+    StImportDefaultPersona: ({ userId, importId, entityId }) =>
+      Effect.gen(function* () {
+        yield* current(userId, importId, importId)
+        if (!(yield* ownedPersona(sql, userId, entityId)))
+          return yield* new NotFound({ entity: "persona", id: entityId })
+        const previous = yield* readSetting(sql, "user", userId, DEFAULT_PERSONA)
+        if (previous.value !== null) return false
+        yield* putUserSetting(sql, userId, DEFAULT_PERSONA, entityId)
+        return true
+      }).pipe(transaction(sql, "StImportDefaultPersona")),
     StImportDefaultPreset: ({ userId, importId, refId }) =>
       Effect.gen(function* () {
         yield* current(userId, importId, importId)

@@ -14,6 +14,7 @@ import { BinItem } from "./bin.ts"
 import { ChatApi, ChatEventsApi } from "./chatApi.ts"
 import { AgentApi } from "./agentApi.ts"
 import { DecisionApi } from "./decisionApi.ts"
+import { ProviderListApi } from "./providerApi.ts"
 import { ChatSetupApi, ShellUpdatesApi } from "./chatSetupApi.ts"
 import { StImportApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
@@ -170,6 +171,8 @@ export class AppCoreApi extends RpcGroup.make(
    */
   Rpc.make("CreateConnection", {
     payload: {
+      /** The provider chosen; left out, the kind's default provider. The kind is its API type. */
+      provider: Schema.optionalKey(Schema.String),
       kind: ProviderKind,
       settings: ConnectionSettings,
       apiKey: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -427,6 +430,9 @@ export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {
 /** The decision-model settings RPCs (decisionApi.ts). */
 export class AuthenticatedDecisionApi extends DecisionApi.middleware(Authentication) {}
 
+/** The providers a new connection starts from (providerApi.ts). */
+export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Authentication) {}
+
 export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedChatEventsApi)
   .merge(AuthenticatedAgentApi)
@@ -438,7 +444,8 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi)
-  .merge(AuthenticatedShellUpdatesApi) {}
+  .merge(AuthenticatedShellUpdatesApi)
+  .merge(AuthenticatedProviderListApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

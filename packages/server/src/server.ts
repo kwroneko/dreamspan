@@ -3,6 +3,7 @@ import {
   AuthenticatedChatEventsApi,
   AuthenticatedChatMergeApi,
   AuthenticatedDecisionApi,
+  AuthenticatedProviderListApi,
   AuthenticatedSplitChatApi
 } from "@rp/shared/api.ts"
 import { makeAgentHandlers } from "./api/agent.ts"
@@ -68,7 +69,7 @@ import { makeComposerHandlers } from "./api/composer.ts"
 import { makeNoticeHandlers } from "./api/notices.ts"
 import { makeInspectorHandlers } from "./api/inspector.ts"
 import { Notices } from "./chat/Notices.ts"
-import { makeProviderHandlers } from "./api/providers.ts"
+import { makeProviderHandlers, makeProviderListHandlers } from "./api/providers.ts"
 import { makeStImportHandlers } from "./api/stImport.ts"
 import { imageRoute as SourceImageRoute, makeCardSourceHandlers } from "./api/cardSources.ts"
 import * as CardSources from "./sources/CardSources.ts"
@@ -174,6 +175,7 @@ const Handlers = Layer.mergeAll(
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
   AuthenticatedCardSourcesApi.toLayer(makeCardSourceHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
+  AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),
   AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
 )
 

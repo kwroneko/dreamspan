@@ -660,6 +660,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   PreviewStSettings: { global: "pure preview of the supplied file; no stored user data is read or changed" },
   ListExportFormats: { global: "the instance's worker exporter registry, with no user documents" },
   ListProviderKinds: { global: "the instance's provider registry, the same for every user" },
+  ListProviders: { global: "the instance's provider definitions, the same for every user" },
   GetCostSettings: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -3944,6 +3945,19 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  StImportDefaultPersona: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportDefaultPersona({ userId: actor.user.id, importId, entityId: owner.cardId }),
+        "ImportLeaseLost"
+      )
+      const mine = yield* actor.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportDefaultPersona({ userId: actor.user.id, importId: mine.importId, entityId: owner.cardId }),
+        "NotFound"
+      )
+    }),
   StImportDefaultPreset: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })

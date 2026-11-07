@@ -1,6 +1,7 @@
 import { installStorageKindValidation } from "./storageKinds.ts"
 import { makeStImportPrefix, stImportPrefixHandlers } from "./stImportPrefix.ts"
 import { stateModuleHandlers } from "./stateModules.ts"
+import { providerDefinitionHandlers } from "../providers/definitions.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeInsertWriteHandlers } from "./insertWrites.ts"
 import { makeMergeWriteHandlers } from "./merges.ts"
@@ -70,35 +71,37 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
         const prefix = makeStImportPrefix()
         const stImport = yield* makeStImportWriteHandlers(prefix)
         return WriteOps.of(
-          stateModuleHandlers(
-            stImportPrefixHandlers(
-              {
-                ...(yield* makeHistoryWriteHandlers),
-                ...(yield* makeInsertWriteHandlers(bin)),
-                ...(yield* makeMergeWriteHandlers(bin)),
-                ...graph,
-                ...library,
-                ...binOps,
-                ...providers,
-                ...accounts,
-                ...chatSetup,
-                ...stImport,
-                ...(yield* makeStImportJobWriteHandlers),
-                ...generation,
-                ...(yield* makeLcmWriteHandlers(bin)),
-                ...(yield* makeLcmQueueHandlers),
-                ...(yield* makeLcmUiWriteHandlers),
-                ...(yield* makeLcmEnableWriteHandlers(bin)),
-                ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
-                ...(yield* makeAdoptWriteHandlers(
-                  library.ImportFile,
-                  chatSetup.StartChat,
-                  library.CommitEditorDrafts,
-                  bin.drafts
-                )),
-                ...(yield* makeDecisionWriteHandlers(bin))
-              },
-              prefix
+          providerDefinitionHandlers(
+            stateModuleHandlers(
+              stImportPrefixHandlers(
+                {
+                  ...(yield* makeHistoryWriteHandlers),
+                  ...(yield* makeInsertWriteHandlers(bin)),
+                  ...(yield* makeMergeWriteHandlers(bin)),
+                  ...graph,
+                  ...library,
+                  ...binOps,
+                  ...providers,
+                  ...accounts,
+                  ...chatSetup,
+                  ...stImport,
+                  ...(yield* makeStImportJobWriteHandlers),
+                  ...generation,
+                  ...(yield* makeLcmWriteHandlers(bin)),
+                  ...(yield* makeLcmQueueHandlers),
+                  ...(yield* makeLcmUiWriteHandlers),
+                  ...(yield* makeLcmEnableWriteHandlers(bin)),
+                  ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
+                  ...(yield* makeAdoptWriteHandlers(
+                    library.ImportFile,
+                    chatSetup.StartChat,
+                    library.CommitEditorDrafts,
+                    bin.drafts
+                  )),
+                  ...(yield* makeDecisionWriteHandlers(bin))
+                },
+                prefix
+              )
             )
           )
         )

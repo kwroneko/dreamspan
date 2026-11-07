@@ -5,6 +5,7 @@ import { Effect } from "effect"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
 import { openPanel, closePanel, openSummarySettings } from "./support/panel.ts"
+import { chooseCustomServer } from "./support/provider.ts"
 
 const server = serverPerFile(withAdmin)
 test.describe.configure({ mode: "serial" })
@@ -308,6 +309,7 @@ for (const scope of ["account", "fork"] as const)
 test("creation and rename forms keep non-secret text without copying a typed key", async ({ page }) => {
   await authenticate(page)
   await page.goto(`${server().url}/settings/connections/new`)
+  await chooseCustomServer(page)
   await page.getByLabel("Name", { exact: true }).fill("Unfinished connection")
   await page.getByLabel("Base URL", { exact: true }).fill("http://127.0.0.1:4321/v1")
   await page.getByLabel("API key", { exact: true }).fill("synthetic-secret-never-drafted")

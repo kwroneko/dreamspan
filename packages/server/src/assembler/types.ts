@@ -722,6 +722,11 @@ export interface ModelInput {
   /** The provider kind (`openai-chat`, `anthropic`, …) and its wire API. */
   readonly kind: string
   readonly api: string
+  /**
+   * Whose documented cache contract applies (cachePolicy.ts: `anthropic`, `amazon-bedrock`, …),
+   * from the connection's provider; null where none is known, absent on older snapshots.
+   */
+  readonly cacheContract?: string | null
   readonly key: string
   readonly prefill: "none" | "assistant" | "tool_schema"
   readonly continueUnavailable?: string | undefined

@@ -2,7 +2,7 @@ import { useUserDraft, UserDraftStatus } from "./editor/userDraft.tsx"
 // Saved keys (ARCHITECTURE §3.12). A key goes in and never comes out, and it's sent only
 // to the origins the user confirmed. Every origin is confirmed by the user, one by one:
 // the server can't tell a stolen session's choices from the user's.
-import type { Connection, Credential, ProviderKindInfo } from "@rp/shared/providers.ts"
+import type { Connection, Credential } from "@rp/shared/providers.ts"
 import { originOf } from "@rp/shared/providers.ts"
 import { type FormEvent, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
@@ -12,7 +12,7 @@ import { Checkbox } from "../ui/Choice.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../ui/Dialog.tsx"
 import { Field, Fieldset, formText, Input, SecretInput, Textarea } from "../ui/Field.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../ui/Surface.tsx"
-import { effectiveOrigin, providerSetupAtom } from "./connections/data.ts"
+import { effectiveOrigin, type ProviderSetup, providerSetupAtom } from "./connections/data.ts"
 import { useTitle } from "./shell.tsx"
 
 const keyLabel = (credential: Credential) =>
@@ -108,12 +108,12 @@ interface Candidate {
 const candidatesFor = (
   credential: Credential,
   connections: ReadonlyArray<Connection>,
-  kinds: ReadonlyArray<ProviderKindInfo>
+  setup: ProviderSetup
 ): ReadonlyArray<Candidate> => {
   const usedBy = new Map<string, Array<string>>()
   for (const connection of connections) {
     if (connection.credentialId !== credential.id) continue
-    const origin = effectiveOrigin(connection, kinds)
+    const origin = effectiveOrigin(connection, setup)
     if (origin !== null) usedBy.set(origin, [...(usedBy.get(origin) ?? []), connection.name])
   }
   const origins = [...new Set([...usedBy.keys(), ...credential.origins])]
@@ -127,12 +127,12 @@ const candidatesFor = (
 function ReplaceKeyDialog({
   credential,
   connections,
-  kinds,
+  setup,
   onOpenChange
 }: {
   credential: Credential
   connections: ReadonlyArray<Connection>
-  kinds: ReadonlyArray<ProviderKindInfo>
+  setup: ProviderSetup
   onOpenChange: (open: boolean) => void
 }) {
   const action = useAction()
@@ -142,7 +142,7 @@ function ReplaceKeyDialog({
   const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(new Set())
   /** The connections the user was warned would stop working, as they were at the warning. */
   const [warned, setWarned] = useState<string | null>(null)
-  const offered = candidatesFor(credential, connections, kinds)
+  const offered = candidatesFor(credential, connections, setup)
   const candidates = [
     ...offered,
     ...extra
@@ -376,11 +376,11 @@ type Open = { readonly dialog: "rename" | "replace" | "allow" | "delete"; readon
 function CredentialList({
   credentials,
   connections,
-  kinds
+  setup
 }: {
   credentials: ReadonlyArray<Credential>
   connections: ReadonlyArray<Connection>
-  kinds: ReadonlyArray<ProviderKindInfo>
+  setup: ProviderSetup
 }) {
   const remove = useAction()
   const [open, setOpen] = useState<Open>(null)
@@ -455,7 +455,7 @@ function CredentialList({
       </ul>
       {open?.dialog === "rename" && <RenameDialog credential={open.credential} onOpenChange={close} />}
       {open?.dialog === "replace" && (
-        <ReplaceKeyDialog credential={open.credential} connections={connections} kinds={kinds} onOpenChange={close} />
+        <ReplaceKeyDialog credential={open.credential} connections={connections} setup={setup} onOpenChange={close} />
       )}
       {open?.dialog === "allow" && (
         <AllowHostDialog credential={open.credential} url={null} open onOpenChange={close} />
@@ -507,8 +507,8 @@ function CredentialsPage() {
         }
       />
       <AsyncView atom={providerSetupAtom} loading="Loading keys…">
-        {({ kinds, connections, credentials }) => (
-          <CredentialList credentials={credentials} connections={connections} kinds={kinds} />
+        {({ kinds, providers, connections, credentials }) => (
+          <CredentialList credentials={credentials} connections={connections} setup={{ kinds, providers }} />
         )}
       </AsyncView>
       {creating && <CreateCredentialDialog onOpenChange={setCreating} />}

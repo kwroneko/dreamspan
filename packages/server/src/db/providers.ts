@@ -14,6 +14,7 @@ import {
   ModelOverrides,
   ModelUpstream,
   type ProviderKind,
+  ProviderSettings,
   type ProxyMode,
   type WireApi
 } from "@rp/shared/providers.ts"
@@ -32,6 +33,8 @@ export interface ConnectionRow {
   readonly id: string
   readonly owner_user_id: string
   readonly name: string
+  readonly provider: string
+  readonly provider_settings_json: string
   readonly kind: ProviderKind
   readonly api: WireApi
   readonly base_url: string | null
@@ -56,6 +59,7 @@ export interface ConnectionRow {
 }
 
 const decodeCompat = Schema.decodeUnknownSync(Compat)
+const decodeProviderSettings = Schema.decodeUnknownSync(ProviderSettings)
 const decodeNames = Schema.decodeUnknownSync(Schema.Array(Schema.String))
 const decodeUpstream = Schema.decodeUnknownSync(ModelUpstream)
 const decodeOverrides = Schema.decodeUnknownSync(ModelOverrides)
@@ -64,6 +68,8 @@ export const toConnection = (row: ConnectionRow) =>
   new Connection({
     id: row.id as ConnectionId,
     name: row.name,
+    provider: row.provider,
+    providerSettings: decodeProviderSettings(JSON.parse(row.provider_settings_json)),
     kind: row.kind,
     api: row.api,
     baseUrl: row.base_url,

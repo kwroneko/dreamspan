@@ -1,7 +1,7 @@
 import { logoutFromSettings } from "./support/appMenu.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import { startProvider, type FakeProvider } from "./support/provider.ts"
+import { chooseCustomServer, startProvider, type FakeProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, type TestServer, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -20,6 +20,7 @@ test.afterAll(async () => {
 const createConnection = async (page: Page, name: string, baseUrl: string, key: string) => {
   await page.goto(`${server().url}/settings/connections`)
   await page.getByRole("link", { name: "New connection" }).click()
+  await chooseCustomServer(page)
   await page.getByLabel("Name", { exact: true }).fill(name)
   await page.getByLabel("Base URL", { exact: true }).fill(baseUrl)
   await page.getByLabel("API key", { exact: true }).fill(key)
@@ -39,6 +40,7 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
 
   // The form explains what's missing before anything is sent.
   await page.getByRole("link", { name: "New connection" }).click()
+  await chooseCustomServer(page)
   await page.getByLabel("Base URL", { exact: true }).fill("localhost port 5001")
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Enter a full URL, such as http://localhost:8000/v1.")).toBeVisible()

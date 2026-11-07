@@ -19,6 +19,8 @@ import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
 import { documentedCachePolicy } from "../providers/cachePolicy.ts"
+import { findProvider, resolveProviderSettings } from "@rp/shared/providerDefinitions.ts"
+import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import { prefillUnavailable } from "../assembler/prefill.ts"
 import { mappingCapabilities } from "../providers/mapping.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
@@ -894,7 +896,16 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         }
         const c = toConnection(connection)
         const m = toModel(model)
-        const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat)
+        const providers = yield* CurrentProviderDefinitions
+        const provider = findProvider(providers, c.provider, c.kind, c.baseUrl)
+        const cacheContract = provider ? provider.cacheContract : c.kind
+        const effective = resolveModel(
+          m.key,
+          m.upstream,
+          m.overrides,
+          c.compat,
+          resolveProviderSettings(provider, c.providerSettings)
+        )
         resolvedModel = {
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
@@ -906,8 +917,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
               ? effective.cacheTtlS.value
               : (c.cacheTtlS ??
                 effective.cacheTtlS.value ??
-                documentedCachePolicy({ provider: c.kind, api: c.api, model: m.key })?.ttlS ??
+                (cacheContract === null
+                  ? null
+                  : documentedCachePolicy({ provider: cacheContract, api: c.api, model: m.key })?.ttlS) ??
                 null),
+          cacheContract,
           modelId: m.id,
           kind: c.kind,
           api: c.api,

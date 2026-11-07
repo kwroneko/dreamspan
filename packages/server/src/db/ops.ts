@@ -1200,6 +1200,8 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       connectionId: ConnectionId,
+      /** The provider chosen (providerDefinitions.ts); left out, the kind's default provider. */
+      provider: Schema.optionalKey(Schema.String),
       kind: ProviderKind,
       /** The kind's wire API, resolved by the provider registry on the main thread. */
       api: Schema.String,
@@ -1956,6 +1958,12 @@ export class WriteOps extends RpcGroup.make(
   /** Adopts ST's selected preset only while the user has no stored default. */
   Rpc.make("StImportDefaultPreset", {
     payload: { userId: UserId, importId: Schema.String, refId: RefId },
+    success: Schema.Boolean,
+    error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
+  }),
+  /** Adopts ST's default persona only while the user has no stored default. */
+  Rpc.make("StImportDefaultPersona", {
+    payload: { userId: UserId, importId: Schema.String, entityId: EntityId },
     success: Schema.Boolean,
     error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
   }),

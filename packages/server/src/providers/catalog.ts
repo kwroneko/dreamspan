@@ -11,6 +11,8 @@ import type { Catalog, ProviderKindEntry } from "./registry.ts"
 /** Loaders for pi-ai's per-provider catalogs, by pi provider id. */
 export const piCatalogs: Record<string, () => Promise<Catalog>> = {
   anthropic: () => import("@earendil-works/pi-ai/providers/anthropic.models").then((m) => m.ANTHROPIC_MODELS),
+  "amazon-bedrock": () =>
+    import("@earendil-works/pi-ai/providers/amazon-bedrock.models").then((m) => m.AMAZON_BEDROCK_MODELS),
   openai: () => import("@earendil-works/pi-ai/providers/openai.models").then((m) => m.OPENAI_MODELS),
   openrouter: () => import("@earendil-works/pi-ai/providers/openrouter.models").then((m) => m.OPENROUTER_MODELS),
   deepseek: () => import("@earendil-works/pi-ai/providers/deepseek.models").then((m) => m.DEEPSEEK_MODELS),

@@ -678,14 +678,17 @@ function TabStrip({
   return (
     <div
       data-tab-strip
-      className="flex h-9 shrink-0 items-stretch border-b border-border bg-surface"
+      // In a frame too narrow for everything, the tabs give way first, then Maximize (the ⋯ menu
+      // has it too, styles.css); what still doesn't fit is cut at the start, never the end, so
+      // the ⋯ menu and the panel's toggle stay inside the frame (sidetoggles review, 2026-11-07).
+      className="flex h-9 shrink-0 items-stretch justify-end overflow-hidden border-b border-border bg-surface"
       onDragOver={(event) => dragOver(event, tabs.length)}
       onDragLeave={() => setOver(null)}
       onDrop={(event) => drop(event, tabs.length)}
     >
       {!phone && corners.topLeft === frame.id && (
         // Empty while the sidebar shows; the first tab moves right only while it's hidden.
-        <div className="flex shrink-0 items-center px-2 empty:hidden">
+        <div data-strip-show className="flex shrink-0 items-center px-2 empty:hidden">
           <SlotOutlet slot={sidebarToggle} props={{ place: "strip" }} />
         </div>
       )}
@@ -733,6 +736,7 @@ function TabStrip({
               icon="expand"
               aria-pressed={layout.maximized === frame.id}
               className="size-7"
+              data-strip-maximize
               onClick={() => store.maximize(layout.maximized === frame.id ? null : frame.id)}
             />
           )}

@@ -699,8 +699,8 @@ describe("references across chats", () => {
     const c = chat(owner)
     run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('card', ?, 'card', 1)`, owner)
     run(
-      `INSERT INTO connections (id, owner_user_id, name, kind, api, created_at, updated_at)
-         VALUES ('conn', ?, 'Local', 'openai-chat', 'openai-completions', 1, 1)`,
+      `INSERT INTO connections (id, owner_user_id, name, provider, kind, api, created_at, updated_at)
+         VALUES ('conn', ?, 'Local', 'openai-compatible', 'openai-chat', 'openai-completions', 1, 1)`,
       owner
     )
     for (const [table, rowId] of [
@@ -969,8 +969,8 @@ describe("connections and the usage ledger", () => {
   const connection = (ownerId: string) => {
     const connectionId = id("conn")
     run(
-      `INSERT INTO connections (id, owner_user_id, name, kind, api, created_at, updated_at)
-         VALUES (?, ?, 'Local', 'openai-chat', 'openai-completions', 1, 1)`,
+      `INSERT INTO connections (id, owner_user_id, name, provider, kind, api, created_at, updated_at)
+         VALUES (?, ?, 'Local', 'openai-compatible', 'openai-chat', 'openai-completions', 1, 1)`,
       connectionId,
       ownerId
     )

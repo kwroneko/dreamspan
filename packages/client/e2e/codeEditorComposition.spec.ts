@@ -33,23 +33,18 @@ test.beforeAll(async ({ browser }) => {
   server = await createServer({
     configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
     root: fileURLToPath(new URL("..", import.meta.url)),
+    appType: "custom",
     server: { host: "127.0.0.1", port: 0 },
-    // Pre-bundle only what the probe imports: scanning the whole app first held every request
-    // past the test's minute.
-    optimizeDeps: { entries: ["src/ui/CodeEditorView.tsx"] },
-    plugins: [
-      {
-        name: "composition-test-harness",
-        configureServer(vite) {
-          vite.middlewares.use("/composition.html", (_request, response, next) => {
-            void vite.transformIndexHtml("/composition.html", harness).then((html) => {
-              response.setHeader("Content-Type", "text/html")
-              response.end(html)
-            }, next)
-          })
-        }
-      }
-    ]
+    // Limit a fallback scan to the probe's imports; normally global setup has pre-bundled them.
+    optimizeDeps: { entries: ["src/ui/CodeEditorView.tsx"] }
+  })
+  // Plugin names enter Vite's dependency-cache hash. Serve the probe without adding a
+  // plugin, so it reuses global setup's pre-bundle instead of deleting and rebuilding it.
+  server.middlewares.use("/composition.html", (_request, response, next) => {
+    void server.transformIndexHtml("/composition.html", harness).then((html) => {
+      response.setHeader("Content-Type", "text/html")
+      response.end(html)
+    }, next)
   })
   await server.listen()
   // Compile the probe before timing composition, as the other Vite-backed specs do.

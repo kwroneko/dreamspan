@@ -4,6 +4,8 @@ import { admitRequest } from "./lcmBackfill.ts"
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionSettings } from "@rp/shared/providers.ts"
+import { findProvider, providerChanges } from "@rp/shared/providerDefinitions.ts"
+import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -29,7 +31,10 @@ const settingsColumns = (settings: ConnectionSettings) => ({
   cache_ttl_s: settings.cacheTtlS,
   max_concurrent: settings.maxConcurrent,
   preset_override_ref_id: settings.presetOverrideRefId,
-  ...(settings.modelIdPrefix !== undefined ? { model_id_prefix: settings.modelIdPrefix } : {})
+  ...(settings.modelIdPrefix !== undefined ? { model_id_prefix: settings.modelIdPrefix } : {}),
+  ...(settings.providerSettings !== undefined
+    ? { provider_settings_json: JSON.stringify(settings.providerSettings) }
+    : {})
 })
 
 export const makeProviderWriteHandlers = Effect.gen(function* () {
@@ -113,8 +118,10 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         const revision = yield* writeSetting(sql, "user", userId, "cost", rules, expectedRevision)
         return { revision, rules }
       }).pipe(transaction(sql, "SetCostSettings")),
-    CreateConnection: ({ userId, connectionId, kind, api, settings, credential }) =>
+    CreateConnection: ({ userId, connectionId, provider, kind, api, settings, credential }) =>
       Effect.gen(function* () {
+        const definitions = yield* CurrentProviderDefinitions
+        const definition = findProvider(definitions, provider ?? null, kind, settings.baseUrl)
         yield* checkPresetRef(userId, settings.presetOverrideRefId)
         const credentialId = "typed" in credential ? credential.typed.credentialId : credential.existing
         if ("typed" in credential) yield* insertCredential(userId, credential.typed, true)
@@ -123,9 +130,15 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO connections ${sql.insert({
           id: connectionId,
           owner_user_id: userId,
+          provider: provider ?? definition?.id ?? kind,
           kind,
           api,
-          ...settingsColumns(settings),
+          ...settingsColumns({
+            ...settings,
+            ...(settings.providerSettings !== undefined
+              ? { providerSettings: providerChanges(definition, settings.providerSettings) }
+              : {})
+          }),
           credential_id: credentialId,
           created_at: now,
           updated_at: now
@@ -136,6 +149,8 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
     UpdateConnection: ({ userId, connectionId, settings, expectedRowVersion }) =>
       Effect.gen(function* () {
         const row = yield* ownedConnection(userId, connectionId)
+        const definitions = yield* CurrentProviderDefinitions
+        const definition = findProvider(definitions, row.provider, row.kind, row.base_url)
         yield* checkPresetRef(userId, settings.presetOverrideRefId)
         if (row.row_version !== expectedRowVersion) {
           return yield* new StaleWrite({
@@ -145,7 +160,13 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
             actual: row.row_version
           })
         }
-        yield* sql`UPDATE connections SET ${sql.update({ ...settingsColumns(settings), updated_at: Date.now() })},
+        const normalized = {
+          ...settings,
+          ...(settings.providerSettings !== undefined
+            ? { providerSettings: providerChanges(definition, settings.providerSettings) }
+            : {})
+        }
+        yield* sql`UPDATE connections SET ${sql.update({ ...settingsColumns(normalized), updated_at: Date.now() })},
                      row_version = row_version + 1
                    WHERE id = ${connectionId}`
         return yield* reloadConnection(connectionId)
