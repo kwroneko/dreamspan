@@ -3,7 +3,10 @@ import { useSplitChats } from "./splitChats.ts"
 // loaded with the chat rather than with the app.
 import { useNavigate } from "@tanstack/react-router"
 import { useSyncExternalStore } from "react"
+import { createPortal } from "react-dom"
+import { Away } from "../../ui/away.ts"
 import { Dialog } from "../../ui/Dialog.tsx"
+import { usePanelTogglePlace } from "../workbench/tab.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import type { ChatHeaderActionProps } from "./ChatHeader.tsx"
 import { PinButton } from "../characters/ShellBrowser.tsx"
@@ -36,9 +39,13 @@ export function HeaderPin({ view }: ChatHeaderActionProps) {
   ) : null
 }
 
-/** The panel's button, in a saved chat's header and in a pending one's. */
+/**
+ * The panel's button, in a saved chat's header and in a pending one's; in tab mode at the end
+ * of the top-right frame's strip instead, from the chat that has the panel (owner, 2026-11-07).
+ */
 export function HeaderPanel({ view, panel }: Pick<ChatHeaderActionProps, "view" | "panel">) {
-  return (
+  const place = usePanelTogglePlace(panel.wide)
+  const toggles = (
     <PanelToggles
       compact
       view={view}
@@ -46,8 +53,12 @@ export function HeaderPanel({ view, panel }: Pick<ChatHeaderActionProps, "view" 
       open={panel.open}
       wide={panel.wide}
       onToggle={panel.onToggle}
+      className={place.inline ? "" : "size-7"}
     />
   )
+  if (place.inline) return toggles
+  // Shown in the strip even while this chat's tab is behind another, as its panel is.
+  return place.host ? createPortal(<Away value={false}>{toggles}</Away>, place.host) : null
 }
 
 export function HeaderMenu({ session, view, onHistory, onJump, onRename }: ChatHeaderActionProps) {

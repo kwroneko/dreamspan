@@ -86,7 +86,8 @@ export function PanelToggles({
   wide,
   view,
   onToggle,
-  compact = false
+  compact = false,
+  className = ""
 }: {
   userId: string
   open: PanelTab | null
@@ -96,6 +97,8 @@ export function PanelToggles({
   onToggle: (tab: PanelTab) => void
   /** One icon that opens the panel at its last tab and hides it (the chat header's). */
   compact?: boolean
+  /** The compact button's size where it sits (a tab strip's are smaller). */
+  className?: string
 }) {
   const available = usePanelTabs(view, open)
   const tabs = available.filter((tab) => tab.descriptor.header !== false)
@@ -121,7 +124,7 @@ export function PanelToggles({
         icon="panel"
         aria-expanded={open !== null}
         aria-pressed={open !== null}
-        className={open === null ? "" : "bg-surface-raised text-text"}
+        className={`${className} ${open === null ? "" : "bg-surface-raised text-text"}`}
         onClick={toggle}
       />
     )

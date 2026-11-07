@@ -11,7 +11,6 @@ import {
   frames,
   initialLayout,
   type Layout,
-  leftEdgeFrames,
   maximizeFrame,
   moveTab,
   neighbours,
@@ -19,8 +18,10 @@ import {
   pinTab,
   restoreLayout,
   saveLayout,
+  showsStrips,
   splitFrame,
-  stickTab
+  stickTab,
+  stripCorners
 } from "../src/features/workbench/model.ts"
 
 const keyOf = (href: string) => href.split("?")[0]!
@@ -77,7 +78,29 @@ describe("workbench layout", () => {
     layout = openTab(layout, "/b", keyOf)
     expect(titles(layout)).toEqual([["/a"], ["/a", "/b"]])
     expect(neighbours(layout, first).right).toBe(focusedFrame(layout).id)
-    expect([...leftEdgeFrames(layout.root)]).toEqual([first])
+    expect(stripCorners(layout)).toEqual({ topLeft: first, topRight: focusedFrame(layout).id })
+    expect(showsStrips(layout)).toBe(true)
+  })
+
+  it("puts the shell's strip buttons on the top-left and top-right frames", () => {
+    let layout = initialLayout("/a")
+    const only = focusedFrame(layout).id
+    expect(showsStrips(layout)).toBe(false)
+    expect(stripCorners(layout)).toEqual({ topLeft: only, topRight: only })
+    layout = openTab(pinTab(layout, focusedTab(layout)!.id), "/b", keyOf)
+    expect(showsStrips(layout)).toBe(true)
+    // Left | (top-right over bottom-right): the right column's top frame takes the panel's toggle.
+    layout = splitFrame(layout, only, "row")
+    const right = focusedFrame(layout).id
+    layout = splitFrame(layout, right, "column")
+    const bottomRight = focusedFrame(layout).id
+    expect(stripCorners(layout)).toEqual({ topLeft: only, topRight: right })
+    // Over a left column split in two, the top one has the sidebar's button.
+    layout = splitFrame(focusFrame(layout, only), only, "column")
+    expect(stripCorners(layout).topLeft).toBe(only)
+    // A maximized frame shows alone and carries both.
+    layout = maximizeFrame(layout, bottomRight)
+    expect(stripCorners(layout)).toEqual({ topLeft: bottomRight, topRight: bottomRight })
   })
 
   it("opens an item another frame shows there, unless a frame is named", () => {

@@ -88,7 +88,8 @@ const openCast = async (page: Page, frame: Locator) => {
   if (!(await panel(page).isVisible())) {
     const icons = frame.getByRole("group", { name: "Chat panel" })
     if (await icons.isVisible()) await icons.getByRole("button", { name: "Cast", exact: true }).click()
-    else await frame.getByRole("button", { name: "Chat panel", exact: true }).click()
+    // Split, the panel's toggle is on the top-right strip.
+    else await page.getByRole("button", { name: "Chat panel", exact: true }).click()
   }
   await panelTab(page, "Cast")
 }
