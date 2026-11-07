@@ -477,6 +477,32 @@ describe("content security policy", () => {
     }).pipe(withServer(config))
   })
 
+  it.live("the panel frame's page has its own: only the bootstrap runs, and Origin null is refused", () => {
+    const config = testConfig({ clientDist: tempDir("client") })
+    return Effect.gen(function* () {
+      const port = yield* serverPort
+      const { status, csp } = yield* cspOf("/frame/panel")
+      assert.strictEqual(status, 200)
+      const directives = new Map(
+        csp.split("; ").map((d) => [d.split(" ")[0]!, d.split(" ").slice(1).join(" ")] as const)
+      )
+      assert.strictEqual(directives.get("default-src"), "'none'")
+      assert.strictEqual(
+        directives.get("script-src"),
+        `http://127.0.0.1:${port}/frame/bootstrap.js https://127.0.0.1:${port}/frame/bootstrap.js`
+      )
+      assert.strictEqual(directives.get("connect-src"), "'none'")
+      assert.strictEqual(directives.get("form-action"), "'none'")
+      assert.strictEqual(directives.get("frame-ancestors"), "'self'")
+      // A Host that isn't a plain name falls back to 'self' and can't add a source.
+      const odd = yield* cspOf("/frame/panel", { Host: "[::1]" })
+      assert.include(odd.csp, "script-src 'self';")
+      // The frame's own requests carry Origin: null.
+      assert.strictEqual((yield* cspOf("/frame/panel", { Origin: "null" })).status, 403)
+      assert.strictEqual((yield* cspOf("/healthz", { Origin: "null" })).status, 403)
+    }).pipe(withServer(config))
+  })
+
   it.live("a Host that isn't a host name adds no WebSocket origin", () => {
     const config = testConfig({ authMode: "proxy" })
     return Effect.gen(function* () {

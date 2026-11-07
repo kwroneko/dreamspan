@@ -125,6 +125,11 @@ const displayFields = {
   displayRegex: Schema.Boolean,
   /** "Show HTML as formatting" (spec/HTML-MESSAGES.md §3.1): off, a message's HTML shows as text. */
   htmlFormatting: Schema.Boolean,
+  /**
+   * "Run panels in the last N messages" (spec/HTML-MESSAGES.md §3.3): document blocks in older
+   * messages wait for Run panel; null runs them in every message.
+   */
+  panelDepth: Schema.NullOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))),
   enterSends: Schema.Literals(["automatic", "always", "never"]),
   chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
   /** How preset lists sort (the composer's picker, the Prompt preset tab's, the library's). */
@@ -177,6 +182,7 @@ export const DisplayPrefsChange = Schema.Struct({
   outputMacros: Schema.optionalKey(displayFields.outputMacros),
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
   htmlFormatting: Schema.optionalKey(displayFields.htmlFormatting),
+  panelDepth: Schema.optionalKey(displayFields.panelDepth),
   enterSends: Schema.optionalKey(displayFields.enterSends),
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
   presetSort: Schema.optionalKey(displayFields.presetSort),
@@ -211,6 +217,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   outputMacros: false,
   displayRegex: true,
   htmlFormatting: true,
+  panelDepth: null,
   enterSends: "automatic",
   chatWidth: CHAT_WIDTH.default,
   presetSort: "name",

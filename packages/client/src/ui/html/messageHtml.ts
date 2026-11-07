@@ -1,6 +1,7 @@
 // What message HTML needs from around it (spec/HTML-MESSAGES.md §3.2, §3.3): the viewer's choices,
 // the message a body belongs to, and the chat view's card styles in one constructed stylesheet.
 import { createContext } from "react"
+import type { FrameSlots } from "./frames.ts"
 
 /**
  * Scopes a text's CSS (css.ts). The renderer's lazy chunk sets it, so its CSS parser stays out
@@ -18,13 +19,19 @@ export function setStyleScoper(scope: (styles: ReadonlyArray<string>) => string)
 export interface HtmlSettings {
   /** "Show HTML as formatting": off, HTML shows as text. */
   readonly html: boolean
+  /** "Run panels in the last N messages": null, every message's. */
+  readonly panelDepth: number | null
 }
-export const HtmlSettingsContext = createContext<HtmlSettings>({ html: true })
+export const HtmlSettingsContext = createContext<HtmlSettings>({ html: true, panelDepth: null })
 
 /** The chat message a body shows, set by its body only: reasoning and previews have none. */
 export interface HtmlMessage {
   /** Its slot: the row, whichever version shows. */
   readonly key: string
+  /** Its reply is being written: its panels wait ("Panel loading"). */
+  readonly streaming?: boolean
+  /** How far it is from the viewed fork's tip (0 is the last message), when known. */
+  readonly fromTip?: number | null
 }
 export const HtmlMessageContext = createContext<HtmlMessage | null>(null)
 
@@ -129,5 +136,7 @@ export class MessageStyles {
 /** The chat view's shared HTML state, provided by the chat surface (features/chat). */
 export interface HtmlChat {
   readonly styles: MessageStyles
+  /** Its live panel frames (frames.ts). */
+  readonly frames: FrameSlots
 }
 export const HtmlChatContext = createContext<HtmlChat | null>(null)

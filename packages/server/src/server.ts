@@ -248,6 +248,52 @@ const contentSecurityPolicy = (host: string | undefined) => {
   ].join("; ")
 }
 
+/** The page a message's document block loads in its frame (spec/HTML-MESSAGES.md §3.3). */
+const FRAME_PANEL = "/frame/panel"
+/** Its one script, the client build's (packages/client/src/frame/bootstrap.ts). */
+const FRAME_BOOTSTRAP = "/frame/bootstrap.js"
+
+/**
+ * The frame page's policy. The frame is sandboxed without allow-same-origin, so its origin is
+ * opaque and `'self'` can't name the app: the bootstrap is named by the Host the browser used
+ * when it's a plain host name (otherwise `'self'`, which matches the page's URL in current
+ * browsers). Only the bootstrap runs: the block's own scripts and handlers stay off. Styles
+ * and `data:`/`blob:` images and fonts are the block's own; it can't connect, submit, change
+ * its base or be framed by another site.
+ */
+const framePolicy = (host: string | undefined) => {
+  const script =
+    host !== undefined && HOST.test(host) && !host.startsWith("[")
+      ? `http://${host}${FRAME_BOOTSTRAP} https://${host}${FRAME_BOOTSTRAP}`
+      : "'self'"
+  return [
+    "default-src 'none'",
+    `script-src ${script}`,
+    "style-src 'unsafe-inline'",
+    "img-src data: blob:",
+    "font-src data:",
+    "connect-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'self'"
+  ].join("; ")
+}
+
+/** The frame page: nothing but the bootstrap, which writes the block's document when the app posts it. */
+const FramePanelRoute = HttpRouter.add(
+  "GET",
+  FRAME_PANEL,
+  Effect.succeed(
+    HttpServerResponse.text(
+      `<!doctype html><html><head><meta charset="utf-8"><script src="${FRAME_BOOTSTRAP}"></script></head><body></body></html>`,
+      {
+        contentType: "text/html; charset=utf-8",
+        headers: { "cache-control": "no-cache", "x-content-type-options": "nosniff" }
+      }
+    )
+  )
+)
+
 /**
  * Every request passes here first. It refuses other sites' pages and DNS-rebound names
  * (net/exposure.ts), and records the socket's address in PEER_HEADER for authentication,
@@ -272,7 +318,11 @@ const RequestGuard = HttpRouter.middleware(
     }
     return (httpEffect) =>
       Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
-        const csp = HttpServerResponse.setHeader("content-security-policy", contentSecurityPolicy(request.headers.host))
+        const policy =
+          request.url.split("?")[0] === FRAME_PANEL
+            ? framePolicy(request.headers.host)
+            : contentSecurityPolicy(request.headers.host)
+        const csp = HttpServerResponse.setHeader("content-security-policy", policy)
         const headers = { host: request.headers.host, origin: request.headers.origin }
         const problem = crossSiteProblem(headers, publicOrigins, checkHost)
         if (problem !== undefined) return Effect.succeed(csp(HttpServerResponse.text(problem, { status: 403 })))
@@ -513,6 +563,7 @@ export const serverWith = <E>(
     Layer.mergeAll(
       RpcRoute,
       HealthRoute,
+      FramePanelRoute,
       AuthRoutes,
       ImportRoutes.layer,
       SourceImageRoute,

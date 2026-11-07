@@ -129,3 +129,51 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   await expect(page.getByRole("link", { name: "Open Wren in the full editor", exact: true })).toBeVisible()
   expect(violations).toEqual([])
 })
+
+test("a message's panel runs in a frame with an opaque origin, under its own policy", async ({ page }) => {
+  const violations = await watchViolations(page)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  // The frame page's own policy: only the bootstrap runs, nothing connects, only the app frames it.
+  const frame = await page.request.get(`${server().url}/frame/panel`)
+  const policy = frame.headers()["content-security-policy"]!
+  expect(policy).toContain("default-src 'none'")
+  expect(policy).toContain(`script-src http://127.0.0.1:${server().port}/frame/bootstrap.js`)
+  expect(policy).toContain("connect-src 'none'")
+  expect(policy).toContain("frame-ancestors 'self'")
+  // A request from a frame carries Origin: null, which no route takes.
+  for (const path of ["/rpc", "/library/import?name=x.json", "/frame/panel"]) {
+    const refused = await page.request.get(`${server().url}${path}`, { headers: { origin: "null" } })
+    expect(refused.status(), path).toBe(403)
+  }
+
+  await page.goto(`${server().url}/chats`)
+  await page.getByLabel("Title of the new chat").fill("Panel")
+  await page.getByRole("button", { name: "New chat" }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Panel" })).toBeVisible()
+  const block = [
+    "```html",
+    "<!doctype html><html><head><style>p { color: rgb(1, 2, 3) }</style></head>",
+    '<body><p id="lamp">lit</p><img src="https://example.com/a.png" alt=""><script>document.title = "ran"</script></body></html>',
+    "```"
+  ].join("\n")
+  await page.getByLabel("Message", { exact: true }).fill(block)
+  await page.getByRole("button", { name: "Send" }).click()
+  const panel = page.getByRole("article", { name: "Your message" }).frameLocator('iframe[title="Panel"]')
+  await expect(panel.locator("#lamp")).toHaveCSS("color", "rgb(1, 2, 3)")
+  const content = page.frames().find((candidate) => candidate.url().endsWith("/frame/panel"))!
+  expect(await content.evaluate(() => origin)).toBe("null")
+  expect(await content.evaluate(() => document.title)).toBe("")
+  // The frame can't read the app.
+  expect(
+    await content.evaluate(() => {
+      try {
+        return String(parent.document)
+      } catch {
+        return "blocked"
+      }
+    })
+  ).toBe("blocked")
+  await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
+  // The app's pages report nothing; the frame's refusals (its script, the remote image) are its own.
+  expect(violations.filter((text) => !text.includes("/frame/") && !text.includes("example.com"))).toEqual([])
+})

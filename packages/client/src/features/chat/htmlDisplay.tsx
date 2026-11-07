@@ -10,15 +10,18 @@ import {
   MessageStyles,
   type HtmlChat
 } from "../../ui/html/messageHtml.ts"
+import { FrameSlots } from "../../ui/html/frames.ts"
+import { Field } from "../../ui/Field.tsx"
+import { Select } from "../../ui/Select.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 
 type Entries = ReadonlyArray<{ readonly key: string; readonly text: string }>
 /** The viewer's setting and a stylesheet adopted while mounted, holding `entries`' styles. */
 function useHtml(entries: Entries) {
-  const html = useViewPrefs().prefs.htmlFormatting
-  const settings = useMemo(() => ({ html }), [html])
-  const [chat] = useState<HtmlChat>(() => ({ styles: new MessageStyles() }))
+  const { htmlFormatting: html, panelDepth } = useViewPrefs().prefs
+  const settings = useMemo(() => ({ html, panelDepth }), [html, panelDepth])
+  const [chat] = useState<HtmlChat>(() => ({ styles: new MessageStyles(), frames: new FrameSlots() }))
   useEffect(() => chat.styles.attach(), [chat])
   useEffect(() => chat.styles.setLoaded(html ? entries : []), [chat, html, entries])
   return { settings, chat }
@@ -63,5 +66,29 @@ export function HtmlFormattingSwitch() {
     >
       Show HTML as formatting
     </Switch>
+  )
+}
+
+const DEPTHS = [1, 2, 3, 5, 10]
+/** The Interface panel's panel depth, after the switch. */
+export function PanelDepthSelect() {
+  const viewer = useViewPrefs()
+  const depth = viewer.prefs.panelDepth
+  const depths = depth === null || DEPTHS.includes(depth) ? DEPTHS : [...DEPTHS, depth].sort((a, b) => a - b)
+  return (
+    <Field
+      label="Run panels in"
+      about="Panels are boxes a card draws in its own frame. Panels in older messages wait for you to run them."
+    >
+      <Select<string>
+        value={depth === null ? "all" : String(depth)}
+        disabled={!viewer.ready || viewer.pending}
+        onValueChange={(value) => void viewer.change({ panelDepth: value === "all" ? null : Number(value) })}
+        items={[
+          { value: "all", label: "All messages" },
+          ...depths.map((n) => ({ value: String(n), label: n === 1 ? "The last message" : `The last ${n} messages` }))
+        ]}
+      />
+    </Field>
   )
 }

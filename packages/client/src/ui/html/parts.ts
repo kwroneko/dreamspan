@@ -22,7 +22,7 @@ export const htmlClassifiers = makeRegistry<{
 }>()
 
 /** What a document block's renderer is given (rehypeHtml.ts makes the block). */
-interface DocumentBlockProps {
+export interface DocumentBlockProps {
   /** The block's text after the display transforms: the document. */
   readonly source: string
   /** Its place among the message's document blocks, from 0. */
@@ -30,7 +30,7 @@ interface DocumentBlockProps {
   /** Copy metadata (sourcePositions.ts): the block's stored range, on its one placeholder character. */
   readonly sourceMap?: string
 }
-const documentRenderers = makeRegistry<{
+export const documentRenderers = makeRegistry<{
   readonly id: string
   readonly order: number
   readonly component: ComponentType<DocumentBlockProps>

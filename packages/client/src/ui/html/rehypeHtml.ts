@@ -165,10 +165,10 @@ const MEDIA = new Set(["audio", "video", "source", "track"])
  * calls a document becomes a frame; parsed elements get the custom- class prefix, the ids' prefix
  * and links to them, DOMPurify's value checks, and lose whatever would load from elsewhere.
  */
-export function htmlFinish(options: { parts: number; block: number; documents: boolean }) {
+export function htmlFinish(options: { parts: number; block: number }) {
   return (tree: Node) => {
     const classifier = effectiveClassifier()
-    const frames = options.documents && classifier && effectiveDocumentRenderer() ? classifier : undefined
+    const frames = classifier && effectiveDocumentRenderer() ? classifier : undefined
     let blocked = false
     let documents = 0
     const visit = (node: Node) => {

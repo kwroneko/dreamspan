@@ -90,13 +90,13 @@ const rehypePlugins = [defaultRehypePlugins.sanitize!, hardening(false)] as Plug
  * re-keys Streamdown's processor cache when a part is replaced; `block` keeps the document
  * blocks of different blocks apart. `data:` images load: they make no request.
  */
-const htmlPlugins = (parts: number, block: number, documents: boolean) =>
+const htmlPlugins = (parts: number, block: number) =>
   [
     htmlMark,
     rehypeRaw,
     [htmlPrepare, { parts }],
     [htmlSanitize, { parts }],
-    [htmlFinish, { parts, block, documents }],
+    [htmlFinish, { parts, block }],
     hardening(true)
   ] as Plugins
 
@@ -125,7 +125,7 @@ const htmlRemarkPlugins = [
 ] as typeof remarkPlugins
 const SourceBlocks = createContext<ReadonlyArray<string>>([])
 /** How this text's blocks render HTML: null shows it as text. */
-const BlockHtml = createContext<{ readonly parts: number; readonly documents: boolean } | null>(null)
+const BlockHtml = createContext<{ readonly parts: number } | null>(null)
 
 function PositionedBlock(props: BlockProps) {
   const key = useContext(SourceBlocks)[props.index] ?? "[]"
@@ -136,7 +136,7 @@ function PositionedBlock(props: BlockProps) {
   const plugins = useMemo(
     () =>
       [
-        ...(parse ? htmlPlugins(html.parts, props.index, html.documents) : rehypePlugins),
+        ...(parse ? htmlPlugins(html.parts, props.index) : rehypePlugins),
         [sourcePositions, { offsets: JSON.parse(key) as SourceChar[] }]
       ] as Plugins,
     [key, parse, html, props.index]
@@ -183,16 +183,13 @@ function displayRanges(stored: string, display: string): SourceChar[] {
 }
 
 /** The built-in ST formatter; storage, copy and prompt text never pass through it. */
-export function StMarkdown({ text, sourceText = text, streaming }: MessageTextProps) {
+export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
   const settings = useContext(HtmlSettingsContext)
   const message = useContext(HtmlMessageContext)
   const chat = useContext(HtmlChatContext)
   const parts = useSyncExternalStore(subscribeHtmlParts, htmlPartsRevision, htmlPartsRevision)
   // Disabling the registered schema (`html.inline`) shows HTML as text, as the switch does.
-  const html = useMemo(
-    () => (settings.html && effectiveSchema() ? { parts, documents: !streaming } : null),
-    [settings.html, parts, streaming]
-  )
+  const html = useMemo(() => (settings.html && effectiveSchema() ? { parts } : null), [settings.html, parts])
   // A message body's `<style>`s join the chat's stylesheet (ui/html/messageHtml.ts).
   const styles = useMemo(() => (html && message ? scopeStyles(extractStyles(text)) : null), [html, message, text])
   useEffect(() => {

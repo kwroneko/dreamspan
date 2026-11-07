@@ -84,6 +84,8 @@ function renderedHtml(range: Range, body: Element): string {
     element.removeAttribute("data-source-map")
     element.removeAttribute("data-message-source")
   }
+  // A message's panel frame (ui/html/DocumentFrame.tsx) is a live view, not copied content.
+  for (const frame of holder.querySelectorAll("iframe")) frame.remove()
   // Clipboard recipients don't have our stylesheet. Keep literal quote glyphs
   // without the browser's extra q quotes, and make code line breaks structural.
   for (const quote of holder.querySelectorAll("q")) quote.style.quotes = "none"

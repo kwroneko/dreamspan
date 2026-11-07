@@ -8,6 +8,7 @@ import { scopeStyles } from "../src/ui/html/css.ts"
 import { extractStyles, HtmlMessageContext, HtmlSettingsContext } from "../src/ui/html/messageHtml.ts"
 import { htmlClassifiers, htmlSchemas, isDocumentBlock } from "../src/ui/html/parts.ts"
 import { registerHtmlParts } from "../src/ui/html/register.ts"
+import { htmlSchema } from "../src/ui/html/schema.ts"
 
 let disposers: Array<() => void> = []
 beforeAll(() => {
@@ -16,12 +17,19 @@ beforeAll(() => {
 afterAll(() => disposers.forEach((dispose) => dispose()))
 
 /** The rendered markup, without the copy metadata or the wrapper. */
-const render = (text: string, { html = true, streaming = false } = {}) =>
+const render = (
+  text: string,
+  { html = true, streaming = false, panelDepth = null as number | null, fromTip = null as number | null } = {}
+) =>
   renderToStaticMarkup(
     createElement(
       HtmlSettingsContext,
-      { value: { html } },
-      createElement(HtmlMessageContext, { value: { key: "slot" } }, createElement(StMarkdown, { text, streaming }))
+      { value: { html, panelDepth } },
+      createElement(
+        HtmlMessageContext,
+        { value: { key: "slot", streaming, fromTip } },
+        createElement(StMarkdown, { text, streaming })
+      )
     )
   )
     .replace(/<span data-source-map="[^"]*">([^<]*)<\/span>/g, "$1")
@@ -162,10 +170,34 @@ describe("document blocks", () => {
     expect(isDocumentBlock("const html = 1")).toBe(false)
   })
 
+  const documentBlock = "```html\n<html><body>x</body></html>\n```"
+  it("shows a document block in a frame", () => {
+    const out = render(documentBlock)
+    expect(out).not.toContain("&lt;html&gt;")
+    expect(out).toContain('aria-hidden="true"')
+  })
+
+  it("shows Panel loading while its reply streams", () => {
+    expect(render(documentBlock, { streaming: true })).toContain("Panel loading")
+  })
+
+  it("leaves an older message's panel for Run panel", () => {
+    expect(render(documentBlock, { panelDepth: 2, fromTip: 2 })).toContain("Run panel")
+    expect(render(documentBlock, { panelDepth: 2, fromTip: 1 })).not.toContain("Run panel")
+    expect(render(documentBlock, { fromTip: 50 })).not.toContain("Run panel")
+  })
+
   it("leaves a document block as code without a frame renderer", () => {
-    expect(htmlClassifiers.snapshot().entries.length).toBe(1)
-    const out = render("```html\n<html><body>x</body></html>\n```")
-    expect(out).toContain("&lt;html&gt;")
-    expect(out).not.toContain("rp-frame")
+    disposers.forEach((dispose) => dispose())
+    const partial = [
+      htmlSchemas.register({ id: "html.inline", order: 0, schema: htmlSchema }),
+      htmlClassifiers.register({ id: "html.classifier", order: 0, isDocument: isDocumentBlock })
+    ]
+    try {
+      expect(render(documentBlock)).toContain("&lt;html&gt;")
+    } finally {
+      partial.forEach((dispose) => dispose())
+      disposers = registerHtmlParts()
+    }
   })
 })
