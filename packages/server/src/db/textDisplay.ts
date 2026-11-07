@@ -1,4 +1,4 @@
-// Display-only tokenization: assembly's scale gate keeps the inexpensive budget cut.
+// Calibrated display counts; assembly and cache fitting use the same local tokenizer families.
 // Uses the assembler's replaceable local text counters; never a provider endpoint.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"

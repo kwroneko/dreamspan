@@ -165,20 +165,19 @@ export const injectInChat = (
   return messages.reverse()
 }
 
-/**
- * Token counts against the preset's budget. ST counts with the model's tokenizer; this
- * estimates, a token per four characters plus three per message, so what's cut at the
- * margin can differ (ARCHITECTURE §15).
- */
+/** Emergency fallback when a local tokenizer cannot run. */
 export const estimateTokens = (text: string) => Math.ceil(text.length / 4)
 
-export const tokensOf = (message: {
-  readonly content: string
-  readonly name?: string | undefined
-  /** Images count what their estimate says (`image-tokens` stage); unsent ones count nothing. */
-  readonly images?: ReadonlyArray<{ readonly estimate?: ImageEstimate | undefined }> | undefined
-}) =>
-  (message.content.length === 0 ? 0 : estimateTokens(message.content + (message.name ?? "")) + 3) +
+export const tokensOf = (
+  message: {
+    readonly content: string
+    readonly name?: string | undefined
+    /** Images count what their estimate says (`image-tokens` stage); unsent ones count nothing. */
+    readonly images?: ReadonlyArray<{ readonly estimate?: ImageEstimate | undefined }> | undefined
+  },
+  countText: (text: string) => number = estimateTokens
+) =>
+  (message.content.length === 0 ? 0 : countText(message.content + (message.name ?? "")) + 3) +
   (message.images ?? []).reduce((n, image) => n + budgetTokens(image.estimate), 0)
 
 /** ST's parseExampleIntoIndividual: one example block into user and character lines. */
@@ -262,7 +261,9 @@ export const compose = (input: {
   readonly layer?: ReadonlyArray<StMessage>
   readonly stableExamples?: boolean
   readonly budget: number
+  readonly countText?: (text: string) => number
 }): Composition => {
+  const countMessage = (message: Parameters<typeof tokensOf>[0]) => tokensOf(message, input.countText)
   const { collection } = input
   const index = (identifier: string) => collection.findIndex((p) => p.identifier === identifier)
   const has = (identifier: string) => index(identifier) !== -1
@@ -283,7 +284,7 @@ export const compose = (input: {
       kind: prompt.kind === "pinned" ? "pinned" : prompt.barrier ? "volatile" : (prompt.kind ?? "prefix")
     }
     slots.set(at, [message])
-    spend(tokensOf(message))
+    spend(countMessage(message))
   }
   for (const id of [
     "worldInfoBefore",
@@ -298,7 +299,7 @@ export const compose = (input: {
   }
   relative("personaDescription")
   const control = input.control ?? []
-  spend(control.reduce((n, m) => n + tokensOf(m), 0))
+  spend(control.reduce((n, m) => n + countMessage(m), 0))
   const userRelative = collection
     .filter((p) => p.system_prompt === false && p.injection_position !== "absolute")
     .map((p) => p.identifier)
@@ -308,10 +309,10 @@ export const compose = (input: {
   for (const { message, at } of input.beside) {
     if (at === "start") main!.unshift(message)
     else main!.push(message)
-    spend(tokensOf(message))
+    spend(countMessage(message))
   }
   const layer = input.layer ?? []
-  spend(layer.reduce((n, m) => n + tokensOf(m), 0))
+  spend(layer.reduce((n, m) => n + countMessage(m), 0))
   if (budget < 0) {
     throw new AssemblyFailed({
       reason: "budget",
@@ -338,7 +339,7 @@ export const compose = (input: {
       : null
     for (const block of input.examples) {
       const messages: Array<StMessage> = block.map((line) => ({ ...line }))
-      const cost = (heading ? tokensOf(heading) : 0) + messages.reduce((n, m) => n + tokensOf(m), 0)
+      const cost = (heading ? countMessage(heading) : 0) + messages.reduce((n, m) => n + countMessage(m), 0)
       if (budget - cost < 0) break
       if (heading && (heading.content || heading.kind === "volatile")) examples.push(heading)
       examples.push(...messages.filter((m) => m.content))
@@ -364,7 +365,7 @@ export const compose = (input: {
           kind: "prefix"
         }
       : null
-    const reserved = newChat ? tokensOf(newChat) : 0
+    const reserved = newChat ? countMessage(newChat) : 0
     spend(reserved)
     if (input.chat.findLast((line) => line.content)?.role === "assistant" && input.sendIfEmpty?.text) {
       const message: StMessage = {
@@ -373,17 +374,17 @@ export const compose = (input: {
         pieces: [input.sendIfEmpty.piece],
         kind: "volatile"
       }
-      if (budget - tokensOf(message) >= 0) {
+      if (budget - countMessage(message) >= 0) {
         history.push(message)
-        spend(tokensOf(message))
+        spend(countMessage(message))
       }
     }
     for (let i = input.chat.length - 1; i >= 0; i--) {
       const line = input.chat[i]!
       const message: StMessage = { ...line }
-      if (budget - tokensOf(message) < 0) break
+      if (budget - countMessage(message) < 0) break
       if (message.content || message.kind === "volatile") history.unshift(message)
-      spend(tokensOf(message))
+      spend(countMessage(message))
       if (message.kind === "history") historySent++
     }
     spend(-reserved)

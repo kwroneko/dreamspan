@@ -18,6 +18,7 @@ import type * as AssemblyPlugin from "./support/assemblyPlugin.ts"
 import { readFileSync } from "node:fs"
 import { ASSEMBLER_VERSION, generationOf, type ContextSnapshot } from "../src/assembler/types.ts"
 import { tokensOf } from "../src/assembler/st.ts"
+import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 import { prefixChange } from "../src/assembler/warmth.ts"
 import * as Database from "../src/db/Database.ts"
 import { importCard } from "../src/formats/cardImport.ts"
@@ -28,6 +29,8 @@ import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
 import { ProviderRegistry } from "../src/providers/registry.ts"
+
+const countText = await prepareTokenizer("o200k_base")
 
 const database = () =>
   Database.layer({ dataDir: tempDir("assembly"), readers: 1, allowNetworkFs: false, ...testWorkers })
@@ -501,7 +504,7 @@ describe("context assembly from the database", () => {
           })
         const old = yield* append(sent.slotId, original)
         let leaf = old.slotId
-        for (let i = 0; i < 24; i++) leaf = (yield* append(leaf, "x".repeat(80))).slotId
+        for (let i = 0; i < 24; i++) leaf = (yield* append(leaf, "x".repeat(160))).slotId
         const target = yield* append(leaf, "", true)
         const build = (slotId: SlotId, versionId: VersionId) =>
           reader
@@ -611,7 +614,7 @@ describe("context assembly from the database", () => {
               version: new NewVersion({
                 speakerEntityId: null,
                 writer: "human",
-                content: "u".repeat(100),
+                content: "u".repeat(50),
                 status: "complete",
                 macroMode: "verbatim",
                 origin: "user_written"
@@ -690,7 +693,7 @@ describe("context assembly from the database", () => {
           const next = yield* generate(user.slotId)
           if (next.snapshot.historyMove === "maximum") {
             jumps.push(next.snapshot)
-            assert.isAtMost(43 + next.snapshot.request.messages.reduce((n, m) => n + tokensOf(m), 0), 400)
+            assert.isAtMost(43 + next.snapshot.request.messages.reduce((n, m) => n + tokensOf(m, countText), 0), 400)
             assert.match(
               prefixChange(last.snapshot, next.snapshot, () => ({ label: "Message" }))!.reason,
               /reached its maximum/
@@ -739,13 +742,13 @@ describe("context assembly from the database", () => {
         })
         yield* state({ key: "note.activate", value: { note: variable.entityId } })
         let withNote = raised
-        for (const value of ["short", "Q".repeat(480), "", "Q".repeat(480), "Q".repeat(600)]) {
+        for (const value of ["short", "Q".repeat(240), "", "Q".repeat(240), "Q".repeat(300)]) {
           yield* state({ key: "var.set", value: { name: "long", value } })
           withNote = yield* generate((yield* send(withNote.slot)).slotId)
           assert.ok(
             withNote.snapshot.request.messages.some((m) => m.content.includes(`${value} KEEP THIS INSTRUCTION`.trim()))
           )
-          assert.isAtMost(43 + withNote.snapshot.request.messages.reduce((n, m) => n + tokensOf(m), 0), 500)
+          assert.isAtMost(43 + withNote.snapshot.request.messages.reduce((n, m) => n + tokensOf(m, countText), 0), 500)
           assert.isAtLeast(
             withNote.snapshot.historyStart!.state!.noteBudget!.sizes[variable.entityId]!,
             value.length + 22

@@ -127,7 +127,7 @@ describe("images in the context budget", () => {
   })
 
   it("fails explicitly rather than dropping oversized newest text", async () => {
-    await expect(assembled(fixture([{ side: "user", content: "x".repeat(100_000) }], {}))).rejects.toMatchObject({
+    await expect(assembled(fixture([{ side: "user", content: "😀".repeat(25_000) }], {}))).rejects.toMatchObject({
       reason: "budget",
       message: expect.stringMatching(/newest message/i)
     })

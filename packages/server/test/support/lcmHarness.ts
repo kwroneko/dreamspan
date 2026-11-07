@@ -157,6 +157,7 @@ export const lcmHarness = (
   server: { readonly config: AppConfigShape; readonly summarizer: () => Summarizer["Service"] },
   options: {
     readonly messages?: number
+    readonly message?: (index: number) => string
     readonly summarizer?: (request: Recorded) => Reply
     readonly judge?: (request: Recorded) => Reply
     readonly fallback?: (request: Recorded) => Reply
@@ -289,7 +290,8 @@ export const lcmHarness = (
         }),
         (row) => Effect.sync(() => void rows.push(row))
       )
-    for (let n = 0; n < (options.messages ?? 8); n++) yield* append(`Message ${n}. ` + "The road ran on. ".repeat(10))
+    for (let n = 0; n < (options.messages ?? 8); n++)
+      yield* append(options.message?.(n) ?? `Message ${n}. ` + "The road ran on. ".repeat(10))
 
     /** Enqueues one L1 job over the messages `from` to `to` (inclusive) of the path. */
     const enqueue = (from: number, to: number, requestClass: "interactive" | "idle" | "background" = "interactive") =>

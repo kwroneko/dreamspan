@@ -63,8 +63,9 @@ export interface Assembler {
   readonly projections: ProjectionRegistry
   /** How merged chats reach the model (`merge-layout` stage, spec/CHAT-MERGE.md §4). */
   readonly mergeLayouts: MergeLayoutRegistry
-  /** What an image costs per provider and model (ARCHITECTURE §15, image tokens). */
+  /** Local model tokenizers for display and prepared budget counts (ARCHITECTURE §15). */
   readonly textCounters: Registry<TextTokenCounter>
+  /** What an image costs per provider and model (ARCHITECTURE §15, image tokens). */
   readonly imageTokens: Registry<ImageTokenRule>
   /** Where regex scripts come from, in the order they run (global, preset, character). */
   readonly scriptSources: Registry<ScriptSource>
@@ -180,7 +181,11 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
     assemble: (request) =>
       withAssemblyModules(
         assembler,
-        assemble(stages, { ...request, macros, projections, mergeLayouts, imageTokens, scriptSources }, transforms)
+        assemble(
+          stages,
+          { ...request, macros, projections, mergeLayouts, imageTokens, textCounters, scriptSources },
+          transforms
+        )
       ),
     rewrite: (request, options, items) =>
       Effect.map(assembler.prepareRewrite(request, options), (prepared) => prepared.run(items)),
@@ -190,7 +195,16 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
         Effect.gen(function* () {
           const assembly = yield* assembleThrough(
             stages,
-            { ...request, macros, projections, mergeLayouts, imageTokens, scriptSources, rewrite: options },
+            {
+              ...request,
+              macros,
+              projections,
+              mergeLayouts,
+              imageTokens,
+              textCounters,
+              scriptSources,
+              rewrite: options
+            },
             "scripts"
           )
           const side = rewriteSide(assembly, options)

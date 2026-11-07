@@ -35,7 +35,7 @@ const build = (switches: Record<string, boolean>, crowded = false) =>
       participants: ["mira"],
       messages: Array.from({ length: crowded ? 30 : 1 }, (_, i) => ({
         side: "user" as const,
-        content: `History ${i}\n\n${"road ".repeat(crowded ? 20 : 1)}`
+        content: `History ${i}\n\n${"road ".repeat(crowded ? 21 : 1)}`
       }))
     })
   )
