@@ -650,6 +650,9 @@ describe("the guards (§6.2)", () => {
 
   it("private and loopback addresses are recognized, IPv4-mapped too", () => {
     for (const ip of [
+      "0.0.0.0",
+      "::",
+      "::ffff:0.0.0.0",
       "127.0.0.1",
       "10.1.2.3",
       "192.168.7.40",
