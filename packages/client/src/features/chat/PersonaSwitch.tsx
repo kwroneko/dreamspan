@@ -45,8 +45,8 @@ export function PersonaSwitch({ session, trigger }: { session: ChatSession; trig
 export function PendingPersonaSwitch({ pending, trigger }: { pending: PendingChat; trigger?: ReactNode }) {
   const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
   const view = useMemo(
-    () => castView(null, [...state.greeters.map((item) => item.card), ...pending.cards]),
-    [state.greeters, pending.cards]
+    () => castView(pending.view(state).cast, [...state.greeters.map((item) => item.card), ...pending.cards]),
+    [pending, state]
   )
   return (
     <CastContext value={view}>

@@ -327,7 +327,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
     if (!next || !(persona || personas)) return
     setTab("personas")
     const list = personas?.listCards ?? listCards
-    if (all === null && list)
+    // Another selector or editor may have created a persona since this picker last opened.
+    if (list)
       void list().then((result) => {
         setAll(result.ok ? result.value : [])
         if (result.ok) setNames(new Map(result.value.map((card) => [card.entityId, card])))

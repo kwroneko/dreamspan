@@ -23,7 +23,7 @@ export function ChatPortraitProvider({
   children: ReactNode
 }) {
   const [ids, setIds] = usePlaceList("portraits")
-  const inWorkbench = useWorkbenchTab() !== null
+  const tab = useWorkbenchTab()
   const call = useCaller()
   const [gallery, setGallery] = useState<Record<string, Portrait>>({})
   const [galleryReady, setGalleryReady] = useState(false)
@@ -51,10 +51,14 @@ export function ChatPortraitProvider({
       off()
     }
   }, [call, refs, cast])
-  const key = `rp.portraitWeights.${useSession().user.id}`
+  const legacyKey = `rp.portraitWeights.${useSession().user.id}`
+  // Duplicate views can show the same portrait at different heights. Keep each view's
+  // weights with this browser tab's layout, rather than overwriting another view's values.
+  const key = tab ? `${legacyKey}.${tab.tabId}` : legacyKey
   const [weights, setWeights] = useState<Record<string, number>>(() => {
     try {
-      return JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, number>
+      const storage = tab ? sessionStorage : localStorage
+      return JSON.parse(storage.getItem(key) ?? localStorage.getItem(legacyKey) ?? "{}") as Record<string, number>
     } catch {
       return {}
     }
@@ -84,7 +88,8 @@ export function ChatPortraitProvider({
     const nextWeights = { ...weights, ...Object.fromEntries(next.map((e) => [e.portrait.id, e.weight])) }
     setWeights(nextWeights)
     try {
-      localStorage.setItem(key, JSON.stringify(nextWeights))
+      const storage = tab ? sessionStorage : localStorage
+      storage.setItem(key, JSON.stringify(nextWeights))
     } catch {
       /* Still works in this view. */
     }
@@ -95,7 +100,7 @@ export function ChatPortraitProvider({
       current={(portrait) => gallery[portrait.id] ?? castPortrait(cast, portrait.id)}
       stack={portraits}
       onStackChange={change}
-      tabHref={inWorkbench ? pictureHref : undefined}
+      tabHref={tab ? pictureHref : undefined}
     >
       {children}
     </PortraitProvider>
