@@ -6,21 +6,31 @@
 // resized it, and gives way with the other columns so the messages keep their minimum
 // (ui/columnLayout.ts). In the workbench it is a column of the shell, left of the frames, as the
 // side panel is right of them (owner, 2026-11-05: "the image-viewer would also open in its own
-// extra column as it does"): never inside a frame, where it would cover the next one.
+// extra column as it does"): never inside a frame, where it would cover the next one. It is one
+// column for all the frames (portraitSources.ts): pictures opened from any view stack in it.
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useSession } from "../../session.ts"
 import { MAX_UPSCALE, type NaturalSize } from "../../ui/ImageViewer.tsx"
 import { mediaUrl, pictureUrl } from "../../ui/mediaImage.ts"
 import { popupOpen } from "../../ui/openPopups.ts"
-import { type Portrait, PortraitView, usePortraitViewer } from "../../ui/Portrait.tsx"
+import {
+  type Portrait,
+  PortraitView,
+  type PortraitViewer,
+  PortraitViewerScope,
+  usePortraitViewer
+} from "../../ui/Portrait.tsx"
 import type { StackEntry } from "../../ui/portraitStack.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { ViewerHeader, ViewerMoves } from "../../ui/ViewerHeader.tsx"
 import { Menu, MenuCheckboxItem, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
-import { useOpenAsTab, usePortraitColumnPlace } from "../workbench/tab.tsx"
+import { type TabContextValue, useOpenAsTab, usePortraitHost } from "../workbench/tab.tsx"
 import { pictureHref } from "./PicturePage.tsx"
+import { portraitSources, usePortraitSources } from "./portraitSources.ts"
+
+type OpenAsTab = ReturnType<typeof useOpenAsTab>
 
 const MIN = 200
 /** Preferred minimum while sharing a pair; smaller pairs split their available height. */
@@ -41,12 +51,43 @@ interface Measured {
 
 export function PortraitColumn({ wide }: { wide: boolean }) {
   const viewer = usePortraitViewer()
-  const place = usePortraitColumnPlace(wide && viewer !== null && viewer.shown.length > 0)
-  if (!place.show) return null
-  return place.host ? createPortal(<Column />, place.host) : <Column />
+  const place = usePortraitHost()
+  if (!viewer || !wide) return null
+  if (place) return <SharedColumn tab={place.tab} host={place.host} viewer={viewer} />
+  return viewer.shown.length > 0 ? <Column asTabOf={() => null} /> : null
 }
 
-function Column() {
+/**
+ * A view in the workbench gives its pictures to the one column; the oldest view renders it
+ * (portraitSources.ts), in the shell's column left of the frames.
+ */
+function SharedColumn({
+  tab,
+  host,
+  viewer
+}: {
+  tab: TabContextValue
+  host: HTMLElement | null
+  viewer: PortraitViewer
+}) {
+  const sources = portraitSources(tab.store)
+  const asTab = useOpenAsTab()
+  useLayoutEffect(() => sources.publish(tab.tabId, { viewer, asTab }))
+  useLayoutEffect(() => () => sources.remove(tab.tabId), [sources, tab.tabId])
+  // Read from the state, not the store, so each change renders again.
+  const state = usePortraitSources(sources)
+  if (state.renderer !== tab.tabId || !host) return null
+  const shared = sources.viewer(state, tab.tabId, viewer)
+  if (shared.shown.length === 0) return null
+  return createPortal(
+    <PortraitViewerScope viewer={shared}>
+      <Column asTabOf={(id) => sources.sourceOf(id)?.asTab ?? null} />
+    </PortraitViewerScope>,
+    host
+  )
+}
+
+function Column({ asTabOf }: { asTabOf: (id: string) => OpenAsTab }) {
   const viewer = usePortraitViewer()!
   const shown = viewer.shown
   const userId = useSession().user.id
@@ -98,6 +139,7 @@ function Column() {
             <Viewer
               key={entry.portrait.id}
               entry={entry}
+              asTab={asTabOf(entry.portrait.id)}
               first={index === 0}
               onMeasure={(size) =>
                 setMeasured((all) => {
@@ -134,11 +176,14 @@ function Column() {
 /** One portrait in the stack: its header (name, scale, Fit / 100%, the toggle, Close) over its image. */
 function Viewer({
   entry,
+  asTab,
   first,
   boundary,
   onMeasure
 }: {
   entry: StackEntry<Portrait>
+  /** Into a frame as a tab, beside the view the picture was opened from; null outside a workbench. */
+  asTab: OpenAsTab
   first: boolean
   boundary: ReactNode
   onMeasure: (size: Measured) => void
@@ -148,7 +193,6 @@ function Viewer({
   const ref = useRef<HTMLElement>(null)
   // Into a frame as a tab (owner, 2026-11-07): dragged from the header onto a frame's strip or
   // body, or from the ⋯ menu. The column stays where pictures open.
-  const asTab = useOpenAsTab()
   const href = pictureHref(portrait)
   const outside =
     asTab && href

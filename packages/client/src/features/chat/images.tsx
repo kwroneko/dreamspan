@@ -20,6 +20,7 @@ import { Dialog } from "../../ui/Dialog.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
+import { PICTURE_TAB_MIME } from "../../ui/Portrait.tsx"
 import { Composer, type AttachmentInput } from "./Composer.tsx"
 import type { ComposerSource } from "./composerDraft.ts"
 import { composerWorkspace } from "./composerWorkspace.ts"
@@ -190,11 +191,13 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
         event.stopPropagation()
         void add(files)
       }
+      // The app's own portrait dragged here goes to the frame as a tab, not into the message.
+      const own = (event: DragEvent) => event.dataTransfer?.types.includes(PICTURE_TAB_MIME) ?? false
       const over = (event: DragEvent) => {
-        if (event.dataTransfer?.types.includes("Files")) event.preventDefault()
+        if (event.dataTransfer?.types.includes("Files") && !own(event)) event.preventDefault()
       }
       const drop = (event: DragEvent) => {
-        if (!event.dataTransfer?.files.length) return
+        if (!event.dataTransfer?.files.length || own(event)) return
         event.preventDefault()
         event.stopPropagation()
         void add(Array.from(event.dataTransfer.files))
@@ -481,10 +484,12 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
       <div
         className="flex min-h-0 flex-1 flex-col"
         onDragOver={(event) => {
-          if (event.dataTransfer.types.includes("Files")) event.preventDefault()
+          if (event.dataTransfer.types.includes("Files") && !event.dataTransfer.types.includes(PICTURE_TAB_MIME))
+            event.preventDefault()
         }}
         onDrop={(event) => {
-          if (!event.dataTransfer.files.length) return
+          // The app's own portrait dragged here goes to the frame as a tab, not into the message.
+          if (!event.dataTransfer.files.length || event.dataTransfer.types.includes(PICTURE_TAB_MIME)) return
           event.preventDefault()
           add(Array.from(event.dataTransfer.files))
         }}

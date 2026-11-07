@@ -6,6 +6,8 @@ import { onLibraryChange } from "../../libraryChanges.ts"
 import { useSession } from "../../session.ts"
 import { usePlaceList, usePlaceNotice } from "../../usePlaceParam.ts"
 import { PortraitProvider, type Portrait } from "../../ui/Portrait.tsx"
+import { useWorkbenchTab } from "../workbench/tab.tsx"
+import { pictureHref } from "./PicturePage.tsx"
 import type { Stack } from "../../ui/portraitStack.ts"
 import { castPortrait, type CastView } from "./cast.ts"
 
@@ -21,6 +23,7 @@ export function ChatPortraitProvider({
   children: ReactNode
 }) {
   const [ids, setIds] = usePlaceList("portraits")
+  const inWorkbench = useWorkbenchTab() !== null
   const call = useCaller()
   const [gallery, setGallery] = useState<Record<string, Portrait>>({})
   const [galleryReady, setGalleryReady] = useState(false)
@@ -92,6 +95,7 @@ export function ChatPortraitProvider({
       current={(portrait) => gallery[portrait.id] ?? castPortrait(cast, portrait.id)}
       stack={portraits}
       onStackChange={change}
+      tabHref={inWorkbench ? pictureHref : undefined}
     >
       {children}
     </PortraitProvider>

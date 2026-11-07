@@ -76,7 +76,8 @@ const inFilter = (c: ShellCard, filter: CardFilter) =>
               : true
 
 /** Whether a filter's list mixes the persona folder's cards in with the characters (and so marks them). */
-export const mixesPersonas = (browse: CardBrowse) => browse.withPersonas && browse.filter !== "personas"
+export const mixesPersonas = (browse: CardBrowse) =>
+  browse.filter !== "personas" && (browse.filter === "archived" || browse.withPersonas)
 /** The cards a filter considers: personas only under Personas or with Include personas. */
 const considered = (cards: ReadonlyArray<ShellCard>, browse: Pick<CardBrowse, "filter" | "withPersonas">) =>
   browse.filter === "archived" || browse.filter === "personas" || browse.withPersonas

@@ -343,6 +343,60 @@ test("the detector catches geometry defects and respects documented intent", asy
   expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
 })
 
+test("picture overlays report hidden space between visible controls", async ({ page }) => {
+  await page.setContent(`<style>
+    body { margin: 20px; }
+    .tile { position: relative; width: 120px; }
+    .pic { display: block; height: 180px; background: #888; }
+    button { width: 32px; height: 32px; border: 0; background: white; }
+  </style>
+  <div class="tile"><span class="pic" data-portrait></span>
+    <span data-layout-overlay="toggles" style="position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:4px">
+      <button aria-pressed="true">S</button>
+      <button id="hidden" style="opacity:0;pointer-events:none">H</button>
+      <button id="archive" aria-pressed="true">A</button>
+    </span>
+  </div>`)
+  expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([
+    expect.objectContaining({
+      selector: "#archive",
+      related: "#hidden",
+      measurement: "hidden #hidden keeps its space before this control"
+    })
+  ])
+  await page.locator("#hidden").evaluate((el) => (el.style.display = "none"))
+  expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
+})
+
+test("picture overlay controls are audited when they carry the overlay marker", async ({ page }) => {
+  await page.setContent(`<style>
+    body { margin: 20px; }
+    .grid { display: grid; grid-template-columns: 120px; }
+    .tile { position: relative; }
+    .pic { display: block; height: 180px; background: #888; }
+    button { width: 32px; height: 32px; border: 0; background: transparent; }
+  </style>
+  <div class="grid"><div class="tile"><span class="pic" data-portrait></span>
+    <button id="star" data-layout-overlay="star" aria-pressed="false" style="position:absolute;top:8px;left:8px">S</button>
+  </div></div>`)
+  const measurements = async () =>
+    (await layoutAudit(page)).filter((v) => v.kind === "overlay").map((v) => v.measurement)
+  expect(await measurements()).toContain("no backing of its own over the picture")
+  const star = page.locator("#star")
+  await star.evaluate((el) => (el.style.background = "white"))
+  expect(await measurements()).toContain("shown at rest though not a pressed toggle (hover or focus should reveal it)")
+  await star.evaluate((el) => (el.style.opacity = "0"))
+  expect(await measurements()).toContain("hidden, yet takes clicks meant for the picture under it")
+  await star.evaluate((el) => (el.style.pointerEvents = "none"))
+  expect(await measurements()).toEqual([])
+  await star.evaluate((el) => {
+    el.style.opacity = "1"
+    el.style.pointerEvents = "auto"
+    el.setAttribute("aria-pressed", "true")
+  })
+  expect(await measurements()).toEqual([])
+})
+
 const work = process.env.LAYOUT_AUDIT_WORK ?? mkdtempSync(join(tmpdir(), "rp-layout-audit-"))
 const selected = new RegExp(process.env.LAYOUT_AUDIT_SURFACES ?? ".*")
 const avatarStackNames = ["Double Capitals", "Other 1", "Other 3", "Wide WWW", "ß ß", "Hidden Willow"]
@@ -2616,6 +2670,8 @@ for (const width of [1440, 390])
         await expectLayout(page, info, `cardarchive-sidebar-${width}-${theme}`, { scope: "[data-shell-list]" })
         await list.screenshot({ path: info.outputPath("sidebar.png") })
         await page.goto(`${local.url}/?side=characters&sideShow=all`)
+        // Navigation's optional toggle helper must run after the new app has mounted.
+        if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
         await showAppNavigation(page)
         await expect(list.getByRole("link", { name: "Open Pilot 006", exact: true })).toBeVisible()
         await expectLayout(page, info, `cardarchive-sidebar-all-${width}-${theme}`, { scope: "[data-shell-list]" })

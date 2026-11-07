@@ -6,6 +6,28 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 
+test("an expired session in a shell stream returns to login", async ({ page }) => {
+  await admin((api) =>
+    Effect.forEach(
+      Array.from({ length: 101 }, (_, n) => n),
+      (n) => api.CreateChat({ title: `Expiry fixture ${n}` }),
+      {
+        concurrency: 4
+      }
+    )
+  )
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(server().url)
+  const more = page.getByRole("complementary").first().getByRole("button", { name: "Show 1 more of 1", exact: true })
+  await expect(more).toBeVisible()
+  // Revoke the session independently, as an expiry or another tab's logout would.
+  const response = await page.request.post(`${server().url}/auth/logout`, { headers: { origin: server().url } })
+  expect(response.status()).toBe(204)
+  await more.click()
+  await expect(page).toHaveURL(/\/login/)
+})
+
 test("the home sidebar receives edits from another client without refetching the library", async ({ page }) => {
   const started = await admin((api) =>
     Effect.gen(function* () {
@@ -49,4 +71,8 @@ test("the home sidebar receives edits from another client without refetching the
   )
   await expect(sidebar.getByText("After the edit", { exact: true })).toBeVisible()
   expect(reads()).toBe(before)
+  await server().restart()
+  await admin((api) => api.RenameChat({ chatId: started.chat.id, name: "Reconnected story" }))
+  await expect(sidebar.getByText("Reconnected story", { exact: true })).toBeVisible()
+  await expect.poll(reads).toBeGreaterThan(before)
 })

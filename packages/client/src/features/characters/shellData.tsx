@@ -43,7 +43,9 @@ export const shellAtom = Atom.keepAlive(
       Stream.unwrap(
         Effect.map(AppClient, (client) =>
           client("WatchShellCards", undefined).pipe(
-            Stream.retry(Schedule.spaced("1 second")),
+            Stream.retry(($) =>
+              $(Schedule.spaced("1 second")).pipe(Schedule.while(({ input }) => input._tag === "RpcClientError"))
+            ),
             Stream.scan(
               (): ShellCards => ({ cards: [], personas: [], archived: [], pinsCollapsed: false }),
               applyShellCards
@@ -88,7 +90,9 @@ const shellForksAtom = Atom.family((key: string) =>
         Stream.unwrap(
           Effect.map(AppClient, (client) =>
             client("WatchShellForks", JSON.parse(key) as ShellForksView).pipe(
-              Stream.retry(Schedule.spaced("1 second")),
+              Stream.retry(($) =>
+                $(Schedule.spaced("1 second")).pipe(Schedule.while(({ input }) => input._tag === "RpcClientError"))
+              ),
               Stream.scan(
                 () =>
                   ({
@@ -199,7 +203,8 @@ export function useShellNavigation() {
     setScope: (next: Scope) =>
       void navigate({
         to: ".",
-        search: (prev: Record<string, unknown>) => ({ ...prev, ...sidebarCleared, ...scopeSearch(next) })
+        search: (prev: Record<string, unknown>) => ({ ...prev, ...sidebarCleared, ...scopeSearch(next) }),
+        state: (prev) => ({ ...prev })
       }),
     setGrid: (grid: boolean) =>
       void navigate({
@@ -210,6 +215,7 @@ export function useShellNavigation() {
           ...scopeSearch(scope),
           ...(grid ? { side: "characters" } : {})
         }),
+        state: (prev) => ({ ...prev }),
         resetScroll: false
       }),
     selection,

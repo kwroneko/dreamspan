@@ -76,20 +76,14 @@ export function useSidePanelPlace(wide: boolean): { show: boolean; host: HTMLEle
 }
 
 /**
- * The portrait column's place for a view with pictures `open`: beside it outside a workbench,
- * else the shell's column left of the frames while this tab's pictures are the ones it shows
- * (`portraitOwner`), else nowhere. On a phone the viewer is full screen, so this isn't asked.
+ * Where the portrait column goes in a workbench: the shell's column left of the frames, one for
+ * every view (features/chat/portraitSources.ts). Null outside a workbench, where it sits beside
+ * its view.
  */
-export function usePortraitColumnPlace(open: boolean): { show: boolean; host: HTMLElement | null } {
+export function usePortraitHost(): { tab: TabContextValue; host: HTMLElement | null } | null {
   const tab = useContext(TabContext)
   const workbench = useContext(WorkbenchContext)
-  useEffect(() => (tab && open ? tab.store.addPortraitTab(tab.tabId) : undefined), [tab, open])
-  const owner = useSyncExternalStore(tab?.store.subscribe ?? noop, () =>
-    tab ? tab.store.portraitOwner() === tab.tabId : true
-  )
-  if (!tab) return { show: open, host: null }
-  const host = workbench?.portraitHost ?? null
-  return { show: open && owner && host !== null, host }
+  return tab ? { tab, host: workbench?.portraitHost ?? null } : null
 }
 
 /**

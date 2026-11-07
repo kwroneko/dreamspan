@@ -158,7 +158,7 @@ On phones, home holds the same Show row (it scrolls sideways, as now). The carde
 
 The existing model for imported cards applies unchanged. An adopted card has an **import line** (ARCHITECTURE §11.1), and the archive's version is the revision on it. A newer archive version is "a newer imported version", the same as a newer file:
 
-- **Detecting it** sends nothing extra. A results page carries each held card's current version, so a held card that shows up in results is checked for free. A card's Metadata → Sources row for cardex has **Check for a newer version** (hover: "Asks cardex whether <name> has changed since you added it."). Automatic background checks are a decision for the owner (§9, D4).
+- **Detecting it** sends nothing extra. A results page carries each held card's current version, so a held card that shows up in results is checked for free. A card's Metadata → Sources row for cardex has **Check for a newer version** (hover: "Asks cardex whether <name> has changed since you added it."). There are no automatic background checks (§9, D4 [D]).
 - **Offering it:** the existing notice under the editor's actions ("A newer imported version is waiting" → here "A newer version is on cardex") with **Review and merge**, which stages the archive's new file on the import line (`mode=merge` staging) and opens the existing merge review. The card's import dialog's **Replace** works on it too, and a third choice, **Add as a separate card**, adopts the new version as a card of its own ([D] owner, 2026-11-06; §9).
 - **Nothing is applied without that review.** Forks of the card aren't touched. They see only their parent's later revisions, as now, once the user has merged into the parent.
 
@@ -254,7 +254,7 @@ Never on visiting home or opening the sidebar with another option chosen, on ope
 
 - **Settings → Card sources** (a new Settings section, registered): one switch per source, "Show cardex" (hover: "Adds cardex to the Show choices on the home page and in the side panel."). With it off, the option isn't offered (it's the last option, so its removal moves nothing), no request is ever made, and remote draft chats and Inspect pages say "cardex is turned off in Settings" with a link there. Cards already added are ordinary cards and stay.
 - **An admin switch** (instance settings) turns a source off for every account and hides the per-user switch. Some instances have to make no outside requests at all (DESIGN's offline laptop case).
-- Whether it starts on or off is a decision for the owner (§9, D1).
+- It starts on for a new account, and nothing is sent until it is clicked (§9, D1 [D]).
 - The same section holds the source's **API key**, if the API needs one: write-only, stored in `credentials` like provider keys. It also has **Clear cached cards** (the user's cache entries and recent list), and for admins the cache cap.
 
 ### 5.3 What's sent
@@ -320,30 +320,30 @@ Blind roleplay (DESIGN §12 [L]) needs nothing new from sources. It's a consumer
 
 ## 9. Decisions for the owner
 
-Each has the default this spec uses. Settled, so not asked here: the tab's name ("cardex", owner 2026-11-06) and what an update offers.
+D1–D4 were decided as their defaults below (owner, 2026-11-07: "okay", via the coordinator). Settled earlier: the tab's name ("cardex", owner 2026-11-06) and what an update offers.
 
 - **[D] What an update offers** (owner, 2026-11-06: "Ignore that older design note.", via the coordinator). A newer archive version of a card you added offers **Review and merge**, **Replace**, or **Add as a separate card** (§3.8), the same as a newer file of an imported card, with Review and merge first. The October open item "take it as a separate card or a fork, never merged into the user's copy" (DESIGN §12) is superseded.
 
-- **D1. Is cardex on or off for a new account?**
+- **[D] D1. Is cardex on or off for a new account?** On: cardex is shown to new accounts, and nothing is sent until it's clicked (owner, 2026-11-07: "okay", via the coordinator).
   - *What:* whether "cardex" appears among the Show choices before the user has turned anything on.
   - *When:* first visit to home on a new account or a new instance.
   - *Example:* a new user opens home and sees "All · With chats · Never used · Favourites · Personas · Groups · cardex". Nothing has been sent to cardex; clicking "cardex" is the first request.
   - *Default:* **on**. The option is shown and nothing is sent until it's clicked, and it's meant to be a selling point.
   - *Otherwise:* the option is hidden until the user turns it on in Settings → Card sources. That's safer for instances that must make no outside requests (an admin can still turn it off for everyone either way), but most users would never find the feature.
-- **D2. Does the first message add the card without asking?**
+- **[D] D2. Does the first message add the card without asking?** Yes: the first message adds the card without asking (owner, 2026-11-07: "okay", via the coordinator).
   - *What:* whether sending in a draft chat with a cardex card adds it at once, or first asks "Add <name> to your cards?".
   - *When:* the first Send or Generate in a chat with a card from cardex.
   - *Example:* you try a card, type "Hello" and press Send. With the default, the message goes and the card is now in your cards, with a notice "Added Mio to your cards". Asking would put a dialog between you and every tried card.
   - *Default:* **no question.** The header badge, the panel's line and Send's hover say beforehand that sending adds it (§4.4), and the notice says so after.
   - *Otherwise:* a dialog on each first send (with "Don't ask again"). It's safer for someone who didn't read the hover, but it slows the try-many-cards loop you described.
-- **D3. Cards added only by trying them: how they're cleared away**
+- **[D] D3. Cards added only by trying them: how they're cleared away.** Ordinary cards, plus the "Only tried" criterion in Archive unused cards… (owner, 2026-11-07: "okay", via the coordinator).
   - *What:* trying ten cards with one message each leaves ten cards in your cards, each with a one-message chat (DESIGN §12 [O]). The app avoids making users delete things, so clearing them means archiving them, not moving them to the bin.
   - *When:* after a session of trying cards.
   - *Example:* you try ten cards and like two. All ten are ordinary cards in All and in the Library. Later, **Archive unused cards…** (the dialog job cardarchive is building, reached from the Archived view) has a third criterion, **"Only tried: added from cardex, with at most N of your messages in all its chats"** (N = 1 by default). It lists the eight you didn't continue, each with its checkbox, beside that dialog's other criteria. **Archive 8 cards** archives them in one step, with Undo. They leave All and every listing, and stay in the Archived view.
   - *Why a criterion and not a view:* that dialog already does what's needed: it lists matching cards with checkboxes and a count, archives them as one reversible operation, and never includes favourites. Its "Never used" criterion can't catch tried cards, because sending a message counts as using a card. One clean-up place is better than a separate Tried view that would duplicate the dialog's selection and bulk action in the Library.
   - *Default:* **ordinary cards, plus the "Only tried" criterion** in Archive unused cards…, off by default like "Not used in the last N months". When the cardex option is enabled, it shows in the dialog with its count ("12 cards"), so it's discoverable without being preselected. The criterion is a registered part of the dialog, contributed by the sources feature, so another source extends it ("added from <source>") and a plugin can replace it.
   - *Otherwise:* a Library → Show → **Tried** view with its own "Archive all" button, or tried cards kept out of home's All until they have a second message of yours. The first duplicates the dialog. The second makes a card you just chatted with seem to vanish from home.
-- **D4. Checking for newer versions of cards you added from cardex**
+- **[D] D4. Checking for newer versions of cards you added from cardex.** Only from results and the Check for a newer version button; nothing in the background (owner, 2026-11-07: "okay", via the coordinator).
   - *What:* how the app learns that the author updated a card you added.
   - *When:* at any time after adding.
   - *Example:* you added Mio a month ago and the author fixed her greeting last week. With the default, you see "update available" when Mio appears in cardex results, or when you press **Check for a newer version** in Mio's Metadata.
@@ -352,7 +352,7 @@ Each has the default this spec uses. Settled, so not asked here: the tab's name 
 
 ## 10. The public API: what was found, and what we need
 
-**Found:** no public documentation of cardex's API. Searches on 2026-11-06 ("cardex character card archive API", "cardex public API … openapi", "cardex SillyTavern cards archive search tags API") returned other card services and tools, nothing describing cardex's endpoints, card URLs, fields, rate limits or terms for third-party clients. The card editor's recognizer job found the same on 2026-11-01 (DESIGN §4). So nothing above depends on a cardex-specific detail. The `cardex` adapter is written once the documentation is in hand. Until then, development and tests use a **fake source** (an in-process HTTP server serving our own synthetic cards, `test/support/fakeArchive.ts`). It's registered on a development server too, so a development server's content stays entirely ours.
+**Found:** no public documentation of cardex's API. Searches on 2026-11-06 ("cardex character card archive API", "cardex public API … openapi", "cardex SillyTavern cards archive search tags API") returned other card services and tools, nothing describing cardex's endpoints, card URLs, fields, rate limits or terms for third-party clients. The card editor's recognizer job found the same on 2026-11-01 (DESIGN §4). So nothing above depends on a cardex-specific detail. cardex's public API is being built on cardex's side (coordinator, 2026-11-07); the `cardex` adapter will follow its published documentation once it's out. Until then, development and tests use a **fake source** (an in-process HTTP server serving our own synthetic cards, `test/support/fakeArchive.ts`). It's registered on a development server too, so a development server's content stays entirely ours.
 
 **What we need from any archive API**, in order of necessity:
 
@@ -374,6 +374,6 @@ Each phase is shippable and tested on its own (synthetic fixtures only, at 1440 
 2. **Browsing.** The "cardex" Show option on home and in the sidebar; search; the generated Filters panel and chips; source sorts; URL keys; result tiles; infinite scroll; thumbnails; the error states. Results are never mixed (a test lists every local surface with the option open). Also the recently viewed row.
 3. **Trying and adding.** Remote draft chats and Inspect pages; the panel's editors on the cached document; `remote-card` drafts; the assembler's cached-document source for the estimate; the three triggers through `AdoptRemoteCard` (one transaction each, the first send with `StartChat`); `card_origins` and the source-hash index (baseline); held cards in results; double-add refusal; the inert regex scripts. Tests: an adoption stores exactly §4.5's rows; a failed one stores none; the card-plus-chat atomicity.
 4. **The cardex adapter**, once its API documentation is in hand: capabilities, mappings, rate limits, its Sources recognizer. It's checked against the live API by hand only, never in the test suite, and no real card ever lands in a fixture.
-5. **Updates.** Version markers from results, Check for a newer version, the "A newer version is on cardex" notice wired to the existing merge staging, Replace and Add as a separate card (after D4).
-6. **Tried cards** (after D3, and once cardarchive has landed): the "Only tried" criterion registered into Archive unused cards…, backed by `card_origins` and one reader query that counts the user's own messages per card across its chats (the dialog's 5,000-card scale test covers it).
+5. **Updates.** Version markers from results, Check for a newer version, the "A newer version is on cardex" notice wired to the existing merge staging, Replace and Add as a separate card.
+6. **Tried cards** (once cardarchive has landed): the "Only tried" criterion registered into Archive unused cards…, backed by `card_origins` and one reader query that counts the user's own messages per card across its chats (the dialog's 5,000-card scale test covers it).
 7. **Blind roleplay** (§7), when the owner schedules it.
