@@ -20,7 +20,12 @@ const TOTAL_MS = 60_000
 const USER_AGENT = "rp-harness/0.0.0 (self-hosted roleplay app; browses card sources on its user's request)"
 
 /** Every local range: loopback, RFC 1918, link-local, CGNAT, IPv6 ULA and link-local. */
-const PRIVATE = parseBypass(DEFAULT_BYPASS.filter((entry) => entry !== "localhost")).list.addresses
+const PRIVATE = parseBypass([
+  ...DEFAULT_BYPASS.filter((entry) => entry !== "localhost"),
+  // Unspecified destinations can connect to this machine too; they are not proxy bypass defaults.
+  "0.0.0.0/8",
+  "::/128"
+]).list.addresses
 
 export const isPrivateAddress = (ip: string) => {
   const bare = ip.replace(/^\[(.*)\]$/, "$1")
@@ -82,7 +87,6 @@ export const makeSourceHttp = (
   const scheme = adapter.scheme ?? "https"
   const hosts = new Set(adapter.hosts.map((host) => host.toLowerCase()))
   const resolve = options.resolve ?? defaultResolve
-  const fetch = options.network.fetchFor({ mode: "inherit" })
 
   /** Whether the admin named this host itself on the bypass list (not an address range). */
   const listedByName = (hostname: string) =>
@@ -95,7 +99,6 @@ export const makeSourceHttp = (
       }
       if (adapter.local) return
       const hostname = url.hostname.toLowerCase().replace(/^\[(.*)\]$/, "$1")
-      if (listedByName(hostname)) return
       const addresses =
         isIP(hostname) !== 0
           ? [hostname]
@@ -103,10 +106,15 @@ export const makeSourceHttp = (
               try: () => resolve(hostname),
               catch: () => fail(adapter.id, "unreachable", `can't resolve ${hostname}`)
             })
-      if (addresses.length === 0 || addresses.some(isPrivateAddress)) {
+      if (addresses.length === 0 || (!listedByName(hostname) && addresses.some(isPrivateAddress))) {
         return yield* fail(adapter.id, "unreachable", `${hostname} is a private address`)
       }
+      return addresses
     })
+
+  // Network validates every redirect and connects to these literals, so a later socket
+  // lookup (or the proxy's DNS) cannot replace an allowed answer with a private address.
+  const fetch = options.network.fetchFor({ mode: "inherit" }, undefined, (url) => Effect.runPromise(checkTarget(url)))
 
   const get: SourceHttp["get"] = (url, kind, headers = {}) =>
     Effect.gen(function* () {

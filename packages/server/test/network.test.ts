@@ -8,6 +8,12 @@ import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { startHttpProxy, startSocks5Proxy, startTarget } from "./support/proxies.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
+import { cardexAdapter } from "../src/sources/cardex.ts"
+import { makeSourceHttp } from "../src/sources/guard.ts"
+import { makeLimiter } from "../src/sources/limiter.ts"
+import { createServer as createHttpsServer } from "node:https"
+import { getCACertificates, setDefaultCACertificates } from "node:tls"
+import sourceTls from "./fixtures/sourceTls.json" with { type: "json" }
 
 const layer = (dataDir: string) =>
   Network.layer.pipe(
@@ -19,6 +25,186 @@ const resource = <A extends { close: () => Promise<void> }>(start: () => Promise
   Effect.acquireRelease(Effect.promise(start), (r) => Effect.promise(() => r.close()))
 
 describe("network", () => {
+  it.live("pinned source TLS verifies the original hostname, directly and through both proxies", () =>
+    Effect.gen(function* () {
+      const trusted = getCACertificates()
+      yield* Effect.acquireRelease(
+        Effect.sync(() => setDefaultCACertificates([...trusted, sourceTls.cert])),
+        () => Effect.sync(() => setDefaultCACertificates(trusted))
+      )
+      const hosts: Array<string | undefined> = []
+      const target = yield* resource(
+        () =>
+          new Promise<{ origin: string; close: () => Promise<void> }>((resolve) => {
+            const server = createHttpsServer(sourceTls, (req, res) => {
+              hosts.push(req.headers.host)
+              res.end("{}")
+            })
+            server.listen(0, "127.0.0.1", () => {
+              const address = server.address()
+              if (address === null || typeof address === "string") throw new Error("no TCP address")
+              resolve({
+                origin: `https://source.invalid:${address.port}`,
+                close: () =>
+                  new Promise<void>((done) => {
+                    server.closeAllConnections()
+                    server.close(() => done())
+                  })
+              })
+            })
+          })
+      )
+      const httpProxy = yield* resource(startHttpProxy)
+      const socks = yield* resource(() => startSocks5Proxy())
+      const network = yield* Network.Network
+      for (const proxyUrl of [null, httpProxy.url, socks.url]) {
+        yield* network.setInstance({ proxyUrl, bypass: [], forceProxy: false })
+        const http = makeSourceHttp(cardexAdapter({ origin: target.origin }), null, {
+          network,
+          limiter: makeLimiter(),
+          bypassEntries: () => ["source.invalid", "wrong.invalid"],
+          resolve: async () => ["127.0.0.1"]
+        })
+        assert.deepStrictEqual((yield* http.get(new URL(target.origin), "json")).json(), {})
+        // A pinned address grants no permission to use another TLS identity.
+        const wrong = target.origin.replace("source.invalid", "wrong.invalid")
+        const refused = makeSourceHttp(cardexAdapter({ origin: wrong }), null, {
+          network,
+          limiter: makeLimiter(),
+          bypassEntries: () => ["wrong.invalid"],
+          resolve: async () => ["127.0.0.1"]
+        })
+        assert.strictEqual((yield* Effect.flip(refused.get(new URL(wrong), "json"))).reason, "unreachable")
+      }
+      assert.deepStrictEqual(
+        hosts,
+        Array.from({ length: 3 }, () => new URL(target.origin).host)
+      )
+      assert.isTrue(httpProxy.tunnels().every((host) => host.startsWith("127.0.0.1:")))
+      assert.isTrue(socks.tunnels().every((host) => host.startsWith("127.0.0.1:")))
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
+  )
+
+  it.live("an unspecified source destination cannot reach a local service", () =>
+    Effect.gen(function* () {
+      const target = yield* resource(() => startTarget(() => ({ json: { secret: "private" } })))
+      const network = yield* Network.Network
+      const origin = target.url.replace("127.0.0.1", "0.0.0.0")
+      const http = makeSourceHttp({ ...cardexAdapter({ origin }), local: false }, null, {
+        network,
+        limiter: makeLimiter(),
+        bypassEntries: () => []
+      })
+      const result = yield* Effect.exit(http.get(new URL(origin), "json"))
+      assert.strictEqual(result._tag, "Failure")
+      assert.strictEqual(target.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
+  )
+
+  it.live("pins a source's HTTP and SOCKS destinations while preserving its Host through redirects", () =>
+    Effect.gen(function* () {
+      const hosts: Array<string | undefined> = []
+      const target = yield* resource(() =>
+        startTarget((req) => {
+          hosts.push(req.headers.host)
+          return req.url === "/" ? { status: 302, headers: { location: "/end" }, json: null } : { json: { ok: true } }
+        })
+      )
+      const httpProxy = yield* resource(startHttpProxy)
+      const socks = yield* resource(() => startSocks5Proxy())
+      const network = yield* Network.Network
+      const origin = target.url.replace("127.0.0.1", "source.invalid")
+      const host = new URL(origin).host
+      for (const proxyUrl of [null, httpProxy.url, socks.url]) {
+        yield* network.setInstance({ proxyUrl, bypass: [], forceProxy: false })
+        let lookups = 0
+        const http = makeSourceHttp({ ...cardexAdapter({ origin }), local: false }, null, {
+          network,
+          limiter: makeLimiter(),
+          // Explicit admin permission for this private synthetic source.
+          bypassEntries: () => ["source.invalid"],
+          resolve: async () => {
+            lookups++
+            return ["127.0.0.1"]
+          }
+        })
+        const result = yield* http.get(new URL(origin), "json")
+        assert.deepStrictEqual(result.json(), { ok: true })
+        assert.strictEqual(lookups, 3, "preflight and both transport hops")
+      }
+      assert.deepStrictEqual(
+        hosts,
+        Array.from({ length: 6 }, () => host)
+      )
+      assert.deepStrictEqual([...new Set(httpProxy.tunnels())], [new URL(target.url).host])
+      assert.deepStrictEqual([...new Set(socks.tunnels())], [new URL(target.url).host])
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
+  )
+
+  it.live("rechecks the source policy on same-origin redirects and refuses other origins", () =>
+    Effect.gen(function* () {
+      let allowed = true
+      let location = "/private"
+      const target = yield* resource(() =>
+        startTarget(() => {
+          allowed = false
+          return { status: 302, headers: { location }, json: null }
+        })
+      )
+      const network = yield* Network.Network
+      const origin = target.url.replace("127.0.0.1", "localhost")
+      const http = makeSourceHttp({ ...cardexAdapter({ origin }), local: false }, null, {
+        network,
+        limiter: makeLimiter(),
+        bypassEntries: () => (allowed ? ["localhost"] : []),
+        resolve: async () => ["127.0.0.1"]
+      })
+      const rebound = yield* Effect.flip(http.get(new URL(origin), "json"))
+      assert.strictEqual(rebound.reason, "unreachable")
+      assert.strictEqual(target.requests(), 1)
+      allowed = true
+      location = `${target.url}/elsewhere`
+      const elsewhere = yield* Effect.flip(http.get(new URL(origin), "json"))
+      assert.strictEqual(elsewhere.reason, "bad_response")
+      assert.strictEqual(target.requests(), 2)
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
+  )
+
+  it.live("tries another checked source address when the first cannot connect", () =>
+    Effect.gen(function* () {
+      const target = yield* resource(() => startTarget(() => ({ json: { ok: true } })))
+      const network = yield* Network.Network
+      const origin = target.url.replace("127.0.0.1", "source.invalid")
+      const http = makeSourceHttp({ ...cardexAdapter({ origin }), local: false }, null, {
+        network,
+        limiter: makeLimiter(),
+        bypassEntries: () => ["source.invalid"],
+        resolve: async () => ["127.0.0.2", "127.0.0.1"]
+      })
+      assert.deepStrictEqual((yield* http.get(new URL(origin), "json")).json(), { ok: true })
+      assert.strictEqual(target.requests(), 1)
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
+  )
+
+  it.live("a source cannot rebind between the guard and the transport", () =>
+    Effect.gen(function* () {
+      const target = yield* resource(() => startTarget(() => ({ json: { secret: "private" } })))
+      const network = yield* Network.Network
+      const origin = target.url.replace("127.0.0.1", "localhost")
+      let lookups = 0
+      const http = makeSourceHttp({ ...cardexAdapter({ origin }), local: false }, null, {
+        network,
+        limiter: makeLimiter(),
+        bypassEntries: () => [],
+        // Preflight was public, but the connect-time answer is private.
+        resolve: async () => (++lookups === 1 ? ["93.184.216.34"] : ["127.0.0.1"])
+      })
+      const result = yield* Effect.exit(http.get(new URL(origin), "json"))
+      assert.strictEqual(result._tag, "Failure")
+      assert.strictEqual(target.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
+  )
+
   it.live("goes direct to local targets by default, and through the proxy otherwise", () =>
     Effect.gen(function* () {
       const target = yield* resource(() => startTarget(() => ({ json: { ok: true } })))

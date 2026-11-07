@@ -499,6 +499,35 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("a valid card larger than the cache cap can still be opened and adopted", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const service = yield* CardSources.CardSources
+      const adapter = fakeCardexAdapter(archive)
+      yield* service.registry.register({
+        ...adapter,
+        card: (http, id) =>
+          adapter
+            .card(http, id)
+            .pipe(
+              Effect.map((file) => ({ ...file, bytes: Buffer.concat([file.bytes, new Uint8Array(17 * 1024 * 1024)]) }))
+            )
+      })
+      yield* api.SetSourceCacheCap({ bytes: 16 * 1024 * 1024 })
+      const card = archive.cards[45]!
+      const opened = yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.strictEqual((JSON.parse(opened.docJson!) as { name: string }).name, card.name)
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.isFalse(added.existing)
+      assert.strictEqual((yield* api.OpenEditor({ refId: added.refId as RefId })).revisionNumber, 1)
+    }).pipe(
+      Effect.ensuring(
+        Effect.flatMap(client(alice), (api) => api.SetSourceCacheCap({ bytes: 1024 ** 3 })).pipe(Effect.orDie)
+      ),
+      Effect.scoped
+    )
+  )
+
   it.effect("archive errors are worded by kind", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)
@@ -650,6 +679,9 @@ describe("the guards (§6.2)", () => {
 
   it("private and loopback addresses are recognized, IPv4-mapped too", () => {
     for (const ip of [
+      "0.0.0.0",
+      "::",
+      "::ffff:0.0.0.0",
       "127.0.0.1",
       "10.1.2.3",
       "192.168.7.40",

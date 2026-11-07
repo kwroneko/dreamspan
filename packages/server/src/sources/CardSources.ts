@@ -359,15 +359,21 @@ const make = (options: CardSourcesOptions = {}) =>
         const adapter = yield* known(sourceId)
         const key = cacheKey(user, sourceId, "card", remoteId)
         let entry = yield* cache.get(key)
+        let bytes: Uint8Array
         if (!entry) {
           const file = yield* ask(user, sourceId, `card:${remoteId}`, (http) => adapter.card(http, remoteId))
+          // Admission may evict this very file when it exceeds the cache cap. The active
+          // request already owns its bytes and must not depend on retaining that blob.
+          bytes = new Uint8Array(file.bytes)
           entry = yield* cache.put(key, {
             bytes: file.bytes,
             value: { summary: file.summary, fileName: file.fileName }
           })
-        } else yield* usable(user, sourceId)
+        } else {
+          yield* usable(user, sourceId)
+          bytes = new Uint8Array(yield* cache.readBlob(entry.blob!))
+        }
         const { summary, fileName } = entry.value as { summary: AdapterSummary; fileName: string }
-        const bytes = new Uint8Array(yield* cache.readBlob(entry.blob!))
         const parsed = yield* formats.parse(bytes, fileName).pipe(Effect.catch(storage("reading the card")))
         return { summary, fileName, parsed }
       })
@@ -633,13 +639,14 @@ const make = (options: CardSourcesOptions = {}) =>
           if (ref === null) return yield* new NotFound({ entity: "image", id: key })
           const entryKey = cacheKey(user, sourceId, "image", sha(ref))
           let entry = yield* cache.get(entryKey)
+          let bytes: Uint8Array
           if (!entry) {
-            const bytes = yield* ask(user, sourceId, `image:${ref}`, (http) => adapter.image(http, ref))
+            bytes = yield* ask(user, sourceId, `image:${ref}`, (http) => adapter.image(http, ref))
             const { mime } = describeImage(bytes)
             if (!IMAGES.has(mime))
               return yield* new SourceFailed({ sourceId, reason: "bad_response", message: "not an image" })
             entry = yield* cache.put(entryKey, { bytes, value: { mime } })
-          }
+          } else bytes = yield* cache.readBlob(entry.blob!)
           const blob = entry.blob!
           const { mime } = entry.value as { mime: string }
           if (width !== null) {
@@ -648,11 +655,11 @@ const make = (options: CardSourcesOptions = {}) =>
               .pipe(Effect.option)
             if (thumb._tag === "Some" && !thumb.value.original) {
               yield* cache.noteDerivative(blob, thumb.value.path)
-              const bytes = yield* Effect.promise(() => readFile(join(config.dataDir, thumb.value.path)))
-              return { bytes, mime: "image/webp", etag: `"${thumb.value.path.split("/").pop()!}"` }
+              const thumbnail = yield* Effect.promise(() => readFile(join(config.dataDir, thumb.value.path)))
+              return { bytes: thumbnail, mime: "image/webp", etag: `"${thumb.value.path.split("/").pop()!}"` }
             }
           }
-          return { bytes: yield* cache.readBlob(blob), mime, etag: `"${blob}"` }
+          return { bytes, mime, etag: `"${blob}"` }
         }),
       recent: (user, sourceId) =>
         Effect.map(prefsOf(user.id), (prefs) => prefs.recent.filter((r) => r.sourceId === sourceId)),

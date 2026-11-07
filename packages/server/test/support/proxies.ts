@@ -140,7 +140,14 @@ export const startSocks5Proxy = (auth?: { username: string; password: string }):
 
 /** A plain HTTP server answering every request with `respond`, counting requests. */
 export const startTarget = (
-  respond: (req: import("node:http").IncomingMessage, body: string) => { status?: number; json: unknown }
+  respond: (
+    req: import("node:http").IncomingMessage,
+    body: string
+  ) => {
+    status?: number
+    headers?: Record<string, string>
+    json: unknown
+  }
 ) =>
   new Promise<{ url: string; requests: () => number; close: () => Promise<void> }>((resolve) => {
     let count = 0
@@ -151,7 +158,9 @@ export const startTarget = (
       req.on("data", (chunk) => (body += chunk))
       req.on("end", () => {
         const answer = respond(req, body)
-        res.writeHead(answer.status ?? 200, { "content-type": "application/json" }).end(JSON.stringify(answer.json))
+        res
+          .writeHead(answer.status ?? 200, { "content-type": "application/json", ...answer.headers })
+          .end(JSON.stringify(answer.json))
       })
     })
     server.on("connection", (socket) => track(sockets, socket))
