@@ -20,7 +20,7 @@ import { useIsPanelTab } from "./panels.tsx"
 import { RegistryContext } from "@effect/atom-react"
 import type { ChatId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { useLocation, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { observeElementOffset, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
 import {
   type RefObject,
   useCallback,
@@ -201,12 +201,25 @@ function MessageList({
     rows.findIndex((row) => positionOf(entries[entry]!) >= row.from && positionOf(entries[entry]!) <= row.to)
   const estimateSize = useCallback((row: number) => rows[row]!.estimate, [rows])
   const getItemKey = useCallback((row: number) => rows[row]!.key, [rows])
+  const offsetChanged = useRef<((offset: number, isScrolling: boolean) => void) | null>(null)
+  const observeOffset = useCallback(
+    (instance: Virtualizer<HTMLDivElement, Element>, changed: (offset: number, isScrolling: boolean) => void) => {
+      offsetChanged.current = changed
+      const stop = observeElementOffset(instance, changed)
+      return () => {
+        offsetChanged.current = null
+        stop?.()
+      }
+    },
+    []
+  )
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parent.current,
     estimateSize,
     getItemKey,
+    observeElementOffset: observeOffset,
     // Start near the destination. Mounting the first window's first rows only to replace
     // them with its last rows in the layout effect also mounted their controls and reads.
     initialOffset: () => {
@@ -241,10 +254,12 @@ function MessageList({
   // an offset it set to where the list already is (the estimated start in a history too short
   // to scroll, a destination at the top, a row kept in place as rows above it change), none
   // fires, and the rows between the real offset and its own would never mount.
+  // Report a correction, not active scrolling: React flushes a layout-effect update before
+  // paint itself; a scroll event would make the adapter call flushSync during that commit.
   const syncOffset = useCallback(() => {
     const list = parent.current
     if (list !== null && Math.abs((virtualizer.scrollOffset ?? 0) - list.scrollTop) >= 1)
-      list.dispatchEvent(new Event("scroll"))
+      offsetChanged.current?.(list.scrollTop, false)
   }, [virtualizer])
   useLayoutEffect(syncOffset)
 
