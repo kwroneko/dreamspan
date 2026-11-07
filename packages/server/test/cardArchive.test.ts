@@ -26,6 +26,25 @@ describe("card archive", () => {
       assert.isTrue(plan!.some((row) => /SEARCH er USING COVERING INDEX/.test(String(row.detail))))
     }).pipe(Effect.scoped, withServer(config))
   })
+  it.live("retains fork activity after the child is unlinked", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const parent = yield* api.CreateCard({ label: "Original explorer", name: "Original explorer" })
+      const child = yield* api.ForkCard({
+        refId: parent.id,
+        name: "Independent explorer",
+        nickname: "",
+        characterVersion: ""
+      })
+      const old = Date.now() - 400 * 86400000
+      yield* fixtureSql(config.dataDir, [{ sql: "UPDATE entity_refs SET created_at=?", params: [old] }])
+      assert.lengthOf(yield* api.ListArchiveCandidates({ criteria: { never: 30 } }), 0)
+      yield* api.SetCardParent({ entityId: child.entityId, parentEntityId: null })
+      assert.lengthOf(yield* api.ListArchiveCandidates({ criteria: { never: 30 } }), 0)
+      assert.lengthOf(yield* api.ListArchiveCandidates({ criteria: { inactive: 6 } }), 0)
+    }).pipe(Effect.scoped, withServer(config))
+  })
   it.live("counts messages, replies, saved edits and both sides of a fork, but not greetings or cast joins", () => {
     const config = testConfig()
     return Effect.gen(function* () {
