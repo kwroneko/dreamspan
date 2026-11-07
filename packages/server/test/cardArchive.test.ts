@@ -3,10 +3,29 @@ import type { LibraryRef } from "@rp/shared/library.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
+import { archiveCandidatesSql } from "../src/db/cardArchive.ts"
 import { client, testConfig, withServer } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
 describe("card archive", () => {
+  it.live("reads revision activity through a covering index without visiting card documents", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const userId = (yield* api.Whoami()).id
+      const [plan] = yield* fixtureSql(
+        config.dataDir,
+        [
+          {
+            sql: `EXPLAIN QUERY PLAN ${archiveCandidatesSql}`,
+            params: [userId, userId, userId, userId]
+          }
+        ],
+        { readOnly: true }
+      )
+      assert.isTrue(plan!.some((row) => /SEARCH er USING COVERING INDEX/.test(String(row.detail))))
+    }).pipe(Effect.scoped, withServer(config))
+  })
   it.live("counts messages, replies, saved edits and both sides of a fork, but not greetings or cast joins", () => {
     const config = testConfig()
     return Effect.gen(function* () {

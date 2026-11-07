@@ -250,6 +250,8 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER card_summaries_delete AFTER DELETE ON entity_revisions
     BEGIN DELETE FROM card_summaries WHERE revision_id = OLD.id; END`,
   `CREATE INDEX entity_revisions_entity ON entity_revisions(entity_id, seq)`,
+  // Archive eligibility reads these columns without following doc_json's overflow pages.
+  `CREATE INDEX entity_revisions_activity ON entity_revisions(entity_id, origin, created_at, parents)`,
   `CREATE INDEX entity_revisions_hash ON entity_revisions(entity_id, doc_hash)`,
   // An entity's one ref: its head, what it last merged (from its own import line or, for a
   // fork, its parent's revisions: so it may name another entity's revision), its label and
