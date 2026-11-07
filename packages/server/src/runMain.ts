@@ -13,13 +13,14 @@ const teardown: Runtime.Teardown = (exit, onExit) =>
   Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? onExit(0) : Runtime.defaultTeardown(exit, onExit)
 
 /**
- * A development instance (not production) may ask for the fake card archive in place of a real
- * card source (`FAKE_CARD_SOURCE`, as the development server reads it), so its content stays
- * synthetic. Production registers no card source.
+ * The development instance and previews ask for the fake card archive in place of a real card
+ * source by setting `FAKE_CARD_SOURCE` (as the development server reads it), so their content
+ * stays synthetic. Only that variable decides, since the development instance runs a production
+ * build; production's units never set it, and without it no card source is registered.
  */
 const fakeCardSource = process.env[serverEnvironment.FAKE_CARD_SOURCE]
 const server =
-  fakeCardSource === undefined || fakeCardSource === "off" || process.env[serverEnvironment.NODE_ENV] === "production"
+  fakeCardSource === undefined || fakeCardSource === "off"
     ? ServerLive
     : Layer.unwrap(
         Effect.map(

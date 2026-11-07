@@ -18,7 +18,7 @@ export const fakeCardSources = (setting: string | undefined) =>
             Effect.promise(() => startFakeArchive({ port: Number(setting) || 0 })),
             (started) => Effect.promise(() => started.close())
           )
-          yield* Effect.logInfo(`Fake card archive at ${archive.origin}`)
+          yield* Effect.logWarning(`fake card source active: synthetic "cardex" cards from ${archive.origin}`)
           return CardSources.layerWith({ adapters: [fakeArchiveAdapter({ origin: archive.origin })] })
         })
       )
