@@ -806,7 +806,7 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
           <MenuItem
             icon="search"
             description={`Searches ${info.name} for cards by ${card.creator}.`}
-            onClick={() => byCreator(browse, card.creator!)}
+            onClick={() => byCreator(browse, card.creatorQuery ?? card.creator!)}
           >
             Search {info.name} for cards by {card.creator}
           </MenuItem>

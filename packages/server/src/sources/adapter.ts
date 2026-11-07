@@ -18,8 +18,9 @@ export type ResponseKind = "json" | "card" | "image"
 
 export interface SourceHttp {
   /**
-   * A GET on one of the adapter's hosts. A non-2xx status is answered as a response, except
-   * 401/403 (`unauthorized`), 404 (`not_found`) and 429 (`rate_limited`), which fail.
+   * A GET on one of the adapter's hosts. A non-2xx status fails: 401/403 `unauthorized`, 404
+   * `not_found`, 429 `rate_limited` (with its Retry-After), 5xx `unreachable`, any other
+   * (a 400 among them) `bad_response`.
    */
   readonly get: (
     url: URL,

@@ -1,21 +1,23 @@
 // A fake card archive (spec/CARD-SOURCES.md §10): an in-process HTTP server serving our own
-// synthetic cards, closely in the shape of cardex's public read API v1, so the real adapter
-// can be a thin mapping of this one: capabilities with filters, sorts and modes; search with
-// a cursor in fts mode and page numbers in semantic mode, `limit` 1–100, a total capped at
-// 10,000 that may be an estimate; tag prefix suggestions with counts; immutable slugs with
-// `superseded_by`; the file's sha256 as the version; a batch lookup that answers an unsorted
-// or duplicated id list with a 308 to its canonical URL; 512 px WebP thumbnails apart from
-// the full image; downloads as JSON or PNG. No real archive's cards, names or images are
-// used: everything is generated here. The development server registers it in place of the real adapter, and the tests count what reaches it, so they can
-// check that nothing is sent before the user asks (§5.1).
+// synthetic cards in the shape of cardex's public API v1 (https://cardex.zip/docs/api), so the
+// real cardex adapter (`src/sources/cardex.ts`) runs against it unchanged, pointed at its
+// origin: v1's capabilities descriptors (names, types, allowed values; no labels); search with
+// `nsfw` include/exclude/only, `kind`, tags, tokens, sites, `author` as site/handle, v1's sorts,
+// `limit` 1–100 (else 400), a cursor in text mode (refused for another query) and page numbers
+// in either mode, semantic mode capped at 240 with no cursor and no sort, a total capped at
+// 10,000 and then an estimate; the tags envelope; a card's detail envelope; a batch lookup that
+// answers anything but its canonical form (sorted, without duplicates, joined by `%2C`) with a
+// 308; pictures as paths (`/t/<sha256>.512.webp?v=1`, `/i/<sha256>.png`); downloads as a
+// mirrored card PNG or JSON. No real archive's cards, names or images are used: everything is
+// generated here. The development server and the tests use it in place of cardex, and the tests
+// count what reaches it, so they can check that nothing is sent before the user asks (§5.1).
 import { createHash } from "node:crypto"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 import { deflateSync } from "node:zlib"
 import sharp from "sharp"
-import { SourceFailed, type SourceCapabilities, type SourceQuery } from "@rp/shared/cardSources.ts"
-import { Effect } from "effect"
-import type { AdapterSummary, CardSourceAdapter, SourceHttp } from "../../src/sources/adapter.ts"
+import type { CardSourceAdapter } from "../../src/sources/adapter.ts"
+import { cardexAdapter } from "../../src/sources/cardex.ts"
 
 const ADJECTIVES = [
   "Amber",
@@ -58,6 +60,8 @@ const NOUNS = [
   "Minstrel"
 ]
 const CREATORS = ["fable_forge", "night-owl", "quillwork", "tidepool", "lumen", "graywind", "marrow"]
+/** v1's site names the synthetic cards say they were found on. */
+const SITES = ["chub", "risuai", "char_tavern", "generic"]
 const TAGS = [
   "fantasy",
   "sci-fi",
@@ -89,6 +93,8 @@ interface FakeCard {
   readonly slug: string
   readonly name: string
   readonly creator: string
+  /** The site it was found on (v1's `source`). */
+  readonly site: string
   readonly tags: ReadonlyArray<string>
   readonly tagline: string
   readonly nsfw: boolean
@@ -98,6 +104,8 @@ interface FakeCard {
   readonly hasLorebook: boolean
   /** Made from another card on its source (`exclude_forks` leaves these out). */
   readonly fork: boolean
+  /** Its original is a CHARX, as some on cardex are: it has no derived PNG or JSON. */
+  readonly originalOnly: boolean
   readonly json: string
   readonly sha256: string
   readonly color: readonly [number, number, number]
@@ -171,6 +179,7 @@ const syntheticCards = (count = 240): ReadonlyArray<FakeCard> => {
       slug: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${sha256.slice(0, 8)}`,
       name,
       creator,
+      site: SITES[n % SITES.length]!,
       tags,
       tagline: `A ${tags[0]} ${NOUNS[Math.floor(n / ADJECTIVES.length) % NOUNS.length]!.toLowerCase()} for quiet scenes.`,
       nsfw,
@@ -179,6 +188,7 @@ const syntheticCards = (count = 240): ReadonlyArray<FakeCard> => {
       addedAt: Date.UTC(2026, 0, 1) + n * 3_600_000,
       hasLorebook,
       fork,
+      originalOnly: n % 40 === 7,
       json,
       sha256,
       color: hsl(hue)
@@ -257,41 +267,75 @@ const portraitPng = (width: number, height: number, color: readonly [number, num
   ])
 }
 
-/** The archive's own description of what it can filter and sort by (cardex v1: /api/v1/capabilities). */
-const capabilitiesBody = {
-  modes: [
-    { id: "fts", label: "Words", paging: "cursor", default: true },
-    { id: "semantic", label: "Meaning", paging: "page" }
-  ],
-  filters: [
-    {
-      id: "nsfw",
-      label: "Rating",
-      type: "choice",
-      options: [
-        ["sfw", "Safe"],
-        ["all", "Everything"],
-        ["nsfw", "Mature only"]
-      ],
-      default: "sfw"
-    },
-    { id: "tokens", label: "Tokens", type: "range", min: 0, max: 20000 },
-    { id: "exclude_forks", label: "Leave out forks", type: "toggle" },
-    { id: "author", label: "Creator", type: "text" }
-  ],
-  sorts: [
-    { id: "popularity", label: "Popular", reversible: true },
-    { id: "added", label: "Newest", reversible: true },
-    { id: "name", label: "Name", reversible: true }
-  ],
-  limits: { limit_min: 1, limit_max: 100, max_results: 10_000 },
-  thumbnail_sizes: [512],
-  download_modes: ["mirrored", "self-contained", "json", "original"],
-  terms_url: "/terms"
-}
-
-/** cardex v1 caps a search's total here, saying it's an estimate. */
+const flag = (name: string, value = false) => ({
+  name,
+  type: "boolean",
+  allowed_values: ["true", "false", "1", "0"],
+  default: value,
+  min: null,
+  max: null
+})
+const field = (name: string, type: string, extra: Record<string, unknown> = {}) => ({
+  name,
+  type,
+  allowed_values: [],
+  default: null,
+  min: null,
+  max: null,
+  ...extra
+})
+/** v1's sites, all of them, as its capabilities list them. */
+const V1_SITES = [
+  "chub",
+  "char_tavern",
+  "risuai",
+  "janitorai",
+  "venusai",
+  "nyaime",
+  "booru",
+  "webring",
+  "catbox",
+  "generic",
+  "botbooru",
+  "pygmalion",
+  "aicc",
+  "backyard",
+  "wyvern",
+  "pephop"
+]
+const V1_SORTS = ["relevance", "newest", "oldest", "popular", "name", "tokens_asc", "tokens_desc"]
+/** cardex v1's search caps: in text mode a total past 10,000 is an estimate; semantic mode finds 240 at most. */
 const MAX_RESULTS = 10_000
+const SEMANTIC_MAX = 240
+
+/** The archive's own description of what it can filter and sort by (v1: /api/v1/capabilities). */
+const capabilitiesBody = {
+  version: "v1",
+  filters: [
+    field("q", "string", { max: 500 }),
+    field("nsfw", "enum", { allowed_values: ["include", "exclude", "only"], default: "include" }),
+    field("kind", "enum", { allowed_values: ["character", "lorebook", "both"], default: "both" }),
+    field("source", "list", { allowed_values: V1_SITES, default: [] }),
+    field("tags", "list", { default: [], max: 20 }),
+    field("not_tags", "list", { default: [], max: 20 }),
+    field("min_tokens", "integer", { default: 30, min: 0, max: 10_000_000 }),
+    field("max_tokens", "integer", { min: 0, max: 10_000_000 }),
+    flag("has_cover", true),
+    field("author", "identity"),
+    flag("exclude_forks")
+  ],
+  sorts: V1_SORTS,
+  default_sort: "relevance with q; newest without q",
+  modes: [
+    { name: "fts", pagination: ["page", "cursor"], max_results: MAX_RESULTS },
+    { name: "semantic", pagination: ["page"], max_results: SEMANTIC_MAX }
+  ],
+  page_size: { min: 1, max: 100, default: 24, max_results: MAX_RESULTS },
+  thumbnail_variants: ["512", "64"],
+  download_modes: ["mirrored", "self-contained", "json", "original"],
+  rate_limits: { requests_per_second: 10, burst: 60 },
+  terms_url: "/docs/api#terms"
+}
 
 export interface FakeArchiveOptions {
   readonly port?: number
@@ -313,18 +357,30 @@ export interface FakeArchive {
   readonly close: () => Promise<void>
 }
 
+/** The real cardex adapter, pointed at the fake: what tests and the development instance register. */
+export const fakeCardexAdapter = (archive: Pick<FakeArchive, "origin">): CardSourceAdapter =>
+  cardexAdapter({ origin: archive.origin })
+
+const error = (code: string, message: string) => ({ error: code, message })
+
 export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promise<FakeArchive> => {
   const cards = syntheticCards(options.cards ?? 240)
   const bySlug = new Map(cards.map((c) => [c.slug, c]))
   const bySha = new Map(cards.map((c) => [c.sha256, c]))
-  // The full image is a PNG; the thumbnail, as cardex's, a 512 px wide WebP.
+  // The full image is a PNG; the thumbnails, as cardex's, WebP at 512 and 64 px wide.
   const images = new Map<string, Promise<Buffer>>()
-  const image = (card: FakeCard, size: "thumb" | "full") => {
+  const image = (card: FakeCard, size: "512" | "64" | "full") => {
     const key = `${card.sha256}:${size}`
     let made = images.get(key)
     if (!made) {
       const png = portraitPng(512, 768, card.color)
-      made = size === "full" ? Promise.resolve(png) : sharp(png).resize({ width: 512 }).webp().toBuffer()
+      made =
+        size === "full"
+          ? Promise.resolve(png)
+          : sharp(png)
+              .resize({ width: Number(size) })
+              .webp()
+              .toBuffer()
       images.set(key, made)
     }
     return made
@@ -333,101 +389,162 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
   let failure: { status: number; times: number; retryAfter?: number } | null = null
 
   const json = (res: ServerResponse, status: number, body: unknown) => {
-    res.writeHead(status, { "content-type": "application/json" })
+    res.writeHead(status, { "content-type": "application/json; charset=utf-8" })
     res.end(JSON.stringify(body))
   }
-  let origin = ""
+  // v1's CardSummary; its URLs are paths on the archive.
   const summary = (c: FakeCard) => ({
     slug: c.slug,
-    url: `${origin}/c/${c.slug}`,
+    url: `/c/${c.slug}`,
     name: c.name,
-    creator: { name: c.creator, source: "fake", handle: c.creator, url: `${origin}/u/${c.creator}` },
+    creator: { name: c.creator, source: c.site, handle: c.creator, url: `/u/${c.site}/${c.creator}` },
     tags: c.tags,
     tagline: c.tagline,
     nsfw: c.nsfw,
     kind: "character",
     token_count: c.tokens,
     stats: { popularity: c.popularity, rating_avg: 4, rating_count: 10 },
-    thumbnail_url: `${origin}/t/${c.sha256}.512.webp`,
-    image_url: `${origin}/i/${c.sha256}.png`,
+    thumbnail_url: `/t/${c.sha256}.512.webp?v=1`,
+    image_url: `/i/${c.sha256}.png`,
     version: c.sha256,
     updated_at: new Date(c.addedAt).toISOString(),
     superseded_by: c.supersededBy ?? null
   })
+  const list = (value: string | null) => (value ?? "").split(",").filter(Boolean)
+  const truthy = (value: string | null) => value === "true" || value === "1"
 
   /**
-   * cardex v1's search: `limit` 1–100, else 400; fts mode (the default) pages with the
-   * `next_cursor` it gave, for the same query and limit only; semantic mode with `page` (from
-   * 1), and gives no cursor. The total is capped at 10,000, marked as an estimate past that.
+   * v1's search: `limit` 1–100 (24 by default), else 400; text mode pages by `page` or by the
+   * `next_cursor` it gave, which belongs to the same query and limit only; semantic mode by
+   * `page` alone, 240 results at most, ranked by likeness whatever the sort.
    */
   const search = (params: URLSearchParams): { status: number; body: unknown } => {
     const mode = params.get("mode") ?? "fts"
-    if (mode !== "fts" && mode !== "semantic") return { status: 400, body: { error: "mode is fts or semantic" } }
-    const limit = Number(params.get("limit") ?? "20")
+    if (mode !== "fts" && mode !== "semantic")
+      return { status: 400, body: error("bad_mode", "mode is fts or semantic") }
+    const limit = Number(params.get("limit") ?? "24")
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-      return { status: 400, body: { error: "limit must be 1 to 100" } }
-    if (mode === "fts" && params.has("page")) return { status: 400, body: { error: "fts mode pages with cursor" } }
+      return { status: 400, body: error("bad_limit", "limit must be 1 to 100") }
     if (mode === "semantic" && params.has("cursor"))
-      return { status: 400, body: { error: "semantic mode pages with page" } }
-    // The query a cursor belongs to: every parameter but the cursor itself, in order.
-    const normalized = [...params].filter(([k]) => k !== "cursor").sort(([a], [b]) => a.localeCompare(b))
+      return { status: 400, body: error("bad_cursor", "semantic mode pages with page") }
+    const nsfw = params.get("nsfw") ?? "include"
+    if (!["include", "exclude", "only"].includes(nsfw)) return { status: 400, body: error("bad_nsfw", "unknown nsfw") }
+    const kind = params.get("kind") ?? "both"
+    if (!["character", "lorebook", "both"].includes(kind))
+      return { status: 400, body: error("bad_kind", "unknown kind") }
+    const sites = list(params.get("source"))
+    if (sites.some((s) => !V1_SITES.includes(s))) return { status: 400, body: error("bad_source", "unknown source") }
+    const q = (params.get("q") ?? "").trim().toLowerCase()
+    const sort = params.get("sort") ?? (q ? "relevance" : "newest")
+    if (!V1_SORTS.includes(sort)) return { status: 400, body: error("bad_sort", "unknown sort") }
+    const include = list(params.get("tags"))
+    const exclude = list(params.get("not_tags"))
+    if (include.length > 20 || exclude.length > 20) return { status: 400, body: error("bad_tags", "at most 20 tags") }
+    // The query a cursor belongs to: every parameter but the cursor and page, in order.
+    const normalized = [...params]
+      .filter(([k]) => k !== "cursor" && k !== "page")
+      .sort(([a], [b]) => a.localeCompare(b))
     const queryHash = createHash("sha256").update(JSON.stringify(normalized)).digest("hex").slice(0, 12)
     let offset = 0
-    if (mode === "semantic") {
-      const page = Number(params.get("page") ?? "1")
-      if (!Number.isInteger(page) || page < 1) return { status: 400, body: { error: "page starts at 1" } }
-      offset = (page - 1) * limit
-    } else if (params.has("cursor")) {
+    if (params.has("cursor")) {
       const cursor = /^(\d+)\.([0-9a-f]{12})$/.exec(Buffer.from(params.get("cursor")!, "base64url").toString("utf8"))
       if (!cursor || cursor[2] !== queryHash)
-        return { status: 400, body: { error: "the cursor belongs to another query" } }
+        return { status: 400, body: error("bad_cursor", "the cursor belongs to another query") }
       offset = Number(cursor[1])
+    } else if (params.has("page")) {
+      const page = Number(params.get("page"))
+      if (!Number.isInteger(page) || page < 1) return { status: 400, body: error("bad_page", "page starts at 1") }
+      offset = (page - 1) * limit
     }
-    const q = (params.get("q") ?? "").toLowerCase()
-    const include = (params.get("tags") ?? "").split(",").filter(Boolean)
-    const exclude = (params.get("not_tags") ?? "").split(",").filter(Boolean)
-    const nsfw = params.get("nsfw") ?? "sfw"
     const author = (params.get("author") ?? "").toLowerCase()
-    const min = Number(params.get("min_tokens") ?? "0")
+    const min = Number(params.get("min_tokens") ?? "30")
     const max = Number(params.get("max_tokens") ?? "Infinity")
-    const noForks = params.get("exclude_forks") === "true"
-    const sort = params.get("sort") ?? "popularity"
-    const ascending = params.get("order") === "asc"
+    const noForks = truthy(params.get("exclude_forks"))
+    const semantic = mode === "semantic"
+    const words = (c: FakeCard) => c.name.toLowerCase().includes(q) || c.tagline.toLowerCase().includes(q)
     const matching = cards.filter(
       (c) =>
-        (!q || c.name.toLowerCase().includes(q) || c.tagline.toLowerCase().includes(q)) &&
+        // Meaning search finds something for any words; text search needs them.
+        (semantic || !q || words(c)) &&
+        kind !== "lorebook" &&
+        (sites.length === 0 || sites.includes(c.site)) &&
         include.every((t) => c.tags.includes(t)) &&
         !exclude.some((t) => c.tags.includes(t)) &&
-        (nsfw === "all" || (nsfw === "nsfw" ? c.nsfw : !c.nsfw)) &&
-        (!author || c.creator.toLowerCase().includes(author)) &&
+        (nsfw === "include" || (nsfw === "only" ? c.nsfw : !c.nsfw)) &&
+        (!author || `${c.site}/${c.creator}`.toLowerCase() === author) &&
         c.tokens >= min &&
         c.tokens <= max &&
         (!noForks || !c.fork)
     )
     // Semantic mode ranks by likeness to the words: here, a stable hash of the words and the card.
     const likeness = (c: FakeCard) => createHash("sha256").update(`${q}\u0000${c.slug}`).digest().readUInt32BE(0)
-    const key = (c: FakeCard) =>
-      mode === "semantic" && q ? likeness(c) : sort === "name" ? c.name : sort === "added" ? c.addedAt : c.popularity
-    const sorted = [...matching].sort((a, b) => {
-      const [x, y] = [key(a), key(b)]
-      const order = x < y ? -1 : x > y ? 1 : 0
-      // Popular and Newest come highest first; Name A to Z.
-      return (sort === "name" ? order : -order) * (ascending ? -1 : 1) || a.slug.localeCompare(b.slug)
-    })
-    const reachable = sorted.slice(0, MAX_RESULTS)
-    const items = reachable.slice(offset, offset + limit)
+    const order: Record<string, (a: FakeCard, b: FakeCard) => number> = {
+      relevance: (a, b) =>
+        Number(b.name.toLowerCase().includes(q)) - Number(a.name.toLowerCase().includes(q)) ||
+        b.popularity - a.popularity,
+      newest: (a, b) => b.addedAt - a.addedAt,
+      oldest: (a, b) => a.addedAt - b.addedAt,
+      popular: (a, b) => b.popularity - a.popularity,
+      name: (a, b) => a.name.localeCompare(b.name),
+      tokens_asc: (a, b) => a.tokens - b.tokens,
+      tokens_desc: (a, b) => b.tokens - a.tokens
+    }
+    const by = semantic ? (a: FakeCard, b: FakeCard) => likeness(a) - likeness(b) : order[sort]!
+    const sorted = [...matching].sort((a, b) => by(a, b) || a.slug.localeCompare(b.slug))
+    const reachable = sorted.slice(0, semantic ? SEMANTIC_MAX : MAX_RESULTS)
+    const items = reachable.slice(offset, offset + limit).map(summary)
     const more = offset + limit < reachable.length
-    const estimated = options.estimate === true || sorted.length > MAX_RESULTS
+    const estimated = !semantic && (options.estimate === true || sorted.length > MAX_RESULTS)
+    const total = semantic
+      ? reachable.length
+      : options.estimate
+        ? Math.round(reachable.length / 10) * 10
+        : reachable.length
     return {
       status: 200,
       body: {
-        total: options.estimate ? Math.round(reachable.length / 10) * 10 : reachable.length,
+        query: Object.fromEntries(params),
+        author: null,
+        author_error: null,
+        results: items,
+        items,
+        total,
+        total_capped: sorted.length > reachable.length,
         total_is_estimate: estimated,
+        page: Math.floor(offset / limit) + 1,
+        pages: Math.ceil(reachable.length / limit),
+        page_size: limit,
+        tags: include,
+        not_tags: exclude,
+        unknown_tags: [],
+        semantic: semantic ? { max_results: SEMANTIC_MAX } : null,
+        defaults: { nsfw: "include", kind: "both", min_tokens: 30, has_cover: true },
         next_cursor:
-          mode === "fts" && more ? Buffer.from(`${offset + limit}.${queryHash}`, "utf8").toString("base64url") : null,
-        items: items.map(summary)
+          !semantic && more ? Buffer.from(`${offset + limit}.${queryHash}`, "utf8").toString("base64url") : null
       }
     }
+  }
+
+  const download = (res: ServerResponse, c: FakeCard, mode: string) => {
+    if (!capabilitiesBody.download_modes.includes(mode)) return json(res, 400, error("bad_mode", "unknown mode"))
+    // A CHARX original has no derived files; these synthetic originals are otherwise JSON.
+    if (c.originalOnly) {
+      if (mode !== "original") return json(res, 404, error("no_derived_download", "only the original is kept"))
+      res.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+        "content-disposition": `attachment; filename="${c.slug}.json"`
+      })
+      return res.end(c.json)
+    }
+    if (mode === "json" || mode === "original") {
+      res.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+        "content-disposition": `attachment; filename="${c.slug}.json"`
+      })
+      return res.end(c.json)
+    }
+    res.writeHead(200, { "content-type": "image/png", "content-disposition": `attachment; filename="${c.slug}.png"` })
+    return res.end(cardPng(c))
   }
 
   const handle = (req: IncomingMessage, res: ServerResponse) => {
@@ -452,8 +569,11 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       failure.times -= 1
       const { status, retryAfter } = failure
       if (failure.times === 0) failure = null
-      res.writeHead(status, retryAfter === undefined ? {} : { "retry-after": String(retryAfter) })
-      return res.end()
+      res.writeHead(status, {
+        "content-type": "application/json; charset=utf-8",
+        ...(retryAfter === undefined ? {} : { "retry-after": String(retryAfter) })
+      })
+      return res.end(JSON.stringify(error(status === 429 ? "rate_limited" : "failed", "a failure the test asked for")))
     }
     if (path === "/api/v1/capabilities") return json(res, 200, capabilitiesBody)
     if (path === "/api/v1/search") {
@@ -461,25 +581,27 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       return json(res, status, body)
     }
     if (path === "/api/v1/tags") {
+      // A page of 200 by card count; `limit` isn't a v1 parameter here.
       const prefix = (url.searchParams.get("q") ?? "").toLowerCase()
       const counts = new Map<string, number>()
       for (const c of cards) for (const t of c.tags) if (t.startsWith(prefix)) counts.set(t, (counts.get(t) ?? 0) + 1)
-      return json(
-        res,
-        200,
-        [...counts]
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, Number(url.searchParams.get("limit") ?? "10"))
-          .map(([slug, card_count]) => ({ slug, label: slug, card_count }))
-      )
+      const all = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      return json(res, 200, {
+        q: prefix,
+        tags: all.slice(0, 200).map(([slug, card_count]) => ({ slug, label: slug, card_count })),
+        page: 1,
+        pages: Math.max(1, Math.ceil(all.length / 200)),
+        total: all.length
+      })
     }
     if (path === "/api/v1/cards/batch") {
-      const ids = (url.searchParams.get("ids") ?? "").split(",").filter(Boolean)
+      const ids = list(url.searchParams.get("ids"))
       const canonical = [...new Set(ids)].sort()
-      if (canonical.length > 100) return json(res, 400, { error: "at most 100 ids" })
-      // An unsorted or duplicated list answers 308 to its canonical URL, as cardex v1 does.
-      if (canonical.join(",") !== ids.join(",")) {
-        res.writeHead(308, { location: `/api/v1/cards/batch?ids=${canonical.map(encodeURIComponent).join(",")}` })
+      if (canonical.length > 100) return json(res, 400, error("too_many_ids", "at most 100 ids"))
+      // Anything but the canonical form (sorted, without duplicates, joined by %2C) answers 308.
+      const form = `?ids=${canonical.map(encodeURIComponent).join("%2C")}`
+      if (url.search !== form) {
+        res.writeHead(308, { location: `/api/v1/cards/batch${form}` })
         return res.end()
       }
       return json(res, 200, {
@@ -490,32 +612,45 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         missing: canonical.filter((id) => !bySlug.has(id))
       })
     }
-    const card = /^\/api\/v1\/cards\/([^/]+)$/.exec(path)
-    if (card) {
-      const c = bySlug.get(decodeURIComponent(card[1]!))
-      return c ? json(res, 200, summary(c)) : json(res, 404, { error: "not found" })
+    const detail = /^\/api\/v1\/cards\/([^/]+)$/.exec(path)
+    if (detail) {
+      // v1's card page envelope: its `card` is the archive's record, not a summary.
+      const c = bySlug.get(decodeURIComponent(detail[1]!))
+      if (!c) return json(res, 404, error("not_found", "no such card"))
+      const origin = { source: c.site, author: c.creator, name: c.name, tagline: c.tagline, tags: c.tags, fork: c.fork }
+      return json(res, 200, {
+        card: {
+          slug: c.slug,
+          kind: "character",
+          nsfw: c.nsfw,
+          tags: c.tags,
+          path: `/c/${c.slug}`,
+          content_hash: c.sha256
+        },
+        creator: summary(c).creator,
+        files: [
+          { sha256: c.sha256, ext: c.originalOnly ? "charx" : "json", is_original: true, url: `/i/${c.sha256}.png` }
+        ],
+        origins: [origin],
+        main_origin: origin,
+        earlier_origins: [],
+        related: [],
+        variants: []
+      })
     }
-    const download = /^\/api\/v1\/download\/([0-9a-f]{64})$/.exec(path)
-    if (download) {
-      const c = bySha.get(download[1]!)
-      if (!c) return json(res, 404, { error: "not found" })
-      // `json` and `original` (these cards were uploaded as JSON) are the JSON; the generated modes, a card PNG.
-      const mode = url.searchParams.get("mode") ?? "mirrored"
-      if (!["mirrored", "self-contained", "json", "original"].includes(mode))
-        return json(res, 400, { error: "unknown mode" })
-      if (mode === "json" || mode === "original") {
-        res.writeHead(200, { "content-type": "application/json" })
-        return res.end(c.json)
-      }
-      res.writeHead(200, { "content-type": "image/png" })
-      return res.end(cardPng(c))
+    const file = /^\/api\/v1\/download\/([0-9a-f]{64})$/.exec(path)
+    if (file) {
+      const c = bySha.get(file[1]!)
+      return c
+        ? download(res, c, url.searchParams.get("mode") ?? "mirrored")
+        : json(res, 404, error("not_found", "no such file"))
     }
-    const picture = /^\/(?:t\/([0-9a-f]{64})\.512\.webp|i\/([0-9a-f]{64})\.png)$/.exec(path)
+    const picture = /^\/(?:t\/([0-9a-f]{64})\.(512|64)\.webp|i\/([0-9a-f]{64})\.png)$/.exec(path)
     if (picture) {
       const thumb = picture[1] !== undefined
-      const c = bySha.get((picture[1] ?? picture[2])!)
-      if (!c) return json(res, 404, { error: "not found" })
-      void image(c, thumb ? "thumb" : "full").then((bytes) => {
+      const c = bySha.get((picture[1] ?? picture[3])!)
+      if (!c) return json(res, 404, error("not_found", "no such picture"))
+      void image(c, thumb ? (picture[2] as "512" | "64") : "full").then((bytes) => {
         res.writeHead(200, {
           "content-type": thumb ? "image/webp" : "image/png",
           "cache-control": "public, max-age=31536000, immutable"
@@ -524,13 +659,13 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       })
       return
     }
-    json(res, 404, { error: "not found" })
+    json(res, 404, error("not_found", "no such path"))
   }
 
   const server = createServer(handle)
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve))
   const port = (server.address() as AddressInfo).port
-  origin = `http://127.0.0.1:${port}`
+  const origin = `http://127.0.0.1:${port}`
   return {
     origin,
     host: `127.0.0.1:${port}`,
@@ -549,226 +684,5 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         server.closeAllConnections()
         server.close(() => resolve())
       })
-  }
-}
-
-// --- The adapter: what a real archive's adapter does, against the fake's API.
-
-interface ArchiveSummary {
-  readonly slug: string
-  readonly url: string
-  readonly name: string
-  readonly creator: { readonly name: string }
-  readonly tags: ReadonlyArray<string>
-  readonly tagline: string
-  readonly nsfw: boolean
-  readonly token_count: number
-  readonly stats: { readonly popularity: number }
-  readonly thumbnail_url: string
-  readonly image_url: string
-  readonly version: string
-  readonly updated_at: string
-  readonly superseded_by: string | null
-}
-
-const bad = (sourceId: string) =>
-  new SourceFailed({ sourceId, reason: "bad_response", message: `${sourceId} sent something this app can't read` })
-
-const asSummary = (item: ArchiveSummary): AdapterSummary => ({
-  remoteId: item.slug,
-  name: item.name,
-  creator: item.creator.name,
-  tagline: item.tagline,
-  tags: item.tags,
-  ...(item.nsfw ? { rating: "Mature" } : {}),
-  tokens: item.token_count,
-  thumb: item.thumbnail_url,
-  image: item.image_url,
-  version: {
-    id: item.version,
-    updatedAt: Date.parse(item.updated_at),
-    ...(item.superseded_by ? { supersededBy: item.superseded_by } : {})
-  },
-  url: item.url,
-  stats: { popularity: item.stats.popularity }
-})
-
-const PAGE_SIZE = 50
-
-/**
- * The page token we hand out (opaque to everything but this adapter): `c:<cursor>` in fts
- * mode, where cardex pages with its cursor; `p:<n>` in semantic mode, where it pages by number.
- */
-const pageOf = (token: string | null) =>
-  token?.startsWith("c:")
-    ? ({ cursor: token.slice(2) } as const)
-    : token?.startsWith("p:")
-      ? ({ page: Number(token.slice(2)) } as const)
-      : ({} as const)
-
-/** The query as the archive's search parameters. */
-const searchParams = (query: SourceQuery, token: string | null) => {
-  const params = new URLSearchParams()
-  const page = pageOf(token)
-  if (query.text.trim()) params.set("q", query.text.trim())
-  if (query.tags.length) params.set("tags", query.tags.join(","))
-  if (query.excludeTags.length) params.set("not_tags", query.excludeTags.join(","))
-  for (const [id, value] of Object.entries(query.filters)) {
-    if (id === "tokens" && typeof value === "object" && !Array.isArray(value)) {
-      const range = value as { readonly min?: number; readonly max?: number }
-      if (range.min !== undefined) params.set("min_tokens", String(range.min))
-      if (range.max !== undefined) params.set("max_tokens", String(range.max))
-    } else if (typeof value === "string" && value !== "") params.set(id, value)
-    else if (value === true) params.set(id, "true")
-  }
-  if (query.sort) params.set("sort", query.sort)
-  if (query.reverse) params.set("order", "asc")
-  params.set("limit", String(PAGE_SIZE))
-  if ("cursor" in page) params.set("cursor", page.cursor)
-  if ("page" in page) params.set("page", String(page.page))
-  return params
-}
-
-export interface FakeAdapterOptions {
-  /** "cardex" on the development server, standing in for the real adapter (phase 4). */
-  readonly id?: string
-  readonly name?: string
-  readonly origin: string
-  readonly rate?: { readonly perSecond: number; readonly burst: number }
-}
-
-export const fakeArchiveAdapter = (options: FakeAdapterOptions): CardSourceAdapter => {
-  const id = options.id ?? "cardex"
-  const base = new URL(options.origin)
-  const api = (path: string, params?: URLSearchParams) => {
-    const url = new URL(path, base)
-    if (params) url.search = params.toString()
-    return url
-  }
-  const getJson = (http: SourceHttp, url: URL) =>
-    Effect.flatMap(http.get(url, "json"), (response) =>
-      Effect.try({ try: () => response.json(), catch: () => bad(id) })
-    )
-  /** Only the archive's own URLs: an image or card URL elsewhere is refused before any request. */
-  const own = (raw: string) =>
-    Effect.suspend(() => {
-      const url = URL.canParse(raw) ? new URL(raw) : null
-      return url && url.origin === base.origin ? Effect.succeed(url) : Effect.fail(bad(id))
-    })
-  return {
-    id,
-    name: options.name ?? "cardex",
-    hosts: [base.host],
-    scheme: base.protocol === "http:" ? "http" : "https",
-    local: base.protocol === "http:",
-    key: "optional",
-    ...(options.rate ? { rate: options.rate } : { rate: { perSecond: 10, burst: 60 } }),
-    capabilities: (http) =>
-      Effect.map(getJson(http, api("/api/v1/capabilities")), (raw): SourceCapabilities => {
-        const body = raw as typeof capabilitiesBody
-        const rating = body.filters.find((f) => f.id === "nsfw")
-        // The search modes are one more choice: how the words are matched.
-        const modes = {
-          id: "mode",
-          label: "Match",
-          kind: "choice" as const,
-          multi: false,
-          options: body.modes.map((m) => ({ value: m.id, label: m.label })),
-          about: "Words finds cards that contain your words; Meaning finds cards about what you describe."
-        }
-        return {
-          text: true,
-          tags: { include: true, exclude: true, suggest: true },
-          filters: [
-            ...body.filters.map((f) =>
-              f.type === "choice"
-                ? {
-                    id: f.id,
-                    label: f.label,
-                    kind: "choice" as const,
-                    multi: false,
-                    options: (f.options ?? []).map(([value, label]) => ({ value: value!, label: label! }))
-                  }
-                : f.type === "range"
-                  ? {
-                      id: f.id,
-                      label: f.label,
-                      kind: "range" as const,
-                      unit: "tokens",
-                      min: f.min ?? 0,
-                      max: f.max ?? 0
-                    }
-                  : f.type === "toggle"
-                    ? { id: f.id, label: f.label, kind: "toggle" as const }
-                    : { id: f.id, label: f.label, kind: "text" as const }
-            ),
-            modes
-          ],
-          sorts: body.sorts,
-          ratings: { filterId: "nsfw", default: rating?.default ?? null },
-          paging: "cursor",
-          stats: [{ id: "popularity", label: "popularity" }]
-        }
-      }),
-    search: (http, query, page) =>
-      Effect.flatMap(getJson(http, api("/api/v1/search", searchParams(query, page))), (raw) => {
-        const body = raw as {
-          total: number
-          total_is_estimate: boolean
-          next_cursor: string | null
-          items: Array<ArchiveSummary>
-        }
-        if (!Array.isArray(body?.items)) return Effect.fail(bad(id))
-        // Semantic mode gives no cursor: the next page is the next number while results remain.
-        const semantic = query.filters.mode === "semantic"
-        const number = pageOf(page)
-        const current = "page" in number ? number.page : 1
-        const next = semantic
-          ? body.items.length === PAGE_SIZE && current * PAGE_SIZE < body.total
-            ? `p:${current + 1}`
-            : null
-          : body.next_cursor === null
-            ? null
-            : `c:${body.next_cursor}`
-        return Effect.succeed({
-          items: body.items.map(asSummary),
-          next,
-          total: body.total,
-          totalEstimated: body.total_is_estimate
-        })
-      }),
-    tags: (http, prefix) =>
-      Effect.map(getJson(http, api("/api/v1/tags", new URLSearchParams({ q: prefix, limit: "10" }))), (raw) =>
-        (raw as Array<{ slug: string; label: string; card_count: number }>).map((t) => ({
-          tag: t.slug,
-          label: t.label,
-          count: t.card_count
-        }))
-      ),
-    card: (http, remoteId) =>
-      Effect.gen(function* () {
-        const item = (yield* getJson(http, api(`/api/v1/cards/${encodeURIComponent(remoteId)}`))) as ArchiveSummary
-        const file = yield* http.get(
-          api(`/api/v1/download/${item.version}`, new URLSearchParams({ mode: "json" })),
-          "card"
-        )
-        return { bytes: file.bytes, fileName: `${item.name}.json`, summary: asSummary(item) }
-      }),
-    image: (http, ref) =>
-      Effect.flatMap(own(ref), (url) => Effect.map(http.get(url, "image"), (response) => response.bytes)),
-    // Sorted and without duplicates, the list's canonical form, so cardex needn't redirect it.
-    versions: (http, ids) =>
-      Effect.map(
-        getJson(http, api("/api/v1/cards/batch", new URLSearchParams({ ids: [...new Set(ids)].sort().join(",") }))),
-        (raw) =>
-          (raw as { items: Array<ArchiveSummary & { file_sha256: string }> }).items.map((c) => ({
-            remoteId: c.slug,
-            version: {
-              id: c.version,
-              updatedAt: Date.parse(c.updated_at),
-              ...(c.superseded_by ? { supersededBy: c.superseded_by } : {})
-            }
-          }))
-      )
   }
 }

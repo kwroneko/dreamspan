@@ -81,7 +81,7 @@ for (const width of [1440, 390])
         // Its total shows on the option once open.
         await expect(show.getByRole("button", { name: "cardex", exact: true })).toContainText(/\d/)
         const first = await tiles(main).count()
-        expect(first).toBe(50)
+        expect(first).toBe(48)
         // The next page comes as the end nears.
         await tiles(main).last().scrollIntoViewIfNeeded()
         await expect.poll(() => tiles(main).count()).toBeGreaterThan(first)
@@ -125,7 +125,7 @@ for (const width of [1440, 390])
         await main.getByRole("button", { name: "Retry", exact: true }).click()
         await expect(tiles(main).first()).toBeVisible()
         await search.fill("")
-        await expect(tiles(main)).toHaveCount(50)
+        await expect(tiles(main)).toHaveCount(48)
         await expectLayout(page, info, `home-cardex-${width}-${theme}`, { scope: "main" })
         await main.screenshot({ path: info.outputPath("home.png") })
 

@@ -1,6 +1,7 @@
 // Where a card came from: links to the archives and sites it was uploaded to, built from its
 // CCv3 `source` entries and the fields sites write into `data.extensions`. Each site is a
 // recognizer in a registry, so a plugin can add a site, replace one or disable one.
+import { CARDEX_SITE_LABELS } from "@rp/shared/cardSources.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { makeRegistry } from "../../registry.ts"
 
@@ -158,6 +159,55 @@ const risuRecognizer: SourceRecognizer = {
   }
 }
 
+// cardex (cardex.zip), a public card archive. A card's page there is https://cardex.zip/c/<slug>
+// (its API v1, https://cardex.zip/docs/api); a card added from it has that URL in `source`, or
+// `cardex:<slug>` when cardex gave none (spec/CARD-SOURCES.md §4.5). Files cardex serves carry
+// `extensions.cardex`: `url`, the card's page there, and `origins`, each a page on a site cardex
+// found it on (`source` its site's v1 name, `url` the page), linked under that site's name.
+const CARDEX_HOST = "cardex.zip"
+const cardexSlug = (url: URL) => {
+  const [kind, slug] = url.pathname.split("/").filter(Boolean)
+  if (kind !== "c" || !slug) return undefined
+  try {
+    return decodeURIComponent(slug)
+  } catch {
+    return slug
+  }
+}
+const cardexRecognizer: SourceRecognizer = {
+  id: "card-sources.cardex",
+  site: "cardex",
+  links: (doc) => {
+    const links: Array<SourceLink> = []
+    const extension = record(doc.extensions["cardex"])
+    const page = webUrl(text(extension?.["url"]) ?? "")
+    if (page && hostOf(page) === CARDEX_HOST) {
+      const slug = cardexSlug(page)
+      links.push({ url: page.href, ...(slug ? { label: slug } : {}) })
+    }
+    for (const entry of doc.source ?? []) {
+      const id = /^cardex:(.+)$/.exec(entry.trim())?.[1]?.trim()
+      if (id) {
+        links.push({ url: `https://${CARDEX_HOST}/c/${encodeURIComponent(id)}`, label: id, from: entry })
+        continue
+      }
+      const url = webUrl(entry)
+      if (!url || hostOf(url) !== CARDEX_HOST) continue
+      const slug = cardexSlug(url)
+      links.push({ url: url.href, ...(slug ? { label: slug } : {}), from: entry })
+    }
+    const origins = extension?.["origins"]
+    for (const origin of Array.isArray(origins) ? origins : []) {
+      const found = record(origin)
+      const url = webUrl(text(found?.["url"]) ?? "")
+      if (!url || hostOf(url) === CARDEX_HOST) continue
+      const site = text(found?.["source"])
+      links.push({ site: (site && CARDEX_SITE_LABELS[site]) ?? hostOf(url), url: url.href })
+    }
+    return links
+  }
+}
+
 // The other sites SillyTavern imports characters from by URL (src/endpoints/content-manager.js,
 // the /importURL host checks): a `source` URL on their host gets the site's name. None of them
 // writes a field of its own into the card that names its page, so only URLs are recognized.
@@ -173,5 +223,6 @@ export const builtinRecognizers: ReadonlyArray<SourceRecognizer> = [
   hostRecognizer("jannyai", "JannyAI", ["jannyai.com"]),
   hostRecognizer("pygmalion", "Pygmalion", ["pygmalion.chat"]),
   hostRecognizer("aicharactercards", "AI Character Cards", ["aicharactercards.com"]),
-  hostRecognizer("perchance", "Perchance", ["perchance.org"])
+  hostRecognizer("perchance", "Perchance", ["perchance.org"]),
+  cardexRecognizer
 ]

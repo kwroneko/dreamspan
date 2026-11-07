@@ -10,12 +10,13 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { CardSourceAdapter } from "../src/sources/adapter.ts"
+import { cardexAdapter } from "../src/sources/cardex.ts"
 import { makeSourceCache } from "../src/sources/cache.ts"
 import * as CardSources from "../src/sources/CardSources.ts"
 import { isPrivateAddress, makeSourceHttp } from "../src/sources/guard.ts"
 import { makeCoalescer, makeLimiter } from "../src/sources/limiter.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
-import { fakeArchiveAdapter, startFakeArchive } from "./support/fakeArchive.ts"
+import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
 
 const archive = await startFakeArchive({ cards: 120 })
 afterAll(() => archive.close())
@@ -23,7 +24,9 @@ afterAll(() => archive.close())
 const alice = { "Remote-User": "src-alice" }
 const bob = { "Remote-User": "src-bob" }
 const config = testConfig({ authMode: "proxy" })
-const sources = CardSources.layerWith({ adapters: [fakeArchiveAdapter({ origin: archive.origin })] })
+// The real cardex adapter against the fake, with a key it may take: cardex itself takes none,
+// but this is where the key's write-only path is tested.
+const sources = CardSources.layerWith({ adapters: [{ ...fakeCardexAdapter(archive), key: "optional" }] })
 const testServer = serverLayer(config, undefined, undefined, sources)
 const base = Effect.map(serverPort, (port) => `http://127.0.0.1:${port}`)
 
@@ -42,7 +45,7 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
         [["cardex", "cardex", true]]
       )
       yield* api.ListRecentRemote({ sourceId: "cardex" })
-      yield* api.SetCardSourceRating({ sourceId: "cardex", rating: "all" })
+      yield* api.SetCardSourceRating({ sourceId: "cardex", rating: "include" })
       assert.strictEqual(archive.hits(), 0)
       // Turned off, a search is refused here and sends nothing.
       yield* api.SetCardSourceEnabled({ sourceId: "cardex", enabled: false })
@@ -54,7 +57,7 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       const caps = yield* api.SourceCapabilities({ sourceId: "cardex" })
       assert.isTrue(caps.filters.some((f) => f.id === "nsfw"))
       const page = yield* api.SourceSearch({ sourceId: "cardex", query: emptySourceQuery, page: null })
-      assert.lengthOf(page.items, 50)
+      assert.lengthOf(page.items, 48)
       assert.isAbove(archive.hits(), 0)
       // The same page again comes from the cache.
       const before = archive.hits()
@@ -99,7 +102,7 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
   it.effect("pages follow cardex v1: a cursor in fts mode, page numbers in semantic mode", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)
-      const all = { ...emptySourceQuery, filters: { nsfw: "all" } }
+      const all = { ...emptySourceQuery, filters: { nsfw: "include" } }
       for (const query of [all, { ...all, filters: { ...all.filters, mode: "semantic" } }]) {
         const seen = new Set<string>()
         let page: string | null = null
@@ -116,7 +119,7 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       }
       const paths = archive.paths().filter((p) => p.startsWith("/api/v1/search"))
       assert.isTrue(paths.some((p) => p.includes("mode=semantic") && p.includes("page=2") && !p.includes("cursor")))
-      assert.isTrue(paths.some((p) => p.includes("cursor=") && !p.includes("page=")))
+      assert.isTrue(paths.some((p) => p.includes("cursor=") && !p.includes("page=") && !p.includes("mode=semantic")))
     })
   )
   it.effect("each user's switches, recent list and cache are their own", () =>
@@ -182,21 +185,45 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
 describe("the fake archive keeps cardex v1's rules", () => {
   const get = (path: string) => fetch(`${archive.origin}${path}`, { redirect: "manual" })
 
-  it.effect("limit 1–100, a cursor only for its own query, 308 for an unsorted batch, WebP thumbnails", () =>
+  it.effect("limit 1–100, a cursor only for its own query, 308 for a non-canonical batch, WebP thumbnails", () =>
     Effect.gen(function* () {
-      assert.strictEqual((yield* Effect.promise(() => get("/api/v1/search?limit=0"))).status, 400)
-      assert.strictEqual((yield* Effect.promise(() => get("/api/v1/search?limit=101"))).status, 400)
-      assert.strictEqual((yield* Effect.promise(() => get("/api/v1/search?mode=fts&page=2"))).status, 400)
+      const status = (path: string) => Effect.promise(() => get(path).then((r) => r.status))
+      assert.strictEqual(yield* status("/api/v1/search?limit=0"), 400)
+      assert.strictEqual(yield* status("/api/v1/search?limit=101"), 400)
+      assert.strictEqual(yield* status("/api/v1/search?nsfw=sfw"), 400)
+      assert.strictEqual(yield* status("/api/v1/search?mode=fts&page=2"), 200)
       const first = (yield* Effect.promise(() => get("/api/v1/search?limit=10").then((r) => r.json()))) as {
         next_cursor: string
+        page_size: number
       }
-      const other = yield* Effect.promise(() => get(`/api/v1/search?limit=10&q=amber&cursor=${first.next_cursor}`))
-      assert.strictEqual(other.status, 400)
+      assert.strictEqual(first.page_size, 10)
+      assert.strictEqual(yield* status(`/api/v1/search?limit=10&cursor=${first.next_cursor}`), 200)
+      assert.strictEqual(yield* status(`/api/v1/search?limit=10&q=amber&cursor=${first.next_cursor}`), 400)
+      assert.strictEqual(yield* status(`/api/v1/search?limit=20&cursor=${first.next_cursor}`), 400)
+      assert.strictEqual(yield* status(`/api/v1/search?mode=semantic&cursor=${first.next_cursor}`), 400)
+      const semantic = (yield* Effect.promise(() =>
+        get("/api/v1/search?mode=semantic&q=quiet&limit=100&page=2").then((r) => r.json())
+      )) as { next_cursor: string | null; items: ReadonlyArray<unknown> }
+      assert.isNull(semantic.next_cursor)
+      assert.lengthOf(semantic.items, 20)
       const [a, b] = [archive.cards[5]!.slug, archive.cards[2]!.slug].sort()
-      const redirected = yield* Effect.promise(() => get(`/api/v1/cards/batch?ids=${b},${a},${b}`))
-      assert.strictEqual(redirected.status, 308)
-      assert.strictEqual(redirected.headers.get("location"), `/api/v1/cards/batch?ids=${a},${b}`)
-      const thumb = yield* Effect.promise(() => get(`/t/${archive.cards[0]!.sha256}.512.webp`))
+      for (const raw of [`${b}%2C${a}%2C${b}`, `${a},${b}`]) {
+        const redirected = yield* Effect.promise(() => get(`/api/v1/cards/batch?ids=${raw}`))
+        assert.strictEqual(redirected.status, 308)
+        assert.strictEqual(redirected.headers.get("location"), `/api/v1/cards/batch?ids=${a}%2C${b}`)
+      }
+      assert.strictEqual(yield* status(`/api/v1/cards/batch?ids=${a}%2C${b}`), 200)
+      // A card's page is an envelope, not a summary; tags come in one too.
+      const detail = (yield* Effect.promise(() => get(`/api/v1/cards/${a}`).then((r) => r.json()))) as {
+        card: Record<string, unknown>
+      }
+      assert.isUndefined(detail.card.name)
+      assert.strictEqual(yield* status("/api/v1/cards/no-such-card"), 404)
+      const tags = (yield* Effect.promise(() => get("/api/v1/tags?q=s").then((r) => r.json()))) as {
+        tags: ReadonlyArray<{ slug: string }>
+      }
+      assert.isTrue(tags.tags.length > 0 && tags.tags.every((t) => t.slug.startsWith("s")))
+      const thumb = yield* Effect.promise(() => get(`/t/${archive.cards[0]!.sha256}.512.webp?v=1`))
       assert.strictEqual(thumb.headers.get("content-type"), "image/webp")
       const bytes = new Uint8Array(yield* Effect.promise(() => thumb.arrayBuffer()))
       assert.strictEqual(Buffer.from(bytes.subarray(8, 12)).toString("latin1"), "WEBP")
@@ -220,7 +247,7 @@ describe("the fake archive keeps cardex v1's rules", () => {
             }
           })
       }
-      const adapter = fakeArchiveAdapter({ origin: archive.origin })
+      const adapter = fakeCardexAdapter(archive)
       const ids = [archive.cards[9]!.slug, archive.cards[1]!.slug, archive.cards[9]!.slug, "no-such-card"]
       const versions = yield* adapter.versions!(http as never, ids)
       assert.deepStrictEqual(
@@ -241,14 +268,14 @@ describe("the registry", () => {
     Effect.gen(function* () {
       const service = yield* CardSources.CardSources
       const replacement: CardSourceAdapter = {
-        ...fakeArchiveAdapter({ origin: archive.origin }),
+        ...fakeCardexAdapter(archive),
         name: "cardex (plugin)"
       }
       const user = { id: "u", handle: "u", displayName: "u", role: "user" } as never
       yield* Effect.scoped(
         Effect.gen(function* () {
           yield* service.registry.register(replacement)
-          yield* service.registry.register(fakeArchiveAdapter({ id: "second", name: "second", origin: archive.origin }))
+          yield* service.registry.register({ ...fakeCardexAdapter(archive), id: "second", name: "second" })
           const listed = yield* service.list(user)
           assert.deepStrictEqual(
             listed.sources.map((s) => s.name),
@@ -282,7 +309,7 @@ describe("the guards (§6.2)", () => {
       }) as unknown as typeof fetch
   })
   const remote: CardSourceAdapter = {
-    ...fakeArchiveAdapter({ origin: "https://archive.example" }),
+    ...cardexAdapter({ origin: "https://archive.example" }),
     local: false
   }
 

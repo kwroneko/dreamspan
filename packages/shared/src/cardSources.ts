@@ -98,6 +98,8 @@ export const RemoteSummary = Schema.Struct({
   remoteId: Schema.String,
   name: Schema.String,
   creator: Schema.optionalKey(Schema.String),
+  /** The creator as the source's creator filter takes it (cardex: `site/handle`), when it isn't the name. */
+  creatorQuery: Schema.optionalKey(Schema.String),
   tagline: Schema.optionalKey(Schema.String),
   tags: Schema.Array(Schema.String),
   /** Its content rating, as the source words it; only when it isn't the source's default (safe) one. */
@@ -191,6 +193,26 @@ const RemoteCard = Schema.Struct({
 
 /** At most this many recently viewed cards are kept, newest first (§4.1). */
 export const RECENT_REMOTE_MAX = 50
+
+/** The sites cardex finds cards on, by its API v1 name (its `source` filter), as people call them. */
+export const CARDEX_SITE_LABELS: Readonly<Record<string, string>> = {
+  chub: "Chub",
+  char_tavern: "Character Tavern",
+  risuai: "RisuRealm",
+  janitorai: "JanitorAI",
+  venusai: "VenusAI",
+  nyaime: "Nyai.me",
+  booru: "Booru",
+  webring: "Webring",
+  catbox: "Catbox",
+  generic: "Other sites",
+  botbooru: "BotBooru",
+  pygmalion: "Pygmalion",
+  aicc: "AI Character Cards",
+  backyard: "Backyard AI",
+  wyvern: "Wyvern",
+  pephop: "PepHop"
+}
 
 /** The account's card-source choices: user `settings` key `sources`. */
 export const SourcePrefs = Schema.Struct({
