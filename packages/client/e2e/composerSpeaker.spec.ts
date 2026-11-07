@@ -8,7 +8,8 @@ import { Effect } from "effect"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { choices, nextChip, nextName, nextReply, pickReply } from "./support/strip.ts"
-import { openPanel } from "./support/panel.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
+import { layoutAudit } from "./support/layoutAudit.ts"
 
 // Seed 1's prose mentions none of this file's cast. Random synthetic names can
 // legitimately override talkativeness, changing Auto's next pick after a reply.
@@ -475,3 +476,76 @@ test("empty Enter requests the visible empty-box reply without adding human text
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await expect(composer(page)).toHaveValue("")
 })
+
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844]
+] as const)
+  test(`a new chat from a card's tab speaks as the default persona; its composer picks another (${width}px)`, async ({
+    page
+  }) => {
+    await page.setViewportSize({ width, height })
+    const name = `Corvina ${width}`
+    const { card, ana, bo, group } = await admin((api) =>
+      Effect.gen(function* () {
+        const ids: Array<EntityId> = []
+        for (const label of ["Ana", "Bo"]) {
+          const existing = (yield* api.ListCards()).find((card) => card.name === label)
+          const id = existing?.entityId ?? (yield* api.CreateCard({ label, name: label })).entityId
+          yield* api.SetPersona({ entityId: id, persona: true })
+          ids.push(id)
+        }
+        const [ana, bo] = ids as [EntityId, EntityId]
+        const card = yield* api.CreateCard({ label: name, name })
+        const partner = yield* api.CreateCard({ label: `Guest ${width}`, name: `Guest ${width}` })
+        yield* api.ChangeGenerationDefaults({ change: { persona: ana } })
+        const group = yield* api.StartChat({
+          cards: [card.entityId, partner.entityId],
+          persona: ana,
+          greeting: null,
+          first: { _tag: "Send", content: "A gathering.", speakerEntityId: null }
+        })
+        return { card: card.entityId, ana, bo, group: group.chat.id }
+      })
+    )
+    try {
+      await page.goto(`${server().url}/chats/${group}`)
+      await openPanel(page, name)
+      await page
+        .getByRole("tabpanel", { name, exact: true })
+        .getByRole("link", { name: `New chat with ${name}`, exact: true })
+        .click()
+      await expect(page).toHaveURL(new RegExp(`/cards/${card}/chat`))
+      // A phone's panel is a sheet over the chat; a wide screen's sits beside the composer.
+      if (width === 390) {
+        await expect(page.getByRole("tablist", { name: "Chat panel", exact: true })).toBeVisible()
+        await closePanel(page)
+      }
+      await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Ana\b/)
+      await speakerChip(page).click()
+      await expect(page.getByRole("combobox", { name: "Find someone to speak as, or a persona" })).toBeFocused()
+      await expect(speakAs(page).getByRole("option")).toHaveText([/Ana/, new RegExp(name)], { useInnerText: true })
+      const yours = page.getByRole("group", { name: "Your persona", exact: true })
+      await expect(yours.getByRole("option", { name: "Ana", exact: true })).toHaveAttribute("aria-current", "true")
+      await expect(yours.getByRole("option", { name: "Bo", exact: true })).toBeVisible()
+      // The picture-overlay rule reads the popover's own portrait rows as pictures under it (the
+      // saved chat's picker reports the same); every other layout rule must pass.
+      await page.mouse.move(0, 0)
+      const findings = await layoutAudit(page, { scope: '[role="dialog"]' })
+      expect(findings.filter((finding) => finding.kind !== "overlay")).toEqual([])
+      if (process.env.RP_SCREENS)
+        await page.screenshot({ path: `${process.env.RP_SCREENS}/pending-speaker-personas-${width}.png` })
+      await yours.getByRole("option", { name: "Bo", exact: true }).click()
+      // Speaking as the persona goes on speaking as the one picked.
+      await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Bo\b/)
+      await composer(page).fill("Played as Bo from the start.")
+      await page.getByRole("button", { name: /^Send(?: as .+)?$/ }).click()
+      await expect(page).toHaveURL(/\/chats\//)
+      const chatId = new URL(page.url()).pathname.split("/")[2] as typeof group
+      expect((await admin((api) => api.GetCast({ chatId, slotId: null }))).playedByMe).toEqual([bo])
+      // Picking for this chat leaves the account default as it was.
+      expect((await admin((api) => api.GetGenerationDefaults())).persona).toBe(ana)
+    } finally {
+      await admin((api) => api.ChangeGenerationDefaults({ change: { persona: null } }))
+    }
+  })
