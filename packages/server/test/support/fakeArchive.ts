@@ -3,12 +3,17 @@
 // real cardex adapter (`src/sources/cardex.ts`) runs against it unchanged, pointed at its
 // origin: v1's capabilities descriptors (names, types, allowed values; no labels); search with
 // `nsfw` include/exclude/only, `kind`, tags, tokens, sites, `author` as site/handle, v1's sorts,
-// `limit` 1–100 (else 400), a cursor in text mode (refused for another query) and page numbers
+// `limit` 1–100 (else 400), a cursor in text mode (refused for another query with 400
+// `invalid_cursor`) and page numbers
 // in either mode, semantic mode capped at 240 with no cursor and no sort, a total capped at
 // 10,000 and then an estimate; the tags envelope; a card's detail envelope; a batch lookup that
 // answers anything but its canonical form (sorted, without duplicates, joined by `%2C`) with a
 // 308; pictures as paths (`/t/<sha256>.512.webp?v=1`, `/i/<sha256>.png`); downloads as a
-// mirrored card PNG or JSON. No real archive's cards, names or images are used: everything is
+// mirrored card PNG or JSON, a CHARX-original card (`originalOnly`) answering 404 for its
+// mirrored and self-contained files, each summary's and detail file's `download_modes` (left
+// out with `omitDownloadModes`, as a response cached from before cardex listed them), and
+// `refuseDownloads`, a card whose downloads are refused (an empty list, 403). Misuse answers
+// 400 `bad_request`, a cursor of another query 400 `invalid_cursor`. No real archive's cards, names or images are used: everything is
 // generated here. The development server and the tests use it in place of cardex, and the tests
 // count what reaches it, so they can check that nothing is sent before the user asks (§5.1).
 import { createHash } from "node:crypto"
@@ -104,7 +109,7 @@ interface FakeCard {
   readonly hasLorebook: boolean
   /** Made from another card on its source (`exclude_forks` leaves these out). */
   readonly fork: boolean
-  /** Its original is a CHARX, as some on cardex are: it has no derived PNG or JSON. */
+  /** Its original is a CHARX, as some on cardex are: no mirrored or self-contained file, only its JSON. */
   readonly originalOnly: boolean
   readonly json: string
   readonly sha256: string
@@ -342,6 +347,8 @@ export interface FakeArchiveOptions {
   readonly cards?: number
   /** Report the total as an estimate, as an archive with a large index may. */
   readonly estimate?: boolean
+  /** Leave `download_modes` out, as a response cached from before cardex listed them. */
+  readonly omitDownloadModes?: boolean
 }
 
 export interface FakeArchive {
@@ -354,6 +361,8 @@ export interface FakeArchive {
   readonly reset: () => void
   /** The next `times` requests get this status (and `Retry-After`), as a failing archive would answer. */
   readonly failNext: (status: number, times?: number, retryAfterSeconds?: number) => void
+  /** From now on the archive refuses downloads of this card: no `download_modes`, 403 on a try. */
+  readonly refuseDownloads: (slug: string) => void
   readonly close: () => Promise<void>
 }
 
@@ -408,8 +417,13 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     image_url: `/i/${c.sha256}.png`,
     version: c.sha256,
     updated_at: new Date(c.addedAt).toISOString(),
-    superseded_by: c.supersededBy ?? null
+    superseded_by: c.supersededBy ?? null,
+    ...(options.omitDownloadModes ? {} : { download_modes: downloadModes(c) })
   })
+  /** The modes that answer 200: a CHARX original has no mirrored or self-contained file. */
+  const refused = new Set<string>()
+  const downloadModes = (c: FakeCard) =>
+    refused.has(c.slug) ? [] : c.originalOnly ? ["json", "original"] : [...capabilitiesBody.download_modes]
   const list = (value: string | null) => (value ?? "").split(",").filter(Boolean)
   const truthy = (value: string | null) => value === "true" || value === "1"
 
@@ -421,25 +435,27 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
   const search = (params: URLSearchParams): { status: number; body: unknown } => {
     const mode = params.get("mode") ?? "fts"
     if (mode !== "fts" && mode !== "semantic")
-      return { status: 400, body: error("bad_mode", "mode is fts or semantic") }
+      return { status: 400, body: error("bad_request", "mode is fts or semantic") }
     const limit = Number(params.get("limit") ?? "24")
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-      return { status: 400, body: error("bad_limit", "limit must be 1 to 100") }
+      return { status: 400, body: error("bad_request", "limit must be 1 to 100") }
     if (mode === "semantic" && params.has("cursor"))
-      return { status: 400, body: error("bad_cursor", "semantic mode pages with page") }
+      return { status: 400, body: error("bad_request", "semantic mode pages with page") }
     const nsfw = params.get("nsfw") ?? "include"
-    if (!["include", "exclude", "only"].includes(nsfw)) return { status: 400, body: error("bad_nsfw", "unknown nsfw") }
+    if (!["include", "exclude", "only"].includes(nsfw))
+      return { status: 400, body: error("bad_request", "unknown nsfw") }
     const kind = params.get("kind") ?? "both"
     if (!["character", "lorebook", "both"].includes(kind))
-      return { status: 400, body: error("bad_kind", "unknown kind") }
+      return { status: 400, body: error("bad_request", "unknown kind") }
     const sites = list(params.get("source"))
-    if (sites.some((s) => !V1_SITES.includes(s))) return { status: 400, body: error("bad_source", "unknown source") }
+    if (sites.some((s) => !V1_SITES.includes(s))) return { status: 400, body: error("bad_request", "unknown source") }
     const q = (params.get("q") ?? "").trim().toLowerCase()
     const sort = params.get("sort") ?? (q ? "relevance" : "newest")
-    if (!V1_SORTS.includes(sort)) return { status: 400, body: error("bad_sort", "unknown sort") }
+    if (!V1_SORTS.includes(sort)) return { status: 400, body: error("bad_request", "unknown sort") }
     const include = list(params.get("tags"))
     const exclude = list(params.get("not_tags"))
-    if (include.length > 20 || exclude.length > 20) return { status: 400, body: error("bad_tags", "at most 20 tags") }
+    if (include.length > 20 || exclude.length > 20)
+      return { status: 400, body: error("bad_request", "at most 20 tags") }
     // The query a cursor belongs to: every parameter but the cursor and page, in order.
     const normalized = [...params]
       .filter(([k]) => k !== "cursor" && k !== "page")
@@ -449,11 +465,11 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     if (params.has("cursor")) {
       const cursor = /^(\d+)\.([0-9a-f]{12})$/.exec(Buffer.from(params.get("cursor")!, "base64url").toString("utf8"))
       if (!cursor || cursor[2] !== queryHash)
-        return { status: 400, body: error("bad_cursor", "the cursor belongs to another query") }
+        return { status: 400, body: error("invalid_cursor", "the cursor belongs to another query") }
       offset = Number(cursor[1])
     } else if (params.has("page")) {
       const page = Number(params.get("page"))
-      if (!Number.isInteger(page) || page < 1) return { status: 400, body: error("bad_page", "page starts at 1") }
+      if (!Number.isInteger(page) || page < 1) return { status: 400, body: error("bad_request", "page starts at 1") }
       offset = (page - 1) * limit
     }
     const author = (params.get("author") ?? "").toLowerCase()
@@ -526,16 +542,11 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
   }
 
   const download = (res: ServerResponse, c: FakeCard, mode: string) => {
-    if (!capabilitiesBody.download_modes.includes(mode)) return json(res, 400, error("bad_mode", "unknown mode"))
-    // A CHARX original has no derived files; these synthetic originals are otherwise JSON.
-    if (c.originalOnly) {
-      if (mode !== "original") return json(res, 404, error("no_derived_download", "only the original is kept"))
-      res.writeHead(200, {
-        "content-type": "application/json; charset=utf-8",
-        "content-disposition": `attachment; filename="${c.slug}.json"`
-      })
-      return res.end(c.json)
-    }
+    if (!capabilitiesBody.download_modes.includes(mode)) return json(res, 400, error("bad_request", "unknown mode"))
+    // A CHARX original has no mirrored or self-contained file, but its JSON, as every card's.
+    // These synthetic originals are themselves JSON.
+    if (refused.has(c.slug)) return json(res, 403, error("download_refused", "this card can't be downloaded"))
+    if (!downloadModes(c).includes(mode)) return json(res, 404, error("no_derived_download", "not in this form"))
     if (mode === "json" || mode === "original") {
       res.writeHead(200, {
         "content-type": "application/json; charset=utf-8",
@@ -599,7 +610,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     if (path === "/api/v1/cards/batch") {
       const ids = list(url.searchParams.get("ids"))
       const canonical = [...new Set(ids)].sort()
-      if (canonical.length > 100) return json(res, 400, error("too_many_ids", "at most 100 ids"))
+      if (canonical.length > 100) return json(res, 400, error("bad_request", "at most 100 ids"))
       // Anything but the canonical form (sorted, without duplicates, joined by %2C) answers 308.
       const form = `?ids=${canonical.map(encodeURIComponent).join("%2C")}`
       if (url.search !== form) {
@@ -631,7 +642,13 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         },
         creator: summary(c).creator,
         files: [
-          { sha256: c.sha256, ext: c.originalOnly ? "charx" : "json", is_original: true, url: `/i/${c.sha256}.png` }
+          {
+            sha256: c.sha256,
+            ext: c.originalOnly ? "charx" : "json",
+            is_original: true,
+            url: `/i/${c.sha256}.png`,
+            ...(options.omitDownloadModes ? {} : { download_modes: downloadModes(c) })
+          }
         ],
         origins: [origin],
         main_origin: origin,
@@ -681,6 +698,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     failNext: (status, times = 1, retryAfterSeconds) => {
       failure = { status, times, ...(retryAfterSeconds === undefined ? {} : { retryAfter: retryAfterSeconds }) }
     },
+    refuseDownloads: (slug) => void refused.add(slug),
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections()

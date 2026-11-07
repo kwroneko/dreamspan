@@ -992,6 +992,8 @@ function ProblemAlert({
           {name} sent something this app can't read.
         </Alert>
       )
+    case "refused":
+      return <Alert tone="neutral">{name} refused this request.</Alert>
     case "not_found":
       return (
         <Alert tone="neutral" actions={retry}>

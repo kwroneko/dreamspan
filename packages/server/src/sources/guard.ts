@@ -47,6 +47,27 @@ export interface GuardOptions {
 const fail = (sourceId: string, reason: SourceFailed["reason"], message: string, retryAfterMs?: number) =>
   new SourceFailed({ sourceId, reason, message, ...(retryAfterMs === undefined ? {} : { retryAfterMs }) })
 
+/** How much of a refusal's body is read, for its error code. */
+const REFUSAL_CAP = 4096
+
+/** A refusal's error code: `{"error": "<code>"}` (cardex v1), `{"error": {"code": ...}}` or `{"code": ...}`. */
+const refusalCode = (bytes: Uint8Array) => {
+  try {
+    const body = JSON.parse(Buffer.from(bytes).toString("utf8")) as unknown
+    if (typeof body !== "object" || body === null) return undefined
+    const { error, code } = body as { error?: unknown; code?: unknown }
+    const named =
+      typeof error === "string"
+        ? error
+        : typeof error === "object" && error !== null
+          ? (error as { code?: unknown }).code
+          : code
+    return typeof named === "string" && /^[a-z0-9_]{1,64}$/.test(named) ? named : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const defaultResolve = async (host: string) => (await lookup(host, { all: true })).map((answer) => answer.address)
 
 /** Retry-After as seconds or an HTTP date, in milliseconds. */
@@ -135,8 +156,14 @@ export const makeSourceHttp = (
             })
             clearTimeout(first)
             if (answer.status < 200 || answer.status > 299) {
-              await answer.body?.cancel()
-              return { status: answer.status, headers: answer.headers, bytes: new Uint8Array() }
+              // A refused request's body names what was wrong; only a little of it is read.
+              const refused =
+                answer.status >= 400 && answer.status < 500 && ![401, 403, 404, 429].includes(answer.status)
+              if (!refused) await answer.body?.cancel()
+              const bytes = refused
+                ? await readCapped(answer, REFUSAL_CAP).catch(() => new Uint8Array())
+                : new Uint8Array()
+              return { status: answer.status, headers: answer.headers, bytes }
             }
             return {
               status: answer.status,
@@ -162,11 +189,20 @@ export const makeSourceHttp = (
         return yield* fail(adapter.id, "rate_limited", `${adapter.id} is limiting requests`, delay)
       }
       if (status === 401 || status === 403)
-        return yield* fail(adapter.id, "unauthorized", `${adapter.id} refused the key`)
+        return yield* (adapter.key ?? "none") === "none"
+          ? fail(adapter.id, "refused", `${adapter.id} refused the request`)
+          : fail(adapter.id, "unauthorized", `${adapter.id} refused the key`)
       if (status === 404) return yield* fail(adapter.id, "not_found", "not on the source")
       if (status >= 500) return yield* fail(adapter.id, "unreachable", `${adapter.id} answered ${status}`)
-      if (status < 200 || status > 299)
-        return yield* fail(adapter.id, "bad_response", `${adapter.id} answered ${status}`)
+      if (status < 200 || status > 299) {
+        const code = refusalCode(response.bytes)
+        return yield* new SourceFailed({
+          sourceId: adapter.id,
+          reason: "bad_response",
+          message: `${adapter.id} answered ${status}`,
+          ...(code === undefined ? {} : { code })
+        })
+      }
       options.limiter.passed(adapter.id)
       const bytes = response.bytes
       return {

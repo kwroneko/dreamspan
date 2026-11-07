@@ -147,7 +147,9 @@ export const SourceFailure = Schema.Literals([
   "unauthorized",
   "not_found",
   "bad_response",
-  "disabled"
+  "disabled",
+  /** The source won't give this card: cardex lists no download for it, or an anonymous source answered 401/403. */
+  "refused"
 ])
 export type SourceFailure = typeof SourceFailure.Type
 
@@ -156,6 +158,8 @@ export class SourceFailed extends Schema.TaggedError<SourceFailed>()("SourceFail
   reason: SourceFailure,
   /** For `rate_limited`: when to try again. */
   retryAfterMs: Schema.optionalKey(Schema.Number),
+  /** For a refused request (`bad_response` from a 400): the source's own error code, when its answer named one. */
+  code: Schema.optionalKey(Schema.String),
   message: Schema.String
 }) {}
 

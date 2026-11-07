@@ -722,6 +722,33 @@ describe("the guards (§6.2)", () => {
     })
   )
 
+  it.effect("a refusal carries the error code its body named", () =>
+    Effect.gen(function* () {
+      let body: string = JSON.stringify({ error: "invalid_cursor", message: "the cursor expired" })
+      let status = 400
+      const refusing = {
+        fetchFor: () => (async () => new Response(body, { status })) as unknown as typeof fetch
+      }
+      const http = makeSourceHttp(remote, null, {
+        network: refusing,
+        limiter: makeLimiter(),
+        bypassEntries: () => [],
+        resolve: async () => ["93.184.216.34"]
+      })
+      const named = yield* Effect.flip(http.get(new URL("https://archive.example/api"), "json"))
+      assert.strictEqual(named.reason, "bad_response")
+      assert.strictEqual(named.code, "invalid_cursor")
+      body = "not json"
+      const plain = yield* Effect.flip(http.get(new URL("https://archive.example/api"), "json"))
+      assert.strictEqual(plain.reason, "bad_response")
+      assert.isUndefined(plain.code)
+      // A source with no key that answers 403 refused the request, not a key.
+      status = 403
+      const refused = yield* Effect.flip(http.get(new URL("https://archive.example/api"), "json"))
+      assert.strictEqual(refused.reason, "refused")
+    })
+  )
+
   it.effect("responses past their cap are refused", () =>
     Effect.gen(function* () {
       const big = {

@@ -12,6 +12,8 @@ import {
   CARDEX_ORIGIN,
   cardexAdapter,
   cardSourceSetup,
+  cursorRefused,
+  downloadModeOf,
   searchParams,
   summaryOf
 } from "../src/sources/cardex.ts"
@@ -19,6 +21,16 @@ import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
 
 const archive = await startFakeArchive({ cards: 120 })
 afterAll(() => archive.close())
+
+/** A refusal's `{"error": "<code>"}`, as the guard reads it. */
+const errorCode = (bytes: Uint8Array) => {
+  try {
+    const { error } = JSON.parse(Buffer.from(bytes).toString("utf8")) as { error?: unknown }
+    return typeof error === "string" ? error : undefined
+  } catch {
+    return undefined
+  }
+}
 
 /** Requests straight to the fake, failing on a status as the guard does (guard.ts). */
 const direct = (seen: Array<string> = []): SourceHttp => ({
@@ -38,7 +50,14 @@ const direct = (seen: Array<string> = []): SourceHttp => ({
               : response.status < 200 || response.status > 299
                 ? "bad_response"
                 : null
-      if (reason) return yield* new SourceFailed({ sourceId: "cardex", reason, message: String(response.status) })
+      const code = reason === "bad_response" ? errorCode(bytes) : undefined
+      if (reason)
+        return yield* new SourceFailed({
+          sourceId: "cardex",
+          reason,
+          message: String(response.status),
+          ...(typeof code === "string" ? { code } : {})
+        })
       return {
         status: response.status,
         headers: response.headers,
@@ -230,8 +249,30 @@ describe("the adapter against the fake archive", () => {
       assert.lengthOf(seen, 2)
       assert.include(seen[0]!, "cursor=not-a-cursor")
       assert.notInclude(seen[1]!, "cursor=")
+      assert.notInclude(seen[1]!, "page=")
     })
   )
+
+  it("only invalid_cursor counts as a refused cursor; other misuse is bad_request", () => {
+    const refused = (code?: string) =>
+      cursorRefused(
+        new SourceFailed({ sourceId: "cardex", reason: "bad_response", message: "400", ...(code ? { code } : {}) })
+      )
+    assert.isTrue(refused("invalid_cursor"))
+    assert.isFalse(refused("bad_request"))
+    assert.isFalse(refused())
+    assert.isFalse(cursorRefused(new SourceFailed({ sourceId: "cardex", reason: "unreachable", message: "503" })))
+  })
+
+  it("a card's download mode comes from its download_modes when they're listed", () => {
+    assert.isUndefined(downloadModeOf(undefined))
+    assert.isUndefined(downloadModeOf(null))
+    assert.strictEqual(downloadModeOf(["self-contained", "mirrored", "json", "original"]), "mirrored")
+    assert.strictEqual(downloadModeOf(["json", "original"]), "json")
+    assert.isNull(downloadModeOf(["original"]))
+    // An empty list: cardex refuses downloads of the card.
+    assert.strictEqual(downloadModeOf([]), "refused")
+  })
 
   it.effect("a creator's cards by site/handle; tags from the envelope", () =>
     Effect.gen(function* () {
@@ -250,24 +291,83 @@ describe("the adapter against the fake archive", () => {
     })
   )
 
-  it.effect("a card comes as the mirrored PNG, or as its original when it has no derived file", () =>
+  it.effect("without download_modes (a cached answer), a card is the mirrored PNG, or its JSON when that 404s", () =>
     Effect.gen(function* () {
+      const cached = yield* Effect.promise(() => startFakeArchive({ cards: 60, omitDownloadModes: true }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => cached.close()))
+      const old = fakeCardexAdapter(cached)
       const http = direct()
-      const plain = archive.cards.find((c) => !c.originalOnly)!
-      const file = yield* adapter.card(http, plain.slug)
+      const plain = cached.cards.find((c) => !c.originalOnly)!
+      const file = yield* old.card(http, plain.slug)
       assert.strictEqual(file.fileName, `${plain.slug}.png`)
       assert.deepStrictEqual([...file.bytes.subarray(1, 4)], [0x50, 0x4e, 0x47])
       assert.strictEqual(file.summary.version.id, plain.sha256)
       const seen: Array<string> = []
-      const charx = archive.cards.find((c) => c.originalOnly)!
-      const original = yield* adapter.card(direct(seen), charx.slug)
-      assert.strictEqual(original.fileName, `${charx.slug}.json`)
+      const charx = cached.cards.find((c) => c.originalOnly)!
+      const json = yield* old.card(direct(seen), charx.slug)
+      assert.strictEqual(json.fileName, `${charx.slug}.json`)
       assert.deepStrictEqual(
         seen.map((p) => new URLSearchParams(p.split("?")[1]).get("mode")),
-        [null, "mirrored", "original"]
+        [null, "mirrored", "json"]
       )
-      const missing = yield* Effect.flip(adapter.card(http, "no-such-card"))
+      const missing = yield* Effect.flip(old.card(http, "no-such-card"))
       assert.strictEqual(missing.reason, "not_found")
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("download_modes picks the mode with no 404 first; an empty list is a plain refusal, not tried", () =>
+    Effect.gen(function* () {
+      const listing = yield* Effect.promise(() => startFakeArchive({ cards: 60 }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => listing.close()))
+      const listed = fakeCardexAdapter(listing)
+      const modes = (seen: ReadonlyArray<string>) =>
+        seen
+          .filter((p) => p.startsWith("/api/v1/download/"))
+          .map((p) => new URLSearchParams(p.split("?")[1]).get("mode"))
+      const seen: Array<string> = []
+      const plain = listing.cards.find((c) => !c.originalOnly)!
+      const png = yield* listed.card(direct(seen), plain.slug)
+      assert.strictEqual(png.fileName, `${plain.slug}.png`)
+      assert.deepStrictEqual(modes(seen), ["mirrored"])
+      seen.length = 0
+      const charx = listing.cards.find((c) => c.originalOnly)!
+      const json = yield* listed.card(direct(seen), charx.slug)
+      assert.strictEqual(json.fileName, `${charx.slug}.json`)
+      assert.deepStrictEqual(modes(seen), ["json"])
+      seen.length = 0
+      const kept = listing.cards.find((c) => !c.originalOnly && c.slug !== plain.slug)!
+      listing.refuseDownloads(kept.slug)
+      const refused = yield* Effect.flip(listed.card(direct(seen), kept.slug))
+      assert.strictEqual(refused.reason, "refused")
+      assert.strictEqual(refused.message, "cardex doesn't allow downloading this card.")
+      assert.deepStrictEqual(modes(seen), [])
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("the recorded shapes: download_modes on summaries and detail files, in cardex's order", () =>
+    Effect.gen(function* () {
+      const get = (path: string) =>
+        Effect.promise(async () => (await (await fetch(`${archive.origin}${path}`)).json()) as Record<string, unknown>)
+      const plain = archive.cards.find((c) => !c.originalOnly)!
+      const charx = archive.cards.find((c) => c.originalOnly)!
+      const batch = (yield* get(`/api/v1/cards/batch?ids=${[plain.slug, charx.slug].sort().join("%2C")}`)) as {
+        items: ReadonlyArray<{ slug: string; download_modes: ReadonlyArray<string> }>
+      }
+      const modes = new Map(batch.items.map((item) => [item.slug, item.download_modes]))
+      assert.deepStrictEqual(modes.get(plain.slug), ["mirrored", "self-contained", "json", "original"])
+      assert.deepStrictEqual(modes.get(charx.slug), ["json", "original"])
+      const search = (yield* get("/api/v1/search?limit=5")) as {
+        items: ReadonlyArray<{ download_modes?: ReadonlyArray<string> }>
+      }
+      assert.isTrue(search.items.every((item) => Array.isArray(item.download_modes)))
+      const detail = (yield* get(`/api/v1/cards/${charx.slug}`)) as {
+        files: ReadonlyArray<{ download_modes: ReadonlyArray<string> }>
+      }
+      assert.deepStrictEqual(detail.files[0]!.download_modes, ["json", "original"])
+      const misuse = yield* Effect.promise(async () =>
+        (await fetch(`${archive.origin}/api/v1/search?limit=500`)).json()
+      )
+      assert.strictEqual((misuse as { error: string }).error, "bad_request")
     })
   )
 
