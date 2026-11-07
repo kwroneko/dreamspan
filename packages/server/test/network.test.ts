@@ -85,6 +85,22 @@ describe("network", () => {
     }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
   )
 
+  it.live("an unspecified source destination cannot reach a local service", () =>
+    Effect.gen(function* () {
+      const target = yield* resource(() => startTarget(() => ({ json: { secret: "private" } })))
+      const network = yield* Network.Network
+      const origin = target.url.replace("127.0.0.1", "0.0.0.0")
+      const http = makeSourceHttp({ ...cardexAdapter({ origin }), local: false }, null, {
+        network,
+        limiter: makeLimiter(),
+        bypassEntries: () => []
+      })
+      const result = yield* Effect.exit(http.get(new URL(origin), "json"))
+      assert.strictEqual(result._tag, "Failure")
+      assert.strictEqual(target.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(layer(tempDir("net"))))
+  )
+
   it.live("pins a source's HTTP and SOCKS destinations while preserving its Host through redirects", () =>
     Effect.gen(function* () {
       const hosts: Array<string | undefined> = []
