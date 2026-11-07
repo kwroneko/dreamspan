@@ -364,9 +364,12 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   await page.keyboard.press("Control+End")
   await page.keyboard.type(" The bridge is out.")
   await large.getByRole("button", { name: "Close", exact: true }).click()
-  await expect(
-    page.getByRole("group", { name: "Lorebook entry 123", exact: true }).getByRole("textbox", { name: "Entry content" })
-  ).toHaveValue("Text of place 123. The bridge is out.")
+  await expectTextBox(
+    page
+      .getByRole("group", { name: "Lorebook entry 123", exact: true })
+      .getByRole("textbox", { name: "Entry content" }),
+    "Text of place 123. The bridge is out."
+  )
   await page.getByRole("button", { name: "Close Place 123", exact: true }).click()
 
   // A new entry and then a copy of it both lead the table, the newest first.

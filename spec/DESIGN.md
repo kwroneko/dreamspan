@@ -817,6 +817,8 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 
 ### 5.6 Macros
 
+**Built 2026-11-07 (lorebookmacros); obsolete as an implementation requirement:** the owner’s §5.6 macro-colouring requirement now also reaches standalone lorebook entry content, with the shared editor’s changed-line marks. Snippets already use the shared note editor. See ARCHITECTURE §14.6.
+
 - **[D] Decided (owner, 2026-11-02, macrohighlight):** “Highlight using the real parser”, with comments dimmed, implemented value macros in one color and implemented directives in another, classified through the registry; unknown macros stay unstyled. Applies to every shared prompt-text field editor, including presets, cards, notes, lorebooks and snippets. “No hover popups or autocomplete: highlighting only.” Keep 5,000-line texts fast. **Built; obsolete as an implementation requirement:** ARCHITECTURE §10 and §14.6.
 - **[P]** (macrohighlight, 2026-11-02, implementation choice): reuse the engine's scoped pairing, cache completed parser nodes before edits, and decorate only visible CodeMirror ranges; share the display macro registry. **Built; obsolete as an implementation proposal:** ARCHITECTURE §10.
 
