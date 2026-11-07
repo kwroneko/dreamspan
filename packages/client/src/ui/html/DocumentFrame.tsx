@@ -9,6 +9,7 @@
 // reply streams the block shows "Panel loading"; older than the viewer's panel depth, it waits
 // for Run panel. A block with scripts that don't run says so, with the button that allows them.
 import { useContext, useEffect, useRef, useState } from "react"
+import { copyText } from "../../copyText.ts"
 import { Button } from "../Button.tsx"
 import { bridgeLink, parseBridgeMessage } from "./bridge.ts"
 import { FrameSlots } from "./frames.ts"
@@ -141,7 +142,7 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
       } else if (data.type === "rp:open") {
         const link = bridgeLink(data.url)
         if (link !== null && clicked()) window.open(link, "_blank", "noopener,noreferrer")
-      } else if (data.type === "rp:copy" && clicked()) void navigator.clipboard?.writeText(data.text).catch(() => {})
+      } else if (data.type === "rp:copy" && clicked()) void copyText(data.text).catch(() => {})
     }
     window.addEventListener("message", onMessage)
     const themeChanged = () => post({ type: "rp:theme", theme: theme() })

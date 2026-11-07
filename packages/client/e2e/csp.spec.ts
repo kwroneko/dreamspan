@@ -28,6 +28,8 @@ const watchViolations = async (page: Page) => {
 }
 
 test("every screen runs under the Content-Security-Policy", async ({ page }) => {
+  // It walks most screens: a loaded host needs more than the default minute (the gate's runs).
+  test.setTimeout(120_000)
   const violations = await watchViolations(page)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const response = await page.goto(`${server().url}/chats`)

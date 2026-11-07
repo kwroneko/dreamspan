@@ -65,7 +65,8 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/chats/${fixture.chat.id}`)
       const second = page.locator(`article[data-slot="${fixture.second.entry.slotId}"]`)
       const frame = second.locator('iframe[title="Panel"]')
-      await expect(frame).toBeVisible()
+      // A loaded host takes its time to render the first messages (the gate's runs).
+      await expect(frame).toBeVisible({ timeout: 30_000 })
       await expect(frame).toHaveAttribute("sandbox", "allow-scripts")
       const inside = second.frameLocator('iframe[title="Panel"]')
       await expect(inside.locator("#panel")).toHaveText("Second panel")
@@ -75,8 +76,7 @@ for (const width of [1440, 390])
       expect(await content.evaluate(() => document.body.dataset.ran ?? "")).toBe("")
       const colours = await inside.locator("#panel").evaluate((element) => ({
         color: getComputedStyle(element).color,
-        border: getComputedStyle(element).borderTopColor,
-        height: element.getBoundingClientRect().height
+        border: getComputedStyle(element).borderTopColor
       }))
       const app = await page.evaluate(() => {
         const probe = document.createElement("div")
@@ -89,11 +89,18 @@ for (const width of [1440, 390])
       })
       expect(colours.color).toBe(app.color)
       expect(colours.border).toBe(app.border)
-      const column = await page.getByTestId("messages").evaluate((element) => element.clientHeight)
-      expect(Math.abs(colours.height - column * 0.2)).toBeLessThan(2)
+      // The column's height can still change as the page settles (the composer loading); the
+      // frame hears of each change, so its 20vh follows within a moment.
+      const panelHeight = () => inside.locator("#panel").evaluate((element) => element.getBoundingClientRect().height)
+      await expect
+        .poll(async () => {
+          const column = await page.getByTestId("messages").evaluate((element) => element.clientHeight)
+          return Math.abs((await panelHeight()) - column * 0.2)
+        })
+        .toBeLessThan(2)
       // The frame is as tall as its document.
       await expect
-        .poll(async () => Math.abs(((await frame.boundingBox())?.height ?? 0) - colours.height))
+        .poll(async () => Math.abs(((await frame.boundingBox())?.height ?? 0) - (await panelHeight())))
         .toBeLessThan(1.5)
       await expectLayout(page, info, `html-frame-${width}-${theme}`, {
         scope: `article[data-slot="${fixture.second.entry.slotId}"]`
