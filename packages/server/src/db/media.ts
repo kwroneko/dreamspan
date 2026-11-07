@@ -6,3 +6,6 @@ export const mediaPath = (sha256: string) => `media/${sha256.slice(0, 2)}/${sha2
 
 /** Whether a stored path is one `mediaPath` makes, so it can't name a file anywhere else. */
 export const isMediaPath = (path: string) => /^media\/[0-9a-f]{2}\/[0-9a-f]{64}$/.test(path)
+
+/** Whether a path is a card source's cached image (`sources/cache.ts`), which thumbnails are made from too. */
+export const isSourceCachePath = (path: string) => /^cache\/sources\/blobs\/[0-9a-f]{2}\/[0-9a-f]{64}$/.test(path)

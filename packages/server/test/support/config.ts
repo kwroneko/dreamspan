@@ -60,9 +60,11 @@ const testPasswordCost = Layer.succeed(PasswordCost)({ n: 2 ** 10, r: 8, p: 1 })
 export const serverLayer = (
   config: AppConfigShape,
   generator?: typeof ContextGenerator.layer,
-  summaries = Summarizer.layer
+  summaries = Summarizer.layer,
+  /** The card sources: the fake archive's adapter for cardSources.test.ts. */
+  sources?: Parameters<typeof serverWith>[4]
 ) =>
-  serverWith(generator ?? ContextGenerator.layer, summaries).pipe(
+  serverWith(generator ?? ContextGenerator.layer, summaries, undefined, undefined, sources).pipe(
     Layer.provide([Layer.succeed(AppConfig)(config), testPasswordCost, testBundles])
   )
 

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto"
 import { readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Effect } from "effect"
-import { isMediaPath } from "../db/media.ts"
+import { isMediaPath, isSourceCachePath } from "../db/media.ts"
 import { type AvatarCrop, picturePixels, cropKey, cropPixels, defaultCrop, MEDIA_WIDTHS } from "@rp/shared/media.ts"
 import { ThumbnailFailed } from "./ops.ts"
 
@@ -38,7 +38,7 @@ const write = async (target: string, output: Buffer) => {
  * the 2:3 part of the image, named in the file, so a changed cutout is another file and ETag.
  */
 const derive = async (dataDir: string, path: string, widths: ReadonlyArray<number>, crop?: AvatarCrop | null) => {
-  if (!isMediaPath(path)) throw new Error("invalid media path")
+  if (!isMediaPath(path) && !isSourceCachePath(path)) throw new Error("invalid media path")
   const original = join(dataDir, path)
   const cut = crop === undefined ? "" : `-c${cropKey(crop)}`
   const relative = (width: number) => `${path}.thumb-v1-${width}${cut}.webp`

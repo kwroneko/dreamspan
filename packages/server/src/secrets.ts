@@ -6,7 +6,7 @@
 // generated at first start into DATA_DIR/secret.key (owner, 2026-10-10: setup must be
 // trivial). With the key file next to the database, encryption protects a leaked database
 // or backup on its own, not a copy of the whole data directory.
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto"
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto"
 import { chmodSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { Context, Effect, Layer, Option, Redacted, Schema } from "effect"
@@ -42,6 +42,11 @@ export interface SecretsShape {
    */
   readonly encrypt: (plaintext: string, binding: string) => Uint8Array
   readonly decrypt: (blob: Uint8Array, binding: string) => Effect.Effect<string, SecretUnreadable>
+  /**
+   * A MAC of `data` (HMAC-SHA256 under a key derived for `purpose`, base64url): for handles the
+   * server issues and must recognize later, such as card sources' image keys.
+   */
+  readonly sign: (data: string, purpose: string) => string
 }
 
 export class Secrets extends Context.Service<Secrets, SecretsShape>()("rp/Secrets") {}
@@ -52,7 +57,17 @@ const deriveKey = (secret: string) =>
 
 export const makeSecrets = (secret: string): SecretsShape => {
   const key = deriveKey(secret)
+  const signingKeys = new Map<string, Buffer>()
+  const signingKey = (purpose: string) => {
+    let derived = signingKeys.get(purpose)
+    if (!derived) {
+      derived = Buffer.from(hkdfSync("sha256", Buffer.from(secret, "utf8"), "rp-harness", `sign ${purpose} v1`, 32))
+      signingKeys.set(purpose, derived)
+    }
+    return derived
+  }
   return {
+    sign: (data, purpose) => createHmac("sha256", signingKey(purpose)).update(data, "utf8").digest("base64url"),
     encrypt: (plaintext, binding) => {
       const nonce = randomBytes(NONCE_BYTES)
       const cipher = createCipheriv("aes-256-gcm", key, nonce)

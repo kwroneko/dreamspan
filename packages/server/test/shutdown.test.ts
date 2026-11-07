@@ -30,6 +30,8 @@ const start = async (): Promise<Running> => {
     cwd: serverDir,
     env: {
       ...process.env,
+      // No card source: a server started from main.ts would otherwise register cardex.
+      FAKE_CARD_SOURCE: "off",
       HOST: "127.0.0.1",
       PORT: "0",
       DATA_DIR: dataDir,

@@ -44,7 +44,7 @@ export function useHomeBrowse() {
         ...writeHomeSearch(changeHomeBrowse(readHomeSearch(prev), change))
       }),
       state: (prev) => ({ ...prev, homeBrowse: true }),
-      replace: change.filter === undefined,
+      replace: change.filter === undefined && change.source === undefined,
       resetScroll: false
     })
   }

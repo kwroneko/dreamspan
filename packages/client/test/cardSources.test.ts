@@ -91,6 +91,29 @@ it("names the other import sites by host and lists unknown URLs and ids plainly"
   ])
 })
 
+it("links a cardex card from its URL, its cardex: id and extensions.cardex, with the sites it was found on", () => {
+  const doc = card({
+    source: ["cardex:synthetic-lantern-2", "https://cardex.zip/c/synthetic-lantern-1"],
+    extensions: {
+      cardex: {
+        version: 1,
+        url: "https://cardex.zip/c/synthetic-lantern-1",
+        origins: [
+          { source: "chub", id: "x", url: "https://chub.ai/characters/synthcreator/lantern" },
+          { source: "unlisted_site", url: "https://cards.example/lantern" },
+          { source: "generic", url: "not a url" }
+        ]
+      }
+    }
+  })
+  expect(cardSources(doc)).toEqual([
+    { kind: "link", site: "cardex", url: "https://cardex.zip/c/synthetic-lantern-1", label: "synthetic-lantern-1" },
+    { kind: "link", site: "cardex", url: "https://cardex.zip/c/synthetic-lantern-2", label: "synthetic-lantern-2" },
+    { kind: "link", site: "Chub", url: "https://chub.ai/characters/synthcreator/lantern" },
+    { kind: "link", site: "cards.example", url: "https://cards.example/lantern" }
+  ])
+})
+
 it("lets a plugin add a recognizer that claims an id, and disable a built-in", () => {
   const dispose = sourceRecognizers.register({
     id: "plugin.synthetic-archive",

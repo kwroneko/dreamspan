@@ -63,6 +63,7 @@ import {
   VersionId
 } from "@rp/shared/chat.ts"
 import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
+import { RecentRemote, SourcePrefs } from "@rp/shared/cardSources.ts"
 import {
   ForkNote,
   ForkNoteSelection,
@@ -2576,6 +2577,30 @@ export class WriteOps extends RpcGroup.make(
     success: DisplayPrefs,
     error: StorageError
   }),
+  // --- Card sources (spec/CARD-SOURCES.md §5.2): the account's choices, merged by source.
+  Rpc.make("ChangeSourcePrefs", {
+    payload: {
+      userId: UserId,
+      change: Schema.Struct({
+        enabled: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.Boolean))),
+        keys: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
+        rating: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String)))
+      })
+    },
+    success: SourcePrefs,
+    error: StorageError
+  }),
+  /** Puts a remote card first in "Recently viewed", keeping the latest 50. */
+  Rpc.make("RecordRecentRemote", {
+    payload: { userId: UserId, entry: RecentRemote },
+    success: SourcePrefs,
+    error: StorageError
+  }),
+  Rpc.make("ClearRecentRemote", {
+    payload: { userId: UserId, sourceId: Schema.NullOr(Schema.String) },
+    success: SourcePrefs,
+    error: StorageError
+  }),
   /**
    * Records that a one-time notice was shown for `key` (the impersonation notice: a preset's
    * ref). Answers whether this call recorded it, so of two tabs only one shows it.
@@ -3717,6 +3742,8 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
   /** The user's display choices; the defaults where none are stored. */
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
+  /** The account's card-source choices and recently viewed cards; the defaults where none are stored. */
+  Rpc.make("GetSourcePrefs", { payload: { userId: UserId }, success: SourcePrefs, error: StorageError }),
   // --- Branches (DESIGN §3.2) and forks.
   /** The live forks of a chat of the user's, most recently current first. */
   Rpc.make("ListForks", {

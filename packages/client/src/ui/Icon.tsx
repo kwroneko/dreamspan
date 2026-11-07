@@ -153,6 +153,8 @@ const paths = {
   user: ["M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2", "M8 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0"],
   /** A person with a cross (Lucide user-x): personas excluded by the filter. */
   "user-x": ["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", "M5 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0", "m17 8 5 5", "m22 8-5 5"],
+  /** A circle with a slash (Lucide ban): an excluded tag, a filter that denies. */
+  ban: ["M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0", "m4.9 4.9 14.2 14.2"],
   people: [
     "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",
     "M5 7a4 4 0 1 0 8 0a4 4 0 1 0-8 0",

@@ -4,6 +4,7 @@ import type { SqlClient } from "effect/sql"
 import { makeRegistry } from "@rp/shared/registry.ts"
 import { DisplayPrefs } from "@rp/shared/chatApi.ts"
 import { BinLimits } from "@rp/shared/bin.ts"
+import { SourceAdminSettings, SourcePrefs } from "@rp/shared/cardSources.ts"
 import { CostRules } from "@rp/shared/costFormulas.ts"
 import { DecisionPointSetting } from "@rp/shared/decisions.ts"
 import { LcmDefaults, ModelChoice } from "@rp/shared/lcmSettings.ts"
@@ -39,6 +40,8 @@ const definitions: ReadonlyArray<SettingDefinition> = [
   { id: "generation.lcm", scope: "user", schema: Schema.NullOr(LcmDefaults) },
   { id: "regex.global", scope: "user", schema: GlobalScripts },
   { id: "bin.limits", scope: "user", schema: BinLimits },
+  { id: "sources", scope: "user", schema: SourcePrefs },
+  { id: "sources.admin", scope: "app", schema: SourceAdminSettings },
   {
     id: "cards.favourites",
     scope: "user",

@@ -3,7 +3,7 @@ import { Tooltip } from "./Tooltip.tsx"
 // id, so the same card always looks the same. A stack shows a chat's cast together.
 
 import type { AvatarCrop } from "@rp/shared/media.ts"
-import type { ComponentProps, CSSProperties } from "react"
+import { type ComponentProps, type CSSProperties, useState } from "react"
 import { PICTURE_TAB_MIME, PortraitFrame, usePortraitViewer } from "./Portrait.tsx"
 import { useMediaWidth } from "./mediaImage.ts"
 import { portraitUrl } from "./portraitParts.ts"
@@ -68,11 +68,14 @@ export function Avatar({
   shape: _shape,
   className = "",
   preview = false,
-  alt = ""
+  alt = "",
+  src
 }: {
   id: string
   name: string
   mediaId?: string | null
+  /** A picture that isn't a stored file (a card source's, through this server), at a width. */
+  src?: ((width: number) => string) | undefined
   /** The avatar's chosen cutout (§14.5c): what the portrait shows. Absent or null: the default. */
   crop?: AvatarCrop | null | undefined
   size?: AvatarSize
@@ -88,11 +91,16 @@ export function Avatar({
   // A filling portrait must not leave an inline baseline below it in collage cells.
   // That extra line-box space otherwise makes row gaps larger than column gaps.
   const box = `relative ${size === "fill" ? "flex" : "inline-flex"} shrink-0 overflow-hidden rounded-sm ${AVATAR_SIZES[size]} ${className}`
+  // A source's picture that fails to load shows the initials, as a card without one does.
+  const [failed, setFailed] = useState<string | null>(null)
+  const url = src && width !== undefined ? src(width) : null
+  const shown = mediaId !== null || (src !== undefined && failed !== url)
   const content = (
     <>
-      {mediaId !== null && width !== undefined && (
+      {shown && width !== undefined && (
         <img
-          src={portraitUrl(mediaId, width, crop)}
+          src={url ?? portraitUrl(mediaId!, width, crop)}
+          {...(url === null ? {} : { onError: () => setFailed(url) })}
           style={cutoutPosition(crop)}
           alt={alt}
           loading="lazy"
@@ -102,8 +110,8 @@ export function Avatar({
       )}
       <span
         aria-hidden="true"
-        {...(mediaId !== null ? { "data-image-fallback": true } : {})}
-        className={`size-full items-center justify-center text-[40cqi] leading-none font-semibold select-none ${mediaId !== null ? "bg-surface-raised text-muted" : `inline-flex ${tint(id)}`}`}
+        {...(shown ? { "data-image-fallback": true } : {})}
+        className={`size-full items-center justify-center text-[40cqi] leading-none font-semibold select-none ${shown ? "bg-surface-raised text-muted" : `inline-flex ${tint(id)}`}`}
       >
         {initials(name)}
       </span>

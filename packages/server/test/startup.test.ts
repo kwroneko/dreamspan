@@ -16,6 +16,8 @@ for (const secretKey of [undefined, "synthetic-server-secret"]) {
         cwd: resolve(import.meta.dirname, ".."),
         env: {
           ...process.env,
+          // No card source: a server started from main.ts would otherwise register cardex.
+          FAKE_CARD_SOURCE: "off",
           HOST: "127.0.0.1",
           PORT: "0",
           DATA_DIR: directory,
@@ -73,6 +75,8 @@ for (const entry of ["src/main.ts", "src/dev/main.ts"]) {
       cwd: resolve(import.meta.dirname, ".."),
       env: {
         ...process.env,
+        // No card source: a server started from main.ts would otherwise register cardex.
+        FAKE_CARD_SOURCE: "off",
         HOST: "127.0.0.1",
         PORT: "0",
         DATA_DIR: fixture,

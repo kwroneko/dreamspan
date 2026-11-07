@@ -139,7 +139,10 @@ export function CardFilterControl({
   withPersonas = false,
   compact = false,
   wrap = true,
-  archived = false
+  archived = false,
+  sources = [],
+  source = null,
+  onSource
 }: {
   value: CardFilter
   onChange: (filter: CardFilter) => void
@@ -151,45 +154,83 @@ export function CardFilterControl({
   /** Wraps onto more lines when narrow; off, the choices scroll sideways instead. */
   wrap?: boolean
   archived?: boolean
+  /**
+   * Card sources, after the filters and a divider (spec/CARD-SOURCES.md §3.2): a different
+   * place, not a filter of the user's cards. `count` only once one is open (null: none to show).
+   */
+  sources?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly count: string | null }>
+  /** The source shown instead of the filter's cards, or null. */
+  source?: string | null
+  onSource?: (id: string) => void
 }) {
   const counts = filterCounts(cards, withPersonas)
   const options = FILTERS.filter((f) => (f !== "groups" || groups !== undefined) && (f !== "archived" || archived))
   const count = (f: CardFilter) => (f === "groups" ? (groups ?? null) : counts[f])
-  const shown = options.includes(value) ? value : "all"
+  type Choice = CardFilter | `src.${string}`
+  const shown: Choice =
+    source !== null && sources.some((s) => s.id === source) ? `src.${source}` : options.includes(value) ? value : "all"
+  const choose = (choice: Choice) =>
+    choice.startsWith("src.") ? onSource?.(choice.slice(4)) : onChange(choice as CardFilter)
+  const sourceHint = (name: string) => `Shows cards on ${name}, a public card archive. Nothing is added to your cards.`
   if (compact)
     return (
-      <Select<CardFilter>
+      <Select<Choice>
         ariaLabel="Show"
         className="h-8! gap-1! px-2!"
         value={shown}
-        onValueChange={onChange}
-        items={options.map((f) => ({
-          value: f,
-          label: `${FILTER_LABELS[f]} · ${count(f)?.toLocaleString() ?? "…"}`,
-          description: FILTER_HINTS[f]
-        }))}
+        onValueChange={choose}
+        items={[
+          ...options.map((f) => ({
+            value: f as Choice,
+            label: `${FILTER_LABELS[f]} · ${count(f)?.toLocaleString() ?? "…"}`,
+            description: FILTER_HINTS[f]
+          })),
+          ...sources.map((s, index) => ({
+            value: `src.${s.id}` as Choice,
+            label: s.count === null ? s.name : `${s.name} · ${s.count}`,
+            description: sourceHint(s.name),
+            separatorBefore: index === 0
+          }))
+        ]}
       />
     )
   return (
-    <Segmented
+    <Segmented<Choice>
       wrap={wrap}
       label="Show"
       inlineDescription={false}
       value={shown}
-      onValueChange={onChange}
-      options={options.map((f) => ({
-        value: f,
-        description: FILTER_HINTS[f],
-        label: (
-          <>
-            {FILTER_LABELS[f]}
-            {/* Seen, not part of the choice's name: "Favourites", not "Favourites 2". */}
-            <span aria-hidden="true" className="font-normal text-muted tabular-nums">
-              {count(f)?.toLocaleString() ?? "…"}
-            </span>
-          </>
-        )
-      }))}
+      onValueChange={choose}
+      options={[
+        ...options.map((f) => ({
+          value: f as Choice,
+          description: FILTER_HINTS[f],
+          label: (
+            <>
+              {FILTER_LABELS[f]}
+              {/* Seen, not part of the choice's name: "Favourites", not "Favourites 2". */}
+              <span aria-hidden="true" className="font-normal text-muted tabular-nums">
+                {count(f)?.toLocaleString() ?? "…"}
+              </span>
+            </>
+          )
+        })),
+        ...sources.map((s, index) => ({
+          value: `src.${s.id}` as Choice,
+          description: sourceHint(s.name),
+          separatorBefore: index === 0,
+          label: (
+            <>
+              {s.name}
+              {s.count !== null && (
+                <span aria-hidden="true" className="font-normal text-muted tabular-nums">
+                  {s.count}
+                </span>
+              )}
+            </>
+          )
+        }))
+      ]}
     />
   )
 }
@@ -202,19 +243,27 @@ export function CardFilterControl({
  */
 export function IncludePersonas({
   browse,
-  onChange
+  onChange,
+  disabledReason
 }: {
   browse: CardBrowse
   onChange: (change: Partial<CardBrowse>) => void
+  /** Shown but unavailable (a card source lists no personas): why, on hover. */
+  disabledReason?: string | undefined
 }) {
-  const hidden = browse.filter === "personas" || browse.filter === "groups" || browse.filter === "archived"
+  const hidden =
+    disabledReason === undefined &&
+    (browse.filter === "personas" || browse.filter === "groups" || browse.filter === "archived")
+  const disabled = disabledReason !== undefined
   return (
     <IconButton
       label="Include personas"
-      hint={browse.withPersonas ? "Click to hide personas" : "Click to show personas"}
-      icon={browse.withPersonas ? "user" : "user-x"}
-      aria-pressed={browse.withPersonas}
-      className={`${hidden ? "invisible" : ""} ${browse.withPersonas ? "" : "text-text!"} aria-pressed:bg-surface-raised aria-pressed:text-accent`}
+      hint={disabledReason ?? (browse.withPersonas ? "Click to hide personas" : "Click to show personas")}
+      icon={browse.withPersonas && !disabled ? "user" : "user-x"}
+      aria-pressed={browse.withPersonas && !disabled}
+      disabled={disabled}
+      focusableWhenDisabled
+      className={`${hidden ? "invisible" : ""} ${browse.withPersonas || disabled ? "" : "text-text!"} data-disabled:pointer-events-auto! data-disabled:opacity-50 aria-pressed:bg-surface-raised aria-pressed:text-accent`}
       onClick={() => onChange({ withPersonas: !browse.withPersonas })}
     />
   )
@@ -250,19 +299,29 @@ const orderName = (order: SortOrder, reversed: boolean) => ORDER_NAMES[order][re
 export function SortDirection({
   order: kind,
   reversed,
-  onToggle
+  onToggle,
+  disabledReason
 }: {
   order: SortOrder
   reversed: boolean
   onToggle: () => void
+  /** The sort has one direction only: the button stays, disabled, saying so. */
+  disabledReason?: string | undefined
 }) {
   const order = orderName(kind, reversed)
   return (
     <IconButton
       label={`Order: ${order}`}
-      hint={`Click to sort ${orderName(kind, !reversed).toLowerCase()}`}
+      hint={disabledReason ?? `Click to sort ${orderName(kind, !reversed).toLowerCase()}`}
       icon={reversed ? "sortUp" : "sortDown"}
       onClick={onToggle}
+      {...(disabledReason === undefined
+        ? {}
+        : {
+            disabled: true,
+            focusableWhenDisabled: true,
+            className: "data-disabled:pointer-events-auto! data-disabled:opacity-50"
+          })}
     />
   )
 }

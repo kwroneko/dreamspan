@@ -20,6 +20,7 @@ import {
   readDefaults
 } from "./generationSettings.ts"
 import { makeDisplayPrefsWriteHandlers } from "./displayPrefs.ts"
+import { makeSourcePrefsWriteHandlers } from "./sourcePrefs.ts"
 import { makeTokenCountingWriteHandlers } from "./tokenCounting.ts"
 import type { WriteOps } from "./ops.ts"
 import { LcmSettingsInvalid } from "@rp/shared/lcm.ts"
@@ -88,6 +89,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
 
   const handlers = {
     ...(yield* makeDisplayPrefsWriteHandlers),
+    ...(yield* makeSourcePrefsWriteHandlers),
     ...(yield* makeTokenCountingWriteHandlers),
     StartRollout: ({
       userId,
