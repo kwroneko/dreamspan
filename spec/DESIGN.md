@@ -1453,6 +1453,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 - **[P] (splitsection)** The count covers both groups. The relation line uses the split chat's first branch's split point, the same one the branch labels use: the number of messages it shares and the time of its first own message. A source-only chat now has a one-row list instead of a link in the header; an open section is never taller than its rows, so a short list leaves the rest to Chats. **Built**, ARCHITECTURE §12.
 
 ### 10.2 Rendering
+
+- **[D]** (owner brief, 2026-11-07): "Add one client copy helper with a fallback (a hidden textarea plus document.execCommand('copy')) used by both" message/reasoning/snippet copy and recovered-text copy. "Copy must still copy the raw text." **Built; obsolete as an implementation requirement** (followups-ac, ARCHITECTURE §14).
 - **[D]** HTML rendering must be possible (ST's HTML "games"). Interactivity will be expanded later, once the harness is agentic.
 - **[D]** Per-turn HTML makes the context explode, so recent and older messages need to be shown differently.
 - **[D]** Message text renders as ST renders it (owner, 2026-10-29; ST 1.19 `messageFormatting`): text in double quotes ("…", “…”, «…», 「…」, 『…』, ＂…＂, not inside code) in the quote colour, `*italics*` in the italics colour (italics inside a quote keep the quote colour), `__text__` underlined in the underline colour, single line breaks kept as line breaks, and unclosed Markdown fixed on every message. The four colours (main text, italics, underline, quote) are theme colours with ST's defaults (adjusted to read well in the light theme), and the user can change them in display settings. **Built W3** (ARCHITECTURE §14); HTML remains deferred below.

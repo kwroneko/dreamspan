@@ -1,4 +1,5 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { copyText } from "../../copyText.ts"
 // The recycle bin (DESIGN §6.2): what the user deleted, newest first, to restore where it was
 // or delete for good (the one place that asks first), and the text recovered from drafts.
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
@@ -362,7 +363,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
               hint="Copies this recovered text."
               variant="primary"
               onClick={async () => {
-                await navigator.clipboard.writeText(full).then(
+                await copyText(full).then(
                   () => setCopied(true),
                   () => setCopied(false)
                 )
