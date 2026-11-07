@@ -485,9 +485,17 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
       for (const layer of nodes) {
         if (!layer.dataset.layoutOverlay || css(layer).position !== "absolute" || !visible(layer, false)) continue
         const host = layer.offsetParent as HTMLElement | null
-        const box = rect(layer)
+        // Only local picture overlays use this rule. Page positioners and portalled
+        // popups can cover unrelated portraits (or contain their own portrait rows).
+        // Stop at their positioned host so local toggles inside a popup stay audited.
         if (
           !host ||
+          host === document.body ||
+          [...ancestors(layer)].some((p) => p.hasAttribute("data-base-ui-portal") && host.contains(p))
+        )
+          continue
+        const box = rect(layer)
+        if (
           ![...host.querySelectorAll<HTMLElement>(pictures)].some((p) => {
             const r = rect(p)
             return (

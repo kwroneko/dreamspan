@@ -119,6 +119,24 @@ for (const [width, half] of [
       test.setTimeout(120_000)
       const name = `menu-${width}${half ? "-half" : ""}-${theme}`
       const dialog = await open(page, width, theme, half)
+      if (half)
+        expect(
+          await dialog.evaluate((popup) => {
+            const box = popup.getBoundingClientRect()
+            return [...document.querySelectorAll("article[data-slot] [data-portrait]")].some((portrait) => {
+              const r = portrait.getBoundingClientRect()
+              return (
+                r.width &&
+                r.height &&
+                r.left < box.right &&
+                box.left < r.right &&
+                r.top < box.bottom &&
+                box.top < r.bottom
+              )
+            })
+          }),
+          "the half-width menu covers message portraits"
+        ).toBe(true)
       await shot(page, name)
       await expectLayout(page, test.info(), name, { scope: '[role="dialog"]' })
       // Scrolled to the end: the last rows and the footer.

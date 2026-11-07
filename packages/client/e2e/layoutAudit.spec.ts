@@ -343,6 +343,44 @@ test("the detector catches geometry defects and respects documented intent", asy
   expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
 })
 
+test("picture overlays exclude page positioners and portalled popups, but audit their contents", async ({ page }) => {
+  await page.setContent(`<style>
+    body { margin: 20px; }
+    [data-portrait] { display: block; width: 120px; height: 180px; }
+    button { width: 32px; height: 32px; padding: 0; border: 0; background: transparent; }
+    .popup { padding: 12px; background: white; }
+  </style>
+  <span data-portrait></span>
+  <div data-layout-overlay="Page positioner" style="position:absolute;top:20px;left:20px">
+    <div class="popup"><button>Page</button></div>
+  </div>
+  <div style="position:relative">
+    <div data-base-ui-portal>
+      <div data-layout-overlay="Portalled positioner" style="position:absolute;top:0;left:0">
+        <div class="popup" role="dialog"><span data-portrait></span><button>Pick</button>
+          <div style="position:relative">
+            <span data-portrait></span>
+            <button id="local" data-layout-overlay="Local portrait toggle" style="position:absolute;top:8px;left:8px">S</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`)
+  // The popup is portalled into a positioned container rather than document.body.
+  // Its local portrait toggle still needs a backing; skipping a portal's whole subtree
+  // would hide that real defect.
+  expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([
+    expect.objectContaining({ selector: "#local", measurement: "no backing of its own over the picture" })
+  ])
+  await page.locator("#local").evaluate((el) => (el.style.background = "white"))
+  expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
+  await page.locator('[role="dialog"]').evaluate((el) => {
+    el.style.padding = "0"
+    el.style.border = "1px solid"
+  })
+  expect((await layoutAudit(page)).some((v) => v.kind === "inset")).toBe(true)
+})
+
 test("picture overlays report hidden space between visible controls", async ({ page }) => {
   await page.setContent(`<style>
     body { margin: 20px; }
