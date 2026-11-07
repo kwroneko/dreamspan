@@ -12,6 +12,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { condensed, level1 } from "./support/summaries.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
+import { expectFlashedThenUnmarked, recordFlashes } from "./support/flashes.ts"
 
 const server = serverPerFile(withAdmin)
 test.setTimeout(180_000)
@@ -155,12 +156,13 @@ for (const [name, viewport] of [
         const chat = await makeChat(`timeline ${name} ${colorScheme}`)
         await timeline(true)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-        // A link to message 15, inside the level-2 summary: it opens to it, highlighted.
+        // A link to message 15, inside the level-2 summary: it opens to it, flashing it.
+        await recordFlashes(page)
         await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[14]!.slotId}`)
         const target = page.locator(`article[data-slot="${chat.entries[14]!.slotId}"]`)
         await expect(target).toBeVisible({ timeout: 30_000 })
-        await expect(target).toHaveClass(/border-accent/)
         await expect(target).toBeInViewport()
+        await expectFlashedThenUnmarked(page, target)
         const top = page.locator(`[data-timeline-summary="${chat.top.id}"]`)
         await expect(top.getByRole("button", { name: "Collapse messages 1–20", exact: true }).first()).toHaveAttribute(
           "aria-expanded",

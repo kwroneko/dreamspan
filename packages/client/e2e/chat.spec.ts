@@ -7,6 +7,7 @@ import type { Chat, SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
+import { expectFlashedThenUnmarked, recordFlashes } from "./support/flashes.ts"
 import { REPLY, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, startServer, withAdmin } from "./support/server.ts"
@@ -126,8 +127,13 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
     await expect(page.getByText("Link copied")).toBeVisible()
     const link = await page.evaluate(() => navigator.clipboard.readText())
     expect(link).toMatch(/slot=/)
+    await recordFlashes(page)
     await page.goto(link)
-    await expect(page.locator("article[data-slot]").first()).toHaveClass(/border-accent/)
+    // It flashes, then is left unmarked.
+    await expectFlashedThenUnmarked(
+      page,
+      page.locator(`article[data-slot="${new URL(link).searchParams.get("slot")}"]`)
+    )
 
     // A branch from the first message: the reply below it isn't on it.
     await messageMenu(page.getByRole("article", { name: "Your message" }).first(), "Branch from here")
@@ -139,7 +145,7 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
     await repliesDone(page, 1)
     // The branch is now the chat's latest: the chat's own URL opens on it.
     await page.goto(page.url().split("?")[0]!)
-    await expect(page.getByText("Walk away instead.")).toBeVisible()
+    await expect(page.getByTestId("messages").getByText("Walk away instead.")).toBeVisible()
     await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)
 
     // Deleting goes to the bin; the message is gone from the path.
@@ -176,9 +182,9 @@ test("a message sent from an older part of the chat lands at the end, with its r
     })
   )
   await page.goto(`${server().url}/chats/${chat.id}?slot=${first}`)
-  await expect(page.getByText("Message 0", { exact: true })).toBeVisible()
+  await expect(page.getByTestId("messages").getByText("Message 0", { exact: true })).toBeVisible()
   await send(page, "From the start")
-  await expect(page.getByText("From the start")).toBeVisible()
+  await expect(page.getByTestId("messages").getByText("From the start")).toBeVisible()
   await repliesDone(page, 1)
   const path = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 3 })
@@ -200,7 +206,7 @@ test("a branch's URL follows the messages sent on it", async ({ page }) => {
   await repliesDone(page, 1)
   await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBe(branch)
   await page.reload()
-  await expect(page.getByText("Second, on the branch")).toBeVisible()
+  await expect(page.getByTestId("messages").getByText("Second, on the branch")).toBeVisible()
   await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)
 })
 

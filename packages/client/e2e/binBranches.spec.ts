@@ -6,6 +6,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
+import { expectFlashedThenUnmarked, recordFlashes } from "./support/flashes.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, DB_WORKERS: "bundle" })
@@ -102,16 +103,17 @@ for (const width of [1440, 390]) {
     await expect(oldEntry.getByRole("link")).toHaveCount(0)
     await shots(page, "purge-branches", width)
 
-    // A plain click opens the branch at the message, highlighted, in a new tab; the dialog stays.
+    // A plain click opens the branch at the message, flashing it, in a new tab; the dialog stays.
     // A new tab loads the whole app cold, which took over 10 s on a loaded host: it gets 30.
     const loading = { timeout: 30_000 }
+    await recordFlashes(context)
     const opened = context.waitForEvent("page")
     await sideLink.click()
     const tab = await opened
     await tab.waitForLoadState()
     const article = tab.locator(`article[data-slot="${shared}"]`)
     await expect(article).toBeVisible(loading)
-    await expect(article).toHaveClass(/border-accent/)
+    await expectFlashedThenUnmarked(tab, article)
     await expect(tab.getByTestId("messages").getByText("Down the side road")).toBeVisible()
     await tab.close()
     const above = context.waitForEvent("page")
@@ -120,7 +122,7 @@ for (const width of [1440, 390]) {
     await firstTab.waitForLoadState()
     const rootArticle = firstTab.locator(`article[data-slot="${root}"]`)
     await expect(rootArticle).toBeVisible(loading)
-    await expect(rootArticle).toHaveClass(/border-accent/)
+    await expectFlashedThenUnmarked(firstTab, rootArticle)
     await expect(firstTab.getByTestId("messages").getByText("Only the first branch has this")).toBeVisible()
     await firstTab.close()
     await expect(dialog).toBeVisible()

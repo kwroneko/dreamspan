@@ -218,6 +218,17 @@ export function useShellNavigation() {
 }
 
 /**
+ * Whether opening a character's chat (its tile, its row) goes to the line the character last
+ * spoke, which then flashes (chat/jumpFlash.ts), rather than to the chat's end. The owner called
+ * it "dubiously useful" (2026-11-06): `false` drops it everywhere.
+ */
+const OPEN_AT_LAST_LINE = true
+
+/** The `slot` a character's chat opens at (`OPEN_AT_LAST_LINE`); none: its end. */
+const lastLine = (latest: { readonly slot: string | null }) =>
+  OPEN_AT_LAST_LINE && latest.slot ? { slot: latest.slot } : {}
+
+/**
  * Where a character's tile links: the chat it opens (its latest), else a new one, with the
  * sidebar on the character's chats and its card's panel, as a click opens it (`useOpenCharacter`),
  * so Open beside, Alt-click and a new browser tab open the character too (owner, 2026-11-06).
@@ -230,7 +241,7 @@ const characterLink = (card: ShellCard) => {
     ? {
         to: "/chats/$chatId" as const,
         params: { chatId: latest.chatId },
-        search: { ...character, fork: latest.forkId, ...(latest.slot ? { slot: latest.slot } : {}) }
+        search: { ...character, fork: latest.forkId, ...lastLine(latest) }
       }
     : { to: "/cards/$entityId/chat" as const, params: { entityId: entity }, search: character }
 }
@@ -261,7 +272,7 @@ export function useOpenCharacter() {
           character: entity,
           fork: latest.forkId,
           panel,
-          ...(latest.slot ? { slot: latest.slot } : {})
+          ...lastLine(latest)
         }
       })
     else
