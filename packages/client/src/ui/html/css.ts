@@ -59,7 +59,12 @@ function closingQuote(text: string, start: number) {
 function plain(value: string) {
   return value
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16) || 0xfffd))
+    .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) => {
+      const point = Number.parseInt(hex, 16)
+      return String.fromCodePoint(
+        point === 0 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff) ? 0xfffd : point
+      )
+    })
     .replace(/\\(.)/g, "$1")
     .toLowerCase()
 }

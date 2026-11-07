@@ -88,6 +88,12 @@ describe("scopeCss", () => {
       ".message-html .custom-box { &:hover { color: red } & > span { color: blue } }"
     )
   })
+
+  it("handles invalid Unicode escapes in hostile declarations without throwing", () => {
+    expect(() => scopeCss(String.raw`.box { color: \ffffff }`)).not.toThrow()
+    expect(() => cleanStyle(String.raw`color: \110000`)).not.toThrow()
+    expect(() => loads(String.raw`url(\ffffff)`)).not.toThrow()
+  })
 })
 
 describe("cleanStyle", () => {
