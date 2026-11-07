@@ -22,6 +22,7 @@ import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import { EditorApi, ForkMergeApi, GalleryApi, CardArchiveApi } from "./editorApi.ts"
+import { CardSourcesApi } from "./cardSources.ts"
 import {
   AccountRejected,
   Forbidden,
@@ -403,6 +404,9 @@ export const AuthenticatedForkMergeApi = ForkMergeApi.middleware(Authentication)
 
 export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authentication)
 
+/** Card sources (cardSources.ts): browsing an archive through the server. */
+export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authentication)
+
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
@@ -427,6 +431,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedCardArchiveApi)
+  .merge(AuthenticatedCardSourcesApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)

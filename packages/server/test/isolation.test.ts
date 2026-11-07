@@ -2662,6 +2662,49 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       )
   },
+  // Card sources: this server registers none, so each names a source no one has. Their
+  // per-user namespace (keys, switches, cache, recently viewed) is cardSources.test.ts's,
+  // against the fake archive.
+  ListCardSources: {
+    probe: (actor) => Effect.map(actor.api.ListCardSources(), (list) => assert.lengthOf(list.sources, 0))
+  },
+  SetCardSourceEnabled: {
+    probe: (actor) => refused(actor.api.SetCardSourceEnabled({ sourceId: "cardex", enabled: false }), "NotFound")
+  },
+  SetCardSourceAdminDisabled: {
+    adminOnly: (actor) =>
+      refused(actor.api.SetCardSourceAdminDisabled({ sourceId: "cardex", disabled: true }), "Forbidden")
+  },
+  SetSourceCacheCap: {
+    adminOnly: (actor) => refused(actor.api.SetSourceCacheCap({ bytes: 1024 ** 3 }), "Forbidden")
+  },
+  SetCardSourceKey: {
+    probe: (actor) => refused(actor.api.SetCardSourceKey({ sourceId: "cardex", key: "k" }), "NotFound")
+  },
+  SetCardSourceRating: {
+    probe: (actor) => refused(actor.api.SetCardSourceRating({ sourceId: "cardex", rating: null }), "NotFound")
+  },
+  ClearSourceCache: { probe: (actor) => Effect.asVoid(actor.api.ClearSourceCache({ sourceId: null })) },
+  SourceCapabilities: {
+    probe: (actor) => refused(actor.api.SourceCapabilities({ sourceId: "cardex" }), "NotFound")
+  },
+  SourceSearch: {
+    probe: (actor) =>
+      refused(
+        actor.api.SourceSearch({
+          sourceId: "cardex",
+          query: { text: "", tags: [], excludeTags: [], filters: {}, sort: null, reverse: false },
+          page: null
+        }),
+        "NotFound"
+      )
+  },
+  SourceTags: { probe: (actor) => refused(actor.api.SourceTags({ sourceId: "cardex", prefix: "f" }), "NotFound") },
+  SourceCard: { probe: (actor) => refused(actor.api.SourceCard({ sourceId: "cardex", remoteId: "x" }), "NotFound") },
+  ListRecentRemote: {
+    probe: (actor) => Effect.map(actor.api.ListRecentRemote({ sourceId: "cardex" }), (list) => assert.lengthOf(list, 0))
+  },
+  ClearRecentRemote: { probe: (actor) => Effect.asVoid(actor.api.ClearRecentRemote({ sourceId: "cardex" })) },
   ListArchiveCandidates: {
     probe: (actor, owner) =>
       Effect.map(actor.api.ListArchiveCandidates({ criteria: { never: 1, inactive: 1 } }), (cards) =>

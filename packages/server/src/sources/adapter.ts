@@ -1,0 +1,90 @@
+// The card-source adapter (spec/CARD-SOURCES.md §2.2): what knows how to talk to one archive.
+// Adapters never fetch on their own: every request goes through the `SourceHttp` they're
+// given, which keeps them on their declared hosts, under the response caps and timeouts, and
+// behind the source's rate limit (guard.ts, limiter.ts).
+import type { RemoteSummary, SourceCapabilities, SourceFailed, SourceQuery, SourceTag } from "@rp/shared/cardSources.ts"
+import type { Effect } from "effect"
+
+/** A response, read whole under its cap. */
+export interface SourceResponse {
+  readonly status: number
+  readonly headers: Headers
+  readonly bytes: Uint8Array
+  readonly json: () => unknown
+}
+
+/** What a request may read: JSON is capped at 2 MiB, card files at 64 MiB, images at 16 MiB (§6.2). */
+export type ResponseKind = "json" | "card" | "image"
+
+export interface SourceHttp {
+  /**
+   * A GET on one of the adapter's hosts. A non-2xx status is answered as a response, except
+   * 401/403 (`unauthorized`), 404 (`not_found`) and 429 (`rate_limited`), which fail.
+   */
+  readonly get: (
+    url: URL,
+    kind: ResponseKind,
+    headers?: Readonly<Record<string, string>>
+  ) => Effect.Effect<SourceResponse, SourceFailed>
+  /** The user's API key for this source, when one is set. */
+  readonly apiKey: string | null
+}
+
+/** An adapter's summary: as the client's, but `thumb` and `image` are the adapter's own references. */
+export type AdapterSummary = RemoteSummary
+
+/** A card as a file: PNG (`chara`/`ccv3`), CHARX or V2/V3 JSON, as the archive gave it. */
+interface RemoteCardFile {
+  readonly bytes: Uint8Array
+  readonly fileName: string
+  readonly summary: AdapterSummary
+}
+
+interface AdapterPage {
+  readonly items: ReadonlyArray<AdapterSummary>
+  readonly next: string | null
+  readonly total?: number
+  readonly totalEstimated?: boolean
+}
+
+export interface CardSourceAdapter {
+  /** "cardex": namespaced in URLs and keys. */
+  readonly id: string
+  /** "cardex": the Show option's label (owner, 2026-11-06). */
+  readonly name: string
+  /** The only hosts it may contact (§6.2), as `host` or `host:port`. */
+  readonly hosts: ReadonlyArray<string>
+  /** The scheme it uses on them; `http` only for a source on this machine (`local`). */
+  readonly scheme?: "https" | "http"
+  /**
+   * The hosts are on this machine or the local network, as a development source's are.
+   * Otherwise a host resolving to a private or loopback address is refused unless the admin
+   * listed it by name on the network bypass list (§6.2).
+   */
+  readonly local?: boolean
+  /** Whether the API takes a key. */
+  readonly key?: "none" | "optional" | "required"
+  /** The archive's documented rate; 2 requests/s with a burst of 8 when unset (§5.5). */
+  readonly rate?: { readonly perSecond: number; readonly burst: number }
+  readonly capabilities: (http: SourceHttp) => Effect.Effect<SourceCapabilities, SourceFailed>
+  readonly search: (
+    http: SourceHttp,
+    query: SourceQuery,
+    page: string | null
+  ) => Effect.Effect<AdapterPage, SourceFailed>
+  readonly tags?: (
+    http: SourceHttp,
+    prefix: string
+  ) => Effect.Effect<ReadonlyArray<typeof SourceTag.Type>, SourceFailed>
+  readonly card: (http: SourceHttp, remoteId: string) => Effect.Effect<RemoteCardFile, SourceFailed>
+  /** An image a summary referenced (`thumb` or `image`), as bytes. */
+  readonly image: (http: SourceHttp, ref: string) => Effect.Effect<Uint8Array, SourceFailed>
+  /** Current versions for many ids at once, for update checks (phase 5). */
+  readonly versions?: (
+    http: SourceHttp,
+    ids: ReadonlyArray<string>
+  ) => Effect.Effect<
+    ReadonlyArray<{ readonly remoteId: string; readonly version: AdapterSummary["version"] }>,
+    SourceFailed
+  >
+}

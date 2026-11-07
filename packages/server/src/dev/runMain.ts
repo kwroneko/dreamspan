@@ -11,6 +11,7 @@ import { AppConfig } from "../config.ts"
 import { DecisionEngine } from "../decision/engine.ts"
 import { serverWith } from "../server.ts"
 import * as FakeGenerator from "./fakeGenerator.ts"
+import { fakeCardSources } from "./fakeCardSource.ts"
 
 class FakeGeneratorInProduction extends Schema.TaggedError<FakeGeneratorInProduction>()(
   "FakeGeneratorInProduction",
@@ -43,19 +44,35 @@ const options = Config.all({
    * Set, every decision point waits this many milliseconds for its answer instead of its own
    * deadline: browser tests that hold a decision while they look at the page.
    */
-  decisionTimeoutMs: Config.option(Config.Int(serverEnvironment.DECISION_TIMEOUT_MS))
+  decisionTimeoutMs: Config.option(Config.Int(serverEnvironment.DECISION_TIMEOUT_MS)),
+  /**
+   * The fake card archive (spec/CARD-SOURCES.md §10), registered as "cardex" in place of the
+   * real adapter, so the development instance's content stays entirely ours: unset, on a free
+   * port; a number, on that port (browser tests read its counts there); `off`, none.
+   */
+  fakeCardSource: Config.String(serverEnvironment.FAKE_CARD_SOURCE).pipe(Config.withDefault("0"))
 })
 
 Effect.gen(function* () {
   if (process.env[serverEnvironment.NODE_ENV] === "production") return yield* new FakeGeneratorInProduction()
-  const { tokensPerSecond, tokens, seed, burstMs, reasoningTokens, sectionTokens, cotTokens, decisionTimeoutMs } =
-    yield* options
+  const {
+    tokensPerSecond,
+    tokens,
+    seed,
+    burstMs,
+    reasoningTokens,
+    sectionTokens,
+    cotTokens,
+    decisionTimeoutMs,
+    fakeCardSource
+  } = yield* options
   const decisions = Option.match(decisionTimeoutMs, {
     onNone: () => DecisionEngine.layer,
     onSome: (timeoutMs) => DecisionEngine.layerWith({ timeoutMs })
   })
+  const sources = fakeCardSources(fakeCardSource)
   const server = Option.match(tokensPerSecond, {
-    onNone: () => serverWith(ContextGenerator.layer, undefined, undefined, decisions),
+    onNone: () => serverWith(ContextGenerator.layer, undefined, undefined, decisions, sources),
     onSome: (rate) =>
       serverWith(
         FakeGenerator.layer({
@@ -69,7 +86,8 @@ Effect.gen(function* () {
         }),
         undefined,
         undefined,
-        decisions
+        decisions,
+        sources
       )
   })
   return yield* Layer.launch(server.pipe(Layer.provide(AppConfig.layer)))

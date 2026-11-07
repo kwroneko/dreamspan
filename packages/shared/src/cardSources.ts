@@ -1,0 +1,281 @@
+// Card sources (spec/CARD-SOURCES.md): places cards can be browsed from that aren't the
+// user's library, such as cardex, a third-party public archive. The server talks to the
+// source (packages/server/src/sources/); the browser only talks to the server. These are the
+// shapes that cross to the client, and the RPCs, in a group of their own (AppCoreApi is at
+// TypeScript's instantiation depth, TS2589).
+import { Schema } from "effect"
+import { Rpc, RpcGroup } from "effect/rpc"
+import { Forbidden, NotFound, ServerError } from "./errors.ts"
+
+/** A source's id: lowercase, safe in URLs and keys (`show=src.<id>`). */
+const SourceId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,39}$/))
+
+/** One criterion the source can filter by (§2.3). The filter bar is generated from these. */
+const SourceFilter = Schema.Union([
+  Schema.Struct({
+    id: Schema.String,
+    label: Schema.String,
+    kind: Schema.Literal("choice"),
+    options: Schema.Array(Schema.Struct({ value: Schema.String, label: Schema.String })),
+    multi: Schema.Boolean,
+    about: Schema.optionalKey(Schema.String)
+  }),
+  Schema.Struct({
+    id: Schema.String,
+    label: Schema.String,
+    kind: Schema.Literal("range"),
+    unit: Schema.optionalKey(Schema.String),
+    min: Schema.optionalKey(Schema.Number),
+    max: Schema.optionalKey(Schema.Number),
+    about: Schema.optionalKey(Schema.String)
+  }),
+  Schema.Struct({
+    id: Schema.String,
+    label: Schema.String,
+    kind: Schema.Literal("toggle"),
+    about: Schema.optionalKey(Schema.String)
+  }),
+  Schema.Struct({
+    id: Schema.String,
+    label: Schema.String,
+    kind: Schema.Literal("text"),
+    about: Schema.optionalKey(Schema.String)
+  })
+])
+export type SourceFilter = typeof SourceFilter.Type
+
+export const SourceCapabilities = Schema.Struct({
+  text: Schema.Boolean,
+  tags: Schema.Struct({ include: Schema.Boolean, exclude: Schema.Boolean, suggest: Schema.Boolean }),
+  filters: Schema.Array(SourceFilter),
+  sorts: Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String, reversible: Schema.Boolean })),
+  /** Which filter is the content rating, and the source's own anonymous default for it (§5.3). */
+  ratings: Schema.optionalKey(Schema.Struct({ filterId: Schema.String, default: Schema.NullOr(Schema.String) })),
+  paging: Schema.Literals(["cursor", "page"]),
+  /** Labels for the numbers in a summary's `stats`, by key; the first is the main one. */
+  stats: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String })))
+})
+export type SourceCapabilities = typeof SourceCapabilities.Type
+
+/** A range filter's bounds; either may be left open. */
+const SourceRange = Schema.Struct({
+  min: Schema.optionalKey(Schema.Number),
+  max: Schema.optionalKey(Schema.Number)
+})
+/** A filter's value by its kind: a choice (or several), a range, a toggle, a text. */
+export const SourceFilterValue = Schema.Union([Schema.String, Schema.Array(Schema.String), Schema.Boolean, SourceRange])
+export type SourceFilterValue = typeof SourceFilterValue.Type
+
+/** What the user asked the source for: only what they chose (§5.3). */
+export const SourceQuery = Schema.Struct({
+  text: Schema.String.check(Schema.isMaxLength(500)),
+  tags: Schema.Array(Schema.String.check(Schema.isMaxLength(100))).check(Schema.isMaxLength(50)),
+  excludeTags: Schema.Array(Schema.String.check(Schema.isMaxLength(100))).check(Schema.isMaxLength(50)),
+  filters: Schema.Record(Schema.String, SourceFilterValue),
+  sort: Schema.NullOr(Schema.String),
+  reverse: Schema.Boolean
+})
+export type SourceQuery = typeof SourceQuery.Type
+
+export const emptySourceQuery: SourceQuery = {
+  text: "",
+  tags: [],
+  excludeTags: [],
+  filters: {},
+  sort: null,
+  reverse: false
+}
+
+/** A card's version on the source: its id (cardex: the file's SHA-256), and its successor. */
+const RemoteVersion = Schema.Struct({
+  id: Schema.String,
+  updatedAt: Schema.optionalKey(Schema.Number),
+  supersededBy: Schema.optionalKey(Schema.String)
+})
+
+/** A card as the source lists it. `thumb` and `image` are keys this server issued, never URLs. */
+export const RemoteSummary = Schema.Struct({
+  remoteId: Schema.String,
+  name: Schema.String,
+  creator: Schema.optionalKey(Schema.String),
+  tagline: Schema.optionalKey(Schema.String),
+  tags: Schema.Array(Schema.String),
+  /** Its content rating, as the source words it; only when it isn't the source's default (safe) one. */
+  rating: Schema.optionalKey(Schema.String),
+  tokens: Schema.optionalKey(Schema.Number),
+  thumb: Schema.optionalKey(Schema.String),
+  image: Schema.optionalKey(Schema.String),
+  version: RemoteVersion,
+  url: Schema.optionalKey(Schema.String),
+  stats: Schema.optionalKey(Schema.Record(Schema.String, Schema.Number))
+})
+export type RemoteSummary = typeof RemoteSummary.Type
+
+export const SourcePage = Schema.Struct({
+  items: Schema.Array(RemoteSummary),
+  next: Schema.NullOr(Schema.String),
+  total: Schema.optionalKey(Schema.Number),
+  /** The total is the source's estimate, not an exact count. */
+  totalEstimated: Schema.optionalKey(Schema.Boolean)
+})
+export type SourcePage = typeof SourcePage.Type
+
+export const SourceTag = Schema.Struct({
+  tag: Schema.String,
+  label: Schema.optionalKey(Schema.String),
+  count: Schema.optionalKey(Schema.Number)
+})
+
+/** Why a request to a source failed, so the UI can word each case (§5.4). */
+export const SourceFailure = Schema.Literals([
+  "unreachable",
+  "rate_limited",
+  "unauthorized",
+  "not_found",
+  "bad_response",
+  "disabled"
+])
+export type SourceFailure = typeof SourceFailure.Type
+
+export class SourceFailed extends Schema.TaggedError<SourceFailed>()("SourceFailed", {
+  sourceId: Schema.String,
+  reason: SourceFailure,
+  /** For `rate_limited`: when to try again. */
+  retryAfterMs: Schema.optionalKey(Schema.Number),
+  message: Schema.String
+}) {}
+
+/** A source as this user has it: whether it's offered, and whether its key is set. */
+export const SourceInfo = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  /** Turned off for every account by an admin: the user's switch is hidden. */
+  adminDisabled: Schema.Boolean,
+  /** The user's own switch ("Show cardex"), on by default (§9 D1). */
+  userEnabled: Schema.Boolean,
+  /** Offered in Show: neither switch is off. */
+  enabled: Schema.Boolean,
+  key: Schema.Literals(["none", "optional", "required"]),
+  hasKey: Schema.Boolean,
+  /** The content rating chosen last, for the next first search (§5.3); null: the source's default. */
+  rating: Schema.NullOr(Schema.String)
+})
+export type SourceInfo = typeof SourceInfo.Type
+
+export const SourceList = Schema.Struct({
+  sources: Schema.Array(SourceInfo),
+  /** Admins only: the instance's cache cap and what's used of it. */
+  cache: Schema.optionalKey(Schema.Struct({ capBytes: Schema.Number, usedBytes: Schema.Number }))
+})
+export type SourceList = typeof SourceList.Type
+
+/** A remote card the user opened, for "Recently viewed" (§4.1). No definitions. */
+export const RecentRemote = Schema.Struct({
+  sourceId: Schema.String,
+  remoteId: Schema.String,
+  name: Schema.String,
+  creator: Schema.optionalKey(Schema.String),
+  thumb: Schema.optionalKey(Schema.String),
+  at: Schema.Number
+})
+export type RecentRemote = typeof RecentRemote.Type
+
+/** A remote card opened: its parsed document as the importer reads it, and what the source said. */
+const RemoteCard = Schema.Struct({
+  summary: RemoteSummary,
+  /** The card document as JSON text (`@rp/shared/docs/card.ts`), or null when it couldn't be read. */
+  docJson: Schema.NullOr(Schema.String),
+  /** The parser's report lines, for a card that couldn't be read. */
+  problems: Schema.Array(Schema.String)
+})
+
+/** At most this many recently viewed cards are kept, newest first (§4.1). */
+export const RECENT_REMOTE_MAX = 50
+
+/** The account's card-source choices: user `settings` key `sources`. */
+export const SourcePrefs = Schema.Struct({
+  /** Turned off by the user, by source; a source not named here is on (§9 D1). */
+  enabled: Schema.Record(Schema.String, Schema.Boolean),
+  /** The credential holding each source's API key. */
+  keys: Schema.Record(Schema.String, Schema.String),
+  rating: Schema.Record(Schema.String, Schema.NullOr(Schema.String)),
+  recent: Schema.Array(RecentRemote)
+})
+export type SourcePrefs = typeof SourcePrefs.Type
+export const DEFAULT_SOURCE_PREFS: SourcePrefs = { enabled: {}, keys: {}, rating: {}, recent: [] }
+
+/** The instance's: app `settings` key `sources.admin`. */
+export const SourceAdminSettings = Schema.Struct({
+  disabled: Schema.Record(Schema.String, Schema.Boolean),
+  capBytes: Schema.optionalKey(Schema.Number)
+})
+export type SourceAdminSettings = typeof SourceAdminSettings.Type
+
+const sourceErrors = Schema.Union([SourceFailed, NotFound, ServerError])
+
+export class CardSourcesApi extends RpcGroup.make(
+  /** The registered sources as this user has them. Never contacts a source. */
+  Rpc.make("ListCardSources", { success: SourceList, error: ServerError }),
+  Rpc.make("SetCardSourceEnabled", {
+    payload: { sourceId: SourceId, enabled: Schema.Boolean },
+    success: SourceList,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** Admins: turns a source off for every account. */
+  Rpc.make("SetCardSourceAdminDisabled", {
+    payload: { sourceId: SourceId, disabled: Schema.Boolean },
+    success: SourceList,
+    error: Schema.Union([NotFound, Forbidden, ServerError])
+  }),
+  /** Admins: the instance's cache cap. */
+  Rpc.make("SetSourceCacheCap", {
+    payload: { bytes: Schema.Int.check(Schema.isBetween({ minimum: 16 * 1024 * 1024, maximum: 1024 ** 4 })) },
+    success: SourceList,
+    error: Schema.Union([Forbidden, ServerError])
+  }),
+  /** The source's API key, write-only; null removes it. */
+  Rpc.make("SetCardSourceKey", {
+    payload: { sourceId: SourceId, key: Schema.NullOr(Schema.String.check(Schema.isMaxLength(4096))) },
+    success: SourceList,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  Rpc.make("SetCardSourceRating", {
+    payload: { sourceId: SourceId, rating: Schema.NullOr(Schema.String.check(Schema.isMaxLength(100))) },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** Clears this user's cached cards, pages and pictures and the recently viewed list. */
+  Rpc.make("ClearSourceCache", {
+    payload: { sourceId: Schema.NullOr(SourceId) },
+    success: Schema.Void,
+    error: ServerError
+  }),
+  Rpc.make("SourceCapabilities", { payload: { sourceId: SourceId }, success: SourceCapabilities, error: sourceErrors }),
+  Rpc.make("SourceSearch", {
+    payload: {
+      sourceId: SourceId,
+      query: SourceQuery,
+      page: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000)))
+    },
+    success: SourcePage,
+    error: sourceErrors
+  }),
+  Rpc.make("SourceTags", {
+    payload: { sourceId: SourceId, prefix: Schema.String.check(Schema.isMaxLength(100)) },
+    success: Schema.Array(SourceTag),
+    error: sourceErrors
+  }),
+  /** Opens a remote card: fetched (or read from the cache) and parsed; recorded as recently viewed. */
+  Rpc.make("SourceCard", {
+    payload: { sourceId: SourceId, remoteId: Schema.String.check(Schema.isMaxLength(500)) },
+    success: RemoteCard,
+    error: sourceErrors
+  }),
+  /** Never contacts a source. */
+  Rpc.make("ListRecentRemote", {
+    payload: { sourceId: SourceId },
+    success: Schema.Array(RecentRemote),
+    error: ServerError
+  }),
+  Rpc.make("ClearRecentRemote", { payload: { sourceId: SourceId }, success: Schema.Void, error: ServerError })
+) {}

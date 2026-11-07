@@ -32,6 +32,7 @@ import {
   AppCoreApi,
   AuthenticatedGalleryApi,
   AuthenticatedCardArchiveApi,
+  AuthenticatedCardSourcesApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
   AuthenticatedShellUpdatesApi,
@@ -66,6 +67,8 @@ import { makeInspectorHandlers } from "./api/inspector.ts"
 import { Notices } from "./chat/Notices.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { makeStImportHandlers } from "./api/stImport.ts"
+import { imageRoute as SourceImageRoute, makeCardSourceHandlers } from "./api/cardSources.ts"
+import * as CardSources from "./sources/CardSources.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
 import { ImageTokenCounts } from "./chat/ImageTokenCounts.ts"
 import { TextTokens } from "./providers/TextTokens.ts"
@@ -166,6 +169,7 @@ const Handlers = Layer.mergeAll(
   AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
+  AuthenticatedCardSourcesApi.toLayer(makeCardSourceHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers)
 )
 
@@ -500,7 +504,9 @@ export const serverWith = <E>(
   summaries = Summarizer.layer,
   formats = FormatsLive,
   /** The decision engine: the development server may give every point another deadline (tests). */
-  decisions = DecisionEngine.layer
+  decisions = DecisionEngine.layer,
+  /** The card sources (spec/CARD-SOURCES.md): the development server registers its fake source. */
+  sources = CardSources.layer
 ) =>
   HttpRouter.serve(
     Layer.mergeAll(
@@ -508,6 +514,7 @@ export const serverWith = <E>(
       HealthRoute,
       AuthRoutes,
       ImportRoutes.layer,
+      SourceImageRoute,
       StaticRoutes,
       InterruptedRequests,
       RequestGuard
@@ -540,6 +547,7 @@ export const serverWith = <E>(
     Layer.provideMerge(ExecutionRegistry.layer),
     Layer.provideMerge(Commands.layer),
     Layer.provideMerge(Notices.layer),
+    Layer.provideMerge(sources),
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),

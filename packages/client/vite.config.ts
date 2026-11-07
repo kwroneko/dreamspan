@@ -45,6 +45,15 @@ export default defineConfig({
           }
         }
       },
+      // A card source's pictures; its card pages are the app's own (browser navigations).
+      "/sources": {
+        target: server,
+        bypass(req) {
+          if ((req.method === "GET" || req.method === "HEAD") && req.headers.accept?.includes("text/html")) {
+            return req.url
+          }
+        }
+      },
       "/healthz": { target: server }
     }
   }
