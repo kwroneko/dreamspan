@@ -48,6 +48,24 @@ test.beforeAll(async () => {
       // A line in each: a join alone doesn't put a character in a chat (castpresence).
       for (const chat of [solo, pair])
         yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Hello.", reply: false })
+      // Archived favourites, both used and unused, must not change the ordinary counts.
+      for (const name of ["Hidden Bram", "Hidden Ava"]) {
+        const hidden = yield* api.CreateCard({ label: name, name })
+        yield* api.SetCardFavourite({ entityId: hidden.entityId, favourite: true })
+        if (name === "Hidden Ava") {
+          yield* api.SetPersona({ entityId: hidden.entityId, persona: true })
+          const chat = yield* api.CreateChat({ title: "Hidden Ava alone" })
+          yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: hidden.entityId } })
+          yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "Hello.",
+            reply: false
+          })
+        }
+        yield* api.SetRefArchived({ refId: hidden.id, archived: true })
+      }
     })
   )
 })
@@ -93,7 +111,8 @@ for (const width of [1440, 390]) {
       /^Never used\s*2$/,
       /^Favourites\s*1$/,
       /^Personas\s*0$/,
-      /^Groups\s*1$/
+      /^Groups\s*1$/,
+      /^Archived\s*2$/
     ]
     await expect(show.getByRole("button")).toHaveText(counts)
     // The counts are what each filter holds, whatever the search.
@@ -101,10 +120,34 @@ for (const width of [1440, 390]) {
     await expect(show.getByRole("button")).toHaveText(counts)
     await main.getByRole("searchbox", { name: "Search characters and groups" }).fill("")
 
+    // Archived search matches belong only to All, after its ordinary results, collapsed.
+    const search = main.getByRole("searchbox", { name: "Search characters and groups" })
+    await search.fill("Hidden")
+    const matches = main.getByRole("button", { name: "Archived (2)", exact: true })
+    await expect(matches).toHaveAttribute("aria-expanded", "false")
+    await expect(tiles(main)).toHaveCount(0)
+    await matches.click()
+    await expect(main.getByRole("link", { name: "Open Hidden Bram", exact: true })).toBeVisible()
+    await expect(main.getByRole("link", { name: "Open Hidden Ava (persona)", exact: true })).toBeVisible()
+    await matches.click()
+    for (const filter of ["With chats", "Never used", "Favourites", "Personas", "Groups"]) {
+      await show.getByRole("button", { name: filter, exact: true }).click()
+      await expect(matches).toHaveCount(0)
+      await expect(tiles(main)).toHaveCount(0)
+    }
+    await show.getByRole("button", { name: "Archived", exact: true }).click()
+    await expect(tiles(main)).toHaveCount(2)
+    await expect(main.getByRole("link", { name: "Open Hidden Bram", exact: true })).toBeVisible()
+    await expect(main.getByRole("link", { name: "Open Hidden Ava (persona)", exact: true })).toBeVisible()
+    await search.fill("")
+    await show.getByRole("button", { name: "All", exact: true }).click()
+
     // The star marks a favourite where it stands; the tile isn't opened.
+    const beforeStar = page.url()
+    await main.getByRole("link", { name: "Open Bram", exact: true }).hover()
     await main.getByRole("button", { name: "Add Bram to favourites", exact: true }).click()
     await expect(main.getByRole("button", { name: "Remove Bram from favourites", exact: true })).toBeVisible()
-    await expect(page).toHaveURL(`${server().url}/`)
+    await expect(page).toHaveURL(beforeStar)
     await expect(show.getByRole("button", { name: "Favourites", exact: true })).toHaveText(/^Favourites\s*2$/)
     await show.getByRole("button", { name: "Favourites", exact: true }).click()
     await expect.poll(async () => (await labels(tiles(main))).sort()).toEqual(["Bram", "Dora"])
@@ -163,14 +206,18 @@ for (const width of [1440, 390]) {
     await expect(pin.locator("svg")).toHaveCount(1)
     await panel.getByRole("group", { name: "Left panel", exact: true }).getByText("Characters").click()
     await panel.getByRole("combobox", { name: "Show" }).click()
-    await expect(page.getByRole("option")).toHaveText([
+    const options = page.getByRole("option")
+    const optionNames = [
       "All · 4",
       "With chats · 2",
       "Never used · 2",
       "Favourites · 2",
       "Personas · 0",
-      "Groups · 1"
-    ])
+      "Groups · 1",
+      "Archived · 2"
+    ]
+    await expect(options).toHaveCount(optionNames.length)
+    for (const [index, name] of optionNames.entries()) await expect(options.nth(index)).toHaveAccessibleName(name)
     await page.getByRole("option", { name: "Favourites · 2" }).click()
     await expect.poll(async () => (await labels(tiles(panel))).sort()).toEqual(["Bram", "Dora"])
     await panel.getByRole("button", { name: "Sort by: Recent" }).click()
@@ -184,6 +231,9 @@ for (const width of [1440, 390]) {
     ).toBeVisible()
     await panel.getByRole("combobox", { name: "Show" }).click()
     await page.getByRole("option", { name: "All · 4" }).click()
+    // Leave the next width the same starting sort, rather than seeding Added from this run.
+    await panel.getByRole("button", { name: "Sort by: Added" }).click()
+    await page.getByRole("menuitemcheckbox", { name: /^Recent/ }).click()
 
     await expect(panel.getByRole("button", { name: "Start a chat", exact: true })).toHaveCount(0)
 
