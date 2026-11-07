@@ -117,6 +117,28 @@ test("a reload keeps this browser tab's frames, with the URL's item focused", as
   await expect(page).toHaveURL(`${server().url}/`)
 })
 
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a fresh root URL replaces the previous frames for subsequent reloads at ${width} ${theme}`, async ({
+      page
+    }, testInfo) => {
+      await page.emulateMedia({ colorScheme: theme })
+      await homeBesideChat(page)
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto(`${server().url}/`)
+      await expect(home(page)).toBeVisible()
+      await expect(frames(page)).toHaveCount(1)
+
+      // No layout interaction after the fresh navigation: reloading must keep Home alone.
+      await page.reload()
+      await expect(home(page)).toBeVisible()
+      await expect(frames(page)).toHaveCount(1)
+      await expect(said(page, "The tide is out")).toHaveCount(0)
+      await expect(page.locator("[data-tab-strip]")).toHaveCount(0)
+      await expect(frames(page).getByRole("link", { name: "Open Mira", exact: true })).toBeVisible()
+      await page.screenshot({ path: testInfo.outputPath("home.png") })
+    })
+
 test("browser tabs keep their own frames; a new tab or a pasted URL opens just its URL", async ({ page, context }) => {
   await homeBesideChat(page)
 

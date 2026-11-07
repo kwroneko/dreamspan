@@ -6,7 +6,13 @@ import { openAICompletionsApi, openAIResponsesApi, anthropicMessagesApi, googleG
 // 2026-10-10).
 import { Effect, Layer } from "effect"
 import { defaultCacheRelease } from "./cacheStagger.ts"
-import { applyAnthropicBreakpoints, applyBedrockBreakpoints } from "./breakpoints.ts"
+import {
+  applyAnthropicBreakpoints,
+  applyAnthropicStableEndpoint,
+  applyBedrockBreakpoints,
+  applyRouterCacheControl,
+  routerCacheFamily
+} from "./breakpoints.ts"
 import { piCatalogs, withCatalog } from "./catalog.ts"
 import { modelListers } from "./modelLists.ts"
 import { empty, ProviderRegistry, type ProviderKindEntry } from "./registry.ts"
@@ -114,6 +120,37 @@ export const layer = Layer.effectDiscard(
       transform: (payload, request) => {
         if (request.breakpoints.length > 0)
           applyAnthropicBreakpoints(payload, request.messages, request.breakpoints, request.cacheLayout)
+        return payload
+      }
+    })
+    // The automatic layout's last marker before the end-of-request instruction (liveapi F3).
+    yield* registry.transforms.register({
+      id: "anthropic-stable-endpoint",
+      appliesTo: (target) => target.api === "anthropic-messages",
+      transform: (payload, request) => {
+        if (request.stable && request.breakpoints.length === 0)
+          applyAnthropicStableEndpoint(payload, request.messages, request.stable, request.cacheLayout)
+        return payload
+      }
+    })
+    // OpenRouter Claude and Gemini markers, which the assembler's messages replaced (liveapi F4, F5).
+    yield* registry.transforms.register({
+      id: "openrouter-cache-control",
+      appliesTo: (target) =>
+        target.kind === "openrouter" && target.api === "openai-completions" && routerCacheFamily(target.model) !== null,
+      transform: (payload, request) => {
+        const family = routerCacheFamily(request.target.model)
+        if (family) applyRouterCacheControl(payload, family, request)
+        return payload
+      }
+    })
+    // OpenAI routes caches by this key; pi-ai sets it only for api.openai.com (liveapi F8).
+    yield* registry.transforms.register({
+      id: "openai-prompt-cache-key",
+      appliesTo: (target) => target.kind === "openai-chat" || target.kind === "openai-responses",
+      transform: (payload, request) => {
+        if (payload.prompt_cache_key === undefined && request.sessionId && request.cacheRetention !== "none")
+          payload.prompt_cache_key = Array.from(request.sessionId).slice(0, 64).join("")
         return payload
       }
     })

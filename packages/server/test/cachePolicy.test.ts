@@ -16,7 +16,7 @@ for (const [provider, api, model, payload, ttl, fixed] of [
   ["azure", "openai-completions", "gpt-5.6", {}, 1800, false],
   ["azure", "openai-responses", "gpt-4.1", {}, 300, false],
   ["azure", "openai-responses", "gpt-5.4", { prompt_cache_retention: "24h" }, null, false],
-  ["openrouter", "openai-completions", "anthropic/claude", {}, 300, false],
+  ["openrouter", "openai-completions", "anthropic/claude", {}, null, false],
   ["openrouter", "openai-completions", "anthropic/claude", chatHour, 600, false],
   [
     "openrouter",

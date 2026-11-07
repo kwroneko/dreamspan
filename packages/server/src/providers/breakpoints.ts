@@ -208,3 +208,108 @@ export const applyBedrockBreakpoints = (
   if (!responses) mark(wire.length - 1)
   for (const index of targets) mark(index)
 }
+
+const unmark = (message: WireMessage) => {
+  if (typeof message.content === "string") return
+  for (const block of message.content) delete block.cache_control
+}
+
+/**
+ * The automatic layout on Anthropic Messages: pi-ai marks the request's last message, which is
+ * the end-of-request instruction (or a prefill) the next request no longer has, so history would
+ * never read back. Its marker moves to the assembly's endpoint, the last message the next request
+ * repeats; a tool loop's messages after the assembly keep theirs, which the loop's next request
+ * repeats. Reuses pi-ai's marker (and TTL); nothing is added when pi placed none.
+ */
+export const applyAnthropicStableEndpoint = (
+  payload: Record<string, unknown>,
+  transcript: ReadonlyArray<Message>,
+  stable: { readonly message: number; readonly end: number },
+  capabilities: CacheLayout = {}
+): boolean => {
+  const marker = firstMarker(payload)
+  if (!marker || !Array.isArray(payload.messages)) return false
+  const wire = payload.messages as Array<WireMessage>
+  const aligned = alignTranscript(transcript, wire)
+  const target = aligned[stable.message]
+  if (target === null || target === undefined) return false
+  for (let i = stable.message + 1; i < Math.min(stable.end, transcript.length); i++) {
+    const at = aligned[i]
+    if (at !== null && at !== undefined && at !== target) unmark(wire[at]!)
+  }
+  const message = wire[target]!
+  if (typeof message.content === "string") message.content = [{ type: "text", text: message.content }]
+  const last = message.content.findLast((block) => !String(block.type).includes("thinking"))
+  if (!last) return false
+  if (last.cache_control) return true
+  if (Math.min(MAX_ANTHROPIC_BREAKPOINTS, capabilities.maxMarkers ?? 4) - countMarkers(payload) <= 0) return false
+  last.cache_control = marker
+  return true
+}
+
+/** Which OpenRouter models take `cache_control` markers in Chat Completions content, and how. */
+export const routerCacheFamily = (model: string | undefined): "anthropic" | "gemini" | null =>
+  model === undefined
+    ? null
+    : /^anthropic\/claude/i.test(model)
+      ? "anthropic"
+      : /^google\/gemini/i.test(model)
+        ? "gemini"
+        : null
+
+const markText = (message: WireMessage, marker: Record<string, unknown>) => {
+  if (typeof message.content === "string") {
+    if (message.content.length === 0) return false
+    message.content = [{ type: "text", text: message.content }]
+  }
+  if (!Array.isArray(message.content)) return false
+  const last = message.content.findLast((block) => block.type === "text")
+  if (!last) return false
+  if (!last.cache_control) last.cache_control = marker
+  return true
+}
+
+/**
+ * OpenRouter's `cache_control` markers on a Chat Completions payload whose messages the assembler
+ * set (replacing the ones pi-ai marked), in assembly order. Claude
+ * (https://openrouter.ai/docs/guides/best-practices/prompt-caching): the system message, then the
+ * explicit breakpoints or the automatic layout's endpoint, within Anthropic's four markers. Gemini:
+ * only the last marker counts, so one goes on the deepest of those.
+ */
+export const applyRouterCacheControl = (
+  payload: Record<string, unknown>,
+  family: "anthropic" | "gemini",
+  request: {
+    readonly breakpoints: ReadonlyArray<number>
+    readonly stable?: { readonly message: number; readonly end: number } | undefined
+    readonly cacheRetention?: "none" | "short" | "long" | undefined
+    readonly cacheLayout?: CacheLayout | undefined
+  }
+): void => {
+  // A top-level control (set by the model's payload fields) picks OpenRouter's automatic placement.
+  if (request.cacheRetention === "none" || !Array.isArray(payload.messages) || payload.cache_control !== undefined)
+    return
+  const wire = payload.messages as Array<WireMessage>
+  const { stable } = request
+  const targets =
+    request.breakpoints.length > 0
+      ? [...request.breakpoints]
+      : stable
+        ? [stable.message, ...(wire.length > stable.end ? [wire.length - 1] : [])]
+        : []
+  if (targets.length === 0) return
+  if (family === "gemini") {
+    const deepest = wire[Math.max(...targets)]
+    if (deepest) markText(deepest, { type: "ephemeral" })
+    return
+  }
+  const marker = { type: "ephemeral", ...(request.cacheRetention === "long" ? { ttl: "1h" } : {}) }
+  let budget = Math.min(MAX_ANTHROPIC_BREAKPOINTS, request.cacheLayout?.maxMarkers ?? 4) - countMarkers(payload)
+  const system = wire.findIndex((m) => m.role === "system" || m.role === "developer")
+  for (const index of [...(system >= 0 ? [system] : []), ...targets]) {
+    if (budget <= 0) break
+    const message = wire[index]
+    if (!message || countMarkers(message) > 0) continue
+    if (markText(message, marker)) budget--
+  }
+}

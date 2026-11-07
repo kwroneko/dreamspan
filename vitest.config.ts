@@ -17,6 +17,13 @@ const SLOW_SERVER_FILES = [
 ]
 
 /**
+ * The live provider suite (`npm run test:live`): real requests to the providers' own APIs,
+ * paid or quota-limited, so never part of `npm test` or `npm run check`. Skipped unless
+ * RP_LIVE_KEY_FILE names a key file (packages/server/test/live/support/live.ts).
+ */
+const LIVE_SERVER_FILES = ["test/live/**/*.test.ts"]
+
+/**
  * Tests in the other files that measure time or load: tagged `slow`, run by test:slow only.
  * `slowIt.live(…)` (packages/server/test/support/slow.ts), or `tags: ["slow"]` in the options.
  */
@@ -69,7 +76,12 @@ export default defineConfig({
       { test: { ...unit, name: "shared", root: "packages/shared" } },
       { test: { ...unit, name: "client", root: "packages/client" } },
       {
-        test: { ...server, name: "server", include: ["test/**/*.test.ts"], exclude: SLOW_SERVER_FILES }
+        test: {
+          ...server,
+          name: "server",
+          include: ["test/**/*.test.ts"],
+          exclude: [...SLOW_SERVER_FILES, ...LIVE_SERVER_FILES]
+        }
       },
       {
         test: {
@@ -80,6 +92,17 @@ export default defineConfig({
           // Registered during imports, before a test file can change runtime config.
           // Large synthetic fixtures can take more than 10 s to remove.
           hookTimeout: 60_000
+        }
+      },
+      {
+        test: {
+          ...server,
+          name: "server-live",
+          include: LIVE_SERVER_FILES,
+          globalSetup: [join(import.meta.dirname, "packages/server/test/live/support/setup.ts")],
+          env: { TEST_DB_WORKERS: "source" },
+          testTimeout: 900_000,
+          hookTimeout: 120_000
         }
       }
     ]

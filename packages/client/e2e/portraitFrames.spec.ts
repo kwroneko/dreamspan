@@ -139,7 +139,8 @@ const openFromEverySource = async (page: Page, frame: Locator, label: string, au
   await focusFrame(frame)
   const icons = frame.getByRole("group", { name: "Chat panel" })
   if (await icons.isVisible()) await icons.getByRole("button", { name: "Cast", exact: true }).click()
-  else await frame.getByRole("button", { name: "Chat panel", exact: true }).click()
+  // Split, the panel's toggle is on the top-right strip.
+  else await page.getByRole("button", { name: "Chat panel", exact: true }).click()
   await panelTab(page, "Cast")
   const cast = page.getByRole("tabpanel", { name: "Cast", exact: true })
   before = await frameBoxes(page)
@@ -162,7 +163,7 @@ const openFromEverySource = async (page: Page, frame: Locator, label: string, au
   await expectBesideFrames(page, TALL.name)
   await shot(page, `${label}-header`)
   await closeAndExpectRestored(page, TALL.name, before)
-  await frame.getByRole("button", { name: "Hide panel", exact: true }).click()
+  await page.getByRole("button", { name: "Hide panel", exact: true }).click()
   await expect(page.getByRole("tablist", { name: "Chat panel" })).toHaveCount(0)
 }
 

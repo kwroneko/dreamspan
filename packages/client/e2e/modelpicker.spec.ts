@@ -178,6 +178,9 @@ for (const width of [1440, 390])
         const list = page.getByRole("radiogroup", { name: "Model", exact: true })
         await expect(list.getByRole("radio")).toHaveCount(1)
         await expectLayout(page, info, `${name}-${width}-${theme}`, { scope: "[data-model-picker]" })
+        await page.screenshot({
+          path: join(process.env.MODELPICKER_WORK ?? info.outputDir, `${name}-${width}-${theme}.png`)
+        })
         await list.getByRole("radio").click()
       }
       const defaults = await withCookie(server(), "", (api) => api.GetGenerationDefaults())
@@ -198,7 +201,51 @@ for (const width of [1440, 390])
       await page.getByRole("searchbox", { name: "Find a model", exact: true }).fill("qwen story0038")
       await expect(list.getByRole("radio")).toHaveCount(1)
       await expectLayout(page, info, `decision-${width}-${theme}`, { scope: "[data-model-picker]" })
+      await page.screenshot({
+        path: join(process.env.MODELPICKER_WORK ?? info.outputDir, `decision-${width}-${theme}.png`)
+      })
       await list.getByRole("radio").click()
       for (const provider of catalog.providers) expect(provider.completions).toHaveLength(0)
     })
   }
+
+test("search keyboard navigation reaches the selected model outside the mounted window", async ({ page }) => {
+  const router = seeded.lists[0]!
+  const current = router.models.find((model) => model.key.includes("2500"))!
+  await withCookie(server(), "", (api) =>
+    api.ChangeGenerationDefaults({ change: { model: { connection: router.connection.id, model: current.id } } })
+  )
+  await page.goto(`${server().url}/chats/${seeded.chat.id}`)
+  await modelChip(page).click()
+  const input = page.getByRole("searchbox", { name: "Find a model", exact: true })
+  await input.focus()
+  await page.keyboard.press("ArrowDown")
+  await expect(
+    page.getByRole("radio", { name: `${router.connection.name} · ${current.key}`, exact: true })
+  ).toBeFocused()
+  // Returning through search must focus even a row the virtualizer already retains.
+  await input.focus()
+  await page.keyboard.press("ArrowDown")
+  await expect(
+    page.getByRole("radio", { name: `${router.connection.name} · ${current.key}`, exact: true })
+  ).toBeFocused()
+  await page.keyboard.press("Home")
+  await page.keyboard.press("ArrowUp")
+  await expect(input).toBeFocused()
+})
+
+test("Enter in search chooses the first matching model after the list scrolls", async ({ page }) => {
+  await page.goto(`${server().url}/chats/${seeded.chat.id}`)
+  await modelChip(page).click()
+  const input = page.getByRole("searchbox", { name: "Find a model", exact: true })
+  const list = page.getByRole("radiogroup", { name: "Model", exact: true })
+  await input.fill("story")
+  const first = await list.getByRole("radio").first().getAttribute("aria-label")
+  await list.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  await expect(list.getByRole("radio").first()).not.toHaveAccessibleName(first!)
+  await input.focus()
+  await page.keyboard.press("Enter")
+  await expect(modelChip(page)).toHaveAccessibleName(`Model: ${first}. Change the model`)
+})
