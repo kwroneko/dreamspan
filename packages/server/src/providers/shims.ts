@@ -1,7 +1,7 @@
 // Compatibility shims (DESIGN §9, owner 2026-11-07: "specific models on specific providers can
-// have their own compatibility shims"): what one provider kind refuses or needs for some of its
-// models, registered per kind and model pattern in the provider registry's `shims`, and
-// replaceable or disableable by id like every other entry. Never global: a shim names its kinds
+// have their own compatibility shims"): what one provider refuses or needs for some of its
+// models, registered per provider and model pattern in the provider registry's `shims`, and
+// replaceable or disableable by id like every other entry. Never global: a shim names its providers
 // and the models it matches.
 //
 // A shim can set capabilities (prefill, thinking levels, tools, vision...), which refreshes and
@@ -18,8 +18,12 @@ export interface CompatShim {
   readonly id: string
   /** What it does, in the user's terms (the model page lists the shims a model gets). */
   readonly label: string
-  /** The provider kinds it applies to (`openai-chat`, `openrouter`, …). */
-  readonly kinds: ReadonlyArray<string>
+  /** The models it's for, in the user's terms: a provider's advanced section lists its shims by them. */
+  readonly models: string
+  /** The providers it applies to (`openai`, `anthropic-bedrock`, …; providerDefinitions.ts). */
+  readonly providers: ReadonlyArray<string>
+  /** The wire APIs it applies to; left out, all of the provider's. */
+  readonly apis?: ReadonlyArray<string>
   /** Matched on the model's key; patterns allow a router prefix (`acme.`, `vendor/`). */
   readonly model: RegExp
   /** Capabilities the provider imposes for the model, over the list's and catalogs'. */
@@ -30,8 +34,16 @@ export interface CompatShim {
   readonly payload?: (payload: Record<string, unknown>, request: ShimRequest) => Record<string, unknown>
 }
 
-const shimApplies = (shim: CompatShim, kind: string, model: string) =>
-  shim.kinds.includes(kind) && shim.model.test(model)
+/** Where a shim is looked up: the connection's provider, and its wire API where known. */
+export interface ShimTarget {
+  readonly provider: string
+  readonly api?: string
+}
+
+const shimApplies = (shim: CompatShim, target: ShimTarget, model: string) =>
+  shim.providers.includes(target.provider) &&
+  (shim.apis === undefined || target.api === undefined || shim.apis.includes(target.api)) &&
+  shim.model.test(model)
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
@@ -46,8 +58,8 @@ const reasoning = (payload: Record<string, unknown>) => {
 }
 
 /** Capabilities the shims that apply give a model, and the fields they fix. */
-const shimCapabilities = (shims: ReadonlyArray<CompatShim>, kind: string, model: string) => {
-  const applied = shims.filter((shim) => shimApplies(shim, kind, model) && (shim.capabilities || shim.fixed))
+const shimCapabilities = (shims: ReadonlyArray<CompatShim>, target: ShimTarget, model: string) => {
+  const applied = shims.filter((shim) => shimApplies(shim, target, model) && (shim.capabilities || shim.fixed))
   if (applied.length === 0) return null
   const capabilities = Object.assign({}, ...applied.map((shim) => shim.capabilities ?? {})) as ModelUpstream
   const fixed = [...new Set(applied.flatMap((shim) => shim.fixed ?? []))]
@@ -60,14 +72,15 @@ const shimCapabilities = (shims: ReadonlyArray<CompatShim>, kind: string, model:
  */
 export const shimmedUpstream = (
   shims: ReadonlyArray<CompatShim>,
-  kind: string,
+  on: ShimTarget | string,
   key: string,
   upstream: ModelUpstream
 ): ModelUpstream => {
   const { shims: _shims, fixed: _fixed, ...base } = upstream
-  const named = shims.filter((shim) => shimApplies(shim, kind, key))
+  const target = typeof on === "string" ? { provider: on } : on
+  const named = shims.filter((shim) => shimApplies(shim, target, key))
   if (named.length === 0) return base
-  const applied = shimCapabilities(shims, kind, key)
+  const applied = shimCapabilities(shims, target, key)
   return {
     ...base,
     ...applied?.capabilities,
@@ -82,9 +95,13 @@ export const shimmedUpstream = (
 /** A listed model with the shims applied to its upstream. */
 export const withShims = <M extends { readonly key: string; readonly upstream: ModelUpstream }>(
   shims: ReadonlyArray<CompatShim>,
-  kind: string,
+  on: ShimTarget | string,
   model: M
-): M => ({ ...model, upstream: shimmedUpstream(shims, kind, model.key, model.upstream) })
+): M => ({ ...model, upstream: shimmedUpstream(shims, on, model.key, model.upstream) })
+
+/** A provider's shims, by the models they're for, for its connections' advanced section. */
+export const providerRules = (shims: ReadonlyArray<CompatShim>, provider: string) =>
+  shims.filter((shim) => shim.providers.includes(provider)).map((shim) => `${shim.models}: ${shim.label}`)
 
 /** The payload rewrites of the shims that apply, in registration order. */
 export const applyShims = (
@@ -95,7 +112,8 @@ export const applyShims = (
   const applied: Array<string> = []
   let current = payload
   for (const shim of shims) {
-    if (!shim.payload || !shimApplies(shim, target.kind, target.model ?? "")) continue
+    const on = { provider: target.provider ?? target.kind, api: target.api }
+    if (!shim.payload || !shimApplies(shim, on, target.model ?? "")) continue
     current = shim.payload(current, { target })
     applied.push(shim.id)
   }
@@ -108,7 +126,8 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     // F7: "`top_p` is deprecated for this model."
     id: "claude-haiku-5-no-top-p",
     label: "Top P isn’t sent: this model refuses it.",
-    kinds: ["anthropic", "openrouter"],
+    models: "Claude Haiku 5",
+    providers: ["anthropic", "anthropic-bedrock", "openrouter"],
     model: /(?:^|[/.])claude-haiku-5/i,
     payload: (payload) => {
       delete payload.top_p
@@ -119,7 +138,10 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     // F9: "Unsupported parameter: 'top_p' is not supported with this model." with any effort.
     id: "openai-responses-gpt-5.1-5.4-reasoning",
     label: "While it reasons, temperature and top P aren’t sent, and its reasoning summary is asked for.",
-    kinds: ["openai-responses"],
+    models: "GPT-5.1 to 5.4 on Responses",
+    // A router in front of OpenAI (a compatible server) serves the same models.
+    providers: ["openai", "openai-compatible"],
+    apis: ["openai-responses"],
     model: /(?:^|[/.])gpt-5\.[1-4](?:[-.]|$)/i,
     payload: (payload) => {
       if (!reasoning(payload)) return payload
@@ -137,7 +159,9 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     // Responses takes both.
     id: "openai-chat-gpt-5.4-tools-no-effort",
     label: "Requests with tools run without reasoning here. A Responses connection keeps it.",
-    kinds: ["openai-chat"],
+    models: "GPT-5.4 on Chat Completions",
+    providers: ["openai", "openai-compatible"],
+    apis: ["openai-completions"],
     model: /(?:^|[/.])gpt-5\.4(?:[-.]|$)/i,
     payload: (payload) => {
       if (Array.isArray(payload.tools) && payload.tools.length > 0 && reasoning(payload))
@@ -149,7 +173,8 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     // F11: "Reasoning is mandatory for this endpoint and cannot be disabled."
     id: "openrouter-gemini-4-argon-reasoning-on",
     label: "Reasoning stays on: this model can’t turn it off.",
-    kinds: ["openrouter"],
+    models: "Gemini 4 Argon",
+    providers: ["openrouter"],
     model: /^google\/gemini-4-argon/i,
     capabilities: { thinkingLevels: { off: null } },
     payload: (payload) => {
@@ -168,7 +193,8 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     // F13: a trailing assistant message is refused ("Provider returned error").
     id: "openrouter-gemini-no-prefill",
     label: "No prefill: this provider refuses one for Gemini. Continue asks the model to go on instead.",
-    kinds: ["openrouter"],
+    models: "Gemini",
+    providers: ["openrouter"],
     model: /^google\/gemini/i,
     capabilities: { prefill: "none" },
     fixed: ["prefill"]

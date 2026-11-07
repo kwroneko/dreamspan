@@ -48,7 +48,8 @@ export const budgetOrigins = (model: ModelInput | null): BudgetOrigins => {
     context:
       setting !== undefined && (window === null || setting <= window)
         ? "setting"
-        : source === "unknown" || window === null
+        : // A provider sets only caching fields, never the window.
+          source === "unknown" || source === "provider" || window === null
           ? "assumed"
           : source,
     ...(model?.contextCatalog && source === "catalog" ? { catalog: model.contextCatalog } : {}),

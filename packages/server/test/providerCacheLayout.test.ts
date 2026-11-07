@@ -150,11 +150,88 @@ describe("default cache markers", () => {
       const mock = yield* resource(completionReply)
       const api = yield* client()
       const { chat } = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
+        connection: { provider: "openai", kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
         modelKey: "gpt-5.4-nano",
         model: {}
       })
       assert.strictEqual(mock.requests().at(-1)!.body!.prompt_cache_key, chat.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a custom server gets no prompt_cache_key unless its connection turns it on", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource(completionReply)
+      const api = yield* client()
+      yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
+        modelKey: "gpt-5.4-nano",
+        model: {}
+      })
+      assert.notProperty(mock.requests().at(-1)!.body!, "prompt_cache_key")
+      const { chat } = yield* generateReply(api, {
+        connection: {
+          provider: "openai-compatible",
+          kind: "openai-chat",
+          baseUrl: mock.url,
+          providerSettings: { promptCacheKey: true }
+        },
+        modelKey: "gpt-5.4-nano",
+        model: {}
+      })
+      assert.strictEqual(mock.requests().at(-1)!.body!.prompt_cache_key, chat.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a custom Responses server gets no SDK-generated cache key until opted in", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource((_req, res) =>
+        sse(res, [
+          {
+            type: "response.output_item.added",
+            output_index: 0,
+            item: { type: "message", id: "msg_1", role: "assistant", content: [] }
+          },
+          { type: "response.output_text.delta", output_index: 0, delta: "The tide is out." },
+          {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: {
+              type: "message",
+              id: "msg_1",
+              role: "assistant",
+              content: [{ type: "output_text", text: "The tide is out." }]
+            }
+          },
+          {
+            type: "response.completed",
+            response: {
+              id: "r1",
+              status: "completed",
+              model: "m",
+              output: [],
+              usage: { input_tokens: 2, output_tokens: 5 }
+            }
+          }
+        ])
+      )
+      const api = yield* client()
+      for (const promptCacheKey of [false, true]) {
+        const { chat, version } = yield* generateReply(api, {
+          connection: {
+            provider: "openai-compatible",
+            kind: "openai-responses",
+            baseUrl: mock.url,
+            providerSettings: { promptCacheKey }
+          },
+          modelKey: "synthetic",
+          model: {}
+        })
+        assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
+        if (promptCacheKey) assert.strictEqual(mock.requests().at(-1)!.body!.prompt_cache_key, chat.id)
+        else assert.notProperty(mock.requests().at(-1)!.body!, "prompt_cache_key")
+      }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -174,7 +251,7 @@ describe("default cache markers", () => {
       )
       const api = yield* client()
       const { chat } = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
+        connection: { provider: "openai", kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
         modelKey: "gpt-5.4-nano",
         model: { cacheLayout: { minTokens: 1 } }
       })

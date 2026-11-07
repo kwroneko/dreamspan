@@ -73,10 +73,74 @@ export type Compat = typeof Compat.Type
 export const ProxyMode = Schema.Literals(["inherit", "direct", "custom"])
 export type ProxyMode = typeof ProxyMode.Type
 
+const CacheBreakpoints = Schema.Literals(["auto", "explicit", "none"])
+
+/**
+ * What a provider sets up for its connections (`providerDefinitions.ts`), each a default the user
+ * can change in the connection's advanced settings. A connection stores only what the user changed.
+ */
+export const ProviderSettings = Schema.Struct({
+  /** How the key signs requests: one of the provider's `auth` choices. */
+  auth: Schema.optionalKey(Schema.String),
+  /** Where cache markers go: the provider's default placement, at each reusable section, or none. */
+  cacheBreakpoints: Schema.optionalKey(CacheBreakpoints),
+  /** A later request reads a cached start before its own marker (Anthropic), or only at a repeated one (AWS Bedrock). */
+  lookback: Schema.optionalKey(Schema.Boolean),
+  /** Most cache markers in one request, the SDK's own included. */
+  maxMarkers: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  /** The smallest prompt start the provider caches, in tokens; unset: as each model documents. */
+  minTokens: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  /** Sends the chat's id as `prompt_cache_key`, which OpenAI routes cache reads by. */
+  promptCacheKey: Schema.optionalKey(Schema.Boolean),
+  /** The cloud region: it sets the default address and what requests are signed for. Unset: read from the address. */
+  region: Schema.optionalKey(Schema.String)
+})
+export type ProviderSettings = typeof ProviderSettings.Type
+
+/** A choice a provider offers (an API type, a way to sign in), as the client lists it. */
+const ProviderChoice = Schema.Struct({ id: Schema.String, label: Schema.String, about: Schema.String })
+
+/**
+ * A provider as the client lists it, in picker order (the server's `providers` registry): the
+ * first choice for a new connection, which sets the API type, address, key and caching defaults.
+ */
+export class ProviderInfo extends Schema.Class<ProviderInfo>("ProviderInfo")({
+  id: Schema.String,
+  label: Schema.String,
+  about: Schema.String,
+  /** The API types it offers, as provider kinds; the first is the default. */
+  apis: Schema.Array(ProviderChoice),
+  /** Null: there's no default, so the address must be entered. */
+  baseUrl: Schema.NullOr(Schema.String),
+  /** An example address, for a provider without a default. */
+  baseUrlExample: Schema.optionalKey(Schema.String),
+  /** The address for a region, `{region}` replaced, for providers whose address names one. */
+  regionUrl: Schema.optionalKey(Schema.String),
+  keyOptional: Schema.Boolean,
+  /** The ways a key signs requests; the first is the default. */
+  auth: Schema.Array(ProviderChoice),
+  /** The defaults of every setting that applies to it. */
+  defaults: ProviderSettings,
+  /** The settings its advanced section shows, in order. */
+  settings: Schema.Array(Schema.String),
+  /** How long its cache lasts, in the user's terms; null where no lifetime is documented. */
+  cacheLifetime: Schema.NullOr(Schema.String),
+  /** How it counts and bills tokens, in the user's terms. */
+  accounting: Schema.Array(Schema.String),
+  /** What it refuses or needs for some models (compatibility shims), in the user's terms. */
+  rules: Schema.Array(Schema.String),
+  /** The provider answers decision questions (spec/AGENTIC.md §7) and writes no replies. */
+  decisions: Schema.optionalKey(Schema.Boolean)
+}) {}
+
 /** A connection as the user sees it. Secrets appear only as whether they're set. */
 export class Connection extends Schema.Class<Connection>("Connection")({
   id: ConnectionId,
   name: Schema.String,
+  /** The provider chosen when it was made (`anthropic-bedrock`): what sets its defaults. */
+  provider: Schema.String,
+  /** The provider's defaults the user changed; the rest follow the provider. */
+  providerSettings: ProviderSettings,
   kind: ProviderKind,
   api: WireApi,
   /** Null: the kind's default. */
@@ -113,12 +177,13 @@ export const ConnectionSettings = Schema.Struct({
   maxConcurrent: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   presetOverrideRefId: Schema.NullOr(RefId),
   /** Left out: unchanged. Null: unset, so the next refresh fills it from the list. */
-  modelIdPrefix: Schema.optionalKey(Schema.NullOr(Schema.String))
+  modelIdPrefix: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** The provider's defaults the user changed, replacing the stored ones. Left out: unchanged. */
+  providerSettings: Schema.optionalKey(ProviderSettings)
 })
 export type ConnectionSettings = typeof ConnectionSettings.Type
 
 const Prefill = Schema.Literals(["none", "assistant", "tool_schema"])
-const CacheBreakpoints = Schema.Literals(["auto", "explicit", "none"])
 
 /** Cache layout capabilities, independently overrideable for a serving provider/model. */
 export const CacheLayout = Schema.Struct({
@@ -217,10 +282,11 @@ export type ModelUpstream = typeof ModelUpstream.Type
 
 /**
  * Where a field's value came from: the user's setting, a limit learned from a provider's error,
- * the provider's list, a catalog matched by the model's id, or `unknown`: no source knows it and
- * a default is used (for the context window, `ASSUMED_CONTEXT`, shown as assumed).
+ * the provider's list, a catalog matched by the model's id, the connection's provider (its
+ * default or the user's change to it, for caching), or `unknown`: no source knows it and a
+ * default is used (for the context window, `ASSUMED_CONTEXT`, shown as assumed).
  */
-export type FieldSource = "user" | "learned" | "upstream" | "catalog" | "unknown"
+export type FieldSource = "user" | "learned" | "upstream" | "catalog" | "provider" | "unknown"
 
 /** A field's value and where it came from; `unknown` means no source knows it. */
 type Resolved<A> = { readonly value: A; readonly source: FieldSource }
@@ -254,13 +320,15 @@ const DEFAULT_MAX_OUTPUT = 4096
  * Merges a model's sources, user edits first (PROVIDERS §3.1): the user's value, for the context
  * window a limit learned from the provider's error, what the provider's list reports, what a
  * catalog matched by id reports, then a default. `connectionCompat` sits
- * under the model's own compat overrides.
+ * under the model's own compat overrides. `provider` is the connection's provider settings
+ * (`resolveProviderSettings`): its cache layout sits under the model's own edits, over the list.
  */
 export const resolveModel = (
   key: string,
   upstream: ModelUpstream,
   overrides: ModelOverrides,
-  connectionCompat: Compat = {}
+  connectionCompat: Compat = {},
+  provider: ProviderSettings = {}
 ): EffectiveModel => {
   const pick = <K extends Exclude<keyof ModelOverrides, "learned">, A>(
     field: K,
@@ -273,6 +341,13 @@ export const resolveModel = (
       return { value: upstream[field]!, source: upstream.catalog?.fields.includes(field) ? "catalog" : "upstream" }
     return { value: fallback, source: "unknown" }
   }
+  const layout: CacheLayout = {
+    ...(provider.lookback !== undefined ? { lookback: provider.lookback } : {}),
+    ...(provider.maxMarkers !== undefined ? { maxMarkers: provider.maxMarkers } : {}),
+    ...(provider.minTokens !== undefined ? { minTokens: provider.minTokens } : {})
+  }
+  const breakpoints = pick("cacheBreakpoints", "auto" as const)
+  const cacheLayout = pick("cacheLayout", {})
   return {
     name: pick("name", key),
     context: pick("context", ASSUMED_CONTEXT),
@@ -285,8 +360,14 @@ export const resolveModel = (
     tools: pick("tools", false),
     prefill: pick("prefill", "none" as const),
     cacheTtlS: pick("cacheTtlS", null),
-    cacheBreakpoints: pick("cacheBreakpoints", "auto" as const),
-    cacheLayout: pick("cacheLayout", {}),
+    cacheBreakpoints:
+      breakpoints.source === "user" || provider.cacheBreakpoints === undefined
+        ? breakpoints
+        : { value: provider.cacheBreakpoints, source: "provider" },
+    cacheLayout:
+      cacheLayout.source === "user" || Object.keys(layout).length === 0
+        ? cacheLayout
+        : { value: { ...cacheLayout.value, ...layout }, source: "provider" },
     compat: { ...connectionCompat, ...upstream.compat, ...overrides.compat },
     sampling: { ...upstream.sampling, ...overrides.sampling },
     settings: { ...upstream.settings, ...overrides.settings },

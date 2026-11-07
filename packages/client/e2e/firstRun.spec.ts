@@ -2,7 +2,7 @@
 // its models and choosing the default, and the note a composer shows without a model.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import { type FakeProvider, startProvider } from "./support/provider.ts"
+import { chooseCustomServer, type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -39,6 +39,7 @@ test("the empty home leads to a connection, whose first model becomes the defaul
   await steps.getByRole("link", { name: "Connect a model" }).click()
   await expect(page).toHaveURL(/\/settings\/connections\/new$/)
 
+  await chooseCustomServer(page)
   await page.getByLabel("Name", { exact: true }).fill("First run")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   // The kind takes no key: left empty, none is sent.
@@ -64,6 +65,7 @@ test("the empty home leads to a connection, whose first model becomes the defaul
   // A second connection leaves the chosen default alone. Its name, left empty, is the server's.
   const before = await admin((api) => api.GetGenerationDefaults())
   await page.goto(`${server().url}/settings/connections/new`)
+  await chooseCustomServer(page)
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   const host = new URL(provider.baseUrl).host
   await expect(page.getByLabel("Name", { exact: true })).toHaveAttribute("placeholder", host)

@@ -371,7 +371,13 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             : next.inputs.model.cacheTtlS) ?? null
         const prefixTokens = tokensBetween(previous, 0, end)
         // A prefix below the model's minimum cacheable size is never cached (liveapi F6).
-        const target = { provider: next.inputs.model.kind, api: next.inputs.model.api, model: next.inputs.model.key }
+        // The provider's documented contract; a snapshot from before providers names only its kind.
+        const contract = next.inputs.model.cacheContract
+        const target = {
+          provider: contract === undefined ? next.inputs.model.kind : (contract ?? ""),
+          api: next.inputs.model.api,
+          model: next.inputs.model.key
+        }
         const minimum = next.inputs.model.cacheLayout?.minTokens ?? documentedCacheMinimum(target)
         const nextEnd = lastBreakpoint(next)
         const nextTokens = nextEnd < 0 ? 0 : tokensBetween(next, 0, nextEnd)

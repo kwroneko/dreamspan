@@ -2,6 +2,7 @@ import { makeMergeReadHandlers } from "./merges.ts"
 import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
 import { stateModuleHandlers } from "./stateModules.ts"
 import { moduleHandlers } from "../assembler/modules.ts"
+import { providerDefinitionHandlers } from "../providers/definitions.ts"
 import { makeHistoryReadHandlers } from "./historyReads.ts"
 import { makeAssembler, WorkerAssembler } from "../assembler/assembler.ts"
 import { makeLcmPlanningHandlers } from "./lcmPlanning.ts"
@@ -79,24 +80,26 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
             ]) =>
               ReadOps.of(
                 stateModuleHandlers(
-                  moduleHandlers({
-                    ...history,
-                    ...core,
-                    ...providers,
-                    ...accounts,
-                    ...imports,
-                    ...chatSetup,
-                    ...stImport,
-                    ...editor,
-                    ...assembly,
-                    ...inspector,
-                    ...planning,
-                    ...lcm,
-                    ...lcmUi,
-                    ...lcmEnable,
-                    ...merges,
-                    ...agent
-                  })
+                  providerDefinitionHandlers(
+                    moduleHandlers({
+                      ...history,
+                      ...core,
+                      ...providers,
+                      ...accounts,
+                      ...imports,
+                      ...chatSetup,
+                      ...stImport,
+                      ...editor,
+                      ...assembly,
+                      ...inspector,
+                      ...planning,
+                      ...lcm,
+                      ...lcmUi,
+                      ...lcmEnable,
+                      ...merges,
+                      ...agent
+                    })
+                  )
                 )
               )
           ).pipe(Effect.provideService(WorkerAssembler, assembler))

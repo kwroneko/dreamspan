@@ -22,6 +22,8 @@ import { builtinTextCounters } from "./textCounters.ts"
 import { builtinModelCatalogs } from "./contextCatalog.ts"
 import { builtinContextLimitParsers } from "./contextLimits.ts"
 import { systemOneKind } from "./systemOne.ts"
+import { bedrockKind } from "./bedrock.ts"
+import { builtinProviders } from "@rp/shared/providerDefinitions.ts"
 import { builtinShims } from "./shims.ts"
 
 const completions = openAICompletionsApi()
@@ -105,6 +107,8 @@ export const builtinKinds: ReadonlyArray<ProviderKindEntry> = [
     keyOptional: false,
     list: "google"
   }),
+  // Claude on Amazon Bedrock: Anthropic's Messages API in Bedrock's framing and signing.
+  bedrockKind,
   // Decision models (spec/AGENTIC.md §7): asked only for the points a user turns on.
   systemOneKind
 ]
@@ -113,6 +117,8 @@ export const builtinKinds: ReadonlyArray<ProviderKindEntry> = [
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const registry = yield* ProviderRegistry
+    // Providers first: each names its kinds (API types) and sets its connections' defaults.
+    for (const provider of builtinProviders) yield* registry.providers.register(provider)
     for (const entry of builtinKinds) yield* registry.kinds.register(entry)
     for (const shim of builtinShims) yield* registry.shims.register(shim)
     // Explicit cache breakpoints (PROVIDERS §8), for Anthropic Messages so far.
@@ -146,12 +152,24 @@ export const layer = Layer.effectDiscard(
         return payload
       }
     })
-    // OpenAI routes caches by this key; pi-ai sets it only for api.openai.com (liveapi F8).
+    // OpenAI routes caches by this key; pi-ai sets it only for api.openai.com (liveapi F8). The
+    // provider's setting says whether it's sent: on for OpenAI, off for a compatible server.
     yield* registry.transforms.register({
       id: "openai-prompt-cache-key",
-      appliesTo: (target) => target.kind === "openai-chat" || target.kind === "openai-responses",
+      appliesTo: (target) => target.api === "openai-completions" || target.api === "openai-responses",
       transform: (payload, request) => {
-        if (payload.prompt_cache_key === undefined && request.sessionId && request.cacheRetention !== "none")
+        // The Responses SDK always adds this, and Chat Completions may add it for OpenAI
+        // addresses or long retention. The connection's switch governs those defaults too.
+        if (request.settings?.promptCacheKey === false) {
+          delete payload.prompt_cache_key
+          return payload
+        }
+        if (
+          request.settings?.promptCacheKey === true &&
+          payload.prompt_cache_key === undefined &&
+          request.sessionId &&
+          request.cacheRetention !== "none"
+        )
           payload.prompt_cache_key = Array.from(request.sessionId).slice(0, 64).join("")
         return payload
       }

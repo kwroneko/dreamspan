@@ -21,6 +21,12 @@ const admin = Effect.gen(function* () {
   return user
 })
 
+/** The providers a new connection starts from (providerApi.ts), the same for every user. */
+export const makeProviderListHandlers = Effect.gen(function* () {
+  const providers = yield* Providers
+  return { ListProviders: () => Effect.sync(() => providers.providers()) }
+})
+
 export const makeProviderHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
@@ -44,10 +50,11 @@ export const makeProviderHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => reader.ListConnections({ userId: id })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], toServerError("ListConnections"))
       ),
-    CreateConnection: ({ kind, settings, apiKey, credentialId }) =>
+    CreateConnection: ({ provider, kind, settings, apiKey, credentialId }) =>
       Effect.flatMap(userId, (id) =>
         providers.createConnection({
           userId: id,
+          provider,
           kind,
           settings,
           apiKey: apiKey ?? null,

@@ -1200,6 +1200,8 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       connectionId: ConnectionId,
+      /** The provider chosen (providerDefinitions.ts); left out, the kind's default provider. */
+      provider: Schema.optionalKey(Schema.String),
       kind: ProviderKind,
       /** The kind's wire API, resolved by the provider registry on the main thread. */
       api: Schema.String,
