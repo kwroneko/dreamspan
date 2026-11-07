@@ -28,6 +28,7 @@ export const seedCardArchive = (server: TestServer) =>
         }
       ])
       yield* api.SetCardFavourite({ entityId: "archive-e-006" as EntityId, favourite: true })
+      yield* api.SetPersona({ entityId: "archive-e-005" as EntityId, persona: true })
       for (const n of [7, 11, 15]) {
         const id = `archive-e-${String(n).padStart(3, "0")}` as EntityId
         yield* api.StartChat({

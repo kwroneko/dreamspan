@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { DateTime, Schema } from "effect"
 import { EntityId } from "./chat.ts"
 import { RefId } from "./library.ts"
 import { makeRegistry } from "./registry.ts"
@@ -36,9 +36,8 @@ export const cardArchiveCriteria = makeRegistry<{
     initial: 6,
     enabled: false,
     matches: (_added, used, now, n) => {
-      const cutoff = new Date(now)
-      cutoff.setUTCMonth(cutoff.getUTCMonth() - n)
-      return used !== null && used < cutoff.getTime()
+      const cutoff = DateTime.subtract(DateTime.makeUnsafe(now), { months: n })
+      return used !== null && used < DateTime.toEpochMillis(cutoff)
     }
   }
 ])
