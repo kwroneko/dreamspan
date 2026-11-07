@@ -114,6 +114,20 @@ for (const [width, height] of [
       await expect(picker(page, "Cache markers")).toContainText("Each section")
       await expect(page.getByRole("switch", { name: "Finds earlier cached parts" })).not.toBeChecked()
       await help(page, "Finds earlier cached parts", /only at a marker the last request also had/)
+      // An empty minimum size is each model's own: the short placeholder fits, the help explains.
+      const minSize = page.getByLabel("Smallest cached size (tokens)", { exact: true })
+      await expect(minSize).toHaveAttribute("placeholder", "By model")
+      expect(
+        await minSize.evaluate((input: HTMLInputElement) => {
+          const style = getComputedStyle(input)
+          const context = document.createElement("canvas").getContext("2d")
+          if (!context) return false
+          context.font = style.font
+          const room = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+          return context.measureText(input.placeholder).width <= room
+        })
+      ).toBe(true)
+      await help(page, "Smallest cached size (tokens)", /Empty uses each model’s documented size/)
       await expect(page.getByText("How tokens are counted", { exact: true })).toBeVisible()
       await expect(page.getByText("Fixes for some models", { exact: true })).toBeVisible()
       await expect(page.getByText(/Claude Haiku 5: Top P isn’t sent/)).toBeVisible()

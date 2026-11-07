@@ -247,7 +247,7 @@ export function ProviderAdvanced({
                 value={draft.minTokens ?? settings.minTokens?.toString() ?? ""}
                 onValueChange={(minTokens) => onChange({ ...draft, minTokens })}
                 inputMode="numeric"
-                placeholder="Each model’s own"
+                placeholder="By model"
               />
             </Field>
           )}
