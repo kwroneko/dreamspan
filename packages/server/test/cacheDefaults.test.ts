@@ -7,6 +7,9 @@ import { client, serverLayer, testConfig, posted } from "./support/config.ts"
 import { generateReply, eventually, finished } from "./support/generation.ts"
 import { startMockProvider, sse, completionChunks, anthropicSse } from "./support/mockProvider.ts"
 
+// The synthetic prompts are below every documented minimum cacheable size, which these tests aren't about.
+const tiny = { cacheLayout: { minTokens: 1 } }
+
 for (const [kind, key, ttl, field] of [
   ["openai-chat", "gpt-4.1", 300, "details"],
   ["openai-responses", "gpt-5.6", 1800, "details"],
@@ -14,7 +17,9 @@ for (const [kind, key, ttl, field] of [
   ["groq", "openai/gpt-oss-120b", 7200, "details"],
   ["cerebras", "gpt-oss-120b", 300, "details"],
   ["openrouter", "anthropic/claude-sonnet-4.5", 300, "details"],
-  ["openrouter", "google/gemini-2.5-pro", 180, "details"],
+  // Gemini on OpenRouter gets an explicit marker by default, whose write lives a fixed 300 s;
+  // OpenRouter reports that cache as written and read in the same request.
+  ["openrouter", "google/gemini-2.5-pro", 300, "router"],
   ["deepseek", "deepseek-chat", null, "deepseek"],
   ["together", "synthetic", 777, "together"]
 ] as const) {
@@ -29,11 +34,13 @@ for (const [kind, key, ttl, field] of [
               completionChunks(["Synthetic answer"], {
                 prompt_tokens: 120,
                 completion_tokens: 6,
-                ...(field === "details"
-                  ? { prompt_tokens_details: { cached_tokens: kind === "cerebras" ? 0 : 100 } }
-                  : field === "deepseek"
-                    ? { prompt_cache_hit_tokens: 100, prompt_cache_miss_tokens: 20 }
-                    : { cached_tokens: 100 })
+                ...(field === "router"
+                  ? { prompt_tokens_details: { cached_tokens: 100, cache_write_tokens: 100 } }
+                  : field === "details"
+                    ? { prompt_tokens_details: { cached_tokens: kind === "cerebras" ? 0 : 100 } }
+                    : field === "deepseek"
+                      ? { prompt_cache_hit_tokens: 100, prompt_cache_miss_tokens: 20 }
+                      : { cached_tokens: 100 })
               })
             )
           )
@@ -50,7 +57,7 @@ for (const [kind, key, ttl, field] of [
       const api = yield* client()
       const reply = yield* generateReply(api, {
         connection: { kind, baseUrl: mock.url + "/v1", ...(field === "together" ? { cacheTtlS: 777 } : {}) },
-        model: {},
+        model: tiny,
         modelKey: key
       })
       assert.equal(reply.version.status, "complete")
@@ -93,7 +100,7 @@ it.live("model TTL overrides connection TTL, and connection TTL overrides the bu
     for (const override of [undefined, 900]) {
       const reply = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: mock.url, cacheTtlS: 700 },
-        model: override === undefined ? {} : { cacheTtlS: override },
+        model: { ...tiny, ...(override === undefined ? {} : { cacheTtlS: override }) },
         modelKey: "gpt-5.6"
       })
       const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
@@ -138,7 +145,7 @@ for (const kind of ["cerebras", "openrouter"] as const) {
       const api = yield* client()
       const first = yield* generateReply(api, {
         connection: { kind, baseUrl: mock.url },
-        model: {},
+        model: tiny,
         modelKey: kind === "cerebras" ? "gpt-oss-120b" : "google/gemini-2.5-pro"
       })
       const me = yield* api.Whoami()
@@ -204,13 +211,15 @@ for (const [kind, key, payload, ttl] of [
         piProvider: kind === "openai-chat" ? "openai" : kind,
         catalog: async () => ({})
       })
+      // A plugin placing its own cache control replaces the default markers.
+      yield* registry.transforms.disable("openrouter-cache-control")
       yield* registry.transforms.register({
         id: "synthetic-retention",
         appliesTo: () => true,
         transform: (p) => ({ ...p, ...payload })
       })
       const api = yield* client()
-      const reply = yield* generateReply(api, { connection: { kind, baseUrl: mock.url }, model: {}, modelKey: key })
+      const reply = yield* generateReply(api, { connection: { kind, baseUrl: mock.url }, model: tiny, modelKey: key })
       const me = yield* api.Whoami()
       const reader = yield* Reader
       const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
@@ -255,7 +264,7 @@ it.live("Google's cachedContentTokenCount verifies warmth with a user TTL", () =
     const reader = yield* Reader
     const reply = yield* generateReply(api, {
       connection: { kind: "google", baseUrl: mock.url, apiKey: "synthetic-google-key", cacheTtlS: 777 },
-      model: {}
+      model: tiny
     })
     assert.equal(reply.version.status, "complete")
     const warmth = (yield* reader.CacheWarmth({ userId: me.id, chatId: reply.chat.id })).warmth
@@ -334,7 +343,7 @@ for (const [kind, ttl] of [
       const api = yield* client()
       const reply = yield* generateReply(api, {
         connection: { kind, baseUrl: mock.url, apiKey: "synthetic-key" },
-        model: {},
+        model: tiny,
         modelKey: kind === "minimax" ? "MiniMax-M2" : "claude-x"
       })
       assert.equal(reply.version.status, "complete")
@@ -366,7 +375,7 @@ it.live("Fireworks' dedicated hit header verifies warmth without streamed usage"
     const api = yield* client()
     const reply = yield* generateReply(api, {
       connection: { kind: "openai-chat", baseUrl: mock.url, cacheTtlS: 777 },
-      model: {}
+      model: tiny
     })
     assert.equal(reply.version.status, "complete", JSON.stringify(reply.version.error))
     const me = yield* api.Whoami()

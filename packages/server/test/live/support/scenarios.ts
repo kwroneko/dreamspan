@@ -59,6 +59,8 @@ export interface Counts {
   readonly writeLong: number | null
   readonly output: number | null
   readonly reasoning: number | null
+  /** Read and write count the same tokens (OpenRouter's Gemini explicit cache). */
+  readonly overlap?: boolean
 }
 
 const num = (v: unknown) => (typeof v === "number" ? v : null)
@@ -94,19 +96,28 @@ export const wireCounts = (dialect: CacheDialect, u: Record<string, unknown> | n
   const details = obj(u.prompt_tokens_details)
   const read = dialect === "deepseek" ? (num(u.prompt_cache_hit_tokens) ?? 0) : (num(details.cached_tokens) ?? 0)
   const write = num(details.cache_write_tokens)
+  // OpenRouter's Gemini explicit cache writes the prefix and reads it in the same request.
+  const overlap = dialect === "openrouter" && prompt !== null && prompt < read + (write ?? 0)
   return {
-    uncached: prompt === null ? null : prompt - read - (dialect === "openrouter" ? (write ?? 0) : 0),
+    uncached:
+      prompt === null
+        ? null
+        : overlap
+          ? prompt - Math.max(read, write ?? 0)
+          : prompt - read - (dialect === "openrouter" ? (write ?? 0) : 0),
     read,
     write,
     writeLong: null,
     output: num(u.completion_tokens),
-    reasoning: num(obj(u.completion_tokens_details).reasoning_tokens)
+    reasoning: num(obj(u.completion_tokens_details).reasoning_tokens),
+    ...(overlap ? { overlap } : {})
   }
 }
 
 export const totalInput = (c: Counts | LlmRequest["counts"] | null | undefined) => {
   if (!c) return 0
-  if ("uncached" in c) return (c.uncached ?? 0) + (c.read ?? 0) + (c.write ?? 0)
+  if ("uncached" in c)
+    return (c.uncached ?? 0) + (c.overlap ? Math.max(c.read ?? 0, c.write ?? 0) : (c.read ?? 0) + (c.write ?? 0))
   return (c.inputUncached ?? 0) + (c.cacheRead ?? 0) + (c.cacheWrite ?? 0)
 }
 
@@ -301,6 +312,9 @@ const TAIL = 32
 export const growingChat = (f: Findings, p: Profile, chat: LiveChat, model: Model | null) =>
   Effect.gen(function* () {
     const turns: Array<{ t: Turn; wire: Counts | null }> = []
+    // OpenAI's cache is best effort (livefix): what it reads is recorded, not required, and our
+    // estimate must only not claim more than it reads.
+    const bestEffort = p.dialect === "openai" || p.dialect === "responses"
     const lines = [
       "Good evening, Mira. Is the copper bell entry still in the ledger?",
       "Then read me the entry about the amber lantern, please.",
@@ -338,7 +352,7 @@ export const growingChat = (f: Findings, p: Profile, chat: LiveChat, model: Mode
           f.check(
             p.id,
             `turn ${i + 1}: automatic cache reads most of the previous prompt`,
-            (wire.read ?? 0) >= 0.7 * prevTotal,
+            bestEffort ? null : (wire.read ?? 0) >= 0.7 * prevTotal,
             {
               expected: { readAtLeast: Math.round(0.7 * prevTotal), previousPrompt: prevTotal },
               actual: { read: wire.read, uncached: wire.uncached },
@@ -363,7 +377,17 @@ export const growingChat = (f: Findings, p: Profile, chat: LiveChat, model: Mode
             actual: w ?? null
           }
         )
-        if (w)
+        if (w && bestEffort)
+          f.check(
+            p.id,
+            `turn ${i + 1}: estimated cached prefix claims no more than the provider read`,
+            w.prefixTokens <= (wire.read ?? 0) * 1.4,
+            {
+              expected: { providerRead: wire.read },
+              actual: { estimatePrefixTokens: w.prefixTokens, verified: w.verified, ttlS: w.ttlS }
+            }
+          )
+        else if (w)
           f.check(
             p.id,
             `turn ${i + 1}: estimated cached prefix ≈ provider's cached tokens (±40%)`,
@@ -384,7 +408,7 @@ export const growingChat = (f: Findings, p: Profile, chat: LiveChat, model: Mode
       f.check(
         p.id,
         "swipe: reads (nearly) the whole prompt",
-        (sw.read ?? 0) >= (p.dialect === "anthropic" ? full - TAIL : 0.8 * full),
+        bestEffort ? null : (sw.read ?? 0) >= (p.dialect === "anthropic" ? full - TAIL : 0.8 * full),
         {
           expected: { read: full, tolerance: p.dialect === "anthropic" ? TAIL : "80%" },
           actual: sw,
@@ -421,7 +445,7 @@ export const growingChat = (f: Findings, p: Profile, chat: LiveChat, model: Mode
       f.check(
         p.id,
         "deep edit: the system part still reads from cache",
-        (ew.read ?? 0) > 0 && (ew.read ?? 0) < totalInput(ew) * 0.95,
+        bestEffort ? null : (ew.read ?? 0) > 0 && (ew.read ?? 0) < totalInput(ew) * 0.95,
         {
           actual: ew,
           ref: ref(e)

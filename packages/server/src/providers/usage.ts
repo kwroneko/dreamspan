@@ -144,6 +144,13 @@ export const finalCounts = (
           ? raw.prompt_cache_miss_tokens
           : Math.max(0, totalInput - hit)
       }
+      // Gemini's explicit cache through OpenRouter writes the prefix and reads it in the same
+      // request (live, 2026-11-07: cached_tokens = cache_write_tokens = 4,746 of 4,753): the written
+      // tokens are the read ones, not more input, and the rest is uncached.
+      const prompt = raw.prompt_tokens
+      const write = counts.cacheWrite ?? 0
+      if (Predicate.isNumber(prompt) && write > 0 && prompt < hit + write)
+        counts = { ...counts, inputUncached: Math.max(0, prompt - Math.max(hit, write)) }
     }
     if (finished) return { counts, source: "reported" }
     // A stopped or failed request may have reported only its start (Anthropic sends

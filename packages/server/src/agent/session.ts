@@ -219,7 +219,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 ...(prefix.reasoning ? { reasoning: prefix.reasoning } : {}),
                 sessionId: request.chatId,
                 payload: wire.payload,
-                breakpoints: wire.breakpoints
+                breakpoints: wire.breakpoints,
+                ...(wire.stable ? { stable: wire.stable } : {})
               },
               attribution: { purpose: "generation", chatId: request.chatId, rolloutId, versionId: request.versionId }
             })

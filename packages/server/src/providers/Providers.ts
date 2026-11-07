@@ -98,6 +98,8 @@ export interface StreamRequest {
      * important first. Applied for Anthropic Messages; pi-ai's own markers stay.
      */
     readonly breakpoints?: ReadonlyArray<number>
+    /** The automatic layout's reusable endpoint, for transforms that place markers there. */
+    readonly stable?: import("./registry.ts").StableEndpoint
     /**
      * Fields set over the body pi-ai built, before the registered transforms run: what the
      * caller decides that pi-ai doesn't model, such as the context assembler's exact Chat
@@ -1231,7 +1233,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 return response
               }
               const options = request.options ?? {}
-              const target: RequestTarget = { kind: prepared.kind.id, api: prepared.api }
+              const target: RequestTarget = { kind: prepared.kind.id, api: prepared.api, model: model.key }
               const transforms = registry.transforms.list().filter((t) => t.appliesTo(target))
               const observers = registry.observers.list().filter((o) => o.appliesTo(target))
               const breakpoints = options.cacheRetention === "none" ? [] : (options.breakpoints ?? [])
@@ -1282,7 +1284,10 @@ export const layer = (options: ProvidersOptions = {}) =>
                         target,
                         messages: request.context.messages,
                         breakpoints,
-                        cacheLayout: effective.cacheLayout.value
+                        cacheLayout: effective.cacheLayout.value,
+                        ...(options.stable && options.cacheRetention !== "none" ? { stable: options.stable } : {}),
+                        ...(options.cacheRetention !== undefined ? { cacheRetention: options.cacheRetention } : {}),
+                        ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {})
                       }),
                     initial
                   )

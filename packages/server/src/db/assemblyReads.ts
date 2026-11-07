@@ -15,6 +15,7 @@ import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
+import { bestEffortCache, documentedCacheMinimum } from "../providers/cachePolicy.ts"
 import { nextImages, estimateImage } from "../assembler/imageTokens.ts"
 import { budgetOrigins } from "../assembler/budget.ts"
 import { describer, inspectionInputs } from "./inspectorReads.ts"
@@ -364,7 +365,45 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               ? previous.wire.cache.ttlS
               : next.inputs.model.cacheTtlS
             : next.inputs.model.cacheTtlS) ?? null
-        const changed = prefixChange(previous, next, yield* describer(sql, userId, chatId, [previous, next], assembler))
+        const prefixTokens = tokensBetween(previous, 0, end)
+        // A prefix below the model's minimum cacheable size is never cached (liveapi F6).
+        const target = { provider: next.inputs.model.kind, api: next.inputs.model.api, model: next.inputs.model.key }
+        const minimum = next.inputs.model.cacheLayout?.minTokens ?? documentedCacheMinimum(target)
+        const nextEnd = lastBreakpoint(next)
+        const nextTokens = nextEnd < 0 ? 0 : tokensBetween(next, 0, nextEnd)
+        if (minimum !== null && end >= 0 && prefixTokens < minimum) {
+          return {
+            ...boundary,
+            warmth:
+              nextTokens < minimum
+                ? null
+                : {
+                    lastRequestAt: last.started_at,
+                    ttlS,
+                    expiresAt: null,
+                    verified: false,
+                    prefixTokens: 0,
+                    changed: {
+                      reason: `The last request was below the model's minimum cacheable size (${minimum.toLocaleString("en-US")} tokens), so nothing was cached.`,
+                      tokens: nextTokens
+                    }
+                  }
+          }
+        }
+        // OpenAI's automatic cache, measured live (livefix, 2026-11-07): an edited prompt read none of
+        // its unchanged start, a follow-up seconds later read nothing, and later requests read what an
+        // earlier one did, not the whole previous prompt. So a change re-sends everything, and the
+        // estimate claims only what the last request read (nothing before the first read).
+        const bestEffort = bestEffortCache(target)
+        const compared = prefixChange(
+          previous,
+          next,
+          yield* describer(sql, userId, chatId, [previous, next], assembler)
+        )
+        const changed =
+          compared && bestEffort ? { ...compared, tokens: Math.max(compared.tokens, nextTokens) } : compared
+        const lastRead = last.cache_read ?? 0
+        const reusable = bestEffort ? Math.min(prefixTokens, lastRead) : prefixTokens
         const expiresAt = yield* cacheExpiry(sql, userId, chatId, last, previous)
         return {
           ...boundary,
@@ -376,7 +415,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   ttlS,
                   expiresAt,
                   verified: (last.cache_read ?? 0) + (last.cache_write ?? 0) > 0,
-                  prefixTokens: tokensBetween(previous, 0, end),
+                  prefixTokens: reusable,
                   changed
                 }
         }
