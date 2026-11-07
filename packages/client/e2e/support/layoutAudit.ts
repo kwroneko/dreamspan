@@ -537,9 +537,12 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           const flow = boxChildren(container).filter(
             (n) => visible(n, false) && !["absolute", "fixed"].includes(css(n).position)
           )
-          const firstShown = flow.findIndex((n) => visible(n))
-          for (const hidden of flow.slice(0, Math.max(0, firstShown)))
-            add("overlay", flow[firstShown]!, `hidden ${path(hidden)} keeps its space before this control`, hidden)
+          let nextShown: HTMLElement | undefined
+          for (const child of flow.toReversed()) {
+            if (visible(child)) nextShown = child
+            else if (nextShown)
+              add("overlay", nextShown, `hidden ${path(child)} keeps its space before this control`, child)
+          }
         }
         const first = shownControls[0]
         const grid = host.parentElement

@@ -315,6 +315,31 @@ test("the detector catches geometry defects and respects documented intent", asy
   expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
 })
 
+test("picture overlays report hidden space between visible controls", async ({ page }) => {
+  await page.setContent(`<style>
+    body { margin: 20px; }
+    .tile { position: relative; width: 120px; }
+    .pic { display: block; height: 180px; background: #888; }
+    button { width: 32px; height: 32px; border: 0; background: white; }
+  </style>
+  <div class="tile"><span class="pic" data-portrait></span>
+    <span data-layout-overlay="toggles" style="position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:4px">
+      <button aria-pressed="true">S</button>
+      <button id="hidden" style="opacity:0;pointer-events:none">H</button>
+      <button id="archive" aria-pressed="true">A</button>
+    </span>
+  </div>`)
+  expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([
+    expect.objectContaining({
+      selector: "#archive",
+      related: "#hidden",
+      measurement: "hidden #hidden keeps its space before this control"
+    })
+  ])
+  await page.locator("#hidden").evaluate((el) => (el.style.display = "none"))
+  expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
+})
+
 const work = process.env.LAYOUT_AUDIT_WORK ?? mkdtempSync(join(tmpdir(), "rp-layout-audit-"))
 const selected = new RegExp(process.env.LAYOUT_AUDIT_SURFACES ?? ".*")
 const avatarStackNames = ["Double Capitals", "Other 1", "Other 3", "Wide WWW", "ß ß", "Hidden Willow"]
