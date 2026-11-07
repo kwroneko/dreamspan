@@ -1,6 +1,6 @@
 # HTML in messages
 
-**Status: Proposed, 2026-11-07 (htmlmsg).** No code. Owner decisions are in DESIGN §10.2 and §6 below (**[D]**). Everything below is **[P]** unless it cites one. The proposal is a delta from SillyTavern 1.19.0 (`7e8663cd`) plus the JS-Slash-Runner extension, and from rp-harness master `60d95d2b` (ARCHITECTURE §1 CSP, §10 display transforms, §12 rewrites and message rendering, §15 prompt scripts). reference-harness has nothing to reuse here: its replies go to chat platforms and are never rendered as HTML. Its compact/rich tiers (§4.3) are the only precedent.
+**Status: Proposed, 2026-11-07 (htmlmsg); step 1 (inline HTML) built 2026-11-07 (htmlbuild), documented in ARCHITECTURE §12 "HTML in messages, inline". Steps 2 to 5 are not built.** Owner decisions are in DESIGN §10.2 and §6 below (**[D]**). Everything below is **[P]** unless it cites one. The proposal is a delta from SillyTavern 1.19.0 (`7e8663cd`) plus the JS-Slash-Runner extension, and from rp-harness master `60d95d2b` (ARCHITECTURE §1 CSP, §10 display transforms, §12 rewrites and message rendering, §15 prompt scripts). reference-harness has nothing to reuse here: its replies go to chat platforms and are never rendered as HTML. Its compact/rich tiers (§4.3) are the only precedent.
 
 Scope: HTML that cards, regex scripts and models put into message text, which existing cards need. Model-driven UI (widgets and stages whose state the model updates through tools, DESIGN §10.2 [L]) is a separate, later discussion and is not covered here.
 

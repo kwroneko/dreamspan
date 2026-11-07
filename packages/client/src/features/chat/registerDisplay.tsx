@@ -15,6 +15,8 @@ import { builtinDisplayScriptLists, displayScriptLists } from "./displayScripts.
 import { chatPanels } from "./panels.tsx"
 import { chatSurfaceProviders } from "./presentation.tsx"
 import { DisplayProvider, DisplaySettings } from "./DisplaySettings.tsx"
+import { HtmlProvider } from "./htmlDisplay.tsx"
+import { registerHtmlParts } from "../../ui/html/register.ts"
 
 /** The settings page: the panel's settings under the page's title (the chat panel has its own). */
 function InterfacePage() {
@@ -47,6 +49,8 @@ export const registerDisplay = () => [
     component: () => <Navigate to="/settings/interface" search={(prev: Record<string, unknown>) => prev} replace />
   }),
   messageRenderers.register({ id: "markdown", order: 0, component: StMarkdown }),
+  // HTML in messages (ui/html/parts.ts): the inline schema and the document-block classifier.
+  ...registerHtmlParts(),
   appTools.register({ id: "display.message-colors", order: 0, component: MessageColorPreferences }),
   appTools.register({ id: "display.chat-width", order: 0, component: ChatWidthPreference }),
   // Which message actions show as buttons, from the account (messageActions.tsx).
@@ -55,6 +59,7 @@ export const registerDisplay = () => [
   displayTransforms.register({ id: "display.regex", order: 20, transform: regexDisplay }),
   ...builtinDisplayScriptLists.map((list) => displayScriptLists.register(list)),
   chatSurfaceProviders.register({ id: "display.context", order: 15, component: DisplayProvider }),
+  chatSurfaceProviders.register({ id: "display.html", order: 16, component: HtmlProvider }),
   chatPanels.register({
     id: "interface",
     matches: (value) => value === "interface" || value === "display",

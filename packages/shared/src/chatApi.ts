@@ -123,6 +123,8 @@ const displayFields = {
   coverageRail: Schema.Boolean,
   outputMacros: Schema.Boolean,
   displayRegex: Schema.Boolean,
+  /** "Show HTML as formatting" (spec/HTML-MESSAGES.md §3.1): off, a message's HTML shows as text. */
+  htmlFormatting: Schema.Boolean,
   enterSends: Schema.Literals(["automatic", "always", "never"]),
   chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
   /** How preset lists sort (the composer's picker, the Prompt preset tab's, the library's). */
@@ -174,6 +176,7 @@ export const DisplayPrefsChange = Schema.Struct({
   coverageRail: Schema.optionalKey(displayFields.coverageRail),
   outputMacros: Schema.optionalKey(displayFields.outputMacros),
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
+  htmlFormatting: Schema.optionalKey(displayFields.htmlFormatting),
   enterSends: Schema.optionalKey(displayFields.enterSends),
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
   presetSort: Schema.optionalKey(displayFields.presetSort),
@@ -207,6 +210,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   coverageRail: false,
   outputMacros: false,
   displayRegex: true,
+  htmlFormatting: true,
   enterSends: "automatic",
   chatWidth: CHAT_WIDTH.default,
   presetSort: "name",

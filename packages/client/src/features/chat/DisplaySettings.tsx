@@ -22,6 +22,7 @@ import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 
 import { ChatWidthSetting } from "./ChatWidth.tsx"
+import { HtmlFormattingSwitch } from "./htmlDisplay.tsx"
 import { MessageColorSettings } from "./MessageColors.tsx"
 import { MessageDetailSettings } from "./messageDetails.tsx"
 
@@ -217,6 +218,7 @@ export function DisplaySettings() {
         >
           Use display regex scripts
         </Switch>
+        <HtmlFormattingSwitch />
         {viewer.error && (
           <p role="alert" className="text-sm text-danger">
             {viewer.error.message}

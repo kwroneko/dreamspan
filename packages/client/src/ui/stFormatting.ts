@@ -68,7 +68,8 @@ const quote = (children: Node[], quoteRange: number): Node => ({
 const quotes =
   /<style>[\s\S]*?<\/style>|```[\s\S]*?```|~~~[\s\S]*?~~~|``[\s\S]*?``|`[\s\S]*?`|(".*?")|(\u201C.*?\u201D)|(\u00AB.*?\u00BB)|(\u300C.*?\u300D)|(\u300E.*?\u300F)|(\uFF02.*?\uFF02)/gim
 
-export function stFormatting() {
+/** `html`: raw HTML stays HTML for rehype-raw (ui/html); without it, HTML is literal prose. */
+export function stFormatting(options?: { readonly html?: boolean }) {
   return (tree: Node, file: { value: unknown }) => {
     const source = String(file.value)
     const raw = (node: Node) => source.slice(node.position?.start.offset, node.position?.end.offset)
@@ -139,9 +140,9 @@ export function stFormatting() {
       )
     }
     const visit = (node: Node, parent?: Node) => {
-      // Treat both inline and block HTML as literal prose before formatting it.
-      // No HTML parser or new sanitizer permission is involved.
-      if (node.type === "html") {
+      // With HTML shown as text, treat both inline and block HTML as literal prose before
+      // formatting it: no HTML parser or new sanitizer permission is involved.
+      if (node.type === "html" && !options?.html) {
         if (parent && ["root", "blockquote", "listItem"].includes(parent.type)) {
           const value = node.value ?? ""
           node.type = "paragraph"

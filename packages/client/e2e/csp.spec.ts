@@ -1,6 +1,6 @@
 // The built app under its Content-Security-Policy (server.ts): the header is on the page,
-// and every screen, a streamed reply with Markdown, code, a table, raw HTML and an image
-// among it, runs without a single violation.
+// and every screen, a streamed reply with Markdown, code, a table, raw HTML with a style and
+// an image among it, runs without a single violation.
 import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { cardFieldsTab } from "./support/cardEditor.ts"
@@ -51,6 +51,13 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
     "",
     '<div style="color: red" onclick="alert(1)">raw <b>HTML</b></div><script>alert(1)</script>',
     "",
+    '<style>.lamp { color: rgb(1, 2, 3) }</style><span class="lamp">lamp</span>',
+    "",
+    // Known sanitizer bypass strings (spec/HTML-MESSAGES.md §3.7): nothing runs, nothing is refused.
+    '<svg></p><style><a id="</style><img src=1 onerror=alert(1)>">',
+    '<noscript><p title="</noscript><img src=x onerror=alert(1)>">',
+    "<form><math><mtext></form><form><mglyph><style></math><img src onerror=alert(1)>",
+    "",
     "![a gull](https://example.com/gull.png)",
     "",
     "[c]: https://example.com/chart"
@@ -59,6 +66,8 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   await page.getByRole("button", { name: "Send" }).click()
   await expect(page.getByRole("article", { name: "Your message" }).locator("table")).toBeVisible()
   await expect(page.getByRole("link", { name: "chart" })).toHaveAttribute("href", "https://example.com/chart")
+  // The message's style applies under style-src 'self': through the constructed stylesheet.
+  await expect(page.locator(".custom-lamp")).toHaveCSS("color", "rgb(1, 2, 3)")
   await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
   await expect(page.getByRole("article", { name: "Reply" })).toHaveCount(1)
 

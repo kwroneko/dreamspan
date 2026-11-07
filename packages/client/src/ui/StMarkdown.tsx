@@ -1,4 +1,13 @@
-import { createContext, useContext, useMemo, useCallback, type ComponentProps } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useCallback,
+  useState,
+  useSyncExternalStore,
+  type ComponentProps
+} from "react"
 import { diff } from "@codemirror/merge"
 import {
   Block,
@@ -8,7 +17,19 @@ import {
   parseMarkdownIntoBlocks,
   Streamdown
 } from "streamdown"
+import rehypeRaw from "rehype-raw"
 import { fixMarkdownMapped, stFormatting } from "./stFormatting.ts"
+import { MESSAGE_SCOPE, scopeStyles } from "./html/css.ts"
+import { BlockedMediaNote, htmlComponents, MediaBlocked } from "./html/HtmlParts.tsx"
+import {
+  extractStyles,
+  HtmlChatContext,
+  HtmlMessageContext,
+  HtmlSettingsContext,
+  setStyleScoper
+} from "./html/messageHtml.ts"
+import { effectiveSchema, htmlPartsRevision, subscribeHtmlParts } from "./html/parts.ts"
+import { htmlFinish, htmlMark, htmlPrepare, htmlSanitize } from "./html/rehypeHtml.ts"
 import type { MessageTextProps } from "./Markdown.tsx"
 import { withDefinitions } from "./referenceDefinitions.ts"
 import { sourcePositions, type SourceChar, type PositionedNode } from "./sourcePositions.ts"
@@ -27,7 +48,19 @@ function hardenWithPositions(options: unknown) {
       }
     }
     visit(tree)
+    // An anchor without an address (a card's `<a name>` target, or a link whose address the
+    // sanitizer took out) stays an anchor: the hardener would caption it as a blocked link.
+    const anchors: PositionedNode[] = []
+    const bare = (node: PositionedNode) => {
+      if (node.tagName === "a" && node.properties?.href === undefined) {
+        node.tagName = "rp-anchor"
+        anchors.push(node)
+      }
+      for (const child of node.children ?? []) bare(child)
+    }
+    bare(tree)
     transform(tree)
+    for (const anchor of anchors) anchor.tagName = "a"
     for (const { parent, node, index } of images) {
       const replacement = parent.children?.[index]
       if (replacement && replacement !== node && node.position) {
@@ -37,21 +70,42 @@ function hardenWithPositions(options: unknown) {
     }
   }
 }
-const rehypePlugins = [
-  defaultRehypePlugins.sanitize!,
+setStyleScoper((styles) => scopeStyles(styles).css)
+
+type Plugins = NonNullable<ComponentProps<typeof Streamdown>["rehypePlugins"]>
+const hardening = (allowDataImages: boolean) => [
+  hardenWithPositions,
+  {
+    allowedLinkPrefixes: ["*"],
+    allowedImagePrefixes: [],
+    allowDataImages,
+    blockedImageClass: "md-blocked",
+    blockedLinkClass: "md-blocked"
+  }
+]
+/** "Show HTML as formatting" off: raw HTML stays text (Streamdown makes it text without rehype-raw). */
+const rehypePlugins = [defaultRehypePlugins.sanitize!, hardening(false)] as Plugins
+/**
+ * On (ui/html/rehypeHtml.ts): parsed, sanitized by the registered schema and finished. `parts`
+ * re-keys Streamdown's processor cache when a part is replaced; `block` keeps the document
+ * blocks of different blocks apart. `data:` images load: they make no request.
+ */
+const htmlPlugins = (parts: number, block: number, documents: boolean) =>
   [
-    hardenWithPositions,
-    {
-      allowedLinkPrefixes: ["*"],
-      allowedImagePrefixes: [],
-      allowDataImages: false,
-      blockedImageClass: "md-blocked",
-      blockedLinkClass: "md-blocked"
-    }
-  ]
-] as NonNullable<ComponentProps<typeof Streamdown>["rehypePlugins"]>
+    htmlMark,
+    rehypeRaw,
+    [htmlPrepare, { parts }],
+    [htmlSanitize, { parts }],
+    [htmlFinish, { parts, block, documents }],
+    hardening(true)
+  ] as Plugins
 
 function Link({ node: _node, ...props }: ComponentProps<"a"> & { node?: unknown }) {
+  // A link to a place in the message (a card's own `#…` anchors) stays on the page.
+  if (typeof props.href !== "string" || props.href.startsWith("#")) {
+    const { target: _target, rel: _rel, ...rest } = props
+    return <a {...rest} />
+  }
   return <a {...props} target="_blank" rel="noopener noreferrer nofollow" />
 }
 
@@ -65,16 +119,41 @@ function Strong({ node: _node, ...props }: ComponentProps<"strong"> & { node?: u
 // is still text. The React component then supplies the underline presentation.
 const components = { a: Link, ins: Underline, strong: Strong }
 const remarkPlugins = [...Object.values(defaultRemarkPlugins), stFormatting]
+const htmlRemarkPlugins = [
+  ...Object.values(defaultRemarkPlugins),
+  [stFormatting, { html: true }]
+] as typeof remarkPlugins
 const SourceBlocks = createContext<ReadonlyArray<string>>([])
+/** How this text's blocks render HTML: null shows it as text. */
+const BlockHtml = createContext<{ readonly parts: number; readonly documents: boolean } | null>(null)
 
 function PositionedBlock(props: BlockProps) {
   const key = useContext(SourceBlocks)[props.index] ?? "[]"
+  const html = useContext(BlockHtml)
+  // A block without a tag has no HTML to parse: the plain pipeline renders it the same, cheaper.
+  const parse = html !== null && props.content.includes("<")
   // Streamdown caches processors by plugin name + serialized options, not function identity.
   const plugins = useMemo(
-    () => [...rehypePlugins, [sourcePositions, { offsets: JSON.parse(key) as SourceChar[] }]] as typeof rehypePlugins,
-    [key]
+    () =>
+      [
+        ...(parse ? htmlPlugins(html.parts, props.index, html.documents) : rehypePlugins),
+        [sourcePositions, { offsets: JSON.parse(key) as SourceChar[] }]
+      ] as Plugins,
+    [key, parse, html, props.index]
   )
-  return <Block {...props} rehypePlugins={plugins} />
+  const markdown = props.components
+  const withHtml = useMemo(
+    () => (parse ? (htmlComponents(markdown) as BlockProps["components"]) : markdown),
+    [parse, markdown]
+  )
+  return (
+    <Block
+      {...props}
+      rehypePlugins={plugins}
+      {...(parse ? { remarkPlugins: htmlRemarkPlugins } : {})}
+      {...(withHtml ? { components: withHtml } : {})}
+    />
+  )
 }
 
 /** Display transforms can replace a stored token (for example a greeting macro).
@@ -104,7 +183,23 @@ function displayRanges(stored: string, display: string): SourceChar[] {
 }
 
 /** The built-in ST formatter; storage, copy and prompt text never pass through it. */
-export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
+export function StMarkdown({ text, sourceText = text, streaming }: MessageTextProps) {
+  const settings = useContext(HtmlSettingsContext)
+  const message = useContext(HtmlMessageContext)
+  const chat = useContext(HtmlChatContext)
+  const parts = useSyncExternalStore(subscribeHtmlParts, htmlPartsRevision, htmlPartsRevision)
+  // Disabling the registered schema (`html.inline`) shows HTML as text, as the switch does.
+  const html = useMemo(
+    () => (settings.html && effectiveSchema() ? { parts, documents: !streaming } : null),
+    [settings.html, parts, streaming]
+  )
+  // A message body's `<style>`s join the chat's stylesheet (ui/html/messageHtml.ts).
+  const styles = useMemo(() => (html && message ? scopeStyles(extractStyles(text)) : null), [html, message, text])
+  useEffect(() => {
+    if (styles && message && chat) chat.styles.report(message.key, styles.css)
+  }, [styles, message, chat])
+  const [blockedText, setBlockedText] = useState<string | null>(null)
+  const reportBlocked = useCallback(() => setBlockedText(text), [text])
   const { fixed, renderedBlocks, sourceBlocks } = useMemo(() => {
     const fixed = fixMarkdownMapped(text)
     const display = displayRanges(sourceText, text)
@@ -129,23 +224,30 @@ export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
     return { fixed: normalized, renderedBlocks: [...withDefinitions(normalized, parsed)], sourceBlocks }
   }, [text, sourceText])
   const blocks = useCallback(() => renderedBlocks, [renderedBlocks])
+  const blocked = html !== null && (blockedText === text || styles?.blocked === true)
   return (
     <SourceBlocks.Provider value={sourceBlocks}>
-      <Streamdown
-        className="markdown"
-        mode="streaming"
-        parseIncompleteMarkdown={false}
-        parseMarkdownIntoBlocksFn={blocks}
-        BlockComponent={PositionedBlock}
-        rehypePlugins={rehypePlugins}
-        remarkPlugins={remarkPlugins}
-        components={components}
-        controls={false}
-        linkSafety={{ enabled: false }}
-        lineNumbers={false}
-      >
-        {fixed}
-      </Streamdown>
+      <BlockHtml value={html}>
+        <MediaBlocked value={html ? reportBlocked : null}>
+          <Streamdown
+            // Contained (styles.css): a card's `position: fixed` stays inside its message (fix 1).
+            className={`markdown${html ? " markdown-html" : ""}${html && message ? ` ${MESSAGE_SCOPE}` : ""}`}
+            mode="streaming"
+            parseIncompleteMarkdown={false}
+            parseMarkdownIntoBlocksFn={blocks}
+            BlockComponent={PositionedBlock}
+            rehypePlugins={rehypePlugins}
+            remarkPlugins={remarkPlugins}
+            components={components}
+            controls={false}
+            linkSafety={{ enabled: false }}
+            lineNumbers={false}
+          >
+            {fixed}
+          </Streamdown>
+          {blocked && <BlockedMediaNote />}
+        </MediaBlocked>
+      </BlockHtml>
     </SourceBlocks.Provider>
   )
 }

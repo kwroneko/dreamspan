@@ -46,6 +46,7 @@ import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
+import { HtmlPreview } from "./htmlDisplay.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { IconButton, TooltipProvider } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -111,7 +112,9 @@ function Greeting({
           </span>
           {groupOnly && <span className="shrink-0 text-xs text-muted">group greeting</span>}
         </header>
-        <Markdown text={text} streaming={false} />
+        <HtmlPreview id={`greeting:${card.card.entityId}`} text={text}>
+          <Markdown text={text} streaming={false} />
+        </HtmlPreview>
         {count > 1 && (
           <footer className="flex min-h-8 items-center">
             <span className="flex-1" />
