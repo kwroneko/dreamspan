@@ -49,6 +49,7 @@ export interface ConnectionRow {
   readonly proxy_url_enc: Uint8Array | null
   readonly preset_override_ref_id: string | null
   readonly cache_revision: number
+  readonly model_id_prefix: string | null
   readonly row_version: number
   readonly created_at: number
   readonly updated_at: number
@@ -76,6 +77,7 @@ export const toConnection = (row: ConnectionRow) =>
     maxConcurrent: row.max_concurrent,
     proxyMode: row.proxy_mode,
     presetOverrideRefId: row.preset_override_ref_id as RefId | null,
+    modelIdPrefix: row.model_id_prefix,
     rowVersion: row.row_version,
     createdAt: row.created_at,
     updatedAt: row.updated_at

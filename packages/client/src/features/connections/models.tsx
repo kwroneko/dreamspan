@@ -503,11 +503,30 @@ export function ModelSettingsEditor({
             </Field>
             <Field
               label="Prefill"
-              about="Let replies start with text you supply, for the preset’s prefill and Continue. Choose Yes only if the model supports it."
+              about={
+                model.upstream.fixed?.includes("prefill")
+                  ? "This provider refuses a prefill for this model, so it stays off. Continue asks the model to go on from the reply so far."
+                  : "Let replies start with text you supply, for the preset’s prefill and Continue. Choose Yes only if the model supports it."
+              }
             >
-              <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
+              <Select
+                items={prefillItems(model.upstream.prefill)}
+                value={model.upstream.fixed?.includes("prefill") ? "auto" : prefill}
+                onValueChange={setPrefill}
+                disabled={model.upstream.fixed?.includes("prefill") ?? false}
+              />
             </Field>
           </div>
+          {model.upstream.shims && model.upstream.shims.length > 0 && (
+            <div className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-text">Provider rules</span>
+              <ul className="list-disc pl-5 text-muted">
+                {model.upstream.shims.map((shim) => (
+                  <li key={shim.id}>{shim.label}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </Section>
       <Section

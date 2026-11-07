@@ -37,7 +37,14 @@ const OpenAiModel = Schema.Struct({
     )
   ),
   // vLLM: the context the server was started with.
-  max_model_len: OptionalNumber
+  max_model_len: OptionalNumber,
+  // Newer OpenAI-compatible lists: the window, output limit, input kinds and efforts.
+  context_window: OptionalNumber,
+  max_output_tokens: OptionalNumber,
+  input_modalities: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+  effort: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ supported_levels: Schema.optionalKey(Schema.Array(Schema.String)) }))
+  )
 })
 const OpenAiList = Schema.Struct({ data: Schema.Array(OpenAiModel) })
 
@@ -83,15 +90,16 @@ const defined = <A extends Record<string, unknown>>(record: A) =>
 const fromOpenAi = (model: typeof OpenAiModel.Type): ModelUpstream => {
   const input = perMillion(model.pricing?.prompt)
   const output = perMillion(model.pricing?.completion)
-  const modalities = model.architecture?.input_modalities
+  const modalities = model.architecture?.input_modalities ?? model.input_modalities ?? undefined
   const parameters = model.supported_parameters
+  const efforts = model.effort?.supported_levels
   return defined({
     name: model.name,
-    context: model.context_length ?? model.max_model_len ?? undefined,
-    maxOutput: model.top_provider?.max_completion_tokens ?? undefined,
+    context: model.context_length ?? model.context_window ?? model.max_model_len ?? undefined,
+    maxOutput: model.top_provider?.max_completion_tokens ?? model.max_output_tokens ?? undefined,
     vision: modalities ? modalities.includes("image") : undefined,
     tools: parameters ? parameters.includes("tools") : undefined,
-    reasoning: parameters ? parameters.includes("reasoning") : undefined,
+    reasoning: parameters ? parameters.includes("reasoning") : efforts?.length ? true : undefined,
     price:
       input !== undefined && output !== undefined
         ? defined({

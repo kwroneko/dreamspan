@@ -15,6 +15,7 @@ import type { ImageTokenCounter } from "./imageCounters.ts"
 import type { TextTokenCounter } from "./textCounters.ts"
 import type { ModelCatalog } from "./contextCatalog.ts"
 import type { ContextLimitParser } from "./contextLimits.ts"
+import type { CompatShim } from "./shims.ts"
 
 export type Catalog = Readonly<Record<string, Model<Api>>>
 
@@ -161,6 +162,8 @@ export interface ProviderRegistryShape {
   readonly catalogs: Registry<ModelCatalog>
   /** Readers of the limit a context-length error states; newest asked first. */
   readonly contextLimits: Registry<ContextLimitParser>
+  /** Per provider kind and model pattern: what a provider refuses or needs (shims.ts). */
+  readonly shims: Registry<CompatShim>
 }
 
 export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(
@@ -177,6 +180,7 @@ export const empty = Layer.sync(ProviderRegistry, () =>
     imageCounters: makeRegistry<ImageTokenCounter>(),
     textCounters: makeRegistry<TextTokenCounter>(),
     catalogs: makeRegistry<ModelCatalog>(),
-    contextLimits: makeRegistry<ContextLimitParser>()
+    contextLimits: makeRegistry<ContextLimitParser>(),
+    shims: makeRegistry<CompatShim>()
   })
 )

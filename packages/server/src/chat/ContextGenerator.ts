@@ -64,6 +64,43 @@ export const layer = Layer.effect(
         .pipe(Effect.catch((error) => Effect.logError(`closing rollout ${rolloutId} failed`, error)))
 
     /** The registered reply parsers, in order, over a strategy's chunks (replySections.ts). */
+    /**
+     * A prefilled reply that ends with no text after the prefill isn't a reply (liveapi F12): it
+     * fails, so the error shows and the reply can be retried, instead of saving an empty complete
+     * version Continue then refuses. The same for every provider and prefill kind; a continuation
+     * and an agent reply are left as they are.
+     */
+    const emptyAfterPrefill = (
+      request: GenerationRequest,
+      generation: Generation,
+      agentic: boolean,
+      reply: Stream.Stream<import("./Generator.ts").GenerationChunk, GenerationFailed>
+    ) => {
+      if (agentic || request.initial || !generation.request.prefill) return reply
+      let text = false
+      return reply.pipe(
+        Stream.tap((chunk) =>
+          Effect.sync(() => {
+            const said =
+              typeof chunk === "string" ? chunk : "text" in chunk ? chunk.text : "held" in chunk ? chunk.held : ""
+            if (said.trim() !== "") text = true
+          })
+        ),
+        Stream.concat(
+          Stream.suspend(() =>
+            text
+              ? Stream.empty
+              : Stream.fail(
+                  new GenerationFailed({
+                    class: "empty_reply",
+                    message: "The model returned no text after the reply's prefill."
+                  })
+                )
+          )
+        )
+      )
+    }
+
     const parsed = (
       request: GenerationRequest,
       generation: Generation,
@@ -380,7 +417,7 @@ export const layer = Layer.effect(
             resolveImages: (input) =>
               hydrateMessageImages(input, model, (id) => reader.GetMediaFile({ userId, mediaId: id }), config.dataDir)
           })
-          return parsed(request, generation, reply)
+          return parsed(request, generation, emptyAfterPrefill(request, generation, agentic, reply))
         })
       )
 

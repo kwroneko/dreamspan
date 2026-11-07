@@ -22,6 +22,7 @@ import { builtinTextCounters } from "./textCounters.ts"
 import { builtinModelCatalogs } from "./contextCatalog.ts"
 import { builtinContextLimitParsers } from "./contextLimits.ts"
 import { systemOneKind } from "./systemOne.ts"
+import { builtinShims } from "./shims.ts"
 
 const completions = openAICompletionsApi()
 
@@ -113,6 +114,7 @@ export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const registry = yield* ProviderRegistry
     for (const entry of builtinKinds) yield* registry.kinds.register(entry)
+    for (const shim of builtinShims) yield* registry.shims.register(shim)
     // Explicit cache breakpoints (PROVIDERS §8), for Anthropic Messages so far.
     yield* registry.transforms.register({
       id: "anthropic-explicit-breakpoints",
