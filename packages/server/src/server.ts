@@ -32,7 +32,6 @@ import {
   AppCoreApi,
   AuthenticatedGalleryApi,
   AuthenticatedCardArchiveApi,
-  AuthenticatedWorkbenchApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
   AuthenticatedShellUpdatesApi,
@@ -59,7 +58,6 @@ import {
   makeForkMergeHandlers,
   makeCardArchiveHandlers
 } from "./api/editor.ts"
-import { makeWorkbenchHandlers } from "./api/workbench.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeBinHandlers } from "./api/bin.ts"
 import { makeComposerHandlers } from "./api/composer.ts"
@@ -168,8 +166,7 @@ const Handlers = Layer.mergeAll(
   AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
-  AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
-  AuthenticatedWorkbenchApi.toLayer(makeWorkbenchHandlers)
+  AuthenticatedGalleryApi.toLayer(makeGalleryHandlers)
 )
 
 /**

@@ -6,9 +6,9 @@
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
-import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
+import { storedLayout } from "./support/workbench.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 test.setTimeout(180_000)
@@ -90,11 +90,6 @@ const expectPictureIn = async (page: Page, frame: Locator) => {
   expect(shown.x + shown.width).toBeLessThanOrEqual(box.x + box.width + 1)
 }
 
-const savedLayout = async (page: Page) => {
-  const device = await page.evaluate(() => localStorage.getItem("rp.device"))
-  return asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetWorkbenchLayout({ device: device ?? "shared" }))
-}
-
 for (const theme of ["light", "dark"] as const) {
   test(`a picture dragged into a frame's strip is a tab: moved by its menu, kept after reload, closed at 1440 ${theme}`, async ({
     page
@@ -121,7 +116,7 @@ for (const theme of ["light", "dark"] as const) {
     await expectPictureIn(page, left)
 
     // Restored after a reload, where it was.
-    await expect.poll(async () => (await savedLayout(page)) ?? "").toContain("/picture?")
+    await expect.poll(async () => (await storedLayout(page)) ?? "").toContain("/picture?")
     await page.reload()
     await expect(frames(page)).toHaveCount(2)
     await expect(pictureTab(frames(page).nth(0))).toBeVisible()

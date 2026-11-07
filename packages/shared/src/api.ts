@@ -22,7 +22,6 @@ import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import { EditorApi, ForkMergeApi, GalleryApi, CardArchiveApi } from "./editorApi.ts"
-import { WorkbenchApi } from "./workbenchApi.ts"
 import {
   AccountRejected,
   Forbidden,
@@ -407,7 +406,6 @@ export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authenticat
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
-export const AuthenticatedWorkbenchApi = WorkbenchApi.middleware(Authentication)
 export const AuthenticatedShellUpdatesApi = ShellUpdatesApi.middleware(Authentication)
 
 /** The whole API: what the client calls and the server serves. */
@@ -430,7 +428,6 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedCardArchiveApi)
   .merge(AuthenticatedGalleryApi)
-  .merge(AuthenticatedWorkbenchApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi)

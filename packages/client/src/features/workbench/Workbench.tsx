@@ -7,10 +7,7 @@
 // Each tab renders its own router (TabHost) into an element of its own, which is put in its
 // frame while shown and taken out of the page while not: its state, scroll and drafts stay,
 // and nothing hidden is left in the page to find or to focus.
-import { useAtomValue } from "@effect/atom-react"
 import { createMemoryHistory, RouterProvider, useRouter } from "@tanstack/react-router"
-import { Effect } from "effect"
-import { AsyncResult, Atom } from "effect/reactivity"
 import {
   type ReactNode,
   useEffect,
@@ -22,9 +19,7 @@ import {
 } from "react"
 import { createPortal } from "react-dom"
 import { buildRouter } from "../../routes.tsx"
-import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
-import { useCaller } from "../editor/caller.ts"
 import { Away } from "../../ui/away.ts"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { ContextMenu, Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
@@ -47,10 +42,10 @@ import {
   type Tab,
   type Direction
 } from "./model.ts"
-import { deviceId } from "./device.ts"
 import { type DropZone, dropZone } from "./dropOpen.ts"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
+import { readTabLayout, writeTabLayout } from "./tabLayout.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
 
 const TAB_MIME = "application/x-rp-workbench-tab"
@@ -65,44 +60,17 @@ const subscribeWide = (listener: () => void) => {
 }
 const useWideScreen = () => useSyncExternalStore(subscribeWide, () => matchMedia(WIDE).matches)
 
-const savedFor = Atom.family((_userId: string) =>
-  AppClient.runtime.atom(
-    Effect.gen(function* () {
-      const client = yield* AppClient
-      return yield* client("GetWorkbenchLayout", { device: deviceId() })
-    })
-  )
-)
-
 /** Registered in the shell's center column (`centerColumn`). */
 export function Workbench() {
   const userId = useSession().user.id
-  const result = useAtomValue(savedFor(userId))
-  // A layout that can't be read starts fresh: the column must open either way.
-  if (AsyncResult.isInitial(result)) return null
-  const saved = AsyncResult.isSuccess(result) && result.value !== null ? parse(result.value) : null
-  return <WorkbenchFor key={userId} userId={userId} saved={saved} />
+  return <WorkbenchFor key={userId} userId={userId} />
 }
 
-const parse = (text: string): unknown => {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return null
-  }
-}
-
-function WorkbenchFor({ userId, saved }: { userId: string; saved: unknown }) {
+/** This browser tab's frames: its own layout after a reload, else just its URL (tabLayout.ts). */
+function WorkbenchFor({ userId }: { userId: string }) {
   const router = useRouter()
-  const call = useCaller()
   const [store] = useState(
-    () =>
-      new WorkbenchStore(
-        userId,
-        router.history,
-        saved,
-        (layout) => void call((client) => client("SetWorkbenchLayout", { device: deviceId(), layout }))
-      )
+    () => new WorkbenchStore(userId, router.history, readTabLayout(userId), (layout) => writeTabLayout(userId, layout))
   )
   useEffect(() => store.start(), [store])
   useLinkGestures(store)
