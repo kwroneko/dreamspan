@@ -35,6 +35,20 @@ export default tseslint.config(
     }
   },
   {
+    // The app is also served over plain HTTP on LAN addresses, where secure-context APIs are missing.
+    files: ["packages/client/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        {
+          property: "randomUUID",
+          message:
+            "crypto.randomUUID needs a secure context, so it's missing over plain HTTP; use uuid() from src/uuid.ts."
+        }
+      ]
+    }
+  },
+  {
     // Id schemas come from idSchema, which annotates their table: a brand alone leaves no
     // trace in a schema, and code that looks for ids (state.ts) would miss it.
     files: ["packages/*/src/**/*.{ts,tsx}"],
