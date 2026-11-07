@@ -490,7 +490,13 @@ export class WorkbenchStore {
       const preview = frame.tabs.find((t) => t.preview)
       if (preview) this.layout = pinTab(this.layout, preview.id)
       const tabId = this.open(href, { frame: frameId, preview: false })
-      if (index !== undefined) this.move(tabId, frameId, index)
+      if (index !== undefined) {
+        // The drop names a boundary before opening added the tab. Follow the tab on its
+        // right, whose index may have shifted, so moving uses the current strip's boundary.
+        const before = frame.tabs[index]
+        const tabs = frameOfTab(this.layout, tabId)!.tabs
+        this.move(tabId, frameId, before ? tabs.findIndex((t) => t.id === before.id) : tabs.length)
+      }
       return
     }
     const id = newId("f")

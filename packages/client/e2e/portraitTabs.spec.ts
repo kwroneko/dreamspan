@@ -91,6 +91,32 @@ const expectPictureIn = async (page: Page, frame: Locator) => {
 }
 
 for (const theme of ["light", "dark"] as const) {
+  test(`a strip drop keeps its position after tabs following the active chat at 1440 ${theme}`, async ({ page }) => {
+    await openChat(page, theme)
+    // Reloaded chats start as previews; editing keeps this one beside the Library tab.
+    await page.getByLabel("Message", { exact: true }).fill("Keep this chat open")
+    await page.getByLabel("Message", { exact: true }).fill("")
+    await page.getByRole("navigation", { name: "Main", exact: true }).getByRole("link", { name: "Library" }).click()
+    const frame = frames(page).first()
+    await expect(frame.locator("[data-tab]")).toHaveCount(2)
+    await frame.locator("[data-tab] [role=tab]").first().click()
+    await openInColumn(page, frame)
+    const original = await frame
+      .locator("[data-tab]")
+      .evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("data-tab")))
+    const strip = (await frame.locator("[data-tab-strip]").boundingBox())!
+    await dragHeaderTo(page, strip.x + strip.width - 40, strip.y + strip.height / 2)
+    await expectPictureIn(page, frame)
+    await expect(frame.locator("[data-tab]")).toHaveCount(3)
+    expect(
+      await frame
+        .locator("[data-tab]")
+        .evaluateAll((tabs) => tabs.slice(0, 2).map((tab) => tab.getAttribute("data-tab")))
+    ).toEqual(original)
+    await expect(frame.locator("[data-tab] [role=tab]").last()).toHaveAccessibleName(TALL.name)
+    await shot(page, `picture-tab-strip-position-${theme}`)
+  })
+
   test(`a picture dragged into a frame's strip is a tab: moved by its menu, kept after reload, closed at 1440 ${theme}`, async ({
     page
   }) => {
@@ -121,6 +147,15 @@ for (const theme of ["light", "dark"] as const) {
     await expect(frames(page)).toHaveCount(2)
     await expect(pictureTab(frames(page).nth(0))).toBeVisible()
     await expectPictureIn(page, frames(page).nth(0))
+
+    // A picture tab made on desktop remains reachable when this browser narrows to a phone.
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(frames(page)).toHaveCount(1)
+    await expectPictureIn(page, frames(page).first())
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await shot(page, `picture-tab-phone-${theme}`)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await expect(frames(page)).toHaveCount(2)
 
     // Closed by its tab's ×: the frame shows its chat again.
     await frames(page)
@@ -161,6 +196,7 @@ for (const theme of ["light", "dark"] as const) {
     await column(page).getByRole("button", { name: "Viewer options", exact: true }).click()
     const item = page.getByRole("menuitem", { name: "Open as a tab", exact: true })
     await expect(item).toHaveAccessibleDescription(/^Open this image as a tab/)
+    await shot(page, `picture-tab-menu-${theme}`)
     await item.click()
     await expect(pictureTab(frames(page).first())).toBeVisible()
     await expectPictureIn(page, frames(page).first())
