@@ -12,7 +12,7 @@ vi.hoisted(() => {
 })
 
 const connection = (id: string, name: string, kind = "openai-chat") => ({ id, name, kind })
-const model = (id: string, key: string, hidden = false) => ({ id, key, hidden })
+const model = (id: string, key: string, hidden = false) => ({ id, key, hidden, upstream: {}, overrides: {} })
 
 /** A client whose ListModels answers by connection id. */
 const fakeClient = (

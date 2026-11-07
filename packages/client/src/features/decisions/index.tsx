@@ -5,14 +5,15 @@
 // decision model.
 import { useAtomValue } from "@effect/atom-react"
 import type { ConnectionDecisions, DecisionPointInfo, DecisionPointSetting } from "@rp/shared/decisions.ts"
-import { type Model, type ModelId, resolveModel } from "@rp/shared/providers.ts"
+import { type Model, resolveModel } from "@rp/shared/providers.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
-import { Select, type SelectItem } from "../../ui/Select.tsx"
+import { ModelSelect } from "../pickers/ModelPicker.tsx"
+import { modelValue, parseModelValue, type ModelChoice } from "../chat/modelChoices.ts"
 import { Slider } from "../../ui/Slider.tsx"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { modelsAtom } from "../connections/data.ts"
@@ -96,7 +97,7 @@ function PointRow({
 function DecisionsSection({ connection, kinds }: ConnectionSectionProps) {
   const points = useAtomValue(pointsAtom)
   const settings = useAtomValue(settingsAtom)
-  const models = useAtomValue(modelsAtom(connection.id, false))
+  const models = useAtomValue(modelsAtom(connection.id, true))
   const action = useAction()
   // Only a connection whose kind answers decision questions has decisions to make.
   if (!kinds.find((kind) => kind.id === connection.kind)?.decisions) return null
@@ -108,9 +109,18 @@ function DecisionsSection({ connection, kinds }: ConnectionSectionProps) {
   }
   const save = (next: Pick<ConnectionDecisions, "model" | "points">) =>
     void action.run((client) => client("SetDecisionSettings", { connectionId: connection.id, ...next }), ["decisions"])
-  const items: Array<SelectItem<string>> = [
+  const items: Array<ModelChoice> = [
     { value: NONE, label: "None", description: "Nothing is asked." },
-    ...models.value.map((model) => ({ value: model.id as string, label: modelName(model) }))
+    ...models.value
+      .filter((model) => !model.hidden || model.id === own.model)
+      .map((model) => ({
+        value: modelValue(connection.id, model.id),
+        label: `${connection.name} · ${model.key}${model.hidden ? " (hidden)" : ""}`,
+        connectionId: connection.id,
+        connectionName: connection.name,
+        modelKey: model.key,
+        name: modelName(model)
+      }))
   ]
   const chosen = own.model !== null && models.value.some((model) => model.id === own.model) ? own.model : null
   return (
@@ -124,10 +134,13 @@ function DecisionsSection({ connection, kinds }: ConnectionSectionProps) {
           label="Decision model"
           description={models.value.length === 0 ? "Add the model by its id under Models first." : undefined}
         >
-          <Select
+          <ModelSelect
+            ariaLabel="Decision model"
             items={items}
-            value={chosen ?? NONE}
-            onValueChange={(next) => save({ model: next === NONE ? null : (next as ModelId), points: own.points })}
+            value={chosen ? modelValue(connection.id, chosen) : NONE}
+            onValueChange={(next) =>
+              save({ model: next === NONE ? null : parseModelValue(next).model, points: own.points })
+            }
           />
         </Field>
         <div className="flex flex-col gap-3">

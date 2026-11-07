@@ -129,6 +129,11 @@ const displayFields = {
   presetSort: PresetSort,
   /** How model lists sort (the composer's picker and the Model tab's). */
   modelSort: Schema.Literals(["name", "used"]),
+  /** Model choices keyed by the connection/model pair, shared by all model pickers. */
+  modelPins: Schema.Record(Schema.String, Schema.Boolean).check(Schema.isMaxProperties(500)),
+  modelRecent: Schema.Record(Schema.String, Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))).check(
+    Schema.isMaxProperties(100)
+  ),
   /** How the editors' header switchers sort lorebooks, notes and snippets, each kind its own. */
   lorebookSort: DocumentSort,
   noteSort: DocumentSort,
@@ -173,6 +178,8 @@ export const DisplayPrefsChange = Schema.Struct({
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
   presetSort: Schema.optionalKey(displayFields.presetSort),
   modelSort: Schema.optionalKey(displayFields.modelSort),
+  modelPins: Schema.optionalKey(displayFields.modelPins),
+  modelRecent: Schema.optionalKey(displayFields.modelRecent),
   lorebookSort: Schema.optionalKey(displayFields.lorebookSort),
   noteSort: Schema.optionalKey(displayFields.noteSort),
   snippetSort: Schema.optionalKey(displayFields.snippetSort),
@@ -204,6 +211,8 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   chatWidth: CHAT_WIDTH.default,
   presetSort: "name",
   modelSort: "name",
+  modelPins: {},
+  modelRecent: {},
   lorebookSort: "name",
   noteSort: "name",
   snippetSort: "name",

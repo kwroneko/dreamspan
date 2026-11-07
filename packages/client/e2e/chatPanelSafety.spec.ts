@@ -174,7 +174,7 @@ test("a hidden model in use is named, not described as gone", async ({ page }) =
   await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(modelChip(page)).toHaveAccessibleName(modelName(`${connection.name} · model-a (hidden)`))
   await page.goto(`${server().url}/settings/chats`)
-  await expect(page.getByRole("combobox", { name: "Default model" })).toHaveText(
+  await expect(page.getByRole("button", { name: "Default model", exact: true })).toHaveText(
     `${connection.name} · model-a (hidden)`
   )
 })
@@ -190,7 +190,7 @@ test("changing the refusal judge leaves a default model changed in another tab",
     api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: b.id }, preset: null } })
   )
   await page.getByLabel("Refusal judge", { exact: true }).click()
-  await page.getByRole("option", { name: `${connection.name} · model-a`, exact: true }).click()
+  await page.getByRole("radio", { name: `${connection.name} · model-a`, exact: true }).click()
   await expect.poll(async () => (await admin((api) => api.GetGenerationDefaults())).judge?.model).toBe(a.id)
   expect((await admin((api) => api.GetGenerationDefaults())).model?.model).toBe(b.id)
   // The page shows the default as it now is.

@@ -1153,6 +1153,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 ## 9. Connections and models
 
+- **[D]** (owner, 2026-11-06, modelpicker): "When you open it to select a model, you want to be able to find specific models quickly, and to switch between a set of models you've been using - potentially from different connections. Connections can on their own add *thousands* of models - OpenRouter for example - so the model selector must work in a way as to not make one connection with thousands of models compromise its utility or make it hard to find models, for example offering ordering by last used, showing pinned favourites at the top or in their own tab, or allowing easy filtering by connection (a useful thing in general), etc."
+- **[P]** (modelpicker, implementation choices): one registered model picker across reply, account, fallback summarizer, first-run and decision selections; pins first across connections, recent selections and reply use, an always-visible connection filter, punctuation-tolerant fuzzy search over id/name/prefix, connection groups and measured windowing. Pins, recent selections and sort live in account settings. **Built; obsolete as an implementation proposal:** ARCHITECTURE §15.
+
 - **[D]** No ST-style connection profiles. **A connection is one wire type, one provider and one set of settings.** You switch models within a connection; otherwise you switch connections.
 - **[D]** Every provider type has an **overridable base URL**. No special "proxy" concept; a provider's native model picker stays whatever the address.
 - **[D]** Model lists are fetched from the configured upstream. Users can add and edit models for every provider type.

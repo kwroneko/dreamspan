@@ -67,6 +67,13 @@ export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
         const merged = {
           ...stored,
           ...prefs,
+          modelPins: Object.fromEntries(Object.entries({ ...stored.modelPins, ...prefs.modelPins }).slice(-500)),
+          modelRecent: Object.fromEntries(
+            Object.entries({ ...stored.modelRecent, ...prefs.modelRecent })
+              .map(([id, at]) => [id, Math.max(at, stored.modelRecent[id] ?? 0)] as const)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 100)
+          ),
           messageToolbar: mergeChoices(stored.messageToolbar, prefs.messageToolbar),
           dismissedInfo: mergeChoices(stored.dismissedInfo, prefs.dismissedInfo),
           messageDetails: mergeChoices(stored.messageDetails, prefs.messageDetails)
