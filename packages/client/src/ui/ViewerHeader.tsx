@@ -3,19 +3,54 @@ import { MenuItem } from "./Menu.tsx"
 import { type Portrait, usePortraitViewer } from "./Portrait.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
-/** The whole header is a pointer and keyboard handle; controls still receive ordinary clicks. */
-export function ViewerHeader({ portrait, children }: { portrait: Portrait; children: ReactElement }) {
+interface Box {
+  readonly left: number
+  readonly top: number
+  readonly width: number
+  readonly height: number
+}
+
+/**
+ * Somewhere outside the column the image can be dropped (the workbench's frames, as a tab):
+ * `over` gives the part it would take, to shade, or null; `drop` takes it, true when it did.
+ */
+interface ViewerDropOutside {
+  readonly over: (x: number, y: number) => Box | null
+  readonly drop: (x: number, y: number) => boolean
+}
+
+/**
+ * The whole header is a pointer and keyboard handle; controls still receive ordinary clicks.
+ * Dragged within the column it moves the image in the stack; dragged out onto `outside`, it
+ * goes there.
+ */
+export function ViewerHeader({
+  portrait,
+  outside,
+  children
+}: {
+  portrait: Portrait
+  outside?: ViewerDropOutside | undefined
+  children: ReactElement
+}) {
   const viewer = usePortraitViewer()!
   const live = useRef(viewer)
   const tracking = useRef<AbortController | null>(null)
   const [indicator, setIndicator] = useState<{ left: number; top: number; width: number } | null>(null)
+  const [zone, setZone] = useState<Box | null>(null)
   useLayoutEffect(() => {
     live.current = viewer
   })
   useEffect(() => () => tracking.current?.abort(), [])
   const index = viewer.shown.findIndex((e) => e.portrait.id === portrait.id)
   return (
-    <Tooltip label="Drag to preview where this image will move on release.">
+    <Tooltip
+      label={
+        outside
+          ? "Drag to move this image in the column, or onto a frame to open it there as a tab."
+          : "Drag to preview where this image will move on release."
+      }
+    >
       <div
         data-viewer-header
         tabIndex={0}
@@ -51,11 +86,14 @@ export function ViewerHeader({ portrait, children }: { portrait: Portrait; child
           const bounds = column.getBoundingClientRect()
           let moving = false
           let target = index
+          let out: { x: number; y: number } | null = null
           e.currentTarget.setPointerCapture(id)
           const end = (commit: boolean) => {
             controller.abort()
             setIndicator(null)
-            if (commit && moving && target !== index) live.current.move(portrait.id, target)
+            setZone(null)
+            if (commit && out && outside?.drop(out.x, out.y)) return
+            if (commit && moving && !out && target !== index) live.current.move(portrait.id, target)
           }
           window.addEventListener(
             "pointermove",
@@ -64,6 +102,18 @@ export function ViewerHeader({ portrait, children }: { portrait: Portrait; child
               if (!moving && Math.hypot(event.clientX - x, event.clientY - y) < 6) return
               moving = true
               event.preventDefault()
+              const beyond =
+                event.clientX < bounds.left ||
+                event.clientX > bounds.right ||
+                event.clientY < bounds.top ||
+                event.clientY > bounds.bottom
+              const over = beyond && outside ? outside.over(event.clientX, event.clientY) : null
+              out = over ? { x: event.clientX, y: event.clientY } : null
+              setZone(over)
+              if (over) {
+                setIndicator(null)
+                return
+              }
               target = others.filter((box) => event.clientY >= box.top + box.height / 2).length
               const top = others[target]?.top ?? others.at(-1)?.bottom ?? bounds.top
               setIndicator(target === index ? null : { left: bounds.left, top: top - 1, width: bounds.width })
@@ -88,6 +138,14 @@ export function ViewerHeader({ portrait, children }: { portrait: Portrait; child
         }}
       >
         {children}
+        {zone && (
+          <div
+            data-viewer-drop-zone
+            data-layout-overlay="Drop target covers the part of the frame the image will take"
+            className="pointer-events-none fixed z-40 border-2 border-accent bg-accent/10"
+            style={zone}
+          />
+        )}
         {indicator && (
           <div
             data-viewer-drop-indicator

@@ -2,6 +2,7 @@
 // side panel's place, and how to name the tab. Outside a workbench (tests, a feature that
 // replaced it) every answer is the single-view one: focused, shown, the panel inline.
 import { createContext, type ReactNode, useContext, useEffect, useSyncExternalStore } from "react"
+import { type DropTarget, dropTargetAt } from "./dropOpen.ts"
 import { itemKey } from "./kinds.ts"
 import { findTab, focusedFrame, focusedTab, frameOfTab, leftEdgeFrames } from "./model.ts"
 import type { WorkbenchStore } from "./store.ts"
@@ -17,6 +18,8 @@ export const WorkbenchContext = createContext<{
   readonly store: WorkbenchStore
   /** Where the focused chat's side panel goes, beside the frames. */
   readonly sideHost: HTMLElement | null
+  /** Where the portrait column goes, left of the frames. */
+  readonly portraitHost: HTMLElement | null
 } | null>(null)
 
 const noop = () => () => {}
@@ -70,6 +73,39 @@ export function useSidePanelPlace(wide: boolean): { show: boolean; host: HTMLEle
   )
   if (!tab) return { show: true, host: null }
   return { show: owner, host: wide ? (workbench?.sideHost ?? null) : null }
+}
+
+/**
+ * The portrait column's place for a view with pictures `open`: beside it outside a workbench,
+ * else the shell's column left of the frames while this tab's pictures are the ones it shows
+ * (`portraitOwner`), else nowhere. On a phone the viewer is full screen, so this isn't asked.
+ */
+export function usePortraitColumnPlace(open: boolean): { show: boolean; host: HTMLElement | null } {
+  const tab = useContext(TabContext)
+  const workbench = useContext(WorkbenchContext)
+  useEffect(() => (tab && open ? tab.store.addPortraitTab(tab.tabId) : undefined), [tab, open])
+  const owner = useSyncExternalStore(tab?.store.subscribe ?? noop, () =>
+    tab ? tab.store.portraitOwner() === tab.tabId : true
+  )
+  if (!tab) return { show: open, host: null }
+  const host = workbench?.portraitHost ?? null
+  return { show: open && owner && host !== null, host }
+}
+
+/**
+ * Opening something as a tab from outside the strips (a picture from the portrait column): what
+ * a point over the frames would take, a drop there, and an open beside the view's own tab, kept.
+ * Null outside a workbench.
+ */
+export function useOpenAsTab() {
+  const tab = useContext(TabContext)
+  if (!tab) return null
+  const { store, tabId } = tab
+  return {
+    at: dropTargetAt,
+    drop: (target: DropTarget, href: string) => store.dropOpen(href, target.frameId, target.zone, target.index),
+    open: (href: string) => store.dropOpen(href, store.frameOf(tabId) ?? store.frames()[0]!.id, "center")
+  }
 }
 
 /** The item the tab shows now: what it says about itself is said again when this changes. */

@@ -1,7 +1,8 @@
 // The center column as frames of tabs (owner, 2026-11-05; DESIGN §10.1): VS Code's split view
 // with tabs. One item and no split looks as the single view did; the strip appears once a
 // frame has two tabs or the column is split. The side panel stays beside the frames and shows
-// the chat focused last (tab.tsx `useSidePanelPlace`).
+// the chat focused last (tab.tsx `useSidePanelPlace`); the portrait column stays left of the
+// frames and shows the pictures opened last (`usePortraitColumnPlace`).
 //
 // Each tab renders its own router (TabHost) into an element of its own, which is put in its
 // frame while shown and taken out of the page while not: its state, scroll and drafts stay,
@@ -47,6 +48,7 @@ import {
   type Direction
 } from "./model.ts"
 import { deviceId } from "./device.ts"
+import { type DropZone, dropZone } from "./dropOpen.ts"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
@@ -107,6 +109,7 @@ function WorkbenchFor({ userId, saved }: { userId: string; saved: unknown }) {
   const layout = useSyncExternalStore(store.subscribe, store.snapshot)
   const wide = useWideScreen()
   const [sideHost, setSideHost] = useState<HTMLElement | null>(null)
+  const [portraitHost, setPortraitHost] = useState<HTMLElement | null>(null)
   const [slots, setSlots] = useState<ReadonlyMap<string, HTMLElement>>(new Map())
   /** A frame's body, where its shown tab's element goes; the returned function forgets it. */
   const slotRef: SlotRef = (frameId, element) => {
@@ -126,8 +129,9 @@ function WorkbenchFor({ userId, saved }: { userId: string; saved: unknown }) {
   // A maximized frame shows alone; the others keep their tabs (VS Code's Maximize Editor Group).
   const maximized = layout.maximized ? frames(layout.root).find((f) => f.id === layout.maximized) : undefined
   return (
-    <WorkbenchContext value={{ store, sideHost }}>
+    <WorkbenchContext value={{ store, sideHost, portraitHost }}>
       <div className="flex min-h-0 min-w-0 flex-1">
+        <div ref={setPortraitHost} className="contents" data-portrait-host />
         <div data-workbench className="flex min-h-0 min-w-0 flex-1 flex-col">
           {wide ? (
             <NodeView node={maximized ?? layout.root} layout={layout} store={store} slotRef={slotRef} />
@@ -391,24 +395,6 @@ function SplitView({
   )
 }
 
-/** Where over a frame a dragged tab drops: into it, or into a new frame on that side. */
-type DropZone = "center" | "left" | "right" | "top" | "bottom"
-
-/** VS Code's: the outer quarter on each side splits there; nearest edge first in a corner. */
-const dropZone = (element: HTMLElement, event: DragEvent): DropZone => {
-  const box = element.getBoundingClientRect()
-  const x = (event.clientX - box.left) / box.width
-  const y = (event.clientY - box.top) / box.height
-  const edges: Array<[DropZone, number]> = [
-    ["left", x],
-    ["right", 1 - x],
-    ["top", y],
-    ["bottom", 1 - y]
-  ]
-  const [zone, distance] = edges.reduce((a, b) => (b[1] < a[1] ? b : a))
-  return distance < 0.25 ? zone : "center"
-}
-
 /** The part of the frame the tab will take, shaded while it's dragged over. */
 const ZONE_OVERLAY: Record<DropZone, string> = {
   center: "inset-0",
@@ -496,7 +482,7 @@ function FrameView({
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
       {strip && <TabStrip frame={frame} layout={layout} store={store} tabs={frame.tabs} />}
-      <div ref={setBody} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={setBody} data-frame-body className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         {frame.tabs.length === 0 && <EmptyFrame frame={frame} store={store} layout={layout} />}
         {over && (
           <div

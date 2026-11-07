@@ -401,7 +401,7 @@ function AppShell() {
  */
 export function CenterPage() {
   const pathname = useLocation({ select: (location) => location.pathname })
-  const fill = /^\/(?:chats\/[^/]+|cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.test(pathname)
+  const fill = /^\/(?:chats\/[^/]+|cards\/[^/]+\/chat|groups\/[^/]+\/new|picture)$/.test(pathname)
   // An editor opened from a chat scrolls itself, as the chat's large editors did (BoundScroll).
   const bound = useSearch({ strict: false, select: (search) => typeof search.chat === "string" && search.chat !== "" })
   if (fill) return <Outlet />
