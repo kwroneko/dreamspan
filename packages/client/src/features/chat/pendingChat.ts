@@ -48,7 +48,10 @@ export class PendingChat {
   private readonly listeners = new Set<() => void>()
 
   /** Every card the user has but the greeters', in the library's order: who can be the persona or join. */
-  readonly cards: ReadonlyArray<CastCard>
+  private availableCards: ReadonlyArray<CastCard>
+  get cards(): ReadonlyArray<CastCard> {
+    return this.availableCards
+  }
   readonly group: PendingGroup | null
   private readonly call: Caller
 
@@ -60,7 +63,7 @@ export class PendingChat {
     defaultPersona: EntityId | null = null,
     guidance = false
   ) {
-    this.cards = cards
+    this.availableCards = cards
     this.group = group
     this.call = call
     const persona =
@@ -164,8 +167,15 @@ export class PendingChat {
     return { ok: true, value: undefined }
   }
 
-  /** The cards the persona is picked from, as a saved chat's `listCards`: all but the chat's own. */
-  readonly listCards = (): Promise<Outcome<ReadonlyArray<CastCard>>> => Promise.resolve({ ok: true, value: this.cards })
+  /** Read current cards, including a persona just created by a picker, before it is selected. */
+  readonly listCards = async (): Promise<Outcome<ReadonlyArray<CastCard>>> => {
+    const result = await this.call((client) => client("ListCards", undefined))
+    if (!result.ok) return result
+    const greeters = new Set(this.state.greeters.map((item) => item.card.entityId))
+    this.availableCards = result.value.filter((card) => !greeters.has(card.entityId))
+    this.change((state) => ({ ...state }))
+    return { ok: true, value: this.cards }
+  }
 
   /** The card the user plays, if any. */
   playing(state = this.state) {
@@ -177,9 +187,8 @@ export class PendingChat {
   }
 
   /** The chat as the saved chat's parts read it: its cast, and nothing else yet. */
-  view(): ChatView {
-    if (this.cached?.state === this.state) return this.cached.view
-    const state = this.state
+  view(state = this.state): ChatView {
+    if (this.cached?.state === state) return this.cached.view
     const playing = this.playing(state)
     const characters = state.greeters.map((item) => item.card).filter((card) => card.entityId !== state.persona)
     const cards = [...characters, ...(playing ? [playing] : [])]

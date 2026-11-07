@@ -159,7 +159,7 @@ function Pending({
   const navigate = useNavigate()
   const navigationSearch = useSearch({ strict: false }) as { panel?: string; character?: string; guidance?: string }
   const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
-  const view = pending.view()
+  const view = pending.view(state)
   const { greeters, picks, persona, fallbackNote } = state
   const group = pending.group
   const options = pendingOptions(state)
