@@ -199,7 +199,8 @@ export function useShellNavigation() {
     setScope: (next: Scope) =>
       void navigate({
         to: ".",
-        search: (prev: Record<string, unknown>) => ({ ...prev, ...sidebarCleared, ...scopeSearch(next) })
+        search: (prev: Record<string, unknown>) => ({ ...prev, ...sidebarCleared, ...scopeSearch(next) }),
+        state: (prev) => ({ ...prev })
       }),
     setGrid: (grid: boolean) =>
       void navigate({
@@ -210,6 +211,7 @@ export function useShellNavigation() {
           ...scopeSearch(scope),
           ...(grid ? { side: "characters" } : {})
         }),
+        state: (prev) => ({ ...prev }),
         resetScroll: false
       }),
     selection,
