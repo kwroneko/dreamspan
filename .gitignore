@@ -11,3 +11,4 @@ test-results/
 playwright-report/
 
 .cache-stagger-measurements/
+/*.png
