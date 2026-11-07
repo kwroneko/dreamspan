@@ -1035,7 +1035,8 @@ export class WriteOps extends RpcGroup.make(
       doc: Doc,
       schemaVersion: Schema.Int,
       origin: Schema.Literals(["user", "import"]),
-      sourcePath: Schema.NullOr(Schema.String)
+      sourcePath: Schema.NullOr(Schema.String),
+      tags: Schema.optionalKey(Schema.Array(Schema.String))
     },
     success: Schema.Struct({ entityId: EntityId, ref: LibraryRef }),
     error: StorageError

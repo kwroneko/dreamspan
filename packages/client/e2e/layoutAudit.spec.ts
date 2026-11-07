@@ -1,4 +1,5 @@
 import { exercisePhoneFooters } from "./support/phoneFooters.ts"
+import { newflowTests } from "./support/newflows.ts"
 import { seedSplitChats } from "./support/splitChats.ts"
 import { centerHeaderTests } from "./support/centerHeaders.ts"
 import { seedCardArchive } from "./support/cardArchive.ts"
@@ -29,6 +30,7 @@ import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
+if (process.env.LAYOUT_AUDIT_NEWFLOWS_ONLY === "1") newflowTests()
 
 test.use({
   reducedMotion: "reduce",
@@ -1395,6 +1397,7 @@ test.describe("synthetic library and every app surface", () => {
         if (process.env.LAYOUT_AUDIT_DIALOGS_ONLY === "1") {
           await go("library-before-dialogs", "/library")
           for (const name of ["New card", "New prompt preset"]) {
+            await page.getByRole("tab", { name: name === "New card" ? /^Cards/ : /^Presets/ }).click()
             await page.getByRole("main").getByRole("button", { name, exact: true }).click()
             await expect(page.getByRole("dialog", { name, exact: true })).toBeVisible()
             await audit(`dialog-${name}`)
@@ -2031,6 +2034,7 @@ test.describe("synthetic library and every app surface", () => {
           await go(surface, path)
           if (surface === "library") {
             for (const name of ["New card", "New prompt preset"]) {
+              await page.getByRole("tab", { name: name === "New card" ? /^Cards/ : /^Presets/ }).click()
               await page.getByRole("main").getByRole("button", { name, exact: true }).click()
               await expect(page.getByRole("dialog", { name, exact: true })).toBeVisible()
               await audit(`dialog-${name}`)

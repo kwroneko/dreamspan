@@ -9,12 +9,12 @@ declare module "@tanstack/react-router" {
   }
 }
 
-/** URL state, with the existing device sort used only to seed a fresh, unqualified visit. */
+/** URL state, with the account's sort used to seed a fresh, unqualified visit. */
 export function useHomeBrowse() {
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const initialized = useLocation({ select: (l) => l.state.homeBrowse === true })
   const navigate = useNavigate()
-  const [remembered, remember] = useCardBrowse("home")
+  const [remembered, remember, ready] = useCardBrowse("home")
   const state = useMemo(() => {
     const parsed = readHomeSearch(search)
     return !initialized && !homeSearch.some((key) => search[key] !== undefined)
@@ -22,9 +22,9 @@ export function useHomeBrowse() {
       : parsed
   }, [initialized, search, remembered.sort, remembered.reversed, remembered.withPersonas])
   // Mark even a default-only entry, so Back restores its defaults after a later choice
-  // changed the device memory. The marker survives reloads in this history entry.
+  // changed the account's choice. The marker survives reloads in this history entry.
   useEffect(() => {
-    if (initialized) return
+    if (initialized || !ready) return
     void navigate({
       to: ".",
       search: (prev: Record<string, unknown>) => ({ ...prev, ...writeHomeSearch(state) }),
@@ -32,7 +32,7 @@ export function useHomeBrowse() {
       replace: true,
       resetScroll: false
     })
-  }, [initialized, navigate, state])
+  }, [initialized, ready, navigate, state])
 
   const update = (change: Partial<HomeBrowse>) => {
     const next = changeHomeBrowse(state, change)

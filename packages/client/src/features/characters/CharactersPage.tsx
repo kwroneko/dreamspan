@@ -14,6 +14,7 @@ import { CardGridControls } from "./CardGridControls.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { browsable, CharacterGrid, shellAtom, type ShellLibrary } from "./shellData.tsx"
 import { PinnedChats } from "./ShellBrowser.tsx"
+import { NewCardButton } from "../editor/NewCard.tsx"
 
 // By Home's own width, not the window's: in a split frame the tiles keep their size rather than
 // shrinking to five columns of a narrow frame, where the corner toggles would cover the tile.
@@ -25,7 +26,13 @@ function Home({ data }: { data: ShellLibrary }) {
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
   // Then the filters and search, having nothing to work on, stay out of the way too.
-  if (intro && data.cards.length === 0 && data.archived.length === 0)
+  if (
+    intro &&
+    data.cards.length === 0 &&
+    data.personas.length === 0 &&
+    data.archived.length === 0 &&
+    browse.filter !== "personas"
+  )
     return (
       <div className="flex flex-col gap-5">
         <SlotOutlet slot={homeIntro} props={{ data }} />
@@ -56,6 +63,11 @@ function Home({ data }: { data: ShellLibrary }) {
         onSearch={(search) => setBrowse({ search })}
         searchLabel="Search characters and groups"
       />
+      {browse.filter === "personas" && (
+        <div>
+          <NewCardButton persona />
+        </div>
+      )}
       {browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
       {browse.filter === "groups" ? (
         <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} />

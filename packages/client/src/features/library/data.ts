@@ -10,7 +10,8 @@ const listAtom = libraryListAtom
 export const LISTED = [
   { kind: "card", title: "Cards" },
   { kind: "lorebook", title: "Lorebooks" },
-  { kind: "preset", title: "Presets" }
+  { kind: "preset", title: "Presets" },
+  { kind: "note", title: "Notes" }
 ] as const satisfies ReadonlyArray<{ kind: EntityKind; title: string }>
 
 /** Cards as chats see them: which are in the persona folder. */
@@ -20,6 +21,7 @@ export const libraryAtom = allOf({
   card: listAtom("card"),
   lorebook: listAtom("lorebook"),
   preset: listAtom("preset"),
+  note: listAtom("note"),
   /** Archived presets, for the presets' Archived view (the other kinds have none yet). */
   archivedPresets: libraryListAtom("preset", true),
   castCards: castCardsAtom,

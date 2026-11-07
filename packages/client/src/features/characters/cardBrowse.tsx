@@ -2,12 +2,12 @@
 // Favourites, Personas, Groups, each with its count), Include personas, the sort with its direction, the date a date sort
 // orders by, the favourite star and the grid of tiles. The home grid and the left panel's
 // grid use them; each place keeps its own sort and direction (`useCardBrowse(place)`),
-// remembered per account in this browser, since a narrow panel and the home page are used
+// remembered on the account, since a narrow panel and the home page are used
 // differently. Home overlays this memory with its URL state (`useHomeBrowse`); elsewhere
 // the filter starts at All on each visit.
 import { useState } from "react"
 import { useAction } from "../../actions.tsx"
-import { useSession } from "../../session.ts"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
@@ -31,48 +31,29 @@ export interface CardBrowse {
    */
   readonly withPersonas: boolean
 }
-const DEFAULT: CardBrowse = { filter: "all", sort: "recent", reversed: false, withPersonas: false }
 const FILTERS = CARD_FILTERS
 const SORTS = ["recent", "created", "added", "name"] as const
 
-const read = (key: string): CardBrowse => {
-  try {
-    const stored = JSON.parse(localStorage.getItem(key) ?? "{}") as Partial<Record<keyof CardBrowse, unknown>>
-    return {
-      filter: DEFAULT.filter,
-      sort: SORTS.find((s) => s === stored.sort) ?? DEFAULT.sort,
-      reversed: stored.reversed === true,
-      withPersonas: stored.withPersonas === true
-    }
-  } catch {
-    return DEFAULT
-  }
-}
-
 /**
- * A place's filter, and its sort and Include personas remembered per account in this browser.
+ * A place's filter, and its sort and Include personas remembered on the account.
  * A new sort starts its own way round.
  */
-export function useCardBrowse(place: string) {
-  const key = `rp.cards.${place}.${useSession().user.id}`
-  const [state, setState] = useState<CardBrowse>(() => read(key))
+export function useCardBrowse(place: "sidebar" | "home" | "cast") {
+  const { prefs, change: savePrefs, ready } = useViewPrefs()
+  const key = ({ sidebar: "sidebarCards", home: "homeCards", cast: "castCards" } as const)[place]
+  const [filter, setFilter] = useState<CardFilter>("all")
+  const state: CardBrowse = { ...prefs[key], filter }
   const update = (change: Partial<CardBrowse>) => {
     const next = {
       ...state,
       ...(change.sort !== undefined && change.sort !== state.sort ? { reversed: false } : {}),
       ...change
     }
-    setState(next)
-    try {
-      localStorage.setItem(
-        key,
-        JSON.stringify({ sort: next.sort, reversed: next.reversed, withPersonas: next.withPersonas })
-      )
-    } catch {
-      /* Not remembered, still applied. */
-    }
+    setFilter(next.filter)
+    if (next.sort !== state.sort || next.reversed !== state.reversed || next.withPersonas !== state.withPersonas)
+      void savePrefs({ [key]: { sort: next.sort, reversed: next.reversed, withPersonas: next.withPersonas } })
   }
-  return [state, update] as const
+  return [state, update, ready] as const
 }
 
 /** By name, in-chat name or version, ignoring case; `needle` already lowercased and trimmed. */

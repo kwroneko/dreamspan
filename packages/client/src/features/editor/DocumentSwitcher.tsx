@@ -7,6 +7,7 @@ import { shellAtom } from "../characters/shellData.tsx"
 import { libraryListAtom } from "../library/queries.ts"
 import { type DocumentChoice, HeaderSwitcher, type NewDocument } from "../pickers/DocumentPickers.tsx"
 import { NewCardDialog } from "./NewCard.tsx"
+import { NewDocumentDialog } from "./NewDocument.tsx"
 
 /**
  * An editor's header switcher: its kind's complete picker (pickers/DocumentPickers.tsx).
@@ -30,7 +31,7 @@ export function DocumentSwitcher({
   focus?: string | undefined
   /**
    * Makes a new one of those documents and gives its ref, which then opens here ("New snippet",
-   * "New note"). Cards have theirs built in; lorebooks and library notes have no way to make one.
+   * "New note"). Library documents use their shared creation dialog.
    */
   create?: { label: string; hint: string; run: () => Promise<RefId | null> } | undefined
 }) {
@@ -71,7 +72,7 @@ function CardSwitcher({ refId, label, open }: { refId: RefId; label: string; ope
   const shell = useAtomValue(shellAtom)
   const persona = AsyncResult.isSuccess(shell) && shell.value.personas.some((p) => p.card.refId === refId)
   // The library's New card form, outliving the list it's started from; the card opens here.
-  const [making, setMaking] = useState(false)
+  const [making, setMaking] = useState<"card" | "persona" | null>(null)
   return (
     <>
       <HeaderSwitcher
@@ -82,12 +83,25 @@ function CardSwitcher({ refId, label, open }: { refId: RefId; label: string; ope
         persona={persona}
         create={{
           label: "New card…",
-          hint: "Opens a form to create a card, which then opens in this editor.",
-          start: () => setMaking(true)
+          hint: "Opens a form to create a card in this editor.",
+          start: () => setMaking("card")
+        }}
+        createPersona={{
+          label: "New persona…",
+          hint: "Opens a form to create a persona in this editor.",
+          start: () => setMaking("persona")
         }}
         open={open}
       />
-      <NewCardDialog open={making} onOpenChange={setMaking} onCreated={open} />
+      <NewCardDialog
+        key={making ?? "closed"}
+        persona={making === "persona"}
+        open={making !== null}
+        onOpenChange={(next) => {
+          if (!next) setMaking(null)
+        }}
+        onCreated={open}
+      />
     </>
   )
 }
@@ -103,10 +117,39 @@ function LibrarySwitcher({
   open: (refId: RefId) => void
 }) {
   const result = useAtomValue(libraryListAtom(kind))
+  const [making, setMaking] = useState(false)
   const choices = AsyncResult.isSuccess(result)
     ? result.value.map((ref) => ({ value: ref.id, label: ref.label, subtitle: ref.subtitle, updatedAt: ref.updatedAt }))
     : []
-  return <ChoicesSwitcher {...props} choices={choices} />
+  const creatable = kind === "lorebook" || kind === "note" ? kind : null
+  return (
+    <>
+      <ChoicesSwitcher
+        {...props}
+        choices={choices}
+        create={
+          creatable
+            ? {
+                label: `New ${creatable}…`,
+                hint: `Creates an empty ${creatable} and opens its editor.`,
+                start: () => setMaking(true)
+              }
+            : undefined
+        }
+      />
+      {creatable && (
+        <NewDocumentDialog
+          kind={creatable}
+          open={making}
+          onOpenChange={setMaking}
+          onCreated={(ref) => {
+            setMaking(false)
+            props.open(ref.id)
+          }}
+        />
+      )}
+    </>
+  )
 }
 
 function ChoicesSwitcher({

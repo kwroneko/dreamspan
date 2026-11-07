@@ -24,6 +24,7 @@ import {
   type TileState
 } from "../characters/shellData.tsx"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
+import { NewCardButton } from "../editor/NewCard.tsx"
 import { readCastAddOpen, subscribeCastAdd, takeCastAddRequest, writeCastAddOpen } from "./castAddState.ts"
 import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession, Outcome } from "./session.ts"
@@ -176,6 +177,11 @@ function AddGrid({
         </Tooltip>
         <CardBrowseBar data={data} browse={browse} onChange={setBrowse} includePersonas />
       </div>
+      {browse.filter === "personas" && (
+        <div>
+          <NewCardButton persona />
+        </div>
+      )}
       <CharacterGrid
         cards={cards}
         sort={browse.sort}

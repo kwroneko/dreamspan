@@ -1,6 +1,7 @@
 import { defineSlot } from "../../slots.tsx"
+import type { EntityKind } from "@rp/shared/library.ts"
 
-export const libraryActions = defineSlot<Record<string, never>>("library.actions")
+export const libraryActions = defineSlot<{ kind: EntityKind; personas: boolean }>("library.actions")
 
 /** What the ST import page's sections are given: the import opened (`?job=`), and a way to open another. */
 export interface StImportSectionProps {

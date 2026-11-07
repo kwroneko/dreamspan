@@ -7,6 +7,7 @@ import { registerUserDraftNotices } from "./userDraft.tsx"
 import { libraryActions } from "../library/slots.ts"
 import { NewCardButton } from "./NewCard.tsx"
 import { NewPresetButton } from "./NewPreset.tsx"
+import { NewDocumentButton } from "./NewDocument.tsx"
 import { BrowserRecoveryWarning } from "./BrowserRecovery.tsx"
 import { appTools, navigationNotices } from "../shell.tsx"
 import { CardSavedHost } from "./CardSavedHost.tsx"
@@ -67,8 +68,26 @@ export const register = () => {
   })
   registerUserDraftNotices()
   cutoutChoosers.register({ id: CUTOUT_CHOOSER, component: LazyCutoutChooser })
-  libraryActions.register({ id: "editor.new-card", order: 10, component: NewCardButton })
-  libraryActions.register({ id: "editor.new-preset", order: 20, component: NewPresetButton })
+  libraryActions.register({
+    id: "editor.new-card",
+    order: 10,
+    component: ({ kind, personas }) => (kind === "card" ? <NewCardButton persona={personas} /> : null)
+  })
+  libraryActions.register({
+    id: "editor.new-preset",
+    order: 20,
+    component: ({ kind }) => (kind === "preset" ? <NewPresetButton /> : null)
+  })
+  libraryActions.register({
+    id: "editor.new-lorebook",
+    order: 30,
+    component: ({ kind }) => (kind === "lorebook" ? <NewDocumentButton kind="lorebook" /> : null)
+  })
+  libraryActions.register({
+    id: "editor.new-note",
+    order: 40,
+    component: ({ kind }) => (kind === "note" ? <NewDocumentButton kind="note" /> : null)
+  })
   appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
   cardEditorSections.register({ id: CARD_LOREBOOK_SECTION, order: 100, component: EmbeddedLorebook })
   cardEditorSections.register({ id: "card.regex", order: 110, component: CardRegexScripts })

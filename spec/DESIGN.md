@@ -36,6 +36,8 @@
 
 # Design: requirements and decisions
 
+**Built 2026-11-06 (newflows):** Library lorebook/note creation, the persona form and account-backed card-list sorts below are implemented and obsolete as implementation requirements; see ARCHITECTURE §14 and §5.
+
 **Built 2026-11-04 (smallfixes4):** The inline field-help, depth-zero placement and side-panel Persona header decisions in §10.1, §6.2a and §2.2 are implemented and obsolete as implementation requirements; see ARCHITECTURE §5, §14.6 and §12.
 
 **Built 2026-11-03 (saveflow follow-up):** The four-row shared card header, expanding Persona toggle and strict title-row save placement in §2.2/§10.1 are implemented; earlier header placement entries are superseded. See ARCHITECTURE §12 and §14.6.
@@ -132,6 +134,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** **No "Continue by prefilling" switch** (owner, 2026-11-02): the preset editor's Prefill card doesn't show ST's continue prefill. The stored `prefill.continue` stays as it is: imported from ST's `continue_prefill` and exported back unchanged, so a round trip to ST keeps it. Nothing in generation reads it, and Continue behaves as decided on 2026-10-31 (above). **Built** (ARCHITECTURE §9, §14.6).
 
 ### 1.3 Lorebooks / World Info
+- **[D]** (owner brief, 2026-11-06) “New lorebook” from the Library, the lorebook switcher's list end and wherever lorebooks are attached: “a dialog with a name, and the same dialog everywhere.” It creates an empty named book, opens its editor and attaches it when started at an attach point. **Built** (newflows, ARCHITECTURE §14); today's attachment pickers are chats and presets, while cards author their own embedded book.
 - **[D]** **Export-only header stays quiet** (owner, 2026-11-03): the collapsed Card export only "header must show NO dot and NO summary: just its title and arrow", because its options are inert until export. Other section headers retain their current markers and summaries pending a decision. **Built** (lorebookfix2; ARCHITECTURE §14.6).
 - **[D]** **Lorebook field explanations** (owner, 2026-11-03): "Remove that popover from the field (no popover on hover, focus or click). Put the same text in the standard "?" help button right beside the keys field (it has no label, so beside the field, aligned with its first line)." The same rule applies to every lorebook entry field: labelled fields keep help beside the label, unlabelled fields beside the field. **Built** (lorebookfix2; ARCHITECTURE §14.6).
 - **[D]** **Strategy and position stays visible** (owner, 2026-11-03): "Make it a plain, always-visible group, with no accordion: in the side panel editor it's always shown while the entry's options are open; in the large editor it's always shown." Strategy, Position, Depth, Order and Trigger % are not a boxed settings section. Other settings retain their grouping. This supersedes the lorebookeditor proposal to fold every section. **Built** (lorebookfix2; ARCHITECTURE §14.6).
@@ -276,6 +279,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[P]** (cardarchive, 2026-11-06) Bulk archive uses either checked registered criterion: never used and added more than 30 days ago (on initially), or last used more than 6 calendar months ago (off initially); thresholds are adjustable. Used means a human message or a nonempty model reply while the card participated, any retained swipe or branch, or a card field edit (drafts included) or fork (both the original and new fork). A greeting alone, an empty failed generation, opening a card or joining a cast does not count; imported initial model messages are treated as greetings. Binned chat history still records use until purged. Favourites never qualify. The reader previews names, portraits, added and last-use dates; the user can exclude individual matches. One writer transaction rechecks eligibility and archives the selected matches. One Undo restores just that operation’s unchanged archive states. Criteria descriptors and predicates are registered for the later cardex “Only tried” rule. **Built; obsolete as an implementation proposal** (ARCHITECTURE §3.9).
 
 ### 2.2 Personas, speakers and writers
+- **[D]** (owner brief, 2026-11-06) “New persona” from persona lists and the persona switcher's list end: “A persona form like New card, with name, picture and description, using the existing card creation where the data model shares it.” **Built** (newflows, ARCHITECTURE §14).
 
 - **[D] 2026-11-05 (casttabscroll)** Owner: "Clicking on cast tabs scrolls to the description for some reason". Ordinary cast-tab opening starts at the top; explicit reveal and search Go to retain their requested destination. Implemented and obsolete as an implementation requirement; see ARCHITECTURE §12.
 
@@ -618,6 +622,7 @@ Design: [CHAT-MERGE.md](CHAT-MERGE.md).
 - **[P]** (gallery, 2026-11-03): keep gallery membership and order in the existing revisioned CCv3 `assets` array and its media mapping; use card-asset bin entries to restore removed membership without reverting unrelated edits. **Built** (ARCHITECTURE §14.5d).
 
 ### 4.1 Card modules and character notes
+- **[D]** (owner brief, 2026-11-06) “New note (a library note, not tied to a chat): from the Library and the note switcher's list end.” **Built** (newflows, ARCHITECTURE §14).
 
 - **[D]** (owner, 2026-11-03): A note the user creates new starts expanded, with its settings (placement, depth, role, conditions and other options) expanded too, then scrolls into view and flashes. “The user must be able to discover these options exist.” Existing and reopened notes retain their remembered state; copies made by Fork for this chat are excluded. Collapsing a newly created note or its settings is remembered normally. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 
@@ -1173,6 +1178,7 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+- **[D]** (owner brief, 2026-11-06) “The left panel's, Home's and Add characters' card-list sorts move from browser storage into the per-account settings (the `display` setting, like the switchers' sorts), so every list's sort is remembered on the server.” **Built** (newflows, ARCHITECTURE §5). Existing URL choices still describe a particular view; an unqualified visit starts from the account's saved sort.
 
 - **[D]** (owner, 2026-11-06, settingsdb): "Having five settings tables is insane." Consolidate account, app and device preferences in one `settings(scope, scope_id, key, value_json, revision, updated_at)` table, with each setting's scope and schema declared in a registered, replaceable registry that plugins can extend. Writes validate through the registry and use the common revision for stale replacements. Workbench layout uses its device id; per-chat/per-fork state belongs to chat state. Built; implementation details and the rule prohibiting new settings tables are in ARCHITECTURE §3.7.
 

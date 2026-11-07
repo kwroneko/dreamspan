@@ -39,6 +39,7 @@ for (const width of [1440, 390])
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       }
       await page.goto(`${server().url}/library`)
+      await page.getByRole("tab", { name: /^Presets/ }).click()
       await page.getByRole("button", { name: "New prompt preset" }).click()
       const dialog = page.getByRole("dialog", { name: "New prompt preset" })
       await dialog.getByRole("textbox", { name: "Name", exact: true }).fill(`Fresh ${width} ${theme}`)

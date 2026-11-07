@@ -199,13 +199,21 @@ export class EditorApi extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([InvalidDocument, ServerError])
   }),
+  /** An empty, named library lorebook. */
+  Rpc.make("CreateLorebook", {
+    payload: { label: Label },
+    success: LibraryRef,
+    error: Schema.Union([InvalidDocument, ServerError])
+  }),
   /** A card from scratch: an upstream with every field empty but its name. */
   Rpc.make("CreateCard", {
     payload: {
       label: Label,
       name: Schema.String,
       nickname: Schema.optionalKey(Schema.String),
-      version: Schema.optionalKey(Schema.String)
+      version: Schema.optionalKey(Schema.String),
+      description: Schema.optionalKey(Schema.String),
+      persona: Schema.optionalKey(Schema.Boolean)
     },
     success: LibraryRef,
     error: Schema.Union([InvalidDocument, ServerError])

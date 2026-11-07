@@ -209,6 +209,7 @@ export interface CardPickerProps extends PickerBodyProps {
   readonly onChoose: (value: RefId) => void
   /** "New card…" at the end of the list. */
   readonly create?: NewDocument | undefined
+  readonly createPersona?: NewDocument | undefined
 }
 
 /** The registered card and persona switcher body (`card.picker`). */
@@ -263,7 +264,16 @@ function useCardSwitcherView() {
 /** A card row's portrait, as the speaker switcher's rows show theirs. */
 const CARD_ROW_SIZE = 64
 
-export function CardPicker({ value, persona, onChoose, create, onChosen, focus, focusRef }: CardPickerProps) {
+export function CardPicker({
+  value,
+  persona,
+  onChoose,
+  create,
+  createPersona,
+  onChosen,
+  focus,
+  focusRef
+}: CardPickerProps) {
   const shell = useAtomValue(shellAtom)
   const [remembered, update] = useCardSwitcherView()
   const [filter, setFilter] = useState<CardBrowse["filter"]>(persona ? "personas" : "all")
@@ -336,7 +346,7 @@ export function CardPicker({ value, persona, onChoose, create, onChosen, focus, 
               : "No cards here."
         }
       />
-      <NewRow create={create} onChosen={onChosen} />
+      <NewRow create={filter === "personas" ? (createPersona ?? create) : create} onChosen={onChosen} />
     </>
   )
 }
@@ -353,6 +363,7 @@ export function HeaderSwitcher({
   choices,
   persona = false,
   create,
+  createPersona,
   open
 }: {
   kind: "preset" | "card" | "document"
@@ -365,6 +376,7 @@ export function HeaderSwitcher({
   persona?: boolean
   /** "New …" at the end of a card or document list (presets have their own). */
   create?: NewDocument | undefined
+  createPersona?: NewDocument | undefined
   open: (refId: RefId) => void
 }) {
   const hint = `Switches to another ${subject} in this editor.`
@@ -381,7 +393,7 @@ export function HeaderSwitcher({
     >
       {(body) =>
         kind === "card" ? (
-          <SlotOutlet slot={cardPickers} props={{ ...body, value, persona, onChoose: open, create }} />
+          <SlotOutlet slot={cardPickers} props={{ ...body, value, persona, onChoose: open, create, createPersona }} />
         ) : (
           <SlotOutlet
             slot={documentPickers}

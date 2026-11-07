@@ -205,6 +205,17 @@ for (const theme of ["light", "dark"] as const)
         // Only the rows in view (and a few more) are in the page, however many there are.
         const mounted = await dialog.locator("[data-picker-row]").count()
         expect(mounted).toBeLessThanOrEqual(60)
+        // Creation stays at the list's end, including the windowed lorebook list.
+        if (["lorebook", "note", "persona"].includes(kind.name)) {
+          const create = dialog.getByRole("button").last()
+          await expect(create).toHaveAccessibleName(`New ${kind.name}…`)
+          expect(
+            await create.evaluate((button) => {
+              const list = button.closest('[role="dialog"]')!.querySelector('[role="radiogroup"]')!
+              return Boolean(list.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING)
+            })
+          ).toBe(true)
+        }
         timings.push({ kind: kind.name, ms, mounted })
         expect(ms).toBeLessThan(3000)
         await page.mouse.move(0, 899)
@@ -297,8 +308,8 @@ test("sorts follow the account, card rows show portraits, and New rows make and 
   const sorts = dialog.getByRole("group", { name: "Sort lorebooks", exact: true })
   await sorts.getByRole("button", { name: "Modified", exact: true }).click()
   await expect(sorts.getByRole("button", { name: "Modified", exact: true })).toHaveAttribute("aria-pressed", "true")
-  // Lorebooks have no way to make one, so no New row.
-  await expect(dialog.getByRole("button", { name: /^New / })).toHaveCount(0)
+  // Lorebooks now share their creation dialog with the Library and attachment pickers.
+  await expect(dialog.getByRole("button", { name: "New lorebook…", exact: true })).toBeVisible()
   await expect
     .poll(() => admin((api) => api.GetDisplayPrefs({}).pipe(Effect.map((prefs) => prefs.lorebookSort))))
     .toBe("modified")

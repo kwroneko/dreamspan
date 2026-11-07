@@ -20,6 +20,7 @@ import { ActionMenu, type ActionMenuItem } from "../../ui/Menu.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { inlineExplanationClass } from "../../ui/Explanation.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { revealAdded } from "../../ui/reveal.ts"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { useCardRefs, useLibraryLorebooks } from "../editor/libraryLorebooks.ts"
 import { LorebookPanelEditor } from "../editor/LorebookPanelEditor.tsx"
@@ -197,6 +198,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
   const { books: presetBooks, label: presetName } = usePresetBooks(presetStore)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [added, setAdded] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = usePlaceParam("book", "")
   const selected = selectedKey || null
   const setSelected = (next: string | null) => setSelectedKey(next ?? "")
@@ -217,6 +219,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
       return next
     })
     setError(outcome.ok ? null : `${failure}: ${outcome.error.message}`)
+    return outcome.ok
   }
 
   const own = (cast?.participants ?? []).flatMap((id) => {
@@ -326,12 +329,21 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
 
   const chosen = rows.find((row) => row.key === selected)
   const chosenShown = chosen ? shownOf(chosen) : null
+  const chosenRef = chosenShown?.edit?.ref
   // A book picked on a phone opens below the fold: its name is brought into view, the list
   // staying put when it already shows.
   const opened = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (selected) opened.current?.scrollIntoView({ block: "nearest" })
-  }, [selected])
+    if (!selected || !chosenRef || !opened.current) return
+    const element = opened.current
+    if (added === selected) {
+      const frame = requestAnimationFrame(() => {
+        revealAdded(element)
+        setAdded(null)
+      })
+      return () => cancelAnimationFrame(frame)
+    } else element.scrollIntoView({ block: "nearest" })
+  }, [selected, chosenRef, added])
   const openLarge = (shown: Shown) => {
     if (!shown.edit) return
     if (workspace) workspace.open(shown.edit.ref, shown.focus)
@@ -376,6 +388,24 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
           <LorebookPicker
             title="Add a lorebook"
             lorebooks={addable}
+            onCreate={async (ref) => {
+              if (
+                await send(
+                  `chat:${ref.id}`,
+                  { _tag: "Lorebook", ref: ref.id, active: true },
+                  true,
+                  `Couldn't add ${ref.label}`
+                )
+              ) {
+                setAdding(false)
+                if (workspace) {
+                  setSelected(`chat:${ref.id}`)
+                  setAdded(`chat:${ref.id}`)
+                } else void navigate({ to: "/library/$refId", params: { refId: ref.id } })
+                return true
+              }
+              return false
+            }}
             onPick={(ref: LibraryRef) => {
               setAdding(false)
               void send(

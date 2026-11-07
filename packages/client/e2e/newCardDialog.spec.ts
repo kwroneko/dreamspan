@@ -72,6 +72,7 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "New card", exact: true }).click()
     await expect(version).toHaveValue(`draft-${width}`)
     await close()
+    await page.getByRole("tab", { name: /^Presets/ }).click()
     await page.getByRole("button", { name: "New prompt preset", exact: true }).click()
     await audit("new-preset")
     await close()

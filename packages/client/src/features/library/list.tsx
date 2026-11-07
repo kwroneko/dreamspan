@@ -546,7 +546,7 @@ export function LibraryPage() {
         <h1 className="text-base font-semibold">Library</h1>
       </CenterHeaderContent>
       <div className="flex flex-wrap gap-2">
-        <SlotOutlet slot={libraryActions} props={{}} />
+        <SlotOutlet slot={libraryActions} props={{ kind: prefs.kind, personas: prefs.show === "personas" }} />
         <Tooltip label="Opens file import.">
           <Link to="/import" className={buttonClass("primary")}>
             Import files

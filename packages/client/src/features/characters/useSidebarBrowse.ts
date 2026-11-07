@@ -22,7 +22,7 @@ export function useSidebarBrowse() {
   const search = useMemo(() => JSON.parse(encoded) as Record<string, unknown>, [encoded])
   const marked = useLocation({ select: (l) => l.state.sidebarBrowse === true })
   const navigate = useNavigate()
-  const [remembered, remember] = useCardBrowse("sidebar")
+  const [remembered, remember, ready] = useCardBrowse("sidebar")
   const state = useMemo(() => {
     const parsed = read(search)
     return !marked && !homeSearch.some((k) => search[key(k)] !== undefined)
@@ -30,7 +30,7 @@ export function useSidebarBrowse() {
       : parsed
   }, [marked, search, remembered.sort, remembered.reversed, remembered.withPersonas])
   useEffect(() => {
-    if (!marked)
+    if (!marked && ready)
       void navigate({
         to: ".",
         search: (prev: Record<string, unknown>) => ({ ...prev, ...write(state) }),
@@ -38,7 +38,7 @@ export function useSidebarBrowse() {
         replace: true,
         resetScroll: false
       })
-  }, [marked, navigate, state])
+  }, [marked, ready, navigate, state])
   const update = (change: Partial<HomeBrowse>) => {
     if (change.sort !== undefined || change.reversed !== undefined || change.withPersonas !== undefined)
       remember(changeHomeBrowse(state, change))

@@ -611,7 +611,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           return { entity: made.entity_id as EntityId, created: true }
         }).pipe(transaction(sql, "StImportCharacterNote")),
 
-      CreateEntity: ({ userId, kind, label, subtitle, doc, schemaVersion, origin, sourcePath }) =>
+      CreateEntity: ({ userId, kind, label, subtitle, doc, schemaVersion, origin, sourcePath, tags }) =>
         createUpstream({
           userId,
           kind,
@@ -624,6 +624,12 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           sourcePath,
           sourceHash: null
         }).pipe(
+          Effect.tap((ref) =>
+            Effect.gen(function* () {
+              for (const tag of new Set((tags ?? []).map((tag) => tag.trim()).filter(Boolean)))
+                yield* sql`INSERT INTO entity_tags ${sql.insert({ entity_id: ref.entity_id, tag })}`
+            })
+          ),
           Effect.map((ref) => ({ entityId: ref.entity_id as EntityId, ref: toLibraryRef(ref) })),
           transaction(sql, "CreateEntity")
         ),
