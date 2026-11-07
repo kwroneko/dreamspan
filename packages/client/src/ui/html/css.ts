@@ -223,6 +223,18 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`): ScopedCss {
       rule.params = renameClass(rule.params.trim())
       rule.walkDecls(declaration)
     } else if (name === "font-face" && !nested) {
+      const descriptors = (rule.nodes ?? []).filter((node): node is Declaration => node.type === "decl")
+      const families = descriptors.filter((decl) => decl.prop.toLowerCase() === "font-family")
+      // renameNames handles simple CSS identifiers only. An escaped or multiword family
+      // would otherwise remain global and could redefine a font used by the app.
+      if (
+        families.length === 0 ||
+        descriptors.some((decl) => decl.prop.includes("\\")) ||
+        families.some((decl) => !/^(["']?)-?[_a-zA-Z][-\w]*\1$/.test(decl.value.trim()))
+      ) {
+        rule.remove()
+        return
+      }
       rule.walkDecls((decl) => {
         if (decl.prop.toLowerCase() === "font-family") decl.value = renameNames(decl.value, fonts)
         else declaration(decl)
