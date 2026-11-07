@@ -1,9 +1,42 @@
 import { assert, it } from "@effect/vitest"
 import { CHAT_WIDTH, DEFAULT_DISPLAY_PREFS, DisplayPrefsChange } from "@rp/shared/chatApi.ts"
-import { WorkbenchDevice } from "@rp/shared/workbenchApi.ts"
 import { Effect, Schema } from "effect"
 import { client, testConfig, withServer } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+
+it.live("model pins, recent choices and sort persist per account and merge independent devices", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const phone = yield* client({ "Remote-User": "alice" })
+    const bob = yield* client({ "Remote-User": "bob" })
+    yield* alice.SetDisplayPrefs({
+      prefs: { modelPins: { "router alpha": true }, modelRecent: { "router alpha": 100 } }
+    })
+    yield* phone.SetDisplayPrefs({
+      prefs: { modelPins: { "local beta": true }, modelRecent: { "local beta": 200 }, modelSort: "used" }
+    })
+    yield* alice.SetDisplayPrefs({ prefs: { modelPins: { "router alpha": false }, coverageRail: true } })
+    const saved = yield* phone.GetDisplayPrefs({})
+    assert.deepStrictEqual(saved.modelPins, { "router alpha": false, "local beta": true })
+    assert.deepStrictEqual(saved.modelRecent, { "local beta": 200, "router alpha": 100 })
+    yield* phone.SetDisplayPrefs({ prefs: { modelRecent: { "local beta": 150 } } })
+    assert.strictEqual((yield* alice.GetDisplayPrefs({})).modelRecent["local beta"], 200)
+    assert.strictEqual(saved.modelSort, "used")
+    assert.strictEqual(saved.coverageRail, true)
+    const separate = yield* bob.GetDisplayPrefs({})
+    assert.deepStrictEqual(separate.modelPins, {})
+    assert.deepStrictEqual(separate.modelRecent, {})
+    assert.strictEqual(separate.modelSort, "name")
+    yield* alice.SetDisplayPrefs({
+      prefs: { modelRecent: Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`studio model-${i}`, i + 300])) }
+    })
+    const capped = (yield* phone.GetDisplayPrefs({})).modelRecent
+    assert.strictEqual(Object.keys(capped).length, 100)
+    assert.isUndefined(capped["router alpha"])
+    assert.strictEqual(capped["studio model-99"], 399)
+    assert.strictEqual(Schema.decodeUnknownOption(DisplayPrefsChange)({ modelRecent: { model: -1 } })._tag, "None")
+  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)
 
 it.live("reads older display rows with colour defaults, merges colour patches and resets one choice", () => {
   const config = testConfig()
@@ -151,39 +184,5 @@ it.live("explanation dismissals merge by box id and stay within the account", ()
       "another.intro": true
     })
     assert.deepStrictEqual((yield* bob.GetDisplayPrefs({})).dismissedInfo, {})
-  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
-)
-
-it.live("each device keeps its own workbench layout, and an account keeps its 20 latest devices'", () =>
-  Effect.gen(function* () {
-    const alice = yield* client({ "Remote-User": "alice" })
-    const bob = yield* client({ "Remote-User": "bob" })
-    const phone = JSON.stringify({ frames: "phone" })
-    const desktop = JSON.stringify({ frames: "desktop" })
-    yield* alice.SetWorkbenchLayout({ device: "phone", layout: phone })
-    yield* alice.SetWorkbenchLayout({ device: "desktop", layout: desktop })
-    assert.strictEqual(yield* alice.GetWorkbenchLayout({ device: "phone" }), phone)
-    assert.strictEqual(yield* alice.GetWorkbenchLayout({ device: "desktop" }), desktop)
-    assert.isNull(yield* alice.GetWorkbenchLayout({ device: "tablet" }))
-    assert.isNull(yield* bob.GetWorkbenchLayout({ device: "phone" }))
-    // Not an object: dropped, the device's layout stays.
-    yield* alice.SetWorkbenchLayout({ device: "phone", layout: "[1]" })
-    assert.strictEqual(yield* alice.GetWorkbenchLayout({ device: "phone" }), phone)
-    // The phone saves again, then 19 new devices: the desktop, saved least recently, goes.
-    yield* alice.SetWorkbenchLayout({ device: "phone", layout: phone })
-    for (let index = 0; index < 19; index++)
-      yield* alice.SetWorkbenchLayout({ device: `other-${index}`, layout: JSON.stringify({ index }) })
-    assert.isNull(yield* alice.GetWorkbenchLayout({ device: "desktop" }))
-    assert.strictEqual(yield* alice.GetWorkbenchLayout({ device: "phone" }), phone)
-    assert.strictEqual(yield* alice.GetWorkbenchLayout({ device: "other-0" }), JSON.stringify({ index: 0 }))
-    const reconnect = yield* client({ "Remote-User": "alice" })
-    assert.strictEqual(yield* reconnect.GetWorkbenchLayout({ device: "other-18" }), JSON.stringify({ index: 18 }))
-    yield* bob.SetWorkbenchLayout({ device: "phone", layout: phone })
-    yield* alice.ForgetWorkbenchLayouts({})
-    assert.isNull(yield* alice.GetWorkbenchLayout({ device: "phone" }))
-    assert.isNull(yield* reconnect.GetWorkbenchLayout({ device: "other-18" }))
-    assert.strictEqual(yield* bob.GetWorkbenchLayout({ device: "phone" }), phone)
-    const decode = Schema.decodeUnknownOption(WorkbenchDevice)
-    for (const value of ["", "a/b", "x".repeat(65), "a b"]) assert.strictEqual(decode(value)._tag, "None")
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )

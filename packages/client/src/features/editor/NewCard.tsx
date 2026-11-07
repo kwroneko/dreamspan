@@ -3,15 +3,15 @@ import { Effect } from "effect"
 import { DISPLAY_HINT, NICKNAME_HINT } from "./cardNameHints.ts"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"
-// A card from scratch: the three standard names, then the editor for the rest.
+// A card from scratch: the three standard names, then the editor for the rest. New persona is
+// the same form and flow; its card is made in the persona folder (owner, 2026-11-07).
 import type { LibraryRef, RefId } from "@rp/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field, Input, Textarea } from "../../ui/Field.tsx"
-import { PICTURE_ACCEPT } from "../../ui/portraitParts.ts"
+import { Field, Input } from "../../ui/Field.tsx"
 
 export function NewCardButton({ persona = false }: { persona?: boolean }) {
   const [open, setOpen] = useState(false)
@@ -27,7 +27,8 @@ export function NewCardButton({ persona = false }: { persona?: boolean }) {
 
 /**
  * Names a new card and creates it. `onCreated` says where it goes next; by default its editor
- * opens from the library.
+ * opens from the library. With `persona`, only the title differs: the card is created in the
+ * persona folder, and the editor sets its picture and definitions as for any card.
  */
 export function NewCardDialog({
   open,
@@ -37,7 +38,7 @@ export function NewCardDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCreated?: (refId: RefId) => void
+  onCreated?: (refId: RefId, ref: LibraryRef) => void
   persona?: boolean
 }) {
   const action = useAction()
@@ -45,13 +46,14 @@ export function NewCardDialog({
   const durable = useUserDraft(
     persona ? "persona:new" : "card:new",
     "Names",
-    JSON.stringify({ name: "", nickname: "", version: "", description: "" })
+    JSON.stringify({ name: "", nickname: "", version: "" })
   )
-  const names = JSON.parse(durable.text) as { name: string; nickname: string; version: string; description?: string }
-  const [picture, setPicture] = useState<File | null>(null)
-  const [created, setCreated] = useState<LibraryRef | null>(null)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
+  // An older persona draft has no nickname or version.
+  const names = { name: "", nickname: "", version: "", ...(JSON.parse(durable.text) as object) } as {
+    name: string
+    nickname: string
+    version: string
+  }
   const { name, nickname, version } = names
   const setName = (name: string) => durable.setText(JSON.stringify({ ...names, name }))
   const setNickname = (nickname: string) => durable.setText(JSON.stringify({ ...names, nickname }))
@@ -60,46 +62,26 @@ export function NewCardDialog({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if ((!created && clash) || action.pending || uploading) return
+    if (clash || action.pending) return
     const trimmed = name.trim()
     await durable.commit(durable.text, async () => {
-      const result = created
-        ? { ok: true as const, value: created }
-        : await action.run(
-            (client) =>
-              Effect.gen(function* () {
-                yield* checkCardNames(client, trimmed, version.trim())
-                return yield* client("CreateCard", {
-                  label: trimmed,
-                  name: trimmed,
-                  nickname,
-                  version: version.trim(),
-                  ...(persona ? { persona: true, description: names.description ?? "" } : {})
-                })
-              }),
-            ["library"]
-          )
+      const result = await action.run(
+        (client) =>
+          Effect.gen(function* () {
+            yield* checkCardNames(client, trimmed, version.trim())
+            return yield* client("CreateCard", {
+              label: trimmed,
+              name: trimmed,
+              nickname,
+              version: version.trim(),
+              ...(persona ? { persona: true } : {})
+            })
+          }),
+        ["library"]
+      )
       if (result.ok) {
-        if (persona && picture) {
-          setCreated(result.value)
-          setUploading(true)
-          const response = await fetch(`/library/avatar?ref=${result.value.id}&rowVersion=${result.value.rowVersion}`, {
-            method: "POST",
-            headers: { "content-type": "application/octet-stream" },
-            body: picture
-          }).catch(() => null)
-          setUploading(false)
-          if (!response?.ok) {
-            setUploadError("The persona was created, but the picture couldn't be uploaded. Choose a picture and retry.")
-            return false
-          }
-          await action.run(() => Effect.void, ["library"])
-        }
-        setPicture(null)
-        setCreated(null)
-        setUploadError(null)
         setOpen(false)
-        if (onCreated) onCreated(result.value.id)
+        if (onCreated) onCreated(result.value.id, result.value)
         else void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
       }
       return result.ok
@@ -107,84 +89,43 @@ export function NewCardDialog({
   }
 
   return (
-    <>
-      <Dialog open={open} onOpenChange={setOpen} title={persona ? "New persona" : "New card"}>
-        <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
-          <UserDraftStatus draft={durable} />
-          <Field label={persona ? "Name" : "Display name"} about={DISPLAY_HINT}>
-            <Input
-              value={name}
-              onChange={(event) => setName(event.currentTarget.value)}
-              required
-              disabled={created !== null}
-            />
-          </Field>
-          {persona ? (
-            <>
-              <Field label="Picture" about="Choose a PNG, JPEG, GIF or WebP picture, up to 16 MB.">
-                <input
-                  type="file"
-                  aria-label="Picture"
-                  accept={PICTURE_ACCEPT}
-                  className="max-w-full text-sm"
-                  onChange={(event) => {
-                    setPicture(event.currentTarget.files?.[0] ?? null)
-                    setUploadError(null)
-                  }}
-                />
-              </Field>
-              <Field label="Description" about="Describes who you play in chats.">
-                <Textarea
-                  value={names.description ?? ""}
-                  disabled={created !== null}
-                  onChange={(event) =>
-                    durable.setText(JSON.stringify({ ...names, description: event.currentTarget.value }))
-                  }
-                  rows={5}
-                />
-              </Field>
-            </>
-          ) : (
-            <>
-              <Field label="In-chat nickname" about={NICKNAME_HINT}>
-                <Input
-                  placeholder="Add an in-chat nickname"
-                  value={nickname}
-                  onChange={(event) => setNickname(event.currentTarget.value)}
-                />
-              </Field>
-              <Field label="Version" about="Shown as the card's subtitle.">
-                <Input value={version} onChange={(event) => setVersion(event.currentTarget.value)} />
-              </Field>
-            </>
-          )}
-          {!created && clash && (
-            <p role="status" className="text-sm text-muted">
-              {clash}
-            </p>
-          )}
-          <ErrorAlert error={action.error} />
-          {uploadError && (
-            <p role="alert" className="text-sm text-danger">
-              {uploadError}
-            </p>
-          )}
-          <DialogActions>
-            <Button hint="Closes this dialog." onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              hint={`Creates the ${persona ? "persona" : "card"} and opens its editor.`}
-              type="submit"
-              variant="primary"
-              pending={action.pending || uploading}
-              disabled={name.trim() === "" || (!created && clash !== null)}
-            >
-              Create
-            </Button>
-          </DialogActions>
-        </form>
-      </Dialog>
-    </>
+    <Dialog open={open} onOpenChange={setOpen} title={persona ? "New persona" : "New card"}>
+      <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
+        <UserDraftStatus draft={durable} />
+        <Field label="Display name" about={DISPLAY_HINT}>
+          <Input value={name} onChange={(event) => setName(event.currentTarget.value)} required />
+        </Field>
+        <Field label="In-chat nickname" about={NICKNAME_HINT}>
+          <Input
+            placeholder="Add an in-chat nickname"
+            value={nickname}
+            onChange={(event) => setNickname(event.currentTarget.value)}
+          />
+        </Field>
+        <Field label="Version" about="Shown as the card's subtitle.">
+          <Input value={version} onChange={(event) => setVersion(event.currentTarget.value)} />
+        </Field>
+        {clash && (
+          <p role="status" className="text-sm text-muted">
+            {clash}
+          </p>
+        )}
+        <ErrorAlert error={action.error} />
+        <DialogActions>
+          <Button hint="Closes this dialog." onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint={`Creates the ${persona ? "persona" : "card"} and opens its editor.`}
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={name.trim() === "" || clash !== null}
+          >
+            Create
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
   )
 }

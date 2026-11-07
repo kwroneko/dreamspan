@@ -13,6 +13,7 @@ import { positionOf } from "./position.ts"
 import type { MessageImages, PathEntry } from "@rp/shared/chat.ts"
 import type { ImagesLeftOut } from "@rp/shared/inspectorApi.ts"
 import { useSession } from "../../session.ts"
+import { uuid } from "../../uuid.ts"
 import { Button } from "../../ui/Button.tsx"
 import { ContentImage } from "../../ui/ContentImage.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
@@ -383,7 +384,7 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
         if (stored.length + selected.length > 32) throw new Error("A message can hold at most 32 images.")
         const firstPosition = Math.max(0, ...stored.map((entry) => entry.pendingPosition ?? 0)) + 1
         const added = selected.map((file, index) => ({
-          id: crypto.randomUUID(),
+          id: uuid(),
           scope,
           name: file.name || "Pasted image",
           file,
@@ -448,7 +449,7 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
             try {
               for (const image of images) {
                 const entry = {
-                  id: crypto.randomUUID(),
+                  id: uuid(),
                   scope,
                   name: image.altText || "Restored image",
                   mediaId: image.mediaId

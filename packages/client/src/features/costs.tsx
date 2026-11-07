@@ -4,6 +4,7 @@ import { Schema } from "effect"
 import { useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../actions.tsx"
 import { AppClient } from "../rpc.ts"
+import { uuid } from "../uuid.ts"
 import { routes } from "../routes.tsx"
 import { Button } from "../ui/Button.tsx"
 import { Field, Input } from "../ui/Field.tsx"
@@ -231,7 +232,7 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
               edit([
                 ...values.rules,
                 {
-                  id: crypto.randomUUID(),
+                  id: uuid(),
                   name: "New formula",
                   kind: null,
                   connectionId: null,

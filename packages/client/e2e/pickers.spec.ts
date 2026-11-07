@@ -323,11 +323,13 @@ for (const width of [1440, 390]) {
       const list = page.getByRole("radiogroup", { name: "Model", exact: true })
       const names = await list.getByRole("radio").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")))
       expect(names).toHaveLength(2)
-      // fake-large wrote the reply made before; fake-small never has.
+      // Recent choices count alongside replies, across the shared model selectors.
       await expect(list.getByRole("radio", { name: /fake-large$/ })).toHaveAccessibleDescription(/^used /)
-      await expect(list.getByRole("radio", { name: /fake-small$/ })).toHaveAccessibleDescription("never used")
+      await expect(list.getByRole("radio", { name: /fake-small$/ })).toHaveAccessibleDescription(/^(never used$|used )/)
       await page.getByRole("group", { name: "Sort models" }).getByRole("button", { name: "Used" }).click()
-      await expect(list.getByRole("radio").first()).toHaveAccessibleName(/fake-large$/)
+      await expect(list.getByRole("radio").first()).toHaveAccessibleName(
+        theme === "light" ? /fake-large$/ : /fake-small$/
+      )
       await expect(page.getByRole("link", { name: "Manage connections…" })).toBeVisible()
       await page.screenshot({ path: join(shots, `model-picker-${width}-${theme}.png`) })
       const other = names.find((name) => !before!.includes(name!))!

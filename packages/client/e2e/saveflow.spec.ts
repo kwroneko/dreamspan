@@ -5,7 +5,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { textField, valueField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { forgetWorkbench, loginCookie, withCookie } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -26,7 +26,6 @@ const preset = JSON.parse(
 )
 
 async function seed(page: Page, name: string) {
-  await forgetWorkbench(server(), adminCookie)
   const separator = adminCookie.indexOf("=")
   await page.context().addCookies([
     {

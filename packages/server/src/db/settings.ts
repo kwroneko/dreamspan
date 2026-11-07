@@ -74,11 +74,6 @@ const definitions: ReadonlyArray<SettingDefinition> = [
       template: Schema.String,
       enabled: Schema.Boolean
     })
-  },
-  {
-    id: "workbench",
-    scope: "device",
-    schema: Schema.Struct({ at: Schema.Int, layout: Schema.Record(Schema.String, Schema.Unknown) })
   }
 ]
 

@@ -94,7 +94,7 @@ test("a composer with no model says so and offers the choice", async ({ page }) 
   expect(note!.y + note!.height).toBeLessThanOrEqual(box!.y)
   expect(note!.width).toBeGreaterThan(box!.width / 2)
   await page.getByRole("button", { name: "Choose a model for all chats" }).click()
-  await page.getByRole("list", { name: "Models" }).getByRole("button").first().click()
+  await page.getByRole("radiogroup", { name: "Model", exact: true }).getByRole("radio").first().click()
   await expect(page.getByText("No model chosen")).toHaveCount(0)
   expect((await admin((api) => api.GetGenerationDefaults())).model).not.toBeNull()
 
@@ -111,7 +111,7 @@ test("a composer with no model says so and offers the choice", async ({ page }) 
   await page.goto(`${server().url}/chats/${started.chat.id}`)
   await expect(page.getByText("No model chosen")).toBeVisible()
   await page.getByRole("button", { name: "Choose a model for all chats" }).click()
-  await page.getByRole("list", { name: "Models" }).getByRole("button").first().click()
+  await page.getByRole("radiogroup", { name: "Model", exact: true }).getByRole("radio").first().click()
   await expect(page.getByText("No model chosen")).toHaveCount(0)
 
   // Every step done: the home shows only the characters.

@@ -1,10 +1,9 @@
 // Synthetic creation flows. The same measurements run in the focused layout audit.
-import { expect, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./layoutAudit.ts"
 import { openPanel } from "./panel.ts"
 import { showAppNavigation, hideAppNavigation } from "./appMenu.ts"
-import { portraitPng } from "./portrait.ts"
 import { loginCookie, withCookie } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 
@@ -69,33 +68,46 @@ export function newflowTests() {
               else expect(opened.doc["owner"]).toEqual({ shared: "global" })
             })
           }
-          test(`persona: lists, picture and switcher ${suffix}`, async ({ page }, info) => {
+          test(`persona: New card's form, the card editor and the chat's persona ${suffix}`, async ({ page }, info) => {
+            // A persona is a card (owner, 2026-11-07): New card's form, then the card editor.
+            const newCardForm = async (dialog: Locator) => {
+              for (const label of ["Display name", "In-chat nickname", "Version"])
+                await expect(dialog.getByLabel(label, { exact: true })).toBeVisible()
+              await expect(dialog.getByLabel("Description", { exact: true })).toHaveCount(0)
+              await expect(dialog.getByLabel("Picture", { exact: true })).toHaveCount(0)
+              await expect(dialog.locator('input[type="file"]')).toHaveCount(0)
+            }
+            const cardEditor = async (scope: Locator | Page) => {
+              await expect(scope.getByRole("button", { name: "Picture", exact: true }).first()).toBeVisible({
+                timeout: 30_000
+              })
+              await expect(scope.locator('.cm-content[aria-label="Description"]')).toBeVisible()
+            }
             await page.goto(`${server().url}/library?show=personas`)
             await page.getByRole("button", { name: "New persona", exact: true }).click()
             const dialog = page.getByRole("dialog", { name: "New persona", exact: true })
-            await dialog.getByLabel("Name", { exact: true }).fill(`Persona ${suffix}`)
-            await dialog.getByLabel("Description", { exact: true }).fill("A synthetic lighthouse keeper.")
-            await dialog
-              .getByLabel("Picture", { exact: true })
-              .setInputFiles({ name: "portrait.png", mimeType: "image/png", buffer: portraitPng() })
+            await newCardForm(dialog)
+            await dialog.getByLabel("Display name", { exact: true }).fill(`Persona ${suffix}`)
+            await dialog.getByLabel("In-chat nickname", { exact: true }).fill(`Keeper ${suffix}`)
+            await dialog.getByLabel("Version", { exact: true }).fill("v1")
             await expectLayout(page, info, `new-persona-${suffix}`, { scope: '[role="dialog"]' })
             await dialog.screenshot({ path: info.outputPath("new-persona.png") })
             await dialog.getByRole("button", { name: "Create", exact: true }).click()
             await expect(dialog).toHaveCount(0)
-            const cards = await admin((api) => api.ListCards())
-            const made = cards.find((card) => card.label === `Persona ${suffix}`)!
+            const made = (await admin((api) => api.ListCards())).find((card) => card.label === `Persona ${suffix}`)!
             expect(made.persona).toBe(true)
-            expect(made.avatarMediaId).not.toBeNull()
+            expect(made.modelName).toBe(`Keeper ${suffix}`)
+            expect(made.subtitle).toBe("v1")
             const ref = (await admin((api) => api.ListLibrary({ kind: "card" }))).find(
               (ref) => ref.entityId === made.entityId
             )!
-            expect((await admin((api) => api.OpenEditor({ refId: ref.id }))).doc["description"]).toBe(
-              "A synthetic lighthouse keeper."
-            )
+            await expect(page).toHaveURL(new RegExp(`/library/${ref.id}`))
+            await cardEditor(page)
             await expect(page.getByRole("button", { name: "Switch persona", exact: true })).toBeVisible()
             await page.getByRole("button", { name: "Switch persona", exact: true }).click()
             await page.getByRole("button", { name: "New persona…", exact: true }).click()
-            await dialog.getByLabel("Name", { exact: true }).fill(`Second persona ${suffix}`)
+            await newCardForm(dialog)
+            await dialog.getByLabel("Display name", { exact: true }).fill(`Second persona ${suffix}`)
             await dialog.getByRole("button", { name: "Create", exact: true }).click()
             await expect(page.getByRole("button", { name: "Switch persona", exact: true })).toContainText(
               `Second persona ${suffix}`
@@ -111,6 +123,7 @@ export function newflowTests() {
               .first()
               .click()
             await expect(dialog).toBeVisible()
+            await newCardForm(dialog)
             await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
             const { chat } = await admin((api) =>
               Effect.gen(function* () {
@@ -128,7 +141,32 @@ export function newflowTests() {
             await cast.getByRole("button", { name: /Change your persona/ }).click()
             await page.getByRole("button", { name: "New persona…", exact: true }).click()
             await expect(dialog).toBeVisible()
-            await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+            await newCardForm(dialog)
+            await dialog.getByLabel("Display name", { exact: true }).fill(`Chat persona ${suffix}`)
+            await expectLayout(page, info, `new-persona-chat-${suffix}`, {
+              scope: '[role="dialog"][data-layout-overlay="Modal dialog covers the page"]'
+            })
+            await dialog.screenshot({ path: info.outputPath("new-persona-chat.png") })
+            await dialog.getByRole("button", { name: "Create", exact: true }).click()
+            await expect(dialog).toHaveCount(0)
+            // It opens in the card editor in the side panel, and the chat plays it.
+            const tab = page.getByRole("tabpanel", { name: `Chat persona ${suffix}`, exact: true })
+            await cardEditor(tab)
+            await page.screenshot({ path: info.outputPath("persona-in-panel.png") })
+            const played = (await admin((api) => api.ListCards())).find(
+              (card) => card.label === `Chat persona ${suffix}`
+            )!
+            expect(played.persona).toBe(true)
+            await openPanel(page, "Cast")
+            await expect(cast.getByRole("button", { name: /Change your persona/ })).toHaveAccessibleName(
+              new RegExp(`Playing as Chat persona ${suffix}`)
+            )
+            await cast.getByRole("button", { name: /Change your persona/ }).click()
+            await expect(
+              page.getByRole("tabpanel", { name: "Personas", exact: true }).getByText(`Chat persona ${suffix}`, {
+                exact: true
+              })
+            ).toBeVisible()
           })
           test(`lorebook: chat and preset attachment ${suffix}`, async ({ page }, info) => {
             const { chat, preset } = await admin((api) =>
