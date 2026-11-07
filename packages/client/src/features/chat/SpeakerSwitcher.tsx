@@ -25,6 +25,8 @@ import { ChevronIcon } from "./icons.tsx"
 import type { Outcome } from "./session.ts"
 import { NewCardDialog } from "../editor/NewCard.tsx"
 import { Button } from "../../ui/Button.tsx"
+import type { LibraryRef } from "@rp/shared/library.ts"
+import { useShowPanel } from "./panels.tsx"
 
 type SwitcherTab = "members" | "personas" | "all"
 
@@ -339,6 +341,27 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
     else onPick(card)
   }
   const pick = (card: CastCard) => pickAt(shown.indexOf(card))
+  const showPanel = useShowPanel()
+  // A persona made here becomes the one played, then opens in the card editor in the side
+  // panel: its tab exists once the chat plays it.
+  const reveal = useRef<EntityId | null>(null)
+  const created = async (ref: LibraryRef) => {
+    const list = personas?.listCards ?? listCards
+    const result = list ? await list() : null
+    if (!result?.ok) return
+    setAll(result.value)
+    setNames(new Map(result.value.map((card) => [card.entityId, card])))
+    const card = result.value.find((c) => c.entityId === ref.entityId)
+    if (!card) return
+    reveal.current = card.entityId
+    ;(personas ?? { onPick }).onPick(card)
+  }
+  useEffect(() => {
+    const entity = reveal.current
+    if (entity === null || !view.cast?.playedByMe.includes(entity)) return
+    reveal.current = null
+    showPanel(`card:${entity}`)
+  }, [view.cast, showPanel])
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault()
@@ -588,7 +611,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         )}
         {(persona || personas) && (
           <Button
-            hint="Opens a form to create a persona and edit it."
+            hint="Opens a form to create a persona to play in this chat."
             onClick={() => {
               openChange(false)
               setAll(null)
@@ -599,7 +622,9 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
           </Button>
         )}
       </Popover>
-      {(persona || personas) && <NewCardDialog persona open={making} onOpenChange={setMaking} />}
+      {(persona || personas) && (
+        <NewCardDialog persona open={making} onOpenChange={setMaking} onCreated={(_, ref) => void created(ref)} />
+      )}
     </>
   )
 })
