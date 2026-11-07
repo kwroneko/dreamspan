@@ -7,6 +7,9 @@ import { client, serverLayer, testConfig, posted } from "./support/config.ts"
 import { generateReply, eventually, finished } from "./support/generation.ts"
 import { startMockProvider, sse, completionChunks } from "./support/mockProvider.ts"
 
+// The synthetic prompts are below every documented minimum cacheable size, which these tests aren't about.
+const tiny = { cacheLayout: { minTokens: 1 } }
+
 const resource = (handler: Parameters<typeof startMockProvider>[0]) =>
   Effect.acquireRelease(
     Effect.promise(() => startMockProvider(handler)),
@@ -39,7 +42,7 @@ for (const scenario of ["empty", "raw", "after-output"] as const)
       const api = yield* client()
       const reply = yield* generateReply(api, {
         connection: { kind: "google", baseUrl: mock.url, apiKey: key },
-        model: {}
+        model: tiny
       })
       assert.equal(calls, scenario === "after-output" ? 1 : 2)
       assert.equal(reply.version.status, scenario === "after-output" ? "failed" : "complete")
@@ -84,7 +87,7 @@ for (const override of ["none", "model", "connection"] as const)
           apiKey: "synthetic-review-key",
           ...(override === "connection" ? { cacheTtlS: 777 } : {})
         },
-        model: override === "model" ? { cacheTtlS: 888 } : {},
+        model: { ...tiny, ...(override === "model" ? { cacheTtlS: 888 } : {}) },
         modelKey: "gpt-5.4"
       })
       assert.equal(reply.version.status, "complete")
@@ -133,7 +136,7 @@ for (const edit of ["model", "connection", "policy"] as const)
           apiKey: "synthetic-review-key",
           ...(edit === "connection" ? { cacheTtlS: 120 } : {})
         },
-        model: edit === "model" ? { cacheTtlS: 120 } : {},
+        model: { ...tiny, ...(edit === "model" ? { cacheTtlS: 120 } : {}) },
         modelKey: edit === "policy" ? "google/gemini-2.5-pro" : "gpt-oss-120b"
       })
       assert.equal(reply.version.status, "complete")
@@ -216,7 +219,7 @@ it.live("Fireworks preserves a reported header hit on tool-only completion", () 
     const api = yield* client()
     const reply = yield* generateReply(api, {
       connection: { kind: "openai-chat", baseUrl: mock.url, cacheTtlS: 777 },
-      model: {}
+      model: tiny
     })
     assert.equal(reply.version.status, "complete")
     const me = yield* api.Whoami()
@@ -242,6 +245,8 @@ it.live("Ordinary tool-schema cache_control properties do not select explicit ca
       )
     )
     const registry = yield* ProviderRegistry
+    // Without the default marker, only the tool schema's property name could look like one.
+    yield* registry.transforms.disable("openrouter-cache-control")
     yield* registry.transforms.register({
       id: "review-tool-schema",
       appliesTo: () => true,
@@ -261,7 +266,7 @@ it.live("Ordinary tool-schema cache_control properties do not select explicit ca
     const api = yield* client()
     const reply = yield* generateReply(api, {
       connection: { kind: "openrouter", baseUrl: mock.url, apiKey: "synthetic-review-key" },
-      model: {},
+      model: tiny,
       modelKey: "google/gemini-2.5-pro"
     })
     assert.equal(reply.version.status, "complete")

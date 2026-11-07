@@ -73,6 +73,18 @@ export interface DecisionWire {
 export interface RequestTarget {
   readonly kind: string
   readonly api: string
+  /** The model's key on its connection (`anthropic/claude-haiku-4.5`); absent where no model applies. */
+  readonly model?: string
+}
+
+/**
+ * The automatic layout's reusable endpoint: the last message the next request repeats (the
+ * assembly's last breakpoint), and how many messages the assembly built. Messages from `end` on
+ * are a tool loop's, which its next request repeats too.
+ */
+export interface StableEndpoint {
+  readonly message: number
+  readonly end: number
 }
 
 /** Rewrites the payload pi-ai built, before it's sent (pi-ai's `onPayload`). */
@@ -90,6 +102,10 @@ export interface RequestTransform {
       readonly messages: ReadonlyArray<Message>
       readonly breakpoints: ReadonlyArray<number>
       readonly cacheLayout?: import("@rp/shared/providers.ts").CacheLayout
+      /** Set for the automatic layout (no explicit breakpoints) when the assembly has an endpoint. */
+      readonly stable?: StableEndpoint
+      readonly cacheRetention?: "none" | "short" | "long"
+      readonly sessionId?: string
     }
   ) => Record<string, unknown>
 }

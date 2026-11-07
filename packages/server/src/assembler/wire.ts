@@ -137,6 +137,18 @@ export interface ProviderRequest {
   readonly payload: Readonly<Record<string, unknown>>
   /** Indices into `context.messages`, most important first. */
   readonly breakpoints: ReadonlyArray<number>
+  /**
+   * The automatic layout's reusable endpoint: the context message the next request repeats
+   * (the assembly's last breakpoint), for the transforms that place a provider's own markers.
+   */
+  readonly stable?: { readonly message: number; readonly end: number }
+}
+
+/** The automatic layout's endpoint, `offset` messages into the system prompt; none for explicit or off. */
+const stableEndpoint = (request: AssembledRequest, model: ModelInput, offset: number, end: number) => {
+  if (model.cacheBreakpoints !== "auto" || request.breakpoints.length === 0) return {}
+  const message = Math.max(...request.breakpoints.map((b) => b.message)) - offset
+  return message < 0 || message >= end ? {} : { stable: { message, end } }
 }
 
 const imageBlocks = (message: RequestMessage) =>
@@ -178,10 +190,12 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
     }
   }
   if (model.api === "openai-completions") {
+    const messages = withPrefill(request)
     return {
-      context: { messages: withPrefill(request).map((m) => ({ role: "user", content: m.content, timestamp: 0 })) },
+      context: { messages: messages.map((m) => ({ role: "user", content: m.content, timestamp: 0 })) },
       payload: chatCompletionsFields(request, model.kind, model.key),
-      breakpoints: model.cacheBreakpoints === "explicit" ? request.breakpoints.map((b) => b.message) : []
+      breakpoints: model.cacheBreakpoints === "explicit" ? request.breakpoints.map((b) => b.message) : [],
+      ...stableEndpoint(request, model, 0, messages.length)
     }
   }
   const messages = withPrefill(request)
@@ -250,21 +264,23 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
     breakpoints:
       model.cacheBreakpoints === "explicit"
         ? request.breakpoints.flatMap((b) => (b.message < first ? [] : [b.message - first]))
-        : []
+        : [],
+    ...stableEndpoint(request, model, first, piMessages.length)
   }
 }
 
 /** Apply model-owned provider options after prompt composition. */
 export const providerRequest = (request: AssembledRequest, model: ModelInput): ProviderRequest => {
-  const wire = baseProviderRequest(request, model)
+  const base = baseProviderRequest(request, model)
   const settings = model.settings
-  if (!settings) return wire
+  if (!settings) return base
+  const { stable, ...wire } = base
   const effort = settings.samplers?.reasoning_effort
   const verbosity = settings.samplers?.verbosity
   return {
     ...wire,
     ...(settings.cacheRetention ? { cacheRetention: settings.cacheRetention } : {}),
-    ...(settings.cacheRetention === "none" ? { breakpoints: [] } : {}),
+    ...(settings.cacheRetention === "none" ? { breakpoints: [] } : stable ? { stable } : {}),
     ...(["minimal", "low", "medium", "high", "xhigh", "max"].includes(effort ?? "")
       ? { reasoning: effort as import("@earendil-works/pi-ai").ThinkingLevel }
       : {}),

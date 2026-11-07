@@ -72,8 +72,11 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
   }
   if (provider === "openrouter") {
     const pinned = object(payload.provider).only
+    // Claude through OpenRouter caches only at markers (or a top-level control).
     if (model.startsWith("anthropic/claude"))
-      return policy(hour ? (Array.isArray(pinned) && pinned.length === 1 ? 3600 : 600) : 300, routerSource)
+      return explicit
+        ? policy(hour ? (Array.isArray(pinned) && pinned.length === 1 ? 3600 : 600) : 300, routerSource)
+        : null
     if (model.startsWith("google/gemini")) return policy(explicit ? 300 : 180, routerSource, explicit)
     return null
   }
@@ -116,4 +119,44 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
   // Gemini implicit has no documented TTL. Explicit cachedContents are resources:
   // their returned expireTime must be used; this app does not create those objects.
   return null
+}
+
+/**
+ * The documented minimum cacheable prefix, in tokens: a shorter prefix is never cached, whatever
+ * its markers. Null where no minimum is documented for the model.
+ */
+export const documentedCacheMinimum = (target: Target): number | null => {
+  const provider =
+    target.provider === "openai-chat" || target.provider === "openai-responses" ? "openai" : target.provider
+  const model = target.model.toLowerCase()
+  const claude = /claude-?((?:fable|mythos|opus|sonnet|haiku)[-.]?[\w.-]*)/.exec(model)?.[1]?.replace(/\./g, "-")
+  if (
+    claude &&
+    ["anthropic", "openrouter", "amazon-bedrock", "google-vertex", "vercel-ai-gateway"].includes(provider)
+  ) {
+    // claudeSource, "Cache limitations" (read 2026-11-07).
+    if (/^(fable|mythos-5|opus-5|sonnet-5-5|haiku-5)/.test(claude)) return 512
+    if (/^(mythos-preview|opus-4-7)/.test(claude)) return 2048
+    if (/^(opus-4-6|opus-4-5|haiku-4-5)/.test(claude)) return 4096
+    if (/^(opus-4-8|sonnet-5|sonnet-4|opus-4)/.test(claude)) return 1024
+    return null
+  }
+  // openaiSource and routerSource: 1,024 tokens for OpenAI's automatic caching.
+  if ((provider === "openai" || provider === "azure") && knownOpenAI(model)) return 1024
+  if (provider === "openrouter" && /^openai\//.test(model)) return 1024
+  // routerSource: Gemini Pro 4,096, Flash 1,024.
+  if (provider === "openrouter" && /^google\/gemini/.test(model)) return /pro/.test(model) ? 4096 : 1024
+  return null
+}
+
+/**
+ * OpenAI's automatic prompt cache, direct, on Azure or through OpenRouter: best effort, with no
+ * markers and its own routing, so the estimate is calibrated from the reads it reports.
+ */
+export const bestEffortCache = (target: Target): boolean => {
+  const provider =
+    target.provider === "openai-chat" || target.provider === "openai-responses" ? "openai" : target.provider
+  const model = target.model.toLowerCase()
+  if (provider === "openai" || provider === "azure") return knownOpenAI(model)
+  return provider === "openrouter" && /^openai\//.test(model)
 }

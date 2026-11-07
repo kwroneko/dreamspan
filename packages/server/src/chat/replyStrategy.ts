@@ -45,7 +45,8 @@ export const defaultReplyStrategy: ReplyStrategy = {
               ...(wire.reasoning ? { reasoning: wire.reasoning } : {}),
               sessionId: chatId,
               payload: wire.payload,
-              breakpoints: wire.breakpoints
+              breakpoints: wire.breakpoints,
+              ...(wire.stable ? { stable: wire.stable } : {})
             },
             attribution: { purpose: "generation", chatId, rolloutId, versionId }
           })
