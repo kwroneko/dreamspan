@@ -4,7 +4,7 @@ import { Tooltip } from "./Tooltip.tsx"
 
 import type { AvatarCrop } from "@rp/shared/media.ts"
 import type { ComponentProps, CSSProperties } from "react"
-import { PortraitFrame, useOpenPortrait } from "./Portrait.tsx"
+import { PICTURE_TAB_MIME, PortraitFrame, usePortraitViewer } from "./Portrait.tsx"
 import { useMediaWidth } from "./mediaImage.ts"
 import { portraitUrl } from "./portraitParts.ts"
 
@@ -82,7 +82,8 @@ export function Avatar({
   preview?: boolean
   alt?: string
 }) {
-  const open = useOpenPortrait()
+  const viewer = usePortraitViewer()
+  const open = viewer?.open
   const { ref, width } = useMediaWidth()
   // A filling portrait must not leave an inline baseline below it in collage cells.
   // That extra line-box space otherwise makes row gaps larger than column gaps.
@@ -120,6 +121,11 @@ export function Avatar({
         onClick={(event) => {
           event.stopPropagation()
           open({ id, name, mediaId, picture: crop?.picture })
+        }}
+        onDragStart={(event) => {
+          // Dropped on a frame, it opens there as a tab (features/workbench), never as an attachment.
+          const href = viewer?.tabHref?.({ id, name, mediaId, picture: crop?.picture })
+          if (href) event.dataTransfer.setData(PICTURE_TAB_MIME, href)
         }}
       >
         <PortraitFrame className="@container size-full">{content}</PortraitFrame>

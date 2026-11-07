@@ -2,7 +2,8 @@
 // with tabs. One item and no split looks as the single view did; the strip appears once a
 // frame has two tabs or the column is split. The side panel stays beside the frames and shows
 // the chat focused last (tab.tsx `useSidePanelPlace`); the portrait column stays left of the
-// frames and shows the pictures opened last (`usePortraitColumnPlace`).
+// frames, one for all of them (`usePortraitHost`). The side panel coming or going takes its
+// width from the frames beside it only (`useKeepDividers`), so no other divider moves.
 //
 // Each tab renders its own router (TabHost) into an element of its own, which is put in its
 // frame while shown and taken out of the page while not: its state, scroll and drafts stay,
@@ -27,6 +28,7 @@ import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { UnsavedScope, UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
 import { Tooltip, IconButton } from "../../ui/Tooltip.tsx"
 import { CenterPage } from "../shell.tsx"
+import { PanelPlaceholder } from "../chat/PanelPlaceholder.tsx"
 import { defaultTitle, tabKind } from "./kinds.ts"
 import {
   allTabs,
@@ -43,6 +45,7 @@ import {
   type Direction
 } from "./model.ts"
 import { type DropZone, dropZone } from "./dropOpen.ts"
+import { PICTURE_TAB_MIME } from "../../ui/Portrait.tsx"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
 import { readTabLayout, writeTabLayout } from "./tabLayout.ts"
@@ -94,13 +97,18 @@ function WorkbenchFor({ userId }: { userId: string }) {
       })
   }
   const shownFrame = focusedFrame(layout)
+  const [outer, setOuter] = useState<HTMLElement | null>(null)
+  const [center, setCenter] = useState<HTMLElement | null>(null)
+  const side = useSideWidth(outer, center)
+  const placeholder = usePanelPlaceholder(store, wide, side)
+  useKeepDividers(store, outer, center, wide && !layout.maximized)
   // A maximized frame shows alone; the others keep their tabs (VS Code's Maximize Editor Group).
   const maximized = layout.maximized ? frames(layout.root).find((f) => f.id === layout.maximized) : undefined
   return (
     <WorkbenchContext value={{ store, sideHost, portraitHost }}>
-      <div className="flex min-h-0 min-w-0 flex-1">
+      <div ref={setOuter} className="flex min-h-0 min-w-0 flex-1">
         <div ref={setPortraitHost} className="contents" data-portrait-host />
-        <div data-workbench className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div ref={setCenter} data-workbench className="flex min-h-0 min-w-0 flex-1 flex-col">
           {wide ? (
             <NodeView node={maximized ?? layout.root} layout={layout} store={store} slotRef={slotRef} />
           ) : (
@@ -108,6 +116,7 @@ function WorkbenchFor({ userId }: { userId: string }) {
           )}
         </div>
         <div ref={setSideHost} className="contents" data-side-host />
+        {placeholder && <PanelPlaceholder width={placeholder.width} onHide={placeholder.hide} />}
       </div>
       {allTabs(layout).map((tab) => {
         const frame = frameOfTab(layout, tab.id)
@@ -280,6 +289,104 @@ function useSlot(slotRef: SlotRef, frameId: string, element: HTMLElement | null)
   useLayoutEffect(() => register(), [frameId, element])
 }
 
+/**
+ * The width right of the frames: the side panel's, while it shows. Measured as the gap between
+ * the frames' right edge and the shell's, so it's the panel's whatever renders it.
+ */
+function useSideWidth(outer: HTMLElement | null, center: HTMLElement | null) {
+  const [side, setSide] = useState(0)
+  useLayoutEffect(() => {
+    if (!outer || !center) return
+    const measure = () =>
+      setSide(Math.max(0, Math.round(outer.getBoundingClientRect().right - center.getBoundingClientRect().right)))
+    const observer = new ResizeObserver(measure)
+    observer.observe(outer)
+    observer.observe(center)
+    measure()
+    return () => observer.disconnect()
+  }, [outer, center])
+  return side
+}
+
+/**
+ * The side panel's place while no chat is open to fill it (owner, 2026-11-07: "I don't want
+ * unexpected layout shifts just because chats close"): the panel's width when its chat was
+ * the last one closed with the panel showing; null while a chat has it, before any chat showed
+ * it, or once the user hides it.
+ */
+function usePanelPlaceholder(store: WorkbenchStore, wide: boolean, side: number) {
+  const owner = useSyncExternalStore(store.subscribe, () => store.panelOwner(wide))
+  // The panel's width while a chat shows it (0 when hidden there), kept when the chat goes.
+  const [kept, setKept] = useState(0)
+  if (owner !== null && kept !== side) setKept(side)
+  if (!wide || owner !== null || kept <= 0) return null
+  return { width: kept, hide: () => setKept(0) }
+}
+
+/**
+ * The frames' width changed from their right edge alone (the side panel shown, hidden or
+ * resized; the window and the left columns as they were): the frames along that edge take the
+ * change and every divider stays where it was (owner, 2026-11-07: "Why does dragging an image
+ * between panes resize other panes?"). Only after the user's first input on the page, so the
+ * panel appearing as the page loads leaves the saved shares as they are.
+ */
+function useKeepDividers(store: WorkbenchStore, outer: HTMLElement | null, center: HTMLElement | null, on: boolean) {
+  useLayoutEffect(() => {
+    if (!outer || !center || !on) return
+    let acted = false
+    const act = () => {
+      acted = true
+    }
+    const measure = () => ({
+      outer: outer.getBoundingClientRect().width,
+      left: center.getBoundingClientRect().left,
+      width: center.getBoundingClientRect().width
+    })
+    let last = measure()
+    const observer = new ResizeObserver(() => {
+      const was = last
+      const now = (last = measure())
+      if (!acted || Math.abs(now.outer - was.outer) > 0.5 || Math.abs(now.left - was.left) > 0.5) return
+      if (Math.abs(now.width - was.width) < 1) return
+      for (const [splitId, sizes] of keepRightEdge(store.layout.root, was.width, now.width))
+        store.resize(splitId, sizes)
+    })
+    observer.observe(outer)
+    observer.observe(center)
+    window.addEventListener("pointerdown", act, true)
+    window.addEventListener("keydown", act, true)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("pointerdown", act, true)
+      window.removeEventListener("keydown", act, true)
+    }
+  }, [store, outer, center, on])
+}
+
+/**
+ * New shares for the splits along the right edge when the frames' width goes from `from` to
+ * `to`: in a row, every frame but the last keeps its width; a column passes the change to each
+ * of its rows. Where room is short, the last frame keeps at least an equal share of the row
+ * (or its minimum, if less) and the others give it that.
+ */
+function keepRightEdge(node: Node, from: number, to: number): Array<[string, ReadonlyArray<number>]> {
+  if (node.type === "frame" || from <= 0 || to <= 0) return []
+  if (node.direction === "column") return node.children.flatMap((child) => keepRightEdge(child, from, to))
+  const shares = node.children.map((_, i) => node.sizes[i] ?? 1 / node.children.length)
+  const last = shares.length - 1
+  const kept = shares.slice(0, last).map((share) => share * from)
+  const keptWidth = kept.reduce((sum, px) => sum + px, 0)
+  // Where room is short, the last frame keeps at least an equal share; the others give it that.
+  const floor = Math.min(MIN_WIDTH, to / shares.length)
+  const lastWidth = Math.max(floor, to - keptWidth)
+  const scale = keptWidth > 0 ? (to - lastWidth) / keptWidth : 1
+  if (scale <= 0) return []
+  return [
+    [node.id, [...kept.map((px) => (px * scale) / to), lastWidth / to]],
+    ...keepRightEdge(node.children[last]!, shares[last]! * from, lastWidth)
+  ]
+}
+
 function NodeView({
   node,
   layout,
@@ -383,7 +490,9 @@ function useFrameEvents(
   useEffect(() => {
     if (!element) return
     const focus = () => store.focusFrame(frameId)
-    const isTab = (event: DragEvent) => event.dataTransfer?.types.includes(TAB_MIME) ?? false
+    // A tab, or the app's own portrait, which opens as a tab (`PICTURE_TAB_MIME`).
+    const isTab = (event: DragEvent) =>
+      (event.dataTransfer?.types.includes(TAB_MIME) || event.dataTransfer?.types.includes(PICTURE_TAB_MIME)) ?? false
     const dragover = (event: DragEvent) => {
       if (!isTab(event)) return
       event.preventDefault()
@@ -397,6 +506,11 @@ function useFrameEvents(
       if (!isTab(event)) return
       event.preventDefault()
       setOver(null)
+      const picture = event.dataTransfer?.getData(PICTURE_TAB_MIME)
+      if (picture) {
+        store.dropOpen(picture, frameId, dropZone(element, event))
+        return
+      }
       const tabId = event.dataTransfer?.getData(TAB_MIME)
       if (tabId) onDrop(tabId, dropZone(element, event))
     }
@@ -532,14 +646,16 @@ function TabStrip({
   const [over, setOver] = useState<number | null>(null)
   const drop = (event: React.DragEvent, index: number) => {
     const tabId = event.dataTransfer.getData(TAB_MIME)
+    const picture = event.dataTransfer.getData(PICTURE_TAB_MIME)
     setOver(null)
-    if (!tabId) return
+    if (!tabId && !picture) return
     event.preventDefault()
     event.stopPropagation()
-    store.move(tabId, frame.id, index)
+    if (picture) store.dropOpen(picture, frame.id, "center", index)
+    else store.move(tabId, frame.id, index)
   }
   const dragOver = (event: React.DragEvent, index: number) => {
-    if (!event.dataTransfer.types.includes(TAB_MIME)) return
+    if (!event.dataTransfer.types.includes(TAB_MIME) && !event.dataTransfer.types.includes(PICTURE_TAB_MIME)) return
     event.preventDefault()
     event.stopPropagation()
     event.dataTransfer.dropEffect = "move"
