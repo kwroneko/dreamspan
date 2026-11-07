@@ -20,6 +20,7 @@ type Incoming =
   | { readonly type: "rp:vh"; readonly vh: number }
 
 const host = window.parent
+const hostOrigin = new URL(location.href).origin
 let rendered = false
 let reported = -1
 
@@ -36,9 +37,12 @@ function render(html: string) {
   const root = document.importNode(parsed.documentElement, true)
   document.documentElement.replaceWith(root)
   // A link would navigate the frame away from its panel.
-  document.addEventListener("click", (event) => {
-    if (event.target instanceof Element && event.target.closest("a[href]")) event.preventDefault()
-  })
+  const stopNavigation = (event: MouseEvent) => {
+    if (event.target instanceof Element && event.target.closest("a, area")) event.preventDefault()
+  }
+  // Include SVG xlink:href, image maps, middle clicks and links changed by SVG animation.
+  document.addEventListener("click", stopNavigation, true)
+  document.addEventListener("auxclick", stopNavigation, true)
   const observer = new ResizeObserver(report)
   observer.observe(document.documentElement)
   if (document.body) observer.observe(document.body)
@@ -56,7 +60,7 @@ function report() {
   )
   if (height === reported) return
   reported = height
-  host.postMessage({ type: "rp:height", height }, "*")
+  host.postMessage({ type: "rp:height", height }, hostOrigin)
 }
 
 function setTheme(theme: Theme) {
@@ -69,7 +73,8 @@ function setTheme(theme: Theme) {
 const setViewport = (vh: number) => document.documentElement.style.setProperty("--rp-vh", `${vh / 100}px`)
 
 addEventListener("message", (event: MessageEvent<Incoming>) => {
-  if (event.source !== host || typeof event.data !== "object" || event.data === null) return
+  if (event.source !== host || event.origin !== hostOrigin || typeof event.data !== "object" || event.data === null)
+    return
   const message = event.data
   if (message.type === "rp:render" && !rendered && typeof message.html === "string") {
     rendered = true
@@ -79,7 +84,7 @@ addEventListener("message", (event: MessageEvent<Incoming>) => {
   } else if (message.type === "rp:theme" && rendered) setTheme(message.theme)
   else if (message.type === "rp:vh" && rendered) setViewport(message.vh)
 })
-host.postMessage({ type: "rp:ready" }, "*")
+host.postMessage({ type: "rp:ready" }, hostOrigin)
 
 // A module, so its names stay its own (it has no imports or exports when built).
 export {}
