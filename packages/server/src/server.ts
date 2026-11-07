@@ -524,7 +524,7 @@ export const serverWith = <E>(
     // Provided on, so a plugin can register folder handlers into it (PLUGINS §8).
     // Import jobs (StImportJobs) run the path imports in their own scope, past any request.
     Layer.provideMerge(StImportJobs.layer),
-    Layer.provideMerge(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
+    Layer.provideMerge(StImports.layer),
     Layer.provide(
       // The estimate waits while a reply is written (CacheWarmth.hold).
       Generations.layer
@@ -548,6 +548,8 @@ export const serverWith = <E>(
     Layer.provideMerge(Commands.layer),
     Layer.provideMerge(Notices.layer),
     Layer.provideMerge(sources),
+    // One set of held files for uploads, the ST folder import and adopting a source's cards.
+    Layer.provideMerge(MediaHolds.layer),
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),

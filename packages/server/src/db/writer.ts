@@ -27,6 +27,7 @@ import { makeGenerationWriteHandlers } from "./generationWrites.ts"
 import { makeRolloutWriteHandlers } from "./rolloutWrites.ts"
 import { makeDecisionWriteHandlers } from "./decisions.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
+import { makeAdoptWriteHandlers } from "./cardOrigins.ts"
 import { makeProviderWriteHandlers } from "./providerWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
 import { makeStImportWriteHandlers } from "./stImportWrites.ts"
@@ -89,6 +90,12 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
                 ...(yield* makeLcmUiWriteHandlers),
                 ...(yield* makeLcmEnableWriteHandlers(bin)),
                 ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
+                ...(yield* makeAdoptWriteHandlers(
+                  library.ImportFile,
+                  chatSetup.StartChat,
+                  library.CommitEditorDrafts,
+                  bin.drafts
+                )),
                 ...(yield* makeDecisionWriteHandlers(bin))
               },
               prefix

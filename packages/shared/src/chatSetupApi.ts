@@ -590,7 +590,21 @@ export class ChatSetupApi extends RpcGroup.make(
        */
       title: Schema.optionalKey(Schema.String)
     },
-    success: Schema.Struct({ entry: PathEntry, chat: Chat, composer: Draft }),
+    success: Schema.Struct({
+      entry: PathEntry,
+      chat: Chat,
+      composer: Draft,
+      /**
+       * The cards from a card source the first turn added (spec/CARD-SOURCES.md §4.5): each
+       * placeholder id in `cards`, and the user's card that took its place (`existing`: they
+       * had it already).
+       */
+      adopted: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({ placeholder: EntityId, entityId: EntityId, name: Schema.String, existing: Schema.Boolean })
+        )
+      )
+    }),
     error: Schema.Union([...Errors, GenerationUnavailable])
   }),
   /** Who's in the chat, and its settings, after `slotId` (null: at the start). */

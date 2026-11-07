@@ -1,4 +1,5 @@
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
+import { remoteOf } from "@rp/shared/cardSources.ts"
 import { lazy, Suspense } from "react"
 import { chatPanels, lazyPanel, type PanelTabEntry, type PendingPanelProps } from "../chat/panels.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -14,7 +15,9 @@ export const registerCharacterPanels = () =>
     header: false,
     placement: "cast",
     holdsEditor: (ref, tab) => ref.kind === "card" && tab === `card:${ref.entityId}`,
-    matches: (value) => /^card:[0-9a-f-]{36}$/.test(value),
+    // A card from a card source in a draft chat goes by its placeholder (spec/CARD-SOURCES.md §4.2).
+    matches: (value) =>
+      /^card:[0-9a-f-]{36}$/.test(value) || (value.startsWith("card:") && remoteOf(value.slice(5)) !== null),
     tabs: (view, selected) => {
       const cast = view.cast
       const tab = (card: CastCard): PanelTabEntry => ({

@@ -97,6 +97,16 @@ const parse = (row: CardRow): CardText => {
   }
 }
 
+/**
+ * A document not in the library, as a chat would read it: a card on a card source before
+ * it's added (spec/CARD-SOURCES.md §4.2), under its placeholder id. Its regex scripts are
+ * never offered (§4.6): only a user can allow them, once the card is theirs.
+ */
+export const cardTextOfDoc = (entityId: EntityId, docJson: string): CardText => {
+  const { regex: _, ...text } = parse({ entity_id: entityId, label: "", doc_json: docJson, persona: 0, in_bin: 0 })
+  return text
+}
+
 /** A card revision's summary (baseline `card_summaries`), as a query selects it: null without one. */
 export interface CardSummaryRow {
   readonly card_fields: string | null

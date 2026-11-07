@@ -86,7 +86,8 @@ export const recoveredSource = (text: Pick<RecoveredText, "sourceKind" | "source
     summary_edit: "Summary in ",
     snippet: null,
     user_field: null,
-    entity_field: null
+    entity_field: null,
+    remote_card: null
   }
   const prefix = prefixes[text.sourceKind]
   if (prefix === null || !text.sourceLabel.startsWith(`${prefix}"`) || !text.sourceLabel.endsWith('"'))

@@ -1,6 +1,6 @@
 import { QueuedMessages } from "./QueuedMessages.tsx"
 import { RoundControls } from "./RoundControls.tsx"
-import { pendingComposerControls } from "./pendingComposerControls.tsx"
+import { type PendingComposerContext, pendingComposerControls } from "./pendingComposerControls.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -79,6 +79,12 @@ function ReplyNow({ reply, replier, busy, ready, invoke }: ComposerControlContex
   )
 }
 
+/** Generate's hover in a chat not made yet; with a card from a card source, what it adds (spec/CARD-SOURCES.md §4.4). */
+const generateHint = (context: PendingComposerContext) =>
+  context.adds !== ""
+    ? `Has ${context.speakerName} write the first message and adds ${context.adds} to your cards.`
+    : `Generate ${context.speakerName}'s first turn with the model${context.guidance ? ", following your guidance" : ""}.`
+
 export const registerComposerControls = () => [
   composerControls.register({
     id: "composer.queue",
@@ -119,7 +125,7 @@ export const registerComposerControls = () => [
       context.compact ? (
         <SquareIconButton
           label={`Generate ${context.speakerName}`}
-          hint={`Generate ${context.speakerName}'s first turn with the model${context.guidance ? ", following your guidance" : ""}.`}
+          hint={generateHint(context)}
           variant={context.guidance ? "primary" : "ghost"}
           pending={context.guidance && context.busy}
           disabled={context.busy || !context.prefsReady}
@@ -131,7 +137,7 @@ export const registerComposerControls = () => [
         <Button
           variant={context.guidance ? "primary" : "ghost"}
           aria-label={`Generate ${context.speakerName}`}
-          hint={`Generate ${context.speakerName}'s first turn with the model${context.guidance ? ", following your guidance" : ""}.`}
+          hint={generateHint(context)}
           pending={context.busy}
           disabled={context.busy || !context.prefsReady}
           onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
@@ -155,7 +161,9 @@ export const registerComposerControls = () => [
         hint={
           context.guidance
             ? "Guidance is sent with Generate, as instructions for the reply."
-            : `${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`} (${context.submitHint})`
+            : context.adds !== ""
+              ? `Sends your message and adds ${context.adds} to your cards (${context.submitHint})`
+              : `${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`} (${context.submitHint})`
         }
         variant="primary"
         pending={context.busy}

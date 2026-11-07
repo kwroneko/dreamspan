@@ -11,8 +11,12 @@ import { kindWord, linkedByHand, revisionsLine, sourceOf, statusQuery } from "./
 const MergeDialog = lazy(() => import("./MergeDialog.tsx").then((m) => ({ default: m.MergeDialog })))
 
 export function MergeNotice({ store }: { store: EditorStore }) {
-  const ref = useEditorState(store).snapshot?.ref
-  return ref ? <Notice key={ref.id} store={store} refId={ref.id} head={ref.headRevisionId} kind={ref.kind} /> : null
+  const snapshot = useEditorState(store).snapshot
+  const ref = snapshot?.ref
+  // An entry with no revision of its own yet (a card source's card before it's added) has nothing to merge.
+  return ref && snapshot.revisionNumber > 0 ? (
+    <Notice key={ref.id} store={store} refId={ref.id} head={ref.headRevisionId} kind={ref.kind} />
+  ) : null
 }
 
 function Notice({

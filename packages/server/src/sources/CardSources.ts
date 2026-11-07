@@ -11,6 +11,8 @@ import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
   type RecentRemote,
+  remoteEntityId,
+  remoteMediaId,
   type RemoteSummary,
   SourceAdminSettings,
   type SourceCapabilities,
@@ -20,14 +22,21 @@ import {
   type SourcePrefs,
   type SourceQuery
 } from "@rp/shared/cardSources.ts"
+import { CastCard } from "@rp/shared/chat.ts"
+import { CardForChat } from "@rp/shared/chatSetupApi.ts"
 import type { CredentialId } from "@rp/shared/providers.ts"
 import type { User, UserId } from "@rp/shared/domain.ts"
 import { Forbidden, NotFound, ServerError } from "@rp/shared/errors.ts"
 import { mediaWidth } from "@rp/shared/media.ts"
 import { Context, Effect, Layer, Schedule, Schema } from "effect"
 import { AppConfig } from "../config.ts"
+import { cardTextOfDoc } from "../db/cards.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import { docHash, searchText } from "../db/documents.ts"
 import { Formats } from "../importer/Formats.ts"
+import { MediaHolds } from "../importer/MediaHolds.ts"
+import { storeMedia } from "../importer/mediaFiles.ts"
+import { prepareAvatarThumbnails } from "../importer/prepareThumbnails.ts"
 import { describeImage } from "../importer/images.ts"
 import { Network } from "../net/Network.ts"
 import { Providers } from "../providers/Providers.ts"
@@ -42,6 +51,20 @@ const ADMIN_KEY = "sources.admin"
 const IMAGE_PURPOSE = "card-source-image"
 /** Images a browser shows as images; anything else a source sends is refused. */
 const IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+
+/** A source's card as the writer's `AdoptRemoteCard` takes it. */
+type AdoptPayload = Parameters<Writer["Service"]["AdoptRemoteCard"]>[0]
+
+/** A source's card ready to add: its writer payload, and the media files it brings. */
+interface PreparedAdoption {
+  readonly name: string
+  readonly payload: AdoptPayload
+  readonly media: ReadonlyArray<{
+    readonly role: "avatar" | "asset"
+    readonly sha256: string
+    readonly bytes: Uint8Array
+  }>
+}
 
 interface SourceImage {
   readonly bytes: Uint8Array
@@ -93,6 +116,44 @@ export interface CardSourcesShape {
     { summary: RemoteSummary; docJson: string | null; problems: ReadonlyArray<string> },
     SourceFailed | NotFound | ServerError
   >
+  /**
+   * Adds a remote card to the user's cards (§4.5, Add to my cards): its cached file, fetched
+   * again if evicted, stored as an import of it is, with its origin; a card the user already
+   * has from there is answered instead, with `existing`.
+   */
+  readonly adopt: (
+    user: User,
+    sourceId: string,
+    remoteId: string
+  ) => Effect.Effect<
+    { entityId: string; refId: string; name: string; existing: boolean },
+    SourceFailed | NotFound | ServerError
+  >
+  /**
+   * A remote card as a pending chat shows it (§4.2), under its placeholder id
+   * (`remoteEntityId`), its picture by its image key; recorded as recently viewed.
+   */
+  readonly forChat: (
+    user: User,
+    sourceId: string,
+    remoteId: string
+  ) => Effect.Effect<{ card: CardForChat; summary: RemoteSummary }, SourceFailed | NotFound | ServerError>
+  /** A remote card's file made ready to add (§4.5): parsed, its page on the source in its `source`. */
+  readonly prepareAdoption: (
+    user: User,
+    sourceId: string,
+    remoteId: string
+  ) => Effect.Effect<PreparedAdoption, SourceFailed | NotFound | ServerError>
+  /**
+   * Runs `write`, the transaction that adds `prepared`, with their media files written first
+   * and held from the sweep while it runs, as an import's are; then makes the avatars'
+   * thumbnails of the cards `added` says are new (by position in `prepared`).
+   */
+  readonly storingAdoptions: <A, E, R>(
+    prepared: ReadonlyArray<PreparedAdoption>,
+    write: Effect.Effect<A, E, R>,
+    added: (result: A) => ReadonlyArray<boolean>
+  ) => Effect.Effect<A, E | ServerError, R>
   /** An image a result named, by the key this server issued for this user; `width` makes a thumbnail. */
   readonly image: (
     user: User,
@@ -145,6 +206,7 @@ const make = (options: CardSourcesOptions = {}) =>
     const secrets = yield* Secrets
     const providers = yield* Providers
     const formats = yield* Formats
+    const { holding } = yield* MediaHolds
     const registry = makeRegistry<CardSourceAdapter>()
     for (const adapter of options.adapters ?? []) yield* registry.register(adapter)
 
@@ -291,6 +353,57 @@ const make = (options: CardSourcesOptions = {}) =>
         return value
       })
 
+    /** A remote card's file: from the cache while it lasts, else fetched and kept (the user asked for it). */
+    const cardFile = (user: User, sourceId: string, remoteId: string) =>
+      Effect.gen(function* () {
+        const adapter = yield* known(sourceId)
+        const key = cacheKey(user, sourceId, "card", remoteId)
+        let entry = yield* cache.get(key)
+        if (!entry) {
+          const file = yield* ask(user, sourceId, `card:${remoteId}`, (http) => adapter.card(http, remoteId))
+          entry = yield* cache.put(key, {
+            bytes: file.bytes,
+            value: { summary: file.summary, fileName: file.fileName }
+          })
+        } else yield* usable(user, sourceId)
+        const { summary, fileName } = entry.value as { summary: AdapterSummary; fileName: string }
+        const bytes = new Uint8Array(yield* cache.readBlob(entry.blob!))
+        const parsed = yield* formats.parse(bytes, fileName).pipe(Effect.catch(storage("reading the card")))
+        return { summary, fileName, parsed }
+      })
+
+    /** The user's own cards among `items` (§3.7), marked on each; nothing is sent to the source. */
+    const withHeld = (user: User, sourceId: string, items: ReadonlyArray<RemoteSummary>) =>
+      Effect.gen(function* () {
+        if (items.length === 0) return items
+        const held = yield* reader
+          .HeldRemoteCards({
+            userId: user.id,
+            sourceId,
+            items: items.map((item) => ({
+              remoteId: item.remoteId,
+              sha256: /^[0-9a-f]{64}$/.test(item.version.id) ? item.version.id : null
+            }))
+          })
+          .pipe(Effect.catch(storage("finding your cards among the results")))
+        if (held.length === 0) return items
+        const byId = new Map(held.map((card) => [card.remoteId, card]))
+        return items.map((item): RemoteSummary => {
+          const card = byId.get(item.remoteId)
+          return card
+            ? {
+                ...item,
+                held: {
+                  entityId: card.entityId,
+                  refId: card.refId,
+                  archived: card.archived,
+                  update: card.remoteVersion !== null && card.remoteVersion !== item.version.id
+                }
+              }
+            : item
+        })
+      })
+
     const changePrefs = (user: User, change: Parameters<typeof writer.ChangeSourcePrefs>[0]["change"]) =>
       writer
         .ChangeSourcePrefs({ userId: user.id, change })
@@ -379,7 +492,11 @@ const make = (options: CardSourcesOptions = {}) =>
           )
           return {
             ...result,
-            items: result.items.map((item) => forClient(user, sourceId, item))
+            items: yield* withHeld(
+              user,
+              sourceId,
+              result.items.map((item) => forClient(user, sourceId, item))
+            )
           }
         }),
       tags: (user, sourceId, prefix) =>
@@ -393,23 +510,9 @@ const make = (options: CardSourcesOptions = {}) =>
         }),
       card: (user, sourceId, remoteId) =>
         Effect.gen(function* () {
-          const adapter = yield* known(sourceId)
-          const key = cacheKey(user, sourceId, "card", remoteId)
-          let entry = yield* cache.get(key)
-          if (!entry) {
-            const file = yield* ask(user, sourceId, `card:${remoteId}`, (http) => adapter.card(http, remoteId))
-            entry = yield* cache.put(key, {
-              bytes: file.bytes,
-              value: { summary: file.summary, fileName: file.fileName }
-            })
-          } else yield* usable(user, sourceId)
-          const { summary, fileName } = entry.value as { summary: AdapterSummary; fileName: string }
-          const bytes = yield* cache.readBlob(entry.blob!)
-          const parsed = yield* formats
-            .parse(new Uint8Array(bytes), fileName)
-            .pipe(Effect.catch(storage("reading the card")))
+          const { summary, parsed } = yield* cardFile(user, sourceId, remoteId)
           const card = parsed.library?.kind === "card" ? parsed.library : null
-          const shown = forClient(user, sourceId, summary)
+          const [shown] = yield* withHeld(user, sourceId, [forClient(user, sourceId, summary)])
           yield* writer
             .RecordRecentRemote({
               userId: user.id,
@@ -418,16 +521,110 @@ const make = (options: CardSourcesOptions = {}) =>
                 remoteId,
                 name: summary.name,
                 ...(summary.creator ? { creator: summary.creator } : {}),
-                ...(shown.thumb ? { thumb: shown.thumb } : {}),
+                ...(shown!.thumb ? { thumb: shown!.thumb } : {}),
                 at: Date.now()
               }
             })
             .pipe(Effect.tap(keep(user.id)), Effect.catch(storage("recording a recently viewed card")))
           return {
-            summary: shown,
+            summary: shown!,
             docJson: card?.docJson ?? null,
             problems: card ? [] : parsed.report.issues.filter((i) => i.level === "error").map((i) => i.message)
           }
+        }),
+      forChat: (user, sourceId, remoteId) =>
+        Effect.gen(function* () {
+          const { summary, docJson, problems } = yield* service.card(user, sourceId, remoteId)
+          if (docJson === null)
+            return yield* new SourceFailed({
+              sourceId,
+              reason: "bad_response",
+              message: problems[0] ?? "This card couldn't be read."
+            })
+          const text = cardTextOfDoc(remoteEntityId(sourceId, remoteId), docJson)
+          const { avatarCrop: _, ...card } = text.card
+          return {
+            summary,
+            card: new CardForChat({
+              card: new CastCard({
+                ...card,
+                avatarMediaId: summary.image ? remoteMediaId(sourceId, summary.image) : null
+              }),
+              greetings: text.greetings,
+              groupGreetings: text.groupGreetings,
+              description: text.description,
+              personality: text.personality,
+              scenario: text.scenario
+            })
+          }
+        }),
+      prepareAdoption: (user, sourceId, remoteId) =>
+        Effect.gen(function* () {
+          const { summary, fileName, parsed } = yield* cardFile(user, sourceId, remoteId)
+          const card = parsed.library?.kind === "card" ? parsed.library : null
+          if (card === null)
+            return yield* new SourceFailed({
+              sourceId,
+              reason: "bad_response",
+              message: `This card couldn't be read, so it can't be added.`
+            })
+          // The card's page on the source joins its `source` list, as its link back (§4.5).
+          const doc = JSON.parse(card.docJson) as Record<string, unknown>
+          const link = summary.url ?? `${sourceId}:${remoteId}`
+          const sources = Array.isArray(doc.source) ? doc.source.filter((s) => typeof s === "string") : []
+          const stored = sources.includes(link) ? doc : { ...doc, source: [...sources, link] }
+          return {
+            name: summary.name,
+            media: parsed.media,
+            payload: {
+              userId: user.id,
+              sourceId,
+              remoteId,
+              remoteVersion: summary.version.id,
+              file: {
+                label: card.label,
+                docJson: JSON.stringify(stored),
+                docHash: docHash(stored as never),
+                searchText: searchText(stored),
+                schemaVersion: card.schemaVersion,
+                sourceName: fileName,
+                sourceHash: parsed.sha256,
+                media: parsed.media.map(({ bytes: _, ...file }) => file),
+                noteDocJson: card.noteDocJson,
+                ...(card.notesDocJson ? { notesDocJson: card.notesDocJson } : {})
+              }
+            }
+          }
+        }),
+      storingAdoptions: (prepared, write, added) =>
+        Effect.gen(function* () {
+          const media = prepared.flatMap((card) => card.media)
+          const result = yield* holding(
+            media.map((file) => file.sha256),
+            Effect.gen(function* () {
+              yield* Effect.forEach(media, (file) => storeMedia(config.dataDir, file.sha256, file.bytes), {
+                discard: true
+              }).pipe(Effect.catch(storage("storing the card's pictures")))
+              return yield* write
+            })
+          )
+          const fresh = added(result)
+          yield* Effect.forEach(
+            prepared,
+            (card, at) => (fresh[at] ? prepareAvatarThumbnails(formats, config.dataDir, card.media) : Effect.void),
+            { discard: true }
+          )
+          return result
+        }),
+      adopt: (user, sourceId, remoteId) =>
+        Effect.gen(function* () {
+          const prepared = yield* service.prepareAdoption(user, sourceId, remoteId)
+          const added = yield* service.storingAdoptions(
+            [prepared],
+            writer.AdoptRemoteCard(prepared.payload).pipe(Effect.catch(storage("adding the card"))),
+            (result) => [!result.existing]
+          )
+          return { entityId: added.entityId, refId: added.refId, name: prepared.name, existing: added.existing }
         }),
       image: (user, sourceId, key, width) =>
         Effect.gen(function* () {

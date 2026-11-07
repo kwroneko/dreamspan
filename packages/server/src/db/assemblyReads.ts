@@ -36,6 +36,7 @@ import { readDefaults, readGlobalRegex } from "./generationSettings.ts"
 import { readCardPromptUse, readLorebookPresets } from "./lorebookSettings.ts"
 import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
 import { makeSourcePrefsReadHandlers } from "./sourcePrefs.ts"
+import { makeCardOriginReadHandlers } from "./cardOrigins.ts"
 import { makeTokenCountingReadHandlers } from "./tokenCounting.ts"
 import { makeDecisionReadHandlers } from "./decisions.ts"
 import type { ReadOps } from "./ops.ts"
@@ -55,6 +56,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
     ...(yield* makeSourcePrefsReadHandlers),
+    ...(yield* makeCardOriginReadHandlers),
     ...(yield* makeTokenCountingReadHandlers),
     ...(yield* makeDecisionReadHandlers),
     RoleProjections: () => assembler.projectionOptions,

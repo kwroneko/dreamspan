@@ -23,7 +23,8 @@ export const storageKinds = makeRegistry<StorageKind>([
       "summary_edit",
       "user_field",
       "queue_edit",
-      "insert"
+      "insert",
+      "remote_card"
     ]
   },
   {

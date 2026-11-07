@@ -2,13 +2,17 @@
 // synthetic cards only: nothing reaches it until the cardex option is opened; then the search,
 // the source's sorts, the generated Filters panel and its chips, pages as the grid scrolls, a
 // card's page and the recently viewed row, an error with Retry, on home and in the side panel.
-// The user's own cards never show among the results.
+// The user's own cards never show among the results. Phase 3: a click opens the card's draft
+// chat, whose first send adds it; Inspect's page adds one without a chat; an edit in the draft
+// chat's character tab, saved, adds one too; each shows as held.
 import { createServer } from "node:net"
 import { expect, test, type Page } from "@playwright/test"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./support/server.ts"
 import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { UNSAVED, expectSaveState, saveRevision } from "./support/saveRevision.ts"
+import { Effect } from "effect"
 
 // Each test walks home and the side panel at one width and theme; a loaded machine needs the room.
 test.setTimeout(480_000)
@@ -26,7 +30,8 @@ const freePort = () =>
 
 const archive = (port: number) => ({
   hits: async () => ((await (await fetch(`http://127.0.0.1:${port}/__fake/hits`)).json()) as { hits: number }).hits,
-  fail: (status: number, times = 1) => fetch(`http://127.0.0.1:${port}/__fake/fail?status=${status}&times=${times}`)
+  fail: (status: number, times = 1, path = "") =>
+    fetch(`http://127.0.0.1:${port}/__fake/fail?status=${status}&times=${times}${path ? `&path=${path}` : ""}`)
 })
 
 const tiles = (scope: ReturnType<Page["locator"]>) => scope.locator("[data-remote-card]")
@@ -119,7 +124,7 @@ for (const width of [1440, 390])
         // An error says what the user can do, and Retry asks again.
         // Pictures are in by now, so the failure meets the search.
         await page.waitForLoadState("networkidle")
-        await fake.fail(503)
+        await fake.fail(503, 1, "/api/v1/search")
         await search.fill("amber")
         await expect(main.getByText("Can't reach cardex right now.", { exact: true })).toBeVisible()
         await main.getByRole("button", { name: "Retry", exact: true }).click()
@@ -129,16 +134,101 @@ for (const width of [1440, 390])
         await expectLayout(page, info, `home-cardex-${width}-${theme}`, { scope: "main" })
         await main.screenshot({ path: info.outputPath("home.png") })
 
-        // A card's page, then the recently viewed row back home.
-        const name = (await tiles(main).first().getByRole("link").getAttribute("aria-label"))!.replace(/^Open /, "")
+        // A click opens the card's draft chat: the pending chat, saying where the card is from.
+        const tried = (await tiles(main).first().getByRole("link").getAttribute("aria-label"))!.replace(/^Open /, "")
         await tiles(main).first().getByRole("link").click()
+        await expect(page).toHaveURL(/\/sources\/cardex\/cards\/[^/]+\/chat/)
+        await expect(page.locator("[data-remote-source]").getByText("cardex", { exact: true })).toBeVisible()
+        await expect(main.getByText("looks up from a stack of notes", { exact: false }).first()).toBeVisible()
+        expect(await labels()).toEqual(before)
+        await expectLayout(page, info, `remote-chat-${width}-${theme}`, { scope: "main" })
+        await page.screenshot({ path: info.outputPath("draft-chat.png") })
+        // The first send adds the card, and the chat is saved with it.
+        await page.getByTestId("composer").fill("Hello there")
+        await page.getByRole("button", { name: "Send", exact: true }).click()
+        await expect(page).toHaveURL(/\/chats\//)
+        await expect(page.getByText(`Added ${tried} to your cards.`, { exact: true })).toBeVisible()
+        expect(await labels()).toEqual([...before, tried].sort())
+        await page.goBack()
+        await expect(tiles(main).first()).toHaveAttribute("data-held", "true")
+        await expect(tiles(main).first().getByLabel("You have this card", { exact: true })).toBeVisible()
+
+        // Inspect: a card's page, where Add to my cards adds it without a chat.
+        const second = tiles(main).nth(1)
+        const name = (await second.getByRole("link").getAttribute("aria-label"))!.replace(/^Open /, "")
+        await second.getByRole("link").click({ button: "right" })
+        await page.getByRole("menuitem", { name: "Inspect", exact: true }).click()
         await expect(page.getByRole("heading", { name, exact: true })).toBeVisible()
         await expect(page.getByText("On cardex. It isn't in your cards.", { exact: true })).toBeVisible()
+        await expect(page.getByRole("link", { name: "Start a chat", exact: true })).toBeVisible()
+        await page.getByRole("button", { name: "Add to my cards", exact: true }).click()
+        await expect(page.getByText(`Added ${name} to your cards.`, { exact: true })).toBeVisible()
+        await expect(page.getByText("On cardex. You have it in your cards.", { exact: true })).toBeVisible()
+        await expect(page.getByRole("link", { name: "Open your card", exact: true })).toBeVisible()
+        expect(await labels()).toEqual([...before, tried, name].sort())
+        await expectLayout(page, info, `remote-card-${width}-${theme}`, { scope: "main" })
+        await page.screenshot({ path: info.outputPath("card-added.png") })
         await page.goBack()
+        await expect(tiles(main).nth(1)).toHaveAttribute("data-held", "true")
         const recent = main.locator("[data-source-recent]")
         await expect(recent).toContainText("Recently viewed on cardex")
         await recent.locator("summary").click()
         await expect(recent.getByRole("link").filter({ hasText: name })).toBeVisible()
+
+        // The draft chat's character tab is the card editor on the source's copy: a change is
+        // kept as a draft, and Save adds the card with it as its revision 2.
+        const third = tiles(main).nth(2).getByRole("link")
+        const edited = (await third.getAttribute("aria-label"))!.replace(/^Open /, "")
+        await third.click()
+        await expect(page).toHaveURL(/\/sources\/cardex\/cards\/[^/]+\/chat/)
+        // The header's portrait opens the card's tab; a phone's header leaves it to the panel's link.
+        if (width === 1440) await page.getByRole("button", { name: `Show ${edited}'s card`, exact: true }).click()
+        else
+          await page.goto(
+            `${page.url().split("?")[0]}?panel=${encodeURIComponent(`card:src:cardex:${/\/cards\/([^/]+)\/chat/.exec(page.url())![1]}`)}`
+          )
+        await expect(page).toHaveURL(/panel=card(:|%3A)src/)
+        const tab = page.getByRole("tabpanel", { name: edited, exact: true })
+        await expect(tab.getByText("From cardex · not in your cards", { exact: true })).toBeVisible({
+          timeout: 30_000
+        })
+        const description = tab.getByRole("textbox", { name: "Description", exact: true })
+        await expect(description).toBeVisible()
+        await description.click()
+        await page.keyboard.press("Control+End")
+        await page.keyboard.type(" Edited before adding.")
+        await expectSaveState(tab, UNSAVED)
+        await expect(tab.getByRole("button", { name: /^Export/ })).toBeDisabled()
+        // Nothing that needs a saved card complains: there's nothing to merge yet.
+        await expect(tab.getByText(/^Couldn.t/)).toHaveCount(0)
+        expect(await labels()).toEqual([...before, tried, name].sort())
+        await expectLayout(page, info, `remote-edit-${width}-${theme}`, { scope: "[role=tabpanel]" })
+        await page.screenshot({ path: info.outputPath("remote-edit.png") })
+        await saveRevision(tab)
+        await expect(page.getByText(`Added ${edited} to your cards.`, { exact: true })).toBeVisible()
+        // The tab goes on with the user's card; the chat is still a draft.
+        await expect(tab.getByText("From cardex · not in your cards", { exact: true })).toHaveCount(0)
+        await expect(page).toHaveURL(/panel=card(:|%3A)(?!src)/)
+        await expect(page).toHaveURL(/\/sources\/cardex\/cards\/[^/]+\/chat/)
+        await expect(tab.getByRole("textbox", { name: "Description", exact: true })).toContainText(
+          "Edited before adding."
+        )
+        expect(await labels()).toEqual([...before, tried, name, edited].sort())
+        const own = await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+          Effect.gen(function* () {
+            const ref = (yield* api.ListLibrary({ kind: "card", archived: false })).find((c) => c.label === edited)!
+            return yield* api.OpenEditor({ refId: ref.id })
+          })
+        )
+        expect(own.revisionNumber).toBe(2)
+        expect((own.doc as { description?: string }).description).toContain("Edited before adding.")
+        await page.goto(server.url)
+        await show.getByRole("button", { name: "cardex", exact: true }).click()
+        await main.getByRole("searchbox", { name: "Search cardex", exact: true }).fill(edited)
+        await expect(
+          tiles(main).filter({ has: page.getByRole("link", { name: `Open ${edited}`, exact: true }) })
+        ).toHaveAttribute("data-held", "true")
+        await main.getByRole("searchbox", { name: "Search cardex", exact: true }).fill("")
 
         // The side panel's Show offers it too, after a separator, and lists its cards.
         await showAppNavigation(page)

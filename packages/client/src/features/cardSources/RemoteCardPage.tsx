@@ -1,17 +1,26 @@
 // A card on a card source, shown without adding it (spec/CARD-SOURCES.md §3.5, in brief): its
 // picture, name, creator, tags and definitions, read from the source through the server and
-// recorded as recently viewed. Starting a chat with it and adding it come with trying (§4).
+// recorded as recently viewed, with Add to my cards (§4.5); a card the user already has from
+// there says so and links to theirs. Starting a chat with it comes with trying (§4.2).
 import { RegistryContext } from "@effect/atom-react"
 import type { RemoteSummary } from "@rp/shared/cardSources.ts"
 import { Link, useParams } from "@tanstack/react-router"
 import { useContext, useEffect, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { Button } from "../../ui/Button.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Badge, Card, EmptyState } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useTitle } from "../shell.tsx"
 import { useSourceList } from "./browse.tsx"
-import { recentAtom, remoteImageUrl, type SourceProblem, useSourceCall } from "./remote.ts"
+import {
+  type Adopted,
+  problemText,
+  recentAtom,
+  remoteImageUrl,
+  type SourceProblem,
+  useAdoptRemote,
+  useSourceCall
+} from "./remote.ts"
 
 /** What SourceCard answers: the card as listed, and its parsed document. */
 interface RemoteCard {
@@ -66,23 +75,6 @@ function Folded({ label, text }: { label: string; text: string }) {
   )
 }
 
-const problemText = (name: string, problem: SourceProblem) =>
-  problem.reason === "not_found"
-    ? `This card is no longer on ${name}.`
-    : problem.reason === "unreachable"
-      ? `Can't reach ${name} right now.`
-      : problem.reason === "rate_limited"
-        ? `${name} is limiting requests. Try again in a moment.`
-        : problem.reason === "unauthorized"
-          ? `${name} refused the API key.`
-          : problem.reason === "disabled"
-            ? `${name} is turned off in Settings.`
-            : problem.reason === "bad_response"
-              ? `${name} sent something this app can't read.`
-              : "message" in problem
-                ? problem.message
-                : `${name} couldn't answer.`
-
 export function RemoteCardPage() {
   const { sourceId = "", remoteId = "" } = useParams({ strict: false }) as { sourceId?: string; remoteId?: string }
   const list = useSourceList()
@@ -93,6 +85,9 @@ export function RemoteCardPage() {
   const [state, setState] = useState<{ key: string; card?: RemoteCard; problem?: SourceProblem } | null>(null)
   const [attempt, setAttempt] = useState(0)
   const key = `${sourceId}/${remoteId}`
+  const adopt = useAdoptRemote()
+  const [adopted, setAdopted] = useState<{ key: string; card: Adopted } | null>(null)
+  const [adding, setAdding] = useState(false)
   useEffect(() => {
     if (!info) return
     const controller = new AbortController()
@@ -128,6 +123,12 @@ export function RemoteCardPage() {
     )
   if (!current?.card) return <p className="p-2 text-sm text-muted">Asking {name}…</p>
   const { summary, docJson } = current.card
+  const mine =
+    adopted?.key === key
+      ? { entityId: adopted.card.entityId, archived: false }
+      : summary.held
+        ? { entityId: summary.held.entityId, archived: summary.held.archived }
+        : null
   const doc = (docJson ? JSON.parse(docJson) : {}) as Definitions
   const greetings = (doc.alternate_greetings ?? []).length
   const entries = doc.character_book?.entries?.length ?? 0
@@ -146,7 +147,47 @@ export function RemoteCardPage() {
           <div className="flex min-w-0 flex-col gap-1">
             <h1 className="text-xl font-semibold break-words">{summary.name}</h1>
             {summary.creator && <p className="text-sm text-muted">by {summary.creator}</p>}
-            <p className="text-sm text-muted">On {name}. It isn't in your cards.</p>
+            <p className="text-sm text-muted">
+              {mine === null
+                ? `On ${name}. It isn't in your cards.`
+                : mine.archived
+                  ? `On ${name}. You have it, archived.`
+                  : `On ${name}. You have it in your cards.`}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {mine === null && (
+              <Tooltip label={`Opens a new chat with ${summary.name}. It joins your cards when you send.`}>
+                <Link
+                  to="/sources/$sourceId/cards/$remoteId/chat"
+                  params={{ sourceId, remoteId }}
+                  className={buttonClass("primary")}
+                >
+                  Start a chat
+                </Link>
+              </Tooltip>
+            )}
+            {mine === null ? (
+              <Button
+                disabled={adding}
+                hint={`Adds ${summary.name} to your cards without starting a chat.`}
+                onClick={() => {
+                  setAdding(true)
+                  void adopt(sourceId, name, remoteId).then((card) => {
+                    setAdding(false)
+                    if (card) setAdopted({ key, card })
+                  })
+                }}
+              >
+                Add to my cards
+              </Button>
+            ) : (
+              <Tooltip label={`Opens your ${summary.name}.`}>
+                <Link to="/cards/$entityId" params={{ entityId: mine.entityId }} className={buttonClass("primary")}>
+                  Open your card
+                </Link>
+              </Tooltip>
+            )}
           </div>
           {summary.tags.length > 0 && (
             <ul aria-label="Tags" className="flex flex-wrap gap-1">

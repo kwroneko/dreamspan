@@ -108,6 +108,8 @@ export const makeWriteHandlers = (bin: Bin) =>
     /** A draft's target must belong to the user. */
     const draftTargets: Record<DraftKey["targetKind"], (userId: UserId, key: DraftKey) => Count> = {
       user_field: (userId) => sql`SELECT count(*) AS n FROM users WHERE id = ${userId}`,
+      // A source's card is the user's to try; the source and the card are checked where its drafts are read.
+      remote_card: (userId) => sql`SELECT count(*) AS n FROM users WHERE id = ${userId}`,
       composer: (userId, key) => sql`SELECT count(*) AS n FROM forks f JOIN chats c ON c.id = f.chat_id
         WHERE f.id = ${key.field} AND c.id = ${key.targetId} AND c.owner_user_id = ${userId}
           AND f.deleted_at IS NULL AND c.deleted_at IS NULL`,

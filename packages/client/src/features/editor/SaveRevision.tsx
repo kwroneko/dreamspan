@@ -25,11 +25,14 @@ const contentOf = (field: string, value: unknown) =>
 export function SaveRevision({
   store,
   onSaved,
-  shownNameClash = null
+  shownNameClash = null,
+  adds = null
 }: {
   store: EditorStore
   onSaved?: (saved: SavedRef) => void
   shownNameClash?: string | null
+  /** A card from a card source, which saving adds to the user's cards: its name. */
+  adds?: string | null
 }) {
   useUnsavedSource(store.unsavedSource)
   const state = useEditorState(store)
@@ -113,6 +116,7 @@ export function SaveRevision({
         failed={shownNameClash ? null : failure}
         onSave={save}
         onRevert={revert}
+        adds={adds}
       />
       {error && <ErrorAlert error={error} />}
       {conflicts !== null && (

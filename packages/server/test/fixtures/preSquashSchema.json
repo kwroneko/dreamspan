@@ -20,6 +20,12 @@
     },
     {
       "type": "index",
+      "name": "card_origins_remote",
+      "tbl_name": "card_origins",
+      "sql": "CREATE UNIQUE INDEX card_origins_remote ON card_origins(owner_user_id, source_id, remote_id)"
+    },
+    {
+      "type": "index",
       "name": "changeset_items_after_version",
       "tbl_name": "changeset_items",
       "sql": "CREATE INDEX changeset_items_after_version ON changeset_items(after_json ->> '$.id') WHERE target_kind='version_replace'"
@@ -203,6 +209,12 @@
       "name": "entity_refs_merge_base",
       "tbl_name": "entity_refs",
       "sql": "CREATE INDEX entity_refs_merge_base ON entity_refs(merge_base_revision_id) WHERE merge_base_revision_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "entity_refs_source_hash",
+      "tbl_name": "entity_refs",
+      "sql": "CREATE INDEX entity_refs_source_hash ON entity_refs(source_hash) WHERE source_hash IS NOT NULL"
     },
     {
       "type": "index",
@@ -851,6 +863,12 @@
       "name": "bin_items",
       "tbl_name": "bin_items",
       "sql": "CREATE TABLE \"bin_items\" ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL, target_id TEXT NOT NULL, chat_id TEXT, title TEXT NOT NULL, excerpt TEXT NOT NULL, origin_json TEXT NOT NULL CHECK (json_valid(origin_json)), byte_size INTEGER NOT NULL, deleted_at INTEGER NOT NULL ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "card_origins",
+      "tbl_name": "card_origins",
+      "sql": "CREATE TABLE card_origins ( entity_id TEXT PRIMARY KEY REFERENCES entities(id), owner_user_id TEXT NOT NULL REFERENCES users(id), source_id TEXT NOT NULL, remote_id TEXT NOT NULL, remote_version TEXT NOT NULL, remote_sha256 TEXT NOT NULL, recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized')), created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",

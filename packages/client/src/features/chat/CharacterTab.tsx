@@ -17,13 +17,14 @@ import { useChatCards } from "./chatCards.ts"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { buttonClass } from "../../ui/Button.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { CardEditor } from "../editor/CardEditor.tsx"
@@ -42,6 +43,9 @@ import { usePendingCardInfo } from "./pendingCardInfo.ts"
 import { chatCardActions } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { composerChoice } from "./speaker.ts"
+import { remoteOf } from "@rp/shared/cardSources.ts"
+import { RemoteCardLine } from "../cardSources/RemoteBadge.tsx"
+import { showAdopted } from "../cardSources/remote.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export function CharacterTab({ session, view, tab }: PanelProps) {
@@ -60,15 +64,21 @@ export function PendingCharacterTab({ pending, view, tab }: PendingPanelProps) {
   const info = usePendingCardInfo()(entityId)
   const persona = view.cast?.playedByMe.includes(entityId) ?? false
   if (!card) return <p className="text-sm text-muted">This character isn't in the chat.</p>
-  if (!info) return <p className="text-sm text-muted">Loading the card…</p>
+  // A card from a card source (spec/CARD-SOURCES.md §4.3): the editor on its cached copy,
+  // under its placeholder id; saving a change adds it to the user's cards.
+  const remote = remoteOf(entityId) !== null
+  const shown = remote
+    ? { entityId, refId: entityId as unknown as RefId, usedByChats: 0, binding: "default" as const }
+    : info
+  if (!shown) return <p className="text-sm text-muted">Loading the card…</p>
   return (
     <CardPanel
-      key={info.refId}
+      key={shown.refId}
       session={null}
       pending={pending}
       view={view}
       card={card}
-      info={info}
+      info={shown}
       persona={persona}
     />
   )
@@ -138,17 +148,42 @@ function useCardStore(refId: RefId) {
 
 /** "New chat with <name>": only them, from their greeting (owner, 2026-11-01: a button, not under More). */
 function NewChat({ card, guidance }: { card: CastCard; guidance: boolean }) {
+  const from = remoteOf(card.entityId)
+  const search = { panel: `card:${card.entityId}`, guidance: guidance ? "on" : "off" }
+  const className = `${buttonClass("ghost")} h-8! px-2!`
   return (
     <Tooltip label="Start a chat with only them, at their greeting.">
-      <Link
-        to="/cards/$entityId/chat"
-        params={{ entityId: card.entityId }}
-        search={{ panel: `card:${card.entityId}`, guidance: guidance ? "on" : "off" }}
-        className={`${buttonClass("ghost")} h-8! px-2!`}
-      >
-        New chat with {card.name}
-      </Link>
+      {from === null ? (
+        <Link to="/cards/$entityId/chat" params={{ entityId: card.entityId }} search={search} className={className}>
+          New chat with {card.name}
+        </Link>
+      ) : (
+        <Link
+          to="/sources/$sourceId/cards/$remoteId/chat"
+          params={{ sourceId: from.sourceId, remoteId: from.remoteId }}
+          search={search}
+          className={className}
+        >
+          New chat with {card.name}
+        </Link>
+      )}
     </Tooltip>
+  )
+}
+
+/** A source's card's actions before it's added: what needs it in the user's cards says so. */
+function RemoteCardActions({ card }: { card: CastCard }) {
+  return (
+    <Button
+      variant="ghost"
+      className="h-8! px-2!"
+      disabled
+      focusableWhenDisabled
+      hint={`Add ${card.name} to your cards to export it.`}
+    >
+      Export…
+      <Icon name="down" />
+    </Button>
   )
 }
 
@@ -170,6 +205,7 @@ function CardPanel({
   persona: boolean
 }) {
   const choices = session === null ? pending : composerChoice(session)
+  const remote = remoteOf(card.entityId) !== null
   const guidance = useSyncExternalStore(choices!.subscribe, () => choices!.snapshot().guidance)
   const store = useCardStore(info.refId)
   const workspace = usePresetWorkspace()
@@ -186,6 +222,22 @@ function CardPanel({
     if (store.snapshot === null) void store.load()
   }, [store])
   useLeaveGuard(store)
+  // A source's card that became the user's (Save here, or Add to my cards): the chat, and
+  // this tab, go on with their card (spec/CARD-SOURCES.md §4.5).
+  // A Save added it when the editor, open on the source's copy, opens the user's card.
+  const ownId = state.snapshot?.ref.entityId
+  const navigate = useNavigate()
+  const sawCopy = useRef(false)
+  const adopted = (entityId: string) => void pending?.swap(card.entityId, entityId as EntityId)
+  useEffect(() => {
+    if (!remote || ownId === undefined) return
+    if (ownId === card.entityId) {
+      sawCopy.current = true
+      return
+    }
+    if (sawCopy.current) showAdopted(navigate, { entityId: ownId, name: card.name, existing: false })
+    void pending?.swap(card.entityId, ownId)
+  }, [remote, ownId, card.entityId, card.name, pending, navigate])
   // A new chat with only them is this one, while it's pending with no one else.
   const alone =
     pending !== null &&
@@ -198,16 +250,34 @@ function CardPanel({
       <div className="flex flex-col gap-4">
         <CardHeader
           portrait={
-            <TabPortrait
-              store={store}
-              call={call}
-              id={card.entityId}
-              shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
-              {...(session === null ? {} : { onChanged: () => void session.rereadCast() })}
-              badge={persona ? <PersonaBadge played portrait /> : undefined}
-            />
+            remote ? (
+              <CardHeaderPortrait>
+                <Avatar
+                  id={card.entityId}
+                  name={card.name}
+                  mediaId={card.avatarMediaId}
+                  size="fill"
+                  className="size-full"
+                  preview
+                />
+              </CardHeaderPortrait>
+            ) : (
+              <TabPortrait
+                store={store}
+                call={call}
+                id={card.entityId}
+                shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
+                {...(session === null ? {} : { onChanged: () => void session.rereadCast() })}
+                badge={persona ? <PersonaBadge played portrait /> : undefined}
+              />
+            )
           }
         >
+          {remote && (
+            <div data-card-header-row className="col-span-full">
+              <RemoteCardLine card={card} beforeAdd={() => store.flush()} onAdded={adopted} />
+            </div>
+          )}
           {state.snapshot ? (
             <>
               <CardNameHeader
@@ -215,12 +285,14 @@ function CardPanel({
                 call={call}
                 saveControls={
                   <>
-                    <SaveRevision store={store} />
-                    <SlotOutlet
-                      slot={chatCardActions}
-                      only="card.edit"
-                      props={{ session, card, info, persona, presentation: "header" }}
-                    />
+                    <SaveRevision store={store} adds={remote ? card.name : null} />
+                    {!remote && (
+                      <SlotOutlet
+                        slot={chatCardActions}
+                        only="card.edit"
+                        props={{ session, card, info, persona, presentation: "header" }}
+                      />
+                    )}
                   </>
                 }
                 current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
@@ -238,7 +310,11 @@ function CardPanel({
         </CardHeader>
         <div className="-mx-2 flex flex-wrap items-center gap-x-1">
           {!persona && !alone && <NewChat card={card} guidance={guidance} />}
-          <SlotOutlet slot={chatCardActions} except={["card.edit"]} props={{ session, card, info, persona }} />
+          {remote ? (
+            <RemoteCardActions card={card} />
+          ) : (
+            <SlotOutlet slot={chatCardActions} except={["card.edit"]} props={{ session, card, info, persona }} />
+          )}
         </div>
         {state.loadError && <ErrorAlert error={state.loadError} />}
         {!state.snapshot && !state.loadError && <p className="text-sm text-muted">Loading the card…</p>}
@@ -285,7 +361,7 @@ function CardPanel({
               store={store}
               call={call}
               layout="panel"
-              onOpenBook={workspace ? () => workspace.open(info.refId, CARD_LOREBOOK_FOCUS) : undefined}
+              onOpenBook={workspace && !remote ? () => workspace.open(info.refId, CARD_LOREBOOK_FOCUS) : undefined}
             />
           </>
         )}

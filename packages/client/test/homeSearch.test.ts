@@ -2,7 +2,10 @@ import { expect, test } from "vitest"
 import { changeHomeBrowse, readHomeSearch, writeHomeSearch } from "../src/features/characters/homeSearch.ts"
 
 test("home query state round-trips while omitting defaults", () => {
-  expect(Object.values(writeHomeSearch(readHomeSearch({})))).toEqual(Array(6).fill(undefined))
+  // Every key, the card source's too, is left out at its default.
+  const empty = writeHomeSearch(readHomeSearch({}))
+  expect(Object.keys(empty).length).toBeGreaterThan(0)
+  expect(Object.values(empty).every((value) => value === undefined)).toBe(true)
   const query = {
     show: "groups",
     sort: "name",
@@ -37,4 +40,24 @@ test("Personas is a home tab, and Include personas round-trips", () => {
   expect(readHomeSearch({ show: "personas" }).filter).toBe("personas")
   expect(readHomeSearch({ personas: true }).withPersonas).toBe(true)
   expect(writeHomeSearch(readHomeSearch({})).personas).toBeUndefined()
+})
+
+test("a card source's browsing round-trips, and choosing one of the user's own filters leaves it", () => {
+  const query = {
+    show: "src.cardex",
+    sq: "lantern",
+    stags: ["mystery"],
+    sxtags: ["horror"],
+    sf: { forks: false, tokens: { min: 100 } },
+    ssort: "name",
+    sreverse: true
+  }
+  const state = readHomeSearch(query)
+  expect(state.source).toBe("cardex")
+  expect(state.filter).toBe("all")
+  expect(writeHomeSearch(state)).toEqual(query)
+  // A malformed source name or value is dropped on its own.
+  expect(readHomeSearch({ show: "src.Bad Name!", sq: 5, stags: "x" })).toEqual(readHomeSearch({}))
+  expect(changeHomeBrowse(state, { filter: "groups" }).source).toBeNull()
+  expect(changeHomeBrowse(state, { sort: "name" }).source).toBe("cardex")
 })

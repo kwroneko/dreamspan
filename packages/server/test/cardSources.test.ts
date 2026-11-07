@@ -4,7 +4,10 @@
 // lifetimes, pinning, cap and per-user namespace (§4.1), against the fake archive's synthetic
 // cards. No real archive is contacted.
 import { afterAll, assert, describe, it, layer } from "@effect/vitest"
-import { emptySourceQuery, SourceFailed } from "@rp/shared/cardSources.ts"
+import { emptySourceQuery, remoteEntityId, SourceFailed } from "@rp/shared/cardSources.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
+import { textField } from "@rp/shared/editing.ts"
+import type { RefId } from "@rp/shared/library.ts"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -15,6 +18,7 @@ import { makeSourceCache } from "../src/sources/cache.ts"
 import * as CardSources from "../src/sources/CardSources.ts"
 import { isPrivateAddress, makeSourceHttp } from "../src/sources/guard.ts"
 import { makeCoalescer, makeLimiter } from "../src/sources/limiter.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
 
@@ -161,6 +165,337 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       assert.isUndefined(list.cache)
       assert.strictEqual(yield* outcome(b.SetSourceCacheCap({ bytes: 64 * 1024 * 1024 })), "Forbidden")
       assert.strictEqual(yield* outcome(b.SourceCard({ sourceId: "nowhere", remoteId: "x" })), "NotFound")
+    })
+  )
+
+  it.effect("Add to my cards stores the card as an import with its origin, once; results show it as held", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[8]!
+      const before = yield* api.ListLibrary({ kind: "card" })
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.isFalse(added.existing)
+      assert.strictEqual(added.name, card.name)
+      const after = yield* api.ListLibrary({ kind: "card" })
+      assert.lengthOf(after, before.length + 1)
+      const ref = after.find((r) => r.id === added.refId)!
+      assert.strictEqual(ref.entityId, added.entityId)
+      assert.strictEqual(ref.label, card.name)
+      // The document as the importer makes it, the card's page appended to `source`, its portrait stored.
+      const opened = yield* api.OpenEditor({ refId: ref.id })
+      const doc = opened.doc as { source?: ReadonlyArray<string>; avatar_media_id?: string | null; first_mes?: string }
+      assert.include(doc.source ?? [], `${archive.origin}/c/${card.slug}`)
+      assert.isString(doc.avatar_media_id)
+      assert.include(doc.first_mes ?? "", card.name)
+      assert.strictEqual(opened.revisionNumber, 1)
+      // Again, from anywhere: the same card, nothing new.
+      const again = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.deepStrictEqual([again.existing, again.entityId], [true, added.entityId])
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), after.length)
+      // Results and the card's page mark it as the user's; nobody else's.
+      const page = yield* api.SourceSearch({
+        sourceId: "cardex",
+        query: { ...emptySourceQuery, text: card.name },
+        page: null
+      })
+      const shown = page.items.find((item) => item.remoteId === card.slug)!
+      assert.deepStrictEqual(shown.held, {
+        entityId: added.entityId,
+        refId: added.refId,
+        archived: false,
+        update: false
+      })
+      assert.deepStrictEqual(
+        (yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held?.refId,
+        added.refId
+      )
+      const theirs = yield* (yield* client(bob)).SourceSearch({
+        sourceId: "cardex",
+        query: { ...emptySourceQuery, text: card.name },
+        page: null
+      })
+      assert.isUndefined(theirs.items.find((item) => item.remoteId === card.slug)?.held)
+    })
+  )
+
+  it.effect("an adoption that fails stores nothing", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const before = yield* api.ListLibrary({ kind: "card" })
+      // The source can't be reached for a card not cached yet: nothing is added.
+      archive.failNext(503)
+      const unreachable = yield* outcome(api.AdoptRemoteCard({ sourceId: "cardex", remoteId: archive.cards[11]!.slug }))
+      assert.strictEqual(unreachable, "SourceFailed:unreachable")
+      // A write that fails inside the transaction leaves neither the card nor its origin.
+      const writer = yield* Writer
+      const reader = yield* Reader
+      const me = yield* api.Whoami()
+      const failed = yield* Effect.exit(
+        writer.AdoptRemoteCard({
+          userId: me.id,
+          sourceId: "cardex",
+          remoteId: archive.cards[12]!.slug,
+          remoteVersion: archive.cards[12]!.sha256,
+          file: {
+            label: "Broken",
+            docJson: "{not json",
+            docHash: "x",
+            searchText: "",
+            schemaVersion: 1,
+            sourceName: "broken.json",
+            sourceHash: "a".repeat(64) as never,
+            media: [],
+            noteDocJson: null
+          }
+        })
+      )
+      assert.isTrue(Exit.isFailure(failed))
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before.length)
+      const held = yield* reader.HeldRemoteCards({
+        userId: me.id,
+        sourceId: "cardex",
+        items: [{ remoteId: archive.cards[12]!.slug, sha256: null }]
+      })
+      assert.lengthOf(held, 0)
+    })
+  )
+
+  it.effect("a first send with a source's card adds the card and makes its chat together (§4.5)", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[9]!
+      const before = yield* api.ListLibrary({ kind: "card" })
+      // The draft chat's card: under its placeholder id, its picture through the source's route.
+      const { card: shown, summary } = yield* api.SourceCardForChat({ sourceId: "cardex", remoteId: card.slug })
+      const placeholder = remoteEntityId("cardex", card.slug)
+      assert.strictEqual(shown.card.entityId, placeholder)
+      assert.strictEqual(shown.card.name, card.name)
+      assert.isAbove(shown.greetings.length, 0)
+      assert.match(shown.card.avatarMediaId ?? "", /^srcimg:cardex:/)
+      assert.isUndefined(shown.regex)
+      assert.isUndefined(summary.held)
+      // Opening it adds nothing.
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before.length)
+      const first = {
+        cards: [placeholder],
+        persona: null,
+        greeting: null,
+        greeters: [{ entityId: placeholder, greeting: 0 }],
+        first: { _tag: "Send", content: "Hello there", speakerEntityId: null }
+      } as const
+      const started = yield* api.StartChat(first)
+      const adopted = started.adopted?.[0]
+      assert.deepStrictEqual([adopted?.placeholder, adopted?.existing, adopted?.name], [placeholder, false, card.name])
+      const after = yield* api.ListLibrary({ kind: "card" })
+      assert.lengthOf(after, before.length + 1)
+      assert.isDefined(after.find((ref) => ref.entityId === adopted!.entityId))
+      // The chat has the card in it, never the placeholder.
+      const cast = yield* api.GetCast({ chatId: started.chat.id, slotId: started.entry.slotId })
+      assert.include(cast.participants, adopted!.entityId)
+      assert.notInclude(cast.participants as ReadonlyArray<string>, placeholder)
+      // It's the user's from now on.
+      const reopened = yield* api.SourceCardForChat({ sourceId: "cardex", remoteId: card.slug })
+      assert.strictEqual(reopened.summary.held?.entityId, adopted!.entityId)
+      // A draft chat opened before it was added, sent after: the same card, in a second chat.
+      const again = yield* api.StartChat(first)
+      assert.deepStrictEqual([again.adopted?.[0]?.entityId, again.adopted?.[0]?.existing], [adopted!.entityId, true])
+      assert.notStrictEqual(again.chat.id, started.chat.id)
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), after.length)
+    })
+  )
+
+  it.effect("a first send that fails stores neither the card nor the chat", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const me = yield* api.Whoami()
+      const before = yield* api.ListLibrary({ kind: "card" })
+      // The source can't be reached for a card not cached yet: the message isn't sent.
+      archive.failNext(503)
+      const placeholder = remoteEntityId("cardex", archive.cards[13]!.slug)
+      const unreachable = yield* Effect.flip(
+        api.StartChat({
+          cards: [placeholder],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Hello", speakerEntityId: null }
+        })
+      )
+      assert.strictEqual(unreachable._tag, "ServerError")
+      assert.include((unreachable as { message: string }).message, "wasn't sent")
+      // The chat's write fails after the card's, in one transaction: neither stays.
+      const card = archive.cards[10]!
+      const sources = yield* CardSources.CardSources
+      const prepared = yield* sources.prepareAdoption(me, "cardex", card.slug)
+      const failed = yield* Effect.exit(
+        (yield* Writer).AdoptAndStartChat({
+          adopt: [{ placeholder: remoteEntityId("cardex", card.slug), ...prepared.payload }],
+          start: {
+            userId: me.id,
+            cards: [remoteEntityId("cardex", card.slug)],
+            persona: "no-such-persona" as EntityId,
+            greeters: [],
+            first: { _tag: "Send", content: "Hello", speakerEntityId: null },
+            title: null
+          }
+        })
+      )
+      assert.isTrue(Exit.isFailure(failed))
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before.length)
+      const held = yield* (yield* Reader).HeldRemoteCards({
+        userId: me.id,
+        sourceId: "cardex",
+        items: [{ remoteId: card.slug, sha256: null }]
+      })
+      assert.lengthOf(held, 0)
+    })
+  )
+
+  it.effect("a source's card's edits are drafts until Save adds the card with them as its revision 2 (§4.3)", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const me = yield* api.Whoami()
+      const card = archive.cards[14]!
+      const refId = remoteEntityId("cardex", card.slug) as unknown as RefId
+      const field = textField(["description"])
+      const before = yield* api.ListLibrary({ kind: "card" })
+      // The editor opens on the cached card under its placeholder, and adds nothing.
+      const opened = yield* api.OpenEditor({ refId })
+      assert.strictEqual(opened.ref.id, refId)
+      assert.strictEqual(opened.revisionNumber, 0)
+      assert.strictEqual((opened.doc as { name?: string }).name, card.name)
+      assert.lengthOf(opened.drafts, 0)
+      assert.deepStrictEqual(yield* api.ListRevisions({ refId, limit: 10 }), [])
+      const saved = yield* api.SaveEditorDraft({
+        refId,
+        field,
+        draftId: null,
+        content: "Edited before adding.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      const again = yield* api.OpenEditor({ refId })
+      assert.deepStrictEqual(
+        again.drafts.map((d) => [d.key.targetKind, d.key.field, d.content]),
+        [["remote_card", field, "Edited before adding."]]
+      )
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before.length)
+      // Nobody else sees it.
+      assert.lengthOf((yield* (yield* client(bob)).OpenEditor({ refId })).drafts, 0)
+      // Save: the card is the user's, the edit its revision 2.
+      yield* api.CommitEditorDrafts({
+        refId,
+        expectedRowVersion: again.ref.rowVersion,
+        fields: [{ field, draftId: saved.id, expectedRowVersion: saved.rowVersion }],
+        message: null
+      })
+      const after = yield* api.ListLibrary({ kind: "card" })
+      assert.lengthOf(after, before.length + 1)
+      const [held] = yield* (yield* Reader).HeldRemoteCards({
+        userId: me.id,
+        sourceId: "cardex",
+        items: [{ remoteId: card.slug, sha256: null }]
+      })
+      assert.isDefined(held)
+      const own = yield* api.OpenEditor({ refId: held!.refId })
+      assert.strictEqual(own.revisionNumber, 2)
+      assert.strictEqual((own.doc as { description?: string }).description, "Edited before adding.")
+      assert.lengthOf(
+        own.drafts.filter((d) => d.status === "active"),
+        0
+      )
+      assert.lengthOf(yield* api.ListRevisions({ refId: held!.refId, limit: 10 }), 2)
+      // An editor still open on the placeholder carries on with the user's card.
+      const carried = yield* api.OpenEditor({ refId })
+      assert.deepStrictEqual([carried.ref.id, carried.revisionNumber], [held!.refId, 2])
+    })
+  )
+
+  it.effect("Add to my cards after an edit keeps it as the card's unsaved edit; Revert drops edits first", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[15]!
+      const refId = remoteEntityId("cardex", card.slug) as unknown as RefId
+      const field = textField(["personality"])
+      const write = (content: string) =>
+        Effect.gen(function* () {
+          const opened = yield* api.OpenEditor({ refId })
+          // As the editor does: carrying on from the field's draft, ended or not.
+          const existing = opened.drafts.find((d) => d.key.field === field)
+          return yield* api.SaveEditorDraft({
+            refId,
+            field,
+            draftId: null,
+            content,
+            expectedRowVersion: existing?.rowVersion ?? null,
+            expectedSession: existing?.session ?? null,
+            baseRevisionId: null
+          })
+        })
+      yield* write("Dropped.")
+      assert.strictEqual((yield* api.RevertEditorDrafts({ refId })).reverted, 1)
+      const reverted = yield* api.OpenEditor({ refId })
+      assert.lengthOf(
+        reverted.drafts.filter((d) => d.status === "active"),
+        0
+      )
+      yield* write("Kept.")
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      const addedRef = added.refId as RefId
+      const own = yield* api.OpenEditor({ refId: addedRef })
+      assert.strictEqual(own.revisionNumber, 1)
+      const kept = own.drafts.find((d) => d.status === "active" && d.key.field === field)
+      assert.deepStrictEqual([kept?.key.targetKind, kept?.content], ["entity_field", "Kept."])
+      // Saved as any edit is.
+      yield* api.CommitEditorDrafts({
+        refId: addedRef,
+        expectedRowVersion: own.ref.rowVersion,
+        fields: [{ field, draftId: kept!.id, expectedRowVersion: kept!.rowVersion }],
+        message: null
+      })
+      assert.strictEqual((yield* api.OpenEditor({ refId: addedRef })).revisionNumber, 2)
+    })
+  )
+
+  it.effect("a Save on a source's card that fails stores no card and keeps the edit", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const me = yield* api.Whoami()
+      const card = archive.cards[16]!
+      const refId = remoteEntityId("cardex", card.slug) as unknown as RefId
+      const field = textField(["scenario"])
+      const before = yield* api.ListLibrary({ kind: "card" })
+      const saved = yield* api.SaveEditorDraft({
+        refId,
+        field,
+        draftId: null,
+        content: "Not lost.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: null
+      })
+      // The edit changed meanwhile (another tab): the commit fails after the card's write.
+      const failed = yield* outcome(
+        api.CommitEditorDrafts({
+          refId,
+          expectedRowVersion: 0,
+          fields: [{ field, draftId: saved.id, expectedRowVersion: saved.rowVersion + 5 }],
+          message: null
+        })
+      )
+      assert.notStrictEqual(failed, "ok")
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before.length)
+      const held = yield* (yield* Reader).HeldRemoteCards({
+        userId: me.id,
+        sourceId: "cardex",
+        items: [{ remoteId: card.slug, sha256: null }]
+      })
+      assert.lengthOf(held, 0)
+      const still = yield* api.OpenEditor({ refId })
+      assert.deepStrictEqual(
+        still.drafts.map((d) => [d.key.targetKind, d.status, d.content]),
+        [["remote_card", "active", "Not lost."]]
+      )
     })
   )
 

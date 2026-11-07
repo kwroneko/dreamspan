@@ -6,6 +6,8 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Forbidden, NotFound, ServerError } from "./errors.ts"
+import type { EntityId } from "./chat.ts"
+import { CardForChat } from "./chatSetupApi.ts"
 
 /** A source's id: lowercase, safe in URLs and keys (`show=src.<id>`). */
 const SourceId = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,39}$/))
@@ -109,7 +111,17 @@ export const RemoteSummary = Schema.Struct({
   image: Schema.optionalKey(Schema.String),
   version: RemoteVersion,
   url: Schema.optionalKey(Schema.String),
-  stats: Schema.optionalKey(Schema.Record(Schema.String, Schema.Number))
+  stats: Schema.optionalKey(Schema.Record(Schema.String, Schema.Number)),
+  /** The user's own card for it (§3.7), when they have one. Never sent to the source. */
+  held: Schema.optionalKey(
+    Schema.Struct({
+      entityId: Schema.String,
+      refId: Schema.String,
+      archived: Schema.Boolean,
+      /** The source has a version other than the one added (§3.8). */
+      update: Schema.Boolean
+    })
+  )
 })
 export type RemoteSummary = typeof RemoteSummary.Type
 
@@ -193,6 +205,31 @@ const RemoteCard = Schema.Struct({
 
 /** At most this many recently viewed cards are kept, newest first (§4.1). */
 export const RECENT_REMOTE_MAX = 50
+
+const SOURCE_ID = "[a-z0-9][a-z0-9-]{0,39}"
+const REMOTE_ENTITY = new RegExp(`^src:(${SOURCE_ID}):([\\s\\S]+)$`)
+const REMOTE_MEDIA = new RegExp(`^srcimg:(${SOURCE_ID}):([\\s\\S]+)$`)
+
+/**
+ * The id a card on a source has in a chat not made yet (§4.2), until it's added: a cast,
+ * the side panel and the first send name it by this. The first send's `StartChat` adds the
+ * card and puts the new card's id in its place.
+ */
+export const remoteEntityId = (sourceId: string, remoteId: string) => `src:${sourceId}:${remoteId}` as EntityId
+
+/** The source and remote id under a placeholder id; null for any other id. */
+export const remoteOf = (id: string): { readonly sourceId: string; readonly remoteId: string } | null => {
+  const match = REMOTE_ENTITY.exec(id)
+  return match ? { sourceId: match[1]!, remoteId: match[2]! } : null
+}
+
+/** A source card's picture as a media id (`avatarMediaId`): served by the source's image route, by the key the server issued. */
+export const remoteMediaId = (sourceId: string, key: string) => `srcimg:${sourceId}:${key}`
+
+export const remoteMediaOf = (id: string): { readonly sourceId: string; readonly key: string } | null => {
+  const match = REMOTE_MEDIA.exec(id)
+  return match ? { sourceId: match[1]!, key: match[2]! } : null
+}
 
 /** The sites cardex finds cards on, by its API v1 name (its `source` filter), as people call them. */
 export const CARDEX_SITE_LABELS: Readonly<Record<string, string>> = {
@@ -291,6 +328,31 @@ export class CardSourcesApi extends RpcGroup.make(
   Rpc.make("SourceCard", {
     payload: { sourceId: SourceId, remoteId: Schema.String.check(Schema.isMaxLength(500)) },
     success: RemoteCard,
+    error: sourceErrors
+  }),
+  /**
+   * A remote card as the pending chat shows it (§4.2), under its placeholder id
+   * (`remoteEntityId`), with its summary (`held` when the user has it already). Opening it
+   * records it as recently viewed, as `SourceCard` does.
+   */
+  Rpc.make("SourceCardForChat", {
+    payload: { sourceId: SourceId, remoteId: Schema.String.check(Schema.isMaxLength(500)) },
+    success: Schema.Struct({ card: CardForChat, summary: RemoteSummary }),
+    error: sourceErrors
+  }),
+  /**
+   * Adds a remote card to the user's cards (§4.5, Add to my cards): the cached file (fetched
+   * again if it was evicted), stored as an import of it is, with its origin. A card the user
+   * already has from there is answered instead (`existing`), never added twice.
+   */
+  Rpc.make("AdoptRemoteCard", {
+    payload: { sourceId: SourceId, remoteId: Schema.String.check(Schema.isMaxLength(500)) },
+    success: Schema.Struct({
+      entityId: Schema.String,
+      refId: Schema.String,
+      name: Schema.String,
+      existing: Schema.Boolean
+    }),
     error: sourceErrors
   }),
   /** Never contacts a source. */

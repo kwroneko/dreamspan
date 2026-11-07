@@ -386,7 +386,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     return made
   }
   const seen: Array<string> = []
-  let failure: { status: number; times: number; retryAfter?: number } | null = null
+  let failure: { status: number; times: number; retryAfter?: number; path?: string } | null = null
 
   const json = (res: ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "content-type": "application/json; charset=utf-8" })
@@ -560,12 +560,14 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       failure = {
         status: Number(url.searchParams.get("status") ?? "500"),
         times: Number(url.searchParams.get("times") ?? "1"),
-        ...(url.searchParams.has("retryAfter") ? { retryAfter: Number(url.searchParams.get("retryAfter")) } : {})
+        ...(url.searchParams.has("retryAfter") ? { retryAfter: Number(url.searchParams.get("retryAfter")) } : {}),
+        // Only requests to this path fail, so a picture loading meanwhile doesn't use the failure up.
+        ...(url.searchParams.has("path") ? { path: url.searchParams.get("path")! } : {})
       }
       return json(res, 200, { ok: true })
     }
     seen.push(`${path}${url.search}`)
-    if (failure && failure.times > 0) {
+    if (failure && failure.times > 0 && (failure.path === undefined || failure.path === path)) {
       failure.times -= 1
       const { status, retryAfter } = failure
       if (failure.times === 0) failure = null

@@ -29,7 +29,9 @@ import { Alert, EmptyState } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import type { RemoteBrowse } from "../characters/homeSearch.ts"
 import { SortDirection, type SortOrder } from "../characters/cardBrowse.tsx"
-import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace } from "../characters/shellData.tsx"
+import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useOpenCharacter } from "../characters/shellData.tsx"
+import { openOnPlainClick } from "../../ui/links.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
 import {
   cardSourceViews,
   recentAtom,
@@ -37,6 +39,7 @@ import {
   SOURCES_KEY,
   sourcesAtom,
   type SourceProblem,
+  useAdoptRemote,
   useSourceCall
 } from "./remote.ts"
 
@@ -721,6 +724,10 @@ const clearFilters = (browse: SourceBrowse) => {
 const cardLink = (sourceId: string, remoteId: string) =>
   ({ to: "/sources/$sourceId/cards/$remoteId", params: { sourceId, remoteId } }) as const
 
+/** The link to a remote card's draft chat (§4.2): what a click on its tile opens. */
+const chatLink = (sourceId: string, remoteId: string) =>
+  ({ to: "/sources/$sourceId/cards/$remoteId/chat", params: { sourceId, remoteId } }) as const
+
 /** A tile's muted line: the source's main stat and the token count, else the first tags (§3.3). */
 const defaultLine = (card: RemoteSummary, caps: SourceCapabilities | undefined) => {
   const main = caps?.stats?.[0]
@@ -737,55 +744,143 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const info = browse.info!
   const view = cardSourceViews.get(info.id)
   const link = cardLink(info.id, card.remoteId)
-  const href = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}`
+  const chat = chatLink(info.id, card.remoteId)
+  const href = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}/chat`
   const navigate = useNavigate()
   const ratingShown = card.rating !== undefined
+  const adopt = useAdoptRemote()
+  const openCharacter = useOpenCharacter()
+  // The user's own card for it (§3.7): from the results, or just added here.
+  const [added, setAdded] = useState<{ entityId: string; archived: boolean } | null>(null)
+  const [flash, setFlash] = useState(false)
+  const mine = added ?? (card.held ? { entityId: card.held.entityId, archived: card.held.archived } : null)
+  const openMine = (entityId: string) => openCharacter(entityId as EntityId)
+  const face = (
+    <TileFace
+      name={card.name}
+      title={card.name}
+      portrait={
+        <>
+          <Avatar
+            id={`${info.id}:${card.remoteId}`}
+            name={card.name}
+            size="fill"
+            {...(card.thumb ? { src: remoteImageUrl(info.id, card.thumb) } : {})}
+          />
+          {mine !== null && (
+            <Tooltip label={mine.archived ? "You have this card, archived." : "You have this card."}>
+              <span
+                data-held-badge
+                data-layout-overlay="The held badge sits over the portrait"
+                tabIndex={0}
+                aria-label={mine.archived ? "You have this card, archived" : "You have this card"}
+                className="absolute top-2 left-2 inline-flex size-5 items-center justify-center rounded-sm bg-accent text-accent-contrast shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <Icon name="check" size={14} />
+              </span>
+            </Tooltip>
+          )}
+          {ratingShown && (
+            <span
+              data-layout-overlay="The content rating sits over the portrait"
+              className="absolute top-2 right-2 rounded-sm border border-border bg-surface/90 px-1.5 text-[0.6875rem] font-medium"
+            >
+              {card.rating}
+            </span>
+          )}
+        </>
+      }
+    >
+      <span className="truncate text-xs text-muted">{card.creator ? `by ${card.creator}` : " "}</span>
+      <span className="mt-auto truncate text-xs text-muted">
+        {view?.tileLine?.(card) ?? defaultLine(card, browse.caps)}
+      </span>
+    </TileFace>
+  )
+  const addToMine = () =>
+    void adopt(info.id, info.name, card.remoteId).then((result) => {
+      if (!result) return
+      setAdded({ entityId: result.entityId, archived: false })
+      // The tile flashes once as it becomes yours.
+      setFlash(true)
+      window.setTimeout(() => setFlash(false), 1200)
+    })
   return (
     <div
       data-remote-card={card.remoteId}
-      className={`${TILE_SURFACE_CLASS} [content-visibility:auto] [contain-intrinsic-size:auto_18rem]`}
+      {...(mine !== null ? { "data-held": true } : {})}
+      className={`${TILE_SURFACE_CLASS} [content-visibility:auto] [contain-intrinsic-size:auto_18rem] ${flash ? "ring-2 ring-accent" : ""}`}
     >
       <ContextMenu
         label={`Actions for ${card.name}`}
         open={menu}
         onOpenChange={setMenu}
         trigger={
-          <Tooltip label={`Shows ${card.name}, on ${info.name}.`}>
-            <Link {...link} aria-label={`Open ${card.name}`} className={`${TILE_CLASS} hover:border-focus`}>
-              <TileFace
-                name={card.name}
-                title={card.name}
-                portrait={
-                  <>
-                    <Avatar
-                      id={`${info.id}:${card.remoteId}`}
-                      name={card.name}
-                      size="fill"
-                      {...(card.thumb ? { src: remoteImageUrl(info.id, card.thumb) } : {})}
-                    />
-                    {ratingShown && (
-                      <span
-                        data-layout-overlay="The content rating sits over the portrait"
-                        className="absolute top-2 right-2 rounded-sm border border-border bg-surface/90 px-1.5 text-[0.6875rem] font-medium"
-                      >
-                        {card.rating}
-                      </span>
-                    )}
-                  </>
-                }
+          mine !== null ? (
+            <Tooltip label={`Opens your ${card.name}.`}>
+              <Link
+                to="/cards/$entityId/chat"
+                params={{ entityId: mine.entityId }}
+                onClick={openOnPlainClick(() => openMine(mine.entityId))}
+                aria-label={`Open ${card.name}`}
+                className={`${TILE_CLASS} hover:border-focus`}
               >
-                <span className="truncate text-xs text-muted">{card.creator ? `by ${card.creator}` : " "}</span>
-                <span className="mt-auto truncate text-xs text-muted">
-                  {view?.tileLine?.(card) ?? defaultLine(card, browse.caps)}
-                </span>
-              </TileFace>
-            </Link>
-          </Tooltip>
+                {face}
+              </Link>
+            </Tooltip>
+          ) : (
+            <Tooltip label={`Opens a new chat with ${card.name}. It joins your cards when you send.`}>
+              <Link {...chat} aria-label={`Open ${card.name}`} className={`${TILE_CLASS} hover:border-focus`}>
+                {face}
+              </Link>
+            </Tooltip>
+          )
         }
       >
-        <MenuItem icon="person" description="Shows this card, as a click does." onClick={() => void navigate(link)}>
-          Open
-        </MenuItem>
+        {mine !== null ? (
+          <MenuItem
+            icon="person"
+            description="Opens your copy, as a click does."
+            onClick={() => openMine(mine.entityId)}
+          >
+            Open your card
+          </MenuItem>
+        ) : (
+          <MenuItem
+            icon="chat"
+            description="Opens a new chat with it, as a click does."
+            onClick={() => void navigate(chat)}
+          >
+            Open
+          </MenuItem>
+        )}
+        {mine === null && (
+          <MenuItem
+            icon="eye"
+            description={`Shows ${card.name}'s definitions without starting a chat.`}
+            onClick={() => void navigate(link)}
+          >
+            Inspect
+          </MenuItem>
+        )}
+        {mine === null && (
+          <MenuItem
+            icon="plus"
+            description={`Adds ${card.name} to your cards without starting a chat.`}
+            onClick={addToMine}
+          >
+            Add to my cards
+          </MenuItem>
+        )}
+        {mine !== null && (
+          <MenuItem
+            icon="search"
+            description={`Shows ${card.name} on ${info.name}, not your copy.`}
+            onClick={() => void navigate(link)}
+          >
+            Show on {info.name}
+          </MenuItem>
+        )}
         <MenuItem
           icon="external"
           description="Opens it in a new tab of the browser."

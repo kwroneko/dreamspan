@@ -86,7 +86,10 @@ const keepsHistory = (row: { readonly target_kind: DraftKey["targetKind"] }) => 
 
 /** Settings and the held structural changes are plain values: their JSON never goes to the bin. */
 const toBin = (row: { readonly target_kind: DraftKey["targetKind"]; readonly field: string }) =>
-  !(row.target_kind === "entity_field" && (row.field.startsWith("=") || isHeldField(row.field)))
+  !(
+    (row.target_kind === "entity_field" || row.target_kind === "remote_card") &&
+    (row.field.startsWith("=") || isHeldField(row.field))
+  )
 
 /** A field's value in a document, as its draft holds it: text, or a value's JSON. */
 export const fieldContent = (doc: unknown, field: string) => {
