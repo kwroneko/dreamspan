@@ -9,6 +9,7 @@
 // come back into the workbench: the focused tab's own item navigates it, another opens.
 import type { RouterHistory } from "@tanstack/react-router"
 import type { ReactNode } from "react"
+import type { DropZone } from "./dropOpen.ts"
 import { itemKey, persistHref, shellKeys } from "./kinds.ts"
 import {
   allTabs,
@@ -474,6 +475,30 @@ export class WorkbenchStore {
     const id = newId("f")
     const next = splitFrame(focusTab(this.layout, tabId), frame.id, direction, { newFrameId: id, before, empty: true })
     this.set(moveTab(next, tabId, id, undefined, itemKey))
+  }
+  /**
+   * Opens an item dropped on a frame (a picture dragged from the portrait column), kept: into
+   * the frame beside its tabs (its preview tab is kept too), at `index` in its strip when
+   * dropped there, or into a new frame on that side.
+   */
+  dropOpen(href: string, frameId: string, zone: DropZone, index?: number) {
+    const frame = this.frames().find((f) => f.id === frameId)
+    if (!frame) return
+    if (zone === "center") {
+      // Put beside what the frame shows, never in place of its preview tab.
+      const preview = frame.tabs.find((t) => t.preview)
+      if (preview) this.layout = pinTab(this.layout, preview.id)
+      const tabId = this.open(href, { frame: frameId, preview: false })
+      if (index !== undefined) this.move(tabId, frameId, index)
+      return
+    }
+    const id = newId("f")
+    this.layout = splitFrame(this.layout, frameId, zone === "left" || zone === "right" ? "row" : "column", {
+      newFrameId: id,
+      before: zone === "left" || zone === "top",
+      empty: true
+    })
+    this.open(href, { frame: id, preview: false })
   }
   resize(splitId: string, sizes: ReadonlyArray<number>) {
     this.set(resizeSplit(this.layout, splitId, sizes), "REPLACE", 400)

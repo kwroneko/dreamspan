@@ -17,9 +17,10 @@ import { type Portrait, PortraitView, usePortraitViewer } from "../../ui/Portrai
 import type { StackEntry } from "../../ui/portraitStack.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { ViewerHeader, ViewerMoves } from "../../ui/ViewerHeader.tsx"
-import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
+import { Menu, MenuCheckboxItem, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
-import { usePortraitColumnPlace } from "../workbench/tab.tsx"
+import { useOpenAsTab, usePortraitColumnPlace } from "../workbench/tab.tsx"
+import { pictureHref } from "./PicturePage.tsx"
 
 const MIN = 200
 /** Preferred minimum while sharing a pair; smaller pairs split their available height. */
@@ -145,6 +146,23 @@ function Viewer({
   const viewer = usePortraitViewer()!
   const portrait = entry.portrait
   const ref = useRef<HTMLElement>(null)
+  // Into a frame as a tab (owner, 2026-11-07): dragged from the header onto a frame's strip or
+  // body, or from the ⋯ menu. The column stays where pictures open.
+  const asTab = useOpenAsTab()
+  const href = pictureHref(portrait)
+  const outside =
+    asTab && href
+      ? {
+          over: (x: number, y: number) => asTab.at(x, y)?.box ?? null,
+          drop: (x: number, y: number) => {
+            const target = asTab.at(x, y)
+            if (!target) return false
+            asTab.drop(target, href)
+            viewer.close(portrait.id)
+            return true
+          }
+        }
+      : undefined
   // The original's shape, from the thumbnail first, and the image box's height: what a
   // fitted image's height is.
   const [shape, setShape] = useState<NaturalSize | null>(null)
@@ -194,7 +212,11 @@ function Viewer({
       <PortraitView
         portrait={portrait}
         alignToChatHeader={first}
-        header={(node) => <ViewerHeader portrait={portrait}>{node}</ViewerHeader>}
+        header={(node) => (
+          <ViewerHeader portrait={portrait} outside={outside}>
+            {node}
+          </ViewerHeader>
+        )}
         title={(name) => <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</h2>}
         toggle={
           <Menu
@@ -203,11 +225,37 @@ function Viewer({
               <IconButton
                 label="Viewer options"
                 icon="more"
-                hint="Move this image or choose whether other images stay open."
+                hint={
+                  asTab
+                    ? "Move this image, open it as a tab, or choose whether other images stay open."
+                    : "Move this image or choose whether other images stay open."
+                }
               />
             }
           >
             <ViewerMoves portrait={portrait} />
+            {asTab && (
+              <>
+                <MenuSeparator />
+                <MenuItem
+                  icon="image"
+                  disabled={href === null}
+                  description={
+                    href === null
+                      ? "This card has no image to open."
+                      : "Open this image as a tab in the chat's frame. Dragging its header onto a frame does the same."
+                  }
+                  onClick={() => {
+                    if (!href) return
+                    asTab.open(href)
+                    viewer.close(portrait.id)
+                  }}
+                >
+                  Open as a tab
+                </MenuItem>
+                <MenuSeparator />
+              </>
+            )}
             <MenuCheckboxItem
               icon="one-image"
               checked={viewer.single}

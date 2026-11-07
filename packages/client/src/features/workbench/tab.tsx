@@ -2,6 +2,7 @@
 // side panel's place, and how to name the tab. Outside a workbench (tests, a feature that
 // replaced it) every answer is the single-view one: focused, shown, the panel inline.
 import { createContext, type ReactNode, useContext, useEffect, useSyncExternalStore } from "react"
+import { type DropTarget, dropTargetAt } from "./dropOpen.ts"
 import { itemKey } from "./kinds.ts"
 import { findTab, focusedFrame, focusedTab, frameOfTab, leftEdgeFrames } from "./model.ts"
 import type { WorkbenchStore } from "./store.ts"
@@ -89,6 +90,22 @@ export function usePortraitColumnPlace(open: boolean): { show: boolean; host: HT
   if (!tab) return { show: open, host: null }
   const host = workbench?.portraitHost ?? null
   return { show: open && owner && host !== null, host }
+}
+
+/**
+ * Opening something as a tab from outside the strips (a picture from the portrait column): what
+ * a point over the frames would take, a drop there, and an open beside the view's own tab, kept.
+ * Null outside a workbench.
+ */
+export function useOpenAsTab() {
+  const tab = useContext(TabContext)
+  if (!tab) return null
+  const { store, tabId } = tab
+  return {
+    at: dropTargetAt,
+    drop: (target: DropTarget, href: string) => store.dropOpen(href, target.frameId, target.zone, target.index),
+    open: (href: string) => store.dropOpen(href, store.frameOf(tabId) ?? store.frames()[0]!.id, "center")
+  }
 }
 
 /** The item the tab shows now: what it says about itself is said again when this changes. */

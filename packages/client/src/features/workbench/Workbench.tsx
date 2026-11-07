@@ -48,6 +48,7 @@ import {
   type Direction
 } from "./model.ts"
 import { deviceId } from "./device.ts"
+import { type DropZone, dropZone } from "./dropOpen.ts"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
@@ -394,24 +395,6 @@ function SplitView({
   )
 }
 
-/** Where over a frame a dragged tab drops: into it, or into a new frame on that side. */
-type DropZone = "center" | "left" | "right" | "top" | "bottom"
-
-/** VS Code's: the outer quarter on each side splits there; nearest edge first in a corner. */
-const dropZone = (element: HTMLElement, event: DragEvent): DropZone => {
-  const box = element.getBoundingClientRect()
-  const x = (event.clientX - box.left) / box.width
-  const y = (event.clientY - box.top) / box.height
-  const edges: Array<[DropZone, number]> = [
-    ["left", x],
-    ["right", 1 - x],
-    ["top", y],
-    ["bottom", 1 - y]
-  ]
-  const [zone, distance] = edges.reduce((a, b) => (b[1] < a[1] ? b : a))
-  return distance < 0.25 ? zone : "center"
-}
-
 /** The part of the frame the tab will take, shaded while it's dragged over. */
 const ZONE_OVERLAY: Record<DropZone, string> = {
   center: "inset-0",
@@ -499,7 +482,7 @@ function FrameView({
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
       {strip && <TabStrip frame={frame} layout={layout} store={store} tabs={frame.tabs} />}
-      <div ref={setBody} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={setBody} data-frame-body className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         {frame.tabs.length === 0 && <EmptyFrame frame={frame} store={store} layout={layout} />}
         {over && (
           <div
