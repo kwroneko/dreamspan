@@ -15,6 +15,7 @@ import { makeSourceCache } from "../src/sources/cache.ts"
 import * as CardSources from "../src/sources/CardSources.ts"
 import { isPrivateAddress, makeSourceHttp } from "../src/sources/guard.ts"
 import { makeCoalescer, makeLimiter } from "../src/sources/limiter.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
 
@@ -161,6 +162,98 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       assert.isUndefined(list.cache)
       assert.strictEqual(yield* outcome(b.SetSourceCacheCap({ bytes: 64 * 1024 * 1024 })), "Forbidden")
       assert.strictEqual(yield* outcome(b.SourceCard({ sourceId: "nowhere", remoteId: "x" })), "NotFound")
+    })
+  )
+
+  it.effect("Add to my cards stores the card as an import with its origin, once; results show it as held", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[8]!
+      const before = yield* api.ListLibrary({ kind: "card" })
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.isFalse(added.existing)
+      assert.strictEqual(added.name, card.name)
+      const after = yield* api.ListLibrary({ kind: "card" })
+      assert.lengthOf(after, before.length + 1)
+      const ref = after.find((r) => r.id === added.refId)!
+      assert.strictEqual(ref.entityId, added.entityId)
+      assert.strictEqual(ref.label, card.name)
+      // The document as the importer makes it, the card's page appended to `source`, its portrait stored.
+      const opened = yield* api.OpenEditor({ refId: ref.id })
+      const doc = opened.doc as { source?: ReadonlyArray<string>; avatar_media_id?: string | null; first_mes?: string }
+      assert.include(doc.source ?? [], `${archive.origin}/c/${card.slug}`)
+      assert.isString(doc.avatar_media_id)
+      assert.include(doc.first_mes ?? "", card.name)
+      assert.strictEqual(opened.revisionNumber, 1)
+      // Again, from anywhere: the same card, nothing new.
+      const again = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.deepStrictEqual([again.existing, again.entityId], [true, added.entityId])
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), after.length)
+      // Results and the card's page mark it as the user's; nobody else's.
+      const page = yield* api.SourceSearch({
+        sourceId: "cardex",
+        query: { ...emptySourceQuery, text: card.name },
+        page: null
+      })
+      const shown = page.items.find((item) => item.remoteId === card.slug)!
+      assert.deepStrictEqual(shown.held, {
+        entityId: added.entityId,
+        refId: added.refId,
+        archived: false,
+        update: false
+      })
+      assert.deepStrictEqual(
+        (yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held?.refId,
+        added.refId
+      )
+      const theirs = yield* (yield* client(bob)).SourceSearch({
+        sourceId: "cardex",
+        query: { ...emptySourceQuery, text: card.name },
+        page: null
+      })
+      assert.isUndefined(theirs.items.find((item) => item.remoteId === card.slug)?.held)
+    })
+  )
+
+  it.effect("an adoption that fails stores nothing", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const before = yield* api.ListLibrary({ kind: "card" })
+      // The source can't be reached for a card not cached yet: nothing is added.
+      archive.failNext(503)
+      const unreachable = yield* outcome(api.AdoptRemoteCard({ sourceId: "cardex", remoteId: archive.cards[11]!.slug }))
+      assert.strictEqual(unreachable, "SourceFailed:unreachable")
+      // A write that fails inside the transaction leaves neither the card nor its origin.
+      const writer = yield* Writer
+      const reader = yield* Reader
+      const me = yield* api.Whoami()
+      const failed = yield* Effect.exit(
+        writer.AdoptRemoteCard({
+          userId: me.id,
+          sourceId: "cardex",
+          remoteId: archive.cards[12]!.slug,
+          remoteVersion: archive.cards[12]!.sha256,
+          file: {
+            label: "Broken",
+            docJson: "{not json",
+            docHash: "x",
+            searchText: "",
+            schemaVersion: 1,
+            sourceName: "broken.json",
+            sourceHash: "a".repeat(64) as never,
+            media: [],
+            noteDocJson: null
+          }
+        })
+      )
+      assert.isTrue(Exit.isFailure(failed))
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before.length)
+      const held = yield* reader.HeldRemoteCards({
+        userId: me.id,
+        sourceId: "cardex",
+        items: [{ remoteId: archive.cards[12]!.slug, sha256: null }]
+      })
+      assert.lengthOf(held, 0)
     })
   )
 

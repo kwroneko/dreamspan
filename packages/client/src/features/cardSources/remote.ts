@@ -5,8 +5,11 @@ import { RegistryContext } from "@effect/atom-react"
 import type { SourceFailure } from "@rp/shared/cardSources.ts"
 import { Cause, Context, Effect, Exit } from "effect"
 import { Atom, AtomRegistry } from "effect/reactivity"
+import { useNavigate } from "@tanstack/react-router"
 import { useContext } from "react"
+import { invalidateKeys } from "../../actions.tsx"
 import { describeCause } from "../../errors.ts"
+import { showToast } from "../../ui/Toast.tsx"
 import { makeRegistry } from "../../registry.ts"
 import { AppClient } from "../../rpc.ts"
 import type { ReactNode } from "react"
@@ -72,3 +75,59 @@ export interface CardSourceView {
 }
 
 export const cardSourceViews = makeRegistry<CardSourceView>()
+
+/** A failed call to a source, as a sentence the user can act on (§5.4). */
+export const problemText = (name: string, problem: SourceProblem) =>
+  problem.reason === "not_found"
+    ? `This card is no longer on ${name}.`
+    : problem.reason === "unreachable"
+      ? `Can't reach ${name} right now.`
+      : problem.reason === "rate_limited"
+        ? `${name} is limiting requests. Try again in a moment.`
+        : problem.reason === "unauthorized"
+          ? `${name} refused the API key.`
+          : problem.reason === "disabled"
+            ? `${name} is turned off in Settings.`
+            : problem.reason === "bad_response"
+              ? `${name} sent something this app can't read.`
+              : "message" in problem
+                ? problem.message
+                : `${name} couldn't answer.`
+
+export interface Adopted {
+  readonly entityId: string
+  readonly refId: string
+  readonly name: string
+  readonly existing: boolean
+}
+
+/**
+ * Add to my cards (§4.5, trigger 3): the card joins the user's cards, and a notice says so with
+ * a link to it; a card they already have from there is answered as theirs, never added twice.
+ */
+export function useAdoptRemote() {
+  const call = useSourceCall()
+  const registry = useContext(RegistryContext)
+  const navigate = useNavigate()
+  return async (sourceId: string, sourceName: string, remoteId: string): Promise<Adopted | null> => {
+    const out = await call((client) => client("AdoptRemoteCard", { sourceId, remoteId }))
+    if (out === null) return null
+    if (!out.ok) {
+      showToast({ title: "The card wasn't added", description: problemText(sourceName, out.problem) })
+      return null
+    }
+    const added = out.value
+    invalidateKeys(registry, ["library", "chats"])
+    showToast({
+      title: added.existing ? `You have ${added.name} already.` : `Added ${added.name} to your cards.`,
+      actions: [
+        {
+          label: "Show it",
+          hint: `Opens ${added.name}'s page in your cards.`,
+          onClick: () => void navigate({ to: "/cards/$entityId", params: { entityId: added.entityId } })
+        }
+      ]
+    })
+    return added
+  }
+}

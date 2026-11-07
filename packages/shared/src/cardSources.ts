@@ -109,7 +109,17 @@ export const RemoteSummary = Schema.Struct({
   image: Schema.optionalKey(Schema.String),
   version: RemoteVersion,
   url: Schema.optionalKey(Schema.String),
-  stats: Schema.optionalKey(Schema.Record(Schema.String, Schema.Number))
+  stats: Schema.optionalKey(Schema.Record(Schema.String, Schema.Number)),
+  /** The user's own card for it (§3.7), when they have one. Never sent to the source. */
+  held: Schema.optionalKey(
+    Schema.Struct({
+      entityId: Schema.String,
+      refId: Schema.String,
+      archived: Schema.Boolean,
+      /** The source has a version other than the one added (§3.8). */
+      update: Schema.Boolean
+    })
+  )
 })
 export type RemoteSummary = typeof RemoteSummary.Type
 
@@ -291,6 +301,21 @@ export class CardSourcesApi extends RpcGroup.make(
   Rpc.make("SourceCard", {
     payload: { sourceId: SourceId, remoteId: Schema.String.check(Schema.isMaxLength(500)) },
     success: RemoteCard,
+    error: sourceErrors
+  }),
+  /**
+   * Adds a remote card to the user's cards (§4.5, Add to my cards): the cached file (fetched
+   * again if it was evicted), stored as an import of it is, with its origin. A card the user
+   * already has from there is answered instead (`existing`), never added twice.
+   */
+  Rpc.make("AdoptRemoteCard", {
+    payload: { sourceId: SourceId, remoteId: Schema.String.check(Schema.isMaxLength(500)) },
+    success: Schema.Struct({
+      entityId: Schema.String,
+      refId: Schema.String,
+      name: Schema.String,
+      existing: Schema.Boolean
+    }),
     error: sourceErrors
   }),
   /** Never contacts a source. */

@@ -1549,6 +1549,37 @@ export class WriteOps extends RpcGroup.make(
     success: LibraryImport,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
+  /**
+   * A card from a card source into the library (spec/CARD-SOURCES.md §4.5), in one
+   * transaction: what `ImportFile` stores for a new card file, then its `card_origins` row.
+   * A card the user already has from there (a live card, archived or not) is answered
+   * instead, with `existing`, so it's never added twice; an origin whose card is in the bin
+   * or purged is let go, and the card is added again.
+   */
+  Rpc.make("AdoptRemoteCard", {
+    payload: {
+      userId: UserId,
+      sourceId: Schema.String,
+      remoteId: Schema.String,
+      /** The source's version id, and the SHA-256 of the file as the source gave it. */
+      remoteVersion: Schema.String,
+      file: Schema.Struct({
+        label: Schema.String,
+        docJson: Schema.String,
+        docHash: Schema.String,
+        searchText: Schema.String,
+        schemaVersion: Schema.Int,
+        sourceName: Schema.String,
+        sourceHash: Sha256,
+        media: Schema.Array(ImportedMedia),
+        noteDocJson: Schema.NullOr(Schema.String),
+        notesDocJson: Schema.optionalKey(Schema.Array(Schema.String)),
+        characterNoteScan: Schema.optionalKey(Schema.Boolean)
+      })
+    },
+    success: Schema.Struct({ entityId: EntityId, refId: RefId, existing: Schema.Boolean }),
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
   // --- Chats: the chat RPCs beyond the graph operations above (writes.ts).
   /**
    * A new version of a slot, selected in a fork (absent or null: the current one), if the
@@ -3744,6 +3775,31 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
   /** The account's card-source choices and recently viewed cards; the defaults where none are stored. */
   Rpc.make("GetSourcePrefs", { payload: { userId: UserId }, success: SourcePrefs, error: StorageError }),
+  /**
+   * Which of a page of a source's cards the user already has (spec/CARD-SOURCES.md §3.7): by
+   * the origin an adoption recorded, else by the same file imported from disk (its SHA-256,
+   * when the source's version id is one). Live cards only; archived ones count.
+   */
+  Rpc.make("HeldRemoteCards", {
+    payload: {
+      userId: UserId,
+      sourceId: Schema.String,
+      items: Schema.Array(Schema.Struct({ remoteId: Schema.String, sha256: Schema.NullOr(Schema.String) })).check(
+        Schema.isMaxLength(200)
+      )
+    },
+    success: Schema.Array(
+      Schema.Struct({
+        remoteId: Schema.String,
+        entityId: EntityId,
+        refId: RefId,
+        archived: Schema.Boolean,
+        /** The source's version when it was added; null when unknown. */
+        remoteVersion: Schema.NullOr(Schema.String)
+      })
+    ),
+    error: StorageError
+  }),
   // --- Branches (DESIGN §3.2) and forks.
   /** The live forks of a chat of the user's, most recently current first. */
   Rpc.make("ListForks", {

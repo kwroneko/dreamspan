@@ -294,6 +294,23 @@ export const baseline: ReadonlyArray<string> = [
     PRIMARY KEY (entity_id, tag)
   ) STRICT, WITHOUT ROWID`,
   `CREATE INDEX entity_tags_tag ON entity_tags(tag, entity_id)`,
+  // A card added from a card source (spec/CARD-SOURCES.md §8): which source card it is, so a
+  // results page finds the user's cards among its ids in one indexed lookup and a second add
+  // finds the first. `adopted`: added from the source; `recognized`: imported as a file the
+  // source's adapter claimed.
+  `CREATE TABLE card_origins (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    source_id TEXT NOT NULL,
+    remote_id TEXT NOT NULL,
+    remote_version TEXT NOT NULL,
+    remote_sha256 TEXT NOT NULL,
+    recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized')),
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE UNIQUE INDEX card_origins_remote ON card_origins(owner_user_id, source_id, remote_id)`,
+  // The same file imported from disk (§3.7's third check; the join to entities adds the owner).
+  `CREATE INDEX entity_refs_source_hash ON entity_refs(source_hash) WHERE source_hash IS NOT NULL`,
   `CREATE TRIGGER entity_refs_head_same_entity
     BEFORE INSERT ON entity_refs
     WHEN (SELECT entity_id FROM entity_revisions WHERE id = NEW.head_revision_id) IS NOT NEW.entity_id
