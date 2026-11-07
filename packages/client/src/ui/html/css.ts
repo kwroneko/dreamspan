@@ -186,7 +186,20 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`): ScopedCss {
       if (node.type === "decl") declaration(node)
       else if (node.type === "rule") {
         const rule = node as Rule
-        rule.selectors = rule.selectors.map((selector) =>
+        const selectors = rule.selectors.filter((selector) => {
+          const text = selector.replace(/\/\*[\s\S]*?\*\//g, "").trim()
+          // Prefixing a relative sibling selector would target siblings of the message.
+          if (!nested) return !/^[+~|]/.test(text)
+          // Implicit nesting stays below the parent. Explicit nesting is safe only when
+          // that parent anchors the selector: :is(&, body) can otherwise select the app.
+          // Be conservative about '&' even in strings; no selector parser is involved.
+          return !text.includes("&") || (text.startsWith("&") && !text.slice(1).includes("&"))
+        })
+        if (selectors.length === 0) {
+          rule.remove()
+          continue
+        }
+        rule.selectors = selectors.map((selector) =>
           nested ? renameSelector(selector) : `${scope} ${renameSelector(selector)}`
         )
         visit(rule, true)
