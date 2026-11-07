@@ -1,7 +1,7 @@
-// Live: OpenRouter routes, through the app's provider code. Real money: every request's
-// reported cost counts against RP_LIVE_OPENROUTER_CAP (default $2 for the whole file).
+// Live: OpenRouter, through the app's provider code, pinned to each upstream by the model's
+// routing setting. Real money: every request's reported cost counts against
+// RP_LIVE_OPENROUTER_CAP (default $2 for the whole file).
 import { describe } from "@effect/vitest"
-import type { Connection } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
 import { findings, liveEnabled, near } from "./support/live.ts"
 import {
@@ -19,62 +19,71 @@ const f = findings("openrouter")
 const CAP = Number(process.env.RP_LIVE_OPENROUTER_CAP ?? "2")
 const spent = () => Object.values(f.spend).reduce((n, s) => n + s.reported, 0)
 
-const base = { kind: "openrouter", dialect: "openrouter" as const }
-// Each upstream is reached through its own route (a request's `provider` is
-// overridden), so each upstream is reached through the route that serves it.
+const base = { kind: "openrouter", dialect: "openrouter" as const, route: "openrouter/v1" }
+/** A model setting that pins OpenRouter to one provider (`provider.only`, no fallbacks). */
+const pinned = (slug: string, samplers?: Record<string, unknown>) => ({
+  settings: { routing: { only: [slug], allow_fallbacks: false }, ...(samplers ? { samplers } : {}) }
+})
+// OpenRouter honors the request's `provider`, so each
+// upstream is reached by the model's routing setting.
 const routes: ReadonlyArray<Profile & { readonly upstream: string }> = [
   {
     ...base,
-    id: "OR claude via Bedrock",
-    route: "openrouter/v1",
+    id: "OR claude via Anthropic",
     model: "anthropic/claude-haiku-4.5",
     cacheTokens: 4400,
-    upstream: "Amazon Bedrock"
+    upstream: "Anthropic",
+    overrides: pinned("anthropic")
   },
   {
     ...base,
     id: "OR claude via Vertex",
-    route: "openrouter-nozdr/v1",
     model: "anthropic/claude-haiku-4.5",
     cacheTokens: 4400,
-    upstream: "Google"
+    upstream: "Google",
+    overrides: pinned("google-vertex")
   },
   {
     ...base,
-    id: "OR gpt-5.4-nano via Azure",
-    route: "openrouter/v1",
+    id: "OR claude via Bedrock",
+    model: "anthropic/claude-haiku-4.5",
+    cacheTokens: 4400,
+    upstream: "Amazon Bedrock",
+    overrides: pinned("amazon-bedrock")
+  },
+  {
+    ...base,
+    id: "OR gpt-5.4-nano via OpenAI",
     model: "openai/gpt-5.4-nano",
     cacheTokens: 1500,
-    upstream: "Azure",
+    upstream: "OpenAI",
     ttlUnknown: true,
-    overrides: { settings: { samplers: { openai_max_tokens: 600, reasoning_effort: "low" } } }
+    overrides: pinned("openai", { openai_max_tokens: 600, reasoning_effort: "low" })
   },
   {
     ...base,
     id: "OR gemini-3.5-flash-lite via AI Studio",
-    route: "openrouter/v1",
     model: "google/gemini-3.5-flash-lite",
     cacheTokens: 4400,
-    upstream: "Google AI Studio"
+    upstream: "Google AI Studio",
+    overrides: pinned("google-ai-studio")
   },
-  // The same two with the app's explicit breakpoints instead of the default (pi-ai's markers).
+  // Two with the app's explicit breakpoints instead of the default (pi-ai's markers).
   {
     ...base,
-    id: "OR claude via Bedrock (explicit breakpoints)",
-    route: "openrouter/v1",
+    id: "OR claude via Vertex (explicit breakpoints)",
     model: "anthropic/claude-haiku-4.5",
     cacheTokens: 4400,
-    upstream: "Amazon Bedrock",
-    overrides: { cacheBreakpoints: "explicit" }
+    upstream: "Google",
+    overrides: { ...pinned("google-vertex"), cacheBreakpoints: "explicit" }
   },
   {
     ...base,
     id: "OR gemini-3.5-flash-lite via AI Studio (explicit breakpoints)",
-    route: "openrouter/v1",
     model: "google/gemini-3.5-flash-lite",
     cacheTokens: 4400,
     upstream: "Google AI Studio",
-    overrides: { cacheBreakpoints: "explicit" }
+    overrides: { ...pinned("google-ai-studio"), cacheBreakpoints: "explicit" }
   }
 ]
 
@@ -117,13 +126,22 @@ describe.skipIf(!liveEnabled)("live OpenRouter", () => {
                 : null,
               { actual: markers(t.exchange) }
             )
+          // OpenAI's cache is best effort (livefix): what it reads is recorded, not required. Live
+          // (liveapi2): a 1,700-token chat read nothing on turns 2 and 3, a 3,200-token prompt sent
+          // three times read 2,816 from the second, with or without prompt_cache_key.
+          const bestEffort = r.model.startsWith("openai/")
           if (prev && w) {
             const prevTotal = totalInput(prev)
-            f.check(r.id, `turn ${i + 1}: reads most of the previous prompt`, (w.read ?? 0) >= 0.7 * prevTotal, {
-              expected: { readAtLeast: Math.round(0.7 * prevTotal) },
-              actual: { ...w, cost: t.row?.cost?.amount },
-              ref: ref(t)
-            })
+            f.check(
+              r.id,
+              `turn ${i + 1}: reads most of the previous prompt`,
+              bestEffort ? null : (w.read ?? 0) >= 0.7 * prevTotal,
+              {
+                expected: { readAtLeast: Math.round(0.7 * prevTotal) },
+                actual: { ...w, cost: t.row?.cost?.amount },
+                ref: ref(t)
+              }
+            )
             const est = t.before?.warmth
             f.check(
               r.id,
@@ -134,8 +152,10 @@ describe.skipIf(!liveEnabled)("live OpenRouter", () => {
             if (est)
               f.check(
                 r.id,
-                `turn ${i + 1}: estimated cached prefix ≈ provider's cached tokens (±40%)`,
-                near(est.prefixTokens, w.read ?? 0, 1.4),
+                bestEffort
+                  ? `turn ${i + 1}: estimated cached prefix claims no more than the provider read`
+                  : `turn ${i + 1}: estimated cached prefix ≈ provider's cached tokens (±40%)`,
+                bestEffort ? est.prefixTokens <= (w.read ?? 0) * 1.4 : near(est.prefixTokens, w.read ?? 0, 1.4),
                 {
                   expected: { providerRead: w.read },
                   actual: { estimatePrefixTokens: est.prefixTokens, verified: est.verified, ttlS: est.ttlS },
@@ -149,14 +169,10 @@ describe.skipIf(!liveEnabled)("live OpenRouter", () => {
       })
     )
 
-  liveTest("route pinning, a route switch mid-chat, and one Gemini 4 Argon call", f, ({ api, recorder, dataDir }) =>
+  liveTest("route pinning, a provider switch mid-chat, and one Gemini 4 Argon call", f, ({ api, recorder, dataDir }) =>
     Effect.gen(function* () {
       if (spent() > CAP) return void f.check("openrouter", "routing", null, { actual: `cap $${CAP} reached` })
-      const r = {
-        ...routes[0]!,
-        id: "OR routing",
-        overrides: { settings: { routing: { only: ["anthropic"], allow_fallbacks: false } } }
-      }
+      const r = { ...routes[0]!, id: "OR routing" }
       const chat = yield* startChat(api, recorder, dataDir, r)
       const model = yield* modelOf(api, chat.connection.id)
       const t1 = (yield* chat.say("Good evening, Mira. Is the copper bell entry still in the ledger?"))!
@@ -171,32 +187,30 @@ describe.skipIf(!liveEnabled)("live OpenRouter", () => {
         }
       )
       f.check(r.id, "pinned to anthropic: served by Anthropic", t1.row?.upstream === "Anthropic", {
-        actual: { upstream: t1.row?.upstream, note: "routing is set by the route" }
+        actual: { upstream: t1.row?.upstream }
       })
       const t2 = (yield* chat.say("Then read me the amber lantern entry."))!
       checkTurn(f, r, "pinned turn 2", t2, model)
-      // Switch the same connection to the route that serves Claude from Vertex.
-      const connection = (yield* api.ListConnections()).find((c: Connection) => c.id === chat.connection.id)!
-      yield* api.UpdateConnection({
-        connectionId: connection.id,
-        settings: {
-          name: connection.name,
-          baseUrl: connection.baseUrl!.replace("/openrouter/v1", "/openrouter-nozdr/v1"),
-          compat: connection.compat,
-          cacheTtlS: connection.cacheTtlS,
-          maxConcurrent: connection.maxConcurrent,
-          presetOverrideRefId: connection.presetOverrideRefId
-        },
-        expectedRowVersion: connection.rowVersion
+      // Pin the same model to Vertex: another provider's cache.
+      const current = (yield* api.ListModels({ connectionId: chat.connection.id, includeHidden: true })).find(
+        (m) => m.id === chat.model.id
+      )!
+      yield* api.EditModel({
+        modelId: current.id,
+        overrides: pinned("google-vertex"),
+        expectedRowVersion: current.rowVersion
       })
       yield* Effect.sleep("1 second")
       const t3 = (yield* chat.say("Who guards the white compass?"))!
-      const w3 = checkTurn(f, r, "after the route switch", t3, model)
-      f.check(r.id, "route switch: the provider's cache is cold on the new upstream", (w3?.read ?? 0) === 0, {
+      const w3 = checkTurn(f, r, "after the provider switch", t3, model)
+      f.check(r.id, "provider switch: served by Vertex", t3.row?.upstream === "Google", {
+        actual: { upstream: t3.row?.upstream }
+      })
+      f.check(r.id, "provider switch: the provider's cache is cold on the new upstream", (w3?.read ?? 0) === 0, {
         actual: { upstream: t3.row?.upstream, ...w3 },
         ref: ref(t3)
       })
-      f.check(r.id, "route switch: estimate says the prefix changed", !!t3.before?.warmth?.changed, {
+      f.check(r.id, "provider switch: estimate says the prefix changed", !!t3.before?.warmth?.changed, {
         actual: t3.before?.warmth ?? null
       })
 
@@ -204,7 +218,6 @@ describe.skipIf(!liveEnabled)("live OpenRouter", () => {
       const argon: Profile = {
         ...base,
         id: "OR gemini-4-argon",
-        route: "openrouter/v1",
         model: "google/gemini-4-argon",
         cacheTokens: 100
       }

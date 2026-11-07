@@ -60,18 +60,42 @@ const profiles: ReadonlyArray<Profile> = [
     model: "anthropic/claude-haiku-4.5",
     dialect: "openrouter",
     cacheTokens: 60
+  },
+  {
+    id: "google gemini-3.5-flash-lite",
+    kind: "google",
+    route: "google/v1beta",
+    model: "gemini-3.5-flash-lite",
+    listed: "gemini-3.5-flash-lite",
+    dialect: "google",
+    cacheTokens: 60
   }
 ]
 
 /** The roles of a request as sent: system parameter first when there is one. */
 const roles = (e: Exchange | undefined) => {
   const body = e?.request ?? {}
-  const list = (body.messages ?? body.input ?? []) as Array<{ role?: string; type?: string; content?: unknown }>
-  const head = body.system ? ["system-param"] : body.instructions ? ["instructions"] : []
+  const list = (body.messages ?? body.input ?? body.contents ?? []) as Array<{
+    role?: string
+    type?: string
+    content?: unknown
+    parts?: Array<Record<string, unknown>>
+  }>
+  const head = body.system
+    ? ["system-param"]
+    : body.instructions
+      ? ["instructions"]
+      : body.systemInstruction
+        ? ["systemInstruction"]
+        : []
   return [
     ...head,
     ...list.map((m) => {
-      const parts = Array.isArray(m.content) ? (m.content as Array<{ type?: string }>).map((p) => p.type).join("+") : ""
+      // Gemini's parts are keyed by kind (text, inlineData, functionCall, functionResponse).
+      const geminiParts = m.parts?.map((p) => Object.keys(p).find((k) => k !== "thoughtSignature") ?? "?")
+      const parts = Array.isArray(m.content)
+        ? (m.content as Array<{ type?: string }>).map((p) => p.type).join("+")
+        : (geminiParts?.join("+") ?? "")
       return `${m.role ?? m.type}${parts && parts !== "text" && parts !== "input_text" && parts !== "output_text" ? `(${parts})` : ""}`
     })
   ]
@@ -240,37 +264,50 @@ describe.skipIf(!liveEnabled)("live prompt shapes", () => {
       })
     )
 
-  liveTest("gemini-4-argon: one combined shape", f, ({ api, recorder, dataDir }) =>
-    Effect.gen(function* () {
-      const p: Profile = {
-        id: "OR gemini-4-argon",
-        kind: "openrouter",
-        route: "openrouter/v1",
-        model: "google/gemini-4-argon",
-        dialect: "openrouter",
-        cacheTokens: 60,
-        overrides: { settings: { samplers: { openai_max_tokens: 400 } } }
-      }
-      const chat = yield* startChat(api, recorder, dataDir, p, {
-        characters: ["Corin"],
-        stPreset: (st) =>
-          withPrompt(st, {
-            identifier: "depthNote",
-            name: "Depth note",
-            role: "system",
-            content: "[Keep replies under 40 words.]",
-            injection_position: 1,
-            injection_depth: 1
-          }),
-        cardFields: { mes_example: "<START>\n{{user}}: Any news?\n{{char}}: The tide came in early." }
+  const argons: ReadonlyArray<Profile> = [
+    {
+      id: "OR gemini-4-argon",
+      kind: "openrouter",
+      route: "openrouter/v1",
+      model: "google/gemini-4-argon",
+      dialect: "openrouter",
+      cacheTokens: 60,
+      overrides: { settings: { samplers: { openai_max_tokens: 400 } } }
+    },
+    {
+      id: "google gemini-4-argon",
+      kind: "google",
+      route: "google/v1beta",
+      model: "gemini-4-argon",
+      listed: "gemini-4-argon",
+      dialect: "google",
+      cacheTokens: 60,
+      overrides: { settings: { samplers: { openai_max_tokens: 1500 } } }
+    }
+  ]
+  for (const p of argons)
+    liveTest(`${p.id}: one combined shape`, f, ({ api, recorder, dataDir }) =>
+      Effect.gen(function* () {
+        const chat = yield* startChat(api, recorder, dataDir, p, {
+          characters: ["Corin"],
+          stPreset: (st) =>
+            withPrompt(st, {
+              identifier: "depthNote",
+              name: "Depth note",
+              role: "system",
+              content: "[Keep replies under 40 words.]",
+              injection_position: 1,
+              injection_depth: 1
+            }),
+          cardFields: { mes_example: "<START>\n{{user}}: Any news?\n{{char}}: The tide came in early." }
+        })
+        yield* chat.say("Hello, both.", { reply: false })
+        yield* chat.say("Are you there?", { speaker: chat.mira.entityId as never })
+        record(
+          p,
+          "greeting first + two user turns + example messages + system depth note + two character replies in a row",
+          yield* chat.reply({ speaker: chat.others[0]! })
+        )
       })
-      yield* chat.say("Hello, both.", { reply: false })
-      yield* chat.say("Are you there?", { speaker: chat.mira.entityId as never })
-      record(
-        p,
-        "greeting first + two user turns + example messages + system depth note + two character replies in a row",
-        yield* chat.reply({ speaker: chat.others[0]! })
-      )
-    })
-  )
+    )
 })
