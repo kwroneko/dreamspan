@@ -350,6 +350,45 @@ export function CharacterGrid({
   )
 }
 
+// Fills the grid row, its last line at the bottom, so tiles in a row match (DESIGN §2.1).
+const TILE_BASE =
+  "group flex min-w-0 flex-1 flex-col overflow-hidden bg-surface text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+/** A tile that is the whole link (home, the sidebar, a card source's results). */
+export const TILE_CLASS = `${TILE_BASE} rounded-lg border border-border`
+const TILE_OPEN_CLASS = `${TILE_BASE} rounded-t-lg focus-visible:ring-inset`
+/** What holds a tile and the toggles over its picture's corners. */
+export const TILE_SURFACE_CLASS = "tile-toggle-surface relative flex min-w-0 flex-col"
+
+/**
+ * A tile's face: the picture in its 2:3 box, the name on its line, then the tile's own lines.
+ * Every card tile has it: the user's cards and a card source's results look the same (§3.3).
+ */
+export function TileFace({
+  portrait,
+  name,
+  title,
+  dim = false,
+  children
+}: {
+  portrait: ReactNode
+  name: string
+  title?: string | undefined
+  dim?: boolean
+  children: ReactNode
+}) {
+  return (
+    <>
+      <span className={`relative aspect-[2/3] w-full overflow-hidden ${dim ? "opacity-50" : ""}`}>{portrait}</span>
+      <span className="flex w-full min-w-0 flex-1 flex-col gap-0.5 p-2">
+        <span className="truncate text-sm font-medium" {...(title === undefined ? {} : { title })}>
+          {name}
+        </span>
+        {children}
+      </span>
+    </>
+  )
+}
+
 /**
  * A character's tile: its picture, names and use, with its favourite star and archive toggle
  * over the picture's top corners.
@@ -376,28 +415,26 @@ function CharacterTile({
   const c = card.card
   const state = pick?.state(status) ?? {}
   const inner = (
-    <>
-      <span
-        className={`relative aspect-[2/3] w-full overflow-hidden ${!pick?.onOpen && state.done ? "opacity-50" : ""}`}
-      >
-        <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="fill" />
-        {marked && <PersonaBadge portrait />}
+    <TileFace
+      dim={!pick?.onOpen && state.done === true}
+      portrait={
+        <>
+          <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="fill" />
+          {marked && <PersonaBadge portrait />}
+        </>
+      }
+      name={c.label}
+      // A pick's tooltip names it already.
+      title={pick ? undefined : c.label}
+    >
+      {/* The date a date sort orders by shares the last line, so tiles keep their height. */}
+      <span className="mt-auto flex min-w-0 items-baseline justify-between gap-1.5 text-xs text-muted">
+        <span className="shrink-0">{c.chats ? `${c.chats} ${c.chats === 1 ? "chat" : "chats"}` : "Never used"}</span>
+        <SortDate card={card} sort={sort} />
       </span>
-      <span className="flex w-full min-w-0 flex-1 flex-col gap-0.5 p-2">
-        {/* A pick's tooltip names it already. */}
-        <span className="truncate text-sm font-medium" {...(pick ? {} : { title: c.label })}>
-          {c.label}
-        </span>
-        {/* The date a date sort orders by shares the last line, so tiles keep their height. */}
-        <span className="mt-auto flex min-w-0 items-baseline justify-between gap-1.5 text-xs text-muted">
-          <span className="shrink-0">{c.chats ? `${c.chats} ${c.chats === 1 ? "chat" : "chats"}` : "Never used"}</span>
-          <SortDate card={card} sort={sort} />
-        </span>
-      </span>
-    </>
+    </TileFace>
   )
-  // Fills the grid row, its last line at the bottom, so tiles in a row match (DESIGN §2.1).
-  const tileClass = `group flex min-w-0 flex-1 flex-col overflow-hidden ${pick?.onOpen ? "rounded-t-lg focus-visible:ring-inset" : "rounded-lg border border-border"} bg-surface text-left outline-none focus-visible:ring-2 focus-visible:ring-focus ${!pick?.onOpen && (state.done || state.pending) ? "cursor-default" : "hover:border-focus"}`
+  const tileClass = `${pick?.onOpen ? TILE_OPEN_CLASS : TILE_CLASS} ${!pick?.onOpen && (state.done || state.pending) ? "cursor-default" : "hover:border-focus"}`
   const button = !pick ? (
     // A link to the chat it opens, so it opens in a new browser tab too.
     <Link
@@ -436,7 +473,7 @@ function CharacterTile({
   )
   return (
     <div
-      className={`tile-toggle-surface relative flex min-w-0 flex-col ${pick?.onOpen ? "overflow-hidden rounded-lg border border-border bg-surface" : ""}`}
+      className={`${TILE_SURFACE_CLASS} ${pick?.onOpen ? "overflow-hidden rounded-lg border border-border bg-surface" : ""}`}
     >
       {pick ? (
         <Tooltip label={pick.onOpen ? `Open ${c.label} in the full editor` : pick.hint(card, status)}>{button}</Tooltip>

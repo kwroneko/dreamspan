@@ -86,7 +86,7 @@ function SourceCard({ source, isAdmin }: { source: SourceInfo; isAdmin: boolean 
           }
           hint={
             source.adminDisabled
-              ? `An admin turned ${name} off for this server.`
+              ? `Unavailable until an admin allows ${name} on this server again.`
               : source.userEnabled
                 ? `Click to remove ${name} from the Show choices on the home page and in the side panel.`
                 : `Click to add ${name} to the Show choices on the home page and in the side panel.`

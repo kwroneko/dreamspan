@@ -34,6 +34,7 @@ import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { browseCards, mixesPersonas } from "./cardBrowse.tsx"
 import { useSidebarBrowse } from "./useSidebarBrowse.ts"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
+import { SourceChips, SourceFiltersPanel, SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
 import { NewCardButton } from "../editor/NewCard.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
@@ -802,6 +803,9 @@ function Browser({ data }: { data: ShellLibrary }) {
   const [chatBrowse, setChatBrowse] = useChatBrowse()
   const search = browse.search
   const setSearch = (search: string) => setBrowse({ search })
+  // A card source shown in the character grid; asked nothing unless it's shown (§5.1).
+  const sources = useSourceBrowse(grid ? browse.source : null, browse.remote, (remote) => setBrowse({ remote }))
+  const source = grid ? sources.info : null
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const selected = useSplitChats((params.chatId ?? null) as ChatId | null, shown)?.group.id ?? params.chatId
@@ -874,13 +878,24 @@ function Browser({ data }: { data: ShellLibrary }) {
               { value: "characters", label: "Characters" }
             ]}
           />
-          <Input
-            aria-label={grid ? "Find a character" : "Find a chat"}
-            placeholder="Find by name"
-            className="min-w-0"
-            value={search}
-            onChange={(e) => setSearch(e.currentTarget.value)}
-          />
+          {source ? (
+            <Input
+              type="search"
+              aria-label={`Search ${source.name}`}
+              placeholder={`Search ${source.name}`}
+              className="min-w-0"
+              value={sources.remote.text}
+              onChange={(e) => sources.change({ text: e.currentTarget.value })}
+            />
+          ) : (
+            <Input
+              aria-label={grid ? "Find a character" : "Find a chat"}
+              placeholder="Find by name"
+              className="min-w-0"
+              value={search}
+              onChange={(e) => setSearch(e.currentTarget.value)}
+            />
+          )}
         </div>
       </div>
       {!grid && (scope.entity || scope.chat) && (
@@ -934,20 +949,41 @@ function Browser({ data }: { data: ShellLibrary }) {
           props={{ browse: chatBrowse, counts: forks.filterCounts, onChange: setChatBrowse }}
         />
       )}
-      {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups includePersonas />}
-      {grid && browse.filter === "personas" && (
+      {grid && (
+        <CardBrowseBar
+          data={data}
+          browse={browse}
+          onChange={setBrowse}
+          groups
+          includePersonas
+          sources={sources}
+          onSource={(id) => setBrowse({ source: id })}
+          filtersId="side-source-filters"
+        />
+      )}
+      {grid && !source && browse.filter === "personas" && (
         <div>
           <NewCardButton persona />
         </div>
       )}
-      {grid && browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
+      {grid && !source && browse.filter === "archived" && <SlotOutlet slot={archivedCardActions} props={{}} />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
       <div
         ref={listRef}
         data-shell-list
         className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
       >
-        {grid ? (
+        {grid && source ? (
+          // The source's cards only: never mixed with the user's (spec/CARD-SOURCES.md §3.2).
+          <div className="flex min-w-0 flex-col gap-2 pb-2">
+            <SourceFiltersPanel browse={sources} id="side-source-filters" />
+            <SourceChips browse={sources} />
+            <SourceResults
+              browse={sources}
+              className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
+            />
+          </div>
+        ) : grid ? (
           // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
           browse.filter === "groups" ? (
             <GroupGrid

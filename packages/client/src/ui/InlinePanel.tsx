@@ -46,7 +46,7 @@ export function InlinePanel({
           </span>
         </>
       ) : (
-        <div className="-mt-1 -mr-1 flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">{title}</h3>
           <WindowClose onClick={onClose} />
         </div>

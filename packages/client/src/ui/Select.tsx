@@ -1,7 +1,7 @@
 // Pickers. An item's `description` explains it beside the highlighted option, or under its
 // label on touch screens and narrow windows (`Explanation.tsx`), so the label can stay short.
 import { Select as BaseSelect } from "@base-ui/react/select"
-import { useState, type ReactNode } from "react"
+import { Fragment, useState, type ReactNode } from "react"
 import { HighlightExplanation, useItemExplanation } from "./Explanation.tsx"
 
 export interface SelectItem<Value> {
@@ -9,6 +9,8 @@ export interface SelectItem<Value> {
   readonly label: string
   /** What choosing it means, when the label alone doesn't say. */
   readonly description?: string | undefined
+  /** A line before it: it starts a different kind of choice (a card source after the filters). */
+  readonly separatorBefore?: boolean
 }
 
 function SelectOption<Value>({ item }: { item: SelectItem<Value> }) {
@@ -93,7 +95,10 @@ export function Select<Value>({
           >
             <BaseSelect.List className="p-2">
               {items.map((item) => (
-                <SelectOption key={String(item.value)} item={item} />
+                <Fragment key={String(item.value)}>
+                  {item.separatorBefore && <BaseSelect.Separator className="mx-1 my-1 h-px bg-border" />}
+                  <SelectOption item={item} />
+                </Fragment>
               ))}
             </BaseSelect.List>
           </BaseSelect.Popup>

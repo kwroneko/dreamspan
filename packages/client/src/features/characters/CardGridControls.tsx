@@ -1,7 +1,9 @@
 // Shared by the registered home and sidebar character grids. Measure intrinsic controls,
 // then let container queries place them without depending on the window or sidebar width.
+// A card source shown takes over the search, the sort and a Filters button at the row's end.
 import { useId, useLayoutEffect, useRef } from "react"
 import { Input } from "../../ui/Field.tsx"
+import { type SourceBrowse, SourceFiltersButton, SourceSortControl } from "../cardSources/browse.tsx"
 import { type CardBrowse, CardFilterControl, CardSortControl, IncludePersonas } from "./cardBrowse.tsx"
 import { browsable, type ShellLibrary, useGroupCount } from "./shellData.tsx"
 
@@ -11,7 +13,10 @@ export function CardGridControls({
   onChange,
   search,
   onSearch,
-  searchLabel
+  searchLabel,
+  sources,
+  onSource,
+  filtersId = ""
 }: {
   data: ShellLibrary
   browse: CardBrowse
@@ -19,7 +24,16 @@ export function CardGridControls({
   search: string
   onSearch: (search: string) => void
   searchLabel: string
+  /**
+   * The card sources Show offers; while one is shown, the search, sort and Filters work on it
+   * (spec/CARD-SOURCES.md §3.2), and Include personas stays, disabled.
+   */
+  sources?: SourceBrowse | undefined
+  onSource?: (id: string) => void
+  /** The Filters panel's id, for its button. */
+  filtersId?: string
 }) {
+  const shown = sources?.info ?? null
   const name = `card-grid-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`
   const root = useRef<HTMLDivElement>(null)
   const groups = useGroupCount()
@@ -70,6 +84,9 @@ export function CardGridControls({
             groups={groups}
             withPersonas={browse.withPersonas}
             wrap={false}
+            sources={sources?.options ?? []}
+            source={shown?.id ?? null}
+            {...(onSource ? { onSource } : {})}
           />
         </div>
         <div
@@ -77,23 +94,47 @@ export function CardGridControls({
           data-layout-audit-ignore="inset: Unbordered scrolling sort toolbar aligns its controls with the segmented row, rather than enclosing them in a panel"
         >
           <div className="flex w-max items-start gap-1 [&>button]:mt-[3px]">
-            <CardSortControl
-              sort={browse.sort}
-              reversed={browse.reversed}
-              onChange={onChange}
-              className="items-start! [&>button]:mt-[3px]"
-            />
-            <IncludePersonas browse={browse} onChange={onChange} />
+            {shown && sources ? (
+              <>
+                <SourceSortControl browse={sources} />
+                <IncludePersonas
+                  browse={browse}
+                  onChange={onChange}
+                  disabledReason={`Personas are your own cards; ${shown.name} lists characters.`}
+                />
+                <SourceFiltersButton browse={sources} panelId={filtersId} />
+              </>
+            ) : (
+              <>
+                <CardSortControl
+                  sort={browse.sort}
+                  reversed={browse.reversed}
+                  onChange={onChange}
+                  className="items-start! [&>button]:mt-[3px]"
+                />
+                <IncludePersonas browse={browse} onChange={onChange} />
+              </>
+            )}
           </div>
         </div>
         <div className="card-grid-search w-full min-w-0">
-          <Input
-            type="search"
-            aria-label={searchLabel}
-            placeholder="Search by name"
-            value={search}
-            onChange={(event) => onSearch(event.currentTarget.value)}
-          />
+          {shown && sources ? (
+            <Input
+              type="search"
+              aria-label={`Search ${shown.name}`}
+              placeholder={`Search ${shown.name}`}
+              value={sources.remote.text}
+              onChange={(event) => sources.change({ text: event.currentTarget.value })}
+            />
+          ) : (
+            <Input
+              type="search"
+              aria-label={searchLabel}
+              placeholder="Search by name"
+              value={search}
+              onChange={(event) => onSearch(event.currentTarget.value)}
+            />
+          )}
         </div>
       </div>
     </div>

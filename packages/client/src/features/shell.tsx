@@ -167,6 +167,8 @@ function PhoneBar() {
     select: (location) => {
       const params = new URLSearchParams(location.searchStr)
       for (const key of sidebarSearch) params.delete(key)
+      // The same place whatever order its keys come in: writing a sidebar key can reorder the rest.
+      params.sort()
       return `${location.pathname}?${params}`
     }
   })

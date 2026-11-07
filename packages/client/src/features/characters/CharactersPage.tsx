@@ -10,6 +10,8 @@ import { useTitle } from "../shell.tsx"
 import { homeIntro } from "./homeSlots.ts"
 import { browseCards, mixesPersonas } from "./cardBrowse.tsx"
 import { useHomeBrowse } from "./useHomeBrowse.ts"
+import type { HomeBrowse } from "./homeSearch.ts"
+import { SourceChips, SourceFiltersPanel, SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
 import { CardGridControls } from "./CardGridControls.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { browsable, CharacterGrid, shellAtom, type ShellLibrary } from "./shellData.tsx"
@@ -23,6 +25,9 @@ const COLUMNS = "grid grid-cols-2 gap-3 @xl:grid-cols-3 @3xl:grid-cols-4 @4xl:gr
 function Home({ data }: { data: ShellLibrary }) {
   const [browse, setBrowse] = useHomeBrowse()
   const { search } = browse
+  // A card source shown in place of the user's cards; nothing is asked of it otherwise (§5.1).
+  const sources = useSourceBrowse(browse.source, browse.remote, (remote) => setBrowse({ remote }))
+  const source = sources.info
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
   // Then the filters and search, having nothing to work on, stay out of the way too.
@@ -31,7 +36,8 @@ function Home({ data }: { data: ShellLibrary }) {
     data.cards.length === 0 &&
     data.personas.length === 0 &&
     data.archived.length === 0 &&
-    browse.filter !== "personas"
+    browse.filter !== "personas" &&
+    source === null
   )
     return (
       <div className="flex flex-col gap-5">
@@ -62,7 +68,39 @@ function Home({ data }: { data: ShellLibrary }) {
         search={search}
         onSearch={(search) => setBrowse({ search })}
         searchLabel="Search characters and groups"
+        sources={sources}
+        onSource={(id) => setBrowse({ source: id })}
+        filtersId="home-source-filters"
       />
+      {source !== null ? (
+        // The source's cards only: never mixed with the user's (spec/CARD-SOURCES.md §3.2).
+        <>
+          <SourceFiltersPanel browse={sources} id="home-source-filters" />
+          <SourceChips browse={sources} />
+          <SourceResults browse={sources} className={COLUMNS} />
+        </>
+      ) : (
+        <LocalCards data={data} browse={browse} search={search} needle={needle} cards={cards} />
+      )}
+    </div>
+  )
+}
+
+function LocalCards({
+  data,
+  browse,
+  search,
+  needle,
+  cards
+}: {
+  data: ShellLibrary
+  browse: HomeBrowse
+  search: string
+  needle: string
+  cards: ReturnType<typeof browseCards>
+}) {
+  return (
+    <>
       {browse.filter === "personas" && (
         <div>
           <NewCardButton persona />
@@ -105,7 +143,7 @@ function Home({ data }: { data: ShellLibrary }) {
         </CharacterGrid>
       )}
       <SlotOutlet slot={cardSearchExtras} props={{ data, browse, search, className: COLUMNS }} />
-    </div>
+    </>
   )
 }
 

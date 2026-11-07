@@ -15,5 +15,12 @@ export const sidebarSearch = [
   "sideReverse",
   "sidePersonas",
   "sideQ",
-  "sidePinsSort"
+  "sidePinsSort",
+  // A card source's query (spec/CARD-SOURCES.md §3.2).
+  "sideSq",
+  "sideStags",
+  "sideSxtags",
+  "sideSf",
+  "sideSsort",
+  "sideSreverse"
 ] as const

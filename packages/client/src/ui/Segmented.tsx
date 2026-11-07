@@ -2,7 +2,7 @@
 // toggle button (`aria-pressed`) in a labelled group, so the choice is read out with it. An
 // option's `description` is its tooltip and its description for screen readers; on touch
 // screens and narrow windows, where nothing hovers, the chosen option's shows under the row.
-import { type ReactNode, useId } from "react"
+import { Fragment, type ReactNode, useId } from "react"
 import { inlineExplanationClass } from "./Explanation.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
@@ -13,7 +13,13 @@ export function Segmented<Value extends string>(
     className?: string
     /** Compact toolbars keep explanations on hover and focus, without a second line. */
     inlineDescription?: boolean
-    options: ReadonlyArray<{ readonly value: Value; readonly label: ReactNode; readonly description?: string }>
+    options: ReadonlyArray<{
+      readonly value: Value
+      readonly label: ReactNode
+      readonly description?: string
+      /** A divider before it: it starts a different kind of choice (a card source after the filters). */
+      readonly separatorBefore?: boolean
+    }>
   } & (
     | {
         multiple: true
@@ -34,7 +40,11 @@ export function Segmented<Value extends string>(
   const chosen = multiple ? undefined : options.find((option) => isChosen(option.value))?.description
   const row = (
     <div
-      data-layout-audit-ignore="inset: Joined segments share a single outer border"
+      data-layout-audit-ignore={
+        options.some((option) => option.separatorBefore)
+          ? "inset: Joined segments share a single outer border; gap: A divider sets apart a different kind of choice"
+          : "inset: Joined segments share a single outer border"
+      }
       role="group"
       aria-label={label}
       className={`inline-flex w-fit rounded-md border border-border bg-surface p-0.5 ${wrap ? "max-w-full flex-wrap" : "shrink-0"} ${className}`}
@@ -60,10 +70,18 @@ export function Segmented<Value extends string>(
             {option.label}
           </button>
         )
-        return (
+        const tip = (
           <Tooltip key={option.value} label={option.description ?? `Selects ${option.label}.`}>
             {button}
           </Tooltip>
+        )
+        return option.separatorBefore ? (
+          <Fragment key={option.value}>
+            <span aria-hidden="true" data-segment-divider className="mx-1 my-1 w-px self-stretch bg-border" />
+            {tip}
+          </Fragment>
+        ) : (
+          tip
         )
       })}
     </div>
