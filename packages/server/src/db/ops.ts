@@ -1959,6 +1959,12 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
   }),
+  /** Adopts ST's default persona only while the user has no stored default. */
+  Rpc.make("StImportDefaultPersona", {
+    payload: { userId: UserId, importId: Schema.String, entityId: EntityId },
+    success: Schema.Boolean,
+    error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
+  }),
   Rpc.make("StImportBegin", {
     payload: { userId: UserId, importId: Schema.String },
     success: Schema.Void,
