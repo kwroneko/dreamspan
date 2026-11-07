@@ -60,7 +60,7 @@ import { applyShims, withShims } from "./shims.ts"
 import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import type { ModelListError } from "./modelLists.ts"
-import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./registry.ts"
+import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
@@ -101,7 +101,7 @@ export interface StreamRequest {
      */
     readonly breakpoints?: ReadonlyArray<number>
     /** The automatic layout's reusable endpoint, for transforms that place markers there. */
-    readonly stable?: import("./registry.ts").StableEndpoint
+    readonly stable?: StableEndpoint
     /**
      * Fields set over the body pi-ai built, before the registered transforms run: what the
      * caller decides that pi-ai doesn't model, such as the context assembler's exact Chat

@@ -10,7 +10,7 @@
 import type { FixedCapability, ModelUpstream } from "@rp/shared/providers.ts"
 import type { RequestTarget } from "./registry.ts"
 
-export interface ShimRequest {
+interface ShimRequest {
   readonly target: RequestTarget
 }
 
@@ -30,7 +30,7 @@ export interface CompatShim {
   readonly payload?: (payload: Record<string, unknown>, request: ShimRequest) => Record<string, unknown>
 }
 
-export const shimApplies = (shim: CompatShim, kind: string, model: string) =>
+const shimApplies = (shim: CompatShim, kind: string, model: string) =>
   shim.kinds.includes(kind) && shim.model.test(model)
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -46,7 +46,7 @@ const reasoning = (payload: Record<string, unknown>) => {
 }
 
 /** Capabilities the shims that apply give a model, and the fields they fix. */
-export const shimCapabilities = (shims: ReadonlyArray<CompatShim>, kind: string, model: string) => {
+const shimCapabilities = (shims: ReadonlyArray<CompatShim>, kind: string, model: string) => {
   const applied = shims.filter((shim) => shimApplies(shim, kind, model) && (shim.capabilities || shim.fixed))
   if (applied.length === 0) return null
   const capabilities = Object.assign({}, ...applied.map((shim) => shim.capabilities ?? {})) as ModelUpstream
@@ -107,7 +107,7 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
   {
     // F7: "`top_p` is deprecated for this model."
     id: "claude-haiku-5-no-top-p",
-    label: "Claude Haiku 5 takes no top P.",
+    label: "Top P isn’t sent: this model refuses it.",
     kinds: ["anthropic", "openrouter"],
     model: /(?:^|[/.])claude-haiku-5/i,
     payload: (payload) => {
@@ -118,7 +118,7 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
   {
     // F9: "Unsupported parameter: 'top_p' is not supported with this model." with any effort.
     id: "openai-responses-gpt-5.1-5.4-reasoning",
-    label: "GPT-5.1 to 5.4 take no temperature or top P while reasoning; the reasoning summary is requested.",
+    label: "While it reasons, temperature and top P aren’t sent, and its reasoning summary is asked for.",
     kinds: ["openai-responses"],
     model: /(?:^|[/.])gpt-5\.[1-4](?:[-.]|$)/i,
     payload: (payload) => {
@@ -136,7 +136,7 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     // 'none'." A request with tools (agent tools, a schema prefill) sends effort none there;
     // Responses takes both.
     id: "openai-chat-gpt-5.4-tools-no-effort",
-    label: "With tools, GPT-5.4 on Chat Completions runs without reasoning; a Responses connection keeps it.",
+    label: "Requests with tools run without reasoning here. A Responses connection keeps it.",
     kinds: ["openai-chat"],
     model: /(?:^|[/.])gpt-5\.4(?:[-.]|$)/i,
     payload: (payload) => {
@@ -148,7 +148,7 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
   {
     // F11: "Reasoning is mandatory for this endpoint and cannot be disabled."
     id: "openrouter-gemini-4-argon-reasoning-on",
-    label: "Gemini 4 Argon can't turn reasoning off.",
+    label: "Reasoning stays on: this model can’t turn it off.",
     kinds: ["openrouter"],
     model: /^google\/gemini-4-argon/i,
     capabilities: { thinkingLevels: { off: null } }
@@ -156,7 +156,7 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
   {
     // F13: a trailing assistant message is refused ("Provider returned error").
     id: "openrouter-gemini-no-prefill",
-    label: "Gemini on OpenRouter takes no reply prefill; Continue sends its nudge instead.",
+    label: "No prefill: this provider refuses one for Gemini. Continue asks the model to go on instead.",
     kinds: ["openrouter"],
     model: /^google\/gemini/i,
     capabilities: { prefill: "none" },

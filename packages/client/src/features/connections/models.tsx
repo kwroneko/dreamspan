@@ -1,4 +1,5 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { AboutHint, LabelWithHelp } from "../../ui/AboutHint.tsx"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
@@ -518,14 +519,22 @@ export function ModelSettingsEditor({
             </Field>
           </div>
           {model.upstream.shims && model.upstream.shims.length > 0 && (
-            <div className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-text">Provider rules</span>
-              <ul className="list-disc pl-5 text-muted">
-                {model.upstream.shims.map((shim) => (
-                  <li key={shim.id}>{shim.label}</li>
+            <section aria-label="Provider rules" data-provider-rules="" className="mt-4 flex flex-col gap-1">
+              <LabelWithHelp
+                help={
+                  <AboutHint heading="Provider rules">
+                    What this provider refuses or needs for this model. Every request follows them.
+                  </AboutHint>
+                }
+              >
+                <span className="font-medium text-text">Provider rules</span>
+              </LabelWithHelp>
+              <ul className="list-disc pl-5 text-sm text-muted">
+                {model.upstream.shims.map((rule) => (
+                  <li key={rule.id}>{rule.label}</li>
                 ))}
               </ul>
-            </div>
+            </section>
           )}
         </div>
       </Section>

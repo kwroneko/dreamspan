@@ -162,7 +162,7 @@ export const lookupCatalogs = async (catalogs: ReadonlyArray<ModelCatalog>, key:
  * Fills a model's window (and its output limit, when also missing) from the registered catalogs
  * when neither the list nor the kind's own catalog reported it, recording where they came from.
  */
-export const fillFromCatalogs = async (
+const fillFromCatalogs = async (
   catalogs: ReadonlyArray<ModelCatalog>,
   kind: string,
   model: ListedModel

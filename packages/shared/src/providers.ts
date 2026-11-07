@@ -202,8 +202,7 @@ export const FixedCapability = Schema.Literals(["prefill", "thinkingLevels", "to
 export type FixedCapability = typeof FixedCapability.Type
 
 /** A compatibility shim that applies to a model (the server's registered shims), as the user reads it. */
-export const ModelShim = Schema.Struct({ id: Schema.String, label: Schema.String })
-export type ModelShim = typeof ModelShim.Type
+const ModelShim = Schema.Struct({ id: Schema.String, label: Schema.String })
 
 /** What pi-ai's catalog and the upstream list report. Rewritten by every refresh. */
 export const ModelUpstream = Schema.Struct({
