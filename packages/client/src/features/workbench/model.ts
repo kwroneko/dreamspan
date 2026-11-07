@@ -438,11 +438,26 @@ export const neighbours = (layout: Layout, frameId: string) => {
   return result
 }
 
-/** The frames touching the column's left edge (where the hidden sidebar's button goes). */
-export const leftEdgeFrames = (node: Node): ReadonlySet<string> => {
-  if (node.type === "frame") return new Set([node.id])
-  if (node.direction === "row") return leftEdgeFrames(node.children[0]!)
-  return new Set(node.children.flatMap((c) => [...leftEdgeFrames(c)]))
+/**
+ * Tab mode: the frames show their strips (a frame with two tabs, or a split). The sidebar's show
+ * button and the side panel's toggle then leave the page headers for the strips (owner,
+ * 2026-11-07; DESIGN §10.1).
+ */
+export const showsStrips = (layout: Layout) => isSplit(layout) || (frames(layout.root)[0]?.tabs.length ?? 0) >= 2
+
+/**
+ * The frames whose strips carry the shell's buttons in tab mode: the top-left one the hidden
+ * sidebar's show button, the top-right one the side panel's toggle. A maximized frame is both.
+ */
+export const stripCorners = (layout: Layout): { topLeft: string; topRight: string } => {
+  const shown = layout.maximized ? frames(layout.root).find((f) => f.id === layout.maximized) : undefined
+  const corner = (node: Node, right: boolean): string => {
+    if (node.type === "frame") return node.id
+    const children = node.children
+    return corner(node.direction === "row" && right ? children[children.length - 1]! : children[0]!, right)
+  }
+  const root = shown ?? layout.root
+  return { topLeft: corner(root, false), topRight: corner(root, true) }
 }
 
 // --- Saved layouts: whatever is read is repaired into a valid layout, or dropped.

@@ -11,9 +11,10 @@ export const appBanners = defineSlot<Record<string, never>>("app.banners")
 /**
  * The desktop sidebar's hide and show buttons: at the end of its header row while it shows
  * (`sidebar`), at the start of the page's header while it's hidden (`header`: the chat's,
- * or the bar above any other page).
+ * or the bar above any other page), or in tab mode at the start of the top-left frame's tab
+ * strip instead (`strip`, features/workbench).
  */
-export const sidebarToggle = defineSlot<{ place: "sidebar" | "header" }>("shell.sidebar.toggle")
+export const sidebarToggle = defineSlot<{ place: "sidebar" | "header" | "strip" }>("shell.sidebar.toggle")
 /**
  * What fills the center column: the first entry registered (the workbench's frames and tabs,
  * features/workbench), else the routed page itself.
@@ -42,7 +43,7 @@ import { ShellBrowser } from "./characters/ShellBrowser.tsx"
 import { ShellNavigation, useShellNavigation } from "./characters/shellData.tsx"
 import { sidebarSearch } from "./characters/sidebarSearch.ts"
 import { setPageTitle, useNotices } from "./notices.tsx"
-import { useTabAtLeftEdge, useTabFocused, useTabMeta } from "./workbench/tab.tsx"
+import { useTabFocused, useTabInStrips, useTabMeta } from "./workbench/tab.tsx"
 
 /**
  * Sets the browser tab's title while a screen is shown, and names its workbench tab; only the
@@ -257,20 +258,24 @@ function useSidebarHidden(): [boolean, (hidden: boolean) => void] {
   return [hidden, set]
 }
 
-/** Hides the sidebar from its header row, or shows it again from the page's header. */
-function SidebarToggle({ place }: { place: "sidebar" | "header" }) {
+/**
+ * Hides the sidebar from its header row, or shows it again from the page's header, or in tab
+ * mode from the top-left tab strip (owner, 2026-11-07: the headers then have none).
+ */
+function SidebarToggle({ place }: { place: "sidebar" | "header" | "strip" }) {
   const [hidden, setHidden] = useSidebarHidden()
   const ref = useRef<HTMLButtonElement>(null)
-  // Beside the sidebar's place: a frame further right leaves it to the leftmost.
-  const leftEdge = useTabAtLeftEdge()
-  const shown = place === "sidebar" ? !hidden : hidden && leftEdge
+  const strips = useTabInStrips()
+  const shown = place === "sidebar" ? !hidden : hidden && (place === "strip" || !strips)
+  // Hiding the sidebar focuses the show button that comes: the header's or the strip's.
+  const focusPlace = place === "sidebar" ? "sidebar" : "header"
   useEffect(() => {
     // The one on screen: a page can hold another out of view (the tablet bar's, in a chat).
-    if (shown && focusNext === place && ref.current?.checkVisibility()) {
+    if (shown && focusNext === focusPlace && ref.current?.checkVisibility()) {
       focusNext = null
       ref.current?.focus()
     }
-  }, [shown, place])
+  }, [shown, focusPlace])
   if (!shown) return null
   return place === "sidebar" ? (
     <IconButton
@@ -290,7 +295,7 @@ function SidebarToggle({ place }: { place: "sidebar" | "header" }) {
       hint="Click to show the sidebar: your chats, characters and the menu"
       icon="sidebar"
       // A phone's and a tablet's sidebar is the menu over the page; this is the desktop's.
-      className="max-lg:hidden"
+      className={place === "strip" ? "size-7 max-lg:hidden" : "max-lg:hidden"}
       onClick={() => {
         focusNext = "sidebar"
         setHidden(false)

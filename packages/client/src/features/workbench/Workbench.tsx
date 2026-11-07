@@ -10,7 +10,9 @@
 // and nothing hidden is left in the page to find or to focus.
 import { createMemoryHistory, RouterProvider, useRouter } from "@tanstack/react-router"
 import {
+  createContext,
   type ReactNode,
+  useContext,
   useEffect,
   useEffectEvent,
   useLayoutEffect,
@@ -27,7 +29,8 @@ import { ContextMenu, Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { UnsavedScope, UnsavedTracker } from "../../ui/UnsavedChanges.tsx"
 import { Tooltip, IconButton } from "../../ui/Tooltip.tsx"
-import { CenterPage } from "../shell.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { CenterPage, sidebarToggle } from "../shell.tsx"
 import { PanelPlaceholder } from "../chat/PanelPlaceholder.tsx"
 import { defaultTitle, tabKind } from "./kinds.ts"
 import {
@@ -38,6 +41,7 @@ import {
   frames,
   isSplit,
   type Layout,
+  stripCorners,
   neighbours,
   type Node,
   type Split,
@@ -63,6 +67,9 @@ const subscribeWide = (listener: () => void) => {
 }
 const useWideScreen = () => useSyncExternalStore(subscribeWide, () => matchMedia(WIDE).matches)
 
+/** Sets where the side panel's toggle goes: the top-right strip's end (tab.tsx `usePanelTogglePlace`). */
+const PanelToggleHostRef = createContext<(element: HTMLElement | null) => void>(() => {})
+
 /** Registered in the shell's center column (`centerColumn`). */
 export function Workbench() {
   const userId = useSession().user.id
@@ -81,6 +88,7 @@ function WorkbenchFor({ userId }: { userId: string }) {
   const wide = useWideScreen()
   const [sideHost, setSideHost] = useState<HTMLElement | null>(null)
   const [portraitHost, setPortraitHost] = useState<HTMLElement | null>(null)
+  const [panelToggleHost, setPanelToggleHost] = useState<HTMLElement | null>(null)
   const [slots, setSlots] = useState<ReadonlyMap<string, HTMLElement>>(new Map())
   /** A frame's body, where its shown tab's element goes; the returned function forgets it. */
   const slotRef: SlotRef = (frameId, element) => {
@@ -105,19 +113,21 @@ function WorkbenchFor({ userId }: { userId: string }) {
   // A maximized frame shows alone; the others keep their tabs (VS Code's Maximize Editor Group).
   const maximized = layout.maximized ? frames(layout.root).find((f) => f.id === layout.maximized) : undefined
   return (
-    <WorkbenchContext value={{ store, sideHost, portraitHost }}>
-      <div ref={setOuter} className="flex min-h-0 min-w-0 flex-1">
-        <div ref={setPortraitHost} className="contents" data-portrait-host />
-        <div ref={setCenter} data-workbench className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {wide ? (
-            <NodeView node={maximized ?? layout.root} layout={layout} store={store} slotRef={slotRef} />
-          ) : (
-            <PhoneFrame frame={shownFrame} layout={layout} store={store} slotRef={slotRef} />
-          )}
+    <WorkbenchContext value={{ store, sideHost, portraitHost, panelToggleHost }}>
+      <PanelToggleHostRef value={setPanelToggleHost}>
+        <div ref={setOuter} className="flex min-h-0 min-w-0 flex-1">
+          <div ref={setPortraitHost} className="contents" data-portrait-host />
+          <div ref={setCenter} data-workbench className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {wide ? (
+              <NodeView node={maximized ?? layout.root} layout={layout} store={store} slotRef={slotRef} />
+            ) : (
+              <PhoneFrame frame={shownFrame} layout={layout} store={store} slotRef={slotRef} />
+            )}
+          </div>
+          <div ref={setSideHost} className="contents" data-side-host />
+          {placeholder && <PanelPlaceholder width={placeholder.width} onHide={placeholder.hide} />}
         </div>
-        <div ref={setSideHost} className="contents" data-side-host />
-        {placeholder && <PanelPlaceholder width={placeholder.width} onHide={placeholder.hide} />}
-      </div>
+      </PanelToggleHostRef>
       {allTabs(layout).map((tab) => {
         const frame = frameOfTab(layout, tab.id)
         const shown =
@@ -644,6 +654,10 @@ function TabStrip({
 }) {
   const focused = layout.focused === frame.id
   const [over, setOver] = useState<number | null>(null)
+  // Tab mode's shell buttons (owner, 2026-11-07): the hidden sidebar's Show at the top-left
+  // strip's start, the side panel's toggle at the top-right strip's end. Phones have neither.
+  const corners = stripCorners(layout)
+  const setPanelToggleHost = useContext(PanelToggleHostRef)
   const drop = (event: React.DragEvent, index: number) => {
     const tabId = event.dataTransfer.getData(TAB_MIME)
     const picture = event.dataTransfer.getData(PICTURE_TAB_MIME)
@@ -669,6 +683,12 @@ function TabStrip({
       onDragLeave={() => setOver(null)}
       onDrop={(event) => drop(event, tabs.length)}
     >
+      {!phone && corners.topLeft === frame.id && (
+        // Empty while the sidebar shows; the first tab moves right only while it's hidden.
+        <div className="flex shrink-0 items-center px-2 empty:hidden">
+          <SlotOutlet slot={sidebarToggle} props={{ place: "strip" }} />
+        </div>
+      )}
       <div
         role="tablist"
         aria-label="Open tabs"
@@ -717,6 +737,9 @@ function TabStrip({
             />
           )}
           <FrameMenu frame={frame} layout={layout} store={store} />
+          {corners.topRight === frame.id && (
+            <span ref={setPanelToggleHost} className="contents" data-panel-toggle-host />
+          )}
         </div>
       )}
     </div>

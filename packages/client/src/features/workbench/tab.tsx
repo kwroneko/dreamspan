@@ -4,7 +4,7 @@
 import { createContext, type ReactNode, useContext, useEffect, useSyncExternalStore } from "react"
 import { type DropTarget, dropTargetAt } from "./dropOpen.ts"
 import { itemKey } from "./kinds.ts"
-import { findTab, focusedFrame, focusedTab, frameOfTab, leftEdgeFrames } from "./model.ts"
+import { findTab, focusedFrame, focusedTab, frameOfTab, showsStrips } from "./model.ts"
 import type { WorkbenchStore } from "./store.ts"
 
 export interface TabContextValue {
@@ -20,6 +20,8 @@ export const WorkbenchContext = createContext<{
   readonly sideHost: HTMLElement | null
   /** Where the portrait column goes, left of the frames. */
   readonly portraitHost: HTMLElement | null
+  /** Where the side panel's toggle goes in tab mode: the end of the top-right frame's strip. */
+  readonly panelToggleHost: HTMLElement | null
 } | null>(null)
 
 const noop = () => () => {}
@@ -37,14 +39,30 @@ export function useTabFocused() {
   )
 }
 
-/** In a frame along the column's left edge (where the hidden sidebar's button goes). */
-export function useTabAtLeftEdge() {
+/**
+ * Tab mode: this view's frames show their strips, which then carry the sidebar's show button
+ * and the side panel's toggle instead of the page's header (owner, 2026-11-07). False outside
+ * a workbench, and while one tab fills the column alone.
+ */
+export function useTabInStrips() {
   const tab = useContext(TabContext)
-  return useSyncExternalStore(tab?.store.subscribe ?? noop, () => {
-    if (!tab) return true
-    const frame = frameOfTab(tab.store.layout, tab.tabId)
-    return !frame || leftEdgeFrames(tab.store.layout.root).has(frame.id)
-  })
+  return useSyncExternalStore(tab?.store.subscribe ?? noop, () => (tab ? showsStrips(tab.store.layout) : false))
+}
+
+/**
+ * Where a chat's header renders its side panel toggle: `inline` in the header (one view alone,
+ * a phone, outside a workbench), else in the top-right strip while this tab owns the panel
+ * (`host`, null while another chat has it or before the strip is up).
+ */
+export function usePanelTogglePlace(wide: boolean): { inline: true } | { inline: false; host: HTMLElement | null } {
+  const tab = useContext(TabContext)
+  const workbench = useContext(WorkbenchContext)
+  const strips = useTabInStrips()
+  const owner = useSyncExternalStore(tab?.store.subscribe ?? noop, () =>
+    tab ? tab.store.panelOwner(wide) === tab.tabId : false
+  )
+  if (!tab || !wide || !strips) return { inline: true }
+  return { inline: false, host: owner ? (workbench?.panelToggleHost ?? null) : null }
 }
 
 /** On screen: the shown tab of its frame (on a phone, of the focused frame only). */
