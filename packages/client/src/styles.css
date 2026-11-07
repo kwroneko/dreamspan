@@ -741,6 +741,22 @@ main:has(> [data-fill]) {
 .fork-row:has([aria-current="page"]) {
   --fork-row-background: var(--surface-raised);
 }
+/* A frame's tab strip too narrow for all its buttons (Show, Maximize, ⋯, the panel's toggle,
+ * with no room left for tabs) leaves Maximize to the ⋯ menu's own item: 6.5rem holds Maximize,
+ * ⋯ and the panel's toggle; 9.25rem also the hidden sidebar's Show. */
+[data-tab-strip] {
+  container: tab-strip / inline-size;
+}
+@container tab-strip (width < 6.5rem) {
+  [data-strip-maximize] {
+    display: none;
+  }
+}
+@container tab-strip (width < 9.25rem) {
+  [data-tab-strip]:has([data-strip-show] > *) [data-strip-maximize] {
+    display: none;
+  }
+}
 [data-row-portraits] > [data-portrait] {
   position: relative;
   z-index: 1;
