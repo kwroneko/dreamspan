@@ -1294,6 +1294,53 @@ describe("the context assembler", () => {
     const settled = await depthBound({ maxDepth: 1 })
     expect(contents(settled)[settled.request.breakpoints[0]!.message]).toBe("user: six")
   })
+
+  it("sends older messages' HTML as the chat chose (context.htmlDepth), keeping the cache layout", async () => {
+    const panel = ["```html", '<html><body><div class="hp">HP <b>12</b>/20</div></body></html>', "```"].join("\n")
+    const withDepth = (value: StateEventData["value"] | null) =>
+      assembled(
+        chat({
+          messages: [
+            { side: "assistant", content: `Mira pours the tea. <span class="mood">calm</span>\n\n${panel}` },
+            { side: "user", content: "two" },
+            { side: "assistant", content: "<b>three</b> <status>HP 9</status>" },
+            { side: "user", content: "four" },
+            { side: "assistant", content: "Five, with <i>no</i> change yet." },
+            { side: "user", content: "six" }
+          ],
+          ...(value === null
+            ? {}
+            : {
+                events: [
+                  { depth: null, event: { scope: null, data: { key: "context.html_depth", value } as StateEventData } }
+                ]
+              })
+        })
+      )
+    // As written (no event, the default): nothing changes, and the history's breakpoint is the last message.
+    const written = await withDepth(null)
+    expect(contents(written)).toContain(`assistant: Mira pours the tea. <span class="mood">calm</span>\n\n${panel}`)
+    expect(contents(written)[written.request.breakpoints[0]!.message]).toBe("user: six")
+
+    // Text only after 2: the tags go, their text stays, a tag that isn't HTML's stays.
+    const text = await withDepth({ mode: "text", n: 2 })
+    expect(contents(text)).toContain("assistant: Mira pours the tea. calm\n\nHP 12/20")
+    expect(contents(text)).toContain("assistant: three <status>HP 9</status>")
+    // Within the 2, as written. The one that will change at depth 2 is volatile: the
+    // breakpoint goes before it, as for a depth-bound script.
+    expect(contents(text)).toContain("assistant: Five, with <i>no</i> change yet.")
+    expect(contents(text)[text.request.breakpoints[0]!.message]).toBe("user: four")
+
+    // Leave out panels after 2: the document block goes whole.
+    const panels = await withDepth({ mode: "panels", n: 2 })
+    expect(contents(panels)).toContain("assistant: Mira pours the tea. calm")
+    expect(contents(panels).join("\n")).not.toContain("HP 12/20")
+
+    // Past N for good, or nothing to change: the breakpoint stays on the last message.
+    const settled = await withDepth({ mode: "text", n: 1 })
+    expect(contents(settled)).toContain("assistant: Five, with no change yet.")
+    expect(contents(settled)[settled.request.breakpoints[0]!.message]).toBe("user: six")
+  })
 })
 
 describe("several characters (DESIGN §5.0–§5.4)", () => {

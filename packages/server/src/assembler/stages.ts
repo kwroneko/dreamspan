@@ -25,7 +25,15 @@ import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
-import { branchOwned, type ChatState, foldState, noteSwitches, swappedCard } from "@rp/shared/state.ts"
+import {
+  branchOwned,
+  type ChatState,
+  DEFAULT_HTML_DEPTH,
+  foldState,
+  noteSwitches,
+  swappedCard
+} from "@rp/shared/state.ts"
+import { htmlDepthForm } from "./htmlDepth.ts"
 import { anyOf, noteCondition } from "@rp/shared/docs/note.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
@@ -391,7 +399,8 @@ const noteGateStage = sync("note-gate", (assembly) => {
 const modeOf = (state: ChatState): Mode => ({
   projection: state.rolesProjection ?? "by_writer",
   loreBelowHistory: state.loreBelowHistory ?? true,
-  cardsRotation: state.cardsRotation ?? false
+  cardsRotation: state.cardsRotation ?? false,
+  htmlDepth: state.htmlDepth ?? DEFAULT_HTML_DEPTH
 })
 
 const modeStage = sync("mode", (assembly) => {
@@ -2701,6 +2710,40 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
     })
 })
 
+/**
+ * "HTML in older messages sent to the model" (`context.htmlDepth`, spec/HTML-MESSAGES.md §3.6):
+ * from depth N on, a message's text after its prompt scripts loses its HTML (`htmlDepthForm`).
+ * Its prefix stays cacheable as the scripts' does: a message that will change when it reaches
+ * depth N is volatile until then. As written (the default) changes nothing; nor does a summary
+ * request, which reads the messages as the scripts leave them.
+ */
+const htmlDepthStage = sync("context.htmlDepth", (assembly) => {
+  const { mode, n } = need(assembly, "mode").htmlDepth
+  if (mode === "as_written" || assembly.request.summaryJob) return
+  const projected = need(assembly, "projected")
+  const scripted = new Map(need(assembly, "scripted"))
+  const depthOf = (i: number) => projected.length - 1 - i
+  // Templates the history stage didn't run the scripts on run here, as lore scanning does.
+  const rest = projected.flatMap((p, i) => (scripted.get(p.entry.versionId)?.depth === depthOf(i) ? [] : [i]))
+  const ran = applyScripts(
+    assembly,
+    need(assembly, "scripts"),
+    rest.map((i) => ({
+      text: need(assembly, "macros").text(projected[i]!.piece),
+      placement: placementOf(projected[i]!.entry, need(assembly, "cast")),
+      depth: depthOf(i)
+    }))
+  )
+  rest.forEach((index, i) => scripted.set(projected[index]!.entry.versionId, { ...ran[i]!, depth: depthOf(index) }))
+  projected.forEach((p, i) => {
+    const read = scripted.get(p.entry.versionId)!
+    const form = htmlDepthForm(read.text, mode)
+    if (form === read.text) return
+    scripted.set(p.entry.versionId, depthOf(i) >= n ? { ...read, text: form } : { ...read, volatile: true })
+  })
+  assembly.scripted = scripted
+})
+
 const builtinStages: ReadonlyArray<AssemblerStage> = [
   pathStage,
   stateStage,
@@ -2723,6 +2766,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   replacementsStage,
   loreScanStage,
   loreActivationStage,
+  htmlDepthStage,
   endOfRequestStage,
   composeStage,
   messagesStage,

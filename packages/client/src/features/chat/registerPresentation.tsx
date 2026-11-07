@@ -71,6 +71,9 @@ const ReplyOrderSection = deferred<Parameters<typeof import("./ReplyOrder.tsx").
 const CardLayoutSetting = deferred<Parameters<typeof import("./CardLayoutSetting.tsx").CardLayoutSetting>[0]>(() =>
   import("./CardLayoutSetting.tsx").then((m) => ({ default: m.CardLayoutSetting }))
 )
+const HtmlDepthSetting = deferred<Parameters<typeof import("./HtmlDepthSetting.tsx").HtmlDepthSetting>[0]>(() =>
+  import("./HtmlDepthSetting.tsx").then((m) => ({ default: m.HtmlDepthSetting }))
+)
 const OneReplySection = deferred<Parameters<typeof import("./ReplyOrder.tsx").OneReplySection>[0]>(() =>
   import("./ReplyOrder.tsx").then((m) => ({ default: m.OneReplySection }))
 )
@@ -144,6 +147,7 @@ export const registerPresentation = () => [
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
   chatSettingSections.register({ id: "settings.context", order: 15, component: SharedContextSetting }),
+  chatSettingSections.register({ id: "settings.html-depth", order: 16, component: HtmlDepthSetting }),
   chatSettingSections.register({ id: "settings.card-layout", order: 30, component: CardLayoutSetting }),
   chatSettingSections.register({ id: "settings.who-replies", order: 40, component: ReplyChoicesSetting }),
   chatSettingSections.register({ id: "settings.macro-bindings", order: 80, component: MacroBindings }),

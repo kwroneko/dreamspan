@@ -1,7 +1,7 @@
 import type { LoreReceipt, LoreTimingState } from "./loreTiming.ts"
 // The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §15).
 import type { SourceActivation } from "@rp/shared/inspectorApi.ts"
-import type { FoldableEvent, ChatState } from "@rp/shared/state.ts"
+import type { FoldableEvent, ChatState, HtmlDepth } from "@rp/shared/state.ts"
 import type { FrozenValues, MacroLookup } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
@@ -198,6 +198,8 @@ export interface Mode {
   readonly loreBelowHistory: boolean
   /** Card-swap (`cards.rotation`, DESIGN §5.2): only the speaker's card where the preset puts cards; off unless turned on. */
   readonly cardsRotation: boolean
+  /** HTML in older messages sent to the model (`context.html_depth`); as written unless chosen. */
+  readonly htmlDepth: HtmlDepth
 }
 
 /** A message's text after the regex scripts, at the depth they ran at. */
