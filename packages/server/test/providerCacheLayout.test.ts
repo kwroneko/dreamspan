@@ -150,7 +150,32 @@ describe("default cache markers", () => {
       const mock = yield* resource(completionReply)
       const api = yield* client()
       const { chat } = yield* generateReply(api, {
+        connection: { provider: "openai", kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
+        modelKey: "gpt-5.4-nano",
+        model: {}
+      })
+      assert.strictEqual(mock.requests().at(-1)!.body!.prompt_cache_key, chat.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a custom server gets no prompt_cache_key unless its connection turns it on", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource(completionReply)
+      const api = yield* client()
+      yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
+        modelKey: "gpt-5.4-nano",
+        model: {}
+      })
+      assert.notProperty(mock.requests().at(-1)!.body!, "prompt_cache_key")
+      const { chat } = yield* generateReply(api, {
+        connection: {
+          provider: "openai-compatible",
+          kind: "openai-chat",
+          baseUrl: mock.url,
+          providerSettings: { promptCacheKey: true }
+        },
         modelKey: "gpt-5.4-nano",
         model: {}
       })
@@ -174,7 +199,7 @@ describe("default cache markers", () => {
       )
       const api = yield* client()
       const { chat } = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
+        connection: { provider: "openai", kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
         modelKey: "gpt-5.4-nano",
         model: { cacheLayout: { minTokens: 1 } }
       })

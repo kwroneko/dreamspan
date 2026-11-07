@@ -7,7 +7,8 @@ import type { Effect } from "effect"
 import { Context, Layer } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
 import type { ListedModel, ListRequest, ModelListError } from "./modelLists.ts"
-import type { Price } from "@rp/shared/providers.ts"
+import type { Price, ProviderSettings } from "@rp/shared/providers.ts"
+import type { ProviderDefinition } from "@rp/shared/providerDefinitions.ts"
 import type { Cost, TokenCounts } from "@rp/shared/usage.ts"
 import type { UserPricing } from "./userCosts.ts"
 import type { Capture } from "./usage.ts"
@@ -45,6 +46,23 @@ export interface ProviderKindEntry {
    * wire call. Such a kind's connections are refused for replies and left out of model pickers.
    */
   readonly decide?: DecisionWire
+  /**
+   * Wraps the request's `fetch` for a provider whose framing or signing differs from the wire API
+   * the SDK speaks (Anthropic Messages on AWS Bedrock: `bedrock.ts`). It's given the controlled
+   * fetch, so routing, redirects and the request's secrets stay ours.
+   */
+  readonly transport?: (fetch: typeof globalThis.fetch, request: KindTransportRequest) => typeof globalThis.fetch
+  /** Parts of a key that are secrets on their own (an AWS access key ID and its secret). */
+  readonly secretsOf?: (apiKey: string) => ReadonlyArray<string>
+  /** Its model list is a catalog, fetched from nowhere: a test of the connection sends nothing. */
+  readonly listsCatalog?: boolean
+}
+
+/** What a kind's transport is given besides the fetch it wraps. */
+export interface KindTransportRequest {
+  readonly apiKey: string | null
+  readonly baseUrl: string
+  readonly settings: ProviderSettings
 }
 
 /** One decision request on the wire (reference-harness's System-One body), sent with the connection's fetch. */
@@ -74,6 +92,8 @@ export interface DecisionWire {
 export interface RequestTarget {
   readonly kind: string
   readonly api: string
+  /** The connection's provider (providerDefinitions.ts), where one is known. */
+  readonly provider?: string
   /** The model's key on its connection (`anthropic/claude-haiku-4.5`); absent where no model applies. */
   readonly model?: string
 }
@@ -107,6 +127,8 @@ export interface RequestTransform {
       readonly stable?: StableEndpoint
       readonly cacheRetention?: "none" | "short" | "long"
       readonly sessionId?: string
+      /** The connection's provider settings in effect: its defaults with the user's changes. */
+      readonly settings?: ProviderSettings
     }
   ) => Record<string, unknown>
 }
@@ -150,6 +172,8 @@ export interface CostFormula {
 }
 
 export interface ProviderRegistryShape {
+  /** The first choice for a connection: its API types, address, key and caching defaults. */
+  readonly providers: Registry<ProviderDefinition>
   readonly kinds: Registry<ProviderKindEntry>
   readonly transforms: Registry<RequestTransform>
   readonly observers: Registry<ResponseObserver>
@@ -173,6 +197,7 @@ export class ProviderRegistry extends Context.Service<ProviderRegistry, Provider
 /** An empty registry; `builtins.ts` provides the layer that fills it. */
 export const empty = Layer.sync(ProviderRegistry, () =>
   ProviderRegistry.of({
+    providers: makeRegistry<ProviderDefinition>(),
     kinds: makeRegistry<ProviderKindEntry>(),
     transforms: makeRegistry<RequestTransform>(),
     observers: makeRegistry<ResponseObserver>(),

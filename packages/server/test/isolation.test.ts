@@ -660,6 +660,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   PreviewStSettings: { global: "pure preview of the supplied file; no stored user data is read or changed" },
   ListExportFormats: { global: "the instance's worker exporter registry, with no user documents" },
   ListProviderKinds: { global: "the instance's provider registry, the same for every user" },
+  ListProviders: { global: "the instance's provider definitions, the same for every user" },
   GetCostSettings: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

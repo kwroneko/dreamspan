@@ -25,7 +25,7 @@ for (const path of ["/settings/keys", "/settings/connections", "/settings/connec
     await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible()
     await expect(page.getByRole("status").filter({ hasText: "Loading" })).toHaveCount(0)
 
-    const data = ["ListProviderKinds", "ListConnections", "ListCredentials"]
+    const data = ["ListProviderKinds", "ListProviders", "ListConnections", "ListCredentials"]
     const firstReply = events.findIndex((event) => data.some((tag) => event === `reply ${tag}`))
     const requestedBefore = events.slice(0, firstReply).filter((event) => event.startsWith("request "))
     expect(requestedBefore).toEqual(expect.arrayContaining(data.map((tag) => `request ${tag}`)))

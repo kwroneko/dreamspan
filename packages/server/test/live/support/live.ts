@@ -402,6 +402,14 @@ export interface LiveChatOptions {
   readonly apiKey?: string
 }
 
+/** The provider each route reaches (providerDefinitions.ts). */
+const routeProviders: Readonly<Record<string, string>> = {
+  anthropic: "anthropic",
+  "openai": "openai",
+  openrouter: "openrouter",
+  deepseek: "deepseek"
+}
+
 export const liveChat = (
   api: Api,
   recorder: { url: string; exchanges: Array<Exchange> },
@@ -413,7 +421,11 @@ export const liveChat = (
     const me = yield* api.Whoami()
     const userId = me.id as UserId
     const nonce = crypto.randomUUID().slice(0, 8)
+    // The route reaches that provider itself, so the connection is that provider's
+    // (OpenAI's prompt_cache_key and cache contract included), not a custom server's.
+    const provider = routeProviders[options.route.split("/")[0]!]
     const connection = yield* api.CreateConnection({
+      ...(provider ? { provider } : {}),
       kind: options.kind,
       settings: {
         name: `Live ${options.kind}`,

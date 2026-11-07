@@ -780,6 +780,10 @@ export const baseline: ReadonlyArray<string> = [
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL REFERENCES users(id),
     name TEXT NOT NULL,
+    -- The provider chosen for it (providerDefinitions.ts), which sets its defaults, and the
+    -- defaults the user changed: only the changes are stored.
+    provider TEXT NOT NULL,
+    provider_settings_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(provider_settings_json)),
     kind TEXT NOT NULL,
     api TEXT NOT NULL,
     -- NULL means the kind's default.
@@ -1183,10 +1187,11 @@ export const baseline: ReadonlyArray<string> = [
       PRIMARY KEY (chat_id, operation_id)
     ) STRICT`,
   `CREATE TRIGGER connections_cache_revision AFTER UPDATE OF base_url, proxy_mode, proxy_url_enc,
-    credential_id, headers_enc, compat_json, deleted_at, purged_at ON connections
+    credential_id, headers_enc, compat_json, provider_settings_json, deleted_at, purged_at ON connections
     WHEN NEW.base_url IS NOT OLD.base_url OR NEW.proxy_mode IS NOT OLD.proxy_mode
       OR NEW.proxy_url_enc IS NOT OLD.proxy_url_enc OR NEW.credential_id IS NOT OLD.credential_id
       OR NEW.headers_enc IS NOT OLD.headers_enc OR NEW.compat_json IS NOT OLD.compat_json
+      OR NEW.provider_settings_json IS NOT OLD.provider_settings_json
       OR NEW.deleted_at IS NOT OLD.deleted_at OR NEW.purged_at IS NOT OLD.purged_at
     BEGIN UPDATE connections SET cache_revision = OLD.cache_revision + 1 WHERE id = NEW.id; END`,
   `CREATE TRIGGER credentials_cache_revision AFTER UPDATE OF key_enc ON credentials

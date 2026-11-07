@@ -4,6 +4,7 @@ import { admitRequest } from "./lcmBackfill.ts"
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionSettings } from "@rp/shared/providers.ts"
+import { defaultProviderId } from "@rp/shared/providerDefinitions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -29,7 +30,10 @@ const settingsColumns = (settings: ConnectionSettings) => ({
   cache_ttl_s: settings.cacheTtlS,
   max_concurrent: settings.maxConcurrent,
   preset_override_ref_id: settings.presetOverrideRefId,
-  ...(settings.modelIdPrefix !== undefined ? { model_id_prefix: settings.modelIdPrefix } : {})
+  ...(settings.modelIdPrefix !== undefined ? { model_id_prefix: settings.modelIdPrefix } : {}),
+  ...(settings.providerSettings !== undefined
+    ? { provider_settings_json: JSON.stringify(settings.providerSettings) }
+    : {})
 })
 
 export const makeProviderWriteHandlers = Effect.gen(function* () {
@@ -113,7 +117,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         const revision = yield* writeSetting(sql, "user", userId, "cost", rules, expectedRevision)
         return { revision, rules }
       }).pipe(transaction(sql, "SetCostSettings")),
-    CreateConnection: ({ userId, connectionId, kind, api, settings, credential }) =>
+    CreateConnection: ({ userId, connectionId, provider, kind, api, settings, credential }) =>
       Effect.gen(function* () {
         yield* checkPresetRef(userId, settings.presetOverrideRefId)
         const credentialId = "typed" in credential ? credential.typed.credentialId : credential.existing
@@ -123,6 +127,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO connections ${sql.insert({
           id: connectionId,
           owner_user_id: userId,
+          provider: provider ?? defaultProviderId(kind, settings.baseUrl),
           kind,
           api,
           ...settingsColumns(settings),
