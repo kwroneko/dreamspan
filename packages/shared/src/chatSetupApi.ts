@@ -39,7 +39,12 @@ export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
   personality: Schema.String,
   scenario: Schema.String,
   /** Its regex scripts when the user allowed them (`regex_approved`); absent otherwise or without any. */
-  regex: Schema.optionalKey(Schema.Array(RegexScript))
+  regex: Schema.optionalKey(Schema.Array(RegexScript)),
+  /** The library entry it was read from, where its approvals change. */
+  refId: Schema.optionalKey(RefId),
+  /** Its panels run scripts (`html_scripts_approved`) and may use the internet; absent: off. */
+  htmlScripts: Schema.optionalKey(Schema.Boolean),
+  htmlNetwork: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 /**

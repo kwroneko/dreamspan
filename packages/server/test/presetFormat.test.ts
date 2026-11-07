@@ -744,6 +744,16 @@ describe("cases where ST's behaviour is easy to miss", () => {
     for (const doc of [result.doc, { ...result.doc, regex_approved: true }])
       expect(JSON.stringify(exportStPreset(doc))).not.toContain("regex_approved")
   })
+
+  it("never takes its panels' permissions from the file, and never exports them", () => {
+    const result = load(preset({ html_scripts_approved: true, html_network_approved: true }))
+    expect(result.doc.html_scripts_approved).toBeUndefined()
+    expect(result.doc.html_network_approved).toBeUndefined()
+    expect(result.doc.unsupported).not.toHaveProperty("html_scripts_approved")
+    expect(codes(result, "warning").filter((c) => c === "preset.approval_ignored")).toHaveLength(2)
+    const allowed = { ...result.doc, html_scripts_approved: true, html_network_approved: true }
+    expect(JSON.stringify(exportStPreset(allowed))).not.toContain("html_")
+  })
 })
 
 describe("the document order", () => {

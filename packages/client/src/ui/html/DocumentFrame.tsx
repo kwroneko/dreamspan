@@ -1,14 +1,24 @@
-// A document block in a frame (spec/HTML-MESSAGES.md §3.3), the registered `html.frame` renderer.
-// The frame loads `/frame/panel` with an opaque origin (sandbox without allow-same-origin) under
-// that page's own CSP, which runs only our bootstrap (src/frame/bootstrap.ts): the block's own
-// scripts stay off. The block's text goes to it by postMessage, never in the URL; it answers
-// with its height. Frames load near the screen, eight at most (frames.ts); an unloaded one keeps
-// its height. While its reply streams the block shows "Panel loading"; older than the viewer's
-// panel depth, it waits for Run panel.
+// A document block in a frame (spec/HTML-MESSAGES.md §3.3, §3.4), the registered `html.frame`
+// renderer. The frame loads `/frame/panel` with an opaque origin (sandbox without
+// allow-same-origin) under that page's own CSP, which runs only our bootstrap
+// (src/frame/bootstrap.ts) until the message's sources allowed scripts (`PanelPermit`): then
+// `?scripts` (and `&network`) choose a CSP that runs the block's scripts and the vendored
+// libraries too. The block's text goes to it by postMessage once, never in the URL; it answers
+// through the bridge (bridge.ts): its height, and links and copies after a click in it. Frames
+// load near the screen, eight at most (frames.ts); an unloaded one keeps its height. While its
+// reply streams the block shows "Panel loading"; older than the viewer's panel depth, it waits
+// for Run panel. A block with scripts that don't run says so, with the button that allows them.
 import { useContext, useEffect, useRef, useState } from "react"
 import { Button } from "../Button.tsx"
+import { bridgeLink, parseBridgeMessage } from "./bridge.ts"
 import { FrameSlots } from "./frames.ts"
-import { HtmlChatContext, HtmlMessageContext, HtmlSettingsContext } from "./messageHtml.ts"
+import {
+  HtmlChatContext,
+  HtmlMessageContext,
+  HtmlSettingsContext,
+  panelHasScripts,
+  type PanelPermit
+} from "./messageHtml.ts"
 import type { DocumentBlockProps } from "./parts.ts"
 
 /** The page every frame loads (the server's route, packages/server/src/server.ts). */
@@ -26,12 +36,47 @@ function theme() {
     scheme: style.colorScheme.includes("dark") ? "dark" : "light"
   }
 }
+/** The page a frame loads for what it may run. */
+const frameUrl = (permit: PanelPermit | undefined) =>
+  permit?.scripts ? `${FRAME_URL}?scripts=1${permit.network ? "&network=1" : ""}` : FRAME_URL
+
+/** The frame's click gave the app a moment to act on it (activation reaches the frame's ancestors). */
+const clicked = () => navigator.userActivation?.isActive === true
+
+/** "This panel has scripts": the button that lets its source's scripts run. */
+function ScriptsStrip({ ask }: { ask: NonNullable<PanelPermit["ask"]> }) {
+  const [pending, setPending] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const allow = async () => {
+    setPending(true)
+    setFailed(false)
+    const ok = await ask.allow()
+    setPending(false)
+    setFailed(!ok)
+  }
+  return (
+    <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+      <span>{failed ? "This panel has scripts. They couldn't be allowed." : "This panel has scripts."}</span>
+      <Button
+        className="max-w-full"
+        pending={pending}
+        hint={`Lets panels from ${ask.name} run their scripts, in every chat. They can't reach your account, your chats or other sites.`}
+        onClick={() => void allow()}
+      >
+        <span className="truncate">Run scripts from {ask.name}</span>
+      </Button>
+    </div>
+  )
+}
+
 /** The chat column's height: the frame's `100vh`. */
 const columnHeight = (element: Element | null) =>
   element?.closest("[data-testid=messages]")?.clientHeight ?? window.innerHeight
 
 export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) {
   const message = useContext(HtmlMessageContext)
+  const permit = message?.permit
+  const src = frameUrl(permit)
   const chat = useContext(HtmlChatContext)
   const { panelDepth } = useContext(HtmlSettingsContext)
   const slots = chat?.frames ?? loose
@@ -75,22 +120,28 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
     }
   }, [id, slots, streaming, collapsed])
 
-  // The frame's side of the conversation: only messages from this frame's window count.
+  // The frame's side of the conversation: only messages from this frame's window count, and
+  // only the bridge's. A frame window gets the block once (`delivered`).
   useEffect(() => {
     if (!live) return
     const post = (data: unknown) => frame.current?.contentWindow?.postMessage(data, "*")
-    const onMessage = (event: MessageEvent<{ type?: unknown; height?: unknown }>) => {
+    const onMessage = (event: MessageEvent) => {
       const target = frame.current?.contentWindow
       if (!target || event.source !== target || event.origin !== "null") return
-      const data = event.data as { type?: unknown; height?: unknown } | null
-      if (data?.type === "rp:ready" && !delivered.current.has(target)) {
+      const data = parseBridgeMessage(event.data)
+      if (data === null) return
+      if (data.type === "rp:ready") {
+        if (delivered.current.has(target)) return
         delivered.current.add(target)
         post({ type: "rp:render", html: source, vh: columnHeight(frame.current), theme: theme() })
-      } else if (data?.type === "rp:height" && typeof data.height === "number" && Number.isFinite(data.height)) {
+      } else if (data.type === "rp:height") {
         const next = Math.max(0, Math.min(Math.ceil(data.height), window.innerHeight * 2))
         slots.heights.set(id, next)
         setHeight(next)
-      }
+      } else if (data.type === "rp:open") {
+        const link = bridgeLink(data.url)
+        if (link !== null && clicked()) window.open(link, "_blank", "noopener,noreferrer")
+      } else if (data.type === "rp:copy" && clicked()) void navigator.clipboard?.writeText(data.text).catch(() => {})
     }
     window.addEventListener("message", onMessage)
     const themeChanged = () => post({ type: "rp:theme", theme: theme() })
@@ -109,7 +160,7 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
       attributes.disconnect()
       window.removeEventListener("resize", resized)
     }
-  }, [live, source, id, slots])
+  }, [live, source, src, id, slots])
 
   // One character stands for the whole block when a selection is copied (sourcePositions.ts).
   const copy = (
@@ -129,12 +180,16 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
         {copy}
       </div>
     )
+  const ask = !permit?.scripts && permit?.ask && panelHasScripts(source) ? permit.ask : null
   return (
     <div ref={holder} className="my-2">
+      {ask && <ScriptsStrip ask={ask} />}
       {live ? (
         <iframe
+          // A new frame for new text or permissions: each gets its block once.
+          key={`${src}\n${source}`}
           ref={frame}
-          src={FRAME_URL}
+          src={src}
           sandbox="allow-scripts"
           title="Panel"
           referrerPolicy="no-referrer"

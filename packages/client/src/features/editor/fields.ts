@@ -25,6 +25,8 @@ const CARD_LABELS: Record<string, string> = {
   character_book: "Lorebook",
   regex: "Regex scripts",
   regex_approved: "Regex scripts allowed",
+  html_scripts_approved: "Panel scripts allowed",
+  html_network_approved: "Panels may use the internet",
   extensions: "Extensions"
 }
 
@@ -40,6 +42,8 @@ const PRESET_LABELS: Record<string, string> = {
   prefill: "Prefill",
   regex: "Regex scripts",
   regex_approved: "Regex scripts allowed",
+  html_scripts_approved: "Panel scripts allowed",
+  html_network_approved: "Panels may use the internet",
   extensions: "Extensions",
   unsupported: "Fields kept for export"
 }

@@ -15,6 +15,7 @@ import {
   HELD_FIELD,
   isHeldField,
   keepsRegexApproval,
+  withHtmlApprovals,
   newCardNote,
   newChatNote,
   newSharedNote,
@@ -409,8 +410,10 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         }
         let doc = withoutGrantedAgentEdits(ref.kind, head, restoring as Doc)
         // An old revision's scripts, an import's say, don't come back approved.
-        if ((ref.kind === "preset" || ref.kind === "card") && doc.regex_approved === true) {
-          if (!keepsRegexApproval(head, doc)) doc = { ...doc, regex_approved: false }
+        if (ref.kind === "preset" || ref.kind === "card") {
+          if (doc.regex_approved === true && !keepsRegexApproval(head, doc)) doc = { ...doc, regex_approved: false }
+          // Panel permissions are the head's: given or taken since, they stay so.
+          doc = withHtmlApprovals(head, doc)
         }
         const saved = new Date(earlier.created_at).toISOString().replace("T", " ").slice(0, 16)
         const message = `Restored the revision of ${saved} UTC`
@@ -574,6 +577,33 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
                    updated_at = ${Date.now()} WHERE id = ${refId}`
         return toLibraryRef(yield* steps.reload(refId))
       }).pipe(transaction(sql, "RenameRef")),
+
+    // Panel scripts and their internet access (spec/HTML-MESSAGES.md §3.4): the internet only
+    // with scripts, so stopping scripts stops both.
+    SetHtmlApproval: ({ userId, refId, scripts, network, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        if (ref.kind !== "preset" && ref.kind !== "card")
+          return yield* refused(ref, "Only presets and cards have panel scripts.")
+        if (expectedRowVersion !== undefined) yield* steps.checkRowVersion(ref, expectedRowVersion)
+        const head = yield* lib.loadDoc(ref.head_revision_id)
+        // Unchanged, it's no new revision (userEdit).
+        const next: Record<string, unknown> = { ...head }
+        delete next.html_scripts_approved
+        delete next.html_network_approved
+        if (scripts) next.html_scripts_approved = true
+        if (scripts && network) next.html_network_approved = true
+        const was = { scripts: head.html_scripts_approved === true, network: head.html_network_approved === true }
+        const now = { scripts, network: scripts && network }
+        const message = !now.scripts
+          ? "Stopped panel scripts from running"
+          : now.network && !was.network
+            ? "Let panels use the internet"
+            : was.network && !now.network
+              ? "Stopped panels from using the internet"
+              : "Allowed panel scripts to run"
+        return yield* userEdit(ref, next as Doc, message, null)
+      }).pipe(transaction(sql, "SetHtmlApproval")),
 
     SetRegexApproval: ({ userId, refId, approved, expectedRowVersion }) =>
       Effect.gen(function* () {

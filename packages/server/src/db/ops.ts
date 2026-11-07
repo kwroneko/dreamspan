@@ -2300,6 +2300,18 @@ export class WriteOps extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
+  /** A card's or preset's panel permissions (spec/HTML-MESSAGES.md §3.4); without a row version, from a chat. */
+  Rpc.make("SetHtmlApproval", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      scripts: Schema.Boolean,
+      network: Schema.Boolean,
+      expectedRowVersion: Schema.optionalKey(Schema.Int)
+    },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
   Rpc.make("SetRegexApproval", {
     payload: { userId: UserId, refId: RefId, approved: Schema.Boolean, expectedRowVersion: Schema.Int },
     success: RefChange,

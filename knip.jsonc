@@ -5,6 +5,18 @@
   "includeEntryExports": true,
   // Host diagnostics for the opt-in paired performance benchmark; supplied by the OS.
   "ignoreBinaries": ["uptime"],
+  // The panel frames' vendored libraries (spec/HTML-MESSAGES.md §3.3): copied from node_modules into
+  // the build by vite.config.ts `frameLibraries`, never imported.
+  "ignoreDependencies": [
+    "@fortawesome/fontawesome-free",
+    "@tailwindcss/browser",
+    "jquery",
+    "jquery-ui",
+    "jquery-ui-touch-punch",
+    "lodash",
+    "vue",
+    "vue-router"
+  ],
   "workspaces": {
     ".": {
       // Throwaway experiments, kept for their findings and not part of the build.

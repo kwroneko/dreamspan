@@ -40,6 +40,7 @@ import { invokeMessageAction, messageActions, MessageActions } from "./messageAc
 import { ReasoningPanels } from "./Reasoning.tsx"
 import { useDisplayContext } from "./DisplaySettings.tsx"
 import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
+import { usePanelPermit } from "./panelPermits.ts"
 import { MessageDetails, useMessageDetails } from "./messageDetails.tsx"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
@@ -93,7 +94,12 @@ function BodyText({
   // tip, as display regex does (ui/html/messageHtml.ts).
   const { leafDepth } = useDisplayContext()
   const fromTip = leafDepth === null ? null : Math.max(0, leafDepth - depth)
-  const html = useMemo(() => ({ key: version.slotId, streaming, fromTip }), [version.slotId, streaming, fromTip])
+  // Its panels run their scripts once its sources allowed them (panelPermits.ts).
+  const permit = usePanelPermit(version.speakerEntityId, placement)
+  const html = useMemo(
+    () => ({ key: version.slotId, streaming, fromTip, ...(permit ? { permit } : {}) }),
+    [version.slotId, streaming, fromTip, permit]
+  )
   return (
     <HtmlMessageContext value={html}>
       <MessageBody text={text}>

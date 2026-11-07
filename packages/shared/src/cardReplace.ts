@@ -3,7 +3,7 @@
 // what a file can't carry. The server writes it with this, and the client's preview shows
 // the same result before anything is stored.
 import { Schema } from "effect"
-import { keepsRegexApproval, withoutGrantedAgentEdits } from "./editing.ts"
+import { keepsRegexApproval, withHtmlApprovals, withoutGrantedAgentEdits } from "./editing.ts"
 import { ImportReport } from "./importReport.ts"
 import { type Doc, RevisionId } from "./library.ts"
 
@@ -15,10 +15,11 @@ import { type Doc, RevisionId } from "./library.ts"
  *   file's own cutout or the default, as on import, §14.5c);
  * - the permission to run its regex scripts, only if the file's scripts are the same ones
  *   (a file never grants capabilities, DESIGN §11);
- * - the agent's permission to edit a module stays off where it was off.
+ * - the agent's permission to edit a module stays off where it was off;
+ * - the permission to run its panels' scripts, and their internet access, as they were.
  */
 export const replacementDoc = (current: Doc, file: Doc): Doc => {
-  let next = withoutGrantedAgentEdits("card", current, file)
+  let next = withHtmlApprovals(current, withoutGrantedAgentEdits("card", current, file))
   if (next.avatar_media_id === current.avatar_media_id) {
     const { avatar_crop: _, ...rest } = next
     next = current.avatar_crop === undefined ? rest : { ...rest, avatar_crop: current.avatar_crop }

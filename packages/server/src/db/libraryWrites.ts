@@ -17,6 +17,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import {
   hasSchema,
   keepsRegexApproval,
+  withHtmlApprovals,
   protectedChanges,
   validateDoc,
   withoutGrantedAgentEdits
@@ -142,10 +143,11 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
      */
     const withoutGrants = (ref: RefRow, doc: Doc) =>
       Effect.map(lib.loadDoc(ref.head_revision_id), (ours) => {
-        const next = withoutGrantedAgentEdits(ref.kind, ours, doc)
-        return (ref.kind === "preset" || ref.kind === "card") &&
-          next.regex_approved === true &&
-          !keepsRegexApproval(ours, next)
+        const granted = withoutGrantedAgentEdits(ref.kind, ours, doc)
+        if (ref.kind !== "preset" && ref.kind !== "card") return granted
+        // Panel permissions stay the head's: a merge neither grants nor takes them.
+        const next = withHtmlApprovals(ours, granted)
+        return next.regex_approved === true && !keepsRegexApproval(ours, next)
           ? { ...next, regex_approved: false }
           : next
       })

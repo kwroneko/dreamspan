@@ -636,6 +636,26 @@ export const makeGalleryHandlers = Effect.gen(function* () {
   } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").GalleryApi.of>[0]
 })
 
+export const makePanelApprovalHandlers = Effect.gen(function* () {
+  const writer = yield* Writer
+  const warmth = yield* CacheWarmth
+  const userId = Effect.map(CurrentUser, (user) => user.id)
+  return {
+    SetHtmlApproval: ({ refId, scripts, network, expectedRowVersion }) =>
+      Effect.flatMap(userId, (id) =>
+        writer
+          .SetHtmlApproval({
+            userId: id,
+            refId,
+            scripts,
+            network,
+            ...(expectedRowVersion === undefined ? {} : { expectedRowVersion })
+          })
+          .pipe(Effect.tap(() => warmth.refreshUser(id)))
+      ).pipe(Effect.map(saved), settle("SetHtmlApproval"))
+  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").PanelApprovalApi.of>[0]
+})
+
 export const makeCardArchiveHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer

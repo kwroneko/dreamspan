@@ -365,3 +365,19 @@ describe("a card's regex scripts (ST's scoped scripts)", () => {
     expect(imported(exported).regex).toEqual(card.regex)
   })
 })
+
+describe("panel permissions", () => {
+  it("a file never brings them, and an export never writes them", () => {
+    const card = imported({
+      spec: "chara_card_v3",
+      spec_version: "3.0",
+      data: { name: "Lantern Inn", html_scripts_approved: true, html_network_approved: true, extensions: {} }
+    })
+    expect(card.html_scripts_approved).toBeUndefined()
+    expect(card.html_network_approved).toBeUndefined()
+    // What the file claimed is kept as its own unknown data, never read as permission.
+    const allowed: CardDoc = { ...card, unknown_fields: {}, html_scripts_approved: true, html_network_approved: true }
+    for (const version of ["v2", "v3"] as const)
+      expect(JSON.stringify(cardToJson(allowed, version))).not.toContain("html_")
+  })
+})

@@ -1,5 +1,5 @@
 // Exposure safety (spec/DESIGN.md §11): the policy, and the gate on real sockets.
-import { writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { request } from "node:http"
 import { connect } from "node:net"
 import { networkInterfaces } from "node:os"
@@ -481,27 +481,116 @@ describe("content security policy", () => {
     const config = testConfig({ clientDist: tempDir("client") })
     return Effect.gen(function* () {
       const port = yield* serverPort
-      const { status, csp } = yield* cspOf("/frame/panel")
+      const directivesOf = (csp: string) =>
+        new Map(csp.split("; ").map((d) => [d.split(" ")[0]!, d.split(" ").slice(1).join(" ")] as const))
+      const page = (headers?: Record<string, string>, path = "/frame/panel") =>
+        Effect.flatMap(serverPort, (p) =>
+          Effect.callback<{ status: number; csp: string; body: string }, Error>((resume) => {
+            const req = request({ host: "127.0.0.1", port: p, path, headers }, (res) => {
+              let body = ""
+              res.setEncoding("utf8")
+              res.on("data", (chunk: string) => (body += chunk))
+              res.on("end", () =>
+                resume(
+                  Effect.succeed({
+                    status: res.statusCode ?? 0,
+                    csp: String(res.headers["content-security-policy"] ?? ""),
+                    body
+                  })
+                )
+              )
+            })
+            req.on("error", (error) => resume(Effect.fail(error)))
+            req.end()
+          })
+        )
+      const { status, csp, body } = yield* page()
       assert.strictEqual(status, 200)
-      const directives = new Map(
-        csp.split("; ").map((d) => [d.split(" ")[0]!, d.split(" ").slice(1).join(" ")] as const)
-      )
+      const directives = directivesOf(csp)
       assert.strictEqual(directives.get("default-src"), "'none'")
-      assert.strictEqual(
-        directives.get("script-src"),
-        `http://127.0.0.1:${port}/frame/bootstrap.js https://127.0.0.1:${port}/frame/bootstrap.js`
-      )
+      // Only the page's own script tag runs: its nonce, fresh on every load.
+      const nonce = /^'nonce-([A-Za-z0-9+/=]+)'$/.exec(directives.get("script-src") ?? "")?.[1]
+      assert.isDefined(nonce, directives.get("script-src"))
+      assert.include(body, `<script nonce="${nonce}" src="/frame/bootstrap.js">`)
+      assert.notStrictEqual(directivesOf((yield* page()).csp).get("script-src"), directives.get("script-src"))
       assert.strictEqual(directives.get("connect-src"), "'none'")
       assert.strictEqual(directives.get("form-action"), "'none'")
       assert.strictEqual(directives.get("frame-ancestors"), "'self'")
-      // A Host that isn't a plain name falls back to 'self' and can't add a source.
-      const odd = yield* cspOf("/frame/panel", { Host: "[::1]" })
-      assert.include(odd.csp, "script-src 'self';")
+      assert.notInclude(csp, String(port), "no path of the app's is a script source")
+      // An IPv6 Host can't be named in a source, and still runs only the bootstrap.
+      for (const host of ["[::1]", `[::1]:${port}`]) {
+        const odd = yield* page({ Host: host })
+        assert.notInclude(directivesOf(odd.csp).get("script-src"), "'self'", host)
+        const oddNonce = /^'nonce-([A-Za-z0-9+/=]+)'$/.exec(directivesOf(odd.csp).get("script-src") ?? "")?.[1]
+        assert.include(odd.body, `nonce="${oddNonce}"`, host)
+      }
+      // A malformed Host can't name the paths: a panel with scripts gets the policy without them.
+      const malformed = yield* page({ Host: "evil.example/x" }, "/frame/panel?scripts=1")
+      assert.match(directivesOf(malformed.csp).get("script-src") ?? "", /^'(nonce-[A-Za-z0-9+/=]+|none)'$/)
       // The frame's own requests carry Origin: null.
       assert.strictEqual((yield* cspOf("/frame/panel", { Origin: "null" })).status, 403)
       assert.strictEqual((yield* cspOf("/healthz", { Origin: "null" })).status, 403)
     }).pipe(withServer(config))
   })
+
+  it.live(
+    "a panel with scripts runs its own and the vendored libraries, and reaches the internet only when allowed",
+    () => {
+      const clientDist = tempDir("client")
+      mkdirSync(join(clientDist, "frame", "lib"), { recursive: true })
+      writeFileSync(join(clientDist, "frame", "lib", "jquery.min.js"), "/* jquery */")
+      const config = testConfig({ clientDist })
+      return Effect.gen(function* () {
+        const port = yield* serverPort
+        const directivesOf = (csp: string) =>
+          new Map(csp.split("; ").map((d) => [d.split(" ")[0]!, d.split(" ").slice(1).join(" ")] as const))
+        const origin = `127.0.0.1:${port}`
+        const lib = `http://${origin}/frame/lib/ https://${origin}/frame/lib/`
+        const scripts = directivesOf((yield* cspOf("/frame/panel?scripts=1")).csp)
+        assert.strictEqual(
+          scripts.get("script-src"),
+          `'unsafe-inline' 'unsafe-eval' http://${origin}/frame/bootstrap.js https://${origin}/frame/bootstrap.js ${lib}`
+        )
+        assert.strictEqual(scripts.get("style-src"), `'unsafe-inline' ${lib}`)
+        assert.strictEqual(scripts.get("img-src"), `data: blob: ${lib}`)
+        assert.strictEqual(scripts.get("connect-src"), "'none'", "no network without its own permission")
+        assert.strictEqual(scripts.get("form-action"), "'none'")
+        // The internet only with scripts: `network` alone is the plain page.
+        const alone = directivesOf((yield* cspOf("/frame/panel?network=1")).csp)
+        assert.notInclude(alone.get("script-src"), "unsafe-inline")
+        assert.strictEqual(alone.get("connect-src"), "'none'")
+        const network = directivesOf((yield* cspOf("/frame/panel?scripts=1&network=1")).csp)
+        assert.strictEqual(network.get("connect-src"), "https:")
+        for (const directive of ["script-src", "style-src", "img-src", "font-src"])
+          assert.isTrue(network.get(directive)!.endsWith(" https:"), directive)
+        assert.strictEqual(network.get("frame-ancestors"), "'self'")
+        // On an IPv6 Host the paths can't be named: 'self', for a block that runs what it likes.
+        const ipv6 = directivesOf((yield* cspOf("/frame/panel?scripts=1", { Host: "[::1]" })).csp)
+        assert.strictEqual(ipv6.get("script-src"), "'unsafe-inline' 'unsafe-eval' 'self'")
+        assert.strictEqual(ipv6.get("connect-src"), "'none'")
+        // The libraries answer a panel's own reads (fonts come with Origin: null) and nothing else.
+        const read = yield* Effect.flatMap(serverPort, (p) =>
+          Effect.callback<{ status: number; allow: unknown }, Error>((resume) => {
+            const req = request(
+              { host: "127.0.0.1", port: p, path: "/frame/lib/jquery.min.js", headers: { Origin: "null" } },
+              (res) => {
+                res.resume()
+                resume(
+                  Effect.succeed({ status: res.statusCode ?? 0, allow: res.headers["access-control-allow-origin"] })
+                )
+              }
+            )
+            req.on("error", (error) => resume(Effect.fail(error)))
+            req.end()
+          })
+        )
+        assert.deepStrictEqual(read, { status: 200, allow: "*" })
+        assert.strictEqual((yield* cspOf("/frame/panel?scripts=1", { Origin: "null" })).status, 403)
+        assert.strictEqual((yield* cspOf("/rpc", { Origin: "null" })).status, 403)
+        assert.strictEqual((yield* cspOf("/library/media?id=x", { Origin: "null" })).status, 403)
+      }).pipe(withServer(config))
+    }
+  )
 
   it.live("a Host that isn't a host name adds no WebSocket origin", () => {
     const config = testConfig({ authMode: "proxy" })

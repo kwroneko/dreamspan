@@ -517,6 +517,25 @@ export class ForkMergeApi extends RpcGroup.make(
   })
 ) {}
 
+/** Panel permissions, served separately to bound RPC handler inference (TS2589). */
+export class PanelApprovalApi extends RpcGroup.make(
+  /**
+   * The user allows (or stops) scripts in a card's or preset's panels, and their use of the
+   * internet, which needs scripts (spec/HTML-MESSAGES.md §3.4). A chat's "Run scripts from"
+   * sends no row version: it changes only these two fields, which no draft touches.
+   */
+  Rpc.make("SetHtmlApproval", {
+    payload: {
+      refId: RefId,
+      scripts: Schema.Boolean,
+      network: Schema.Boolean,
+      expectedRowVersion: Schema.optionalKey(Schema.Int)
+    },
+    success: SavedRef,
+    error: Schema.Union([...Writes])
+  })
+) {}
+
 /** Card gallery operations, served separately to bound RPC handler inference. */
 export class GalleryApi extends RpcGroup.make(
   Rpc.make("GetCardGallery", { payload: { refId: RefId }, success: CardGallery, error: Schema.Union([...Errors]) }),

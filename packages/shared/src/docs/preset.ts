@@ -215,6 +215,12 @@ export const LegacyPresetDoc = Schema.Struct({
    * capabilities).
    */
   regex_approved: Schema.Boolean,
+  /**
+   * The user allowed scripts in panels this preset's scripts make to run (spec/HTML-MESSAGES.md
+   * §3.4), and to use the internet. Absent: off. Set as `regex_approved`: never by a file.
+   */
+  html_scripts_approved: Schema.optionalKey(Schema.Boolean),
+  html_network_approved: Schema.optionalKey(Schema.Boolean),
   /** The preset's other `extensions` entries, namespaced as in ST, kept for export. */
   extensions: Json,
   /** Top-level ST fields this document doesn't model, kept for export. */
