@@ -15,7 +15,7 @@ import { type PickerBodyProps, PickerPopover, PickerSearch, pickerRowClass } fro
 import { MODEL_SORTS, type ModelSort, modelConnection, modelRows, modelsInOrder } from "./modelList.ts"
 import { type ModelSelection, useModelUse } from "./modelSelection.ts"
 import type { ModelChoice } from "../chat/modelChoices.ts"
-import { VirtualModelList } from "./VirtualModelList.tsx"
+import { VirtualModelList, type ModelListNavigation } from "./VirtualModelList.tsx"
 
 export interface ModelPickerProps extends PickerBodyProps {
   readonly selection: ModelSelection
@@ -45,6 +45,8 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
   const [orderPins, setOrderPins] = useState<Readonly<Record<string, boolean>> | null>(ready ? prefs.modelPins : null)
   if (orderPins === null && ready) setOrderPins(prefs.modelPins)
   const search = useRef<HTMLInputElement>(null)
+  const searchRef = focus === "search" ? focusRef : search
+  const navigation = useRef<ModelListNavigation>(null)
   const listId = useId()
   const { models, value } = selection
   const used = useMemo(() => {
@@ -91,7 +93,11 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
           placeholder="Search name, id or provider"
           value={query}
           onChange={setQuery}
-          inputRef={focus === "search" ? focusRef : search}
+          inputRef={searchRef}
+          navigate={(key) => {
+            if (key === "ArrowDown") navigation.current?.focusCurrent()
+            else navigation.current?.chooseFirst()
+          }}
           controls={listId}
         />
       </Field>
@@ -127,6 +133,8 @@ export function ModelPicker({ selection, focusRef, focus, onChosen }: ModelPicke
         </Tooltip>
       ))}
       <VirtualModelList
+        ref={navigation}
+        fallbackFocus={searchRef}
         key={`${query}:${connection}:${prefs.modelSort}`}
         id={listId}
         rows={rows}

@@ -87,7 +87,8 @@ export function PickerSearch({
   value,
   onChange,
   inputRef,
-  controls
+  controls,
+  navigate
 }: {
   label: string
   placeholder: string
@@ -95,6 +96,8 @@ export function PickerSearch({
   onChange: (value: string) => void
   inputRef?: RefObject<HTMLElement | null> | undefined
   controls: string
+  /** Windowed lists navigate their full data rather than just the mounted rows. */
+  navigate?: (key: "ArrowDown" | "Enter") => void
 }) {
   return (
     <Input
@@ -107,6 +110,11 @@ export function PickerSearch({
       value={value}
       onChange={(event) => onChange(event.currentTarget.value)}
       onKeyDown={(event) => {
+        if (navigate && (event.key === "ArrowDown" || (event.key === "Enter" && !event.nativeEvent.isComposing))) {
+          event.preventDefault()
+          navigate(event.key as "ArrowDown" | "Enter")
+          return
+        }
         // Down goes into the list (at the checked row when it's shown); Enter takes the first row.
         const rows = document.getElementById(controls)?.querySelectorAll<HTMLElement>("[role=radio]")
         if (!rows?.length) return

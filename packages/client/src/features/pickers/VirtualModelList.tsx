@@ -1,7 +1,7 @@
 // Bounded DOM even for catalogs containing thousands of models. Keyboard navigation can
 // reach unmounted rows; the focused row stays mounted while the pointer scrolls elsewhere.
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
-import { useLayoutEffect, useRef, useState, type RefObject } from "react"
+import { useImperativeHandle, useLayoutEffect, useRef, useState, type Ref, type RefObject } from "react"
 import type { ModelChoice } from "../chat/modelChoices.ts"
 import { Icon } from "../../ui/Icon.tsx"
 import { ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
@@ -10,7 +10,14 @@ import { modelConnection, modelDetail, modelName, modelTime } from "./modelList.
 export type ModelRow =
   { readonly heading: string; readonly key: string } | { readonly model: ModelChoice; readonly key: string }
 
+export interface ModelListNavigation {
+  readonly focusCurrent: () => void
+  readonly chooseFirst: () => void
+}
+
 export function VirtualModelList({
+  ref,
+  fallbackFocus,
   id,
   rows,
   value,
@@ -21,6 +28,8 @@ export function VirtualModelList({
   onPin,
   focusRef
 }: {
+  ref?: Ref<ModelListNavigation>
+  fallbackFocus: RefObject<HTMLElement | null>
   id: string
   rows: ReadonlyArray<ModelRow>
   value: string | null
@@ -58,10 +67,23 @@ export function VirtualModelList({
   })
   const move = (index: number, direction: number) => {
     while (index >= 0 && index < rows.length && !("model" in rows[index]!)) index += direction
-    if (index < 0 || index >= rows.length) return
+    if (index < 0) {
+      fallbackFocus.current?.focus()
+      return
+    }
+    if (index >= rows.length) return
     setFocused(index)
     if (windowed) virtualizer.scrollToIndex(index, { align: "auto" })
+    // A mounted row may already be the retained index after focus returned to search.
+    parent.current?.querySelector<HTMLElement>(`[data-model-index="${index}"] [role=radio]`)?.focus()
   }
+  useImperativeHandle(ref, () => ({
+    focusCurrent: () => move(current, 1),
+    chooseFirst: () => {
+      const first = rows.find((row) => "model" in row)
+      if (first && "model" in first) onChoose(first.model.value)
+    }
+  }))
   useLayoutEffect(() => {
     if (focused >= 0)
       parent.current?.querySelector<HTMLElement>(`[data-model-index="${focused}"] [role=radio]`)?.focus()
