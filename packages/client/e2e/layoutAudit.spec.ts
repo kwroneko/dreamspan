@@ -340,6 +340,35 @@ test("picture overlays report hidden space between visible controls", async ({ p
   expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
 })
 
+test("picture overlay controls are audited when they carry the overlay marker", async ({ page }) => {
+  await page.setContent(`<style>
+    body { margin: 20px; }
+    .grid { display: grid; grid-template-columns: 120px; }
+    .tile { position: relative; }
+    .pic { display: block; height: 180px; background: #888; }
+    button { width: 32px; height: 32px; border: 0; background: transparent; }
+  </style>
+  <div class="grid"><div class="tile"><span class="pic" data-portrait></span>
+    <button id="star" data-layout-overlay="star" aria-pressed="false" style="position:absolute;top:8px;left:8px">S</button>
+  </div></div>`)
+  const measurements = async () =>
+    (await layoutAudit(page)).filter((v) => v.kind === "overlay").map((v) => v.measurement)
+  expect(await measurements()).toContain("no backing of its own over the picture")
+  const star = page.locator("#star")
+  await star.evaluate((el) => (el.style.background = "white"))
+  expect(await measurements()).toContain("shown at rest though not a pressed toggle (hover or focus should reveal it)")
+  await star.evaluate((el) => (el.style.opacity = "0"))
+  expect(await measurements()).toContain("hidden, yet takes clicks meant for the picture under it")
+  await star.evaluate((el) => (el.style.pointerEvents = "none"))
+  expect(await measurements()).toEqual([])
+  await star.evaluate((el) => {
+    el.style.opacity = "1"
+    el.style.pointerEvents = "auto"
+    el.setAttribute("aria-pressed", "true")
+  })
+  expect(await measurements()).toEqual([])
+})
+
 const work = process.env.LAYOUT_AUDIT_WORK ?? mkdtempSync(join(tmpdir(), "rp-layout-audit-"))
 const selected = new RegExp(process.env.LAYOUT_AUDIT_SURFACES ?? ".*")
 const avatarStackNames = ["Double Capitals", "Other 1", "Other 3", "Wide WWW", "ß ß", "Hidden Willow"]

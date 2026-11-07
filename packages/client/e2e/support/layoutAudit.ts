@@ -501,10 +501,12 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           })
         )
           continue
-        const shownControls = [...layer.querySelectorAll<HTMLElement>(controls)].filter(
-          (c) =>
-            visible(c) &&
-            ![...ancestors(parent(c))].some((p) => p !== layer && layer.contains(p) && p.matches(controls))
+        const layerControls = [
+          ...(layer.matches(controls) ? [layer] : []),
+          ...layer.querySelectorAll<HTMLElement>(controls)
+        ]
+        const shownControls = layerControls.filter(
+          (c) => visible(c) && ![...ancestors(parent(c))].some((p) => layer.contains(p) && p.matches(controls))
         )
         for (const control of shownControls) {
           const wrappers = [...ancestors(parent(control))].slice(0, [...ancestors(parent(control))].indexOf(layer) + 1)
@@ -529,7 +531,7 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
             add("overlay", control, "shown at rest though not a pressed toggle (hover or focus should reveal it)")
         }
         // A hidden control must not take the clicks meant for the picture under it.
-        for (const control of layer.querySelectorAll<HTMLElement>(controls))
+        for (const control of layerControls)
           if (visible(control, false) && !visible(control) && css(control).pointerEvents !== "none")
             add("overlay", control, "hidden, yet takes clicks meant for the picture under it")
         // Space kept by a hidden sibling, before a shown one in the overlay's flow.
