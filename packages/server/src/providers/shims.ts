@@ -151,7 +151,18 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     label: "Reasoning stays on: this model can’t turn it off.",
     kinds: ["openrouter"],
     model: /^google\/gemini-4-argon/i,
-    capabilities: { thinkingLevels: { off: null } }
+    capabilities: { thinkingLevels: { off: null } },
+    payload: (payload) => {
+      // Model settings and user-edited thinking levels can bypass the SDK's off mapping.
+      if (payload.reasoning_effort === "none") delete payload.reasoning_effort
+      const current = object(payload.reasoning)
+      if (current?.effort === "none") {
+        const { effort: _effort, ...rest } = current
+        if (Object.keys(rest).length > 0) payload.reasoning = rest
+        else delete payload.reasoning
+      }
+      return payload
+    }
   },
   {
     // F13: a trailing assistant message is refused ("Provider returned error").

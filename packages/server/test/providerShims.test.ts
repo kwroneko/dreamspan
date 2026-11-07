@@ -8,7 +8,7 @@ import { applyShims, builtinShims, shimmedUpstream } from "../src/providers/shim
 import { detectModelIdPrefix, withoutModelIdPrefix } from "../src/providers/contextCatalog.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
-import { anthropicSse, json, startMockProvider, type Handler } from "./support/mockProvider.ts"
+import { anthropicSse, completionChunks, json, sse, startMockProvider, type Handler } from "./support/mockProvider.ts"
 
 const resource = (handler: Handler) =>
   Effect.acquireRelease(
@@ -64,9 +64,46 @@ describe("payload shims", () => {
     )
     assert.deepEqual(out.payload, sent)
   })
+
+  it("Argon's mandatory reasoning survives explicit payload settings and thinking-level overrides", () => {
+    const sent = { reasoning: { effort: "none", exclude: true }, reasoning_effort: "none" }
+    const out = shim("openrouter", "openai-completions", "google/gemini-4-argon", sent)
+    assert.deepEqual(out.payload, { reasoning: { exclude: true } })
+    assert.deepEqual(shim("openrouter", "openai-completions", "google/gemini-3.5-pro", sent).payload, sent)
+    assert.deepEqual(
+      shim("openrouter", "openai-completions", "google/gemini-4-argon", { reasoning: { effort: "low" } }).payload,
+      { reasoning: { effort: "low" } }
+    )
+  })
 })
 
 describe("capability shims", () => {
+  it.live("Argon stays usable when model settings override the off thinking level", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource((req, res) => {
+        const reasoning = req.body?.reasoning as Record<string, unknown> | undefined
+        if (reasoning?.effort === "none" || req.body?.reasoning_effort === "none")
+          return json(res, 400, {
+            error: { message: "Reasoning is mandatory for this endpoint and cannot be disabled." }
+          })
+        sse(res, completionChunks(["The tide is out."], { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 }))
+      })
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openrouter", baseUrl: mock.url, apiKey: "synthetic-key" },
+        modelKey: "google/gemini-4-argon",
+        model: {
+          reasoning: true,
+          thinkingLevels: { off: "none" },
+          settings: { samplers: { reasoning_effort: "none" } }
+        }
+      })
+      assert.strictEqual(version.status, "complete")
+      assert.strictEqual(mock.requests().length, 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it("Gemini 4 Argon on OpenRouter has no 'off' level, so no effort none is sent (F11)", () => {
     const upstream = shimmedUpstream(builtinShims, "openrouter", "google/gemini-4-argon", {
       thinkingLevels: { low: "low" }
