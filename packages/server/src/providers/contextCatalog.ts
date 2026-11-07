@@ -162,7 +162,7 @@ export const lookupCatalogs = async (catalogs: ReadonlyArray<ModelCatalog>, key:
  * Fills a model's window (and its output limit, when also missing) from the registered catalogs
  * when neither the list nor the kind's own catalog reported it, recording where they came from.
  */
-export const fillFromCatalogs = async (
+const fillFromCatalogs = async (
   catalogs: ReadonlyArray<ModelCatalog>,
   kind: string,
   model: ListedModel
@@ -187,3 +187,23 @@ export const fillFromCatalogs = async (
 
 export const withCatalogs = (catalogs: ReadonlyArray<ModelCatalog>, kind: string, listed: ReadonlyArray<ListedModel>) =>
   Effect.forEach(listed, (model) => Effect.promise(() => fillFromCatalogs(catalogs, kind, model)))
+
+/**
+ * The prefix a router puts on its model ids (`acme.gpt-5.4-nano`, `acme.deepseek-flash`), when
+ * at least half the listed ids share one: a lowercase segment and a dot before a letter. Vendor
+ * and region prefixes (`anthropic.`, `us.`) are already left out by `baseModelId`; detecting one
+ * of them changes no match.
+ */
+export const detectModelIdPrefix = (keys: ReadonlyArray<string>): string | null => {
+  const counts = new Map<string, number>()
+  for (const key of keys) {
+    const prefix = /^([a-z0-9-]+\.)(?=[a-z])/.exec(key)?.[1]
+    if (prefix) counts.set(prefix, (counts.get(prefix) ?? 0) + 1)
+  }
+  const [best] = [...counts].sort((a, b) => b[1] - a[1])
+  return best && best[1] * 2 >= keys.length ? best[0] : null
+}
+
+/** A model id without the connection's prefix, for catalog matching; the request keeps the full id. */
+export const withoutModelIdPrefix = (key: string, prefix: string | null) =>
+  prefix && key.startsWith(prefix) && key.length > prefix.length ? key.slice(prefix.length) : key

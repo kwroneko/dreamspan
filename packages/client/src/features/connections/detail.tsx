@@ -38,6 +38,8 @@ interface SettingsDraft {
   readonly baseUrl: string
   readonly maxConcurrent: string
   readonly cacheTtlS: string
+  /** Absent in drafts saved before the field existed. */
+  readonly modelIdPrefix?: string
   /** The version the edit started from, so a change made elsewhere meanwhile is a StaleWrite. */
   readonly rowVersion: number
   readonly preset: string
@@ -49,6 +51,7 @@ const draftOf = (connection: Connection): SettingsDraft => ({
   baseUrl: connection.baseUrl ?? "",
   maxConcurrent: connection.maxConcurrent?.toString() ?? "",
   cacheTtlS: connection.cacheTtlS?.toString() ?? "",
+  modelIdPrefix: connection.modelIdPrefix ?? "",
   rowVersion: connection.rowVersion
 })
 
@@ -93,6 +96,8 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
     setSubmitted(true)
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
     let savedVersion = values.rowVersion
+    // Sent only when changed: an unset prefix stays unset until a refresh detects one.
+    const prefix = (values.modelIdPrefix ?? "").trim()
     await durable.commit(
       durable.text,
       async () => {
@@ -107,7 +112,8 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
                 compat: connection.compat,
                 cacheTtlS: ttl.value,
                 maxConcurrent: concurrency.value,
-                presetOverrideRefId: values.preset === "none" ? null : (values.preset as LibraryRef["id"])
+                presetOverrideRefId: values.preset === "none" ? null : (values.preset as LibraryRef["id"]),
+                ...(prefix !== (connection.modelIdPrefix ?? "") ? { modelIdPrefix: prefix } : {})
               }
             }),
           ["connections"]
@@ -147,6 +153,18 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
             placeholder={kind?.defaultBaseUrl}
             inputMode="url"
             autoCapitalize="none"
+            spellCheck={false}
+          />
+        </Field>
+        <Field
+          label="Model ID prefix"
+          about="Text this provider puts before its model IDs, such as acme. It’s left out when looking up a model’s price and limits. Refresh fills it in from the model list. Empty means none."
+        >
+          <Input
+            value={values.modelIdPrefix ?? ""}
+            onValueChange={(modelIdPrefix) => edit({ modelIdPrefix })}
+            autoCapitalize="none"
+            autoComplete="off"
             spellCheck={false}
           />
         </Field>

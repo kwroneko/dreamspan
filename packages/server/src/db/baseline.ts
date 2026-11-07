@@ -788,6 +788,9 @@ export const baseline: ReadonlyArray<string> = [
     -- Purged connections stay as tombstones, so old messages and ledger rows still
     -- name their model (PROVIDERS §10).
     purged_at INTEGER, credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL, headers_origin TEXT, cache_revision INTEGER NOT NULL DEFAULT 0,
+    -- A router's prefix on its model ids ('acme.'), left out when matching catalogs. NULL: not
+    -- set yet, so a refresh sets what the list's ids share; '' means none.
+    model_id_prefix TEXT,
     CHECK ((api_key_enc IS NULL) = (key_hint IS NULL)),
     CHECK ((proxy_mode = 'custom') = (proxy_url_enc IS NOT NULL)),
     CHECK (purged_at IS NULL OR (api_key_enc IS NULL AND headers_enc IS NULL AND proxy_url_enc IS NULL AND base_url IS NULL))

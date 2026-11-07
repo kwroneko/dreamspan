@@ -94,6 +94,11 @@ export class Connection extends Schema.Class<Connection>("Connection")({
   maxConcurrent: Schema.NullOr(Schema.Int),
   proxyMode: ProxyMode,
   presetOverrideRefId: Schema.NullOr(RefId),
+  /**
+   * A router's prefix on its model ids (`acme.`), left out when matching catalogs. Null until a
+   * refresh sets what the list's ids share; empty means none.
+   */
+  modelIdPrefix: Schema.NullOr(Schema.String),
   rowVersion: Schema.Int,
   createdAt: Schema.Number,
   updatedAt: Schema.Number
@@ -106,7 +111,9 @@ export const ConnectionSettings = Schema.Struct({
   compat: Compat,
   cacheTtlS: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   maxConcurrent: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-  presetOverrideRefId: Schema.NullOr(RefId)
+  presetOverrideRefId: Schema.NullOr(RefId),
+  /** Left out: unchanged. Null: unset, so the next refresh fills it from the list. */
+  modelIdPrefix: Schema.optionalKey(Schema.NullOr(Schema.String))
 })
 export type ConnectionSettings = typeof ConnectionSettings.Type
 
@@ -190,11 +197,21 @@ export const CatalogMatch = Schema.Struct({
 })
 export type CatalogMatch = typeof CatalogMatch.Type
 
+/** The capabilities a compatibility shim fixes: the provider refuses anything else. */
+export const FixedCapability = Schema.Literals(["prefill", "thinkingLevels", "tools", "vision", "reasoning"])
+export type FixedCapability = typeof FixedCapability.Type
+
+/** A compatibility shim that applies to a model (the server's registered shims), as the user reads it. */
+const ModelShim = Schema.Struct({ id: Schema.String, label: Schema.String })
+
 /** What pi-ai's catalog and the upstream list report. Rewritten by every refresh. */
 export const ModelUpstream = Schema.Struct({
   ...capabilityFields,
   price: Schema.optionalKey(Price),
-  catalog: Schema.optionalKey(CatalogMatch)
+  catalog: Schema.optionalKey(CatalogMatch),
+  /** The compatibility shims that apply, and the capabilities they fix over the user's edits. */
+  shims: Schema.optionalKey(Schema.Array(ModelShim)),
+  fixed: Schema.optionalKey(Schema.Array(FixedCapability))
 })
 export type ModelUpstream = typeof ModelUpstream.Type
 
@@ -249,7 +266,8 @@ export const resolveModel = (
     field: K,
     fallback: A
   ): Resolved<NonNullable<ModelOverrides[K]> | A> => {
-    if (overrides[field] !== undefined) return { value: overrides[field]!, source: "user" }
+    const fixed = upstream.fixed?.includes(field as FixedCapability) ?? false
+    if (overrides[field] !== undefined && !fixed) return { value: overrides[field]!, source: "user" }
     if (field === "context" && overrides.learned) return { value: overrides.learned.context as A, source: "learned" }
     if (upstream[field] !== undefined)
       return { value: upstream[field]!, source: upstream.catalog?.fields.includes(field) ? "catalog" : "upstream" }

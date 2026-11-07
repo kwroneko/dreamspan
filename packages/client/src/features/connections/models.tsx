@@ -1,4 +1,5 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { AboutHint, LabelWithHelp } from "../../ui/AboutHint.tsx"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
@@ -503,11 +504,38 @@ export function ModelSettingsEditor({
             </Field>
             <Field
               label="Prefill"
-              about="Let replies start with text you supply, for the preset’s prefill and Continue. Choose Yes only if the model supports it."
+              about={
+                model.upstream.fixed?.includes("prefill")
+                  ? "This provider refuses a prefill for this model, so it stays off. Continue asks the model to go on from the reply so far."
+                  : "Let replies start with text you supply, for the preset’s prefill and Continue. Choose Yes only if the model supports it."
+              }
             >
-              <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
+              <Select
+                items={prefillItems(model.upstream.prefill)}
+                value={model.upstream.fixed?.includes("prefill") ? "auto" : prefill}
+                onValueChange={setPrefill}
+                disabled={model.upstream.fixed?.includes("prefill") ?? false}
+              />
             </Field>
           </div>
+          {model.upstream.shims && model.upstream.shims.length > 0 && (
+            <section aria-label="Provider rules" data-provider-rules="" className="mt-4 flex flex-col gap-1">
+              <LabelWithHelp
+                help={
+                  <AboutHint heading="Provider rules">
+                    What this provider refuses or needs for this model. Every request follows them.
+                  </AboutHint>
+                }
+              >
+                <span className="font-medium text-text">Provider rules</span>
+              </LabelWithHelp>
+              <ul className="list-disc pl-5 text-sm text-muted">
+                {model.upstream.shims.map((rule) => (
+                  <li key={rule.id}>{rule.label}</li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
       </Section>
       <Section

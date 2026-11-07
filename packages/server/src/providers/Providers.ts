@@ -53,12 +53,14 @@ import { Reader, Writer } from "../db/Database.ts"
 import { Network, type ProxyOverride, type RequestNetwork, RedirectRefused } from "../net/Network.ts"
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
-import { catalogEntry } from "./catalog.ts"
-import { fillFromCatalogs, withCatalogs } from "./contextCatalog.ts"
+import { catalogEntry, withCatalog } from "./catalog.ts"
+import { detectModelIdPrefix, withCatalogs, withoutModelIdPrefix } from "./contextCatalog.ts"
+import type { ListedModel } from "./modelLists.ts"
+import { applyShims, withShims } from "./shims.ts"
 import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import type { ModelListError } from "./modelLists.ts"
-import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./registry.ts"
+import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
@@ -99,7 +101,7 @@ export interface StreamRequest {
      */
     readonly breakpoints?: ReadonlyArray<number>
     /** The automatic layout's reusable endpoint, for transforms that place markers there. */
-    readonly stable?: import("./registry.ts").StableEndpoint
+    readonly stable?: StableEndpoint
     /**
      * Fields set over the body pi-ai built, before the registered transforms run: what the
      * caller decides that pi-ai doesn't model, such as the context assembler's exact Chat
@@ -806,24 +808,50 @@ export const layer = (options: ProvidersOptions = {}) =>
           })
           .pipe(Effect.mapError((error) => scrubbed(prepared, fromList(error))))
 
+      /**
+       * What the catalogs know of listed (or added) models, matched without the router's id
+       * prefix (liveapi F1, F2): the kind's own catalog (price, reasoning, vision, thinking levels),
+       * then the registered ones for a window; then the compatibility shims. Keys stay as listed.
+       */
+      const describeModels = (kind: ProviderKindEntry, prefix: string | null, listed: ReadonlyArray<ListedModel>) =>
+        Effect.gen(function* () {
+          const stripped = listed.map((model) => ({ ...model, key: withoutModelIdPrefix(model.key, prefix) }))
+          const fromKind = yield* withCatalog(kind, stripped)
+          const filled = yield* withCatalogs(registry.catalogs.list(), kind.id, fromKind)
+          const shims = registry.shims.list()
+          return filled.map((model, i) => withShims(shims, kind.id, { key: listed[i]!.key, upstream: model.upstream }))
+        })
+
       const refreshModels: ProvidersShape["refreshModels"] = (userId, connectionId) =>
         Effect.gen(function* () {
           const prepared = yield* prepare(userId, connectionId)
           let route: string | null = null
           const listed = yield* listModels(prepared, (d) => (route = d))
-          const models = yield* withCatalogs(registry.catalogs.list(), prepared.kind.id, listed)
+          const detected =
+            prepared.connection.modelIdPrefix === null ? detectModelIdPrefix(listed.map((model) => model.key)) : null
+          const prefix = prepared.connection.modelIdPrefix ?? detected
+          const models = yield* describeModels(prepared.kind, prefix, listed)
           const result = yield* fromStorage(
-            writer.SyncFetchedModels({ userId, connectionId, models, fetchedAt: Date.now() })
+            writer.SyncFetchedModels({
+              userId,
+              connectionId,
+              models,
+              fetchedAt: Date.now(),
+              ...(detected !== null ? { modelIdPrefix: detected } : {})
+            })
           )
           return { ...result, route }
         })
 
       const catalogUpstream: ProvidersShape["catalogUpstream"] = (userId, connectionId, key) =>
         reader.GetConnection({ userId, connectionId }).pipe(
-          Effect.flatMap((connection) =>
-            Effect.promise(() => fillFromCatalogs(registry.catalogs.list(), connection.kind, { key, upstream: {} }))
-          ),
-          Effect.map((model) => model.upstream),
+          Effect.flatMap((connection) => {
+            const kind = registry.kinds.get(connection.kind)
+            return kind
+              ? describeModels(kind, connection.modelIdPrefix, [{ key, upstream: {} }])
+              : Effect.succeed<ReadonlyArray<ListedModel>>([{ key, upstream: {} }])
+          }),
+          Effect.map(([model]) => model!.upstream),
           Effect.catch(() => Effect.succeed<ModelUpstream>({}))
         )
 
@@ -1291,7 +1319,9 @@ export const layer = (options: ProvidersOptions = {}) =>
                       }),
                     initial
                   )
-                  const final = limitImages(transformed, effective.maxImages.value)
+                  // Then what the provider refuses or needs for this model (compatibility shims).
+                  const shimmed = applyShims(registry.shims.list(), transformed, target).payload
+                  const final = limitImages(shimmed, effective.maxImages.value)
                   await Effect.runPromise(open(final), { signal })
                   const policy = documentedCachePolicy(
                     { provider: prepared.kind.piProvider, api: prepared.api, model: model.key },
