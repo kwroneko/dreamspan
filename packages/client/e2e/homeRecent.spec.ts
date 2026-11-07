@@ -48,6 +48,12 @@ test.beforeAll(async () => {
         yield* api.ChangeCast({ chatId: trio.id, slotId: null, change: { _tag: "Join", entityId } })
       // Today, so the trio's members come first.
       yield* api.SendMessage({ chatId: trio.id, parentSlotId: null, branch: false, content: "Three of us." })
+      // Even newer activity must not put an archived character in the ordinary Recent grid.
+      const hidden = yield* api.CreateCard({ label: "Archived newest", name: "Archived newest" })
+      const chat = yield* api.CreateChat({ title: "Archived newest alone" })
+      yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: hidden.entityId } })
+      yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Hello.", reply: false })
+      yield* api.SetRefArchived({ refId: hidden.id, archived: true })
     })
   )
 })
@@ -78,14 +84,15 @@ for (const width of [1440, 390]) {
     // The trio's chat is today's, Bob's imported one later than Alice's; Cara has none.
     expect(order.slice(0, 3).sort()).toEqual(["Dax", "Eve", "Fin"])
     expect(order.slice(3)).toEqual(["Bob", "Alice", "Cara"])
-    // No dead tab; each with its count (characterBrowse.spec.ts has more).
+    // Every filter, including the archive, has its count (characterBrowse.spec.ts has more).
     await expect(page.getByRole("group", { name: "Show", exact: true }).getByRole("button")).toHaveText([
       /^All\s*6$/,
       /^With chats\s*5$/,
       /^Never used\s*1$/,
       /^Favourites\s*0$/,
       /^Personas\s*0$/,
-      /^Groups\s*1$/
+      /^Groups\s*1$/,
+      /^Archived\s*1$/
     ])
     if (width === 1440) {
       // The left panel's grid uses the same key.
