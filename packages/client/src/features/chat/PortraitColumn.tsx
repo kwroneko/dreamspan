@@ -4,8 +4,11 @@
 // header and a share of the fixed height split by dragging the boundary between two. Its width follows the images (the widest one's
 // at its own box's height, a small one enlarged at most MAX_UPSCALE times) unless the user
 // resized it, and gives way with the other columns so the messages keep their minimum
-// (ui/columnLayout.ts).
+// (ui/columnLayout.ts). In the workbench it is a column of the shell, left of the frames, as the
+// side panel is right of them (owner, 2026-11-05: "the image-viewer would also open in its own
+// extra column as it does"): never inside a frame, where it would cover the next one.
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useSession } from "../../session.ts"
 import { MAX_UPSCALE, type NaturalSize } from "../../ui/ImageViewer.tsx"
 import { mediaUrl, pictureUrl } from "../../ui/mediaImage.ts"
@@ -14,8 +17,10 @@ import { type Portrait, PortraitView, usePortraitViewer } from "../../ui/Portrai
 import type { StackEntry } from "../../ui/portraitStack.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { ViewerHeader, ViewerMoves } from "../../ui/ViewerHeader.tsx"
-import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
+import { Menu, MenuCheckboxItem, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
+import { useOpenAsTab, usePortraitColumnPlace } from "../workbench/tab.tsx"
+import { pictureHref } from "./PicturePage.tsx"
 
 const MIN = 200
 /** Preferred minimum while sharing a pair; smaller pairs split their available height. */
@@ -36,8 +41,9 @@ interface Measured {
 
 export function PortraitColumn({ wide }: { wide: boolean }) {
   const viewer = usePortraitViewer()
-  if (!wide || !viewer || viewer.shown.length === 0) return null
-  return <Column />
+  const place = usePortraitColumnPlace(wide && viewer !== null && viewer.shown.length > 0)
+  if (!place.show) return null
+  return place.host ? createPortal(<Column />, place.host) : <Column />
 }
 
 function Column() {
@@ -140,6 +146,23 @@ function Viewer({
   const viewer = usePortraitViewer()!
   const portrait = entry.portrait
   const ref = useRef<HTMLElement>(null)
+  // Into a frame as a tab (owner, 2026-11-07): dragged from the header onto a frame's strip or
+  // body, or from the ⋯ menu. The column stays where pictures open.
+  const asTab = useOpenAsTab()
+  const href = pictureHref(portrait)
+  const outside =
+    asTab && href
+      ? {
+          over: (x: number, y: number) => asTab.at(x, y)?.box ?? null,
+          drop: (x: number, y: number) => {
+            const target = asTab.at(x, y)
+            if (!target) return false
+            asTab.drop(target, href)
+            viewer.close(portrait.id)
+            return true
+          }
+        }
+      : undefined
   // The original's shape, from the thumbnail first, and the image box's height: what a
   // fitted image's height is.
   const [shape, setShape] = useState<NaturalSize | null>(null)
@@ -189,7 +212,11 @@ function Viewer({
       <PortraitView
         portrait={portrait}
         alignToChatHeader={first}
-        header={(node) => <ViewerHeader portrait={portrait}>{node}</ViewerHeader>}
+        header={(node) => (
+          <ViewerHeader portrait={portrait} outside={outside}>
+            {node}
+          </ViewerHeader>
+        )}
         title={(name) => <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</h2>}
         toggle={
           <Menu
@@ -198,11 +225,37 @@ function Viewer({
               <IconButton
                 label="Viewer options"
                 icon="more"
-                hint="Move this image or choose whether other images stay open."
+                hint={
+                  asTab
+                    ? "Move this image, open it as a tab, or choose whether other images stay open."
+                    : "Move this image or choose whether other images stay open."
+                }
               />
             }
           >
             <ViewerMoves portrait={portrait} />
+            {asTab && (
+              <>
+                <MenuSeparator />
+                <MenuItem
+                  icon="image"
+                  disabled={href === null}
+                  description={
+                    href === null
+                      ? "This card has no image to open."
+                      : "Open this image as a tab in the chat's frame. Dragging its header onto a frame does the same."
+                  }
+                  onClick={() => {
+                    if (!href) return
+                    asTab.open(href)
+                    viewer.close(portrait.id)
+                  }}
+                >
+                  Open as a tab
+                </MenuItem>
+                <MenuSeparator />
+              </>
+            )}
             <MenuCheckboxItem
               icon="one-image"
               checked={viewer.single}

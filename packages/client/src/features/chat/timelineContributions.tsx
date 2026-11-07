@@ -72,9 +72,7 @@ export const registerTimelineTransforms = () => [
               ? {
                   ...row,
                   estimate: 64,
-                  render: ({ session, anchor }) => (
-                    <MergedChatRow entry={row.entry!} session={session} highlighted={row.entry!.slotId === anchor} />
-                  )
+                  render: ({ session }) => <MergedChatRow entry={row.entry!} session={session} />
                 }
               : row
           )

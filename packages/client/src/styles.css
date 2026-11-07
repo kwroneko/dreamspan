@@ -1,14 +1,12 @@
 @import "tailwindcss";
 
-/* Opacity keeps tile toggles in the layout and tab order. Touch controls stay visible:
- * tapping the tile already opens it. Focus anywhere inside reveals its off toggles. */
+/* Opacity keeps tile toggles in the tab order; each sits alone in its corner, so a hidden one
+ * moves nothing, and it takes no clicks: a click there reaches the tile. Touch controls stay
+ * visible: tapping the tile already opens it. Focus anywhere inside reveals its off toggles. */
 @media (hover: hover) and (pointer: fine) {
   .tile-toggle-surface:not(:hover):not(:focus-within) .tile-toggle[aria-pressed="false"] {
     opacity: 0;
-  }
-  /* A character tile's Open beside, the same way. */
-  .tile-toggle-surface:not(:hover):not(:focus-within) .tile-beside {
-    opacity: 0;
+    pointer-events: none;
   }
 }
 

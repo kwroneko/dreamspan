@@ -106,7 +106,16 @@ export function SnippetLarge({
                   kind="note"
                   subject="snippet"
                   focus={SNIPPET_FOCUS}
-                  items={state.items.map((item) => ({ value: item.ref.id, label: item.title || item.ref.label }))}
+                  items={state.items.map((item) => ({
+                    value: item.ref.id,
+                    label: item.title || item.ref.label,
+                    updatedAt: item.ref.updatedAt
+                  }))}
+                  create={{
+                    label: "New snippet",
+                    hint: `${state.chatId === null ? "An empty snippet for all chats" : "An empty snippet for this chat, every branch of it"}, opened in this editor`,
+                    run: async () => (await workspace.create())?.ref.id ?? null
+                  }}
                 />
               </h1>
             </InlineRename>

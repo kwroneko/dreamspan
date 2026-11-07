@@ -167,12 +167,32 @@ export type RecordedGeneration = typeof RecordedGeneration.Type
 export const ModelRef = Schema.Struct({ provider: Schema.String, model: Schema.String })
 export type ModelRef = typeof ModelRef.Type
 
+/**
+ * How a reply's speaker was chosen, when the decision model's "Who replies next" was to choose
+ * it (DESIGN §2.3, spec/AGENTIC.md §7): `auto`, not chosen yet (the speaker is Auto's pick, which
+ * the reply never shows as its speaker meanwhile); `order`, Auto's pick stood (nothing to ask, or
+ * no answer sure enough); `decision`, the decision model's pick, with how sure it was and the name
+ * it was asked about. Absent: Auto's or the user's pick, with no decision model involved.
+ */
+export const SpeakerPick = Schema.Union([
+  Schema.Struct({ by: Schema.Literal("auto") }),
+  Schema.Struct({ by: Schema.Literal("order") }),
+  Schema.Struct({
+    by: Schema.Literal("decision"),
+    confidence: Schema.Number,
+    name: Schema.String,
+    rolloutId: Schema.String
+  })
+])
+export type SpeakerPick = typeof SpeakerPick.Type
+
 export class Version extends Schema.Class<Version>("Version")({
   id: VersionId,
   slotId: SlotId,
   ordinal: Schema.Int,
   status: VersionStatus,
   speakerEntityId: Schema.NullOr(EntityId),
+  speakerPick: Schema.optionalKey(SpeakerPick),
   writer: Writer,
   content: Schema.String,
   images: Schema.optionalKey(MessageImages),
@@ -305,6 +325,8 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
 /** What a new version is made of; the server fills in ids, ordinals and times. */
 export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   speakerEntityId: Schema.NullOr(EntityId),
+  /** A reply whose speaker Auto picked: the decision model may choose another before it's written. */
+  speakerPick: Schema.optional(SpeakerPick),
   writer: Writer,
   content: Schema.String,
   images: Schema.optionalKey(MessageImages),
@@ -396,9 +418,17 @@ export class QueuedMessage extends Schema.Class<QueuedMessage>("QueuedMessage")(
   /**
    * A reply of a round (DESIGN §2.3): queued by the server, behind the round's reply before it,
    * in `forkId`. `held`: the round stopped (Stop, or a reply that failed) and waits for
-   * Continue round.
+   * Continue round. `decides`: the decision model chooses who replies at this turn, so its
+   * speaker is only Auto's fallback. `startSlotId`: the round's first reply, once posted.
    */
-  round: Schema.optionalKey(Schema.Struct({ held: Schema.Boolean, forkId: Schema.NullOr(ForkId) })),
+  round: Schema.optionalKey(
+    Schema.Struct({
+      held: Schema.Boolean,
+      forkId: Schema.NullOr(ForkId),
+      decides: Schema.optionalKey(Schema.Boolean),
+      startSlotId: Schema.optionalKey(SlotId)
+    })
+  ),
   rowVersion: Schema.Int,
   createdAt: Schema.Number
 }) {}

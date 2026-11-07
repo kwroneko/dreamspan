@@ -179,6 +179,45 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
           yield* sql`UPDATE rollout_payloads SET transcript_json = ${result} WHERE rollout_id = ${rolloutId}`
         }).pipe(transaction(sql, "FinishDecisionRollout")),
 
+      PickSpeaker: ({ userId, rolloutId, versionId, speakerEntityId, name, confidence }) =>
+        Effect.gen(function* () {
+          const decision = yield* decisionRollout(userId, rolloutId)
+          const [version] = yield* sql<{
+            readonly slot_id: string
+            readonly status: string
+            readonly content_length: number
+            readonly speaker_pick_json: string | null
+          }>`
+            SELECT v.slot_id, v.status, v.content_length, v.speaker_pick_json FROM versions v JOIN slots s ON s.id = v.slot_id
+            WHERE v.id = ${versionId} AND s.chat_id = ${decision.chat_id} AND v.deleted_at IS NULL`
+          if (!version || version.slot_id !== decision.slot_id)
+            return yield* new NotFound({ entity: "decision version", id: versionId })
+          // Only a reply Auto picked for, before its first word: a later choice or text stays.
+          const auto = version.speaker_pick_json !== null && JSON.parse(version.speaker_pick_json).by === "auto"
+          if (
+            decision.status !== "completed" ||
+            version.status !== "generating" ||
+            version.content_length !== 0 ||
+            !auto
+          )
+            return false
+          yield* graph.checkSpeaker(userId, speakerEntityId)
+          yield* sql`UPDATE versions SET speaker_entity_id = ${speakerEntityId},
+            speaker_pick_json = ${JSON.stringify({ by: "decision", confidence, name, rolloutId })},
+            updated_at = ${Date.now()} WHERE id = ${versionId}`
+          return true
+        }).pipe(transaction(sql, "PickSpeaker")),
+
+      SettleSpeaker: ({ userId, versionId }) =>
+        Effect.gen(function* () {
+          const settled = yield* sql<{ readonly id: string }>`
+            UPDATE versions SET speaker_pick_json = ${JSON.stringify({ by: "order" })}, updated_at = ${Date.now()}
+            WHERE id = ${versionId} AND json_extract(speaker_pick_json, '$.by') = 'auto'
+              AND slot_id IN (SELECT s.id FROM slots s JOIN chats c ON c.id = s.chat_id WHERE c.owner_user_id = ${userId})
+            RETURNING id`
+          return settled.length > 0
+        }).pipe(transaction(sql, "SettleSpeaker")),
+
       ApplyDecisionEffect: ({ userId, rolloutId, versionId, expectedState, events }) =>
         Effect.gen(function* () {
           const decision = yield* decisionRollout(userId, rolloutId)

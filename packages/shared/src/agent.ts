@@ -101,17 +101,6 @@ export const RunTranscript = Schema.Struct({
 })
 export type RunTranscript = typeof RunTranscript.Type
 
-/** A reply mode the chat settings offer (spec/AGENTIC.md §6). */
-const ReplyModeInfo = Schema.Struct({
-  id: Schema.String,
-  label: Schema.String,
-  description: Schema.String,
-  /** Replies are written by a tool-using loop: the tools list applies. */
-  agentic: Schema.Boolean,
-  /** The tools it offers when the chat doesn't choose, by id, as far as they're registered. */
-  tools: Schema.Array(Schema.String)
-})
-
 /** A tool an agent reply may be offered, as the settings list it. */
 const ReplyToolInfo = Schema.Struct({
   id: Schema.String,
@@ -122,11 +111,11 @@ const ReplyToolInfo = Schema.Struct({
   effect: EffectClass
 })
 
-export const ReplyModes = Schema.Struct({
-  modes: Schema.Array(ReplyModeInfo),
+export const ReplyTools = Schema.Struct({
+  defaultTools: Schema.Array(Schema.String),
   tools: Schema.Array(ReplyToolInfo)
 })
-export type ReplyModes = typeof ReplyModes.Type
+export type ReplyTools = typeof ReplyTools.Type
 
 /**
  * Model work in a chat that made no message (spec/AGENTIC.md §5.4): a summary, a condensation,

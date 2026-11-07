@@ -15,6 +15,8 @@ export interface CardSurfaceContext {
   readonly store?: EditorStore
   /** The family section only when the card has forks: the editor's, where a lone card's is noise. */
   readonly whenForked?: boolean
+  /** Classes the place gives a control it shows inline (a tile's toggle over its picture). */
+  readonly className?: string
 }
 /** What a card's menu entry and its dialog receive: the dialog is mounted outside the menu. */
 export interface CardMenuProps extends CardSurfaceContext {

@@ -75,13 +75,17 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
       detail: presetDetail(ref, view),
       ...(archivedRow && view !== "archived" ? { badge: <Badge tone="warning">Archived</Badge> } : {}),
       tooltip: lines([
-        selection.usage === "summary"
+        selection.usage === "edit"
           ? inUse
-            ? "In use for summaries"
-            : "Use this preset for summaries"
-          : inUse
-            ? `In use for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`
-            : `Use this preset for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`,
+            ? "Shown in this editor"
+            : "Opens this preset in this editor"
+          : selection.usage === "summary"
+            ? inUse
+              ? "In use for summaries"
+              : "Use this preset for summaries"
+            : inUse
+              ? `In use for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`
+              : `Use this preset for the next reply in ${selection.lock?.locked ? "this chat only" : "every chat"}`,
         ...presetTimes(ref)
       ]),
       action: archivedRow
@@ -103,7 +107,7 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
   }
   const items: Array<PickerItem> = [
     ...(pinned ? [row(pinned)] : []),
-    ...(selection.usage !== "summary" && view !== "archived" && matchesBuiltin
+    ...(selection.usage === undefined && view !== "archived" && matchesBuiltin
       ? [
           {
             value: BUILTIN,
@@ -188,7 +192,11 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
       )}
       <ErrorAlert error={selection.error} />
       <PickerFooterButton
-        hint={`${NEW_PRESET_HINT}, ${selection.usage === "summary" ? "chosen for summaries" : "chosen for the next reply"} and opened for editing`}
+        hint={
+          selection.usage === "edit"
+            ? `${NEW_PRESET_HINT}, opened in this editor`
+            : `${NEW_PRESET_HINT}, ${selection.usage === "summary" ? "chosen for summaries" : "chosen for the next reply"} and opened for editing`
+        }
         icon="plus"
         onClick={onNew}
       >
@@ -210,6 +218,8 @@ export function useNewPreset(selection: PresetSelection) {
       name={newPresetName([...selection.live, ...selection.archived].map((ref) => ref.label))}
       onCreated={async (ref) => {
         await selection.choose(ref.id)
+        // An editor's header picker opens it in that editor as it's chosen.
+        if (selection.usage === "edit") return
         if (workspace) workspace.open(ref.id)
         else void navigate({ to: "/library/$refId", params: { refId: ref.id } })
       }}

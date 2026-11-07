@@ -117,7 +117,7 @@ describe("agent note tools", () => {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
           model: {},
           mira: { description: "She wears a grey coat.", agent_editable_fields: ["description"] },
-          state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+          state: [{ key: "agent.enabled", value: { on: true } }]
         })
         const tail = yield* chatNote(
           api,
@@ -188,7 +188,7 @@ describe("agent note tools", () => {
       const { version, events, chat } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       const locked = yield* chatNote(api, chat.id, "Locked", "Mira owes Tobin.", false)
       yield* chatNote(api, chat.id, "Private", "Tobin owes Mira.", false)
@@ -275,7 +275,7 @@ describe("agent note tools", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         mira: { agent_editable_fields: ["description"] },
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       const locked = yield* chatNote(api, chat.id, "Locked", "Mira owes Tobin.", false)
       const me = yield* api.Whoami()
@@ -379,7 +379,7 @@ describe("agent note tools", () => {
           description: "Mira keeps the ledger.\n\nShe wears a grey travelling coat.\n\nShe hums while she works.",
           agent_editable_fields: ["description"]
         },
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       const me = yield* api.Whoami()
       const reader = yield* Reader

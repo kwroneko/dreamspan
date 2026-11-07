@@ -25,6 +25,7 @@ import { Loading, reloadPage } from "../../ui/Spinner.tsx"
 import { ChatDefaultsPage } from "./ChatDefaults.tsx"
 import { ChatsPage } from "./ChatsPage.tsx"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
+import { PICTURE_PATH, PicturePage } from "./PicturePage.tsx"
 import { sidebarSearch } from "../characters/sidebarSearch.ts"
 
 // The chat view carries the Markdown renderer, most of the bundle: it loads with the first chat opened.
@@ -109,6 +110,18 @@ export const register = () => {
     icon: "chat",
     document: true
   })
+  // A picture opened as a tab (dragged from the portrait column): one tab per image and cutout.
+  tabKinds.register({
+    id: "picture",
+    order: 100,
+    match: (url) =>
+      url.pathname === PICTURE_PATH
+        ? `${url.searchParams.get("media") ?? ""}:${url.searchParams.get("crop") ?? ""}`
+        : null,
+    title: (url) => url.searchParams.get("name") || "Picture",
+    icon: "image"
+  })
+  routes.register({ id: "picture", parent: "app", path: PICTURE_PATH, component: PicturePage })
   routes.register({
     id: "chats",
     parent: "app",

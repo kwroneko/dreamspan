@@ -1,6 +1,6 @@
 // Agent replies in the browser (spec/AGENTIC.md §5, §6): a scripted provider that calls
-// search_chat twice and then answers. A plain reply shows no steps; the Reply mode setting
-// switches the chat to the narrator; the next reply's steps stream open as "Working…", folding
+// search_chat twice and then answers. A plain reply shows no steps; the Tools setting
+// enables agent replies; the next reply's steps stream open as "Working…", folding
 // during the run sticks as the user's preference, and when the reply arrives they fold to
 // "2 steps · N s", with the same badge in the header, which opens them again (read from the
 // transcript). The run inspector shows the tools offered and every request; the Activity tab lists
@@ -33,7 +33,7 @@ const prefs = () =>
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
-    test(`agent steps, run inspector, Activity and Reply mode at ${width} ${theme}`, async ({ page }, info) => {
+    test(`agent steps, run inspector, Activity and Tools at ${width} ${theme}`, async ({ page }, info) => {
       test.setTimeout(180_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
@@ -87,15 +87,14 @@ for (const width of [1440, 390])
       await expect(plain.locator("[data-steps-panel]")).toHaveCount(0)
       await expect(plain.locator("[data-steps-badge]")).toHaveCount(0)
 
-      // Reply mode, in This chat: the narrator, with its tools listed.
+      // Tools, in This chat, with the allowed list.
       const settings = await openPanel(page, "This chat")
-      await settings.getByRole("combobox", { name: "Reply mode" }).click()
-      await page.getByRole("option", { name: /^Narrator with tools/ }).click()
-      await expect(settings.getByRole("combobox", { name: "Reply mode" })).toHaveText(/Narrator with tools/)
-      const tools = settings.getByRole("group", { name: "Tools" })
+      await settings.getByRole("switch", { name: "Tools", exact: true }).click()
+      await expect(settings.getByRole("switch", { name: "Tools", exact: true })).toBeChecked()
+      const tools = settings.getByRole("group", { name: "Allowed tools" })
       await expect(tools.getByRole("checkbox", { name: "Search the chat's earlier messages" })).toBeChecked()
       await shot("reply-mode")
-      await expectLayout(page, info, `reply-mode-${width}-${theme}`, { scope: '[aria-label="Reply mode"]' })
+      await expectLayout(page, info, `reply-mode-${width}-${theme}`, { scope: '[aria-label="Tools"]' })
       if (width === 390) await closePanel(page)
 
       // The next message's reply is the agent's.

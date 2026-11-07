@@ -1,6 +1,6 @@
 // Agent replies in the client (spec/AGENTIC.md §5, §6), as registered parts a plugin can replace:
 // the steps inside a reply and its header badge, the run inspector's tools and steps, the
-// Activity tab, and the Reply mode setting.
+// Activity tab, and the Tools setting.
 import { lazy, Suspense, type ComponentProps } from "react"
 import { Loading } from "../../../ui/Spinner.tsx"
 import { chatPanels, lazyPanel, type PanelProps } from "../panels.tsx"
@@ -9,7 +9,7 @@ import { Steps, StepsBadge } from "./Steps.tsx"
 import { cardDefinitionSections } from "../../editor/cardSections.ts"
 
 const RunSteps = lazy(() => import("./RunSteps.tsx").then((m) => ({ default: m.RunSteps })))
-const ReplyModeSection = lazy(() => import("./ReplyModeSection.tsx").then((m) => ({ default: m.ReplyModeSection })))
+const ToolsSection = lazy(() => import("./ToolsSection.tsx").then((m) => ({ default: m.ToolsSection })))
 const AgentPermissionsSection = lazy(() =>
   import("./AgentPermissionsSection.tsx").then((m) => ({ default: m.AgentPermissionsSection }))
 )
@@ -31,15 +31,15 @@ export const registerAgent = () => [
     )
   }),
   chatSettingSections.register({
-    id: "settings.reply-mode",
+    id: "settings.tools",
     order: 20,
-    component: (props: ComponentProps<typeof ReplyModeSection>) => (
+    component: (props: ComponentProps<typeof ToolsSection>) => (
       <Suspense fallback={null}>
-        <ReplyModeSection {...props} />
+        <ToolsSection {...props} />
       </Suspense>
     )
   }),
-  // Below the Reply mode's tools: what the tools may change in this chat.
+  // Below Tools: what the tools may change in this chat.
   chatSettingSections.register({
     id: "settings.agent-permissions",
     order: 21,

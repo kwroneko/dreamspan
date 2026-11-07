@@ -14,7 +14,7 @@ import { GenerationFailed, type GenerationRequest, Generator } from "./Generator
 import { throughParse } from "./replySections.ts"
 import { ChatHub } from "./ChatHub.ts"
 import { foldState } from "@rp/shared/state.ts"
-import { PLAIN_MODE, planTurn } from "../agent/modes.ts"
+import { planTurn } from "../agent/modes.ts"
 import type { OutputContract } from "../agent/modes.ts"
 import { type FrozenTool, frozenTool, sendMessageDefinition } from "../agent/tools.ts"
 import { DecisionEngine } from "../decision/engine.ts"
@@ -165,16 +165,47 @@ export const layer = Layer.effect(
                 ...(forkId === null ? {} : { forkId })
               })
             : false
-          // The chat's mode at this point decides who runs and how (spec/AGENTIC.md §6).
+          // The registered planner combines the chat settings at this point (spec/AGENTIC.md §6).
           const events = yield* reader
             .StateEventsAt({ userId, chatId, slotId: parent, forkId })
             .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("StateEventsAt")))
+          // Points that act before the reply is written (spec/AGENTIC.md §7): "Who replies next" may
+          // give a reply Auto picked another speaker, which every tab hears before its first word.
+          const changed = Option.isSome(decisions)
+            ? yield* decisions.value.beforeReply({
+                userId,
+                chatId,
+                slotId,
+                versionId,
+                forkId,
+                parentSlotId: parent,
+                version: slot.entry.version,
+                events
+              })
+            : false
+          // A reply the decision model was to choose a speaker for shows none until it's chosen:
+          // when it wasn't (nothing to ask, no sure answer, no point to ask it), Auto's pick stands.
+          const settled =
+            slot.entry.version.speakerPick?.by === "auto"
+              ? yield* writer
+                  .SettleSpeaker({ userId, versionId })
+                  .pipe(
+                    Effect.catchTag(["StorageError", "RpcClientError"], (error) =>
+                      Effect.as(Effect.logWarning("SettleSpeaker failed", error), false)
+                    )
+                  )
+              : false
+          if (changed || settled)
+            yield* reader.GetSlot({ userId, slotId, forkId }).pipe(
+              Effect.tap(({ entry }) => Effect.sync(() => hub.publish(chatId, { _tag: "Slot", entry }))),
+              Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetSlot"))
+            )
           const state = foldState(events)
           const planned = planTurn(execution.orchestrationModes, state)
           if ("unavailable" in planned)
             return yield* new GenerationFailed({
               class: "unavailable",
-              message: `The reply mode “${planned.unavailable}” is unavailable.`
+              message: `The reply planner “${planned.unavailable}” is unavailable.`
             })
           // Continue keeps the source prefill; Write for remains a single plain turn.
           const plainTurn =
@@ -301,7 +332,7 @@ export const layer = Layer.effect(
                     ]
                   })}}`
                 : assembled.snapshot,
-              ...(planned.mode === PLAIN_MODE ? {} : { mode: planned.mode }),
+              ...(agentic ? { mode: planned.mode } : {}),
               issues: generation.issues,
               variables: generation.variables,
               frozenMessages: generation.frozenMessages.map((m) => ({ ...m, versionId: m.versionId as VersionId }))

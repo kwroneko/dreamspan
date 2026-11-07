@@ -12,6 +12,7 @@ import {
   PathEntry,
   RecordedGeneration,
   type SlotId,
+  type SpeakerPick,
   Version,
   type VersionId,
   versionInContext
@@ -120,6 +121,8 @@ export interface VersionRow {
   readonly ordinal: number
   readonly status: Version["status"]
   readonly speaker_entity_id: string | null
+  /** How Auto chose the speaker (`SpeakerPick`); absent where a query doesn't select it. */
+  readonly speaker_pick_json?: string | null
   readonly writer: Version["writer"]
   readonly content: string
   readonly macro_mode: Version["macroMode"]
@@ -253,6 +256,7 @@ export const toVersion = (row: VersionRow) =>
     ordinal: row.ordinal,
     status: row.status,
     speakerEntityId: row.speaker_entity_id as EntityId | null,
+    ...(row.speaker_pick_json ? { speakerPick: JSON.parse(row.speaker_pick_json) as SpeakerPick } : {}),
     writer: row.writer,
     content: row.content,
     ...(row.images_json ? { images: JSON.parse(row.images_json) } : {}),

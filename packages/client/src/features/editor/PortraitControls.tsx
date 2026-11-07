@@ -345,7 +345,7 @@ export function CardHeaderPortrait({
         <span
           data-portrait-controls
           data-layout-overlay="The Picture button sits over the picture's corner"
-          data-layout-audit-ignore="inset: A compact icon toolbar whose buttons are the segments of its frame"
+          data-layout-audit-ignore="inset: A compact icon toolbar whose buttons are the segments of its frame; overlay: The toolbar's frame is the one backing its buttons share"
           className="absolute right-1 bottom-1 z-10 flex rounded-md border border-border bg-surface/85 text-text opacity-60 shadow-sm transition-opacity group-hover/portrait:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"
         >
           {controls}

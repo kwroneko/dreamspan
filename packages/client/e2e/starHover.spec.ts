@@ -62,6 +62,12 @@ async function hitTest(star: Locator) {
 
 async function checkStars(page: Page, scope: Locator, surface: "home" | "sidebar" | "library" | "cast") {
   const portrait = surface !== "library"
+  // Fork badges (and the cast's membership marks) arrive after the tiles and push later
+  // rows down. Hovering before they land leaves the pointer over the gap above the tile,
+  // where its hidden star no longer takes clicks.
+  for (const [i, name] of names.entries())
+    if (i % 4 >= 2) await expect(scope.getByRole("button", { name: `Forks of ${name}`, exact: true })).toHaveCount(1)
+  if (surface === "cast") await expect(scope.getByText("In this chat", { exact: true })).toHaveCount(4)
   for (const [i, name] of names.entries()) {
     const namedStar = scope.getByRole("button", {
       name: new RegExp(`^(Add|Remove) ${name} (to|from) favourites$`),
@@ -70,7 +76,8 @@ async function checkStars(page: Page, scope: Locator, surface: "home" | "sidebar
     const tile = namedStar.locator(
       "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' tile-toggle-surface ')][1]"
     )
-    const star = tile.locator(".tile-toggle")
+    // The star, not the archive toggle in the tile's other corner.
+    const star = tile.locator(".tile-toggle[aria-label$='favourites']")
     await tile.scrollIntoViewIfNeeded()
     await star.scrollIntoViewIfNeeded()
     await expect(tile.getByRole("button", { name: `Forks of ${name}`, exact: true })).toHaveCount(i % 4 >= 2 ? 1 : 0)

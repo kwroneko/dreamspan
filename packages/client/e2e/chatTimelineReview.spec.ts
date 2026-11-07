@@ -9,6 +9,7 @@ import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { condensed, level1 } from "./support/summaries.ts"
 import { showActions } from "./support/message.ts"
 import { openPanel } from "./support/panel.ts"
+import { expectFlashedThenUnmarked, recordFlashes } from "./support/flashes.ts"
 
 const server = serverPerFile(withAdmin)
 test.setTimeout(180_000)
@@ -166,13 +167,14 @@ for (const width of [1440, 390])
       })
     )
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await recordFlashes(page)
     const base = `${server().url}/chats/${chat.id}`
     await page.goto(`${base}?slot=${chat.entries[1]!.slotId}`)
     const summary = page.locator(`[data-timeline-summary="${top.id}"]`)
     const message = (index: number) => page.locator(`article[data-slot="${chat.entries[index]!.slotId}"]`)
     await expect(summary).toBeVisible()
     await expect(message(1)).toBeInViewport()
-    await expect(message(1)).toHaveClass(/border-accent/)
+    await expectFlashedThenUnmarked(page, message(1))
     await expect(summary.locator("article")).toHaveCount(100)
     await summary.getByRole("button", { name: "Later messages", exact: true }).click()
     await expect(summary.locator("article")).toHaveCount(120)
@@ -182,11 +184,11 @@ for (const width of [1440, 390])
       dispatchEvent(new PopStateEvent("popstate"))
     }, `${base}?slot=${chat.entries[110]!.slotId}`)
     await expect(message(110)).toBeInViewport()
-    await expect(message(110)).toHaveClass(/border-accent/)
+    await expectFlashedThenUnmarked(page, message(110))
     const panel = await openPanel(page, "Summaries")
     await panel.getByRole("button", { name: "Messages 1–120: show the first message", exact: true }).click()
     await expect(message(0)).toBeInViewport()
-    await expect(message(0)).toHaveClass(/border-accent/)
+    await expectFlashedThenUnmarked(page, message(0))
   })
 
 for (const width of [1440, 390])

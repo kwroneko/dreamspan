@@ -280,6 +280,8 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   mode: Schema.Literals(["st", "layouts"]),
   capture: Schema.Literals(["captured", "unavailable"]),
   tokenizer: Schema.optionalKey(TokenizerInfo),
+  /** The decision model chose who wrote this reply (DESIGN §2.3): by the name it was asked about, how sure. */
+  speakerPick: Schema.optionalKey(Schema.Struct({ name: Schema.String, confidence: Schema.Number })),
   ...ContextDisplay.fields,
   /** Every attempt, retries included, oldest first. */
   requests: Schema.Array(InspectorUsage)

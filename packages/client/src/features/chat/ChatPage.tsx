@@ -22,6 +22,7 @@ import type { ChatId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { useLocation, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
+  type RefObject,
   useCallback,
   useContext,
   useEffect,
@@ -53,6 +54,7 @@ import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
 import { boundaryIndex, placeOf } from "./summaryBoundary.ts"
 import { LET_GO } from "./composition.ts"
+import { flashWhenShown } from "./jumpFlash.ts"
 
 interface ReadingPosition {
   key: string
@@ -63,6 +65,12 @@ declare module "@tanstack/react-router" {
   interface HistoryState {
     chatReading?: ReadingPosition
   }
+}
+
+/** What MessageList flashed last, kept across its remounts (a timeline layout switch). */
+interface Flashes {
+  opened: number
+  again: boolean
 }
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
@@ -79,6 +87,8 @@ function MessageList({
   session,
   view,
   anchor,
+  jump,
+  flashes,
   rail,
   onBranch,
   onOpenSummaries,
@@ -87,6 +97,10 @@ function MessageList({
   session: ChatSession
   view: ChatView
   anchor: SlotId | null
+  /** The message jumped to, which flashes when the window opens at it (jumpFlash.ts); null: none. */
+  jump: SlotId | null
+  /** The window last flashed (`view.opened`), and whether one opened at the same message flashes again. */
+  flashes: RefObject<Flashes>
   restore: ReadingPosition | null
   rail: boolean
   onBranch: (entry: PathEntry, index: number) => void
@@ -197,7 +211,9 @@ function MessageList({
     // them with its last rows in the layout effect also mounted their controls and reads.
     initialOffset: () => {
       const target = restore?.slot ?? anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null)
-      const index = rows.findIndex((row) => row.key === target || row.lastSlotId === target)
+      // The row the positioning below scrolls to: the one showing the entry, a summary's too.
+      const entry = entries.findIndex((e) => e.slotId === target)
+      const index = entry >= 0 ? rowOf(entry) : rows.findIndex((row) => row.key === target || row.lastSlotId === target)
       let offset = 16
       for (let i = 0; i < (index < 0 ? rows.length : index); i++) offset += rows[i]!.estimate + 6
       return offset
@@ -220,6 +236,17 @@ function MessageList({
     },
     [follow, virtualizer]
   )
+
+  // The virtualizer learns the list's offset only from scroll events. When the browser clamps
+  // an offset it set to where the list already is (the estimated start in a history too short
+  // to scroll, a destination at the top, a row kept in place as rows above it change), none
+  // fires, and the rows between the real offset and its own would never mount.
+  const syncOffset = useCallback(() => {
+    const list = parent.current
+    if (list !== null && Math.abs((virtualizer.scrollOffset ?? 0) - list.scrollTop) >= 1)
+      list.dispatchEvent(new Event("scroll"))
+  }, [virtualizer])
+  useLayoutEffect(syncOffset)
 
   // A new window opens at the asked-for message, or at the bottom.
   // With summaries in the chat, a link waits for the layer: placed among the originals first,
@@ -245,8 +272,48 @@ function MessageList({
     if (row >= 0) virtualizer.scrollToIndex(row, { align: rows[row]?.lastSlotId !== undefined ? "start" : "center" })
     else virtualizer.scrollToEnd()
     hold(row < 0)
-    requestAnimationFrame(() => requestAnimationFrame(() => (settled.current = true)))
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        settled.current = true
+        syncOffset()
+      })
+    )
   })
+
+  // A jump flashes its message once, then leaves it unmarked (owner, 2026-11-06). Coming back to
+  // the history entry (back, forward, a reload, its tab) opens at the message without flashing.
+  const router = useRouter()
+  // Pages loading while it waits for its message don't cancel it; another jump or leaving does.
+  const pendingFlash = useRef<(() => void) | null>(null)
+  useEffect(() => () => pendingFlash.current?.(), [])
+  useEffect(() => {
+    const list = parent.current
+    const flashed = flashes.current
+    if (list === null || entries.length === 0 || flashed.opened === view.opened) return
+    flashed.opened = view.opened
+    pendingFlash.current?.()
+    pendingFlash.current = null
+    if (jump === null) return
+    const key = `${session.id}/${jump}`
+    const again = flashed.again
+    flashed.again = false
+    if (router.state.location.state.chatFlashed === key && !again) return
+    pendingFlash.current = flashWhenShown(list, jump, () => {
+      if (router.state.location.state.chatFlashed !== key)
+        void navigate({
+          to: ".",
+          search: (prev: Record<string, unknown>) => prev,
+          state: (prev) => ({ ...prev, chatFlashed: key }),
+          replace: true,
+          resetScroll: false
+        })
+    })
+  }, [jump, view.opened, entries.length, flashes, session, router, navigate])
+  // A message just inserted flashes where it went (spec/MESSAGE-INSERT.md §4.3).
+  useEffect(() => {
+    const list = parent.current
+    if (list !== null && view.highlight !== null) return flashWhenShown(list, view.highlight)
+  }, [view.highlight])
 
   // Expansions load asynchronously, possibly through several summary levels. Position
   // the linked article each time a new one mounts, after the virtualizer measures its row:
@@ -472,7 +539,6 @@ function MessageList({
         onReveal={setRevealed}
         entry={entry}
         session={session}
-        highlighted={entry.slotId === anchor || entry.slotId === view.highlight}
         branchFork={view.forkId}
         onBranch={onBranch}
       />
@@ -611,6 +677,7 @@ function ChatSurface({
   const shown = useRef({ fork, slot })
   const [originalTarget] = useState({ fork, slot })
   const reading = originalTarget.fork === fork && originalTarget.slot === slot ? restore : null
+  const flashes = useRef<Flashes>({ opened: 0, again: false })
   // Another message or fork of the open chat moves the window; a URL catching up with
   // where the window already is doesn't.
   useEffect(() => {
@@ -675,14 +742,16 @@ function ChatSurface({
       setBranchError(null)
       const sibling = result.value.slotId
       const target = result.value.fork.id
-      if (sibling === slot && target === session.snapshot().forkId) void session.open(sibling)
-      else
+      if (sibling === slot && target === session.snapshot().forkId) {
+        flashes.current.again = true
+        void session.open(sibling)
+      } else
         void navigate({
           to: ".",
           search: withPanel({ fork: target, slot: sibling })
         })
     },
-    [session, navigate, withPanel, slot]
+    [session, navigate, withPanel, slot, flashes]
   )
   const switchBranch = useCallback((entry: PathEntry, index: number) => void onBranch(entry, index), [onBranch])
   // A summary's range opens the window at its first message, as a link to that message does.
@@ -694,17 +763,18 @@ function ChatSurface({
       const at = branchFork === null ? { slot: target } : { fork: branchFork, slot: target }
       if (target === slot) {
         if (!wide) show(null)
+        flashes.current.again = true
         void session.open(target)
       } else
         void navigate({
           to: ".",
           search: wide ? withPanel(at) : at,
           // A message link starts a fresh reading position and explicitly closes a phone's sheet.
-          state: ({ chatReading: _old, ...prev }) => ({ ...prev, chatPanel: true }),
+          state: ({ chatReading: _old, chatFlashed: _flashed, ...prev }) => ({ ...prev, chatPanel: true }),
           resetScroll: false
         })
     },
-    [session, navigate, show, withPanel, wide, slot, branchFork, userId]
+    [session, navigate, show, withPanel, wide, slot, branchFork, userId, flashes]
   )
   // Two chats side by side: the keys are the focused one's.
   const focused = useTabFocused()
@@ -776,6 +846,8 @@ function ChatSurface({
                 session={session}
                 view={view}
                 anchor={reading ? reading.slot : slot}
+                jump={reading ? null : slot}
+                flashes={flashes}
                 restore={reading}
                 rail={rail}
                 onBranch={switchBranch}

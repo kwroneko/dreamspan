@@ -12,7 +12,7 @@ import type {
 } from "@rp/shared/chatSetupApi.ts"
 import { Link, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { openOnPlainClick } from "../../ui/links.ts"
-import { OPEN_BESIDE_HINT, OpenBesideButton, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
+import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { Effect, Schedule, Stream } from "effect"
@@ -22,7 +22,7 @@ import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { OVER_PICTURE, Tooltip } from "../../ui/Tooltip.tsx"
+import { PICTURE_TOGGLE, Tooltip } from "../../ui/Tooltip.tsx"
 import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
 import type { CardSort } from "./cardRecency.ts"
 
@@ -218,6 +218,17 @@ export function useShellNavigation() {
 }
 
 /**
+ * Whether opening a character's chat (its tile, its row) goes to the line the character last
+ * spoke, which then flashes (chat/jumpFlash.ts), rather than to the chat's end. The owner called
+ * it "dubiously useful" (2026-11-06): `false` drops it everywhere.
+ */
+const OPEN_AT_LAST_LINE = true
+
+/** The `slot` a character's chat opens at (`OPEN_AT_LAST_LINE`); none: its end. */
+const lastLine = (latest: { readonly slot: string | null }) =>
+  OPEN_AT_LAST_LINE && latest.slot ? { slot: latest.slot } : {}
+
+/**
  * Where a character's tile links: the chat it opens (its latest), else a new one, with the
  * sidebar on the character's chats and its card's panel, as a click opens it (`useOpenCharacter`),
  * so Open beside, Alt-click and a new browser tab open the character too (owner, 2026-11-06).
@@ -230,7 +241,7 @@ const characterLink = (card: ShellCard) => {
     ? {
         to: "/chats/$chatId" as const,
         params: { chatId: latest.chatId },
-        search: { ...character, fork: latest.forkId, ...(latest.slot ? { slot: latest.slot } : {}) }
+        search: { ...character, fork: latest.forkId, ...lastLine(latest) }
       }
     : { to: "/cards/$entityId/chat" as const, params: { entityId: entity }, search: character }
 }
@@ -261,7 +272,7 @@ export function useOpenCharacter() {
           character: entity,
           fork: latest.forkId,
           panel,
-          ...(latest.slot ? { slot: latest.slot } : {})
+          ...lastLine(latest)
         }
       })
     else
@@ -340,7 +351,8 @@ export function CharacterGrid({
 }
 
 /**
- * A character's tile: its picture, names and use, with the favourite star over the picture.
+ * A character's tile: its picture, names and use, with its favourite star and archive toggle
+ * over the picture's top corners.
  * `sort`: a date sort's date ends the last line. `pick`: what a click does, else open its chat.
  */
 function CharacterTile({
@@ -472,18 +484,14 @@ function CharacterTile({
           {state.pending ? "Adding…" : state.done ? "In this chat" : "Add to chat"}
         </Button>
       )}
-      <span
-        data-layout-overlay="Favourite action sits over the portrait"
-        className="absolute top-2 left-2 flex flex-col gap-1"
-      >
-        <FavouriteStar card={card} className={`tile-toggle ${OVER_PICTURE}`} />
-        <span className={`tile-toggle rounded-md ${OVER_PICTURE}`}>
-          <CardSurface placement="archive-toggle" entityId={c.entityId} />
-        </span>
+      {/* Each toggle has a corner of its own: the star top left, the archive top right. */}
+      <span data-layout-overlay="Favourite action sits over the portrait" className="absolute top-2 left-2 flex">
+        <FavouriteStar card={card} className={PICTURE_TOGGLE} />
       </span>
+      {/* A picker adds to a chat (its corner shows whether one's in it); archiving isn't part of that. */}
       {!pick && (
-        <span data-layout-overlay="Open beside sits over the portrait" className="absolute top-2 right-2">
-          <OpenBesideButton href={besideHref} name={c.label} className={`tile-beside ${OVER_PICTURE}`} />
+        <span data-layout-overlay="Archive action sits over the portrait" className="absolute top-2 right-2 flex">
+          <CardSurface placement="archive-toggle" entityId={c.entityId} className={PICTURE_TOGGLE} />
         </span>
       )}
       {state.mark && (

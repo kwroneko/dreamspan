@@ -9,6 +9,7 @@
 // come back into the workbench: the focused tab's own item navigates it, another opens.
 import type { RouterHistory } from "@tanstack/react-router"
 import type { ReactNode } from "react"
+import type { DropZone } from "./dropOpen.ts"
 import { itemKey, persistHref, shellKeys } from "./kinds.ts"
 import {
   allTabs,
@@ -103,6 +104,8 @@ export class WorkbenchStore {
   private readonly metaListeners = new Set<() => void>()
   /** Tabs whose views show the side panel (chats), most recent decides who shows it. */
   private readonly panelTabs = new Set<string>()
+  /** Tabs whose views have pictures open in the portrait column. */
+  private readonly portraitTabs = new Set<string>()
   /** The sidebar's keys a tab's own navigation set or cleared, for the next mirror. */
   private shellChange: ReadonlyMap<string, string | null> | null = null
   private mirroring = false
@@ -473,6 +476,30 @@ export class WorkbenchStore {
     const next = splitFrame(focusTab(this.layout, tabId), frame.id, direction, { newFrameId: id, before, empty: true })
     this.set(moveTab(next, tabId, id, undefined, itemKey))
   }
+  /**
+   * Opens an item dropped on a frame (a picture dragged from the portrait column), kept: into
+   * the frame beside its tabs (its preview tab is kept too), at `index` in its strip when
+   * dropped there, or into a new frame on that side.
+   */
+  dropOpen(href: string, frameId: string, zone: DropZone, index?: number) {
+    const frame = this.frames().find((f) => f.id === frameId)
+    if (!frame) return
+    if (zone === "center") {
+      // Put beside what the frame shows, never in place of its preview tab.
+      const preview = frame.tabs.find((t) => t.preview)
+      if (preview) this.layout = pinTab(this.layout, preview.id)
+      const tabId = this.open(href, { frame: frameId, preview: false })
+      if (index !== undefined) this.move(tabId, frameId, index)
+      return
+    }
+    const id = newId("f")
+    this.layout = splitFrame(this.layout, frameId, zone === "left" || zone === "right" ? "row" : "column", {
+      newFrameId: id,
+      before: zone === "left" || zone === "top",
+      empty: true
+    })
+    this.open(href, { frame: id, preview: false })
+  }
   resize(splitId: string, sizes: ReadonlyArray<number>) {
     this.set(resizeSplit(this.layout, splitId, sizes), "REPLACE", 400)
   }
@@ -541,6 +568,32 @@ export class WorkbenchStore {
       if (source && this.panelTabs.has(source.id) && itemKey(source.href) === key) return source.id
       const owner = allTabs(this.layout).find((t) => this.panelTabs.has(t.id) && itemKey(t.href) === key)
       if (owner) return owner.id
+    }
+    return null
+  }
+
+  /** A view with pictures open in the portrait column while mounted; the returned function stops. */
+  addPortraitTab(tabId: string) {
+    this.portraitTabs.add(tabId)
+    for (const listener of this.listeners) listener()
+    return () => {
+      this.portraitTabs.delete(tabId)
+      for (const listener of this.listeners) listener()
+    }
+  }
+  /**
+   * The tab whose pictures the portrait column shows, beside the frames (owner, 2026-11-05: "the
+   * image-viewer would also open in its own extra column"): of the shown tabs with pictures
+   * open, the one focused last. A click on a portrait focuses its frame, so the column shows
+   * what was opened last; focusing a frame without pictures keeps the column as it is.
+   */
+  portraitOwner() {
+    for (const id of this.layout.recent) {
+      if (!this.portraitTabs.has(id)) continue
+      const frame = frameOfTab(this.layout, id)
+      if (!frame || frame.active !== id) continue
+      if (this.layout.maximized && this.layout.maximized !== frame.id) continue
+      return id
     }
     return null
   }
