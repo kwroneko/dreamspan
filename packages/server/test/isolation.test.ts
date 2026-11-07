@@ -3940,6 +3940,19 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  StImportDefaultPersona: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportDefaultPersona({ userId: actor.user.id, importId, entityId: owner.cardId }),
+        "ImportLeaseLost"
+      )
+      const mine = yield* actor.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportDefaultPersona({ userId: actor.user.id, importId: mine.importId, entityId: owner.cardId }),
+        "NotFound"
+      )
+    }),
   StImportDefaultPreset: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
