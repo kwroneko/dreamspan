@@ -28,7 +28,7 @@ export function ArchivedMatches({
       >
         Archived ({cards.length.toLocaleString()})
       </Button>
-      {open && <CharacterGrid cards={cards} sort={browse.sort} className={className} />}
+      {open && <CharacterGrid cards={cards} sort={browse.sort} markPersonas className={className} />}
     </section>
   )
 }
