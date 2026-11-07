@@ -1,9 +1,35 @@
 import { createMemoryHistory } from "@tanstack/react-router"
 import { afterEach, expect, it, vi } from "vitest"
-import { focusedTab } from "../src/features/workbench/model.ts"
+import { allTabs, focusedTab, saveLayout } from "../src/features/workbench/model.ts"
 import { WorkbenchStore } from "../src/features/workbench/store.ts"
 
-afterEach(() => vi.useRealTimers())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+it("replaces an earlier layout when a fresh URL opens, even without further interaction", () => {
+  vi.useFakeTimers()
+  vi.stubGlobal("window", new EventTarget())
+  const earlier = new WorkbenchStore("user", createMemoryHistory({ initialEntries: ["/chats/a"] }), null, () => {})
+  earlier.split(earlier.frames()[0]!.id, "row")
+  let saved = JSON.stringify(saveLayout(earlier.layout))
+  const fresh = new WorkbenchStore("user", createMemoryHistory({ initialEntries: ["/"] }), null, (json) => {
+    saved = json
+  })
+  const stop = fresh.start()
+  window.dispatchEvent(new Event("pagehide"))
+  stop()
+
+  const reloaded = new WorkbenchStore(
+    "user",
+    createMemoryHistory({ initialEntries: ["/"] }),
+    JSON.parse(saved),
+    () => {}
+  )
+  expect(reloaded.frames()).toHaveLength(1)
+  expect(allTabs(reloaded.layout).map((tab) => tab.href)).toEqual(["/"])
+})
 
 it("releases closed tabs' metadata, deferred history and unsaved state", () => {
   vi.useFakeTimers()
