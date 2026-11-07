@@ -4,8 +4,11 @@
 // header and a share of the fixed height split by dragging the boundary between two. Its width follows the images (the widest one's
 // at its own box's height, a small one enlarged at most MAX_UPSCALE times) unless the user
 // resized it, and gives way with the other columns so the messages keep their minimum
-// (ui/columnLayout.ts).
+// (ui/columnLayout.ts). In the workbench it is a column of the shell, left of the frames, as the
+// side panel is right of them (owner, 2026-11-05: "the image-viewer would also open in its own
+// extra column as it does"): never inside a frame, where it would cover the next one.
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { useSession } from "../../session.ts"
 import { MAX_UPSCALE, type NaturalSize } from "../../ui/ImageViewer.tsx"
 import { mediaUrl, pictureUrl } from "../../ui/mediaImage.ts"
@@ -16,6 +19,7 @@ import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { ViewerHeader, ViewerMoves } from "../../ui/ViewerHeader.tsx"
 import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
+import { usePortraitColumnPlace } from "../workbench/tab.tsx"
 
 const MIN = 200
 /** Preferred minimum while sharing a pair; smaller pairs split their available height. */
@@ -36,8 +40,9 @@ interface Measured {
 
 export function PortraitColumn({ wide }: { wide: boolean }) {
   const viewer = usePortraitViewer()
-  if (!wide || !viewer || viewer.shown.length === 0) return null
-  return <Column />
+  const place = usePortraitColumnPlace(wide && viewer !== null && viewer.shown.length > 0)
+  if (!place.show) return null
+  return place.host ? createPortal(<Column />, place.host) : <Column />
 }
 
 function Column() {

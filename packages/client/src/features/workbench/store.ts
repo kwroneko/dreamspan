@@ -103,6 +103,8 @@ export class WorkbenchStore {
   private readonly metaListeners = new Set<() => void>()
   /** Tabs whose views show the side panel (chats), most recent decides who shows it. */
   private readonly panelTabs = new Set<string>()
+  /** Tabs whose views have pictures open in the portrait column. */
+  private readonly portraitTabs = new Set<string>()
   /** The sidebar's keys a tab's own navigation set or cleared, for the next mirror. */
   private shellChange: ReadonlyMap<string, string | null> | null = null
   private mirroring = false
@@ -541,6 +543,32 @@ export class WorkbenchStore {
       if (source && this.panelTabs.has(source.id) && itemKey(source.href) === key) return source.id
       const owner = allTabs(this.layout).find((t) => this.panelTabs.has(t.id) && itemKey(t.href) === key)
       if (owner) return owner.id
+    }
+    return null
+  }
+
+  /** A view with pictures open in the portrait column while mounted; the returned function stops. */
+  addPortraitTab(tabId: string) {
+    this.portraitTabs.add(tabId)
+    for (const listener of this.listeners) listener()
+    return () => {
+      this.portraitTabs.delete(tabId)
+      for (const listener of this.listeners) listener()
+    }
+  }
+  /**
+   * The tab whose pictures the portrait column shows, beside the frames (owner, 2026-11-05: "the
+   * image-viewer would also open in its own extra column"): of the shown tabs with pictures
+   * open, the one focused last. A click on a portrait focuses its frame, so the column shows
+   * what was opened last; focusing a frame without pictures keeps the column as it is.
+   */
+  portraitOwner() {
+    for (const id of this.layout.recent) {
+      if (!this.portraitTabs.has(id)) continue
+      const frame = frameOfTab(this.layout, id)
+      if (!frame || frame.active !== id) continue
+      if (this.layout.maximized && this.layout.maximized !== frame.id) continue
+      return id
     }
     return null
   }

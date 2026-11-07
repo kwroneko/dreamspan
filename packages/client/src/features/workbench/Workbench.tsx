@@ -1,7 +1,8 @@
 // The center column as frames of tabs (owner, 2026-11-05; DESIGN §10.1): VS Code's split view
 // with tabs. One item and no split looks as the single view did; the strip appears once a
 // frame has two tabs or the column is split. The side panel stays beside the frames and shows
-// the chat focused last (tab.tsx `useSidePanelPlace`).
+// the chat focused last (tab.tsx `useSidePanelPlace`); the portrait column stays left of the
+// frames and shows the pictures opened last (`usePortraitColumnPlace`).
 //
 // Each tab renders its own router (TabHost) into an element of its own, which is put in its
 // frame while shown and taken out of the page while not: its state, scroll and drafts stay,
@@ -107,6 +108,7 @@ function WorkbenchFor({ userId, saved }: { userId: string; saved: unknown }) {
   const layout = useSyncExternalStore(store.subscribe, store.snapshot)
   const wide = useWideScreen()
   const [sideHost, setSideHost] = useState<HTMLElement | null>(null)
+  const [portraitHost, setPortraitHost] = useState<HTMLElement | null>(null)
   const [slots, setSlots] = useState<ReadonlyMap<string, HTMLElement>>(new Map())
   /** A frame's body, where its shown tab's element goes; the returned function forgets it. */
   const slotRef: SlotRef = (frameId, element) => {
@@ -126,8 +128,9 @@ function WorkbenchFor({ userId, saved }: { userId: string; saved: unknown }) {
   // A maximized frame shows alone; the others keep their tabs (VS Code's Maximize Editor Group).
   const maximized = layout.maximized ? frames(layout.root).find((f) => f.id === layout.maximized) : undefined
   return (
-    <WorkbenchContext value={{ store, sideHost }}>
+    <WorkbenchContext value={{ store, sideHost, portraitHost }}>
       <div className="flex min-h-0 min-w-0 flex-1">
+        <div ref={setPortraitHost} className="contents" data-portrait-host />
         <div data-workbench className="flex min-h-0 min-w-0 flex-1 flex-col">
           {wide ? (
             <NodeView node={maximized ?? layout.root} layout={layout} store={store} slotRef={slotRef} />
