@@ -6,6 +6,7 @@ import { openPanel } from "./panel.ts"
 import { showAppNavigation, hideAppNavigation } from "./appMenu.ts"
 import { loginCookie, withCookie } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
+import { saveRevision } from "./saveRevision.ts"
 
 export function newflowTests() {
   test.describe("newflows", () => {
@@ -169,6 +170,19 @@ export function newflowTests() {
             ).toBeVisible()
           })
           test(`lorebook: chat and preset attachment ${suffix}`, async ({ page }, info) => {
+            // A click starts Save; it doesn't wait for its draft flush or revision write.
+            // Hold the revision so the post-save assertion cannot depend on server speed.
+            let holdCommit = true
+            const heldCommits: Array<() => void> = []
+            await page.routeWebSocket(/\/rpc$/, (socket) => {
+              const upstream = socket.connectToServer()
+              socket.onMessage((data) => {
+                if (holdCommit && typeof data === "string" && data.includes('"CommitEditorDrafts"'))
+                  heldCommits.push(() => upstream.send(data))
+                else upstream.send(data)
+              })
+              upstream.onMessage((data) => socket.send(data))
+            })
             const { chat, preset } = await admin((api) =>
               Effect.gen(function* () {
                 const card = yield* api.CreateCard({ label: `Attach card ${suffix}`, name: `Attach card ${suffix}` })
@@ -213,9 +227,17 @@ export function newflowTests() {
             await page.goto(`${server().url}/library/${preset.id}`)
             await expect(page.getByRole("switch", { name: `Preset book ${suffix}`, exact: true })).toBeChecked()
             // Existing preset attachment behavior: the new attachment waits for Save.
-            await page.getByRole("button", { name: "Save", exact: true }).first().click()
+            const saving = saveRevision(page)
+            await expect.poll(() => heldCommits.length).toBe(1)
+            const beforeCommit = await admin((api) => api.OpenEditor({ refId: preset.id }))
+            expect(beforeCommit.doc["lorebooks"]).toBeUndefined()
+            holdCommit = false
+            for (const send of heldCommits) send()
+            await saving
             const saved = await admin((api) => api.OpenEditor({ refId: preset.id }))
             expect(saved.doc["lorebooks"]).toEqual(expect.arrayContaining([expect.objectContaining({ enabled: true })]))
+            await page.reload()
+            await expect(page.getByRole("switch", { name: `Preset book ${suffix}`, exact: true })).toBeChecked()
             expect(book.kind).toBe("lorebook")
             await admin((api) => api.ChangeGenerationDefaults({ change: { preset: preset.id } }))
             await page.goto(`${server().url}/chats/${chat.id}`)
