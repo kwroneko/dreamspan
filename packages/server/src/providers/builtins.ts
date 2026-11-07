@@ -158,6 +158,12 @@ export const layer = Layer.effectDiscard(
       id: "openai-prompt-cache-key",
       appliesTo: (target) => target.api === "openai-completions" || target.api === "openai-responses",
       transform: (payload, request) => {
+        // The Responses SDK always adds this, and Chat Completions may add it for OpenAI
+        // addresses or long retention. The connection's switch governs those defaults too.
+        if (request.settings?.promptCacheKey === false) {
+          delete payload.prompt_cache_key
+          return payload
+        }
         if (
           request.settings?.promptCacheKey === true &&
           payload.prompt_cache_key === undefined &&
