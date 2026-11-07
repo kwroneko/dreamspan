@@ -988,7 +988,7 @@ Chat panels use `panel`; an explicit close marks that history entry so device me
   - `claude-haiku-5-no-top-p` (anthropic, openrouter): drops `top_p` ("`top_p` is deprecated for this model", F7).
   - `openai-responses-gpt-5.1-5.4-reasoning`: with an effort other than none, drops `top_p` and `temperature` and requests `reasoning.summary: "auto"` (F9).
   - `openai-chat-gpt-5.4-tools-no-effort`: a Chat Completions request with tools sends `reasoning_effort: "none"`, as OpenAI's error says to; reasoning with tools needs a Responses connection (F10).
-  - `openrouter-gemini-4-argon-reasoning-on`: `thinkingLevels.off = null`, so pi-ai sends no effort "none" (F11).
+  - `openrouter-gemini-4-argon-reasoning-on`: `thinkingLevels.off = null`, so pi-ai sends no effort "none" (F11). Its payload rewrite also removes explicit "none" efforts from model settings or user-edited thinking levels, retaining other reasoning options.
   - `openrouter-gemini-no-prefill`: prefill `none`, fixed; Continue uses its nudge (F13).
   - `test/providerShims.test.ts` covers each, the prefix and catalog paths, and F12 below.
   - `e2e/providerRules.spec.ts`: the connection's Model ID prefix (help, save, clear) and the model page's rules and locked Prefill (help, no internal words), with scoped layout audits at 1440/390 px in light and dark.
