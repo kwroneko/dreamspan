@@ -21,7 +21,13 @@ export interface PendingState {
   /** Who answers the first message the user sends; null: the first character. */
   readonly replier: EntityId | null
   readonly guidance: boolean
+  /** Placeholders of cards from a card source that became the user's, to their cards' ids. */
+  readonly swapped: Readonly<Record<string, EntityId>>
 }
+
+/** The id a card first had here (`swapped` is the state's): a source card's placeholder, else its own. */
+export const firstId = (swapped: PendingState["swapped"], id: EntityId) =>
+  (Object.entries(swapped).find(([, to]) => to === id)?.[0] as EntityId | undefined) ?? id
 
 /** A group the new chat is of: its name and the chat that names it. */
 export interface PendingGroup {
@@ -69,7 +75,8 @@ export class PendingChat {
       ),
       fallbackNote: "",
       replier: null,
-      guidance
+      guidance,
+      swapped: {}
     }
   }
 
@@ -134,6 +141,26 @@ export class PendingChat {
         ? current
         : { ...current, greeters: [...current.greeters, result.value], picks: [...current.picks, 0] }
     )
+    return { ok: true, value: undefined }
+  }
+
+  /**
+   * A card from a card source, now the user's (Add to my cards, or Save on its tab;
+   * spec/CARD-SOURCES.md §4.5): its greeter becomes their card in place, as saved, its
+   * greeting picked as it was.
+   */
+  async swap(placeholder: EntityId, entityId: EntityId): Promise<Outcome<void>> {
+    if (this.state.swapped[placeholder] !== undefined) return { ok: true, value: undefined }
+    const result = await this.call((client) => client("GetCardForChat", { entityId }))
+    if (!result.ok) return result
+    const swapped = (id: EntityId | null) => (id === placeholder ? entityId : id)
+    this.change((current) => ({
+      ...current,
+      swapped: { ...current.swapped, [placeholder]: entityId },
+      greeters: current.greeters.map((item) => (item.card.entityId === placeholder ? result.value : item)),
+      persona: swapped(current.persona),
+      replier: swapped(current.replier)
+    }))
     return { ok: true, value: undefined }
   }
 

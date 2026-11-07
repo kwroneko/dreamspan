@@ -19,6 +19,14 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { DraftTooLarge, type RefChange, RefOperationRefused, StorageError } from "../db/ops.ts"
+import { remoteEntityId, remoteOf, SourceFailed } from "@rp/shared/cardSources.ts"
+import { cardNames } from "@rp/shared/cardNames.ts"
+import { EditorSnapshot } from "@rp/shared/editorApi.ts"
+import { type Doc, LibraryRef, type RevisionId } from "@rp/shared/library.ts"
+import { editedDoc } from "@rp/shared/presetConditions.ts"
+import type { User } from "@rp/shared/domain.ts"
+import { Option } from "effect"
+import { CardSources } from "../sources/CardSources.ts"
 
 type Internal = StorageError | RpcClientError.RpcClientError
 
@@ -97,6 +105,156 @@ export const makeEditorHandlers = Effect.gen(function* () {
     (id: UserId) =>
     <E, R>(effect: Effect.Effect<import("@rp/shared/drafts.ts").Draft, E, R>) =>
       Effect.tap(effect, (draft) => Effect.sync(() => notices.publish(id, { _tag: "UserDraftChanged", draft })))
+  // A card on a card source before it's added (spec/CARD-SOURCES.md §4.3): its editor opens
+  // under the placeholder id (`src:<source>:<remote>`) on the cached document, and its edits are
+  // `remote_card` drafts until Save adds the card with them as its revision 2. Once the user has
+  // the card, the placeholder stands for theirs, so an editor still open on it carries on.
+  const sources = yield* Effect.serviceOption(CardSources)
+  const remoteKey = (from: { sourceId: string; remoteId: string }, field: string) =>
+    new DraftKey({ targetKind: "remote_card", targetId: `${from.sourceId}:${from.remoteId}`, field })
+  const fromSource = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.catchIf(
+      effect,
+      (error): error is Extract<E, SourceFailed> => error instanceof SourceFailed,
+      (error) => Effect.fail(new ServerError({ message: error.message }))
+    )
+  const cardSources = (refId: string) =>
+    Option.isSome(sources) ? Effect.succeed(sources.value) : Effect.fail(new NotFound({ entity: "ref", id: refId }))
+  /** The cached document and the source's summary of a remote card, as its editor shows it. */
+  const remoteDoc = (user: User, from: { sourceId: string; remoteId: string }, refId: string) =>
+    Effect.gen(function* () {
+      const service = yield* cardSources(refId)
+      const { summary, docJson, problems } = yield* fromSource(service.card(user, from.sourceId, from.remoteId))
+      if (docJson === null) return yield* new ServerError({ message: problems[0] ?? "This card couldn't be read." })
+      return { summary, doc: editedDoc("card", JSON.parse(docJson) as Doc) }
+    })
+  const remoteHandlers: Record<
+    string,
+    (payload: never, from: { sourceId: string; remoteId: string }, user: User) => Effect.Effect<unknown, unknown>
+  > = {
+    OpenEditor: ({ refId }: { refId: RefId }, from, user) =>
+      Effect.gen(function* () {
+        const { summary, doc } = yield* remoteDoc(user, from, refId)
+        const names = cardNames(doc)
+        return new EditorSnapshot({
+          ref: new LibraryRef({
+            id: refId,
+            entityId: remoteEntityId(from.sourceId, from.remoteId),
+            kind: "card",
+            parentEntityId: null,
+            label: names.displayName || summary.name,
+            subtitle: names.version,
+            modelName: names.modelName,
+            headRevisionId: refId as unknown as RevisionId,
+            updateAvailable: false,
+            rowVersion: 0,
+            updatedAt: Date.now()
+          }),
+          doc,
+          usedByChats: 0,
+          drafts: yield* reader.RemoteCardDrafts({ userId: user.id, targetId: `${from.sourceId}:${from.remoteId}` }),
+          revisionNumber: 0,
+          variants: []
+        })
+      }),
+    SaveEditorDraft: (
+      { field, draftId, content, expectedRowVersion, expectedSession }: Parameters<typeof handlers.SaveEditorDraft>[0],
+      from,
+      user
+    ) =>
+      Effect.gen(function* () {
+        yield* checkField(field)
+        return yield* writer.SaveDraft({
+          userId: user.id,
+          key: remoteKey(from, field),
+          draftId,
+          content,
+          expectedRowVersion,
+          expectedSession,
+          baseRevision: null
+        })
+      }),
+    EditorDraftHistory: ({ field, limit, before }: Parameters<typeof handlers.EditorDraftHistory>[0], from, user) =>
+      reader.DraftHistory({
+        userId: user.id,
+        key: remoteKey(from, field),
+        limit,
+        ...(before === undefined ? {} : { before })
+      }),
+    EditorDraftState: ({ field, seq }: Parameters<typeof handlers.EditorDraftState>[0], from, user) =>
+      Effect.map(reader.GetDraftState({ userId: user.id, key: remoteKey(from, field), seq }), (state) => state.content),
+    RestoreEditorDraft: (
+      { refId: _, field, scope: __, ...restore }: Parameters<typeof handlers.RestoreEditorDraft>[0],
+      from,
+      user
+    ) => writer.RestoreDraftState({ userId: user.id, key: remoteKey(from, field), ...restore }),
+    DiscardEditorDraft: (
+      { field, draftId, expectedRowVersion }: Parameters<typeof handlers.DiscardEditorDraft>[0],
+      from,
+      user
+    ) =>
+      writer.ClearDraft({
+        userId: user.id,
+        key: remoteKey(from, field),
+        draftId,
+        outcome: "discarded",
+        expectedRowVersion
+      }),
+    RevertEditorDrafts: (_payload: unknown, from, user) =>
+      writer.RevertRemoteDrafts({ userId: user.id, targetId: `${from.sourceId}:${from.remoteId}` }),
+    // Save adds the card, its edits as revision 2 (§4.5, trigger 2).
+    CommitEditorDrafts: ({ refId, fields, message }: Parameters<typeof handlers.CommitEditorDrafts>[0], from, user) =>
+      Effect.gen(function* () {
+        const service = yield* cardSources(refId)
+        const prepared = yield* fromSource(service.prepareAdoption(user, from.sourceId, from.remoteId))
+        const { change } = yield* service.storingAdoptions(
+          [prepared],
+          writer.AdoptAndCommitDrafts({ adopt: prepared.payload, fields, message }),
+          (result) => [!result.adopted.existing]
+        )
+        yield* warmth.refreshUser(user.id)
+        return saved(change)
+      }),
+    // A card not added yet has no revisions but the source's, which is what its fields started from.
+    ListRevisions: () => Effect.succeed([]),
+    GetRevision: ({ refId, revisionId }: Parameters<typeof handlers.GetRevision>[0], from, user) =>
+      revisionId === (refId as string)
+        ? Effect.map(remoteDoc(user, from, refId), ({ doc }) => doc)
+        : Effect.fail(new NotFound({ entity: "revision", id: revisionId })),
+    ListCardNotes: () => Effect.succeed([])
+  }
+  /**
+   * The handlers as a remote card's editor reaches them: a placeholder id is the user's card
+   * once they have it, else its remote handler, else not found (what needs a saved card).
+   */
+  const remoteAware = <H extends Record<string, unknown>>(table: H): H =>
+    Object.fromEntries(
+      Object.entries(table).map(([name, handler]) => [
+        name,
+        (payload: Record<string, unknown> | undefined, options: unknown) => {
+          const refId = payload?.refId ?? payload?.cardRefId
+          const from = typeof refId === "string" ? remoteOf(refId) : null
+          if (from === null) return (handler as (p: unknown, o: unknown) => unknown)(payload, options)
+          const key = payload?.refId !== undefined ? "refId" : "cardRefId"
+          return Effect.gen(function* () {
+            const user = yield* CurrentUser
+            const [held] = yield* reader.HeldRemoteCards({
+              userId: user.id,
+              sourceId: from.sourceId,
+              items: [{ remoteId: from.remoteId, sha256: null }]
+            })
+            if (held)
+              return yield* (handler as (p: unknown, o: unknown) => Effect.Effect<unknown, unknown>)(
+                { ...payload, [key]: held.refId },
+                options
+              )
+            const remote = remoteHandlers[name]
+            if (remote === undefined) return yield* new NotFound({ entity: "ref", id: refId as string })
+            return yield* remote(payload as never, from, user)
+          }).pipe(settle(name))
+        }
+      ])
+    ) as H
   const handlers = {
     ListSnippets: (args) =>
       Effect.flatMap(userId, (id) => reader.ListSnippets({ userId: id, ...args })).pipe(settle("ListSnippets")),
@@ -421,7 +579,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
         return yield* writer.DeleteEntity({ userId: id, entityId: note.entityId }).pipe(changed(id))
       }).pipe(settle("DeleteNote"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
-  return handlers
+  return remoteAware(handlers)
 })
 
 /** ForkMergeApi's handlers, served by their own layer (AppCoreApi's note). */

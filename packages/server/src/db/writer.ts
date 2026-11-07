@@ -90,7 +90,12 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
                 ...(yield* makeLcmUiWriteHandlers),
                 ...(yield* makeLcmEnableWriteHandlers(bin)),
                 ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
-                ...(yield* makeAdoptWriteHandlers(library.ImportFile, chatSetup.StartChat)),
+                ...(yield* makeAdoptWriteHandlers(
+                  library.ImportFile,
+                  chatSetup.StartChat,
+                  library.CommitEditorDrafts,
+                  bin.drafts
+                )),
                 ...(yield* makeDecisionWriteHandlers(bin))
               },
               prefix

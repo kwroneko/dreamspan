@@ -1185,6 +1185,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           }>`SELECT label FROM entity_refs WHERE id = ${parseDraftTarget(key.targetId).refId}`
           return [ref?.label ?? "A library entry", key.field].filter(Boolean).join(" › ")
         }
+        case "remote_card":
+          return `A card not in your cards › ${key.field}`
       }
     })
 

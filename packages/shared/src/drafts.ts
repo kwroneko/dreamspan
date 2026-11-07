@@ -25,7 +25,9 @@ export const DraftTargetKind = Schema.Literals([
   "user_field",
   "summary_edit",
   "queue_edit",
-  "insert"
+  "insert",
+  // A field of a card on a card source, before it is added (spec/CARD-SOURCES.md §4.3): `<source>:<remote>`.
+  "remote_card"
 ])
 
 /** What a draft is for: the composer of a chat, the edit of a version, a field of a ref... */

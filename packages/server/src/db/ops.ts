@@ -1746,6 +1746,34 @@ export class WriteOps extends RpcGroup.make(
    * `StartChat` with each placeholder id (`src:<source>:<remote>`) replaced by its card's.
    * Either the cards and the chat all exist, or none of them does.
    */
+  /**
+   * Saving edits to a source's card (spec/CARD-SOURCES.md §4.5, trigger 2), in one
+   * transaction: the card as `AdoptRemoteCard` adds it, its `remote_card` drafts moved to the
+   * new card's fields, then `CommitEditorDrafts` of `fields` as its revision 2.
+   */
+  Rpc.make("AdoptAndCommitDrafts", {
+    payload: {
+      adopt: Schema.Struct(AdoptFields),
+      fields: Schema.Array(
+        Schema.Struct({ field: Schema.String, draftId: Schema.String, expectedRowVersion: Schema.Int })
+      ),
+      message: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Struct({
+      adopted: Schema.Struct({ entityId: EntityId, refId: RefId, existing: Schema.Boolean }),
+      change: RefChange
+    }),
+    error: Schema.Union([NotFound, RefOperationRefused, StaleWrite, EditConflict, InvalidDocument, StorageError])
+  }),
+  /**
+   * Revert for a source's card (`remote_card`, `<source>:<remote>`): its active drafts end,
+   * their text kept in the bin's recovered texts, so its fields show the source's text again.
+   */
+  Rpc.make("RevertRemoteDrafts", {
+    payload: { userId: UserId, targetId: Schema.String },
+    success: Schema.Struct({ reverted: Schema.Int }),
+    error: StorageError
+  }),
   Rpc.make("AdoptAndStartChat", {
     payload: {
       adopt: Schema.Array(Schema.Struct({ placeholder: EntityId, ...AdoptFields })).check(Schema.isMaxLength(20)),
@@ -3807,6 +3835,12 @@ export class ReadOps extends RpcGroup.make(
    * the origin an adoption recorded, else by the same file imported from disk (its SHA-256,
    * when the source's version id is one). Live cards only; archived ones count.
    */
+  /** Every draft of a source's card's fields (`remote_card`, `<source>:<remote>`), ended ones too, as `OpenEditor` lists a ref's. */
+  Rpc.make("RemoteCardDrafts", {
+    payload: { userId: UserId, targetId: Schema.String },
+    success: Schema.Array(Draft),
+    error: StorageError
+  }),
   Rpc.make("HeldRemoteCards", {
     payload: {
       userId: UserId,

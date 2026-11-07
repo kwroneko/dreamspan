@@ -32,7 +32,7 @@ export function RemoteSourceBadges({ cards }: { cards: ReadonlyArray<CastCard> }
     return (
       <Tooltip
         key={sourceId}
-        label={`${names.join(", ")} ${names.length === 1 ? "is" : "are"} from ${name} and ${names.length === 1 ? "isn't" : "aren't"} in your cards yet. Sending a message or Add to my cards adds ${names.length === 1 ? "it" : "them"}.`}
+        label={`${names.join(", ")} ${names.length === 1 ? "is" : "are"} from ${name} and ${names.length === 1 ? "isn't" : "aren't"} in your cards yet. Sending a message, saving a change or Add to my cards adds ${names.length === 1 ? "it" : "them"}.`}
       >
         <span
           data-remote-source={sourceId}
@@ -50,7 +50,16 @@ export function RemoteSourceBadges({ cards }: { cards: ReadonlyArray<CastCard> }
  * The card tab's line for a card not added yet: "From <source> · not in your cards", with
  * Add to my cards at its end. `onAdded` gets the user's card once it's theirs.
  */
-export function RemoteCardLine({ card, onAdded }: { card: CastCard; onAdded?: (entityId: string) => void }) {
+export function RemoteCardLine({
+  card,
+  beforeAdd,
+  onAdded
+}: {
+  card: CastCard
+  /** Run first, as keeping what's typed in the card's tab. */
+  beforeAdd?: () => Promise<unknown>
+  onAdded?: (entityId: string) => void
+}) {
   const from = remoteOf(card.entityId)
   const sourceName = useSourceName()
   const adopt = useAdoptRemote()
@@ -63,13 +72,15 @@ export function RemoteCardLine({ card, onAdded }: { card: CastCard; onAdded?: (e
       <Button
         variant="secondary"
         disabled={adding}
-        hint={`Adds ${card.name} to your cards without starting a chat.`}
+        hint={`Adds ${card.name} to your cards, with any changes made here, without starting a chat.`}
         onClick={() => {
           setAdding(true)
-          void adopt(from.sourceId, name, from.remoteId).then((added) => {
-            setAdding(false)
-            if (added) onAdded?.(added.entityId)
-          })
+          void Promise.resolve(beforeAdd?.())
+            .then(() => adopt(from.sourceId, name, from.remoteId))
+            .then((added) => {
+              setAdding(false)
+              if (added) onAdded?.(added.entityId)
+            })
         }}
       >
         Add to my cards

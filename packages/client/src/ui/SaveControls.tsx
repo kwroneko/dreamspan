@@ -22,7 +22,8 @@ export function SaveControls({
   blocked = null,
   failed = null,
   onSave,
-  onRevert
+  onRevert,
+  adds = null
 }: {
   changed: boolean
   pending?: boolean
@@ -30,7 +31,12 @@ export function SaveControls({
   failed?: string | null
   onSave: (message: string | null) => Promise<boolean>
   onRevert: () => Promise<unknown>
+  /** A card not in the user's cards yet, which saving adds (spec/CARD-SOURCES.md §4.5): its name. */
+  adds?: string | null
 }) {
+  const saveHint = adds === null ? hints.save : `Saves your changes and adds ${adds} to your cards.`
+  const messageHint =
+    adds === null ? hints.message : `Saves your changes with a note saying what changed and adds ${adds} to your cards.`
   const [writing, setWriting] = useState(false)
   const [reverting, setReverting] = useState(false)
   const [justSaved, setJustSaved] = useState(false)
@@ -79,7 +85,7 @@ export function SaveControls({
         focusableWhenDisabled
         aria-busy={pending || undefined}
         className={`${square} ${pending ? "data-disabled:pointer-events-auto! data-disabled:opacity-100!" : actionable ? "" : inert}`}
-        hint={actionable ? hints.save : hints.clean}
+        hint={actionable ? saveHint : hints.clean}
         onClick={() => actionable && void save(null)}
       >
         {pending ? <Spinner /> : <Icon name="save" />}
@@ -92,7 +98,7 @@ export function SaveControls({
         disabled={!actionable}
         focusableWhenDisabled
         className={`${square} ${actionable ? "" : inert}`}
-        hint={actionable ? hints.message : hints.clean}
+        hint={actionable ? messageHint : hints.clean}
         onClick={() => actionable && setWriting(!writing)}
       >
         <Icon name="save-message" />
@@ -133,7 +139,7 @@ export function SaveControls({
             label="Revision message"
             placeholder="What changed"
             saveLabel="Save with this message"
-            saveHint={hints.message}
+            saveHint={messageHint}
             onSave={(message) => save(message === "" ? null : message)}
             onCancel={close}
           />

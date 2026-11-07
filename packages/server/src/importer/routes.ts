@@ -11,6 +11,7 @@ import { ExportFormat as ExportFormatSchema, ImportResult } from "@rp/shared/lib
 import { CardReplacePreview } from "@rp/shared/cardReplace.ts"
 import { RefId } from "@rp/shared/library.ts"
 import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
+import { remoteOf } from "@rp/shared/cardSources.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { Notices } from "../chat/Notices.ts"
@@ -772,18 +773,36 @@ export const layer = Layer.unwrap(
       let recovered = 0
       for (const draft of input.value.drafts) {
         if (parseField(draft.field) === null) return jsonError(400, "that isn't a field of a document")
+        // A card on a card source before it's added (spec/CARD-SOURCES.md §4.3): its fields'
+        // drafts are `remote_card`'s, or the user's card's once they have it.
+        const from = remoteOf(draft.refId)
+        const [held] =
+          from === null
+            ? []
+            : yield* reader.HeldRemoteCards({
+                userId: user.id,
+                sourceId: from.sourceId,
+                items: [{ remoteId: from.remoteId, sha256: null }]
+              })
         const saved = yield* writer.SaveDraft({
           userId: user.id,
-          key: new DraftKey({
-            targetKind: "entity_field",
-            targetId: entityDraftTarget(draft.refId, draft.scope),
-            field: draft.field
-          }),
+          key:
+            from !== null && held === undefined
+              ? new DraftKey({
+                  targetKind: "remote_card",
+                  targetId: `${from.sourceId}:${from.remoteId}`,
+                  field: draft.field
+                })
+              : new DraftKey({
+                  targetKind: "entity_field",
+                  targetId: entityDraftTarget(held?.refId ?? draft.refId, draft.scope),
+                  field: draft.field
+                }),
           draftId: draft.draftId,
           content: draft.content,
           expectedRowVersion: draft.expectedRowVersion,
           expectedSession: draft.expectedSession,
-          baseRevision: draft.baseRevisionId
+          baseRevision: from !== null ? null : draft.baseRevisionId
         })
         recovered += saved.recovered
       }

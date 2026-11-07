@@ -62,7 +62,7 @@ import { ComposerBox, useCompactComposer } from "./Composer.tsx"
 import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { expandForDisplay } from "./macros.ts"
 import { useIsPanelTab } from "./panels.tsx"
-import { PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
+import { firstId, PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
 import { chatColumns } from "./presentation.tsx"
 import { seedChat } from "./session.ts"
 import { preloadChatPage } from "./chatPageLoader.ts"
@@ -220,9 +220,9 @@ function Pending({
   const repliers = greeters.filter((item) => item.card.entityId !== persona)
   const replyId = (repliers.find((item) => item.card.entityId === state.replier) ?? repliers[0] ?? card).card.entityId
   const castCards = view.cast?.cards ?? []
-  const speakerId = castCards.some((item) => item.entityId === selectedSpeaker)
-    ? selectedSpeaker
-    : (playing?.entityId ?? null)
+  const swapped = state.swapped
+  const picked = selectedSpeaker === null ? null : (swapped[selectedSpeaker] ?? selectedSpeaker)
+  const speakerId = castCards.some((item) => item.entityId === picked) ? picked : (playing?.entityId ?? null)
   const speakerName = castCards.find((item) => item.entityId === speakerId)?.name ?? "You"
   // Rows and the composer read the cast from context, as in a saved chat.
   const castState = view.cast
@@ -231,7 +231,7 @@ function Pending({
   // greeting: the chat keeps them, so a greeting reads the same after the send (DESIGN §5.6).
   const [frozen] = useState(() => new Map<string, Map<number, FrozenValues>>())
   const draws = (at: number) => {
-    const id = greeters[at]!.card.entityId
+    const id = firstId(swapped, greeters[at]!.card.entityId)
     if (!frozen.has(id)) frozen.set(id, new Map())
     return frozen.get(id)!
   }
@@ -253,7 +253,20 @@ function Pending({
     return result.text
   }
   // The side panel: the saved chat's, its tab in the URL and remembered the same way.
-  const urlPanel = useIsPanelTab(navigationSearch.panel) ? navigationSearch.panel! : null
+  // A source's card's tab is its card's once it's the user's (spec/CARD-SOURCES.md §4.5).
+  const askedPanel = navigationSearch.panel?.startsWith("card:")
+    ? `card:${swapped[navigationSearch.panel.slice(5)] ?? navigationSearch.panel.slice(5)}`
+    : navigationSearch.panel
+  useEffect(() => {
+    if (askedPanel !== navigationSearch.panel)
+      void navigate({
+        to: ".",
+        search: (prev: Record<string, unknown>) => ({ ...prev, panel: askedPanel }),
+        replace: true,
+        resetScroll: false
+      })
+  }, [askedPanel, navigationSearch.panel, navigate])
+  const urlPanel = useIsPanelTab(askedPanel) ? askedPanel! : null
   const { panel, show, wide } = usePanel(urlPanel, view)
   const place = useSidePanelPlace(wide)
   const title = pendingTitle(pending, state)
@@ -348,7 +361,11 @@ function Pending({
       }
       return
     }
-    for (const card of result.value.adopted ?? []) if (!card.existing) showAdopted(navigate, card)
+    const adopted = result.value.adopted ?? []
+    for (const card of adopted) if (!card.existing) showAdopted(navigate, card)
+    const openPanel = panel?.startsWith("card:")
+      ? `card:${adopted.find((card) => card.placeholder === panel.slice(5))?.entityId ?? panel.slice(5)}`
+      : panel
     // Only submitted text was acknowledged. Atomically replace the pending copy with
     // the extra text addressed to the saved chat, before navigating or opening its draft.
     destination.current = { chatId: result.value.chat.id, composer: result.value.composer }
@@ -360,7 +377,7 @@ function Pending({
       params: { chatId: result.value.chat.id },
       replace: true,
       search: {
-        ...(panel !== null ? { panel } : {}),
+        ...(openPanel !== null ? { panel: openPanel } : {}),
         ...(navigationSearch.character ? { character: navigationSearch.character } : {})
       }
     })
