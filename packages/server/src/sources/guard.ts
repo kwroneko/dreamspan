@@ -20,7 +20,12 @@ const TOTAL_MS = 60_000
 const USER_AGENT = "rp-harness/0.0.0 (self-hosted roleplay app; browses card sources on its user's request)"
 
 /** Every local range: loopback, RFC 1918, link-local, CGNAT, IPv6 ULA and link-local. */
-const PRIVATE = parseBypass(DEFAULT_BYPASS.filter((entry) => entry !== "localhost")).list.addresses
+const PRIVATE = parseBypass([
+  ...DEFAULT_BYPASS.filter((entry) => entry !== "localhost"),
+  // Unspecified destinations can connect to this machine too; they are not proxy bypass defaults.
+  "0.0.0.0/8",
+  "::/128"
+]).list.addresses
 
 export const isPrivateAddress = (ip: string) => {
   const bare = ip.replace(/^\[(.*)\]$/, "$1")
