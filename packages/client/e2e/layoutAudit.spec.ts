@@ -2642,6 +2642,8 @@ for (const width of [1440, 390])
         await expectLayout(page, info, `cardarchive-sidebar-${width}-${theme}`, { scope: "[data-shell-list]" })
         await list.screenshot({ path: info.outputPath("sidebar.png") })
         await page.goto(`${local.url}/?side=characters&sideShow=all`)
+        // Navigation's optional toggle helper must run after the new app has mounted.
+        if (width === 390) await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
         await showAppNavigation(page)
         await expect(list.getByRole("link", { name: "Open Pilot 006", exact: true })).toBeVisible()
         await expectLayout(page, info, `cardarchive-sidebar-all-${width}-${theme}`, { scope: "[data-shell-list]" })
