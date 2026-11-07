@@ -78,6 +78,16 @@ describe("scopeCss", () => {
     expect(scopeCss(".a { color: red").css).toBe("")
     expect(scopeCss('.a { content: "').css).toBe("")
   })
+
+  it("rejects selectors that can escape through a sibling or a nesting alternative", () => {
+    for (const selector of ["+ main", "~ main", "/* card */ + main"])
+      expect(scopeCss(`${selector} { color: red }`).css).not.toContain("color: red")
+    for (const selector of [":is(&, body) main", "body &", "& + :is(&, body) main"])
+      expect(scopeCss(`.box { ${selector} { color: red } }`).css).not.toContain("color: red")
+    expect(scoped(".box { &:hover { color: red } & > span { color: blue } }")).toBe(
+      ".message-html .custom-box { &:hover { color: red } & > span { color: blue } }"
+    )
+  })
 })
 
 describe("cleanStyle", () => {
