@@ -3,6 +3,7 @@
 // route taken is reported, never silent. ESLint forbids `fetch` and `undici` elsewhere.
 import { lookup as lookupCallback, type LookupAddress } from "node:dns"
 import { lookup } from "node:dns/promises"
+import { isIP } from "node:net"
 import { InvalidNetworkSettings } from "@rp/shared/api.ts"
 import { ServerError } from "@rp/shared/errors.ts"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
@@ -53,7 +54,11 @@ export interface NetworkShape {
    * A fetch for one connection's requests. `onRoute` hears the route of every request,
    * for the connection test and the request inspector.
    */
-  readonly fetchFor: (override: ProxyOverride, onRoute?: (route: Route, target: URL) => void) => typeof fetch
+  readonly fetchFor: (
+    override: ProxyOverride,
+    onRoute?: (route: Route, target: URL) => void,
+    targetAddresses?: TargetAddresses
+  ) => typeof fetch
   readonly route: (target: URL, override: ProxyOverride) => Effect.Effect<Route>
   /** Whether non-admins must use the instance proxy. */
   readonly forced: () => boolean
@@ -65,6 +70,9 @@ export interface NetworkShape {
     readonly forceProxy: boolean
   }) => Effect.Effect<NetworkView, InvalidNetworkSettings | ServerError>
 }
+
+/** Validate each hop and return the only addresses it may connect to; undefined leaves DNS unrestricted. */
+export type TargetAddresses = (target: URL) => Promise<ReadonlyArray<string> | undefined>
 
 export class Network extends Context.Service<Network, NetworkShape>()("rp/Network") {}
 
@@ -117,17 +125,37 @@ const RESPONSE_IDLE_TIMEOUT_MS = 30 * 60_000
 const idleTimeouts: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (options, handler) =>
   dispatch({ ...options, headersTimeout: RESPONSE_IDLE_TIMEOUT_MS, bodyTimeout: RESPONSE_IDLE_TIMEOUT_MS }, handler)
 
-const makeDispatcher = (route: Route, bypass: () => BypassList): Dispatcher => {
+/** fetch removes Host overrides, so restore the source's HTTP authority after that boundary. */
+const sourceHost =
+  (host: string): Dispatcher.DispatcherComposeInterceptor =>
+  (dispatch) =>
+  (options, handler) => {
+    const raw = options.headers
+    const entries = Array.isArray(raw)
+      ? Array.from({ length: raw.length / 2 }, (_, i) => [raw[i * 2]!, raw[i * 2 + 1]!])
+      : raw != null && Symbol.iterator in raw
+        ? raw
+        : Object.entries(raw ?? {})
+    return dispatch({ ...options, headers: { ...Object.fromEntries(entries), host } }, handler)
+  }
+
+const makeDispatcher = (route: Route, bypass: () => BypassList, servername?: string, host?: string): Dispatcher => {
+  const configure = (agent: Dispatcher) => {
+    const timed = agent.compose(idleTimeouts)
+    return host === undefined ? timed : timed.compose(sourceHost(host))
+  }
   if (route.via === "direct") {
-    const agent = route.pinned ? new Agent({ connect: { lookup: bypassOnlyLookup(bypass) as never } }) : new Agent()
-    return agent.compose(idleTimeouts)
+    const agent = new Agent({
+      connect: { ...(route.pinned ? { lookup: bypassOnlyLookup(bypass) as never } : {}), servername }
+    })
+    return configure(agent)
   }
   const url = new URL(route.proxy)
   const agent =
     url.protocol === "socks5:" || url.protocol === "socks5h:"
-      ? new Socks5ProxyAgent(url)
-      : new ProxyAgent({ uri: url.href })
-  return agent.compose(idleTimeouts)
+      ? new Socks5ProxyAgent(url, { requestTls: { servername } })
+      : new ProxyAgent({ uri: url.href, requestTls: { servername } })
+  return configure(agent)
 }
 
 export const layer = Layer.effect(
@@ -161,12 +189,13 @@ export const layer = Layer.effect(
 
     // One dispatcher per route, reused so connections pool; closed with the layer.
     const dispatchers = new Map<string, Dispatcher>()
-    const dispatcherFor = (route: Route, settings: Current) => {
-      const key =
+    const dispatcherFor = (route: Route, settings: Current, pinnedTarget?: URL, servername?: string, host?: string) => {
+      const routeKey =
         route.via === "direct" ? `direct:${route.pinned ? JSON.stringify(settings.bypassEntries) : "any"}` : route.proxy
+      const key = JSON.stringify([routeKey, pinnedTarget?.origin, servername, host])
       let dispatcher = dispatchers.get(key)
       if (!dispatcher) {
-        dispatcher = makeDispatcher(route, () => settings.bypass)
+        dispatcher = makeDispatcher(route, () => settings.bypass, servername, host)
         dispatchers.set(key, dispatcher)
       }
       return dispatcher
@@ -175,13 +204,18 @@ export const layer = Layer.effect(
       Effect.promise(() => Promise.allSettled([...dispatchers.values()].map((d) => d.close())))
     )
 
-    const routeNow = (target: URL, override: ProxyOverride, settings: Current = Ref.getUnsafe(current)) => {
+    const routeNow = (
+      target: URL,
+      override: ProxyOverride,
+      settings: Current = Ref.getUnsafe(current),
+      addresses?: ReadonlyArray<string>
+    ) => {
       return decideRoute({
         target,
         override,
         instanceProxy: settings.proxyUrl,
         bypass: settings.bypass,
-        resolve: resolveHost
+        resolve: addresses === undefined ? resolveHost : async () => addresses
       })
     }
 
@@ -194,6 +228,7 @@ export const layer = Layer.effect(
     const fetchFor = (
       override: ProxyOverride,
       onRoute?: (route: Route, target: URL) => void,
+      targetAddresses?: TargetAddresses,
       settings?: Current
     ): typeof fetch => {
       const routed = async (input: Parameters<typeof fetch>[0], init: RequestInit = {}) => {
@@ -201,16 +236,59 @@ export const layer = Layer.effect(
         let request: { input: Parameters<typeof fetch>[0]; init: RequestInit } = { input, init }
         for (let hop = 0; ; hop++) {
           const selected = settings ?? Ref.getUnsafe(current)
-          const route = await routeNow(target, override, selected)
+          const addresses = await targetAddresses?.(target)
+          const route = await routeNow(target, override, selected, addresses)
           if (route.via === "proxy" && proxyUrlProblem(route.proxy) !== null) {
             throw new Error(`The proxy for this request is unusable: ${proxyUrlProblem(route.proxy)}`)
           }
           onRoute?.(route, target)
-          const response = await undiciFetch(request.input as Parameters<typeof undiciFetch>[0], {
-            ...(request.init as unknown as Parameters<typeof undiciFetch>[1]),
-            redirect: "manual",
-            dispatcher: dispatcherFor(route, selected)
-          })
+          if (addresses !== undefined) {
+            if (addresses.length === 0 || addresses.some((ip) => isIP(ip) === 0))
+              throw new Error("target has no allowed addresses")
+            if (input instanceof Request) throw new Error("address pinning requires a URL request")
+          }
+          const send = (address: string | undefined) => {
+            let pinnedTarget: URL | undefined
+            let servername: string | undefined
+            if (address !== undefined) {
+              // Use the checked literal on the wire, including the proxy's CONNECT/SOCKS
+              // destination. Keep HTTP Host and TLS identity on the original hostname.
+              pinnedTarget = new URL(target)
+              pinnedTarget.hostname = isIP(address) === 6 ? `[${address}]` : address
+              const hostname = target.hostname.replace(/^\[(.*)\]$/, "$1")
+              servername = isIP(hostname) === 0 ? hostname : undefined
+            }
+            return undiciFetch((pinnedTarget?.href ?? request.input) as Parameters<typeof undiciFetch>[0], {
+              ...(request.init as unknown as Parameters<typeof undiciFetch>[1]),
+              redirect: "manual",
+              dispatcher: dispatcherFor(
+                route,
+                selected,
+                pinnedTarget,
+                servername,
+                pinnedTarget ? target.host : undefined
+              )
+            })
+          }
+          // A public DNS answer may be unreachable (for example IPv6 without a working
+          // route). Read-only source requests can try the other checked answers, never DNS
+          // afresh. Status responses and cancelled requests are not retried.
+          const candidates = addresses ?? [undefined]
+          let response: Awaited<ReturnType<typeof undiciFetch>> | undefined
+          for (let attempt = 0; attempt < candidates.length; attempt++) {
+            try {
+              response = await send(candidates[attempt])
+              break
+            } catch (error) {
+              if (
+                attempt === candidates.length - 1 ||
+                request.init.signal?.aborted ||
+                !["GET", "HEAD"].includes(request.init.method?.toUpperCase() ?? "GET")
+              )
+                throw error
+            }
+          }
+          if (response === undefined) throw new Error("target has no allowed addresses")
           const location = response.headers.get("location")
           if (response.status < 300 || response.status > 399 || location === null)
             return response as unknown as Response
@@ -278,7 +356,7 @@ export const layer = Layer.effect(
         if (settings.proxyUrl !== null) registerSecret(settings.proxyUrl)
         if (override.mode === "custom") registerSecret(override.url)
         return {
-          fetchFor: (onRoute) => fetchFor(override, onRoute, settings),
+          fetchFor: (onRoute) => fetchFor(override, onRoute, undefined, settings),
           route: (target) => Effect.promise(() => routeNow(target, override, settings))
         }
       },
