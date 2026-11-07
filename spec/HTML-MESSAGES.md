@@ -1,6 +1,6 @@
 # HTML in messages
 
-**Status: Proposed, 2026-11-07 (htmlmsg).** No code. Owner decisions are in DESIGN §10.2 (**[D]**). Everything below is **[P]** unless it cites one. The proposal is a delta from SillyTavern 1.19.0 (`7e8663cd`) plus the JS-Slash-Runner extension, and from rp-harness master `60d95d2b` (ARCHITECTURE §1 CSP, §10 display transforms, §12 rewrites and message rendering, §15 prompt scripts). reference-harness has nothing to reuse here: its replies go to chat platforms and are never rendered as HTML. Its compact/rich tiers (§4.3) are the only precedent.
+**Status: Proposed, 2026-11-07 (htmlmsg).** No code. Owner decisions are in DESIGN §10.2 and §6 below (**[D]**). Everything below is **[P]** unless it cites one. The proposal is a delta from SillyTavern 1.19.0 (`7e8663cd`) plus the JS-Slash-Runner extension, and from rp-harness master `60d95d2b` (ARCHITECTURE §1 CSP, §10 display transforms, §12 rewrites and message rendering, §15 prompt scripts). reference-harness has nothing to reuse here: its replies go to chat platforms and are never rendered as HTML. Its compact/rich tiers (§4.3) are the only precedent.
 
 Scope: HTML that cards, regex scripts and models put into message text, which existing cards need. Model-driven UI (widgets and stages whose state the model updates through tools, DESIGN §10.2 [L]) is a separate, later discussion and is not covered here.
 
@@ -166,12 +166,12 @@ The **schema** is a `hast-util-sanitize` schema generated from DOMPurify 3.4's d
 
 ### 3.4 Scripts: yes, sandboxed, off until approved
 
-**The question for the owner.** DESIGN §11 [D] says content must never become code. A card's panel script is content that runs as code. The proposal reads the rule as "never code that can reach the three lines of attack":
+**[D] Card JavaScript is supported, sandboxed, and runs only once the card or preset is approved** (owner, 2026-11-07: "Okay.", to the default below). DESIGN §11 [D] says content must never become code. A card's panel script is content that runs as code, so the rule is read as "never code that can reach the three lines of attack":
 - **Credentials:** the frame has no origin, no cookies and no RPC.
 - **The user's system:** the browser sandbox.
 - **Exfiltrated chats:** no network unless the user allows it, and it sees only its own block and what the bridge answers.
 
-If the owner reads the rule strictly, the alternative is to never run card JavaScript. Document blocks would still render in `sandbox=""` frames with scripts off, and shapes 1 and 2 (§1.4) would work fully.
+The alternative that wasn't chosen: never run card JavaScript. Document blocks would then render in `sandbox=""` frames with scripts off, and shapes 1 and 2 (§1.4) would work fully.
 
 **Approval:**
 - **What:** scripts in a document block run only when the source that made the block is approved for scripts, as display-regex approval follows its source:
@@ -219,8 +219,8 @@ If the owner reads the rule strictly, the alternative is to never run card JavaS
   - **Leave out panels after N messages:** document blocks are dropped whole and inline markup is reduced to its text.
 
   N defaults to 4. The stage runs after the card's prompt scripts and keeps the cache layout as they do: a message that changes at depth N is `volatile`.
-- **Recommended default: As written.** The [D] that "per-turn HTML makes the context explode" is met by the cards' own scripts, which already do this. A second built-in rule would trim what the card author meant to keep.
-- **Alternative default:** "Text only after 4". It saves tokens on cards that don't trim, but it changes ST-compatible prompts silently, against ST-DRIFT's "nothing changes silently".
+- **[D] Default: As written** (owner, 2026-11-07: "Okay."): HTML is not trimmed from older turns by default, as in ST. The [D] that "per-turn HTML makes the context explode" is met by the cards' own scripts, which already do this. A second built-in rule would trim what the card author meant to keep.
+- **Alternative not chosen as default:** "Text only after 4", still offered as a setting. It saves tokens on cards that don't trim, but it changes ST-compatible prompts silently, against ST-DRIFT's "nothing changes silently".
 - **Stored forms are not needed.** DESIGN §10.2's display/context forms and reference-harness's compact tier are both computed:
   - reference-harness renders the compact form from the stored timeline when it builds a session (`src/context/renderer.ts:193`, `renderCompactMessage`; tier sizes in `src/context/compaction.ts:100–120`). It freezes the prefix for the session (reference-harness ARCHITECTURE "Frozen context (built once)"), so the rich/compact boundary doesn't move every turn.
   - The delta here is the same idea per request: the "context form" of an older message is the stored text through its prompt scripts and `context.htmlDepth`, never a second stored text.
@@ -269,8 +269,8 @@ Each step lands with its e2e at 1440/390 in both themes and the layout audit.
 
 None has to land before daily use: absent means off, and a message stored today renders the same under every step.
 
-## 6. For the owner
+## 6. The owner's decisions
 
-Two choices are discretionary and change what gets built. Both have defaults, and the plan proceeds on those defaults.
-- **Card JavaScript at all** (§3.4). Default: yes, in opaque-origin frames, off until approved per card, with no network unless allowed. Alternative: never. Document blocks would then render with scripts off, and shapes 1 and 2 would work fully.
-- **Built-in trimming of HTML for older turns** (§3.6). Default: as written (ST), with the setting available. Alternative: on, after 4 messages.
+Both decisions put to the owner were accepted as proposed (owner, 2026-11-07: "Okay.").
+- **[D] Card JavaScript is supported** (§3.4): in opaque-origin frames, off until approved per card or preset, with no network unless allowed.
+- **[D] HTML is not trimmed from older turns by default** (§3.6): as written, as in ST, with the setting available.
