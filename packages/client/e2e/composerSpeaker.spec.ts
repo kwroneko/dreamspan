@@ -4,12 +4,13 @@
 // a second tab, and the switcher's search. Every card here is made up.
 import { expect, type Page, test } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
+import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { choices, nextChip, nextName, nextReply, pickReply } from "./support/strip.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
-import { layoutAudit } from "./support/layoutAudit.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 
 // Seed 1's prose mentions none of this file's cast. Random synthetic names can
 // legitimately override talkativeness, changing Auto's next pick after a reply.
@@ -82,6 +83,48 @@ const chatWith = async (characters: ReadonlyArray<string>, withBo = false) => {
 test.beforeEach(async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
 })
+
+for (const theme of ["light", "dark"] as const)
+  test(`the composer speaker picker over message portraits at 1024px ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 900 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+    const chatId = await chatWith(["Mira", "Tobin"], true)
+    await admin((api) =>
+      Effect.gen(function* () {
+        const mira = (yield* api.ListCards()).find((card) => card.name === "Mira")!.entityId
+        let parent: import("@rp/shared/chat.ts").SlotId | null = null
+        for (let i = 0; i < 8; i++) {
+          const sent: SendResult = yield* api.SendMessage({
+            chatId,
+            parentSlotId: parent,
+            branch: false,
+            content: `The lantern lights the quay. Turn ${i}.`,
+            speakerEntityId: mira
+          })
+          if (sent._tag !== "Posted") throw new Error("Expected a posted turn")
+          parent = sent.entry.slotId
+        }
+      })
+    )
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(page.locator("article[data-slot]").last()).toContainText("The lantern lights the quay. Turn 7.")
+    await speakerChip(page).click()
+    const dialog = page.getByRole("dialog", { name: "Speak as", exact: true })
+    await expect(dialog.getByRole("combobox")).toBeFocused()
+    expect(
+      await dialog.evaluate((popup) => {
+        const box = popup.getBoundingClientRect()
+        return [...document.querySelectorAll("article[data-slot] [data-portrait]")].some((portrait) => {
+          const r = portrait.getBoundingClientRect()
+          return (
+            r.width && r.height && r.left < box.right && box.left < r.right && r.top < box.bottom && box.top < r.bottom
+          )
+        })
+      }),
+      "the speaker picker covers message portraits"
+    ).toBe(true)
+    await expectLayout(page, test.info(), `speaker-over-portraits-1024-${theme}`, { scope: '[role="dialog"]' })
+  })
 
 for (const [width, height] of [
   [1440, 900],
@@ -528,11 +571,7 @@ for (const [width, height] of [
       const yours = page.getByRole("group", { name: "Your persona", exact: true })
       await expect(yours.getByRole("option", { name: "Ana", exact: true })).toHaveAttribute("aria-current", "true")
       await expect(yours.getByRole("option", { name: "Bo", exact: true })).toBeVisible()
-      // The picture-overlay rule reads the popover's own portrait rows as pictures under it (the
-      // saved chat's picker reports the same); every other layout rule must pass.
-      await page.mouse.move(0, 0)
-      const findings = await layoutAudit(page, { scope: '[role="dialog"]' })
-      expect(findings.filter((finding) => finding.kind !== "overlay")).toEqual([])
+      await expectLayout(page, test.info(), `pending-speaker-personas-${width}`, { scope: '[role="dialog"]' })
       if (process.env.RP_SCREENS)
         await page.screenshot({ path: `${process.env.RP_SCREENS}/pending-speaker-personas-${width}.png` })
       await yours.getByRole("option", { name: "Bo", exact: true }).click()

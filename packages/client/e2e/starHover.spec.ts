@@ -7,6 +7,7 @@ import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { shapeCard } from "./support/shapes.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -68,6 +69,7 @@ async function checkStars(page: Page, scope: Locator, surface: "home" | "sidebar
   for (const [i, name] of names.entries())
     if (i % 4 >= 2) await expect(scope.getByRole("button", { name: `Forks of ${name}`, exact: true })).toHaveCount(1)
   if (surface === "cast") await expect(scope.getByText("In this chat", { exact: true })).toHaveCount(4)
+  await expectLayout(page, test.info(), `${surface}-stars-rest`, { scope: ".tile-toggle" })
   for (const [i, name] of names.entries()) {
     const namedStar = scope.getByRole("button", {
       name: new RegExp(`^(Add|Remove) ${name} (to|from) favourites$`),
@@ -101,6 +103,8 @@ async function checkStars(page: Page, scope: Locator, surface: "home" | "sidebar
       page.getByText(i % 2 ? "Click to remove from favourites" : "Click to add to favourites", { exact: true })
     ).toBeVisible()
     await hitTest(star)
+    if (i === 0)
+      await expectLayout(page, test.info(), `${surface}-star-hover`, { scope: ".tile-toggle", hovered: true })
     // Portrait controls must retain their contrast chip on hover and while explained.
     if (portrait) {
       if (i < 4)
