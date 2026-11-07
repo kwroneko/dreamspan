@@ -1,15 +1,33 @@
-import { fileURLToPath } from "node:url"
 import { randomUUID } from "node:crypto"
 import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import react, { reactCompilerPreset } from "@vitejs/plugin-react"
-import { defineConfig } from "vite"
-
-const stub = (name: string) => fileURLToPath(new URL(`./src/stubs/${name}`, import.meta.url))
+import { defineConfig, type Plugin } from "vite"
 
 // In development the client runs on Vite and proxies the RPC socket and login to the server.
 const server = process.env.RP_SERVER ?? "http://127.0.0.1:8080"
 const buildId = process.env.NODE_ENV === "production" ? randomUUID() : "development"
+
+/** The panel frames' bootstrap (src/frame/bootstrap.ts), built unhashed at the path the frame page names. */
+const FRAME_BOOTSTRAP = "frame/bootstrap.js"
+/**
+ * In development, the bootstrap from source at that path. It loads as a classic script (a
+ * module's request would carry `Origin: null`), so it can't keep the module's empty export.
+ */
+const frameBootstrap: Plugin = {
+  name: "frame-bootstrap",
+  configureServer(dev) {
+    dev.middlewares.use(`/${FRAME_BOOTSTRAP}`, (_request, response, next) => {
+      dev
+        .transformRequest("/src/frame/bootstrap.ts")
+        .then((result) => {
+          response.setHeader("content-type", "text/javascript; charset=utf-8")
+          response.end((result?.code ?? "").replace(/^export\s*\{\s*\};?\s*$/m, ""))
+        })
+        .catch(next)
+    })
+  }
+}
 
 export default defineConfig({
   define: { "import.meta.env.VITE_BUILD_ID": JSON.stringify(buildId) },
@@ -17,6 +35,7 @@ export default defineConfig({
     react(),
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
+    frameBootstrap,
     {
       name: "client-build-id",
       generateBundle() {
@@ -24,11 +43,14 @@ export default defineConfig({
       }
     }
   ],
-  build: { sourcemap: true },
-  resolve: {
-    // Streamdown imports rehype-raw (and through it parse5, an HTML parser) for raw HTML,
-    // which ui/Markdown.tsx never parses: a stub keeps them out of the bundle.
-    alias: { "rehype-raw": stub("rehypeRaw.ts") }
+  build: {
+    sourcemap: true,
+    rolldownOptions: {
+      input: { index: "index.html", "frame-bootstrap": "src/frame/bootstrap.ts" },
+      output: {
+        entryFileNames: (chunk) => (chunk.name === "frame-bootstrap" ? FRAME_BOOTSTRAP : "assets/[name]-[hash].js")
+      }
+    }
   },
   server: {
     port: 5173,
@@ -54,7 +76,9 @@ export default defineConfig({
           }
         }
       },
-      "/healthz": { target: server }
+      "/healthz": { target: server },
+      // The panel frames' page, with its own CSP; its bootstrap is served from source above.
+      "/frame/panel": { target: server }
     }
   }
 })

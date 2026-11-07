@@ -18,6 +18,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore
@@ -28,6 +29,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { MessageBody, sourceOffsetAt } from "../../ui/messageCopy.tsx"
+import { HtmlMessageContext } from "../../ui/html/messageHtml.ts"
 import { Composition } from "./Composition.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
@@ -36,6 +38,7 @@ import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { messageSide, useCast } from "./cast.ts"
 import { invokeMessageAction, messageActions, MessageActions } from "./messageActions.tsx"
 import { ReasoningPanels } from "./Reasoning.tsx"
+import { useDisplayContext } from "./DisplaySettings.tsx"
 import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
 import { MessageDetails, useMessageDetails } from "./messageDetails.tsx"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
@@ -86,8 +89,13 @@ function BodyText({
   streaming
 }: DisplayAt & { placement: 1 | 2; text: string; streaming: boolean }) {
   const shown = useDisplayed({ version, session, parentSlotId, depth }, text, placement, streaming)
+  // A message body: its HTML's styles join the chat's, and its panels know their depth from the
+  // tip, as display regex does (ui/html/messageHtml.ts).
+  const { leafDepth } = useDisplayContext()
+  const fromTip = leafDepth === null ? null : Math.max(0, leafDepth - depth)
+  const html = useMemo(() => ({ key: version.slotId, streaming, fromTip }), [version.slotId, streaming, fromTip])
   return (
-    <>
+    <HtmlMessageContext value={html}>
       <MessageBody text={text}>
         {shown.pending ? (
           // Its place kept, not shown, until the display scripts answer.
@@ -103,7 +111,7 @@ function BodyText({
           {issue}
         </p>
       ))}
-    </>
+    </HtmlMessageContext>
   )
 }
 

@@ -88,6 +88,10 @@ export function selectedSource(map: SourceMap, from: number, to: number): readon
   return [first === firstStored ? map.start : map.chars[first]![0], last === lastStored ? map.end : map.chars[last]![1]]
 }
 
+/** Elements whose text never gets position spans. */
+const OPAQUE = new Set(["textarea", "option", "optgroup", "select", "title", "svg", "math", "style", "script"])
+const TABLE_PARTS = new Set(["table", "thead", "tbody", "tfoot", "tr", "colgroup"])
+
 /** Trusted metadata is attached after sanitizing; source HTML never supplies it. */
 export function sourcePositions({ offsets }: { offsets: ReadonlyArray<SourceChar> }) {
   return (tree: PositionedNode, file: { value: unknown }) => {
@@ -110,6 +114,18 @@ export function sourcePositions({ offsets }: { offsets: ReadonlyArray<SourceChar
     }
     const visit = (node: PositionedNode, parent?: PositionedNode) => {
       const before = leaves.length
+      // Text the DOM can't wrap in a span (a field's value, SVG, whitespace between table parts)
+      // stays as it is, without copy metadata.
+      if (node.tagName && OPAQUE.has(node.tagName)) return
+      if (node.type === "text" && parent?.tagName && TABLE_PARTS.has(parent.tagName) && !node.value?.trim()) return
+      // A document block (ui/html) copies as its whole block: one placeholder character maps to it.
+      if (node.tagName === "rp-frame") {
+        const start = node.position?.start.offset
+        const end = node.position?.end.offset
+        const range = start === undefined || end === undefined ? null : sourceRange(start, end)
+        if (range) leaves.push({ node, chars: [range], start: range[0], end: range[1], code: false, br: false })
+        return
+      }
       const isCode = node.type === "element" && node.tagName === "code"
       const br = node.type === "element" && node.tagName === "br"
       const image = node.tagName === "img" || node.data?.copyAlt !== undefined

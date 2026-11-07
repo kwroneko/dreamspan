@@ -229,8 +229,9 @@ const HOST = /^[A-Za-z0-9.-]+(?::\d{1,5})?$|^\[[0-9A-Fa-f:.]+\](?::\d{1,5})?$/
 /**
  * The Content-Security-Policy on every response. Only the app's own scripts run: none
  * inline, none from elsewhere, so markup that slipped past sanitizing can't run script.
- * Images load from the app or local attachment blobs, so text can't report on the chat through an
- * image URL (Markdown blocks them as well). Connections go to the app and its WebSocket,
+ * Images load from the app, local attachment blobs or `data:` URLs (a message's inline images,
+ * which make no request), so text can't report on the chat through an image URL (the
+ * message renderer blocks them as well). Connections go to the app and its WebSocket,
  * on the host the browser used; `'self'` covers the WebSocket in current browsers, the
  * explicit origins cover older ones.
  */
@@ -240,7 +241,7 @@ const contentSecurityPolicy = (host: string | undefined) => {
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
-    "img-src 'self' blob:",
+    "img-src 'self' blob: data:",
     `connect-src 'self'${socket}`,
     "object-src 'none'",
     "base-uri 'none'",
@@ -248,6 +249,52 @@ const contentSecurityPolicy = (host: string | undefined) => {
     "frame-ancestors 'none'"
   ].join("; ")
 }
+
+/** The page a message's document block loads in its frame (spec/HTML-MESSAGES.md §3.3). */
+const FRAME_PANEL = "/frame/panel"
+/** Its one script, the client build's (packages/client/src/frame/bootstrap.ts). */
+const FRAME_BOOTSTRAP = "/frame/bootstrap.js"
+
+/**
+ * The frame page's policy. The frame is sandboxed without allow-same-origin, so its origin is
+ * opaque and `'self'` can't name the app: the bootstrap is named by the Host the browser used
+ * when it's a plain host name (otherwise `'self'`, which matches the page's URL in current
+ * browsers). Only the bootstrap runs: the block's own scripts and handlers stay off. Styles
+ * and `data:`/`blob:` images and fonts are the block's own; it can't connect, submit, change
+ * its base or be framed by another site.
+ */
+const framePolicy = (host: string | undefined) => {
+  const script =
+    host !== undefined && HOST.test(host) && !host.startsWith("[")
+      ? `http://${host}${FRAME_BOOTSTRAP} https://${host}${FRAME_BOOTSTRAP}`
+      : "'self'"
+  return [
+    "default-src 'none'",
+    `script-src ${script}`,
+    "style-src 'unsafe-inline'",
+    "img-src data: blob:",
+    "font-src data:",
+    "connect-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'self'"
+  ].join("; ")
+}
+
+/** The frame page: nothing but the bootstrap, which writes the block's document when the app posts it. */
+const FramePanelRoute = HttpRouter.add(
+  "GET",
+  FRAME_PANEL,
+  Effect.succeed(
+    HttpServerResponse.text(
+      `<!doctype html><html><head><meta charset="utf-8"><script src="${FRAME_BOOTSTRAP}"></script></head><body></body></html>`,
+      {
+        contentType: "text/html; charset=utf-8",
+        headers: { "cache-control": "no-cache", "x-content-type-options": "nosniff" }
+      }
+    )
+  )
+)
 
 /**
  * Every request passes here first. It refuses other sites' pages and DNS-rebound names
@@ -273,7 +320,11 @@ const RequestGuard = HttpRouter.middleware(
     }
     return (httpEffect) =>
       Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
-        const csp = HttpServerResponse.setHeader("content-security-policy", contentSecurityPolicy(request.headers.host))
+        const policy =
+          request.url.split("?")[0] === FRAME_PANEL
+            ? framePolicy(request.headers.host)
+            : contentSecurityPolicy(request.headers.host)
+        const csp = HttpServerResponse.setHeader("content-security-policy", policy)
         const headers = { host: request.headers.host, origin: request.headers.origin }
         const problem = crossSiteProblem(headers, publicOrigins, checkHost)
         if (problem !== undefined) return Effect.succeed(csp(HttpServerResponse.text(problem, { status: 403 })))
@@ -514,6 +565,7 @@ export const serverWith = <E>(
     Layer.mergeAll(
       RpcRoute,
       HealthRoute,
+      FramePanelRoute,
       AuthRoutes,
       ImportRoutes.layer,
       SourceImageRoute,

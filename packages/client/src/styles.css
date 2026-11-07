@@ -329,6 +329,19 @@ main:has(> [data-fill]) {
   color: var(--text-muted);
   font-size: 0.9em;
 }
+/*
+ * Text whose HTML renders (ui/html, spec/HTML-MESSAGES.md §3.2, fix 1): laid out and painted on
+ * its own, so a card's `position: fixed` is placed and clipped inside its message and can't
+ * cover the app, and its z-indexes stack only among themselves.
+ */
+.markdown-html {
+  contain: layout paint;
+  isolation: isolate;
+}
+.markdown-html img {
+  max-width: 100%;
+  height: auto;
+}
 
 /*
  * In the base layer, so a utility class on an element (`cursor-grab`, `[scrollbar-width:none]`)

@@ -21,7 +21,7 @@ The next line stays separate.
 "code stays plain" *literal* __literal__
 \`\`\`
 
-<span title="synthetic">HTML stays text</span>`
+<span title="synthetic">HTML shows as formatting</span>`
 
 for (const width of [1440, 390])
   for (const colorScheme of ["light", "dark"] as const) {
@@ -48,11 +48,11 @@ for (const width of [1440, 390])
       if (process.env.FORMATTING_STAGE !== "before") {
         await expect(message.locator("u")).toHaveText("A promise kept.")
         await expect(message.locator("q").first()).toHaveText('"Hello, traveler."')
-        // Six quote styles and the auto-closed sentence; the literal HTML attribute
-        // stays in the main colour, as ST's default encode_tags=false requires.
+        // Six quote styles and the auto-closed sentence; the HTML attribute's quotes aren't
+        // dialogue, as ST's default encode_tags=false requires.
         await expect(message.locator("q")).toHaveCount(7)
         await expect(message.locator("br")).not.toHaveCount(0)
-        await expect(message.locator("span[title=synthetic]")).toHaveCount(0)
+        await expect(message.locator("span[title=synthetic]")).toHaveText("HTML shows as formatting")
         const contrast = await message.evaluate((element) => {
           const canvas = document.createElement("canvas")
           const context = canvas.getContext("2d")!
