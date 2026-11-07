@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
-import { forgetWorkbench, loginCookie, withCookie, type Client } from "./support/rpc.ts"
+import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
 import { openPanel, closePanel, openSummarySettings } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
@@ -18,7 +18,6 @@ test.beforeAll(async () => {
 // Fresh browser storage is what these tests need; authentication itself is
 // covered elsewhere. Reuse the file's login instead of spending one per device.
 const authenticate = async (page: Page) => {
-  await forgetWorkbench(server(), cookie)
   const at = cookie.indexOf("=")
   await page.context().addCookies([
     {

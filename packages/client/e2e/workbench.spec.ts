@@ -1,7 +1,7 @@
 // The center column's frames and tabs (owner, 2026-11-05; DESIGN §10.1): one item looks as a
 // single view did; single-click opens are preview tabs, a double click or an edit keeps them;
 // splits show two chats, or a chat and an editor, side by side; the side panel follows the
-// frame focused last; the layout survives a reload, per device; phones switch tabs from a strip.
+// frame focused last; the layout survives a reload of its browser tab; phones switch tabs from a strip.
 // SCREENSHOT_DIR saves full-surface screenshots for the report.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -12,6 +12,7 @@ import { openPanel } from "./support/panel.ts"
 import { expectTextBox, replaceEditorText } from "./support/textbox.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { replaceStoredLayout, storedLayout } from "./support/workbench.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -66,16 +67,9 @@ const expectCharacterSidebar = async (page: Page, name: string, chat: string, ot
 const sidebarChat = (page: Page, title: string) =>
   page.getByRole("complementary", { name: "Sidebar" }).getByRole("link", { name: new RegExp(`^Open chat ${title}`) })
 
-/** The layout the server keeps for this page's browser (features/workbench/device.ts). */
-const savedLayout = async (page: Page) => {
-  const device = await page.evaluate(() => localStorage.getItem("rp.device"))
-  return admin((api) => api.GetWorkbenchLayout({ device: device ?? "shared" }))
-}
-
 const fresh = async (page: Page, width: number, theme: "light" | "dark" = "light") => {
   await page.setViewportSize({ width, height: 900 })
   await page.emulateMedia({ colorScheme: theme })
-  // Logging in starts the account's layouts over at one tab (support/rpc.ts forgetWorkbench).
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
 }
 
@@ -164,51 +158,11 @@ test("two chats side by side; the side panel follows the frame focused last; it 
   await expect(page.locator("[data-frame]")).toHaveCount(2)
 
   // A reload brings back the frames and their tabs.
-  await expect.poll(() => savedLayout(page)).toContain('"type":"split"')
+  await expect.poll(() => storedLayout(page)).toContain('"type":"split"')
   await page.reload()
   await expect(page.locator("[data-frame]")).toHaveCount(2)
   await expect(said(page, "The lamp turns")).toBeVisible()
   await expect(said(page, "The tide is out")).toBeVisible()
-})
-
-// A phone and a desktop on one account keep their own layouts: neither's saves undo the other's.
-test("each device restores its own layout", async ({ page, browser }) => {
-  test.setTimeout(120_000)
-  await fresh(page, 1440)
-  const phoneContext = await browser.newContext({ viewport: { width: 390, height: 800 } })
-  const phone = await phoneContext.newPage()
-  await apiLogin(phone.request, server(), ADMIN.handle, ADMIN.password)
-  try {
-    await page.goto(`${server().url}/chats/${fixtures.chatA}`)
-    await expect(said(page, "The tide is out")).toBeVisible()
-    await page.getByRole("button", { name: "Split right" }).click()
-    await sidebarChat(page, "Lighthouse night").click()
-    await expect(page.locator("[data-frame]")).toHaveCount(2)
-    await expect.poll(() => savedLayout(page)).toContain('"type":"split"')
-
-    // The phone keeps the other chat, then opens Home beside it.
-    await phone.goto(`${server().url}/chats/${fixtures.chatB}`)
-    await expect(said(phone, "The lamp turns")).toBeVisible()
-    const composer = phone.getByRole("textbox", { name: "Message" })
-    await composer.fill("Kept")
-    await expect.poll(() => savedLayout(phone)).toContain('"preview":false')
-    await composer.fill("")
-    await phone.goto(`${server().url}/`)
-    await expect(tabs(phone)).toHaveCount(2)
-    await expect.poll(() => savedLayout(phone)).not.toContain(fixtures.chatA)
-    expect(await savedLayout(page)).toContain('"type":"split"')
-
-    await page.reload()
-    await expect(page.locator("[data-frame]")).toHaveCount(2)
-    await expect(said(page, "The tide is out")).toBeVisible()
-    await expect(said(page, "The lamp turns")).toBeVisible()
-    await phone.reload()
-    await expect(tabs(phone)).toHaveCount(2)
-    await expect(tabs(phone).filter({ hasText: "Lighthouse night" })).toHaveCount(1)
-    await expect(tabs(phone).filter({ hasText: "Harbour walk" })).toHaveCount(0)
-  } finally {
-    await phoneContext.close()
-  }
 })
 
 test("old editor links and modified opener clicks keep their browser navigation", async ({ page, context }) => {
@@ -237,27 +191,24 @@ test("stale layouts keep deleted items closable and unknown versions start fresh
   await page.goto(`${server().url}/chats/${fixtures.chatA}`)
   await expect(said(page, "The tide is out")).toBeVisible()
   await sidebarChat(page, "Harbour walk").dblclick()
-  await expect.poll(() => savedLayout(page)).not.toBeNull()
-  const device = (await page.evaluate(() => localStorage.getItem("rp.device"))) ?? "shared"
+  await expect.poll(() => storedLayout(page)).not.toBeNull()
   const missing = "00000000-0000-4000-8000-000000000000"
-  await admin((api) =>
-    api.SetWorkbenchLayout({
-      device,
-      layout: JSON.stringify({
-        version: 1,
-        root: {
-          type: "frame",
-          id: "restored",
-          active: "live",
-          tabs: [
-            { id: "live", href: `/chats/${fixtures.chatA}`, preview: false },
-            { id: "gone-chat", href: `/chats/${missing}`, preview: false },
-            { id: "gone-item", href: `/library/${missing}`, preview: false }
-          ]
-        },
-        focused: "restored",
-        recent: ["live"]
-      })
+  await replaceStoredLayout(
+    page,
+    JSON.stringify({
+      version: 1,
+      root: {
+        type: "frame",
+        id: "restored",
+        active: "live",
+        tabs: [
+          { id: "live", href: `/chats/${fixtures.chatA}`, preview: false },
+          { id: "gone-chat", href: `/chats/${missing}`, preview: false },
+          { id: "gone-item", href: `/library/${missing}`, preview: false }
+        ]
+      },
+      focused: "restored",
+      recent: ["live"]
     })
   )
   await page.reload()
@@ -271,8 +222,8 @@ test("stale layouts keep deleted items closable and unknown versions start fresh
   await expect(page.getByRole("alert").first()).toBeVisible()
   await missingChat.getByRole("button", { name: /^Close / }).click()
   await expect(said(page, "The tide is out")).toBeVisible()
-  await expect.poll(() => savedLayout(page)).not.toContain(missing)
-  await admin((api) => api.SetWorkbenchLayout({ device, layout: JSON.stringify({ version: 0, root: {} }) }))
+  await expect.poll(() => storedLayout(page)).not.toContain(missing)
+  await replaceStoredLayout(page, JSON.stringify({ version: 0, root: {} }))
   await page.reload()
   await expect(said(page, "The tide is out")).toBeVisible()
   await expect(tabs(page)).toHaveCount(0)
@@ -399,8 +350,10 @@ for (const width of [1024, 390])
       if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), `single-chat-${width}-${theme}`)
       await page.getByRole("textbox", { name: "Message" }).fill("Kept")
       // Typing kept the tab; the saved layout has it before the page is left.
-      await expect.poll(() => savedLayout(page)).toContain('"preview":false')
-      await page.goto(`${server().url}/chats/${fixtures.chatB}`)
+      await expect.poll(() => storedLayout(page)).toContain('"preview":false')
+      // The next chat opens beside it (a URL loaded afresh would open alone).
+      if (width < 1024) await page.getByRole("button", { name: "Chats and menu" }).click()
+      await page.getByRole("link", { name: /^Open chat Lighthouse night/ }).click()
       await expect(said(page, "The lamp turns")).toBeVisible()
       // Phones have no splits; the strip switches between the open tabs.
       await expect(page.getByRole("button", { name: "Split right" })).toHaveCount(width < 1024 ? 0 : 1)

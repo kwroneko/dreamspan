@@ -36,16 +36,20 @@ it.effect(
       assert.strictEqual(stale._tag, "StaleWrite")
       if (stale._tag === "StaleWrite") assert.strictEqual(stale.actual, 2)
       assert.deepStrictEqual(yield* readSetting(sql, "user", "a", "shell.pinsCollapsed"), { value: false, revision: 2 })
-      const layout = { at: 1, layout: { frames: [] } }
-      yield* put("device", deviceScopeId("a", "desktop"), "workbench", layout)
-      assert.deepStrictEqual(yield* readSetting(sql, "device", deviceScopeId("b", "desktop"), "workbench"), {
-        value: null,
-        revision: 0
-      })
-      assert.deepStrictEqual(yield* readSetting(sql, "device", deviceScopeId("a", "phone"), "workbench"), {
-        value: null,
-        revision: 0
-      })
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* settingsRegistry.register({ id: "synthetic/device", scope: "device", schema: Schema.Int })
+          yield* put("device", deviceScopeId("a", "desktop"), "synthetic/device", 1)
+          assert.deepStrictEqual(yield* readSetting(sql, "device", deviceScopeId("b", "desktop"), "synthetic/device"), {
+            value: null,
+            revision: 0
+          })
+          assert.deepStrictEqual(yield* readSetting(sql, "device", deviceScopeId("a", "phone"), "synthetic/device"), {
+            value: null,
+            revision: 0
+          })
+        })
+      )
       // Reset preserves the revision; an old pre-reset snapshot can never become current again.
       yield* put("user", "a", "generation.preset", "synthetic", 0)
       yield* put("user", "a", "generation.preset", null, 1)
