@@ -177,6 +177,51 @@ for (const width of [1440, 390])
       expect(await flashes(page)).toEqual([{ slot: data.slots[4], reduced: true, iterations: [1] }])
     })
 
+// Restored reading state must yield to an explicit jump even when the URL already names it.
+test("choosing the same jump after reload replaces the restored reading position", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await recordFlashes(page)
+  const data = await seed("restored-jump")
+  await page.goto(`${server().url}/chats/${data.chatId}?fork=${data.side}`)
+  await expect(page.getByTestId("messages").getByText("The side road leads inland.")).toBeVisible()
+  const jumpToStart = async () => {
+    await page.getByRole("button", { name: /switch branch/ }).click()
+    await page.getByRole("button", { name: "Go to where this branch starts", exact: true }).click()
+  }
+  await jumpToStart()
+  const target = urlSlot(page)
+  await expectFlashedThenUnmarked(page, article(page, target))
+  await page.reload()
+  await expect.poll(() => page.evaluate(() => window.history.state.chatReading?.key)).toBeTruthy()
+  await expect(article(page, target)).toBeVisible()
+  await expectNoFlash(page)
+  await jumpToStart()
+  await expectFlashedThenUnmarked(page, article(page, target))
+})
+
+// Opening the same character again is a fresh link to the same chat/fork/slot.
+test("choosing the same character link starts a fresh jump", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await recordFlashes(page)
+  const data = await seed("repeat-link")
+  const target = data.slots[21]!
+  await page.goto(server().url)
+  await page.getByRole("main").getByRole("link", { name: "Open Karen repeat-link", exact: true }).click()
+  await expectFlashedThenUnmarked(page, article(page, target))
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" })
+  await sidebar
+    .getByRole("group", { name: "Left panel", exact: true })
+    .getByRole("button", { name: "Characters", exact: true })
+    .click()
+  await clearFlashes(page)
+  await page.getByTestId("messages").evaluate((list) => (list.scrollTop = 0))
+  await expect(article(page, data.slots[0]!)).toBeInViewport()
+  await sidebar.getByRole("link", { name: "Open Karen repeat-link", exact: true }).click()
+  await expect(article(page, target)).toBeInViewport()
+  await expectFlashedThenUnmarked(page, article(page, target))
+})
+
 // Sidebar-only URL changes must retain the current message entry's consumed/reading state.
 test("sidebar navigation preserves message history state", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })

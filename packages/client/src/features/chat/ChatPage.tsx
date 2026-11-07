@@ -63,7 +63,7 @@ interface ReadingPosition {
 }
 declare module "@tanstack/react-router" {
   interface HistoryState {
-    chatReading?: ReadingPosition
+    chatReading?: ReadingPosition | undefined
   }
 }
 
@@ -674,20 +674,52 @@ function ChatSurface({
   const navigate = useNavigate()
   const router = useRouter()
   const { panel, show, withPanel, wide, userId } = usePanel(urlPanel, view)
-  const shown = useRef({ fork, slot })
+  const entry = useLocation({ select: (location) => location.state })
+  const shown = useRef({ fork, slot, index: entry.__TSR_index })
   const [originalTarget] = useState({ fork, slot })
-  const reading = originalTarget.fork === fork && originalTarget.slot === slot ? restore : null
+  const [restoring, setRestoring] = useState(true)
+  const reading = restoring && originalTarget.fork === fork && originalTarget.slot === slot ? restore : null
   const flashes = useRef<Flashes>({ opened: 0, again: false })
+  // An explicit jump replaces a restored reading position, even at the URL's existing slot.
+  const reopen = useCallback(
+    (target: SlotId) => {
+      setRestoring(false)
+      flashes.current.again = true
+      void navigate({
+        to: ".",
+        search: (prev: Record<string, unknown>) => prev,
+        // Explicit clears also replace these keys in the workbench's browser-history mirror.
+        state: (prev) => ({ ...prev, chatReading: undefined, chatFlashed: undefined }),
+        replace: true,
+        resetScroll: false
+      })
+      void session.open(target)
+    },
+    [navigate, session]
+  )
   // Another message or fork of the open chat moves the window; a URL catching up with
-  // where the window already is doesn't.
+  // where the window already is doesn't. A fresh link to the same message is a new jump;
+  // replacements that save scroll/flash state and consumed Back/Forward entries aren't.
   useEffect(() => {
+    if (pending) return
     const before = shown.current
-    shown.current = { fork, slot }
+    shown.current = { fork, slot, index: entry.__TSR_index }
     const current = view.forkId
     const already = fork === null ? current !== null && current === view.chat?.currentForkId : fork === current
-    if (fork !== before.fork && !already) session.showFork(fork, slot)
-    else if (slot !== before.slot) void session.open(slot)
-  }, [session, fork, slot, view.forkId, view.chat])
+    const fresh =
+      slot !== null &&
+      entry.__TSR_index !== before.index &&
+      entry.chatReading === undefined &&
+      entry.chatFlashed !== `${session.id}/${slot}`
+    if (fork !== before.fork && !already) {
+      setRestoring(false)
+      session.showFork(fork, slot)
+    } else if (slot !== before.slot || fresh) {
+      setRestoring(false)
+      if (fresh) flashes.current.again = true
+      void session.open(slot)
+    }
+  }, [session, fork, slot, view.forkId, view.chat, entry, pending])
   // Deleted while open, here or elsewhere: there's nothing left to show.
   useEffect(() => {
     if (!pending && view.deleted) void navigate({ to: "/chats", replace: true })
@@ -743,15 +775,14 @@ function ChatSurface({
       const sibling = result.value.slotId
       const target = result.value.fork.id
       if (sibling === slot && target === session.snapshot().forkId) {
-        flashes.current.again = true
-        void session.open(sibling)
+        reopen(sibling)
       } else
         void navigate({
           to: ".",
           search: withPanel({ fork: target, slot: sibling })
         })
     },
-    [session, navigate, withPanel, slot, flashes]
+    [session, navigate, withPanel, slot, reopen]
   )
   const switchBranch = useCallback((entry: PathEntry, index: number) => void onBranch(entry, index), [onBranch])
   // A summary's range opens the window at its first message, as a link to that message does.
@@ -763,8 +794,7 @@ function ChatSurface({
       const at = branchFork === null ? { slot: target } : { fork: branchFork, slot: target }
       if (target === slot) {
         if (!wide) show(null)
-        flashes.current.again = true
-        void session.open(target)
+        reopen(target)
       } else
         void navigate({
           to: ".",
@@ -774,7 +804,7 @@ function ChatSurface({
           resetScroll: false
         })
     },
-    [session, navigate, show, withPanel, wide, slot, branchFork, userId, flashes]
+    [navigate, show, withPanel, wide, slot, branchFork, userId, reopen]
   )
   // Two chats side by side: the keys are the focused one's.
   const focused = useTabFocused()
