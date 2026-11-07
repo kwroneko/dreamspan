@@ -7,6 +7,7 @@ import {
   defaultProviderId,
   findProvider,
   providerChanges,
+  providerBaseUrl,
   resolveProviderSettings
 } from "../src/providerDefinitions.ts"
 import { resolveModel } from "../src/providers.ts"
@@ -34,6 +35,11 @@ describe("findProvider", () => {
 })
 
 describe("provider settings", () => {
+  it("uses a provider's default region until the connection overrides it", () => {
+    const regional = { ...bedrock, defaults: { ...bedrock.defaults, region: "eu-west-3" } }
+    expect(providerBaseUrl(regional, {})).toBe("https://bedrock-runtime.eu-west-3.amazonaws.com")
+    expect(providerBaseUrl(regional, { region: "us-west-2" })).toBe("https://bedrock-runtime.us-west-2.amazonaws.com")
+  })
   it("stores only what differs from the provider's defaults", () => {
     expect(providerChanges(bedrock, { auth: "api-key", lookback: false, region: "eu-west-1" })).toEqual({
       region: "eu-west-1"

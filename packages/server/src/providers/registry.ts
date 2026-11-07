@@ -3,8 +3,7 @@
 // plugin can add a provider, change how requests are shaped (cache breakpoints), or
 // replace or disable a built-in.
 import type { Api, Message, Model, ProviderStreams } from "@earendil-works/pi-ai"
-import type { Effect } from "effect"
-import { Context, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
 import type { ListedModel, ListRequest, ModelListError } from "./modelLists.ts"
 import type { Price, ProviderSettings } from "@rp/shared/providers.ts"
@@ -17,6 +16,7 @@ import type { TextTokenCounter } from "./textCounters.ts"
 import type { ModelCatalog } from "./contextCatalog.ts"
 import type { ContextLimitParser } from "./contextLimits.ts"
 import type { CompatShim } from "./shims.ts"
+import { ProviderDefinitions } from "./definitions.ts"
 
 export type Catalog = Readonly<Record<string, Model<Api>>>
 
@@ -195,17 +195,20 @@ export class ProviderRegistry extends Context.Service<ProviderRegistry, Provider
 ) {}
 
 /** An empty registry; `builtins.ts` provides the layer that fills it. */
-export const empty = Layer.sync(ProviderRegistry, () =>
-  ProviderRegistry.of({
-    providers: makeRegistry<ProviderDefinition>(),
-    kinds: makeRegistry<ProviderKindEntry>(),
-    transforms: makeRegistry<RequestTransform>(),
-    observers: makeRegistry<ResponseObserver>(),
-    costs: makeRegistry<CostFormula>(),
-    imageCounters: makeRegistry<ImageTokenCounter>(),
-    textCounters: makeRegistry<TextTokenCounter>(),
-    catalogs: makeRegistry<ModelCatalog>(),
-    contextLimits: makeRegistry<ContextLimitParser>(),
-    shims: makeRegistry<CompatShim>()
-  })
-)
+export const empty = Layer.effect(
+  ProviderRegistry,
+  Effect.map(ProviderDefinitions, (providers) =>
+    ProviderRegistry.of({
+      providers,
+      kinds: makeRegistry<ProviderKindEntry>(),
+      transforms: makeRegistry<RequestTransform>(),
+      observers: makeRegistry<ResponseObserver>(),
+      costs: makeRegistry<CostFormula>(),
+      imageCounters: makeRegistry<ImageTokenCounter>(),
+      textCounters: makeRegistry<TextTokenCounter>(),
+      catalogs: makeRegistry<ModelCatalog>(),
+      contextLimits: makeRegistry<ContextLimitParser>(),
+      shims: makeRegistry<CompatShim>()
+    })
+  )
+).pipe(Layer.provideMerge(ProviderDefinitions.layer))

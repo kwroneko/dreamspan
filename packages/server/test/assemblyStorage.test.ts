@@ -10,7 +10,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionId } from "@rp/shared/providers.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { inject } from "vitest"
 import { RpcClient } from "effect/rpc"
 import { AssemblyModules } from "../src/assembler/modules.ts"
@@ -26,6 +26,8 @@ import { json, run } from "./formats/support.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
+import * as ProviderBuiltins from "../src/providers/builtins.ts"
+import { ProviderRegistry } from "../src/providers/registry.ts"
 
 const database = () =>
   Database.layer({ dataDir: tempDir("assembly"), readers: 1, allowNetworkFs: false, ...testWorkers })
@@ -225,6 +227,44 @@ for (const workers of ["source", "bundle"] as const) {
 }
 
 describe("context assembly from the database", () => {
+  it.live("resolves scoped provider defaults in readers without rewriting connections", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, state, assemble } = yield* setup()
+      const registry = yield* ProviderRegistry
+      const connection = yield* writer.CreateConnection({
+        userId,
+        connectionId: uuidv7() as ConnectionId,
+        kind: "anthropic",
+        api: "anthropic-messages",
+        settings: {
+          name: "Provider defaults",
+          providerSettings: { maxMarkers: 2 },
+          baseUrl: null,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        credential: { existing: null }
+      })
+      const model = yield* writer.AddUserModel({ userId, connectionId: connection.id, key: "synthetic", overrides: {} })
+      yield* state({ key: "model.binding", value: { connection: connection.id, model: model.id } })
+      assert.strictEqual((yield* assemble()).inputs.model?.cacheBreakpoints, "auto")
+      yield* Effect.gen(function* () {
+        const provider = registry.providers.get("anthropic")!
+        yield* registry.providers.register({
+          ...provider,
+          defaults: { cacheBreakpoints: "explicit", lookback: false, maxMarkers: 3, minTokens: 16 }
+        })
+        // A caller's inherited headers cannot impersonate the private worker snapshot.
+        const snapshot = yield* assemble().pipe(RpcClient.withHeaders({ "rp-provider-definitions": "[]" }))
+        assert.strictEqual(snapshot.inputs.model?.cacheBreakpoints, "explicit")
+        assert.deepStrictEqual(snapshot.inputs.model?.cacheLayout, { lookback: false, maxMarkers: 2, minTokens: 16 })
+        assert.deepStrictEqual(yield* reader.GetConnection({ userId, connectionId: connection.id }), connection)
+      }).pipe(Effect.scoped)
+      assert.strictEqual((yield* assemble()).inputs.model?.cacheBreakpoints, "auto")
+    }).pipe(Effect.scoped, Effect.provide(database().pipe(Layer.provideMerge(ProviderBuiltins.layer))))
+  )
   it.live("pins replacing notes in plain and agent replays and counts them in their preset slots", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, chat, sent, generating, entity, state, mira, preset, assemble } = yield* setup()

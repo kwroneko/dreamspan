@@ -19,7 +19,8 @@ import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
 import { documentedCachePolicy } from "../providers/cachePolicy.ts"
-import { builtinProviders, findProvider, resolveProviderSettings } from "@rp/shared/providerDefinitions.ts"
+import { findProvider, resolveProviderSettings } from "@rp/shared/providerDefinitions.ts"
+import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import { prefillUnavailable } from "../assembler/prefill.ts"
 import { mappingCapabilities } from "../providers/mapping.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
@@ -895,8 +896,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         }
         const c = toConnection(connection)
         const m = toModel(model)
-        // The built-in provider definitions: the workers hold no registry (providerDefinitions.ts).
-        const provider = findProvider(builtinProviders, c.provider, c.kind, c.baseUrl)
+        const providers = yield* CurrentProviderDefinitions
+        const provider = findProvider(providers, c.provider, c.kind, c.baseUrl)
         const cacheContract = provider ? provider.cacheContract : c.kind
         const effective = resolveModel(
           m.key,

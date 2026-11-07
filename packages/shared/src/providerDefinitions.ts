@@ -7,8 +7,8 @@
 // can change in the connection's advanced settings, and a connection stores only the changes.
 //
 // The definitions are data, registered in the server's provider registry (`providers`) and
-// replaceable by id like every entry there. They're shared because the database workers resolve
-// a chat's model too (assemblySources.ts), from the built-in definitions.
+// replaceable by id like every entry there. The database workers also resolve a chat's model
+// (assemblySources.ts), using the active definitions sent with each private worker request.
 import type { ProviderSettings } from "./providers.ts"
 
 interface Choice {
@@ -240,12 +240,12 @@ export const builtinProviders: ReadonlyArray<ProviderDefinition> = [
  * provider that's the default for its kind. OpenAI Chat Completions with no address of its own
  * is OpenAI (an ST import of ST's OpenAI source); with one, a compatible server.
  */
-export const findProvider = (
-  providers: ReadonlyArray<ProviderDefinition>,
+export const findProvider = <A extends ProviderResolution>(
+  providers: ReadonlyArray<A>,
   id: string | null,
   kind: string,
   baseUrl: string | null = null
-): ProviderDefinition | undefined => {
+): A | undefined => {
   const named = id === null ? undefined : providers.find((provider) => provider.id === id)
   if (named) return named
   if (kind === "openai-chat" && baseUrl === null) {
@@ -255,13 +255,16 @@ export const findProvider = (
   return providers.find((provider) => provider.defaultFor?.includes(kind))
 }
 
+/** The data needed to resolve a stored connection, including in a database worker. */
+export type ProviderResolution = Pick<ProviderDefinition, "id" | "defaults" | "cacheContract" | "defaultFor">
+
 /** The id a connection made without naming a provider gets. */
 export const defaultProviderId = (kind: string, baseUrl: string | null) =>
   findProvider(builtinProviders, null, kind, baseUrl)?.id ?? kind
 
 /** The settings in effect: the provider's defaults with the user's changes over them. */
 export const resolveProviderSettings = (
-  provider: ProviderDefinition | undefined,
+  provider: Pick<ProviderDefinition, "defaults"> | undefined,
   changes: ProviderSettings
 ): ProviderSettings => ({ ...provider?.defaults, ...changes })
 
@@ -288,7 +291,9 @@ export const awsRegionOf = (url: string): string | null => {
 
 /** A provider's default address: its region's, where it has regions and one is set; null when none. */
 export const providerBaseUrl = (
-  provider: Pick<ProviderDefinition, "baseUrl" | "regionUrl">,
+  provider: Pick<ProviderDefinition, "baseUrl" | "regionUrl"> & Partial<Pick<ProviderDefinition, "defaults">>,
   settings: ProviderSettings
-): string | null =>
-  provider.regionUrl && settings.region ? provider.regionUrl.replace("{region}", settings.region) : provider.baseUrl
+): string | null => {
+  const region = settings.region ?? provider.defaults?.region
+  return provider.regionUrl && region ? provider.regionUrl.replace("{region}", region) : provider.baseUrl
+}
