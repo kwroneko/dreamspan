@@ -22,6 +22,8 @@ export interface PendingComposerContext {
   readonly view: ChatView
   /** Opens the side panel at a tab, as the saved composer's chips do. */
   readonly onSettings: (tab: string) => void
+  /** The cards from a card source the first turn adds (spec/CARD-SOURCES.md §4.4), by name; empty for local cards. */
+  readonly adds: string
 }
 interface PendingControl {
   readonly id: string

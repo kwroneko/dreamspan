@@ -20,6 +20,9 @@ import type { ChatSummaries } from "../db/forkSummaries.ts"
 import { shellCardsUpdate, shellForksUpdate } from "@rp/shared/shellUpdates.ts"
 import { freezeTemplate } from "../chat/macros.ts"
 import { internal } from "./internal.ts"
+import { remoteOf } from "@rp/shared/cardSources.ts"
+import { NotFound, ServerError } from "@rp/shared/errors.ts"
+import { CardSources } from "../sources/CardSources.ts"
 
 /** A cast change as the state event it records (DATA-MODEL §5.3), chat-wide. */
 const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): StateEventData => {
@@ -91,6 +94,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
   const hub = yield* ChatHub
   const generations = yield* Generations
   const generator = yield* Generator
+  // A first send with a card from a card source adds it (spec/CARD-SOURCES.md §4.5).
+  const sources = yield* Effect.serviceOption(CardSources)
   // Background writes outlive the request, not the server.
   const scope = yield* Effect.scope
 
@@ -401,7 +406,36 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             message: "This server has nothing to generate with yet: the context assembler isn't built."
           })
         }
-        const id = yield* userId
+        const user = yield* CurrentUser
+        const id = user.id
+        // Cards from a card source, under their placeholder ids (§4.2): read from the source's
+        // cache for the greetings, and added in the transaction that makes the chat (§4.5).
+        const remote = [...new Set(cards)].flatMap((entityId) => {
+          const from = remoteOf(entityId)
+          return from === null ? [] : [{ entityId, ...from }]
+        })
+        if (persona !== null && remoteOf(persona) !== null) return yield* new NotFound({ entity: "card", id: persona })
+        if (remote.length > 0 && Option.isNone(sources))
+          return yield* new NotFound({ entity: "card", id: remote[0]!.entityId })
+        const notSent = (error: { readonly message: string }) =>
+          Effect.fail(
+            new ServerError({ message: `The card couldn't be added, so the message wasn't sent. ${error.message}` })
+          )
+        const fromSources = new Map(
+          yield* Effect.forEach(remote, (card) =>
+            Effect.map(
+              Effect.all({
+                shown: sources.pipe(Option.getOrThrow).forChat(user, card.sourceId, card.remoteId),
+                prepared: sources.pipe(Option.getOrThrow).prepareAdoption(user, card.sourceId, card.remoteId)
+              }),
+              ({ shown, prepared }) => [card.entityId as string, { shown: shown.card, prepared }] as const
+            ).pipe(Effect.catchTag("SourceFailed", notSent))
+          )
+        )
+        const cardForChat = (entityId: EntityId) => {
+          const from = fromSources.get(entityId)
+          return from ? Effect.succeed(from.shown) : reader.GetCardForChat({ userId: id, entityId })
+        }
         // The names the greetings show with: the persona's and each card's, as in the preview.
         const [player] = persona === null ? [] : yield* reader.CastCards({ userId: id, entityIds: [persona] })
         // Who greets: the preview's choices, else every card in the supplied order.
@@ -415,7 +449,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         // Every greeting's random and time macros are frozen here, whatever the client sent:
         // the values it saw in the preview are kept, and any it didn't send are drawn now.
         const drawn = yield* Effect.forEach(asked, (greeter) =>
-          Effect.map(reader.GetCardForChat({ userId: id, entityId: greeter.entityId }), (card) => {
+          Effect.map(cardForChat(greeter.entityId), (card) => {
             const options = offeredGreetings(card, new Set(cards.filter((entity) => entity !== persona)).size)
             const picked =
               greeters === undefined && cards.length > 1 && !(greeter.entityId === cards[0] && greeting !== null)
@@ -445,7 +479,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             }
           })
         )
-        const result = yield* writer.StartChat({
+        const start = {
           guidance: guidance ?? false,
           userId: id,
           cards,
@@ -453,7 +487,24 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           greeters: drawn,
           first,
           title: title ?? null
-        })
+        }
+        const prepared = [...fromSources.values()].map((card) => card.prepared)
+        const { adopted, ...result } =
+          prepared.length === 0
+            ? { ...(yield* writer.StartChat(start)), adopted: undefined }
+            : yield* sources.pipe(Option.getOrThrow).storingAdoptions(
+                prepared,
+                writer
+                  .AdoptAndStartChat({
+                    adopt: [...fromSources.entries()].map(([placeholder, card]) => ({
+                      placeholder: placeholder as EntityId,
+                      ...card.prepared.payload
+                    })),
+                    start
+                  })
+                  .pipe(Effect.catchTag("RefOperationRefused", notSent)),
+                (started) => started.adopted.map((card) => !card.existing)
+              )
         if (first._tag === "Generate") {
           yield* generations.start({
             userId: id,
@@ -464,7 +515,21 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           })
         }
         const { entry } = yield* reader.GetSlot({ userId: id, slotId: result.slotId })
-        return { entry, chat: result.chat, composer: result.composer }
+        return {
+          entry,
+          chat: result.chat,
+          composer: result.composer,
+          ...(adopted === undefined
+            ? {}
+            : {
+                adopted: adopted.map((card) => ({
+                  placeholder: card.placeholder,
+                  entityId: card.entityId,
+                  name: fromSources.get(card.placeholder)!.prepared.name,
+                  existing: card.existing
+                }))
+              })
+        }
       }).pipe(Effect.uninterruptible, internal("StartChat")),
 
     GetCast: ({ chatId, slotId, forkId }) =>

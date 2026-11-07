@@ -42,6 +42,8 @@ import { usePendingCardInfo } from "./pendingCardInfo.ts"
 import { chatCardActions } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { composerChoice } from "./speaker.ts"
+import { remoteOf } from "@rp/shared/cardSources.ts"
+import { RemoteCardLine } from "../cardSources/RemoteBadge.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export function CharacterTab({ session, view, tab }: PanelProps) {
@@ -60,6 +62,7 @@ export function PendingCharacterTab({ pending, view, tab }: PendingPanelProps) {
   const info = usePendingCardInfo()(entityId)
   const persona = view.cast?.playedByMe.includes(entityId) ?? false
   if (!card) return <p className="text-sm text-muted">This character isn't in the chat.</p>
+  if (remoteOf(entityId) !== null) return <PendingRemoteCard card={card} />
   if (!info) return <p className="text-sm text-muted">Loading the card…</p>
   return (
     <CardPanel
@@ -71,6 +74,41 @@ export function PendingCharacterTab({ pending, view, tab }: PendingPanelProps) {
       info={info}
       persona={persona}
     />
+  )
+}
+
+/**
+ * A card from a card source in a chat not made yet (spec/CARD-SOURCES.md §4.4): its header,
+ * with the line that says it isn't the user's yet and Add to my cards.
+ */
+function PendingRemoteCard({ card }: { card: CastCard }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <CardHeader
+        portrait={
+          <CardHeaderPortrait>
+            <Avatar
+              id={card.entityId}
+              name={card.name}
+              mediaId={card.avatarMediaId}
+              size="fill"
+              className="size-full"
+              preview
+            />
+          </CardHeaderPortrait>
+        }
+      >
+        <div data-card-header-row className="col-span-full">
+          <RemoteCardLine card={card} />
+        </div>
+        <h2
+          data-card-header-row
+          className="col-span-full line-clamp-2 text-lg leading-7 font-semibold [overflow-wrap:anywhere]"
+        >
+          {card.name}
+        </h2>
+      </CardHeader>
+    </div>
   )
 }
 

@@ -4,7 +4,8 @@
 // lifetimes, pinning, cap and per-user namespace (§4.1), against the fake archive's synthetic
 // cards. No real archive is contacted.
 import { afterAll, assert, describe, it, layer } from "@effect/vitest"
-import { emptySourceQuery, SourceFailed } from "@rp/shared/cardSources.ts"
+import { emptySourceQuery, remoteEntityId, SourceFailed } from "@rp/shared/cardSources.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -252,6 +253,96 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
         userId: me.id,
         sourceId: "cardex",
         items: [{ remoteId: archive.cards[12]!.slug, sha256: null }]
+      })
+      assert.lengthOf(held, 0)
+    })
+  )
+
+  it.effect("a first send with a source's card adds the card and makes its chat together (§4.5)", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[9]!
+      const before = yield* api.ListLibrary({ kind: "card" })
+      // The draft chat's card: under its placeholder id, its picture through the source's route.
+      const { card: shown, summary } = yield* api.SourceCardForChat({ sourceId: "cardex", remoteId: card.slug })
+      const placeholder = remoteEntityId("cardex", card.slug)
+      assert.strictEqual(shown.card.entityId, placeholder)
+      assert.strictEqual(shown.card.name, card.name)
+      assert.isAbove(shown.greetings.length, 0)
+      assert.match(shown.card.avatarMediaId ?? "", /^srcimg:cardex:/)
+      assert.isUndefined(shown.regex)
+      assert.isUndefined(summary.held)
+      // Opening it adds nothing.
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before.length)
+      const first = {
+        cards: [placeholder],
+        persona: null,
+        greeting: null,
+        greeters: [{ entityId: placeholder, greeting: 0 }],
+        first: { _tag: "Send", content: "Hello there", speakerEntityId: null }
+      } as const
+      const started = yield* api.StartChat(first)
+      const adopted = started.adopted?.[0]
+      assert.deepStrictEqual([adopted?.placeholder, adopted?.existing, adopted?.name], [placeholder, false, card.name])
+      const after = yield* api.ListLibrary({ kind: "card" })
+      assert.lengthOf(after, before.length + 1)
+      assert.isDefined(after.find((ref) => ref.entityId === adopted!.entityId))
+      // The chat has the card in it, never the placeholder.
+      const cast = yield* api.GetCast({ chatId: started.chat.id, slotId: started.entry.slotId })
+      assert.include(cast.participants, adopted!.entityId)
+      assert.notInclude(cast.participants as ReadonlyArray<string>, placeholder)
+      // It's the user's from now on.
+      const reopened = yield* api.SourceCardForChat({ sourceId: "cardex", remoteId: card.slug })
+      assert.strictEqual(reopened.summary.held?.entityId, adopted!.entityId)
+      // A draft chat opened before it was added, sent after: the same card, in a second chat.
+      const again = yield* api.StartChat(first)
+      assert.deepStrictEqual([again.adopted?.[0]?.entityId, again.adopted?.[0]?.existing], [adopted!.entityId, true])
+      assert.notStrictEqual(again.chat.id, started.chat.id)
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), after.length)
+    })
+  )
+
+  it.effect("a first send that fails stores neither the card nor the chat", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const me = yield* api.Whoami()
+      const before = yield* api.ListLibrary({ kind: "card" })
+      // The source can't be reached for a card not cached yet: the message isn't sent.
+      archive.failNext(503)
+      const placeholder = remoteEntityId("cardex", archive.cards[13]!.slug)
+      const unreachable = yield* Effect.flip(
+        api.StartChat({
+          cards: [placeholder],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Hello", speakerEntityId: null }
+        })
+      )
+      assert.strictEqual(unreachable._tag, "ServerError")
+      assert.include((unreachable as { message: string }).message, "wasn't sent")
+      // The chat's write fails after the card's, in one transaction: neither stays.
+      const card = archive.cards[10]!
+      const sources = yield* CardSources.CardSources
+      const prepared = yield* sources.prepareAdoption(me, "cardex", card.slug)
+      const failed = yield* Effect.exit(
+        (yield* Writer).AdoptAndStartChat({
+          adopt: [{ placeholder: remoteEntityId("cardex", card.slug), ...prepared.payload }],
+          start: {
+            userId: me.id,
+            cards: [remoteEntityId("cardex", card.slug)],
+            persona: "no-such-persona" as EntityId,
+            greeters: [],
+            first: { _tag: "Send", content: "Hello", speakerEntityId: null },
+            title: null
+          }
+        })
+      )
+      assert.isTrue(Exit.isFailure(failed))
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before.length)
+      const held = yield* (yield* Reader).HeldRemoteCards({
+        userId: me.id,
+        sourceId: "cardex",
+        items: [{ remoteId: card.slug, sha256: null }]
       })
       assert.lengthOf(held, 0)
     })

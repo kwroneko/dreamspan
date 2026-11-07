@@ -724,6 +724,10 @@ const clearFilters = (browse: SourceBrowse) => {
 const cardLink = (sourceId: string, remoteId: string) =>
   ({ to: "/sources/$sourceId/cards/$remoteId", params: { sourceId, remoteId } }) as const
 
+/** The link to a remote card's draft chat (§4.2): what a click on its tile opens. */
+const chatLink = (sourceId: string, remoteId: string) =>
+  ({ to: "/sources/$sourceId/cards/$remoteId/chat", params: { sourceId, remoteId } }) as const
+
 /** A tile's muted line: the source's main stat and the token count, else the first tags (§3.3). */
 const defaultLine = (card: RemoteSummary, caps: SourceCapabilities | undefined) => {
   const main = caps?.stats?.[0]
@@ -740,7 +744,8 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   const info = browse.info!
   const view = cardSourceViews.get(info.id)
   const link = cardLink(info.id, card.remoteId)
-  const href = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}`
+  const chat = chatLink(info.id, card.remoteId)
+  const href = `/sources/${encodeURIComponent(info.id)}/cards/${encodeURIComponent(card.remoteId)}/chat`
   const navigate = useNavigate()
   const ratingShown = card.rating !== undefined
   const adopt = useAdoptRemote()
@@ -824,8 +829,8 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
               </Link>
             </Tooltip>
           ) : (
-            <Tooltip label={`Shows ${card.name}, on ${info.name}.`}>
-              <Link {...link} aria-label={`Open ${card.name}`} className={`${TILE_CLASS} hover:border-focus`}>
+            <Tooltip label={`Opens a new chat with ${card.name}. It joins your cards when you send.`}>
+              <Link {...chat} aria-label={`Open ${card.name}`} className={`${TILE_CLASS} hover:border-focus`}>
                 {face}
               </Link>
             </Tooltip>
@@ -841,8 +846,21 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             Open your card
           </MenuItem>
         ) : (
-          <MenuItem icon="person" description="Shows this card, as a click does." onClick={() => void navigate(link)}>
+          <MenuItem
+            icon="chat"
+            description="Opens a new chat with it, as a click does."
+            onClick={() => void navigate(chat)}
+          >
             Open
+          </MenuItem>
+        )}
+        {mine === null && (
+          <MenuItem
+            icon="eye"
+            description={`Shows ${card.name}'s definitions without starting a chat.`}
+            onClick={() => void navigate(link)}
+          >
+            Inspect
           </MenuItem>
         )}
         {mine === null && (

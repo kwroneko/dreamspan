@@ -472,6 +472,59 @@ export const ShellLibraryRead = Schema.Struct({ ...ShellLibrary.fields, fresh: S
 const ShellCardsRead = Schema.Struct({ ...ShellCards.fields, fresh: Schema.Array(ChatSummariesAt) })
 const ShellForksRead = Schema.Struct({ ...ShellForks.fields, fresh: Schema.Array(ChatSummariesAt) })
 
+/** A source's card as `AdoptRemoteCard` adds it (spec/CARD-SOURCES.md §4.5). */
+const AdoptFields = {
+  userId: UserId,
+  sourceId: Schema.String,
+  remoteId: Schema.String,
+  /** The source's version id, and the SHA-256 of the file as the source gave it. */
+  remoteVersion: Schema.String,
+  file: Schema.Struct({
+    label: Schema.String,
+    docJson: Schema.String,
+    docHash: Schema.String,
+    searchText: Schema.String,
+    schemaVersion: Schema.Int,
+    sourceName: Schema.String,
+    sourceHash: Sha256,
+    media: Schema.Array(ImportedMedia),
+    noteDocJson: Schema.NullOr(Schema.String),
+    notesDocJson: Schema.optionalKey(Schema.Array(Schema.String)),
+    characterNoteScan: Schema.optionalKey(Schema.Boolean)
+  })
+}
+
+/** A chat made from cards on its first turn, as `StartChat` takes it. */
+const StartChatFields = {
+  guidance: Schema.optionalKey(Schema.Boolean),
+  userId: UserId,
+  cards: Schema.Array(EntityId),
+  persona: Schema.NullOr(EntityId),
+  /**
+   * Who greets, in order, each as a message of its own (one of `cards`; one without
+   * greetings is skipped): the greeting picked and the API's registered-source
+   * snapshot, with each option's nonempty card index, text and frozen values.
+   */
+  greeters: Schema.Array(
+    Schema.Struct({
+      entityId: EntityId,
+      greeting: Schema.NullOr(Schema.Int),
+      options: Schema.Array(
+        Schema.Struct({
+          index: Schema.Int,
+          text: Schema.String,
+          frozen: Schema.NullOr(FrozenMacros)
+        })
+      )
+    })
+  ),
+  first: FirstTurn,
+  /** The chat's title; null or blank: its cast's names. */
+  title: Schema.NullOr(Schema.String)
+}
+
+export const StartChatResult = Schema.Struct({ ...AppendResult.fields, composer: Draft })
+
 export class WriteOps extends RpcGroup.make(
   /**
    * Merges another chat's fork into `forkId` below `at` (spec/CHAT-MERGE.md §8): recomputes the
@@ -1557,26 +1610,7 @@ export class WriteOps extends RpcGroup.make(
    * or purged is let go, and the card is added again.
    */
   Rpc.make("AdoptRemoteCard", {
-    payload: {
-      userId: UserId,
-      sourceId: Schema.String,
-      remoteId: Schema.String,
-      /** The source's version id, and the SHA-256 of the file as the source gave it. */
-      remoteVersion: Schema.String,
-      file: Schema.Struct({
-        label: Schema.String,
-        docJson: Schema.String,
-        docHash: Schema.String,
-        searchText: Schema.String,
-        schemaVersion: Schema.Int,
-        sourceName: Schema.String,
-        sourceHash: Sha256,
-        media: Schema.Array(ImportedMedia),
-        noteDocJson: Schema.NullOr(Schema.String),
-        notesDocJson: Schema.optionalKey(Schema.Array(Schema.String)),
-        characterNoteScan: Schema.optionalKey(Schema.Boolean)
-      })
-    },
+    payload: AdoptFields,
     success: Schema.Struct({ entityId: EntityId, refId: RefId, existing: Schema.Boolean }),
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
@@ -1702,35 +1736,28 @@ export class WriteOps extends RpcGroup.make(
    * version of the first message (`greeting` selected), then the first turn.
    */
   Rpc.make("StartChat", {
-    payload: {
-      guidance: Schema.optionalKey(Schema.Boolean),
-      userId: UserId,
-      cards: Schema.Array(EntityId),
-      persona: Schema.NullOr(EntityId),
-      /**
-       * Who greets, in order, each as a message of its own (one of `cards`; one without
-       * greetings is skipped): the greeting picked and the API's registered-source
-       * snapshot, with each option's nonempty card index, text and frozen values.
-       */
-      greeters: Schema.Array(
-        Schema.Struct({
-          entityId: EntityId,
-          greeting: Schema.NullOr(Schema.Int),
-          options: Schema.Array(
-            Schema.Struct({
-              index: Schema.Int,
-              text: Schema.String,
-              frozen: Schema.NullOr(FrozenMacros)
-            })
-          )
-        })
-      ),
-      first: FirstTurn,
-      /** The chat's title; null or blank: its cast's names. */
-      title: Schema.NullOr(Schema.String)
-    },
-    success: Schema.Struct({ ...AppendResult.fields, composer: Draft }),
+    payload: StartChatFields,
+    success: StartChatResult,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A first turn with cards from a card source (spec/CARD-SOURCES.md §4.5, trigger 1), in one
+   * transaction: each card as `AdoptRemoteCard` adds it (or the user's card from there), then
+   * `StartChat` with each placeholder id (`src:<source>:<remote>`) replaced by its card's.
+   * Either the cards and the chat all exist, or none of them does.
+   */
+  Rpc.make("AdoptAndStartChat", {
+    payload: {
+      adopt: Schema.Array(Schema.Struct({ placeholder: EntityId, ...AdoptFields })).check(Schema.isMaxLength(20)),
+      start: Schema.Struct(StartChatFields)
+    },
+    success: Schema.Struct({
+      ...StartChatResult.fields,
+      adopted: Schema.Array(
+        Schema.Struct({ placeholder: EntityId, entityId: EntityId, refId: RefId, existing: Schema.Boolean })
+      )
+    }),
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   /**
    * A message (or, `generate`, a reply) under `parentSlotId`: posted, or queued when the

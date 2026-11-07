@@ -1,6 +1,7 @@
 // Cards added from a card source (spec/CARD-SOURCES.md §3.7, §4.5, §8): `AdoptRemoteCard`
 // stores what `ImportFile` stores for a new card file and, in the same transaction, the
-// `card_origins` row that says which source card it is; `HeldRemoteCards` finds, for a page
+// `card_origins` row that says which source card it is; `AdoptAndStartChat` does that and
+// then `StartChat`, in one transaction, for a first send; `HeldRemoteCards` finds, for a page
 // of results, the cards the user already has, by that row or by the same file imported from
 // disk (`entity_refs.source_hash`).
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -10,7 +11,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import type { LibraryImport } from "@rp/shared/libraryImport.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
-import type { ReadOps, RefOperationRefused, StorageError, WriteOps } from "./ops.ts"
+import type { ReadOps, RefOperationRefused, StartChatResult, StorageError, WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 
 type Writes = Parameters<typeof WriteOps.of>[0]
@@ -19,6 +20,11 @@ type Writes = Parameters<typeof WriteOps.of>[0]
 type ImportFile = (
   payload: Parameters<Writes["ImportFile"]>[0]
 ) => Effect.Effect<LibraryImport, NotFound | RefOperationRefused | StorageError | SqlError.SqlError>
+
+/** `StartChat`'s write (chatSetupWrites.ts), run after the adoptions in their transaction. */
+type StartChat = (
+  payload: Parameters<Writes["StartChat"]>[0]
+) => Effect.Effect<typeof StartChatResult.Type, NotFound | StorageError | SqlError.SqlError>
 
 interface HeldRow {
   readonly remote_id: string
@@ -76,7 +82,7 @@ export const makeCardOriginReadHandlers = Effect.gen(function* () {
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })
 
-export const makeAdoptWriteHandlers = (importFile: ImportFile) =>
+export const makeAdoptWriteHandlers = (importFile: ImportFile, startChat: StartChat) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     /** The live card the user has from this source card, if any; an origin left by a binned or purged card goes. */
@@ -95,23 +101,45 @@ export const makeAdoptWriteHandlers = (importFile: ImportFile) =>
         }
         return { entityId: origin.entity_id as EntityId, refId: origin.ref_id as RefId }
       })
+    const adopt = ({ userId, sourceId, remoteId, remoteVersion, file }: Parameters<Writes["AdoptRemoteCard"]>[0]) =>
+      Effect.gen(function* () {
+        const held = yield* heldCard(userId, sourceId, remoteId)
+        if (held) return { ...held, existing: true }
+        const imported = yield* importFile({ userId, intoRefId: null, kind: "card", ...file })
+        yield* sql`INSERT INTO card_origins ${sql.insert({
+          entity_id: imported.ref.entityId,
+          owner_user_id: userId,
+          source_id: sourceId,
+          remote_id: remoteId,
+          remote_version: remoteVersion,
+          remote_sha256: file.sourceHash,
+          recognized_by: "adopted",
+          created_at: Date.now()
+        })}`
+        return { entityId: imported.ref.entityId, refId: imported.ref.id, existing: false }
+      })
     return {
-      AdoptRemoteCard: ({ userId, sourceId, remoteId, remoteVersion, file }) =>
+      AdoptRemoteCard: (payload) => adopt(payload).pipe(transaction(sql, "AdoptRemoteCard")),
+      AdoptAndStartChat: ({ adopt: cards, start }) =>
         Effect.gen(function* () {
-          const held = yield* heldCard(userId, sourceId, remoteId)
-          if (held) return { ...held, existing: true }
-          const imported = yield* importFile({ userId, intoRefId: null, kind: "card", ...file })
-          yield* sql`INSERT INTO card_origins ${sql.insert({
-            entity_id: imported.ref.entityId,
-            owner_user_id: userId,
-            source_id: sourceId,
-            remote_id: remoteId,
-            remote_version: remoteVersion,
-            remote_sha256: file.sourceHash,
-            recognized_by: "adopted",
-            created_at: Date.now()
-          })}`
-          return { entityId: imported.ref.entityId, refId: imported.ref.id, existing: false }
-        }).pipe(transaction(sql, "AdoptRemoteCard"))
+          const adopted: Array<{ placeholder: EntityId; entityId: EntityId; refId: RefId; existing: boolean }> = []
+          for (const { placeholder, ...card } of cards) {
+            const added = yield* adopt(card)
+            adopted.push({ placeholder, ...added })
+          }
+          const swap = new Map<string, EntityId>(adopted.map((card) => [card.placeholder, card.entityId]))
+          const id = (entity: EntityId) => swap.get(entity) ?? entity
+          const started = yield* startChat({
+            ...start,
+            cards: [...new Set(start.cards.map(id))],
+            persona: start.persona === null ? null : id(start.persona),
+            greeters: start.greeters.map((greeter) => ({ ...greeter, entityId: id(greeter.entityId) })),
+            first:
+              start.first.speakerEntityId === null
+                ? start.first
+                : { ...start.first, speakerEntityId: id(start.first.speakerEntityId) }
+          })
+          return { ...started, adopted }
+        }).pipe(transaction(sql, "AdoptAndStartChat"))
     } satisfies Partial<Writes>
   })

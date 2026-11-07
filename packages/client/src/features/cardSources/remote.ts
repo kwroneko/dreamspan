@@ -118,16 +118,23 @@ export function useAdoptRemote() {
     }
     const added = out.value
     invalidateKeys(registry, ["library", "chats"])
-    showToast({
-      title: added.existing ? `You have ${added.name} already.` : `Added ${added.name} to your cards.`,
-      actions: [
-        {
-          label: "Show it",
-          hint: `Opens ${added.name}'s page in your cards.`,
-          onClick: () => void navigate({ to: "/cards/$entityId", params: { entityId: added.entityId } })
-        }
-      ]
-    })
+    showAdopted(navigate, added)
     return added
   }
 }
+
+/** The notice for a card that joined the user's cards (§4.4), or that they had already, with a link to it. */
+export const showAdopted = (
+  navigate: ReturnType<typeof useNavigate>,
+  added: { readonly entityId: string; readonly name: string; readonly existing: boolean }
+) =>
+  showToast({
+    title: added.existing ? `You have ${added.name} already.` : `Added ${added.name} to your cards.`,
+    actions: [
+      {
+        label: "Show it",
+        hint: `Opens ${added.name}'s page in your cards.`,
+        onClick: () => void navigate({ to: "/cards/$entityId", params: { entityId: added.entityId } })
+      }
+    ]
+  })

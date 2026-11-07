@@ -31,6 +31,9 @@ import { sidebarSearch } from "../characters/sidebarSearch.ts"
 // The chat view carries the Markdown renderer, most of the bundle: it loads with the first chat opened.
 const ChatPage = lazy(loadChatPage)
 const StartChatPage = lazy(() => import("./StartChatPage.tsx").then((module) => ({ default: module.StartChatPage })))
+const RemoteStartChatPage = lazy(() =>
+  import("./StartChatPage.tsx").then((module) => ({ default: module.RemoteStartChatPage }))
+)
 const StartGroupChatPage = lazy(() =>
   import("./StartChatPage.tsx").then((module) => ({ default: module.StartGroupChatPage }))
 )
@@ -62,6 +65,14 @@ function LazyStartChatPage() {
   return (
     <Suspense fallback={<Loading label="Loading the card…" onRetry={reloadPage} />}>
       <StartChatPage />
+    </Suspense>
+  )
+}
+
+function LazyRemoteStartChatPage() {
+  return (
+    <Suspense fallback={<Loading label="Loading the card…" onRetry={reloadPage} />}>
+      <RemoteStartChatPage />
     </Suspense>
   )
 }
@@ -105,7 +116,9 @@ export const register = () => {
   tabKinds.register({
     id: "chat.start",
     order: 100,
-    match: (url) => /^\/(?:cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.exec(url.pathname)?.[0] ?? null,
+    match: (url) =>
+      /^\/(?:cards\/[^/]+\/chat|groups\/[^/]+\/new|sources\/[^/]+\/cards\/[^/]+\/chat)$/.exec(url.pathname)?.[0] ??
+      null,
     title: () => "New chat",
     icon: "chat",
     document: true
@@ -163,6 +176,14 @@ export const register = () => {
     parent: "app",
     path: "/cards/$entityId/chat",
     component: LazyStartChatPage,
+    retainSearch: sidebarSearch
+  })
+  // A card on a card source, the same way (spec/CARD-SOURCES.md §4.2): adding it is the first send's.
+  routes.register({
+    id: "chat.startRemote",
+    parent: "app",
+    path: "/sources/$sourceId/cards/$remoteId/chat",
+    component: LazyRemoteStartChatPage,
     retainSearch: sidebarSearch
   })
   routes.register({

@@ -25,6 +25,8 @@ import {
 // picked, and the chat is titled with the group's name, so it's one of the group's chats.
 import type { CastCard, ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
+import { remoteOf } from "@rp/shared/cardSources.ts"
+import { showAdopted } from "../cardSources/remote.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { Effect, Option } from "effect"
@@ -256,6 +258,8 @@ function Pending({
   const place = useSidePanelPlace(wide)
   const title = pendingTitle(pending, state)
   const prefs = viewPrefs.prefs
+  // Cards from a card source, added by the first turn (spec/CARD-SOURCES.md §4.5).
+  const adding = greeters.filter((greeter) => remoteOf(greeter.card.entityId) !== null).map((greeter) => greeter.card)
 
   const start = async (first: "send" | "generate") => {
     if (!viewPrefs.ready || action.pending || (first === "send" && text.trim() === "")) return
@@ -291,6 +295,8 @@ function Pending({
                 ? { _tag: "Send", content: submitted, speakerEntityId: speakerId }
                 : { _tag: "Generate", speakerEntityId: speakerId, direction: guidance ? submitted : "" }
           })
+          // A card from a card source is the user's card now, under its own id.
+          const added = (id: EntityId) => started.adopted?.find((card) => card.placeholder === id)?.entityId ?? id
           // A message gets its reply, as after any send; a server without a generator still keeps the message.
           if (first === "send") {
             yield* Effect.ignore(
@@ -298,7 +304,7 @@ function Pending({
                 chatId: started.chat.id,
                 parentSlotId: started.entry.slotId,
                 branch: false,
-                speakerEntityId: replyId
+                speakerEntityId: added(replyId)
               })
             )
           }
@@ -331,7 +337,7 @@ function Pending({
           }
           return started
         }),
-      ["chats"]
+      adding.length > 0 ? ["chats", "library"] : ["chats"]
     )
     sending.current = null
     if (!result.ok) {
@@ -342,6 +348,7 @@ function Pending({
       }
       return
     }
+    for (const card of result.value.adopted ?? []) if (!card.existing) showAdopted(navigate, card)
     // Only submitted text was acknowledged. Atomically replace the pending copy with
     // the extra text addressed to the saved chat, before navigating or opening its draft.
     destination.current = { chatId: result.value.chat.id, composer: result.value.composer }
@@ -382,7 +389,8 @@ function Pending({
     hasText: text.trim() !== "",
     start,
     view,
-    onSettings: show
+    onSettings: show,
+    adds: adding.map((card) => card.name).join(", ")
   }
 
   return (
@@ -601,6 +609,75 @@ export function StartChatPage() {
       {loaded ? (
         <PendingFor
           key={entityId}
+          card={loaded.card}
+          cards={loaded.cards}
+          greeters={[loaded.card]}
+          group={null}
+          defaultPersona={loaded.defaultPersona}
+        />
+      ) : action.error ? (
+        <div className="chat-column pt-4">
+          <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
+        </div>
+      ) : (
+        <div className="chat-column pt-4">
+          <Loading label="Loading the card…" onRetry={retry} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * /sources/$sourceId/cards/$remoteId/chat: a card on a card source in a chat made on its first
+ * send, which adds the card (spec/CARD-SOURCES.md §4.2). It's the pending chat as for any card,
+ * with the source's cached card under its placeholder id. A card the user has from there
+ * already is their own card's pending chat, in place: this page never navigates, so a page
+ * kept by its tab past the first send can't take the user from the saved chat.
+ */
+export function RemoteStartChatPage() {
+  const { sourceId, remoteId } = useParams({ strict: false }) as { sourceId: string; remoteId: string }
+  const action = useAction()
+  const [loaded, setLoaded] = useState<{
+    card: CardForChat
+    defaultPersona: EntityId | null
+    cards: ReadonlyArray<CastCard>
+  } | null>(null)
+  useTitle(loaded ? loaded.card.card.name : "New chat")
+  const [attempt, setAttempt] = useState(0)
+  const retry = () => {
+    action.clearError()
+    setAttempt((n) => n + 1)
+  }
+  useEffect(() => {
+    void action
+      .run((client) =>
+        Effect.gen(function* () {
+          const { remote, cards, defaults } = yield* Effect.all({
+            remote: client("SourceCardForChat", { sourceId, remoteId }),
+            cards: client("ListCards", undefined),
+            defaults: client("GetGenerationDefaults", undefined)
+          })
+          const held = remote.summary.held?.entityId as EntityId | undefined
+          const card = held === undefined ? remote.card : yield* client("GetCardForChat", { entityId: held })
+          return { card, cards: cards.filter((c) => c.entityId !== held), defaults }
+        })
+      )
+      .then((result) => {
+        if (result.ok)
+          setLoaded({
+            card: result.value.card,
+            cards: result.value.cards,
+            defaultPersona: result.value.defaults.persona ?? null
+          })
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card and attempt
+  }, [sourceId, remoteId, attempt])
+  return (
+    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {loaded ? (
+        <PendingFor
+          key={loaded.card.card.entityId}
           card={loaded.card}
           cards={loaded.cards}
           greeters={[loaded.card]}

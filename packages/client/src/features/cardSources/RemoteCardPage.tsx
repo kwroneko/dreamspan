@@ -156,9 +156,19 @@ export function RemoteCardPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {mine === null && (
+              <Tooltip label={`Opens a new chat with ${summary.name}. It joins your cards when you send.`}>
+                <Link
+                  to="/sources/$sourceId/cards/$remoteId/chat"
+                  params={{ sourceId, remoteId }}
+                  className={buttonClass("primary")}
+                >
+                  Start a chat
+                </Link>
+              </Tooltip>
+            )}
             {mine === null ? (
               <Button
-                variant="primary"
                 disabled={adding}
                 hint={`Adds ${summary.name} to your cards without starting a chat.`}
                 onClick={() => {

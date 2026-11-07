@@ -22,6 +22,7 @@ import { NameDialog } from "./NameDialog.tsx"
 import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Badge } from "../../ui/Surface.tsx"
+import { RemoteSourceBadges } from "../cardSources/RemoteBadge.tsx"
 import { Tooltip, TooltipProvider } from "../../ui/Tooltip.tsx"
 import { openAppMenu, sidebarToggle, useTitle } from "../shell.tsx"
 import { ChatBadges } from "./ChatsPage.tsx"
@@ -340,6 +341,7 @@ export function PendingChatHeader({
               <Badge>new</Badge>
             </span>
           </Tooltip>
+          <RemoteSourceBadges cards={characters} />
         </>
       }
       about={aboutLine(characters, title, null)}
