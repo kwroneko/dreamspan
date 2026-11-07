@@ -138,6 +138,9 @@ export class WorkbenchStore {
     })
     // The focused tab's URL, as its view settled it: the browser shows the same.
     this.mirror("REPLACE")
+    // A fresh URL may have discarded this tab's previous frames without another change.
+    // Keep the initial layout too, so a reload cannot bring those old frames back.
+    this.flush()
     const leave = () => {
       if (this.saveTimer) {
         clearTimeout(this.saveTimer)
