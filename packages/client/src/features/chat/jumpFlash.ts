@@ -13,7 +13,7 @@ declare module "@tanstack/react-router" {
      * The message this history entry's jump already flashed (`<chat>/<slot>`): coming back to
      * the entry, reloading it or showing its tab again opens at the message without flashing it.
      */
-    chatFlashed?: string
+    chatFlashed?: string | undefined
   }
 }
 
