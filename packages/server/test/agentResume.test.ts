@@ -224,12 +224,12 @@ const narrator = (toolIds: ReadonlyArray<string>, contract: "final_text" | "both
   Effect.gen(function* () {
     const registry = yield* ExecutionRegistry
     yield* registry.orchestrationModes.register({
-      ...registry.orchestrationModes.get("narrator")!,
+      ...registry.orchestrationModes.get("default")!,
       plan: () => ({ strategy: "agent", tools: toolIds, contract, turnCap: 6 })
     })
   })
 
-const mode = [{ key: "orchestration.mode" as const, value: { mode: "narrator" } }]
+const mode = [{ key: "agent.enabled" as const, value: { on: true } }]
 
 describe("resuming agent replies", () => {
   it.live("a crash after send_message's result restores the sent text without another model turn", () => {
@@ -427,7 +427,7 @@ describe("resuming agent replies", () => {
       assert.deepInclude(after, {
         status: "completed",
         parent_rollout_id: before.id,
-        mode: "narrator",
+        mode: "default",
         origin: "resumed",
         source_version_id: stopped.id,
         step_count: 1

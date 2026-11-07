@@ -1487,6 +1487,16 @@ test.describe("synthetic library and every app surface", () => {
           await audit("noone-chosen-menu", '[role="dialog"]')
           return
         }
+        if (process.env.LAYOUT_AUDIT_CHAT_SETTINGS_ONLY === "1") {
+          await go("group-chat-header", `/chats/${chatId}`)
+          const settings = await openPanel(page, "This chat")
+          await audit("panel-This chat")
+          await settings.getByRole("switch", { name: "Tools", exact: true }).click()
+          await expect(settings.getByRole("group", { name: "Allowed tools" })).toBeVisible()
+          await settings.getByRole("switch", { name: /^Card swap/ }).click()
+          await audit("panel-This chat-tools")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_REPLY_SETTINGS_ONLY === "1") {
           await go("group-chat-header", `/chats/${chatId}`)
           const cast = await openPanel(page, "Cast")

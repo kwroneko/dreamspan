@@ -1987,14 +1987,12 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
       })
   },
   // The registered modes and tools: the same for everyone, nobody's data.
-  ListReplyModes: {
+  ListReplyTools: {
     probe: (actor) =>
       Effect.gen(function* () {
-        const modes = yield* actor.api.ListReplyModes({})
-        assert.include(
-          modes.modes.map((m) => m.id),
-          "plain"
-        )
+        const modes = yield* actor.api.ListReplyTools({})
+        assert.isArray(modes.tools)
+        assert.isArray(modes.defaultTools)
       })
   },
   GetAgentPermissions: {

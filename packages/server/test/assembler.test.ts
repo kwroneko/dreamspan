@@ -9,6 +9,8 @@ import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
+import { foldState } from "@rp/shared/state.ts"
+import { agentInstructions, defaultMode } from "../src/agent/modes.ts"
 import { Effect } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
@@ -2923,6 +2925,34 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
       })
     const swap = { agent: { instructions: "", speakerCardOnly: true } }
 
+    it.each([false, true])("plans byte-identical requests from independent settings, tools=%s", async (tools) => {
+      for (const rotation of [false, true]) {
+        const events = [
+          at(null, { key: "agent.enabled", value: { on: tools } }),
+          at(null, { key: "cards.rotation", value: { on: rotation } })
+        ]
+        const plan = defaultMode.plan({ state: foldState(events.map((e) => e.event)) })
+        const agent = plan.assembly
+          ? {
+              instructions: plan.assembly.instructions(plan.tools, plan.contract),
+              speakerCardOnly: plan.assembly.speakerCardOnly
+            }
+          : undefined
+        const actual = await assembled(three({ events }), agent ? { agent } : {})
+        // The former narrator/card-swap modes supplied these assembly inputs; plain supplied none.
+        const historical = await assembled(
+          three({ events: rotation && !tools ? [events[1]!] : [] }),
+          tools
+            ? {
+                agent: { instructions: agentInstructions(plan.tools, "both"), speakerCardOnly: rotation }
+              }
+            : {}
+        )
+        expect(JSON.stringify(actual.request)).toBe(JSON.stringify(historical.request))
+        expect(plan.strategy).toBe(tools ? "agent" : "reply")
+      }
+    })
+
     it("sends only the speaker's card, at the preset's place, with the persona", async () => {
       const plain = await assembled(three())
       const swapped = await assembled(three(), swap)
@@ -3022,6 +3052,30 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
         }
       }
     )
+
+    it("reports a speaker-dependent prefix when a preset uses field macros alone", async () => {
+      const doc = preset({ prompts: [{ identifier: "main", role: "system", content: "{{description}}" }] })
+      const snapshot = await assembled(
+        three({
+          notes: [],
+          preset: {
+            ...doc,
+            order: doc.order.map((p) => ({
+              ...p,
+              enabled: ["main", "chatHistory", "newestMessage"].includes(p.identifier)
+            }))
+          }
+        }),
+        swap
+      )
+      expect(contents(snapshot).join("\n")).toContain("Oren runs the ferry.")
+      expect(snapshot.issues).toContainEqual(
+        expect.objectContaining({
+          kind: "cache_breakpoints",
+          message: "A prefix prompt can change between replies. A change prevents cache reuse from that prompt onward."
+        })
+      )
+    })
 
     it("rotates with the speaker, in the whole-card Definitions marker too", async () => {
       const definitions = withDefinitions(preset())

@@ -4,6 +4,7 @@ import { MacroBindings } from "./MacroBindings.tsx"
 import { registerImages } from "./images.tsx"
 import { registerTimelineTransforms } from "./timelineContributions.tsx"
 import { NextImagesNote } from "./imageTokens.tsx"
+import { ReplyChoicesSetting, SharedContextSetting } from "./ReplyChoicesSetting.tsx"
 import { lazy, Suspense, type ComponentType } from "react"
 import {
   accountSettingSections,
@@ -142,8 +143,9 @@ export const registerPresentation = () => [
   // This chat leads with what a person touches; what few need comes after, collapsed.
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
-  // The card layout, before Reply mode: card swap works with or without tools.
-  chatSettingSections.register({ id: "settings.card-layout", order: 15, component: CardLayoutSetting }),
+  chatSettingSections.register({ id: "settings.context", order: 15, component: SharedContextSetting }),
+  chatSettingSections.register({ id: "settings.card-layout", order: 30, component: CardLayoutSetting }),
+  chatSettingSections.register({ id: "settings.who-replies", order: 40, component: ReplyChoicesSetting }),
   chatSettingSections.register({ id: "settings.macro-bindings", order: 80, component: MacroBindings }),
   chatSettingSections.register({ id: "settings.merge-layout", order: 85, component: MergeLayoutSetting }),
   chatSettingSections.register({ id: "settings.roles", order: 90, component: RolesSetting }),

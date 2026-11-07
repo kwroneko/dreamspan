@@ -296,7 +296,7 @@ test("an agent reply is composed from like any other", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chatId = await chatWithSwipes("Ferry agent")
-  await admin((api) => api.ChangeCast({ chatId, slotId: null, change: { _tag: "ReplyMode", mode: "narrator" } }))
+  await admin((api) => api.ChangeCast({ chatId, slotId: null, change: { _tag: "AgentEnabled", on: true } }))
   await page.goto(`${server().url}/chats/${chatId}`)
   await generateReply(page)
   const message = reply(page)

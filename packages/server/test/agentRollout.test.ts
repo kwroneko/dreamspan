@@ -90,7 +90,7 @@ const scripted = (request: Recorded, res: ServerResponse) => {
 }
 
 describe("agent rollouts", () => {
-  it.live("Reply mode and Tools affect the next reply on their branch without changing an earlier run", () => {
+  it.live("Tools settings affect the next reply on their branch without changing an earlier run", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
@@ -105,15 +105,15 @@ describe("agent rollouts", () => {
       const main = (yield* api.GetChat({ chatId: chat.id })).currentForkId
       const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: main, atSlotId: version.slotId })
       for (const change of [
-        { _tag: "ReplyMode", mode: "narrator" },
+        { _tag: "AgentEnabled", on: true },
         { _tag: "AgentTools", tools: [] }
       ] as const)
         yield* api.ChangeCast({ chatId: chat.id, forkId: fork.id, slotId: version.slotId, change })
       const mainCast = yield* api.GetCast({ chatId: chat.id, forkId: main, slotId: version.slotId })
-      assert.isUndefined(mainCast.replyMode)
+      assert.isUndefined(mainCast.agentEnabled)
       assert.isUndefined(mainCast.agentTools)
       const branchCast = yield* api.GetCast({ chatId: chat.id, forkId: fork.id, slotId: version.slotId })
-      assert.strictEqual(branchCast.replyMode, "narrator")
+      assert.strictEqual(branchCast.agentEnabled, true)
       assert.deepStrictEqual(branchCast.agentTools, [])
       const next = yield* posted(
         api.Generate({ chatId: chat.id, forkId: fork.id, parentSlotId: version.slotId, branch: false })
@@ -138,7 +138,7 @@ describe("agent rollouts", () => {
       return Effect.gen(function* () {
         const registry = yield* ExecutionRegistry
         yield* registry.orchestrationModes.register({
-          ...registry.orchestrationModes.get("narrator")!,
+          ...registry.orchestrationModes.get("default")!,
           plan: () => ({ strategy: "agent", tools: [], contract: "send_message", turnCap })
         })
         const mock = yield* Effect.acquireRelease(
@@ -149,7 +149,7 @@ describe("agent rollouts", () => {
         const { version } = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
           model: {},
-          state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+          state: [{ key: "agent.enabled", value: { on: true } }]
         })
         const bodies = mock
           .requests()
@@ -184,7 +184,7 @@ describe("agent rollouts", () => {
       const { version } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.content, "Ansel waves.")
       assert.deepStrictEqual(
@@ -207,7 +207,7 @@ describe("agent rollouts", () => {
       const { version, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: { prefill: "assistant" },
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       mock.setHandler((request, res) =>
         sse(
@@ -250,7 +250,7 @@ describe("agent rollouts", () => {
       const { version, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       streaming = true
       const reader = yield* Reader
@@ -282,7 +282,10 @@ describe("agent rollouts", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         example: "<START>\n{{user}}: What is that?\n{{char}}: The lighthouse gleams.",
-        state: [{ key: "orchestration.mode", value: { mode: "card-swap" } }]
+        state: [
+          { key: "agent.enabled", value: { on: true } },
+          { key: "cards.rotation", value: { on: true } }
+        ]
       })
       const messages = mock.requests().find((r) => r.path === "/v1/chat/completions")!.body!.messages
       assert.include(JSON.stringify(messages), "The lighthouse gleams.")
@@ -304,7 +307,10 @@ describe("agent rollouts", () => {
         model: { context: 2000 },
         preset: { openai_max_context: 2000, openai_max_tokens: 100 },
         mira: { description: "A long synthetic character description. ".repeat(500) },
-        state: [{ key: "orchestration.mode", value: { mode: "card-swap" } }]
+        state: [
+          { key: "agent.enabled", value: { on: true } },
+          { key: "cards.rotation", value: { on: true } }
+        ]
       })
       assert.strictEqual(version.status, "failed")
       assert.strictEqual(version.error?.class, "budget")
@@ -336,7 +342,7 @@ describe("agent rollouts", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         state: [
-          { key: "orchestration.mode", value: { mode: "narrator" } },
+          { key: "agent.enabled", value: { on: true } },
           { key: "agent.tools", value: { tools: ["look_up"] } }
         ]
       })
@@ -376,7 +382,7 @@ describe("agent rollouts", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         state: [
-          { key: "orchestration.mode", value: { mode: "narrator" } },
+          { key: "agent.enabled", value: { on: true } },
           { key: "agent.tools", value: { tools: ["look_up"] } }
         ]
       })
@@ -450,7 +456,7 @@ describe("agent rollouts", () => {
       const { version } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.content, "Ansel waves.")
       const snapshot = read(config.dataDir, version.id).snapshot.agent as { tools: Array<{ name: string }> }
@@ -467,7 +473,7 @@ describe("agent rollouts", () => {
     return Effect.gen(function* () {
       const registry = yield* ExecutionRegistry
       yield* registry.orchestrationModes.register({
-        ...registry.orchestrationModes.get("narrator")!,
+        ...registry.orchestrationModes.get("default")!,
         plan: () => ({ strategy: "agent", tools: [], contract: "final_text", turnCap: 4 })
       })
       const mock = yield* Effect.acquireRelease(
@@ -488,7 +494,7 @@ describe("agent rollouts", () => {
       const { version } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.content, "The final reply.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -508,7 +514,7 @@ describe("agent rollouts", () => {
           })
       } as RolloutTool<never>)
       yield* registry.orchestrationModes.register({
-        ...registry.orchestrationModes.get("narrator")!,
+        ...registry.orchestrationModes.get("default")!,
         plan: () => ({ strategy: "agent", tools: ["look_up"], contract: "both", turnCap: 2 })
       })
       const mock = yield* Effect.acquireRelease(
@@ -521,7 +527,7 @@ describe("agent rollouts", () => {
       yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(executions, 1)
       assert.strictEqual(mock.requests().filter((r) => r.path === "/v1/chat/completions").length, 2)
@@ -540,7 +546,7 @@ describe("agent rollouts", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: { prefill: "tool_schema" },
         preset: { assistant_prefill: "Hm." },
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.status, "complete")
       assert.strictEqual(version.content, "Done.")
@@ -553,7 +559,7 @@ describe("agent rollouts", () => {
       const registry = yield* ExecutionRegistry
       yield* registry.rolloutTools.register(lookup as RolloutTool<never>)
       yield* registry.orchestrationModes.register({
-        ...registry.orchestrationModes.get("narrator")!,
+        ...registry.orchestrationModes.get("default")!,
         plan: () => ({ strategy: "agent", tools: ["look_up"], contract: "final_text", turnCap: 4 })
       })
       const mock = yield* Effect.acquireRelease(
@@ -565,7 +571,7 @@ describe("agent rollouts", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         preset: { assistant_prefill: "Hm." },
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.status, "complete")
       // The sentence before the tool call was intermediate output, not the reply.
@@ -602,10 +608,10 @@ describe("agent rollouts", () => {
       )
 
       const db = read(config.dataDir, version.id)
-      assert.deepInclude(db.rollout, { status: "completed", mode: "narrator", step_count: 1, llm_requests: 2 })
+      assert.deepInclude(db.rollout, { status: "completed", mode: "default", step_count: 1, llm_requests: 2 })
       assert.strictEqual(db.requests.length, 2)
       assert.deepStrictEqual(db.snapshot.agent, {
-        mode: "narrator",
+        mode: "default",
         contract: "final_text",
         turnCap: 4,
         tools: [
@@ -658,17 +664,14 @@ describe("agent rollouts", () => {
       // A reply is reached from its message, never listed as Activity.
       assert.deepStrictEqual(yield* api.ListActivity({ chatId: chat.id }), { rows: [], before: null })
       // The settings list the registered tool, its label standing in for a missing explanation.
-      const modes = yield* api.ListReplyModes({})
+      const modes = yield* api.ListReplyTools({})
       assert.deepInclude(modes.tools, {
         id: "look_up",
         label: "Looked something up",
         explanation: "Looked something up",
         effect: "read"
       })
-      assert.deepInclude(
-        modes.modes.map((m) => ({ id: m.id, agentic: m.agentic })),
-        { id: "plain", agentic: false }
-      )
+      assert.isArray(modes.defaultTools)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -693,22 +696,23 @@ describe("agent rollouts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("a mode that isn't registered fails the reply before any request", () => {
+  it.live("a disabled planner fails the reply before any request", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
         Effect.promise(() => startMockProvider(scripted)),
         (m) => Effect.promise(() => m.close())
       )
+      yield* (yield* ExecutionRegistry).orchestrationModes.disable("default")
       const api = yield* client()
       const { version } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "council" } }]
+        state: []
       })
       assert.strictEqual(version.status, "failed")
       assert.strictEqual(version.error?.class, "unavailable")
-      assert.include(version.error?.message ?? "", "council")
+      assert.include(version.error?.message ?? "", "default")
       assert.isEmpty(mock.requests())
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
@@ -719,7 +723,7 @@ describe("agent rollouts", () => {
       const registry = yield* ExecutionRegistry
       yield* registry.rolloutTools.register(lookup as RolloutTool<never>)
       yield* registry.orchestrationModes.register({
-        ...registry.orchestrationModes.get("narrator")!,
+        ...registry.orchestrationModes.get("default")!,
         plan: () => ({ strategy: "agent", tools: ["look_up"], contract: "send_message", turnCap: 6 })
       })
       const mock = yield* Effect.acquireRelease(
@@ -737,7 +741,7 @@ describe("agent rollouts", () => {
       const { version, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.status, "complete")
       assert.strictEqual(version.content, "Ansel waves.")
@@ -776,7 +780,7 @@ describe("agent rollouts", () => {
     return Effect.gen(function* () {
       const registry = yield* ExecutionRegistry
       yield* registry.orchestrationModes.register({
-        ...registry.orchestrationModes.get("narrator")!,
+        ...registry.orchestrationModes.get("default")!,
         plan: () => ({ strategy: "agent", tools: [], contract: "send_message", turnCap: 6 })
       })
       const mock = yield* Effect.acquireRelease(
@@ -794,7 +798,7 @@ describe("agent rollouts", () => {
       const { version, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.content, "Sent words.")
       assert.isTrue(events.some((e) => e._tag === "Delta" && e.versionId === version.id && e.replace === true))
@@ -821,7 +825,7 @@ describe("agent rollouts", () => {
       const registry = yield* ExecutionRegistry
       yield* registry.rolloutTools.register(lookup as RolloutTool<never>)
       yield* registry.orchestrationModes.register({
-        ...registry.orchestrationModes.get("narrator")!,
+        ...registry.orchestrationModes.get("default")!,
         plan: () => ({ strategy: "agent", tools: ["look_up"], contract: "both", turnCap: 2 })
       })
       const mock = yield* Effect.acquireRelease(
@@ -838,7 +842,7 @@ describe("agent rollouts", () => {
       const { version } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.content, "Done.")
       const bodies = mock
@@ -869,7 +873,7 @@ describe("agent rollouts", () => {
       const { version } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.content, "Hi.")
       const [first] = mock
@@ -928,7 +932,8 @@ describe("agent rollouts", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         state: [
-          { key: "orchestration.mode", value: { mode: "card-swap" } },
+          { key: "agent.enabled", value: { on: true } },
+          { key: "cards.rotation", value: { on: true } },
           { key: "agent.tools", value: { tools: ["look_up"] } }
         ]
       })
@@ -998,7 +1003,7 @@ describe("agent rollouts", () => {
       const { version } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.content, "First.")
       assert.strictEqual(mock.requests().filter((r) => r.path === "/v1/chat/completions").length, 1)
@@ -1031,7 +1036,7 @@ describe("agent rollouts", () => {
         presetFields: {
           reply_sections: { enabled: true, pairs: [{ open: "<thinking>", close: "</thinking>" }], send_back: 0 }
         },
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
       assert.strictEqual(version.content, "Ansel waves.")
@@ -1052,7 +1057,7 @@ describe("agent rollouts", () => {
       const registry = yield* ExecutionRegistry
       yield* registry.rolloutTools.register(lookup as RolloutTool<never>)
       yield* registry.orchestrationModes.register({
-        ...registry.orchestrationModes.get("narrator")!,
+        ...registry.orchestrationModes.get("default")!,
         plan: () => ({ strategy: "agent", tools: ["look_up"], contract: "final_text", turnCap: 4 })
       })
       const start = {
@@ -1109,7 +1114,7 @@ describe("agent rollouts", () => {
       const { version } = yield* generateReply(api, {
         connection: { kind: "anthropic", baseUrl: mock.url, apiKey: "sk-ant-made-up-for-tests-0000" },
         model: { cacheBreakpoints: "explicit" },
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
       assert.strictEqual(version.content, "Ansel waves.")
@@ -1160,7 +1165,7 @@ describe("agent rollouts", () => {
       const registry = yield* ExecutionRegistry
       yield* registry.rolloutTools.register(slow as RolloutTool<never>)
       yield* registry.orchestrationModes.register({
-        ...registry.orchestrationModes.get("narrator")!,
+        ...registry.orchestrationModes.get("default")!,
         plan: () => ({ strategy: "agent", tools: ["slow_look_up"], contract: "both", turnCap: 4 })
       })
       const mock = yield* Effect.acquireRelease(
@@ -1177,7 +1182,7 @@ describe("agent rollouts", () => {
       const { version } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       yield* Fiber.join(stopper)
       assert.strictEqual(version.status, "stopped")

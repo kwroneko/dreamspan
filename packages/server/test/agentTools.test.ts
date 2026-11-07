@@ -73,7 +73,7 @@ describe("agent read tools", () => {
       const { version, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.content, "Ansel waves.")
       const results = (versionId: typeof version.id) =>
@@ -122,7 +122,7 @@ describe("agent read tools", () => {
       const { version, events, mira, chat } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       const steps = yield* api.GetRolloutSteps({ versionId: version.id })
       assert.deepInclude(steps[0], {
@@ -230,7 +230,7 @@ describe("agent read tools", () => {
       const { version, events, chat } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }]
+        state: [{ key: "agent.enabled", value: { on: true } }]
       })
       // Two chat notes, on: one the agent may change, one it may not.
       const note = (title: string, content: string, editable: boolean) =>
@@ -313,7 +313,7 @@ describe("agent read tools", () => {
       const { version } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "orchestration.mode", value: { mode: "narrator" } }],
+        state: [{ key: "agent.enabled", value: { on: true } }],
         mira: {
           character_book: loreBook(
             [

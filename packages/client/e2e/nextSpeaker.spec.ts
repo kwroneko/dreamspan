@@ -419,7 +419,8 @@ for (const width of [1440, 390])
       holdDecisions = true
       provider.hold()
       await page.getByLabel("Message", { exact: true }).fill("Anyone seen the Gull?")
-      await page.keyboard.press("Enter")
+      // This checks the decision round; a late focus change mustn't swallow its send.
+      await page.getByRole("button", { name: "Send as Ana", exact: true }).click()
 
       // The first turn, being chosen: no one named, in the reply or the strip.
       const first = page.locator("article[data-slot]").nth(2)
