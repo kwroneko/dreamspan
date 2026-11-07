@@ -45,7 +45,18 @@ interface PortraitViewer {
   readonly single: boolean
   /** Turns it on, keeping only `keep` open, or off, back to stacking. */
   readonly setSingle: (on: boolean, keep: string) => void
+  /** Puts `next` in place of the ones open (the workbench's one column, over several views). */
+  readonly set: (next: Stack<Portrait>) => void
+  /** The tab URL that opens a portrait's picture, for a drag onto a frame; absent outside the workbench's views. */
+  readonly tabHref?: ((portrait: Portrait) => string | null) | undefined
 }
+
+/**
+ * A drag of the app's own portrait carries this, with the tab URL of its picture: a frame
+ * opens it as a tab, and a chat's composer never takes it as an attachment.
+ */
+export const PICTURE_TAB_MIME = "application/x-rp-picture-tab"
+export type { PortraitViewer }
 const Context = createContext<PortraitViewer | null>(null)
 
 /**
@@ -61,10 +72,12 @@ export function PortraitProvider({
   current,
   stack: suppliedStack,
   onStackChange,
+  tabHref,
   children
 }: {
   inline: boolean
   current?: (portrait: Portrait) => Portrait | null
+  tabHref?: ((portrait: Portrait) => string | null) | undefined
   stack?: Stack<Portrait>
   onStackChange?: (next: Stack<Portrait>) => void
   children: ReactNode
@@ -94,7 +107,9 @@ export function PortraitProvider({
     setSingle: (on, keep) => {
       if (on) setStack((stack) => keepOnly(stack, keep))
       prefs.change({ singlePortrait: on })
-    }
+    },
+    set: (next) => setStack(() => next),
+    tabHref
   }
   const top = shown[0]?.portrait
   return (
@@ -108,6 +123,11 @@ export function PortraitProvider({
 /** The shared click toggle for viewer portraits, including editable card headers. */
 export const useOpenPortrait = () => useContext(Context)?.open
 export const usePortraitViewer = () => useContext(Context)
+
+/** Gives `viewer` to what's inside, in place of the one above (the workbench's shared column). */
+export function PortraitViewerScope({ viewer, children }: { viewer: PortraitViewer; children: ReactNode }) {
+  return <Context value={viewer}>{children}</Context>
+}
 
 /**
  * A viewer for pages outside a chat (the full editor's own page): a full-screen one, unless a

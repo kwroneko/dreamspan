@@ -206,6 +206,12 @@
     },
     {
       "type": "index",
+      "name": "entity_revisions_activity",
+      "tbl_name": "entity_revisions",
+      "sql": "CREATE INDEX entity_revisions_activity ON entity_revisions(entity_id, origin, created_at, parents)"
+    },
+    {
+      "type": "index",
       "name": "entity_revisions_entity",
       "tbl_name": "entity_revisions",
       "sql": "CREATE INDEX entity_revisions_entity ON entity_revisions(entity_id, seq)"

@@ -40,8 +40,8 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
 
   /** The user's card, not in the bin, or NotFound. */
   const liveCard = (userId: UserId, entityId: string) =>
-    sql<{ id: string; forked_from_entity_id: string | null }>`
-      SELECT id, forked_from_entity_id FROM entities
+    sql<{ id: string; forked_from_entity_id: string | null; forked_at: number | null }>`
+      SELECT id, forked_from_entity_id, forked_at FROM entities
       WHERE id = ${entityId} AND owner_user_id = ${userId} AND kind = 'card' AND deleted_at IS NULL`.pipe(
       Effect.flatMap(([row]) =>
         row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "card", id: entityId }))
@@ -250,6 +250,14 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
     SetCardParent: ({ userId, entityId, parentEntityId }) =>
       Effect.gen(function* () {
         const card = yield* liveCard(userId, entityId)
+        // A relationship can change; the use recorded by making that fork must survive it.
+        if (
+          card.forked_from_entity_id !== null &&
+          card.forked_at !== null &&
+          card.forked_from_entity_id !== parentEntityId
+        )
+          yield* sql`UPDATE entity_refs SET last_used_at = max(coalesce(last_used_at, 0), ${card.forked_at})
+            WHERE entity_id IN (${entityId}, ${card.forked_from_entity_id})`
         if (parentEntityId === null) {
           yield* sql`UPDATE entities SET forked_from_entity_id = NULL, forked_from_revision_id = NULL,
                      forked_in_chat_id = NULL, forked_at = NULL WHERE id = ${entityId}`
