@@ -19,6 +19,7 @@ test("card selectors cannot style the app or remove message containment", async 
         reply: false,
         content: [
           "<style>",
+          String.raw`@font-face { font-family: "\49 nter"; src: local("FreeMono") }`,
           ".box { color: rgb(1, 2, 3); & > span { color: rgb(4, 5, 6) }",
           ":is(&, body) [data-security-probe] { color: rgb(11, 22, 33) !important }",
           ":is(&, body) [class~=markdown-html] { contain: none !important } }",
@@ -43,4 +44,5 @@ test("card selectors cannot style the app or remove message containment", async 
   })
   await expect(page.locator("[data-security-probe]")).toHaveCSS("color", "rgb(7, 8, 9)")
   await expect(page.locator(".message-html")).toHaveCSS("contain", "layout paint")
+  expect(await page.evaluate(() => Array.from(document.fonts, (font) => font.family))).not.toContain("Inter")
 })
