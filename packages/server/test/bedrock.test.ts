@@ -194,6 +194,26 @@ const markedAt = (messages: ReadonlyArray<WireMessage>) =>
   messages.flatMap((m, i) => (JSON.stringify(m.content).includes("cache_control") ? [i] : []))
 
 describe("a reply through Bedrock", () => {
+  it.live("sends no SDK cache markers when the connection chooses None", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource(bedrockReply())
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: {
+          provider: "anthropic-bedrock",
+          kind: "anthropic-bedrock",
+          baseUrl: mock.url,
+          apiKey: "synthetic-key",
+          providerSettings: { cacheBreakpoints: "none" }
+        },
+        modelKey: MODEL,
+        model: {}
+      })
+      assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
+      assert.notInclude(JSON.stringify(mock.requests().at(-1)!.body), "cache_control")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
   it.live("goes to the model's invoke address with the Messages body Bedrock takes and a Bedrock API key", () => {
     const config = testConfig()
     return Effect.gen(function* () {

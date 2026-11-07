@@ -1343,7 +1343,16 @@ export const layer = (options: ProvidersOptions = {}) =>
                 state.retryAfterMs = parseRetryAfter(response.headers.get("retry-after") ?? undefined)
                 return response
               }
-              const options = request.options ?? {}
+              const cacheMode = resolveModel(
+                model.key,
+                model.upstream,
+                model.overrides,
+                prepared.connection.compat,
+                prepared.settings
+              ).cacheBreakpoints.value
+              // An empty breakpoint list alone leaves the SDK's automatic markers enabled.
+              const options =
+                cacheMode === "none" ? { ...request.options, cacheRetention: "none" as const } : (request.options ?? {})
               const target: RequestTarget = {
                 kind: prepared.kind.id,
                 api: prepared.api,
