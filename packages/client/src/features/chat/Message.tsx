@@ -36,7 +36,7 @@ import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { messageSide, useCast } from "./cast.ts"
-import { invokeMessageAction, messageActions, MessageActions } from "./messageActions.tsx"
+import { invokeMessageAction, messageActions, MessageActionDialog, MessageActions } from "./messageActions.tsx"
 import { ReasoningPanels } from "./Reasoning.tsx"
 import { useDisplayContext } from "./DisplaySettings.tsx"
 import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
@@ -918,6 +918,7 @@ export const Message = memo(function Message({
           )}
           {entry.branchCount > 1 && <Branches entry={entry} onBranch={onBranch} />}
         </header>
+        <MessageActionDialog context={actionContext} />
         {editingAnotherVersion && (
           <p role="note" className="text-sm text-muted">
             Another version is selected. Your edit still belongs to the version you opened.

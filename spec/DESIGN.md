@@ -75,7 +75,7 @@
 
 **Built 2026-11-02 (addbuttons):** The direct-add-actions requirement in §10.1 is implemented and obsolete as a plan; see ARCHITECTURE.md §14.6.
 
-**Built 2026-11-02 (homeurl):** Home's URL state requirement in §10.1 is implemented and obsolete as an implementation plan; see ARCHITECTURE.md §12. Most broader refresh state is implemented by urlstate (2026-11-02); saved-amendment/original-text dialog destinations remain deferred after two failed phone attempts. See ARCHITECTURE.md §5.
+**Built 2026-11-02 (homeurl):** Home's URL state requirement in §10.1 is implemented and obsolete as an implementation plan; see ARCHITECTURE.md §12. Most broader refresh state is implemented by urlstate (2026-11-02); saved-amendment/original-text dialog destinations are **Built** (dialogreload, 2026-11-08; ARCHITECTURE.md §5): `messageDialog` names the action and message version, **[P]** pushed like other places. See ARCHITECTURE.md §5.
 
 **Built 2026-10-30:** CCv3 `group_only_greetings` selection in §4 is implemented and obsolete as a proposal; see ARCHITECTURE.md §12. Other §4 fields retain their statuses.
 

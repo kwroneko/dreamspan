@@ -111,6 +111,10 @@ for (const width of [1440, 390])
       const dialog = page.getByRole("dialog", { name: "The original text" })
       await expect(dialog.getByRole("region", { name: "Original message text" }).locator("pre")).toHaveText(REPLY)
       await screenshot(page, `regex-original-${width}-${colorScheme}`)
+      // A reload reopens the dialog, and closing it leaves the address without it.
+      await page.reload()
+      await expect(dialog.getByRole("region", { name: "Original message text" }).locator("pre")).toHaveText(REPLY)
+      expect(new URL(page.url()).searchParams.get("messageDialog")).toContain("message.original-text:")
       await dialog.getByRole("button", { name: "Restore it", exact: true }).click()
       await expect(dialog).toBeHidden()
       // The restored version is shown, and no script rewrites it.
