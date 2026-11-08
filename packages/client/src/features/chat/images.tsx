@@ -22,12 +22,7 @@ import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { PICTURE_TOGGLE, SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { carryOnDrag, isAppDrag, PICTURE_DRAG } from "../../ui/appDrags.ts"
-import {
-  EnsurePortraitViewer,
-  PicturePeek,
-  type Portrait,
-  usePortraitViewer
-} from "../../ui/Portrait.tsx"
+import { EnsurePortraitViewer, PicturePeek, type Portrait, usePortraitViewer } from "../../ui/Portrait.tsx"
 import { useOpenAsTab } from "../workbench/tab.tsx"
 import { attachmentName, attachmentPicture } from "./attachmentPictures.ts"
 import { messageSide, nameOf, useCast } from "./cast.ts"
