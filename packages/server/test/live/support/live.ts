@@ -10,6 +10,9 @@
 // - RP_LIVE_KEY_DIR: a directory with one key file per provider, named for its route:
 //   anthropic, openai, openrouter, deepseek, google. Unset: the suite is skipped.
 //   A key is read here, given to the app as a connection key, and never logged or stored.
+// - RP_LIVE_BASE_URL_<PROVIDER> (ANTHROPIC, OPENAI, OPENROUTER, DEEPSEEK, GOOGLE): optional. Sends
+//   that provider's requests to another endpoint that speaks the same API: the route's path
+//   (`/v1/…`) is appended to it. Default: the provider's public origin.
 // - RP_LIVE_OUT: where results go (default <tmpdir>/rp-live-results).
 // - RP_LIVE_WAIT_TTL=1: also run the checks that wait out a 5-minute cache lifetime.
 //
@@ -51,6 +54,11 @@ const providerApis: Readonly<Record<string, { readonly origin: string; readonly 
   openrouter: { origin: "https://openrouter.ai/api", provider: "openrouter" },
   deepseek: { origin: "https://api.deepseek.com", provider: "deepseek" },
   google: { origin: "https://generativelanguage.googleapis.com", provider: "google" }
+}
+/** Where a route's requests go: its `RP_LIVE_BASE_URL_<PROVIDER>` override, else the public origin. */
+const originOf = (name: string) => {
+  const override = process.env[`RP_LIVE_BASE_URL_${name.toUpperCase()}`]?.trim().replace(/\/+$/, "")
+  return override || providerApis[name]?.origin
 }
 const keyOf = (name: string) => {
   try {
@@ -137,7 +145,7 @@ export const startRecorder = (keys: ReadonlyArray<string>) =>
             continue
           headers.set(name, Array.isArray(value) ? value.join(", ") : value)
         }
-        const origin = providerApis[exchange.path.split("/")[1] ?? ""]?.origin
+        const origin = originOf(exchange.path.split("/")[1] ?? "")
         if (!origin) {
           res.writeHead(404).end()
           exchange.status = 404

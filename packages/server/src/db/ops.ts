@@ -1318,9 +1318,7 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       connectionId: ConnectionId,
       models: Schema.Array(Schema.Struct({ key: Schema.String, upstream: ModelUpstream })),
-      fetchedAt: Schema.Number,
-      /** Set on the connection when it has none yet. */
-      modelIdPrefix: Schema.optionalKey(Schema.String)
+      fetchedAt: Schema.Number
     },
     success: Schema.Struct({ added: Schema.Int, updated: Schema.Int, missing: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])

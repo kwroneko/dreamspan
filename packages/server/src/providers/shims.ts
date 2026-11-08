@@ -29,7 +29,7 @@ export interface CompatShim {
   readonly providers: ReadonlyArray<string>
   /** The wire APIs it applies to; left out, all of the provider's. */
   readonly apis?: ReadonlyArray<string>
-  /** Matched on the model's key; patterns allow a router prefix (`acme.`, `vendor/`). */
+  /** Matched on the model's key. */
   readonly model: RegExp
   /** Capabilities the provider imposes for the model, over the list's and catalogs'. */
   readonly capabilities?: Partial<Omit<ModelUpstream, "catalog" | "shims" | "fixed">>
@@ -180,6 +180,7 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     label: "Top P isn’t sent: this model refuses it.",
     models: "Claude Haiku 5",
     providers: ["anthropic", "anthropic-bedrock", "anthropic-vertex", "openrouter"],
+    // Also as Bedrock (`anthropic.claude-…`) and OpenRouter (`anthropic/claude-…`) name it.
     model: /(?:^|[/.])claude-haiku-5/i,
     payload: (payload) => {
       delete payload.top_p
@@ -191,10 +192,10 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     id: "openai-responses-gpt-5.1-5.4-reasoning",
     label: "While it reasons, temperature and top P aren’t sent, and its reasoning summary is asked for.",
     models: "GPT-5.1 to 5.4 on Responses",
-    // A router in front of OpenAI (a compatible server) serves the same models.
+    // A compatible server may serve the same models.
     providers: ["openai", "openai-compatible"],
     apis: ["openai-responses"],
-    model: /(?:^|[/.])gpt-5\.[1-4](?:[-.]|$)/i,
+    model: /^gpt-5\.[1-4](?:[-.]|$)/i,
     payload: (payload) => {
       if (!reasoning(payload)) return payload
       delete payload.top_p
@@ -214,7 +215,7 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     models: "GPT-5.4 on Chat Completions",
     providers: ["openai", "openai-compatible"],
     apis: ["openai-completions"],
-    model: /(?:^|[/.])gpt-5\.4(?:[-.]|$)/i,
+    model: /^gpt-5\.4(?:[-.]|$)/i,
     payload: (payload) => {
       if (Array.isArray(payload.tools) && payload.tools.length > 0 && reasoning(payload))
         payload.reasoning_effort = "none"

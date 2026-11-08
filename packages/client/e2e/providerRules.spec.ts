@@ -1,6 +1,5 @@
-// The connection's "Model ID prefix" setting and the model page's provider rules and locked
-// Prefill (livefix): their help on hover, their copy, and the layout audit at 1440 and 390 px
-// in light and dark.
+// The model page's provider rules and locked Prefill (livefix): their help on hover, their copy,
+// and the layout audit at 1440 and 390 px in light and dark.
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -67,25 +66,13 @@ for (const [width, height] of [
   [390, 844]
 ] as const)
   for (const theme of ["light", "dark"] as const)
-    test(`model ID prefix and provider rules: ${width} ${theme}`, async ({ page }, info) => {
+    test(`provider rules: ${width} ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/settings/connections/${connectionId}`)
 
-      // The connection's setting: a short label, its help on hover, saved like the others.
-      const prefix = page.getByLabel("Model ID prefix", { exact: true })
-      await expect(prefix).toBeVisible()
-      await help(page, "Model ID prefix", /before its model IDs.*price and limits/)
       await expectLayout(page, info, `connection-settings-${width}-${theme}`, { scope: "main" })
-      await prefix.fill("acme.")
-      await page.getByRole("button", { name: "Save", exact: true }).first().click()
-      await expect(page.getByRole("button", { name: "Save", exact: true }).first()).toBeDisabled()
-      await page.reload()
-      await expect(page.getByLabel("Model ID prefix", { exact: true })).toHaveValue("acme.")
-      await page.getByLabel("Model ID prefix", { exact: true }).fill("")
-      await page.getByRole("button", { name: "Save", exact: true }).first().click()
-      await expect(page.getByRole("button", { name: "Save", exact: true }).first()).toBeDisabled()
       await noInternals(page)
 
       // The model page: the rules listed with their help, and Prefill locked off with its reason.
