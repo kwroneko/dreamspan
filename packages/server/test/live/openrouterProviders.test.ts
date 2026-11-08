@@ -1,5 +1,5 @@
-// Live: OpenRouter models pinned to one upstream provider each (`provider.only`, which
-// OpenRouter honors): DeepSeek and MiMo Pro through a few providers, an OpenAI model on
+// Live: OpenRouter models pinned to one upstream provider each (`provider.only`, which OpenRouter
+// honors): DeepSeek and MiMo Pro through a few providers, an OpenAI model on
 // Amazon Bedrock, and one small synthetic image per pair. Secondary checks (liveapi2): what each
 // provider does with caching, reasoning, tools, prefill and images. Real money: counts against
 // RP_LIVE_OPENROUTER_CAP with the rest of the OpenRouter checks.

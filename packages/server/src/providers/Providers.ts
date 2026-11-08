@@ -67,7 +67,7 @@ import { Network, type ProxyOverride, type RequestNetwork, RedirectRefused } fro
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
 import { catalogEntry, withCatalog } from "./catalog.ts"
-import { detectModelIdPrefix, withCatalogs, withoutModelIdPrefix } from "./contextCatalog.ts"
+import { withCatalogs } from "./contextCatalog.ts"
 import type { ListedModel } from "./modelLists.ts"
 import { applyShims, providerRules, withShims } from "./shims.ts"
 import { statedContextLimit } from "./contextLimits.ts"
@@ -901,19 +901,13 @@ export const layer = (options: ProvidersOptions = {}) =>
           .pipe(Effect.mapError((error) => scrubbed(prepared, fromList(error))))
 
       /**
-       * What the catalogs know of listed (or added) models, matched without the router's id
-       * prefix (liveapi F1, F2): the kind's own catalog (price, reasoning, vision, thinking levels),
-       * then the registered ones for a window; then the compatibility shims. Keys stay as listed.
+       * What the catalogs know of listed (or added) models (liveapi F1, F2): the kind's own
+       * catalog (price, reasoning, vision, thinking levels), then the registered ones for a
+       * window; then the compatibility shims.
        */
-      const describeModels = (
-        kind: ProviderKindEntry,
-        provider: string,
-        prefix: string | null,
-        listed: ReadonlyArray<ListedModel>
-      ) =>
+      const describeModels = (kind: ProviderKindEntry, provider: string, listed: ReadonlyArray<ListedModel>) =>
         Effect.gen(function* () {
-          const stripped = listed.map((model) => ({ ...model, key: withoutModelIdPrefix(model.key, prefix) }))
-          const fromKind = yield* withCatalog(kind, stripped)
+          const fromKind = yield* withCatalog(kind, listed)
           const filled = yield* withCatalogs(registry.catalogs.list(), kind.id, fromKind)
           const shims = registry.shims.list()
           const on = { provider, api: kind.api }
@@ -925,18 +919,9 @@ export const layer = (options: ProvidersOptions = {}) =>
           const prepared = yield* prepare(userId, connectionId)
           let route: string | null = null
           const listed = yield* listModels(prepared, (d) => (route = d))
-          const detected =
-            prepared.connection.modelIdPrefix === null ? detectModelIdPrefix(listed.map((model) => model.key)) : null
-          const prefix = prepared.connection.modelIdPrefix ?? detected
-          const models = yield* describeModels(prepared.kind, prepared.provider, prefix, listed)
+          const models = yield* describeModels(prepared.kind, prepared.provider, listed)
           const result = yield* fromStorage(
-            writer.SyncFetchedModels({
-              userId,
-              connectionId,
-              models,
-              fetchedAt: Date.now(),
-              ...(detected !== null ? { modelIdPrefix: detected } : {})
-            })
+            writer.SyncFetchedModels({ userId, connectionId, models, fetchedAt: Date.now() })
           )
           return { ...result, route }
         })
@@ -984,7 +969,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             const kind = registry.kinds.get(connection.kind)
             const provider = providerOf(connection)?.id ?? connection.provider
             return kind
-              ? describeModels(kind, provider, connection.modelIdPrefix, [{ key, upstream: {} }])
+              ? describeModels(kind, provider, [{ key, upstream: {} }])
               : Effect.succeed<ReadonlyArray<ListedModel>>([{ key, upstream: {} }])
           }),
           Effect.map(([model]) => model!.upstream),

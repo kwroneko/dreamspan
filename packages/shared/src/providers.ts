@@ -171,11 +171,6 @@ export class Connection extends Schema.Class<Connection>("Connection")({
   maxConcurrent: Schema.NullOr(Schema.Int),
   proxyMode: ProxyMode,
   presetOverrideRefId: Schema.NullOr(RefId),
-  /**
-   * A router's prefix on its model ids (`acme.`), left out when matching catalogs. Null until a
-   * refresh sets what the list's ids share; empty means none.
-   */
-  modelIdPrefix: Schema.NullOr(Schema.String),
   rowVersion: Schema.Int,
   createdAt: Schema.Number,
   updatedAt: Schema.Number
@@ -189,8 +184,6 @@ export const ConnectionSettings = Schema.Struct({
   cacheTtlS: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   maxConcurrent: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   presetOverrideRefId: Schema.NullOr(RefId),
-  /** Left out: unchanged. Null: unset, so the next refresh fills it from the list. */
-  modelIdPrefix: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** The provider's defaults the user changed, replacing the stored ones. Left out: unchanged. */
   providerSettings: Schema.optionalKey(ProviderSettings)
 })

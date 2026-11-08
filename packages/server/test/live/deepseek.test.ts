@@ -38,7 +38,7 @@ describe.skipIf(!liveEnabled)("live DeepSeek", () => {
   liveTest("basics, caching", f, ({ api, recorder, dataDir }) =>
     Effect.gen(function* () {
       const chat = yield* startChat(api, recorder, dataDir, p)
-      yield* checkModels(f, p, api, chat, { listed: "acme.deepseek-flash" })
+      yield* checkModels(f, p, api, chat, { listed: "deepseek-flash" })
       const model = yield* modelOf(api, chat)
       yield* growingChat(f, p, chat, model)
       const small = yield* startChat(api, recorder, dataDir, p, { cardTokens: 200 })
@@ -138,11 +138,11 @@ describe.skipIf(!liveEnabled)("live DeepSeek", () => {
     })
   )
 
-  // A request whose last message carries `prefix: true` goes to DeepSeek's
-  // /beta/chat/completions itself, so its /deepseek/v1 route takes a prefill.
+  // DeepSeek takes a request whose last message carries `prefix: true` only at its /beta
+  // address, so this one goes there.
   liveTest("prefill and continue (DeepSeek's /beta)", f, ({ api, recorder, dataDir }) =>
     Effect.gen(function* () {
-      const pre = { ...p, id: "deepseek (prefill)" }
+      const pre = { ...p, id: "deepseek (prefill)", route: "deepseek/beta" }
       // A short output limit cuts the reply mid-sentence, so Continue has something to add (a
       // finished reply continued live ended at once with no new tokens).
       const chat = yield* startChat(api, recorder, dataDir, pre, {

@@ -1,12 +1,10 @@
 // Compatibility shims per provider, API type and model (liveapi F7, F9, F10, F11, F13), a reply with
-// nothing after its prefill (F12), and catalog facts for models added by id or listed behind a
-// router's id prefix (F1, F2).
+// nothing after its prefill (F12), and catalog facts for models added by id or listed with their own fields (F1, F2).
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { pinnedRoute, resolveModel, routedUpstream } from "@rp/shared/providers.ts"
 import { prefillUnavailable } from "../src/assembler/prefill.ts"
 import { applyShims, builtinShims, providerRules, shimmedUpstream } from "../src/providers/shims.ts"
-import { detectModelIdPrefix, withoutModelIdPrefix } from "../src/providers/contextCatalog.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
 import { anthropicSse, completionChunks, json, sse, startMockProvider, type Handler } from "./support/mockProvider.ts"
@@ -45,8 +43,7 @@ describe("payload shims", () => {
     const sent = { top_p: 0.9, temperature: 0.7, reasoning: { effort: "low" } }
     const shimmed = shim("openai", "openai-responses", "gpt-5.4-nano", sent).payload
     assert.deepEqual(shimmed, { reasoning: { effort: "low", summary: "auto" } })
-    // Behind a router prefix too; without an effort, or on 5.5, nothing changes.
-    assert.notProperty(shim("openai", "openai-responses", "acme.gpt-5.1", sent).payload, "top_p")
+    // Without an effort, or on 5.5, nothing changes.
     const none = { ...sent, reasoning: { effort: "none" } }
     assert.deepEqual(shim("openai", "openai-responses", "gpt-5.4-nano", none).payload, none)
     assert.deepEqual(shim("openai", "openai-responses", "gpt-5.5", sent).payload, sent)
@@ -143,30 +140,20 @@ describe("capability shims", () => {
   })
 })
 
-describe("router model id prefixes (F2)", () => {
-  it("detects the prefix most listed ids share", () => {
-    assert.strictEqual(detectModelIdPrefix(["acme.gpt-5.4-nano", "acme.gpt-5.5", "text-embedding-3"]), "acme.")
-    assert.isNull(detectModelIdPrefix(["gpt-5.4-nano", "gpt-4.1", "o3"]))
-    assert.isNull(detectModelIdPrefix(["anthropic/claude-haiku-4.5", "google/gemini-3.5-pro"]))
-    assert.isNull(detectModelIdPrefix(["acme.deepseek-flash", "a", "b", "c"]))
-    assert.strictEqual(withoutModelIdPrefix("acme.gpt-5.4-nano", "acme."), "gpt-5.4-nano")
-    assert.strictEqual(withoutModelIdPrefix("gpt-5.4-nano", "acme."), "gpt-5.4-nano")
-  })
-
-  it.live("a refresh reads the list's own fields, matches the catalog without the prefix, and keeps it", () => {
+describe("model lists with their own fields (F2)", () => {
+  it.live("a refresh reads the list's own fields and matches the catalog", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* resource((req, res) =>
         req.path.endsWith("/models")
           ? json(res, 200, {
               data: [
-                { id: "acme.gpt-5.4-nano", architecture: { output_modalities: ["text"] } },
+                { id: "gpt-5.4-nano", architecture: { output_modalities: ["text"] } },
                 {
-                  id: "acme.synthetic-model",
+                  id: "synthetic-model",
                   context_window: 64000,
                   max_output_tokens: 8000,
-                  input_modalities: ["text", "image"],
-                  effort: { supported_levels: ["low", "high"] }
+                  input_modalities: ["text", "image"]
                 }
               ]
             })
@@ -176,7 +163,7 @@ describe("router model id prefixes (F2)", () => {
       const connection = yield* api.CreateConnection({
         kind: "openai-chat",
         settings: {
-          name: "Gateway",
+          name: "Compatible server",
           baseUrl: `${mock.url}/v1`,
           compat: {},
           cacheTtlS: null,
@@ -185,35 +172,15 @@ describe("router model id prefixes (F2)", () => {
         },
         apiKey: "sk-synthetic"
       })
-      assert.isNull(connection.modelIdPrefix)
       yield* api.RefreshModels({ connectionId: connection.id })
       const models = yield* api.ListModels({ connectionId: connection.id, includeHidden: true })
-      const nano = models.find((m) => m.key === "acme.gpt-5.4-nano")!.upstream
+      const nano = models.find((m) => m.key === "gpt-5.4-nano")!.upstream
       assert.isDefined(nano.price)
       assert.isTrue(nano.reasoning)
       assert.isTrue(nano.vision)
       assert.strictEqual(nano.catalog?.match, "gpt-5.4-nano")
-      const listed = models.find((m) => m.key === "acme.synthetic-model")!.upstream
-      assert.deepInclude(listed, { context: 64000, maxOutput: 8000, vision: true, reasoning: true })
-      const [saved] = (yield* api.ListConnections()).filter((c) => c.id === connection.id)
-      assert.strictEqual(saved!.modelIdPrefix, "acme.")
-      // The user's choice stands: cleared, a refresh doesn't set it again.
-      yield* api.UpdateConnection({
-        connectionId: connection.id,
-        expectedRowVersion: saved!.rowVersion,
-        settings: {
-          name: "Gateway",
-          baseUrl: `${mock.url}/v1`,
-          compat: {},
-          cacheTtlS: null,
-          maxConcurrent: null,
-          presetOverrideRefId: null,
-          modelIdPrefix: ""
-        }
-      })
-      yield* api.RefreshModels({ connectionId: connection.id })
-      const [cleared] = (yield* api.ListConnections()).filter((c) => c.id === connection.id)
-      assert.strictEqual(cleared!.modelIdPrefix, "")
+      const listed = models.find((m) => m.key === "synthetic-model")!.upstream
+      assert.deepInclude(listed, { context: 64000, maxOutput: 8000, vision: true })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

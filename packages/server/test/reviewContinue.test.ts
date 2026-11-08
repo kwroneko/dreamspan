@@ -189,7 +189,7 @@ describe("R4-C review acceptance regressions", () => {
     assert.include(prefillUnavailable(deepseek, "https://api.deepseek.com") ?? "", "/beta endpoint")
     assert.include(prefillUnavailable(deepseek, "https://api.deepseek.com/v1") ?? "", "/beta endpoint")
     assert.isUndefined(prefillUnavailable(deepseek, "https://api.deepseek.com/beta"))
-    // Another host in front of DeepSeek decides where a prefix goes itself (liveapi2).
+    // Another host in front of DeepSeek decides where a prefix goes itself.
     assert.isUndefined(prefillUnavailable(deepseek, "https://router.example/deepseek/v1"))
   })
 

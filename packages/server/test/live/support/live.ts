@@ -7,16 +7,20 @@
 // never builds a provider request itself.
 //
 // Configuration (environment):
-// - RP_LIVE_KEY_FILE: path of a file holding the API key. Unset: the suite is skipped.
-//   The key is read here, given to the app as a connection key, and never logged or stored.
-// - RP_LIVE_BASE: base URL of the provider router (default http://127.0.0.1:8080, routes /<upstream>/…).
-// - RP_LIVE_OUT: where results go (default <work>/artifacts/liveapi/results).
+// - RP_LIVE_KEY_DIR: a directory with one key file per provider, named for its route:
+//   anthropic, openai, openrouter, deepseek, google. Unset: the suite is skipped.
+//   A key is read here, given to the app as a connection key, and never logged or stored.
+// - RP_LIVE_BASE_URL_<PROVIDER> (ANTHROPIC, OPENAI, OPENROUTER, DEEPSEEK, GOOGLE): optional. Sends
+//   that provider's requests to another endpoint that speaks the same API: the route's path
+//   (`/v1/…`) is appended to it. Default: the provider's public origin.
+// - RP_LIVE_OUT: where results go (default <tmpdir>/rp-live-results).
 // - RP_LIVE_WAIT_TTL=1: also run the checks that wait out a 5-minute cache lifetime.
 //
 // Content is synthetic and SFW: generated harbor-town lore, no owner data.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { deflateSync } from "node:zlib"
@@ -37,18 +41,46 @@ import { type client, posted, serverPort } from "../../support/config.ts"
 import { cardDoc } from "../../support/docs.ts"
 
 export const LIVE = {
-  keyFile: process.env.RP_LIVE_KEY_FILE,
-  base: process.env.RP_LIVE_BASE ?? "http://127.0.0.1:8080",
-  out: process.env.RP_LIVE_OUT ?? "<work>/artifacts/liveapi/results",
+  keyDir: process.env.RP_LIVE_KEY_DIR,
+  out: process.env.RP_LIVE_OUT ?? join(tmpdir(), "rp-live-results"),
   waitTtl: process.env.RP_LIVE_WAIT_TTL === "1"
 }
-export const liveEnabled = !!LIVE.keyFile && !process.env.CI
-export const liveKey = () => readFileSync(LIVE.keyFile!, "utf8").trim()
+export const liveEnabled = !!LIVE.keyDir && !process.env.CI
+
+/** Each route name (the first path segment of a `LiveChatOptions.route`) is a provider's own API. */
+const providerApis: Readonly<Record<string, { readonly origin: string; readonly provider: string }>> = {
+  anthropic: { origin: "https://api.anthropic.com", provider: "anthropic" },
+  openai: { origin: "https://api.openai.com", provider: "openai" },
+  openrouter: { origin: "https://openrouter.ai/api", provider: "openrouter" },
+  deepseek: { origin: "https://api.deepseek.com", provider: "deepseek" },
+  google: { origin: "https://generativelanguage.googleapis.com", provider: "google" }
+}
+/** Where a route's requests go: its `RP_LIVE_BASE_URL_<PROVIDER>` override, else the public origin. */
+const originOf = (name: string) => {
+  const override = process.env[`RP_LIVE_BASE_URL_${name.toUpperCase()}`]?.trim().replace(/\/+$/, "")
+  return override || providerApis[name]?.origin
+}
+const keyOf = (name: string) => {
+  try {
+    return readFileSync(join(LIVE.keyDir!, name), "utf8").trim()
+  } catch {
+    return null
+  }
+}
+/** The key for a route, from RP_LIVE_KEY_DIR. */
+const liveKey = (route: string) => {
+  const name = route.split("/")[0]!
+  const key = keyOf(name)
+  if (!key) throw new Error(`No key file named "${name}" in RP_LIVE_KEY_DIR`)
+  return key
+}
+/** Every key in the directory, so the recorder can redact them all. */
+export const liveKeys = () => Object.keys(providerApis).flatMap((name) => keyOf(name) ?? [])
 /** Live tests run for minutes: replies, waits for caches to settle, retries upstream. */
 export const LIVE_TIMEOUT = 900_000
 
 // ---------------------------------------------------------------------------------------
-// The recorder: a loopback pass-through to the provider that keeps each exchange.
+// The recorder: a loopback pass-through to the provider's API that keeps each exchange.
 
 export interface Exchange {
   readonly path: string
@@ -75,10 +107,10 @@ const keep = (exchange: Exchange) => {
 
 const ID_HEADERS = ["request-id", "x-request-id", "x-ds-trace-id", "x-generation-id", "x-openrouter-generation-id"]
 
-export const startRecorder = (key: string) =>
+export const startRecorder = (keys: ReadonlyArray<string>) =>
   new Promise<{ url: string; exchanges: Array<Exchange>; close: () => Promise<void> }>((resolve) => {
     const exchanges: Array<Exchange> = []
-    const redact = (text: string) => text.split(key).join("<redacted>")
+    const redact = (text: string) => keys.reduce((out, key) => out.split(key).join("<redacted>"), text)
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       const chunks: Array<Buffer> = []
       req.on("data", (c: Buffer) => chunks.push(c))
@@ -113,7 +145,14 @@ export const startRecorder = (key: string) =>
             continue
           headers.set(name, Array.isArray(value) ? value.join(", ") : value)
         }
-        fetch(LIVE.base + exchange.path, {
+        const origin = originOf(exchange.path.split("/")[1] ?? "")
+        if (!origin) {
+          res.writeHead(404).end()
+          exchange.status = 404
+          exchange.done = true
+          return
+        }
+        fetch(origin + exchange.path.slice(exchange.path.indexOf("/", 1)), {
           method: req.method ?? "GET",
           headers,
           ...(raw.length ? { body: raw } : {}),
@@ -380,7 +419,7 @@ export interface Turn {
 
 export interface LiveChatOptions {
   readonly kind: string
-  /** The provider route: `anthropic`, `openai/v1`, `openrouter/v1`, `deepseek/v1`, `google/v1beta`. */
+  /** The provider's API: its route name, then its path: `anthropic`, `openai/v1`, `openrouter/v1`, `deepseek`, `google/v1beta`. */
   readonly route: string
   readonly model: string
   /** Use the provider's listed model of this id (after a refresh) instead of adding `model`. */
@@ -399,17 +438,8 @@ export interface LiveChatOptions {
   readonly greeting?: string | null
   readonly state?: ReadonlyArray<StateEventData>
   readonly cardFields?: Partial<CardDoc>
-  /** Use this key instead of the provider key (bad-key checks). */
+  /** Use this key instead of the provider's own key (bad-key checks). */
   readonly apiKey?: string
-}
-
-/** The provider each route reaches (providerDefinitions.ts). */
-const routeProviders: Readonly<Record<string, string>> = {
-  anthropic: "anthropic",
-  "openai": "openai",
-  openrouter: "openrouter",
-  deepseek: "deepseek",
-  google: "google"
 }
 
 export const liveChat = (
@@ -423,9 +453,9 @@ export const liveChat = (
     const me = yield* api.Whoami()
     const userId = me.id as UserId
     const nonce = crypto.randomUUID().slice(0, 8)
-    // The route reaches that provider itself, so the connection is that provider's
+    // The route reaches that provider's own API, so the connection is that provider's
     // (OpenAI's prompt_cache_key and cache contract included), not a custom server's.
-    const provider = routeProviders[options.route.split("/")[0]!]
+    const provider = providerApis[options.route.split("/")[0]!]?.provider
     const connection = yield* api.CreateConnection({
       ...(provider ? { provider } : {}),
       kind: options.kind,
@@ -437,7 +467,7 @@ export const liveChat = (
         maxConcurrent: null,
         presetOverrideRefId: null
       },
-      apiKey: options.apiKey ?? liveKey()
+      apiKey: options.apiKey ?? liveKey(options.route)
     })
     // A model the provider lists is used as listed (its catalog price included); otherwise
     // it is added by id, as a user would add one.
