@@ -45,6 +45,9 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
   const [height, setHeight] = useState<number | null>(() => slots.heights.get(id) ?? null)
   const holder = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLIFrameElement>(null)
+  // WindowProxy identity survives navigation. Never redeliver HTML to a new document
+  // that took over the frame, even if it replays the bootstrap's ready message.
+  const delivered = useRef(new WeakSet<Window>())
 
   // Near the screen, claim a slot; away from it, offer it up.
   useEffect(() => {
@@ -77,11 +80,13 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
     if (!live) return
     const post = (data: unknown) => frame.current?.contentWindow?.postMessage(data, "*")
     const onMessage = (event: MessageEvent<{ type?: unknown; height?: unknown }>) => {
-      if (!frame.current || event.source !== frame.current.contentWindow) return
+      const target = frame.current?.contentWindow
+      if (!target || event.source !== target || event.origin !== "null") return
       const data = event.data as { type?: unknown; height?: unknown } | null
-      if (data?.type === "rp:ready")
+      if (data?.type === "rp:ready" && !delivered.current.has(target)) {
+        delivered.current.add(target)
         post({ type: "rp:render", html: source, vh: columnHeight(frame.current), theme: theme() })
-      else if (data?.type === "rp:height" && typeof data.height === "number" && Number.isFinite(data.height)) {
+      } else if (data?.type === "rp:height" && typeof data.height === "number" && Number.isFinite(data.height)) {
         const next = Math.max(0, Math.min(Math.ceil(data.height), window.innerHeight * 2))
         slots.heights.set(id, next)
         setHeight(next)

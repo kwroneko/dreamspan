@@ -59,7 +59,12 @@ function closingQuote(text: string, start: number) {
 function plain(value: string) {
   return value
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16) || 0xfffd))
+    .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) => {
+      const point = Number.parseInt(hex, 16)
+      return String.fromCodePoint(
+        point === 0 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff) ? 0xfffd : point
+      )
+    })
     .replace(/\\(.)/g, "$1")
     .toLowerCase()
 }
@@ -186,7 +191,20 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`): ScopedCss {
       if (node.type === "decl") declaration(node)
       else if (node.type === "rule") {
         const rule = node as Rule
-        rule.selectors = rule.selectors.map((selector) =>
+        const selectors = rule.selectors.filter((selector) => {
+          const text = selector.replace(/\/\*[\s\S]*?\*\//g, "").trim()
+          // Prefixing a relative sibling selector would target siblings of the message.
+          if (!nested) return !/^[+~|]/.test(text)
+          // Implicit nesting stays below the parent. Explicit nesting is safe only when
+          // that parent anchors the selector: :is(&, body) can otherwise select the app.
+          // Be conservative about '&' even in strings; no selector parser is involved.
+          return !text.includes("&") || (text.startsWith("&") && !text.slice(1).includes("&"))
+        })
+        if (selectors.length === 0) {
+          rule.remove()
+          continue
+        }
+        rule.selectors = selectors.map((selector) =>
           nested ? renameSelector(selector) : `${scope} ${renameSelector(selector)}`
         )
         visit(rule, true)
@@ -205,6 +223,18 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`): ScopedCss {
       rule.params = renameClass(rule.params.trim())
       rule.walkDecls(declaration)
     } else if (name === "font-face" && !nested) {
+      const descriptors = (rule.nodes ?? []).filter((node): node is Declaration => node.type === "decl")
+      const families = descriptors.filter((decl) => decl.prop.toLowerCase() === "font-family")
+      // renameNames handles simple CSS identifiers only. An escaped or multiword family
+      // would otherwise remain global and could redefine a font used by the app.
+      if (
+        families.length === 0 ||
+        descriptors.some((decl) => decl.prop.includes("\\")) ||
+        families.some((decl) => !/^(["']?)-?[_a-zA-Z][-\w]*\1$/.test(decl.value.trim()))
+      ) {
+        rule.remove()
+        return
+      }
       rule.walkDecls((decl) => {
         if (decl.prop.toLowerCase() === "font-family") decl.value = renameNames(decl.value, fonts)
         else declaration(decl)

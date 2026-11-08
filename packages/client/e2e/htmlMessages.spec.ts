@@ -81,6 +81,7 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `html-greeting-${width}-${theme}`, {
         scope: `article[aria-label="Greeting from ${name}"]`
       })
+      await page.screenshot({ path: info.outputPath(`html-greeting-${width}-${theme}.png`) })
 
       // Off, the markup shows as text, and the card's style goes.
       await page.goto(`${server().url}/settings/interface`)

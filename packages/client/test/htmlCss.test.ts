@@ -74,9 +74,32 @@ describe("scopeCss", () => {
     expect(scoped(".a { fill: url(#g) }")).toBe(".message-html .custom-a { fill: url(#user-content-g) }")
   })
 
+  it("drops font faces whose families cannot be safely renamed", () => {
+    for (const family of [String.raw`"\49 nter"`, String.raw`\49 nter`, '"SF Mono"'])
+      expect(scopeCss(`@font-face { font-family: ${family}; src: local("FreeMono") }`).css).toBe("")
+    expect(scopeCss(String.raw`@font-face { f\6f nt-family: Inter; src: local("FreeMono") }`).css).toBe("")
+    expect(scoped('@font-face { font-family: "Card"; src: local("FreeMono") }')).toContain('"custom-Card"')
+  })
+
   it("leaves unparsable CSS out whole", () => {
     expect(scopeCss(".a { color: red").css).toBe("")
     expect(scopeCss('.a { content: "').css).toBe("")
+  })
+
+  it("rejects selectors that can escape through a sibling or a nesting alternative", () => {
+    for (const selector of ["+ main", "~ main", "/* card */ + main"])
+      expect(scopeCss(`${selector} { color: red }`).css).not.toContain("color: red")
+    for (const selector of [":is(&, body) main", "body &", "& + :is(&, body) main"])
+      expect(scopeCss(`.box { ${selector} { color: red } }`).css).not.toContain("color: red")
+    expect(scoped(".box { &:hover { color: red } & > span { color: blue } }")).toBe(
+      ".message-html .custom-box { &:hover { color: red } & > span { color: blue } }"
+    )
+  })
+
+  it("handles invalid Unicode escapes in hostile declarations without throwing", () => {
+    expect(() => scopeCss(String.raw`.box { color: \ffffff }`)).not.toThrow()
+    expect(() => cleanStyle(String.raw`color: \110000`)).not.toThrow()
+    expect(() => loads(String.raw`url(\ffffff)`)).not.toThrow()
   })
 })
 

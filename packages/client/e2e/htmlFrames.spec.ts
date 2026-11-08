@@ -98,6 +98,7 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `html-frame-${width}-${theme}`, {
         scope: `article[data-slot="${fixture.second.entry.slotId}"]`
       })
+      await page.screenshot({ path: info.outputPath(`html-frame-${width}-${theme}.png`) })
 
       // Only the last message's panel runs; the older one waits for Run panel.
       await page.goto(`${server().url}/chats/${fixture.chat.id}?panel=interface`)
