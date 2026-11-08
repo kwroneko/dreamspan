@@ -13,6 +13,7 @@ import { openOnPlainClick } from "../../ui/links.ts"
 import { useAtomRefresh } from "@effect/atom-react"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useMemo, useRef, useState } from "react"
+import { carryLink, CHAT_DRAG } from "../../ui/appDrags.ts"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncView, ErrorAlert, FailureView, useAction } from "../../actions.tsx"
 import type { ForkId } from "@rp/shared/chat.ts"
@@ -142,6 +143,8 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean, splitNavigation = fals
   }
   return open
 }
+/** A chat's row dragged out: dropped on a frame, the chat opens there on the row's branch, as a click does. */
+const carryChat = carryLink(CHAT_DRAG.id)
 /** Where a fork's row links: the chat on that fork (a plain click opens it with the panel's place). */
 const forkLink = (fork: ShellFork) => ({
   to: "/chats/$chatId" as const,
@@ -157,6 +160,7 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
         <Link
           {...forkLink(fork)}
           onClick={openOnPlainClick(open)}
+          onDragStart={carryChat}
           data-layout-audit-ignore="inset: Whole group tile is the open control"
           aria-label={`Open chat ${fork.chatName}`}
           className="flex w-full flex-1 flex-col text-left"
@@ -424,6 +428,7 @@ export function ForkRow({
             <Link
               {...forkLink(fork)}
               onClick={openOnPlainClick(open)}
+              onDragStart={carryChat}
               aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}`}
               aria-current={here ? "page" : undefined}
               data-chat-id={fork.chat.id}

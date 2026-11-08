@@ -13,6 +13,8 @@ import { PICTURE_ACCEPT, useCutoutChooser } from "../../ui/portraitParts.ts"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import type { Caller } from "./caller.ts"
 import { useOpenPortrait } from "../../ui/Portrait.tsx"
+import { carryOnDrag, isAppDrag, PICTURE_DRAG } from "../../ui/appDrags.ts"
+import { pictureHref } from "../chat/PicturePage.tsx"
 import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
 
 interface Choosing {
@@ -171,6 +173,10 @@ function ViewablePortrait({
         aria-label={`View ${name}'s picture`}
         data-view-portrait
         onClick={() => togglePortrait({ id, name, mediaId, picture: crop?.picture })}
+        // Dropped on a frame, the picture opens there as a tab (owner, 2026-11-07).
+        onDragStart={(event) =>
+          carryOnDrag(event.dataTransfer, PICTURE_DRAG.id, pictureHref({ id, name, mediaId, picture: crop?.picture }))
+        }
         className="relative inline-flex size-full shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         {avatar}
@@ -204,7 +210,9 @@ const PICTURE_HINT = "PNG, JPEG, GIF or WebP, up to 16 MB. Choose the picture an
 /** A portrait that takes a dropped image file: `over` while one is dragged over it. */
 function useImageDrop(onFile: (file: File) => void, enabled: boolean) {
   const [over, setOver] = useState(false)
-  const files = (event: DragEvent) => enabled && event.dataTransfer.types.includes("Files")
+  // A file from outside; the app's own picture dragged here is no new one.
+  const files = (event: DragEvent) =>
+    enabled && event.dataTransfer.types.includes("Files") && !isAppDrag(event.dataTransfer)
   return {
     over,
     props: {
