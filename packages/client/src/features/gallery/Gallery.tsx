@@ -2,6 +2,7 @@ import type { CardAsset } from "@rp/shared/docs/card.ts"
 import { AssetKind, type AssetChange, assetGroup, galleryAssets } from "@rp/shared/gallery.ts"
 import { useLayoutEffect, useRef, useState } from "react"
 import { Effect } from "effect"
+import { isAppDrag } from "../../ui/appDrags.ts"
 import { ContentImage } from "../../ui/ContentImage.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -108,8 +109,9 @@ export function Gallery({ store, call }: Pick<CardTabProps, "store" | "call">) {
       data-gallery
       data-over={over || undefined}
       className="rounded-lg data-over:ring-2 data-over:ring-accent"
+      // Only a file from outside: a picture dragged from the app opens where it's dropped instead.
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes("Files")) {
+        if (e.dataTransfer.types.includes("Files") && !isAppDrag(e.dataTransfer)) {
           e.preventDefault()
           setOver(true)
         }
@@ -118,7 +120,7 @@ export function Gallery({ store, call }: Pick<CardTabProps, "store" | "call">) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false)
       }}
       onDrop={(e) => {
-        if (!e.dataTransfer.types.includes("Files")) return
+        if (!e.dataTransfer.types.includes("Files") || isAppDrag(e.dataTransfer)) return
         e.preventDefault()
         setOver(false)
         void add([...e.dataTransfer.files])

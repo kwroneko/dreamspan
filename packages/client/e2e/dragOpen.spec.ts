@@ -371,6 +371,76 @@ for (const theme of ["light", "dark"] as const) {
   })
 }
 
+/**
+ * Drops the app's `source` on `target` as a real browser drags an image: its own dragstart puts
+ * the payload on the drag, and the browser adds the image as a file (Playwright's mouse drags
+ * leave the file out, so this dispatches the events itself).
+ */
+const dropWithFile = async (source: Locator, target: Locator) => {
+  await source.evaluate(
+    async (from, to) => {
+      const canvas = document.createElement("canvas")
+      canvas.width = canvas.height = 8
+      canvas.getContext("2d")!.fillRect(0, 0, 8, 8)
+      const blob = await new Promise<Blob>((resolve) => canvas.toBlob((b) => resolve(b!), "image/png"))
+      const data = new DataTransfer()
+      const init = { dataTransfer: data, bubbles: true, cancelable: true }
+      from.dispatchEvent(new DragEvent("dragstart", init))
+      data.items.add(new File([blob], "portrait.png", { type: "image/png" }))
+      const box = to!.getBoundingClientRect()
+      const at = { ...init, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 }
+      for (const type of ["dragenter", "dragover", "drop"]) to!.dispatchEvent(new DragEvent(type, at))
+      from.dispatchEvent(new DragEvent("dragend", init))
+    },
+    await target.elementHandle()
+  )
+}
+
+// review-imgdrag: a portrait's native drag carries the browser's own image file too, so a card's
+// Gallery and the import page's file drop took it as a new picture or an import while the frame
+// opened it as a tab.
+test("nothing dragged from the app adds to a card's gallery or starts an import", async ({ page }) => {
+  const uploads: string[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST" && /\/library\/(gallery|import)\b/.test(request.url())) uploads.push(request.url())
+  })
+  await twoFrames(page, "light")
+  const [left, right] = [frames(page).nth(0), frames(page).nth(1)]
+  // The right frame shows Tall's full editor; the panel stays the left frame's chat's.
+  await right.locator(`${STRIP_TAB} [role=tab]`).first().click()
+  await openKept(page, "Library")
+  await right.getByRole("link", { name: `Edit ${TALL.name}`, exact: true }).click()
+  await expect(cardEditor(right)).toBeVisible()
+  await right.getByRole("tab", { name: "Extra", exact: true }).click()
+  await left.locator(`${STRIP_TAB} [role=tab]`).first().click()
+  const portrait = () =>
+    page
+      .getByRole("tabpanel", { name: "Cast" })
+      .getByRole("button", { name: `View ${TALL.name}'s portrait` })
+      .first()
+  await openPanel(page, "Cast")
+  const gallery = right.locator("[data-gallery]")
+  await gallery.scrollIntoViewIfNeeded()
+  await dropWithFile(portrait(), gallery)
+  await expect(right.getByRole("tab", { name: TALL.name, exact: true, selected: true })).toBeVisible()
+  expect(uploads).toEqual([])
+
+  // The import page's file drop, a chat beside it.
+  await page.goto(`${server().url}/import`)
+  await expect(page.getByText("Choose files, or drop them here")).toBeVisible()
+  await page.getByRole("button", { name: "Split right" }).first().click()
+  await expect(frames(page)).toHaveCount(2)
+  const [importer, chat] = [frames(page).nth(0), frames(page).nth(1)]
+  await chat.locator(`${STRIP_TAB} [role=tab]`).first().click()
+  await sidebar(page).getByRole("link", { name: "Open chat Harbour walk" }).click()
+  await expect(chat.getByText("The tide is out")).toBeVisible()
+  await openPanel(page, "Cast")
+  await dropWithFile(portrait(), importer.getByText("Choose files, or drop them here"))
+  await expect(importer.getByRole("tab", { name: TALL.name, exact: true, selected: true })).toBeVisible()
+  await expect(page.getByRole("list", { name: "Imported files" })).toHaveCount(0)
+  expect(uploads).toEqual([])
+})
+
 test("a phone has no drag: a long press on a character is its menu, a tap opens it", async ({
   browser,
   browserName
