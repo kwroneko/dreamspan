@@ -44,3 +44,19 @@ export const lorebookRows = (input: RowInput): ReadonlyArray<BookRow> => {
     ...input.preset.filter((book) => !listed.has(book.id)).map((book) => row("preset", book.id, book.enabled))
   ]
 }
+
+/**
+ * The world file that replaces a card's own book in the context: the one linked to the card, while
+ * it's read (on in this chat, or sent by the preset); null when the card's own book is used.
+ */
+export const replacedBy = (
+  entity: string,
+  bindings: Readonly<Record<string, string>> | undefined,
+  listed: RowInput["listed"],
+  preset: RowInput["preset"]
+): string | null => {
+  const ref = bindings?.[entity]
+  if (!ref) return null
+  const read = listed.some((book) => book.ref === ref && book.on) || preset.some((book) => book.id === ref && book.enabled)
+  return read ? ref : null
+}

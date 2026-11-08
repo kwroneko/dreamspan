@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { lorebookRows } from "../src/features/chat/lorebookRows.ts"
+import { lorebookRows, replacedBy } from "../src/features/chat/lorebookRows.ts"
 
 const base = { cards: [], cardsOff: [], listed: [], preset: [], pending: new Map<string, boolean>() }
 
@@ -53,4 +53,13 @@ test("a switch shows at once and is pending until the server agrees", () => {
   expect(before[0]).toMatchObject({ on: false, pending: true })
   const after = lorebookRows({ ...base, listed: [{ ref: "a", on: false }], pending })
   expect(after[0]).toMatchObject({ on: false, pending: false })
+})
+
+test("a card's own book is replaced only while its linked world file is read", () => {
+  const bindings = { aria: "w" }
+  expect(replacedBy("aria", bindings, [{ ref: "w", on: true }], [])).toBe("w")
+  expect(replacedBy("aria", bindings, [], [{ id: "w", enabled: true }])).toBe("w")
+  expect(replacedBy("aria", bindings, [{ ref: "w", on: false }], [{ id: "w", enabled: false }])).toBeNull()
+  expect(replacedBy("rook", bindings, [{ ref: "w", on: true }], [])).toBeNull()
+  expect(replacedBy("aria", undefined, [{ ref: "w", on: true }], [])).toBeNull()
 })

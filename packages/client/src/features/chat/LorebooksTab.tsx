@@ -32,7 +32,7 @@ import { EditorStore, useEditorState, useLeaveGuard, useValue } from "../editor/
 import { useSession } from "../../session.ts"
 import { useCast } from "./cast.ts"
 import { useChatPreset } from "./chatPreset.ts"
-import { type BookRow, lorebookRows } from "./lorebookRows.ts"
+import { type BookRow, lorebookRows, replacedBy } from "./lorebookRows.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 const entries = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
@@ -254,10 +254,12 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
       const card = cards.get(row.id)!
       const name = card.lorebookName ?? `${card.name}'s lorebook`
       const ref = cardRefs?.get(row.id)
+      const replacement = replacedBy(row.id, cast?.cardLorebookBindings, cast?.listedLorebooks ?? [], presetBooks)
       return {
         name,
         from: [
           row.on ? `${card.name}'s own lorebook` : `${card.name}'s own lorebook, off in this chat`,
+          ...(replacement ? [`replaced by ${nameOf(replacement)}, linked to ${card.name}`] : []),
           ...(card.lorebookEntries === undefined ? [] : [entries(card.lorebookEntries)])
         ].join(" · "),
         switchHint: `Click to ${row.on ? "disable" : "enable"} ${card.name}’s lorebook for this chat.`,
