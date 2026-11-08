@@ -63,6 +63,12 @@ export interface KindTransportRequest {
   readonly apiKey: string | null
   readonly baseUrl: string
   readonly settings: ProviderSettings
+  /**
+   * The connection's fetch, routed as the provider request is but not observed as it: for a
+   * kind's own requests that aren't the reply (Vertex's sign-in), so the ledger, the cache
+   * identity and the usage capture see the provider request alone.
+   */
+  readonly aside?: typeof globalThis.fetch
 }
 
 /** One decision request on the wire (reference-harness's System-One body), sent with the connection's fetch. */

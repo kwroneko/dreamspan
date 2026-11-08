@@ -12,8 +12,10 @@ test.describe.configure({ mode: "serial" })
 
 const PROVIDERS = [
   "OpenAI",
+  "OpenAI (AWS Bedrock)",
   "Anthropic",
   "Anthropic (AWS Bedrock)",
+  "Anthropic (Google Vertex)",
   "OpenRouter",
   "DeepSeek",
   "Google AI Studio",
@@ -166,4 +168,99 @@ for (const [width, height] of [
       await expect(picker(page, "Cache markers")).toContainText("Each section")
       await expect(page.getByText("synthetic/secret")).toHaveCount(0)
       await expectLayout(page, info, `provider-connection-${width}-${theme}`, { scope: "main" })
+    })
+
+/** A synthetic service account key file: never a real key, and never sent anywhere here. */
+const keyFile = {
+  name: "lantern-key.json",
+  mimeType: "application/json",
+  buffer: Buffer.from(
+    JSON.stringify({
+      type: "service_account",
+      project_id: "lantern-project-123",
+      private_key_id: "0123456789abcdef0123456789abcdef0123wxyz",
+      private_key: "-----BEGIN PRIVATE KEY-----\nMIIsyntheticsyntheticsynthetic\n-----END PRIVATE KEY-----\n",
+      client_email: "mira@lantern-project-123.iam.gserviceaccount.com"
+    })
+  )
+}
+
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844]
+] as const)
+  for (const theme of ["light", "dark"] as const)
+    test(`OpenAI on Bedrock and Claude on Vertex: ${width} ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/settings/connections/new`)
+
+      // OpenAI on Bedrock: Responses first, the Region sets Bedrock's OpenAI address.
+      await choose(page, "Provider", "OpenAI (AWS Bedrock)")
+      await expect(picker(page, "API type")).toContainText("Responses")
+      await page.getByLabel("Region", { exact: true }).fill("us-west-2")
+      await expect(page.getByLabel("Base URL", { exact: true })).toHaveAttribute(
+        "placeholder",
+        "https://bedrock-runtime.us-west-2.amazonaws.com/openai/v1"
+      )
+      await expect(picker(page, "Key type")).toBeVisible()
+      await page.getByText("Advanced", { exact: true }).click()
+      await expect(page.getByRole("switch", { name: "Finds earlier cached parts" })).not.toBeChecked()
+      await noInternals(page)
+      await page.getByText("Advanced", { exact: true }).click()
+
+      // Claude on Vertex: a Region (global by default), a project, and a key file.
+      await choose(page, "Provider", "Anthropic (Google Vertex)")
+      await expect(picker(page, "API type")).toHaveCount(0)
+      await expect(picker(page, "Key type")).toHaveCount(0)
+      const region = page.getByLabel("Region", { exact: true })
+      await expect(region).toHaveAttribute("placeholder", "global")
+      await help(page, "Region", /Where Google Cloud runs your requests/)
+      await region.fill("not a region")
+      await page.getByRole("button", { name: "Create connection" }).click()
+      await expect(page.getByText("Enter a region code, such as us-east5.")).toBeVisible()
+      await region.fill("us-east5")
+      await expect(page.getByLabel("Base URL", { exact: true })).toHaveAttribute(
+        "placeholder",
+        "https://us-east5-aiplatform.googleapis.com"
+      )
+      await region.fill("eu")
+      await expect(page.getByLabel("Base URL", { exact: true })).toHaveAttribute(
+        "placeholder",
+        "https://aiplatform.eu.rep.googleapis.com"
+      )
+      await help(page, "Project", /Google Cloud project ID/)
+      await help(page, "Service account key", /JSON key file/)
+      const file = page.getByLabel("Service account key", { exact: true })
+      await file.setInputFiles({ name: "notes.json", mimeType: "application/json", buffer: Buffer.from("{}") })
+      await expect(page.getByText("This file isn’t a service account’s JSON key.")).toBeVisible()
+      await file.setInputFiles(keyFile)
+      await expect(page.getByText(/Loaded: mira@lantern-project-123\.iam\.gserviceaccount\.com/)).toBeVisible()
+      await expect(page.getByLabel("Project", { exact: true })).toHaveAttribute("placeholder", "lantern-project-123")
+      await expect(page.getByText("MIIsynthetic")).toHaveCount(0)
+      await page.getByText("Advanced", { exact: true }).click()
+      await expect(picker(page, "Cache markers")).toBeVisible()
+      await expect(page.getByRole("switch", { name: "Finds earlier cached parts" })).toBeChecked()
+      await noInternals(page)
+      await file.scrollIntoViewIfNeeded()
+      await expectLayout(page, info, `provider-vertex-${width}-${theme}`, { scope: "main" })
+      await page.getByText("How tokens are counted", { exact: true }).scrollIntoViewIfNeeded()
+      await expectLayout(page, info, `provider-vertex-advanced-${width}-${theme}`, { scope: "main" })
+      if (width !== 1440 || theme !== "light") return
+
+      // Created: its Region and project are kept, and a new key is another file.
+      await page.getByLabel("Name", { exact: true }).fill("Vertex Lantern")
+      await page.getByRole("button", { name: "Create connection" }).click()
+      await expect(page.getByRole("heading", { name: "Vertex Lantern", level: 1 })).toBeVisible()
+      await expect(page.getByText("Anthropic (Google Vertex) · https://aiplatform.eu.rep.googleapis.com")).toBeVisible()
+      await expect(page.getByLabel("Region", { exact: true })).toHaveValue("eu")
+      await expect(page.getByLabel("Project", { exact: true })).toBeVisible()
+      await expect(page.getByText(/wxyz/).first()).toBeVisible()
+      await page.getByRole("button", { name: "Enter a new key" }).click()
+      const dialog = page.getByRole("dialog")
+      await expect(dialog.getByLabel("Service account key", { exact: true })).toBeVisible()
+      await dialog.getByRole("button", { name: "Cancel" }).click()
+      await expect(page.getByText("MIIsynthetic")).toHaveCount(0)
+      await expectLayout(page, info, `provider-vertex-connection-${width}-${theme}`, { scope: "main" })
     })

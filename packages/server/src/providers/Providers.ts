@@ -72,6 +72,7 @@ import type { ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
+import { parseServiceAccount } from "./vertex.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
 import { readDecisionUsage, unwrapEnvelope } from "@rp/shared/decisions.ts"
 
@@ -689,11 +690,17 @@ export const layer = (options: ProvidersOptions = {}) =>
         return trimmed === "" ? null : trimmed
       }
 
-      /** Short keys get no hint: four characters would be most of the key. */
-      const encryptKey = (key: string, credentialId: CredentialId) => ({
-        enc: secrets.encrypt(key, credentialBinding(credentialId)),
-        hint: key.length >= 12 ? key.slice(-4) : ""
-      })
+      /**
+       * Short keys get no hint: four characters would be most of the key. A service account's
+       * key file ends in the same characters as every other, so its hint is its key ID's end.
+       */
+      const encryptKey = (key: string, credentialId: CredentialId) => {
+        const account = parseServiceAccount(key)
+        return {
+          enc: secrets.encrypt(key, credentialBinding(credentialId)),
+          hint: account ? (account.privateKeyId?.slice(-4) ?? "") : key.length >= 12 ? key.slice(-4) : ""
+        }
+      }
 
       /** A typed key as a credential owned by a connection, bound to the connection's origin. */
       const typedCredential = (name: string, key: string, baseUrl: string) =>
@@ -1376,7 +1383,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                         ? prepared.kind.transport(observed, {
                             apiKey: prepared.apiKey,
                             baseUrl: prepared.baseUrl,
-                            settings: prepared.settings
+                            settings: prepared.settings,
+                            aside: routed
                           })
                         : observed
                     }
@@ -2018,6 +2026,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                   baseUrl: provider.baseUrl,
                   ...(provider.baseUrlExample ? { baseUrlExample: provider.baseUrlExample } : {}),
                   ...(provider.regionUrl ? { regionUrl: provider.regionUrl } : {}),
+                  ...(provider.regionUrls ? { regionUrls: provider.regionUrls } : {}),
+                  ...(provider.regionFormat ? { regionFormat: provider.regionFormat } : {}),
                   keyOptional: provider.keyOptional,
                   auth: provider.auth,
                   defaults: provider.defaults,

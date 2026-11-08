@@ -120,14 +120,27 @@ export const applyShims = (
   return { payload: current, applied }
 }
 
-/** The built-in shims, for what the live provider suite found (liveapi, 2026-11-07). */
+/** Takes Bedrock's `prompt_cache_breakpoint` markers out of a Responses or Chat Completions payload. */
+const withoutBreakpoints = (payload: Record<string, unknown>) => {
+  for (const items of [payload.input, payload.messages]) {
+    if (!Array.isArray(items)) continue
+    for (const item of items) {
+      const content = object(item)?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) delete object(block)?.prompt_cache_breakpoint
+    }
+  }
+  return payload
+}
+
+/** The built-in shims, for what the live provider suite found (liveapi, 2026-11-07), and documented limits. */
 export const builtinShims: ReadonlyArray<CompatShim> = [
   {
     // F7: "`top_p` is deprecated for this model."
     id: "claude-haiku-5-no-top-p",
     label: "Top P isn’t sent: this model refuses it.",
     models: "Claude Haiku 5",
-    providers: ["anthropic", "anthropic-bedrock", "openrouter"],
+    providers: ["anthropic", "anthropic-bedrock", "anthropic-vertex", "openrouter"],
     model: /(?:^|[/.])claude-haiku-5/i,
     payload: (payload) => {
       delete payload.top_p
@@ -198,5 +211,27 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     model: /^google\/gemini/i,
     capabilities: { prefill: "none" },
     fixed: ["prefill"]
+  },
+  {
+    // AWS: on bedrock-runtime, explicit prompt caching is "Responses API only" (each GPT model
+    // card); Chat Completions caches automatically. Markers there are taken out.
+    id: "bedrock-openai-chat-automatic-cache",
+    label: "Cache markers aren’t sent: Bedrock caches these requests automatically.",
+    models: "Every model on Chat Completions",
+    providers: ["openai-bedrock"],
+    apis: ["openai-completions"],
+    model: /./,
+    payload: withoutBreakpoints
+  },
+  {
+    // AWS: "For OpenAI models prior to GPT-5.6 (…), Implicit Prompt Caching is automatic"; explicit
+    // breakpoints are documented for GPT-5.6 and later only.
+    id: "bedrock-openai-before-5.6-automatic-cache",
+    label: "Cache markers aren’t sent: Bedrock caches these models automatically.",
+    models: "GPT-5.5 and earlier, and GPT OSS",
+    providers: ["openai-bedrock"],
+    apis: ["openai-responses"],
+    model: /(?:^|[./])gpt-(?:oss-|[1-4](?:[.-]|$)|5(?:\.[0-5])?(?:-|$))/i,
+    payload: withoutBreakpoints
   }
 ]

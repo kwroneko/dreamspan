@@ -22,7 +22,9 @@ import {
   parseProviderDraft,
   ProviderAdvanced,
   type ProviderDraft,
-  RegionField
+  ProjectField,
+  RegionField,
+  ServiceAccountKeyField
 } from "./providerFields.tsx"
 
 export function ConnectionsPage() {
@@ -179,6 +181,7 @@ function NewConnectionForm({
   const edit = (change: Partial<NewConnectionDraft>) => durable.setText(JSON.stringify({ ...values, ...change }))
   const [keyMode, setKeyMode] = useState<KeyMode>("typed")
   const [keyEmpty, setKeyEmpty] = useState(noKeys)
+  const [keyAccount, setKeyAccount] = useState<{ email: string; project: string | null } | null>(null)
   const [credentialId, setCredentialId] = useState<CredentialId | null>(credentials[0]?.id ?? null)
   const [submitted, setSubmitted] = useState(false)
 
@@ -194,10 +197,20 @@ function NewConnectionForm({
   const host = values.baseUrl.trim() !== "" && origin !== null ? new URL(origin).host : null
   const defaultName = host ?? provider?.label ?? ""
   const example = provider?.baseUrlExample ?? "http://localhost:8000/v1"
-  const keyMissing = aws ? keyEmpty.accessKeyId || keyEmpty.secretAccessKey : keyEmpty.apiKey
+  const google = parsed.settings.auth === "gcp-service-account"
+  const keyMissing = aws
+    ? keyEmpty.accessKeyId || keyEmpty.secretAccessKey
+    : google
+      ? keyAccount === null
+      : keyEmpty.apiKey
   const problems = {
     name: values.name.trim() === "" && defaultName === "" ? "Give the connection a name." : null,
     region: parsed.problems.region,
+    project:
+      parsed.problems.project ??
+      (google && keyMode === "typed" && keyAccount !== null && !keyAccount.project && !parsed.settings.project
+        ? "Enter the project ID: the key file names none."
+        : null),
     baseUrl:
       values.baseUrl.trim() === ""
         ? defaultUrl === null
@@ -270,7 +283,10 @@ function NewConnectionForm({
             items={providers.map((entry) => ({ value: entry.id, label: entry.label, description: entry.about }))}
             value={provider?.id ?? null}
             // Another provider starts from its own defaults.
-            onValueChange={(providerId) => edit({ providerId, apiId: "", provider: {} })}
+            onValueChange={(providerId) => {
+              setKeyAccount(null)
+              edit({ providerId, apiId: "", provider: {} })
+            }}
           />
         </Field>
         {provider && provider.apis.length > 1 && (
@@ -296,6 +312,15 @@ function NewConnectionForm({
             draft={values.provider}
             onChange={editProvider}
             error={shown(problems.region)}
+          />
+        )}
+        {provider && (
+          <ProjectField
+            provider={provider}
+            draft={values.provider}
+            onChange={editProvider}
+            error={shown(problems.project)}
+            keyProject={keyAccount?.project ?? null}
           />
         )}
         <Field
@@ -333,6 +358,13 @@ function NewConnectionForm({
             </Field>
           ) : aws ? (
             <AwsKeyFields origin={origin} error={shown(problems.apiKey)} onEmptyChange={typed} />
+          ) : google ? (
+            <ServiceAccountKeyField
+              about={provider?.auth.find((choice) => choice.id === parsed.settings.auth)?.about}
+              origin={origin}
+              error={shown(problems.apiKey)}
+              onLoad={setKeyAccount}
+            />
           ) : (
             <Field
               label="API key"
@@ -381,6 +413,7 @@ function NewConnectionForm({
             onChange={editProvider}
             problems={{
               region: null,
+              project: null,
               maxMarkers: shown(problems.maxMarkers),
               minTokens: shown(problems.minTokens)
             }}

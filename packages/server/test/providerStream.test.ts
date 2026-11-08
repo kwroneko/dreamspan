@@ -1519,6 +1519,9 @@ describe("provider registry", () => {
         "deepseek",
         "google",
         "anthropic-bedrock",
+        "anthropic-vertex",
+        "openai-responses-bedrock",
+        "openai-chat-bedrock",
         "system-one"
       ]
     ))

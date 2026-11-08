@@ -93,7 +93,14 @@ export const ProviderSettings = Schema.Struct({
   /** Sends the chat's id as `prompt_cache_key`, which OpenAI routes cache reads by. */
   promptCacheKey: Schema.optionalKey(Schema.Boolean),
   /** The cloud region: it sets the default address and what requests are signed for. Unset: read from the address. */
-  region: Schema.optionalKey(Schema.String)
+  region: Schema.optionalKey(Schema.String),
+  /** The Google Cloud project requests are billed to (Vertex AI). Unset: the service account key's own. */
+  project: Schema.optionalKey(Schema.String),
+  /**
+   * How a cache marker is written on the wire, where the provider's API takes another encoding than
+   * the API type's own: `prompt_cache_breakpoint` for OpenAI's APIs on AWS Bedrock.
+   */
+  cacheMarker: Schema.optionalKey(Schema.Literal("prompt_cache_breakpoint"))
 })
 export type ProviderSettings = typeof ProviderSettings.Type
 
@@ -116,12 +123,18 @@ export class ProviderInfo extends Schema.Class<ProviderInfo>("ProviderInfo")({
   baseUrlExample: Schema.optionalKey(Schema.String),
   /** The address for a region, `{region}` replaced, for providers whose address names one. */
   regionUrl: Schema.optionalKey(Schema.String),
+  /** Regions whose address doesn't follow `regionUrl` (Vertex's `global`, `us` and `eu`). */
+  regionUrls: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  /** How its regions are written: the form's help, an example and the pattern a region must match. */
+  regionFormat: Schema.optionalKey(
+    Schema.Struct({ about: Schema.String, example: Schema.String, pattern: Schema.String })
+  ),
   keyOptional: Schema.Boolean,
   /** The ways a key signs requests; the first is the default. */
   auth: Schema.Array(ProviderChoice),
   /** The defaults of every setting that applies to it. */
   defaults: ProviderSettings,
-  /** The settings its advanced section shows, in order. */
+  /** The settings its connection forms show, in order. */
   settings: Schema.Array(Schema.String),
   /** How long its cache lasts, in the user's terms; null where no lifetime is documented. */
   cacheLifetime: Schema.NullOr(Schema.String),
@@ -342,6 +355,7 @@ export const resolveModel = (
     return { value: fallback, source: "unknown" }
   }
   const layout: CacheLayout = {
+    ...(provider.cacheMarker !== undefined ? { marker: provider.cacheMarker } : {}),
     ...(provider.lookback !== undefined ? { lookback: provider.lookback } : {}),
     ...(provider.maxMarkers !== undefined ? { maxMarkers: provider.maxMarkers } : {}),
     ...(provider.minTokens !== undefined ? { minTokens: provider.minTokens } : {})

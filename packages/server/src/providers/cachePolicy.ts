@@ -54,6 +54,10 @@ const knownOpenAI = (model: string) =>
 
 const gpt55 = (model: string) => /(?:^|[/.])gpt-5\.5(?:-|$)/.test(model)
 
+/** OpenAI's models on Bedrock's OpenAI-compatible APIs (`us.openai.gpt-5.6-sol`, `openai.gpt-oss-120b`). */
+const bedrockOpenAI = (model: string, api: string) =>
+  (api === "openai-responses" || api === "openai-completions") && /(?:^|\.)openai\.gpt-/.test(model)
+
 export const documentedCachePolicy = (target: Target, payload: Record<string, unknown> = {}): CachePolicy | null => {
   const provider =
     target.provider === "openai-chat" || target.provider === "openai-responses" ? "openai" : target.provider
@@ -145,6 +149,8 @@ export const documentedCacheMinimum = (target: Target): number | null => {
   }
   // openaiSource and routerSource: 1,024 tokens for OpenAI's automatic caching.
   if ((provider === "openai" || provider === "azure") && knownOpenAI(model)) return 1024
+  // bedrockSource: 1,024 per marker for GPT-5.6 and later, and for earlier models' automatic cache.
+  if (provider === "amazon-bedrock" && bedrockOpenAI(model, target.api)) return 1024
   if (provider === "openrouter" && /^openai\//.test(model)) return 1024
   // routerSource: Gemini Pro 4,096, Flash 1,024.
   if (provider === "openrouter" && /^google\/gemini/.test(model)) return /pro/.test(model) ? 4096 : 1024
@@ -160,5 +166,9 @@ export const bestEffortCache = (target: Target): boolean => {
     target.provider === "openai-chat" || target.provider === "openai-responses" ? "openai" : target.provider
   const model = target.model.toLowerCase()
   if (provider === "openai" || provider === "azure") return knownOpenAI(model)
+  // Bedrock's automatic cache for OpenAI's models is "best effort" too (bedrockSource): every model
+  // on Chat Completions, which takes no markers there, and models before GPT-5.6 on Responses.
+  if (provider === "amazon-bedrock" && bedrockOpenAI(model, target.api))
+    return target.api === "openai-completions" || !newerGPT(model)
   return provider === "openrouter" && /^openai\//.test(model)
 }
