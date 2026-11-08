@@ -105,7 +105,13 @@ for (const width of [1440, 390])
       await expect(inside.locator("#results")).toHaveText("")
       await expectLayout(page, info, `html-scripts-off-${width}-${theme}`, { scope: "[data-testid=messages]" })
 
+      // The strip only asks: the dialog, outside the message, allows them.
       await run.click()
+      const confirm = page.getByRole("alertdialog")
+      await expect(confirm).toContainText(`Run scripts from ${name}?`)
+      await expect(frame).toHaveAttribute("src", "/frame/panel")
+      await confirm.getByRole("button", { name: "Run scripts", exact: true }).click()
+      await expect(confirm).toHaveCount(0)
       await expect(article.getByText("This panel has scripts.")).toHaveCount(0)
       await expect(frame).toHaveAttribute("src", "/frame/panel?scripts=1")
       await expect(inside.locator("body")).toHaveAttribute("data-ran", "yes", { timeout: 30_000 })
@@ -234,6 +240,7 @@ test("a panel with scripts can't navigate away from its document or get it again
     .getByRole("button", { name: `Run scripts from ${name}`, exact: true })
     .first()
     .click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Run scripts", exact: true }).click()
   await expect(article.getByText("This panel has scripts.")).toHaveCount(0)
   for (let index = 0; index < 5; index++)
     await expect(frames.nth(index)).toHaveAttribute("src", "/frame/panel?scripts=1")
@@ -429,6 +436,7 @@ test("a preset cannot assemble panel scripts under the card's approval", async (
   await expect(frame).toHaveAttribute("src", "/frame/panel")
   await expect(inside.locator("body")).not.toHaveAttribute("data-preset-ran", "yes")
   await page.getByRole("button", { name: "Run scripts from Source-preset", exact: true }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Run scripts", exact: true }).click()
   await expect(frame).toHaveAttribute("src", "/frame/panel?scripts=1")
   await expect(inside.locator("body")).toHaveAttribute("data-preset-ran", "yes")
   // The card's network approval cannot confer the preset's network permission either.
@@ -558,4 +566,140 @@ test("new preset approval cannot execute a previous preset's pending display tex
   }
   await expect(page.frameLocator('iframe[title="Panel"]').locator("b")).toHaveText("Next")
   await expect(page.locator("html")).not.toHaveAttribute("data-stale-panel-ran")
+})
+
+// A panel's script can focus its own document at any time. The app sends focus back, so the
+// typing stays in the composer, but a key typed in that moment can still reach the panel (its
+// frame runs in another process): the bridge never acts on keys, only on a press in the panel.
+// A press in the panel still gives it focus, and then its copy works.
+test("a panel that takes focus gets neither the typing nor the bridge, and a click in it still works", async ({
+  page
+}) => {
+  test.setTimeout(180_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: server().url })
+  const imported = await page.request.post(`${server().url}/library/import?name=focus.json`, {
+    data: Buffer.from(
+      JSON.stringify({
+        spec: "chara_card_v3",
+        spec_version: "3.0",
+        data: {
+          name: "Focus card",
+          first_mes: panel(
+            "Focus",
+            [
+              '<input id="field">',
+              "<script>setInterval(() => document.getElementById('field').focus(), 30)",
+              "addEventListener('keydown', () => rp.copy('Panel text'), true)",
+              "document.body.dataset.focusReady = 'yes'</script>"
+            ].join("\n")
+          )
+        }
+      })
+    ),
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(imported.status()).toBe(200)
+  const { ref } = ((await imported.json()) as { library: { ref: { id: RefId; entityId: EntityId } } }).library
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.SetHtmlApproval({ refId: ref.id, scripts: true, network: false })
+  )
+  // A preset without display scripts: the card alone is the panel's source, whatever an
+  // earlier test in this file left as the default.
+  const plain = await page.request.post(`${server().url}/library/import?name=Plain-preset.json`, {
+    data: Buffer.from(JSON.stringify({ openai_max_context: 8192 })),
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(plain.status()).toBe(200)
+  const { ref: preset } = ((await plain.json()) as { library: { ref: { id: RefId } } }).library
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.ChangeGenerationDefaults({ change: { preset: preset.id } })
+  )
+  const started = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.StartChat({
+      cards: [ref.entityId],
+      persona: null,
+      greeting: 0,
+      first: { _tag: "Send", content: "Evening.", speakerEntityId: null }
+    })
+  )
+  await page.goto(`${server().url}/chats/${started.chat.id}`)
+  const inside = page.frameLocator('iframe[title="Panel"]')
+  await expect(inside.locator("body")).toHaveAttribute("data-focus-ready", "yes")
+  await page.evaluate(() => navigator.clipboard.writeText("Unchanged"))
+  const composer = page.locator("textarea").last()
+  await composer.click()
+  await page.keyboard.type("Good evening to you", { delay: 60 })
+  // Focus went back: most of the typing is the composer's (without the guard, none of it is).
+  // A few keys typed while focus was away may reach the panel, more on a loaded host.
+  expect((await composer.inputValue()).length).toBeGreaterThan(9)
+  // Whatever key reached the panel gave it nothing to act on.
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("Unchanged")
+  // A press in the panel gives it focus, and its copy then works. (Its field may already hold
+  // the key or two it caught above.) The user stops typing first, as one does to reach for it.
+  await page.waitForTimeout(700)
+  await inside.locator("#field").click()
+  await page.keyboard.type("Room 4", { delay: 60 })
+  await expect(inside.locator("#field")).toHaveValue(/Room 4$/)
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("Panel text")
+})
+
+// A message's own HTML can paint over the strip (a decoy with pointer-events: none passes the
+// click to the button under it). So the strip's button only asks; the confirmation, outside
+// the message, is what allows the scripts.
+test("a click through a decoy over the strip doesn't allow a panel's scripts", async ({ page }) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const greetingWithDecoy = [
+    "Notice.",
+    "",
+    '<div style="position:relative;height:0"><div style="position:absolute;top:0;left:0;width:100%;height:120px;background:#2a6;color:#fff;pointer-events:none;z-index:50">Continue the story</div></div>',
+    "",
+    panel("Decoy", "<script>document.body.dataset.ran = 'yes'</script>")
+  ].join("\n")
+  const imported = await page.request.post(`${server().url}/library/import?name=decoy.json`, {
+    data: Buffer.from(
+      JSON.stringify({
+        spec: "chara_card_v3",
+        spec_version: "3.0",
+        data: { name: "Decoy card", first_mes: greetingWithDecoy }
+      })
+    ),
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(imported.status()).toBe(200)
+  const { ref } = ((await imported.json()) as { library: { ref: { id: RefId; entityId: EntityId } } }).library
+  const plain = await page.request.post(`${server().url}/library/import?name=Decoy-preset.json`, {
+    data: Buffer.from(JSON.stringify({ openai_max_context: 8192 })),
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(plain.status()).toBe(200)
+  const { ref: preset } = ((await plain.json()) as { library: { ref: { id: RefId } } }).library
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.ChangeGenerationDefaults({ change: { preset: preset.id } })
+  )
+  const started = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.StartChat({
+      cards: [ref.entityId],
+      persona: null,
+      greeting: 0,
+      first: { _tag: "Send", content: "Evening.", speakerEntityId: null }
+    })
+  )
+  await page.goto(`${server().url}/chats/${started.chat.id}`)
+  const frame = page.locator('iframe[title="Panel"]')
+  await expect(page.frameLocator('iframe[title="Panel"]').locator("#marker")).toHaveText("Decoy")
+  const run = page.getByRole("button", { name: "Run scripts from Decoy card", exact: true })
+  await expect(run).toBeVisible()
+  // The user clicks "Continue the story", which is painted over the button.
+  const box = (await run.boundingBox())!
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  const confirm = page.getByRole("alertdialog")
+  await expect(confirm).toContainText("Run scripts from Decoy card?")
+  await expect(frame).toHaveAttribute("src", "/frame/panel")
+  await confirm.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(confirm).toHaveCount(0)
+  await expect(frame).toHaveAttribute("src", "/frame/panel")
+  await expect(page.frameLocator('iframe[title="Panel"]').locator("body")).not.toHaveAttribute("data-ran", "yes")
 })

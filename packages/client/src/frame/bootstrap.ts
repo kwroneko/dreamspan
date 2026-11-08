@@ -33,6 +33,16 @@ const activation = navigator.userActivation
 const locallyActivated = activation
   ? Object.getOwnPropertyDescriptor(Object.getPrototypeOf(activation), "isActive")?.get?.bind(activation)
   : undefined
+const clock = performance.now.bind(performance)
+/** When the user last pressed in this frame (a trusted pointer press, never a key). */
+let pressedAt = Number.NEGATIVE_INFINITY
+/**
+ * The bridge's actions need the user's press in this frame, within the few seconds activation
+ * lasts. Activation alone isn't enough: a key press gives it too, and a panel can take focus on
+ * its own (the app sends it back, but a key typed meanwhile may reach it), and a key press on a
+ * link it focused is a trusted click.
+ */
+const pressed = () => clock() - pressedAt < 5000 && locallyActivated?.() === true
 const actionToken = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
   byte.toString(16).padStart(2, "0")
 ).join("")
@@ -145,7 +155,7 @@ function onClick(event: MouseEvent) {
   const link = event.target instanceof Element ? event.target.closest("a, area") : null
   if (!link) return
   event.preventDefault()
-  if (event.type !== "click" || !event.isTrusted || locallyActivated?.() !== true) return
+  if (event.type !== "click" || !event.isTrusted || !pressed()) return
   const href = (link.getAttribute("href") ?? link.getAttributeNS(XLINK, "href") ?? "").trim()
   if (/^https?:\/\//i.test(href)) post({ type: "rp:open", url: href, token: actionToken }, hostOrigin)
 }
@@ -164,12 +174,26 @@ function onMessage(event: MessageEvent<Incoming>) {
 /** Only a click in this frame grants its helpers activation; a parent click grants none. */
 const helpers = {
   copy: (text: unknown) => {
-    if (locallyActivated?.() === true) post({ type: "rp:copy", text: String(text), token: actionToken }, hostOrigin)
+    if (pressed()) post({ type: "rp:copy", text: String(text), token: actionToken }, hostOrigin)
   }
+}
+
+/**
+ * The user pressed in this frame: the app lets it keep focus (DocumentFrame.tsx takes focus back
+ * from a frame that takes it on its own). Only a trusted press counts, signed like the bridge's
+ * actions; a panel that removes this listener (document.open) only loses focus, never gains it.
+ * Sent on release too: a touch gives the page its activation only when the finger lifts.
+ */
+function onPress(event: PointerEvent) {
+  if (!event.isTrusted) return
+  pressedAt = clock()
+  post({ type: "rp:focus", token: actionToken }, hostOrigin)
 }
 
 function listen() {
   addEventListener("message", onMessage)
+  document.addEventListener("pointerdown", onPress, true)
+  document.addEventListener("pointerup", onPress, true)
   document.addEventListener("click", onClick, true)
   document.addEventListener("auxclick", onClick, true)
   Object.assign(window, { rp: helpers })

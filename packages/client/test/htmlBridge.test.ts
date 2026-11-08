@@ -10,7 +10,7 @@ import { panelHasScripts } from "../src/ui/html/messageHtml.ts"
 const token = "a".repeat(32)
 
 describe("the bridge", () => {
-  it("takes its four message types, each by its schema", () => {
+  it("takes its five message types, each by its schema", () => {
     expect(parseBridgeMessage({ type: "rp:ready", token })).toEqual({ type: "rp:ready", token })
     expect(parseBridgeMessage({ type: "rp:height", height: 120 })).toEqual({ type: "rp:height", height: 120 })
     expect(parseBridgeMessage({ type: "rp:open", token, url: "https://example.com/" })).toEqual({
@@ -18,6 +18,7 @@ describe("the bridge", () => {
       token,
       url: "https://example.com/"
     })
+    expect(parseBridgeMessage({ type: "rp:focus", token })).toEqual({ type: "rp:focus", token })
     expect(parseBridgeMessage({ type: "rp:copy", token, text: "HP 12/20" })).toEqual({
       type: "rp:copy",
       token,
@@ -32,6 +33,8 @@ describe("the bridge", () => {
       { type: "rp:ready", token: 1 },
       { type: "rp:ready", token: "short" },
       { type: "rp:copy", text: "Missing token" },
+      { type: "rp:focus" },
+      { type: "rp:focus", token: "short" },
       { type: "rp:open", url: "https://example.com/" },
       "rp:ready",
       42,

@@ -24,7 +24,10 @@ const Copy = Schema.Struct({
   token: Token,
   text: Schema.String.check(Schema.isMaxLength(MAX_BRIDGE_COPY))
 })
-const BridgeMessage = Schema.Union([Ready, Height, Open, Copy])
+// A trusted press in the frame: the user meant to give it focus (DocumentFrame.tsx takes focus
+// back from a frame that grabs it on its own, so typing meant for the app never reaches it).
+const Focus = Schema.Struct({ type: Schema.Literal("rp:focus"), token: Token })
+const BridgeMessage = Schema.Union([Ready, Height, Open, Copy, Focus])
 export type BridgeMessage = typeof BridgeMessage.Type
 
 const decode = Schema.decodeUnknownOption(BridgeMessage)
