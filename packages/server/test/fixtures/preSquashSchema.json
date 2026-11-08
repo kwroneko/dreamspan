@@ -868,7 +868,7 @@
       "type": "table",
       "name": "card_origins",
       "tbl_name": "card_origins",
-      "sql": "CREATE TABLE card_origins ( entity_id TEXT PRIMARY KEY REFERENCES entities(id), owner_user_id TEXT NOT NULL REFERENCES users(id), source_id TEXT NOT NULL, remote_id TEXT NOT NULL, remote_version TEXT NOT NULL, remote_sha256 TEXT NOT NULL, recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized')), created_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE card_origins ( entity_id TEXT PRIMARY KEY REFERENCES entities(id), owner_user_id TEXT NOT NULL REFERENCES users(id), source_id TEXT NOT NULL, remote_id TEXT NOT NULL, remote_version TEXT NOT NULL, seen_version TEXT, remote_sha256 TEXT NOT NULL, recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized')), created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",

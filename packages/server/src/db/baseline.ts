@@ -304,6 +304,7 @@ export const baseline: ReadonlyArray<string> = [
     source_id TEXT NOT NULL,
     remote_id TEXT NOT NULL,
     remote_version TEXT NOT NULL,
+    seen_version TEXT,
     remote_sha256 TEXT NOT NULL,
     recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized')),
     created_at INTEGER NOT NULL

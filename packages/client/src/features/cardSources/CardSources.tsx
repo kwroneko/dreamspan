@@ -4,6 +4,7 @@ import { useMemo, useSyncExternalStore } from "react"
 import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { cardSources, sourceRecognizers, type CardSource, type SourceInput } from "./sources.ts"
+import { CheckForNewer } from "./updates.tsx"
 
 function SourceRow({ source }: { source: CardSource }) {
   if (source.kind === "id") {
@@ -35,8 +36,12 @@ function SourceRow({ source }: { source: CardSource }) {
   )
 }
 
-/** Where the card came from: its archive and site links, then ids no site claimed. */
-export function CardSources({ doc }: { doc: SourceInput }) {
+/**
+ * Where the card came from: its archive and site links, then ids no site claimed. `entityId`,
+ * for a card with a revision of its own: one added from a card source offers Check for a newer
+ * version below them.
+ */
+export function CardSources({ doc, entityId, name }: { doc: SourceInput; entityId?: string; name?: string }) {
   const recognizers = useSyncExternalStore(sourceRecognizers.subscribe, sourceRecognizers.snapshot)
   const sources = useMemo(() => cardSources(doc, recognizers.entries), [doc, recognizers])
   return (
@@ -53,6 +58,7 @@ export function CardSources({ doc }: { doc: SourceInput }) {
           ))}
         </ul>
       )}
+      {entityId && <CheckForNewer entityId={entityId} name={name ?? ""} />}
     </section>
   )
 }

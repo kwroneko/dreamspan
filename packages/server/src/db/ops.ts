@@ -1618,6 +1618,38 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Struct({ entityId: EntityId, refId: RefId, existing: Schema.Boolean }),
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
+  /**
+   * The versions a source reported for cards the user added from it (results, Check for a
+   * newer version; spec/CARD-SOURCES.md §3.8): each becomes the origin's `seen_version`, null
+   * when it's the version the user has. A version already recorded writes nothing.
+   */
+  Rpc.make("NoteRemoteVersions", {
+    payload: {
+      userId: UserId,
+      sourceId: Schema.String,
+      items: Schema.Array(Schema.Struct({ remoteId: Schema.String, version: Schema.String })).check(
+        Schema.isMaxLength(200)
+      )
+    },
+    success: Schema.Struct({ noted: Schema.Int }),
+    error: StorageError
+  }),
+  /** The source's version the user took into their card (Review and merge, Replace): the origin's `remote_version`. */
+  Rpc.make("TakeRemoteVersion", {
+    payload: { userId: UserId, entityId: EntityId, version: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Add as a separate card (§3.8): the source's newer file as a new card, stored as an import
+   * of it is, with no origin row (the first card keeps it), and that version taken on the
+   * first card, in one transaction.
+   */
+  Rpc.make("AdoptRemoteVersionAsCard", {
+    payload: { userId: UserId, entityId: EntityId, version: Schema.String, file: AdoptFields.file },
+    success: Schema.Struct({ entityId: EntityId, refId: RefId }),
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
   // --- Chats: the chat RPCs beyond the graph operations above (writes.ts).
   /**
    * A new version of a slot, selected in a fork (absent or null: the current one), if the
@@ -3865,8 +3897,25 @@ export class ReadOps extends RpcGroup.make(
         entityId: EntityId,
         refId: RefId,
         archived: Schema.Boolean,
-        /** The source's version when it was added; null when unknown. */
-        remoteVersion: Schema.NullOr(Schema.String)
+        /** The source's version the user has; for a card found by its file's hash, that hash. */
+        remoteVersion: Schema.NullOr(Schema.String),
+        /** The newest version the source reported, when it isn't that one. */
+        seenVersion: Schema.NullOr(Schema.String),
+        /** Found by its origin row, which records versions (not by its file's hash). */
+        tracked: Schema.Boolean
+      })
+    ),
+    error: StorageError
+  }),
+  /** A live card's origin, when it was added from a card source; never contacts the source. */
+  Rpc.make("CardOrigin", {
+    payload: { userId: UserId, entityId: EntityId },
+    success: Schema.NullOr(
+      Schema.Struct({
+        sourceId: Schema.String,
+        remoteId: Schema.String,
+        remoteVersion: Schema.String,
+        seenVersion: Schema.NullOr(Schema.String)
       })
     ),
     error: StorageError

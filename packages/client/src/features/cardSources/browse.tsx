@@ -25,7 +25,7 @@ import { Icon } from "../../ui/Icon.tsx"
 import { InlinePanel, pressedButtonClass } from "../../ui/InlinePanel.tsx"
 import { ContextMenu, Menu, MenuCheckboxItem, MenuItem } from "../../ui/Menu.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
-import { Alert, EmptyState } from "../../ui/Surface.tsx"
+import { Alert, Badge, EmptyState } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import type { RemoteBrowse } from "../characters/homeSearch.ts"
 import { SortDirection, type SortOrder } from "../characters/cardBrowse.tsx"
@@ -779,6 +779,15 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
                 <Icon name="check" size={14} />
               </span>
             </Tooltip>
+          )}
+          {card.held?.update && mine !== null && (
+            <span
+              data-held-update
+              data-layout-overlay="The update badge sits over the portrait"
+              className="absolute bottom-2 left-2"
+            >
+              <Badge tone="warning">update available</Badge>
+            </span>
           )}
           {ratingShown && (
             <span

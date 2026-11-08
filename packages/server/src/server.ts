@@ -68,7 +68,11 @@ import { makeInspectorHandlers } from "./api/inspector.ts"
 import { Notices } from "./chat/Notices.ts"
 import { makeProviderHandlers, makeProviderListHandlers } from "./api/providers.ts"
 import { makeStImportHandlers } from "./api/stImport.ts"
-import { imageRoute as SourceImageRoute, makeCardSourceHandlers } from "./api/cardSources.ts"
+import {
+  imageRoute as SourceImageRoute,
+  makeCardSourceHandlers,
+  newerFileRoute as SourceNewerFileRoute
+} from "./api/cardSources.ts"
 import * as CardSources from "./sources/CardSources.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
 import { ImageTokenCounts } from "./chat/ImageTokenCounts.ts"
@@ -569,6 +573,7 @@ export const serverWith = <E>(
       AuthRoutes,
       ImportRoutes.layer,
       SourceImageRoute,
+      SourceNewerFileRoute,
       StaticRoutes,
       InterruptedRequests,
       RequestGuard

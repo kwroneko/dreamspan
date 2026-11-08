@@ -13,8 +13,10 @@
 // mirrored and self-contained files, each summary's and detail file's `download_modes` (left
 // out with `omitDownloadModes`, as a response cached from before cardex listed them), and
 // `refuseDownloads`, a card whose downloads are refused (an empty list, 403). Misuse answers
-// 400 `bad_request`, a cursor of another query 400 `invalid_cursor`. No real archive's cards, names or images are used: everything is
-// generated here. The development server and the tests use it in place of cardex, and the tests
+// 400 `bad_request`, a cursor of another query 400 `invalid_cursor`. `publish` makes a newer
+// version of a card under the same slug (its file changes, so its version, the file's SHA-256,
+// does), the older file still downloadable. No real archive's cards, names or images are used:
+// everything is generated here. The development server and the tests use it in place of cardex, and the tests
 // count what reaches it, so they can check that nothing is sent before the user asks (§5.1).
 import { createHash } from "node:crypto"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
@@ -361,6 +363,8 @@ export interface FakeArchive {
   readonly reset: () => void
   /** The next `times` requests get this status (and `Retry-After`), as a failing archive would answer. */
   readonly failNext: (status: number, times?: number, retryAfterSeconds?: number) => void
+  /** The card's author publishes a newer version: a changed description, the next `character_version`. */
+  readonly publish: (slug: string) => FakeCard
   /** From now on the archive refuses downloads of this card: no `download_modes`, 403 on a try. */
   readonly refuseDownloads: (slug: string) => void
   readonly close: () => Promise<void>
@@ -373,7 +377,7 @@ export const fakeCardexAdapter = (archive: Pick<FakeArchive, "origin">): CardSou
 const error = (code: string, message: string) => ({ error: code, message })
 
 export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promise<FakeArchive> => {
-  const cards = syntheticCards(options.cards ?? 240)
+  const cards = [...syntheticCards(options.cards ?? 240)]
   const bySlug = new Map(cards.map((c) => [c.slug, c]))
   const bySha = new Map(cards.map((c) => [c.sha256, c]))
   // The full image is a PNG; the thumbnails, as cardex's, WebP at 512 and 64 px wide.
@@ -393,6 +397,22 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       images.set(key, made)
     }
     return made
+  }
+  const publish = (slug: string) => {
+    const at = cards.findIndex((c) => c.slug === slug)
+    if (at < 0) throw new Error(`no fake card ${slug}`)
+    const card = cards[at]!
+    const doc = JSON.parse(card.json) as { data: { description: string; character_version: string } }
+    const revision = Number(doc.data.character_version.split(".")[1] ?? "0") + 1
+    doc.data.description = `${doc.data.description} Revised ${revision}: ${card.name} now keeps a garden.`
+    doc.data.character_version = `1.${revision}`
+    const json = JSON.stringify(doc)
+    const sha256 = createHash("sha256").update(json).digest("hex")
+    const next: FakeCard = { ...card, json, sha256, addedAt: card.addedAt + revision * 86_400_000 }
+    cards[at] = next
+    bySlug.set(slug, next)
+    bySha.set(sha256, next)
+    return next
   }
   const seen: Array<string> = []
   let failure: { status: number; times: number; retryAfter?: number; path?: string } | null = null
@@ -577,6 +597,12 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       }
       return json(res, 200, { ok: true })
     }
+    if (path === "/__fake/publish") {
+      const slug = url.searchParams.get("slug") ?? ""
+      if (!bySlug.has(slug)) return json(res, 404, error("not_found", "no such card"))
+      const next = publish(slug)
+      return json(res, 200, { slug, version: next.sha256 })
+    }
     seen.push(`${path}${url.search}`)
     if (failure && failure.times > 0 && (failure.path === undefined || failure.path === path)) {
       failure.times -= 1
@@ -698,6 +724,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     failNext: (status, times = 1, retryAfterSeconds) => {
       failure = { status, times, ...(retryAfterSeconds === undefined ? {} : { retryAfter: retryAfterSeconds }) }
     },
+    publish,
     refuseDownloads: (slug) => void refused.add(slug),
     close: () =>
       new Promise((resolve) => {

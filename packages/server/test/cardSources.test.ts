@@ -1,8 +1,9 @@
 // Card sources (spec/CARD-SOURCES.md, phase 1): the registry, the network consent rule (nothing
 // reaches a source until the user asks for something from it, §5.1), the guards that keep the
 // proxy from being an open one (§6.2), the self rate limit and coalescing (§5.5), the cache's
-// lifetimes, pinning, cap and per-user namespace (§4.1), against the fake archive's synthetic
-// cards. No real archive is contacted.
+// lifetimes, pinning, cap and per-user namespace (§4.1), and updates (§3.8: version markers,
+// Check for a newer version, the newer file, Add as a separate card), against the fake
+// archive's synthetic cards. No real archive is contacted.
 import { afterAll, assert, describe, it, layer } from "@effect/vitest"
 import { emptySourceQuery, remoteEntityId, SourceFailed } from "@rp/shared/cardSources.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -542,6 +543,128 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
         yield* outcome(api.SourceSearch({ sourceId: "cardex", query, page: null })),
         "SourceFailed:unreachable"
       )
+    })
+  )
+
+  // --- Updates (§3.8, §11 phase 5).
+  const newerFile = (entityId: string, headers: Record<string, string>) =>
+    Effect.flatMap(base, (url) => Effect.promise(() => fetch(`${url}/sources/held/${entityId}/file`, { headers })))
+  const importFile = (bytes: Uint8Array, query: Record<string, string>) =>
+    Effect.flatMap(base, (url) =>
+      Effect.promise(() =>
+        fetch(`${url}/library/import?${new URLSearchParams(query)}`, {
+          method: "POST",
+          headers: { ...alice, "content-type": "application/octet-stream" },
+          body: bytes
+        })
+      )
+    )
+
+  it.effect("a newer version: Check records it; its file stages for merging; taking it ends the notice", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[20]!
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      const entityId = added.entityId
+      // The origin is local: reading it sends nothing.
+      archive.reset()
+      assert.deepStrictEqual(yield* api.CardOrigin({ entityId }), {
+        entityId,
+        sourceId: "cardex",
+        sourceName: "cardex",
+        remoteId: card.slug,
+        remoteVersion: card.sha256,
+        newerVersion: null
+      })
+      assert.strictEqual(archive.hits(), 0)
+      // Nothing newer yet; then the author publishes one.
+      assert.isNull((yield* api.CheckRemoteVersion({ entityId })).newerVersion)
+      const next = archive.publish(card.slug)
+      const checked = yield* api.CheckRemoteVersion({ entityId })
+      assert.strictEqual(checked.newerVersion, next.sha256)
+      assert.isTrue(archive.paths().every((path) => path.startsWith("/api/v1/cards/batch")))
+      assert.isTrue((yield* api.ListLibrary({ kind: "card" })).find((r) => r.id === added.refId)!.updateAvailable)
+      // The newer file, fetched when the update is opened, goes on the import line like a file from disk.
+      const response = yield* newerFile(entityId, alice)
+      assert.strictEqual(response.status, 200)
+      assert.strictEqual(response.headers.get("x-remote-version"), next.sha256)
+      const bytes = new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))
+      const staged = yield* importFile(bytes, { name: `${card.slug}.png`, into: added.refId, mode: "merge" })
+      assert.strictEqual(staged.status, 200, yield* Effect.promise(() => staged.clone().text()))
+      const stagedRevision = (
+        (yield* Effect.promise(() => staged.json())) as {
+          library?: { stagedRevisionId?: string }
+        }
+      ).library?.stagedRevisionId
+      assert.isString(stagedRevision)
+      const status = yield* api.ForkMergeStatus({ refId: added.refId as RefId })
+      assert.isTrue(status.versions.some((revision) => revision.id === stagedRevision))
+      const taken = yield* api.TakeRemoteVersion({ entityId, version: next.sha256 })
+      assert.deepStrictEqual([taken.remoteVersion, taken.newerVersion], [next.sha256, null])
+      // Nobody else sees or changes it.
+      const theirs = yield* client(bob)
+      assert.isNull(yield* theirs.CardOrigin({ entityId }))
+      assert.strictEqual(yield* outcome(theirs.CheckRemoteVersion({ entityId })), "NotFound")
+      assert.strictEqual(yield* outcome(theirs.TakeRemoteVersion({ entityId, version: "x" })), "NotFound")
+      assert.strictEqual(yield* outcome(theirs.AddRemoteVersionAsCard({ entityId })), "NotFound")
+      assert.strictEqual((yield* newerFile(entityId, bob)).status, 404)
+      // Turned off, the card shows no origin and nothing is sent.
+      yield* api.SetCardSourceEnabled({ sourceId: "cardex", enabled: false })
+      archive.reset()
+      assert.isNull(yield* api.CardOrigin({ entityId }))
+      assert.strictEqual(yield* outcome(api.CheckRemoteVersion({ entityId })), "SourceFailed:disabled")
+      assert.strictEqual(archive.hits(), 0)
+      yield* api.SetCardSourceEnabled({ sourceId: "cardex", enabled: true })
+    })
+  )
+
+  it.effect("Add as a separate card: the newer file as a card of its own, the first card takes that version", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[21]!
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      const next = archive.publish(card.slug)
+      yield* api.CheckRemoteVersion({ entityId: added.entityId })
+      const before = (yield* api.ListLibrary({ kind: "card" })).length
+      const separate = yield* api.AddRemoteVersionAsCard({ entityId: added.entityId })
+      assert.notStrictEqual(separate.entityId, added.entityId)
+      assert.strictEqual(separate.name, card.name)
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before + 1)
+      const doc = (yield* api.OpenEditor({ refId: separate.refId as RefId })).doc as {
+        description?: string
+        source?: ReadonlyArray<string>
+      }
+      assert.include(doc.description ?? "", "now keeps a garden")
+      assert.include(doc.source ?? [], `${archive.origin}/c/${card.slug}`)
+      // The first card keeps its text and its origin, now at that version; the new one has none.
+      const first = (yield* api.OpenEditor({ refId: added.refId as RefId })).doc as { description?: string }
+      assert.notInclude(first.description ?? "", "now keeps a garden")
+      const origin = yield* api.CardOrigin({ entityId: added.entityId })
+      assert.deepStrictEqual([origin?.remoteVersion, origin?.newerVersion], [next.sha256, null])
+      assert.isNull(yield* api.CardOrigin({ entityId: separate.entityId }))
+    })
+  )
+
+  it.effect("fresh results record a newer version; a page from the cache records nothing", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[22]!
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      const query = { ...emptySourceQuery, text: card.name }
+      const held = (page: { items: ReadonlyArray<{ remoteId: string; held?: { update: boolean } }> }) =>
+        page.items.find((item) => item.remoteId === card.slug)?.held
+      assert.isFalse(held(yield* api.SourceSearch({ sourceId: "cardex", query, page: null }))!.update)
+      const next = archive.publish(card.slug)
+      // The same query again is the cached page, from before: it reports nothing new.
+      assert.isFalse(held(yield* api.SourceSearch({ sourceId: "cardex", query, page: null }))!.update)
+      assert.isNull((yield* api.CardOrigin({ entityId: added.entityId }))!.newerVersion)
+      // Another query asks the archive: its page reports the newer version, recorded.
+      const fresh = yield* api.SourceSearch({ sourceId: "cardex", query: { ...query, sort: "name" }, page: null })
+      assert.isTrue(held(fresh)!.update)
+      assert.strictEqual((yield* api.CardOrigin({ entityId: added.entityId }))!.newerVersion, next.sha256)
+      // The cached page now shows it too, from what was recorded, and doesn't undo it.
+      assert.isTrue(held(yield* api.SourceSearch({ sourceId: "cardex", query, page: null }))!.update)
+      assert.strictEqual((yield* api.CardOrigin({ entityId: added.entityId }))!.newerVersion, next.sha256)
     })
   )
 })

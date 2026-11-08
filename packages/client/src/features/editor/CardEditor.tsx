@@ -425,6 +425,8 @@ function GreetingsTab({ store, layout }: CardTabProps) {
 
 function MetadataTab({ store, call, layout }: CardTabProps) {
   const doc = useWorkingDoc(store)
+  const snapshot = useEditorState(store).snapshot
+  const name = useText(store, ["name"]) ?? ""
   const about = (
     <>
       <CardField store={store} field="creator_notes" label="Creator's notes" rows={4} />
@@ -457,7 +459,11 @@ function MetadataTab({ store, call, layout }: CardTabProps) {
         </h3>
         <Talkativeness store={store} />
       </section>
-      <CardSources doc={doc as Parameters<typeof CardSources>[0]["doc"]} />
+      <CardSources
+        doc={doc as Parameters<typeof CardSources>[0]["doc"]}
+        name={name}
+        {...(snapshot && snapshot.revisionNumber > 0 ? { entityId: snapshot.ref.entityId } : {})}
+      />
     </div>
   )
 }
