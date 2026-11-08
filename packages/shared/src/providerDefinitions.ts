@@ -117,53 +117,6 @@ export const builtinProviders: ReadonlyArray<ProviderDefinition> = [
     defaultFor: ["openai-responses"]
   },
   {
-    // OpenAI's models on Bedrock (bedrockOpenAI.ts): its runtime's OpenAI-compatible APIs, with
-    // Bedrock's keys and its own cache. GPT-5.6 and later cache at `prompt_cache_breakpoint`
-    // markers on the Responses API, read only at a position an earlier request also marked (a
-    // request "reads the cache only if it starts with an entire earlier request"), so markers go
-    // at each section and the previous history marker is repeated, as for Claude on Bedrock; the
-    // automatic marker on the latest message takes one of the four writes. Earlier models, and
-    // Chat Completions, cache automatically only (shims.ts). Source: AWS's prompt caching guide.
-    id: "openai-bedrock",
-    label: "OpenAI (AWS Bedrock)",
-    about: "GPT models through Amazon Bedrock, in your AWS account.",
-    apis: [
-      {
-        id: "openai-responses-bedrock",
-        label: "Responses",
-        about: "OpenAI’s Responses API, as Bedrock serves it. Only this one keeps cache markers."
-      },
-      {
-        id: "openai-chat-bedrock",
-        label: "Chat Completions",
-        about: "OpenAI’s Chat Completions API, as Bedrock serves it. Its caching is automatic only."
-      }
-    ],
-    baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
-    regionUrl: "https://bedrock-runtime.{region}.amazonaws.com/openai/v1",
-    regionFormat: awsRegions,
-    keyOptional: false,
-    auth: bedrockAuth,
-    defaults: {
-      auth: "api-key",
-      cacheBreakpoints: "explicit",
-      cacheMarker: "prompt_cache_breakpoint",
-      lookback: false,
-      maxMarkers: 4,
-      // AWS's example sends one key across requests so they reach the same cache.
-      promptCacheKey: true
-    },
-    settings: ["region", "cacheBreakpoints", "lookback", "maxMarkers", "minTokens", "promptCacheKey", "cacheTtlS"],
-    cacheContract: "amazon-bedrock",
-    cacheLifetime: "At least 30 minutes for GPT-5.6 and later; not documented for earlier models",
-    accounting: [
-      "Cached input is part of the input count. Cache reads are billed at the cached price.",
-      "For GPT-5.6 and later, cache writes cost 1.25 times the input price. Earlier models charge nothing for writes.",
-      "Model IDs name an inference profile, such as us. or global.; global ones cost less."
-    ],
-    defaultFor: ["openai-responses-bedrock", "openai-chat-bedrock"]
-  },
-  {
     id: "anthropic",
     label: "Anthropic",
     about: "Claude through Anthropic’s own API.",
@@ -265,6 +218,53 @@ export const builtinProviders: ReadonlyArray<ProviderDefinition> = [
       "Prices are Google’s. A us, eu or single region costs about 10% more than global for newer models."
     ],
     defaultFor: ["anthropic-vertex"]
+  },
+  {
+    // OpenAI's models on Bedrock (bedrockOpenAI.ts): its runtime's OpenAI-compatible APIs, with
+    // Bedrock's keys and its own cache. GPT-5.6 and later cache at `prompt_cache_breakpoint`
+    // markers on the Responses API, read only at a position an earlier request also marked (a
+    // request "reads the cache only if it starts with an entire earlier request"), so markers go
+    // at each section and the previous history marker is repeated, as for Claude on Bedrock; the
+    // automatic marker on the latest message takes one of the four writes. Earlier models, and
+    // Chat Completions, cache automatically only (shims.ts). Source: AWS's prompt caching guide.
+    id: "openai-bedrock",
+    label: "OpenAI (AWS Bedrock)",
+    about: "GPT models through Amazon Bedrock, in your AWS account.",
+    apis: [
+      {
+        id: "openai-responses-bedrock",
+        label: "Responses",
+        about: "OpenAI’s Responses API, as Bedrock serves it. Only this one keeps cache markers."
+      },
+      {
+        id: "openai-chat-bedrock",
+        label: "Chat Completions",
+        about: "OpenAI’s Chat Completions API, as Bedrock serves it. Its caching is automatic only."
+      }
+    ],
+    baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+    regionUrl: "https://bedrock-runtime.{region}.amazonaws.com/openai/v1",
+    regionFormat: awsRegions,
+    keyOptional: false,
+    auth: bedrockAuth,
+    defaults: {
+      auth: "api-key",
+      cacheBreakpoints: "explicit",
+      cacheMarker: "prompt_cache_breakpoint",
+      lookback: false,
+      maxMarkers: 4,
+      // AWS's example sends one key across requests so they reach the same cache.
+      promptCacheKey: true
+    },
+    settings: ["region", "cacheBreakpoints", "lookback", "maxMarkers", "minTokens", "promptCacheKey", "cacheTtlS"],
+    cacheContract: "amazon-bedrock",
+    cacheLifetime: "At least 30 minutes for GPT-5.6 and later; not documented for earlier models",
+    accounting: [
+      "Cached input is part of the input count. Cache reads are billed at the cached price.",
+      "For GPT-5.6 and later, cache writes cost 1.25 times the input price. Earlier models charge nothing for writes.",
+      "Model IDs name an inference profile, such as us. or global.; global ones cost less."
+    ],
+    defaultFor: ["openai-responses-bedrock", "openai-chat-bedrock"]
   },
   {
     id: "openrouter",

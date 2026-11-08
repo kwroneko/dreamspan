@@ -12,10 +12,10 @@ test.describe.configure({ mode: "serial" })
 
 const PROVIDERS = [
   "OpenAI",
-  "OpenAI (AWS Bedrock)",
   "Anthropic",
   "Anthropic (AWS Bedrock)",
   "Anthropic (Google Vertex)",
+  "OpenAI (AWS Bedrock)",
   "OpenRouter",
   "DeepSeek",
   "Google AI Studio",

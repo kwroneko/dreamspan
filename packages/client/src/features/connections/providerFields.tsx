@@ -190,6 +190,7 @@ export function ServiceAccountKeyField({
       <Input
         type="file"
         accept=".json,application/json"
+        className="py-1.5 leading-5"
         onChange={async (event) => {
           const file = event.currentTarget.files?.[0]
           setKey(null)
