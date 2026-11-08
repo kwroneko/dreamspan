@@ -8,11 +8,18 @@
 //   only those the archive still lists.
 // - `/api/v1/search` pages two ways: text search (`mode=fts`) with an opaque `next_cursor`,
 //   semantic search with page numbers (240 results at most, no cursor, no sort). The page token
-//   handed out is `c:<cursor>` or `p:<n>`, so the client never needs to know which.
+//   handed out is `c:<cursor>` or `p:<n>`, so the client never needs to know which. A cursor
+//   cardex no longer takes answers 400 `invalid_cursor` (`bad_request` before cardex named it),
+//   and the search starts again from its first page; any other misuse (`bad_request`) is an error.
 // - A card is fetched as `/api/v1/cards/batch?ids=<slug>` (its summary and file hash) and then
 //   `/api/v1/download/<sha256>` as the archive's mirrored PNG (the card in its `chara`/`ccv3`
-//   chunks, its portrait the image itself); a card whose original is CHARX has no derived PNG
-//   and is fetched as that original.
+//   chunks, its portrait the image itself). A card whose original is CHARX has no mirrored or
+//   self-contained file (404) and is fetched as `mode=json`, which every card has: its V2/V3
+//   JSON with the `extensions.cardex` block. A summary's `download_modes` (the modes that answer
+//   200, in the order mirrored, self-contained, json, original; a CHARX card's are json and
+//   original) picks the mode instead, with no 404 to learn it; an empty list means cardex
+//   refuses downloads of the card, and none is tried. A response cached from before cardex
+//   listed them (up to 30 minutes) lacks the field, and the fallback above applies.
 // - Batches are sent sorted and without duplicates, comma-joined as `%2C`: cardex's canonical
 //   form, which it otherwise answers with a 308.
 // - Pictures are `/t/<sha256>.512.webp` and `/i/<sha256>.<ext>` on cardex.zip, given as paths.
@@ -50,6 +57,8 @@ interface Summary {
   readonly version?: string | null
   readonly updated_at?: string | null
   readonly superseded_by?: string | null
+  /** The download modes that answer 200 for this card; absent from older answers. */
+  readonly download_modes?: ReadonlyArray<string> | null
 }
 
 /** v1's capabilities: each filter by its parameter name. */
@@ -116,6 +125,24 @@ export const summaryOf = (item: Summary, origin = CARDEX_ORIGIN): AdapterSummary
 
 const summaries = (items: unknown, origin: string) =>
   Array.isArray(items) ? items.flatMap((item) => summaryOf(item as Summary, origin) ?? []) : null
+
+/** The download modes this adapter takes, best first: the PNG holds the portrait, the JSON doesn't. */
+const DOWNLOAD_MODES = ["mirrored", "json"] as const
+
+/**
+ * The download mode for a card: the best one its summary lists; `refused` when it lists none
+ * (cardex won't give the card), null when it lists none of ours; with no list, undefined (try
+ * `mirrored`, then `json` on its 404).
+ */
+export const downloadModeOf = (listed: unknown): (typeof DOWNLOAD_MODES)[number] | "refused" | null | undefined => {
+  if (!Array.isArray(listed)) return undefined
+  if (listed.length === 0) return "refused"
+  return DOWNLOAD_MODES.find((mode) => listed.includes(mode)) ?? null
+}
+
+/** A refusal that means the cursor is no longer good (expired, or another query's): `invalid_cursor`. */
+export const cursorRefused = (failure: SourceFailed) =>
+  failure.reason === "bad_response" && failure.code === "invalid_cursor"
 
 /** The page token handed out: `c:<cursor>` (text search) or `p:<n>` (semantic search). */
 const pageOf = (token: string | null): { readonly cursor: string } | { readonly page: number } | null => {
@@ -337,10 +364,10 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         const semantic = query.filters.mode === "semantic"
         const page = pageOf(token)
         const raw = yield* getJson(http, api("/search", searchParams(query, token))).pipe(
-          // A cursor cardex no longer takes (expired, or a deployment changed) restarts the
-          // search, as its docs ask; the client drops the cards it already shows.
+          // A cursor cardex no longer takes (expired, or for another query) restarts the search
+          // from page 1, as its docs ask; the client drops the cards it already shows.
           Effect.catchIf(
-            (failure) => failure.reason === "bad_response" && page !== null && "cursor" in page,
+            (failure) => page !== null && "cursor" in page && cursorRefused(failure),
             () => getJson(http, api("/search", searchParams(query, null)))
           )
         )
@@ -392,13 +419,24 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         const sha = (item as { file_sha256?: unknown }).file_sha256 ?? item.version
         if (!summary || typeof sha !== "string" || !/^[0-9a-f]{64}$/.test(sha)) return yield* bad()
         const download = (mode: string) => http.get(api(`/download/${sha}`, new URLSearchParams({ mode })), "card")
-        // The mirrored PNG holds the card and its portrait; a CHARX original has none.
-        const file = yield* download("mirrored").pipe(
-          Effect.catchIf(
-            (failure) => failure.reason === "not_found",
-            () => download("original")
-          )
-        )
+        const listed = downloadModeOf(item.download_modes)
+        if (listed === "refused")
+          return yield* new SourceFailed({
+            sourceId: ID,
+            reason: "refused",
+            message: "cardex doesn't allow downloading this card."
+          })
+        if (listed === null) return yield* bad("cardex offers this card in no form this app reads")
+        // The mirrored PNG holds the card and its portrait; a CHARX original has none, but every
+        // card has its JSON.
+        const file = yield* listed
+          ? download(listed)
+          : download("mirrored").pipe(
+              Effect.catchIf(
+                (failure) => failure.reason === "not_found",
+                () => download("json")
+              )
+            )
         return { bytes: file.bytes, fileName: fileNameOf(file, remoteId), summary }
       }),
     image: (http, ref) =>

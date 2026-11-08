@@ -37,6 +37,7 @@ import { StFileResult } from "@rp/shared/stImportApi.ts"
 import { describeImage } from "./images.ts"
 import { readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
 import { prepareAvatarThumbnails } from "./prepareThumbnails.ts"
+import { withSourceLink } from "./sourceLink.ts"
 import { readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { type AvatarCrop, cropKey, mediaWidth, parseCropKey } from "@rp/shared/media.ts"
@@ -215,6 +216,11 @@ export const layer = Layer.unwrap(
       if (mode !== null && into === null) return jsonError(400, "a new version needs the card it's for (into)")
       if (mode === "replace" && (head === null || head.length > 100))
         return jsonError(400, "replace needs the head the preview showed")
+      // A new version from the card source the card came from keeps the card's link back to its
+      // page there (spec/CARD-SOURCES.md §3.8, §4.5): the file doesn't name it.
+      const link = query.get("link")
+      if (link !== null && (mode === null || link === "" || link.length > 2048))
+        return jsonError(400, "link names the page of a new version of a card, up to 2,048 characters")
       // Before the body is read: a refused import reads, parses and stores nothing.
       const target = into === null ? null : yield* reader.GetLibraryRef({ userId: user.id, refId: into })
       if (target !== null && target.kind !== "card" && target.parentEntityId !== null) {
@@ -241,7 +247,11 @@ export const layer = Layer.unwrap(
               // The cap applies as the body arrives: past it, after a pause or past the deadline,
               // reading stops, and the answer closes the connection.
               const body = yield* readBody(message, limits)
-              const parsed = yield* formats.parse(body, fileName)
+              const read = yield* formats.parse(body, fileName)
+              const parsed =
+                link !== null && read.library?.kind === "card"
+                  ? { ...read, library: withSourceLink(read.library, link) }
+                  : read
               if (mode === "preview") {
                 if (parsed.library === null)
                   return yield* HttpServerResponse.schemaJson(CardReplacePreview)(

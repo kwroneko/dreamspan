@@ -147,7 +147,9 @@ export const SourceFailure = Schema.Literals([
   "unauthorized",
   "not_found",
   "bad_response",
-  "disabled"
+  "disabled",
+  /** The source won't give this card: cardex lists no download for it, or an anonymous source answered 401/403. */
+  "refused"
 ])
 export type SourceFailure = typeof SourceFailure.Type
 
@@ -156,6 +158,8 @@ export class SourceFailed extends Schema.TaggedError<SourceFailed>()("SourceFail
   reason: SourceFailure,
   /** For `rate_limited`: when to try again. */
   retryAfterMs: Schema.optionalKey(Schema.Number),
+  /** For a refused request (`bad_response` from a 400): the source's own error code, when its answer named one. */
+  code: Schema.optionalKey(Schema.String),
   message: Schema.String
 }) {}
 
@@ -272,6 +276,30 @@ export type SourceAdminSettings = typeof SourceAdminSettings.Type
 
 const sourceErrors = Schema.Union([SourceFailed, NotFound, ServerError])
 
+/**
+ * A card added from a card source, as its editor shows it (§3.8): which source card it is,
+ * the version the user has, and the newer one the source reported, if any.
+ */
+export const CardOrigin = Schema.Struct({
+  entityId: Schema.String,
+  sourceId: Schema.String,
+  sourceName: Schema.String,
+  remoteId: Schema.String,
+  /** The source's version the user has: the one added, or one taken since. */
+  remoteVersion: Schema.String,
+  /** The newest version the source reported, when it isn't that one: an update is waiting. */
+  newerVersion: Schema.NullOr(Schema.String)
+})
+export type CardOrigin = typeof CardOrigin.Type
+
+/** The header on the newer file's response (`GET /sources/held/<entityId>/file`): the version it is. */
+export const REMOTE_VERSION_HEADER = "x-remote-version"
+/**
+ * The header on the newer file's response: the card's link back to its page on the source, which
+ * the import route adds to the new version's `source` list when it's sent as `link` (§4.5).
+ */
+export const SOURCE_LINK_HEADER = "x-source-link"
+
 export class CardSourcesApi extends RpcGroup.make(
   /** The registered sources as this user has them. Never contacts a source. */
   Rpc.make("ListCardSources", { success: SourceList, error: ServerError }),
@@ -353,6 +381,39 @@ export class CardSourcesApi extends RpcGroup.make(
       name: Schema.String,
       existing: Schema.Boolean
     }),
+    error: sourceErrors
+  }),
+  /**
+   * The card's origin when the user added it from a source that's on for them, else null.
+   * Never contacts a source.
+   */
+  Rpc.make("CardOrigin", {
+    payload: { entityId: Schema.String.check(Schema.isMaxLength(100)) },
+    success: Schema.NullOr(CardOrigin),
+    error: ServerError
+  }),
+  /** Check for a newer version (§3.8): asks the source for the card's current version. */
+  Rpc.make("CheckRemoteVersion", {
+    payload: { entityId: Schema.String.check(Schema.isMaxLength(100)) },
+    success: CardOrigin,
+    error: sourceErrors
+  }),
+  /**
+   * The source's version the user took into the card, by Review and merge (once its file is
+   * staged) or Replace: the update is no longer waiting. Never contacts a source.
+   */
+  Rpc.make("TakeRemoteVersion", {
+    payload: {
+      entityId: Schema.String.check(Schema.isMaxLength(100)),
+      version: Schema.String.check(Schema.isMaxLength(500))
+    },
+    success: CardOrigin,
+    error: sourceErrors
+  }),
+  /** Add as a separate card (§3.8): the source's newer version as a new card; the first card takes that version. */
+  Rpc.make("AddRemoteVersionAsCard", {
+    payload: { entityId: Schema.String.check(Schema.isMaxLength(100)) },
+    success: Schema.Struct({ entityId: Schema.String, refId: Schema.String, name: Schema.String }),
     error: sourceErrors
   }),
   /** Never contacts a source. */

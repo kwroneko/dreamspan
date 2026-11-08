@@ -3,7 +3,7 @@ import type { LibraryRef } from "@rp/shared/library.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
-import { archiveCandidatesSql } from "../src/db/cardArchive.ts"
+import { archiveCandidatesParams, archiveCandidatesSql } from "../src/db/cardArchive.ts"
 import { client, testConfig, withServer } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
@@ -18,12 +18,19 @@ describe("card archive", () => {
         [
           {
             sql: `EXPLAIN QUERY PLAN ${archiveCandidatesSql}`,
-            params: [userId, userId, userId, userId]
+            params: archiveCandidatesParams(userId)
           }
         ],
         { readOnly: true }
       )
-      assert.isTrue(plan!.some((row) => /SEARCH er USING COVERING INDEX/.test(String(row.detail))))
+      const details = plan!.map((row) => String(row.detail))
+      assert.isTrue(details.some((detail) => /SEARCH er USING COVERING INDEX/.test(detail)))
+      // "Only tried": the card's origin by its key, its participation by the card's.
+      assert.isTrue(details.some((detail) => /SEARCH o USING INDEX sqlite_autoindex_card_origins_1/.test(detail)))
+      assert.isFalse(
+        details.some((detail) => /SCAN (o|p|v|s|c)\b/.test(detail)),
+        details.join("\n")
+      )
     }).pipe(Effect.scoped, withServer(config))
   })
   it.live("retains fork activity after the child is unlinked", () => {
@@ -207,6 +214,59 @@ describe("card archive", () => {
         assert.strictEqual(yield* api.UndoCardArchive(receipt), 1)
         assert.strictEqual(yield* api.UndoCardArchive(receipt), 0)
         assert.lengthOf(yield* api.ListLibrary({ kind: "card", archived: true }), 1)
+        // "Only tried" (spec/CARD-SOURCES.md §9 D3): every even card was added from cardex; one has
+        // two of the user's messages in a chat, one has one, one has a reply only.
+        const chat = yield* api.CreateChat({ title: "Synthetic tries" })
+        const message = (n: number, entityId: string, writer: "human" | "model") =>
+          [
+            {
+              sql: "INSERT INTO slots(id,chat_id,depth,selected_version_id,created_at) VALUES(?,?,0,?,?)",
+              params: [`tried-s-${n}`, chat.id, `tried-v-${n}`, old]
+            },
+            {
+              sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,macro_mode,origin,content,cast_json,created_at,updated_at) VALUES(?,?,0,'complete',?,'verbatim',?,'Synthetic try',?,?,?)",
+              params: [
+                `tried-v-${n}`,
+                `tried-s-${n}`,
+                writer,
+                writer === "human" ? "user_written" : "generated",
+                JSON.stringify([entityId]),
+                old + 1,
+                old + 1
+              ]
+            }
+          ].reverse() // the version first: a slot can only select a version that exists
+        yield* fixtureSql(config.dataDir, [
+          {
+            sql: "INSERT INTO card_origins(entity_id, owner_user_id, source_id, remote_id, remote_version, remote_sha256, recognized_by, created_at) SELECT id, owner_user_id, 'cardex', 'remote-'||id, 'v1', 'sha', 'adopted', ? FROM entities WHERE owner_user_id = ? AND CAST(substr(id, 11) AS INTEGER) % 2 = 0",
+            params: [old, userId]
+          },
+          ...message(0, "archive-e-2", "human"),
+          ...message(1, "archive-e-2", "human"),
+          ...message(2, "archive-e-4", "human"),
+          ...message(3, "archive-e-6", "model")
+        ])
+        const triedStart = performance.now()
+        const tried = yield* reader.ListArchiveCandidates({ userId, criteria: { tried: 1 } })
+        console.log(`Only tried, 5,000 cards: ${Math.round(performance.now() - triedStart)} ms`)
+        // 2,500 from cardex, less the archived e-1000 and e-2 with two messages.
+        assert.lengthOf(tried, 2498)
+        const byId = new Map(tried.map((c) => [c.entityId as string, c]))
+        assert.isFalse(byId.has("archive-e-2"))
+        assert.deepStrictEqual(
+          [byId.get("archive-e-4")?.fromSource, byId.get("archive-e-4")?.userMessages],
+          ["cardex", 1]
+        )
+        assert.strictEqual(byId.get("archive-e-6")?.userMessages, 0)
+        assert.isFalse(tried.some((c) => Number(c.entityId.slice(10)) % 2 === 1))
+        assert.lengthOf(yield* reader.ListArchiveCandidates({ userId, criteria: { tried: 2 } }), 2499)
+        assert.lengthOf(yield* bob.ListArchiveCandidates({ criteria: { tried: 36000 } }), 0)
+        // The writer checks again: e-2 isn't archived as tried, e-4 is.
+        const triedReceipt = yield* api.ArchiveUnusedCards({
+          criteria: { tried: 1 },
+          entityIds: ["archive-e-2", "archive-e-4"] as never
+        })
+        assert.deepStrictEqual(triedReceipt.entityIds.map(String), ["archive-e-4"])
       }).pipe(Effect.scoped, withServer(config))
     },
     60_000

@@ -2708,6 +2708,21 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   AdoptRemoteCard: {
     probe: (actor) => refused(actor.api.AdoptRemoteCard({ sourceId: "cardex", remoteId: "x" }), "NotFound")
   },
+  // A card source's origin of another user's card is never shown or changed (cardSources.test.ts
+  // checks it with a card added from the fake archive).
+  CardOrigin: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.CardOrigin({ entityId: owner.cardId }), (origin) => assert.isNull(origin))
+  },
+  CheckRemoteVersion: {
+    probe: (actor, owner) => refused(actor.api.CheckRemoteVersion({ entityId: owner.cardId }), "NotFound")
+  },
+  TakeRemoteVersion: {
+    probe: (actor, owner) => refused(actor.api.TakeRemoteVersion({ entityId: owner.cardId, version: "v" }), "NotFound")
+  },
+  AddRemoteVersionAsCard: {
+    probe: (actor, owner) => refused(actor.api.AddRemoteVersionAsCard({ entityId: owner.cardId }), "NotFound")
+  },
   ListRecentRemote: {
     probe: (actor) => Effect.map(actor.api.ListRecentRemote({ sourceId: "cardex" }), (list) => assert.lengthOf(list, 0))
   },
