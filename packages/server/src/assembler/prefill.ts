@@ -1,4 +1,5 @@
 // Provider-specific prerequisites, resolved with the model independently of context budgeting.
+import { estimateTokens } from "./st.ts"
 import type { ModelInput } from "./types.ts"
 
 /**
@@ -42,15 +43,15 @@ export const replyTool = (prefix: string) => ({
   }
 })
 
-/** The same four-characters-per-token estimate as assembly, including the repeated JSON prefix. */
-export const schemaPrefillBudget = (prefix: string) => ({
+/** Tokenize the schema input; its output reserve must match the wire adapter's allocation. */
+export const schemaPrefillBudget = (prefix: string, countText = estimateTokens) => ({
   input:
-    Math.ceil(
+    countText(
       JSON.stringify({
         tools: [{ type: "function", function: replyTool(prefix) }],
         tool_choice: { type: "function", function: { name: REPLY_TOOL } },
         parallel_tool_calls: false
-      }).length / 4
+      })
     ) + 3,
-  output: Math.ceil(JSON.stringify({ text: prefix }).length / 4) + 3
+  output: estimateTokens(JSON.stringify({ text: prefix })) + 3
 })

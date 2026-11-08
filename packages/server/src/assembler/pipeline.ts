@@ -160,6 +160,7 @@ export interface AssemblyRequest {
   readonly mergeLayouts?: import("./merges.ts").MergeLayoutRegistry
   /** The image token rules in effect (`image-tokens` stage); none: every image is unknown. */
   readonly imageTokens?: Registry<ImageTokenRule>
+  readonly textCounters?: Registry<import("../providers/textCounters.ts").TextTokenCounter>
   /** The regex script lists in effect (`scripts` stage), in order; absent: the built-ins. */
   readonly scriptSources?: Registry<ScriptSource>
   /**
@@ -307,6 +308,8 @@ export interface Assembly {
   renderEndOfRequest?: () => StMessage | undefined
   /** The end-of-request message (DESIGN §2.2), the request's last; absent: none this turn. */
   endOfRequest?: StMessage
+  /** Local tokenizer prepared for this assembly, with a bounded fragment cache. */
+  countText?: (text: string) => number
   composition?: Composition
   messages?: Array<RequestMessage & { readonly pieces: ReadonlyArray<number>; readonly kind: Stability }>
   /** The names ST folds into the text where a provider has no `name` field. */

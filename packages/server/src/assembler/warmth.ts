@@ -16,8 +16,12 @@ export const lastBreakpoint = (snapshot: ContextSnapshot) =>
   Math.max(-1, ...snapshot.request.breakpoints.map((b) => b.message))
 
 /** The estimated tokens of messages `from` to `to`, both included. */
-export const tokensBetween = (snapshot: ContextSnapshot, from: number, to: number) =>
-  snapshot.request.messages.slice(from, to + 1).reduce((sum, message) => sum + tokensOf(message), 0)
+export const tokensBetween = (
+  snapshot: ContextSnapshot,
+  from: number,
+  to: number,
+  countText?: (text: string) => number
+) => snapshot.request.messages.slice(from, to + 1).reduce((sum, message) => sum + tokensOf(message, countText), 0)
 
 const same = (
   a: Pick<WireContext["messages"][number], "role" | "content" | "name">,
@@ -139,7 +143,8 @@ const reasonAt = (last: ContextSnapshot, next: ContextSnapshot, at: number, desc
 export const prefixChange = (
   last: ContextSnapshot,
   next: ContextSnapshot,
-  describe: Describe
+  describe: Describe,
+  countText?: (text: string) => number
 ): { readonly reason: string; readonly tokens: number } | null => {
   const end = lastBreakpoint(last)
   const nextEnd = lastBreakpoint(next)
@@ -158,7 +163,7 @@ export const prefixChange = (
   const newWire = prefix(allNext, nextEnd)
   // A captured wire is text only: each message's images are the request's, estimated.
   const nextImages = wireImages(allNext, next.request)
-  const cost = (m: WireContext["messages"][number], at: number) => tokensOf({ ...m, images: nextImages[at] })
+  const cost = (m: WireContext["messages"][number], at: number) => tokensOf({ ...m, images: nextImages[at] }, countText)
   const suffix = (at: number) => newWire.reduce((sum, m, i) => (i < at ? sum : sum + cost(m, i)), 0)
   if (end < 0 || nextEnd < 0 || oldWire.length === 0 || newWire.length === 0) {
     return {

@@ -11,6 +11,7 @@ import { cacheIdentity } from "../src/providers/cacheIdentity.ts"
 import { markWireSources, wireContext } from "../src/assembler/wire.ts"
 import { type ContextSnapshot, generationOf, type Source } from "../src/assembler/types.ts"
 import { tokensOf } from "../src/assembler/st.ts"
+import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 import { prefixChange, lastBreakpoint } from "../src/assembler/warmth.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { assembleFixture, type AssemblyFixture } from "./support/assemblySources.ts"
@@ -40,7 +41,7 @@ const base: AssemblyFixture = {
 const messages = (count: number): AssemblyFixture["messages"] =>
   Array.from({ length: count }, (_, i) => ({
     side: i % 2 ? "assistant" : "user",
-    content: `Turn ${i}: ${"x".repeat(70)}`
+    content: `Turn ${i}: ${"x".repeat(140)}`
   }))
 /**
  * Mira and Oren, Mira always speaking: a note "while Oren isn't muted" comes and goes as Oren
@@ -59,8 +60,9 @@ const oren = (present: boolean) => ({
   depth: null,
   event: { scope: null, data: { key: "presence.set" as const, value: { entity: "oren" as never, present } } }
 })
+const countText = await prepareTokenizer("o200k_base")
 const cost = (snapshot: Effect.Success<ReturnType<typeof assembleFixture>>) =>
-  3 + 40 + snapshot.request.messages.reduce((sum, m) => sum + tokensOf(m), 0)
+  3 + 40 + snapshot.request.messages.reduce((sum, m) => sum + tokensOf(m, countText), 0)
 
 describe("stepped history", () => {
   for (const layout of ["st", "concat", "swap_tail"] as const) {
@@ -151,7 +153,7 @@ describe("stepped history", () => {
                     doc: {
                       ...cardDoc("Mira"),
                       mes_example: withExamples
-                        ? `<START>\nUser: ${"E".repeat(300)}\nMira: yes\n<START>\nUser: ${"F".repeat(500)}\nMira: no`
+                        ? `<START>\nUser: ${"E".repeat(200)}\nMira: yes\n<START>\nUser: ${"F".repeat(500)}\nMira: no`
                         : ""
                     }
                   },
@@ -173,7 +175,7 @@ describe("stepped history", () => {
                     doc: {
                       schema_version: 1,
                       title: "While Oren isn't muted",
-                      content: "N".repeat(withExamples ? 480 : 400),
+                      content: "N".repeat(withExamples ? 240 : 200),
                       owner: { chat: "chat-1" as never },
                       placement: { mode: "depth", depth: 0, role: "system" },
                       ...whileOren,
@@ -353,7 +355,7 @@ describe("stepped history", () => {
   )
   it.effect("caps admitted examples by their full cost, including the new-chat marker", () =>
     Effect.gen(function* () {
-      const card = { ...cardDoc("Mira"), description: "", mes_example: `<START>\nUser: ${"x".repeat(1233)}\nMira: y` }
+      const card = { ...cardDoc("Mira"), description: "", mes_example: `<START>\nUser: ${"x".repeat(2466)}\nMira: y` }
       const built = yield* assembleFixture({ ...base, cards: [{ entity: "mira", doc: card }] })
       assert.isAtMost(cost(built), 400)
       assert.ok(built.issues.some((issue) => issue.kind === "examples_truncated"))
@@ -419,7 +421,7 @@ describe("stepped history", () => {
         events: [
           {
             depth: null,
-            event: { scope: null, data: { key: "var.set", value: { name: "long", value: "Q".repeat(1000) } } }
+            event: { scope: null, data: { key: "var.set", value: { name: "long", value: "Q".repeat(500) } } }
           },
           { depth: null, event: { scope: null, data: { key: "note.activate", value: { note: "author" as never } } } },
           { depth: null, event: { scope: null, data: { key: "lorebook.attach", value: { ref: "book" as never } } } },
@@ -455,7 +457,7 @@ describe("stepped history", () => {
       const built = yield* assembleFixture(fixture)
       const note = built.request.messages.find((message) => message.content.includes("QQ"))
       assert.ok(note, "the full note must still be sent")
-      assert.strictEqual(note.content, `${"Q".repeat(1000)}\nbottom\ntop`)
+      assert.strictEqual(note.content, `${"Q".repeat(500)}\nbottom\ntop`)
       const history = built.request.messages.filter((message) => message.content.startsWith("Turn "))
       assert.strictEqual(history.length, 24 - built.historyStart!.depth)
       assert.isAtMost(cost(built), 400)
@@ -490,7 +492,7 @@ describe("stepped history", () => {
       const nonempty = yield* assembleFixture({ ...fixture, messages: messages(12), events: variable("short") })
       assert.strictEqual(previous.historyStart!.depth, nonempty.historyStart!.depth)
       let held = 0
-      for (const [i, value] of ["short", "", "Q".repeat(1000), "", "short"].entries()) {
+      for (const [i, value] of ["short", "", "Q".repeat(500), "", "short"].entries()) {
         const next = yield* assembleFixture({
           ...fixture,
           messages: messages(13 + i),
@@ -521,7 +523,7 @@ describe("stepped history", () => {
       ] as const) {
         it.effect(`preserves full notes: ${layout}/${postprocess}/${JSON.stringify(placement)}`, () =>
           Effect.gen(function* () {
-            const content = `${"Q".repeat(480)} KEEP THIS INSTRUCTION`
+            const content = `${"Q".repeat(240)} KEEP THIS INSTRUCTION`
             const built = yield* assembleFixture({
               ...base,
               preset: { ...preset, postprocess },
@@ -550,7 +552,7 @@ describe("stepped history", () => {
                 },
                 {
                   depth: null,
-                  event: { scope: null, data: { key: "var.set", value: { name: "long", value: "Q".repeat(480) } } }
+                  event: { scope: null, data: { key: "var.set", value: { name: "long", value: "Q".repeat(240) } } }
                 }
               ]
             })
@@ -676,7 +678,7 @@ describe("stepped history", () => {
           let growthEvents = 0
           for (let i = 0; i < 12; i++) {
             const due = i % 2 === 1
-            const payload = i === 3 || i === 7 ? "short" : "Q".repeat(480)
+            const payload = i === 3 || i === 7 ? "short" : "Q".repeat(240)
             const next = yield* assembleFixture({
               ...fixture,
               messages: messages(1 + 2 * i),
@@ -725,7 +727,7 @@ describe("stepped history", () => {
 
   it.effect("preserves the complete formatted summary expansion and trailing instructions", () =>
     Effect.gen(function* () {
-      const content = "S".repeat(480)
+      const content = "S".repeat(240)
       const built = yield* assembleFixture({
         ...base,
         messages: messages(1),
@@ -885,7 +887,7 @@ describe("stepped history with inserted messages", () => {
         const send = (
           forkId: ForkId,
           parent: SlotId | null,
-          content = "u".repeat(100),
+          content = "u".repeat(50),
           macroMode: "verbatim" | "template" = "verbatim"
         ) =>
           Effect.map(

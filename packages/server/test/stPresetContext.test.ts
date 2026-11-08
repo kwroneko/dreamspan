@@ -4,6 +4,9 @@ import { Effect } from "effect"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { card, encode, header, jsonl, message } from "./support/stFolder.ts"
 import { importStFolder } from "./support/stUpload.ts"
+import { prepareTokenizer } from "../src/importer/tokenizer.ts"
+
+const countText = await prepareTokenizer("o200k_base")
 
 const folder = (descriptionChars = 20_000) =>
   new Map([
@@ -38,7 +41,7 @@ const folder = (descriptionChars = 20_000) =>
 
 layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 seconds" })("ST selected preset", (it) => {
   for (const chars of [14_000, 20_000]) {
-    it.effect(`uses explicit model settings for all 50 imported messages with a ${chars / 4}-token card`, () =>
+    it.effect(`uses explicit model settings for all 50 imported messages with a ${chars}-character card`, () =>
       Effect.gen(function* () {
         const api = yield* client()
         // The first import has no setting row; the second has an explicitly unset default.
@@ -76,8 +79,8 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
           builtinPreset: false
         })
         assert.deepInclude(next.preset, { name: "Roomy", scope: "user" })
-        assert.isAbove(next.budget!.nonHistoryTokens, chars / 4)
-        assert.isBelow(next.budget!.nonHistoryTokens, chars / 4 + 200)
+        assert.isAbove(next.budget!.nonHistoryTokens, countText("x".repeat(chars)))
+        assert.isBelow(next.budget!.nonHistoryTokens, countText("x".repeat(chars)) + 200)
         const defaults = yield* api.GetGenerationDefaults()
         assert.isNotNull(defaults.preset)
         // Nothing to act on: the report doesn't list it.
@@ -88,7 +91,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
   it.effect("returns a newest-message refusal before Send and clears it when the model budget is repaired", () =>
     Effect.gen(function* () {
       const api = yield* client()
-      yield* importStFolder(folder(14_000))
+      yield* importStFolder(folder(28_000))
       const connection = yield* api.CreateConnection({
         kind: "openai-chat",
         settings: {
@@ -187,7 +190,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
         model: null
       })
       assert.deepStrictEqual(next.preset, { ref: null, name: "Default (built-in)", scope: "builtin" })
-      assert.isAbove(next.budget!.nonHistoryTokens, 5000)
+      assert.isAbove(next.budget!.nonHistoryTokens, countText("x".repeat(20_000)))
       const chosen = (yield* api.ListLibrary({ kind: "preset" })).find((ref) => ref.label === "Roomy")!.id
       yield* api.SetGenerationDefaults({ defaults: { model: null, preset: chosen } })
       assert.isTrue((yield* importStFolder(files)).report.issues.some((i) => i.code === "st.preset_missing"))

@@ -1,4 +1,4 @@
-// Text token counts with the selected model's own tokenizer, for the counts the editors show
+// Text token counts with the selected model's own tokenizer, for editor counts and local fitting
 // (ARCHITECTURE §6 "Text tokens"; owner, 2026-11-02: "ideally you'd always use the tokenizer of
 // the selected model"). The same registry shape as the image counters beside it, and the same
 // endpoints: tried newest registration first, the first that applies counts.
@@ -17,6 +17,7 @@
 import { Effect } from "effect"
 import { localTextEncoding } from "./localTextModels.ts"
 import type { LocalEncoding } from "../importer/tokenizer.ts"
+import { prepareTokenizer } from "../importer/tokenizer.ts"
 import { countField, joinUrl, postJson, TokenCountError } from "./imageCounters.ts"
 import type { ListRequest } from "./modelLists.ts"
 import type { RequestTarget } from "./registry.ts"
@@ -39,6 +40,8 @@ export interface TextTokenCounter {
   readonly label: (model: string) => string
   /** Asks the provider, once per text (its rate limits apply); otherwise counted here. */
   readonly remote: boolean
+  /** Prepare local synchronous counting for repeated budget probes in a reader worker. */
+  readonly prepare?: (model: string) => Promise<(text: string) => number>
   readonly appliesTo: (target: TextCountTarget) => boolean
   readonly count: (request: TextCountRequest) => Effect.Effect<ReadonlyArray<number>, TokenCountError>
 }
@@ -61,6 +64,7 @@ const tiktoken: TextTokenCounter = {
   id: "openai-encodings",
   label: (model) => `${model}'s own tokenizer (${ENCODING_NAMES[localTextEncoding(model) ?? "o200k_base"]})`,
   remote: false,
+  prepare: (model) => prepareTokenizer(localTextEncoding(model) ?? "o200k_base"),
   appliesTo: (target) => ["o200k_base", "cl100k_base"].includes(localTextEncoding(target.model) ?? ""),
   count: (request) => request.encode(localTextEncoding(request.model) ?? "o200k_base", request.texts)
 }
@@ -69,6 +73,7 @@ const openModels: TextTokenCounter = {
   id: "open-model-encodings",
   label: (model) => `${model}'s own tokenizer (${encodingLabel(localTextEncoding(model)!)})`,
   remote: false,
+  prepare: (model) => prepareTokenizer(localTextEncoding(model)!),
   appliesTo: (target) => {
     const encoding = localTextEncoding(target.model)
     return encoding !== null && encoding !== "o200k_base" && encoding !== "cl100k_base"

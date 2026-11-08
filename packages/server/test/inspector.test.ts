@@ -10,6 +10,7 @@ import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 import { presetDoc } from "./support/docs.ts"
+import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 
 /** Reports a cache read, so the estimate counts as verified. */
 const completion = (_request: Recorded, res: Parameters<typeof sse>[0]) =>
@@ -155,10 +156,8 @@ describe("the cache-warmth estimate", () => {
       })
       const cold = yield* estimate(events, before, (w) => w?.changed != null)
       assert.strictEqual(cold!.changed!.reason, "Message 2 was edited, or another of its versions chosen.")
-      assert.strictEqual(
-        cold!.changed!.tokens,
-        Math.ceil("The road washed out.".length / 4) + 3 + Math.ceil(version.content.length / 4) + 3
-      )
+      const count = yield* Effect.promise(() => prepareTokenizer("o200k_base"))
+      assert.strictEqual(cold!.changed!.tokens, count("The road washed out.") + 3 + count(version.content) + 3)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

@@ -1,3 +1,4 @@
+import { prepareTextTokens } from "./textTokens.ts"
 import { mergeLayoutStage } from "./merges.ts"
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
@@ -541,7 +542,7 @@ const historyStage: AssemblerStage = {
             text: clipForSummary(assembly, results[i]!.text || (entry.images?.length ? "[Image]" : ""))
           }
           scripted.set(entry.versionId, { ...result, depth })
-          tokens += tokensOf({ content: result.text })
+          tokens += tokensOf({ content: result.text }, assembly.countText)
         })
         leaf = window.older
       }
@@ -1469,6 +1470,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
 
 /** The context as ST's populateChatCompletion builds it, filled the way the preset says. */
 const composeStage = sync("compose", (assembly) => {
+  const countMessage = (message: Parameters<typeof tokensOf>[0]) => tokensOf(message, assembly.countText)
   let doc = withMain(need(assembly, "preset").doc)
   const cast = need(assembly, "cast")
   const mode = need(assembly, "mode")
@@ -1790,7 +1792,7 @@ const composeStage = sync("compose", (assembly) => {
   // Below the history: every activated entry, whatever its position, in one block at the start of
   // the tail, re-evaluated every turn.
   const tailLore = belowHistory ? loreBlock("tail", lore) : null
-  const loreCost = tokensOf({ content: tailLore?.text ?? "" })
+  const loreCost = countMessage({ content: tailLore?.text ?? "" })
   // When the order has both, Definitions wins and the per-field markers stay empty.
   if (definitions) place(collection, "charDefinitions", "system", markers.definitions)
   place(collection, "charDescription", "system", markers.description)
@@ -2004,7 +2006,7 @@ const composeStage = sync("compose", (assembly) => {
       )
       layer.push({ role: "system", content, pieces: [block], kind: "summary" })
     })
-    const layerCost = layer.reduce((n, message) => n + tokensOf(message), 0)
+    const layerCost = layer.reduce((n, message) => n + countMessage(message), 0)
     return { collection, beside, injections, layer, layerCost }
   }
   for (const prompt of collection) {
@@ -2024,13 +2026,15 @@ const composeStage = sync("compose", (assembly) => {
   prefill(assembly)
   const newExampleChat = optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt)
   const schemaReserve =
-    assembly.prefill && assembly.model?.prefill === "tool_schema" ? schemaPrefillBudget(assembly.prefill) : null
+    assembly.prefill && assembly.model?.prefill === "tool_schema"
+      ? schemaPrefillBudget(assembly.prefill, assembly.countText)
+      : null
   const prefillInput =
     schemaReserve?.input ??
     (assembly.prefill
-      ? tokensOf({ content: assembly.prefill })
+      ? countMessage({ content: assembly.prefill })
       : assembly.continuation
-        ? tokensOf({ content: assembly.continuation.text })
+        ? countMessage({ content: assembly.continuation.text })
         : 0)
   const prefixOutput = schemaReserve?.output ?? 0
   // A default response length gives way to the source prefix; only the model's own can exceed the limit.
@@ -2053,9 +2057,9 @@ const composeStage = sync("compose", (assembly) => {
   // The end-of-request message `messages` sends last (DESIGN §2.2) is budgeted here, so it never
   // takes the request past its target; without one, so is the fallback that may replace it.
   const endOfRequest = assembly.endOfRequest
-    ? tokensOf(assembly.endOfRequest)
+    ? countMessage(assembly.endOfRequest)
     : !assembly.request.summarizing && !assembly.prefill
-      ? tokensOf({
+      ? countMessage({
           content: assembly.continuation
             ? CONTINUE_TEXT
             : FALLBACK_TEXT.replace("{{speaker}}", cast.speaker ? modelName(cast.speaker.doc) : names.char)
@@ -2115,7 +2119,8 @@ const composeStage = sync("compose", (assembly) => {
       newChat,
       newExampleChat,
       sendIfEmpty: cast.type === "normal" ? null : sendIfEmpty,
-      budget
+      budget,
+      countText: assembly.countText!
     })
   }
   const postNames = {
@@ -2129,7 +2134,7 @@ const composeStage = sync("compose", (assembly) => {
     const processed = postProcess(doc.squash ? squash(messages) : messages, doc.postprocess, postNames)
     const tokens = (messages: ReadonlyArray<StMessage>) =>
       limitImageEstimates(messages, assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES).reduce(
-        (sum, message) => sum + tokensOf(message),
+        (sum, message) => sum + countMessage(message),
         0
       )
     return 3 + Math.max(tokens(all), tokens(processed))
@@ -2346,7 +2351,7 @@ const composeStage = sync("compose", (assembly) => {
       reason: "budget",
       message: images.length
         ? `The newest message's ${images.length === 1 ? "image needs" : "images need"} about ${imageTokens.toLocaleString("en-US")} tokens; the history limit is ${limit.toLocaleString("en-US")} tokens. Reduce the images or increase the context target.`
-        : `The newest message needs about ${tokensOf(newest).toLocaleString("en-US")} tokens; the history limit is ${limit.toLocaleString("en-US")} tokens. Shorten it or increase the context target.`,
+        : `The newest message needs about ${countMessage(newest).toLocaleString("en-US")} tokens; the history limit is ${limit.toLocaleString("en-US")} tokens. Shorten it or increase the context target.`,
       contextBudget: contextBudgetInfo(fixedCost),
       preset: { ref: need(assembly, "preset").ref, scope: need(assembly, "preset").scope }
     })
@@ -2407,7 +2412,10 @@ const composeStage = sync("compose", (assembly) => {
     ...admitted,
     historyBudget:
       candidate(projected.length, maximum, true, false, false).historyBudget -
-      failuresBefore(start).reduce((n, failure) => n + tokensOf({ content: assembly.pieces[failure.piece]!.text }), 0),
+      failuresBefore(start).reduce(
+        (n, failure) => n + countMessage({ content: assembly.pieces[failure.piece]!.text }),
+        0
+      ),
     examplesTotal: examples.length
   }
   assembly.postNames = postNames
@@ -2713,6 +2721,17 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   lcmStage,
   macrosStage,
   scriptsStage,
+  {
+    id: "text-tokens",
+    run: (assembly) =>
+      Effect.gen(function* () {
+        assembly.countText = yield* prepareTextTokens(
+          assembly.request.textCounters?.list() ?? [],
+          assembly.model ?? null
+        )
+        return assembly
+      })
+  },
   historyStage,
   replySectionsStage,
   resolveStage,

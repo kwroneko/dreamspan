@@ -410,7 +410,11 @@ lcmTest("a stale enqueue rolls back and can be planned again", (server) =>
 
 lcmTest("a long legacy manual leaf reruns in bounded parts without repeating paid work", (server) =>
   Effect.gen(function* () {
-    const h = yield* lcmHarness(server, { messages: 650, settings: { fanout: 10 } })
+    const h = yield* lcmHarness(server, {
+      messages: 650,
+      message: (n) => `Message ${n}. ` + "The road ran on. ".repeat(7),
+      settings: { fanout: 10 }
+    })
     const old = yield* completeFixture(
       h.dataDir,
       h.writer,
