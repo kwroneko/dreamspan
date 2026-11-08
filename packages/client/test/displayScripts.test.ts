@@ -1,15 +1,18 @@
 import { expect, it, vi } from "vitest"
 import type { EntityId } from "@rp/shared/chat.ts"
+import type { RefId } from "@rp/shared/library.ts"
 import { DEFAULT_DISPLAY_PREFS } from "@rp/shared/chatApi.ts"
 import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import { runDisplayRegex } from "../src/features/chat/displayRegex.ts"
 import {
   approvedScripts,
   builtinDisplayScriptLists,
+  type CardDisplay,
   CardScripts,
   type DisplayScriptList,
   displayScripts,
-  messageCharacter
+  messageCharacter,
+  sameScripts
 } from "../src/features/chat/displayScripts.ts"
 import { makeRegistry } from "../src/registry.ts"
 import { regexDisplay } from "../src/features/chat/displayWorker.ts"
@@ -119,7 +122,7 @@ it("a model-side message takes its speaker's scripts; a user-side one the only o
 })
 
 it("card scripts are read once per member, refreshed without dropping them, and change listeners only on change", async () => {
-  let answer: ReadonlyArray<RegexScript> | null = [script("c", "/a/", "b")]
+  let answer: CardDisplay | null = { scripts: [script("c", "/a/", "b")], panels: null }
   const read = vi.fn(async (_: EntityId) => answer)
   const cards = new CardScripts(read)
   const listener = vi.fn()
@@ -148,8 +151,8 @@ it("a member's first read lands even when refreshes keep restarting it", async (
   const pending: Array<() => void> = []
   const read = vi.fn(
     (_: EntityId) =>
-      new Promise<ReadonlyArray<RegexScript> | null>((resolve) =>
-        pending.push(() => resolve([script("c", "/a/", "b")]))
+      new Promise<CardDisplay | null>((resolve) =>
+        pending.push(() => resolve({ scripts: [script("c", "/a/", "b")], panels: null }))
       )
   )
   const cards = new CardScripts(read)
@@ -161,4 +164,35 @@ it("a member's first read lands even when refreshes keep restarting it", async (
   pending.shift()!()
   await Promise.resolve()
   expect(cards.get(mira).map((s) => s.id)).toEqual(["c"])
+})
+
+it("a member's panel permissions are read with its scripts, and a change to them alone tells listeners", async () => {
+  const refId = "ref-mira" as RefId
+  let answer: CardDisplay | null = { scripts: [], panels: { refId, name: "Mira", scripts: false, network: false } }
+  const cards = new CardScripts(async () => answer)
+  const listener = vi.fn()
+  cards.subscribe(listener)
+  expect(cards.panels(mira)).toBe(null)
+  await vi.waitFor(() => expect(cards.panels(mira)).toEqual({ refId, name: "Mira", scripts: false, network: false }))
+  answer = { scripts: [], panels: { refId, name: "Mira", scripts: true, network: false } }
+  cards.refresh()
+  await vi.waitFor(() => expect(cards.panels(mira)?.scripts).toBe(true))
+  expect(listener).toHaveBeenCalledTimes(2)
+  expect(cards.panels(null)).toBe(null)
+})
+
+it("compares the scripts a text came from by content, not identity", () => {
+  const a = [script("a", "x", "<b>1</b>"), script("b", "y", "2")]
+  // A library refresh makes new objects with the same content: the same scripts.
+  expect(
+    sameScripts(
+      a,
+      a.map((s) => ({ ...s, placement: [...s.placement] }))
+    )
+  ).toBe(true)
+  expect(sameScripts([], [])).toBe(true)
+  expect(sameScripts(a, [script("a", "x", "<script>go()</script>"), a[1]!])).toBe(false)
+  expect(sameScripts(a, [a[1]!, a[0]!])).toBe(false)
+  expect(sameScripts(a, [a[0]!])).toBe(false)
+  expect(sameScripts(a, [script("a", "x", "<b>1</b>", { placement: [2] }), a[1]!])).toBe(false)
 })

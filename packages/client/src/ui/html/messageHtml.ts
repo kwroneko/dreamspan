@@ -32,8 +32,25 @@ export interface HtmlMessage {
   readonly streaming?: boolean
   /** How far it is from the viewed fork's tip (0 is the last message), when known. */
   readonly fromTip?: number | null
+  /** What its panels may run (spec/HTML-MESSAGES.md §3.4); absent, scripts stay off. */
+  readonly permit?: PanelPermit
+}
+
+/**
+ * What a message's panels may run: scripts when every source that could have written them
+ * allowed it (its card, and the preset when its scripts write scripts), the internet when they
+ * all allowed that too.
+ */
+export interface PanelPermit {
+  readonly scripts: boolean
+  readonly network: boolean
+  /** With scripts off: the first source still to allow them, and allowing it. */
+  readonly ask: { readonly name: string; readonly allow: () => Promise<boolean> } | null
 }
 export const HtmlMessageContext = createContext<HtmlMessage | null>(null)
+
+/** Whether a block has scripts of its own: a script element or an event handler attribute. */
+export const panelHasScripts = (html: string) => /<script\b|<[^>]*\son[a-z]+\s*=/i.test(html)
 
 const FENCED = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|$)/gm
 const STYLE = /<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/gi

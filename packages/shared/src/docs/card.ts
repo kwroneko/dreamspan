@@ -82,6 +82,14 @@ export const CardDoc = Schema.Struct({
    */
   regex_approved: Schema.optionalKey(Schema.Boolean),
   /**
+   * The user allowed scripts in this card's panels to run (spec/HTML-MESSAGES.md §3.4), in
+   * sandboxed frames. Absent: off. Import never sets it and export never writes it, as
+   * `regex_approved`; only SetHtmlApproval changes it.
+   */
+  html_scripts_approved: Schema.optionalKey(Schema.Boolean),
+  /** Its panels may also load from and send to other sites (`https:`); only with scripts allowed. */
+  html_network_approved: Schema.optionalKey(Schema.Boolean),
+  /**
    * The fields an agent reply may change in a chat (DESIGN §4.1a, spec/AGENTIC.md §4.3): never the
    * card itself, a note replacing the field there (§4.6). Absent: none. A chat can override it.
    * Import never sets it and export never writes it, as `regex_approved`.

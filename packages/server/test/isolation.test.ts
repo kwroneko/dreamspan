@@ -2757,6 +2757,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.SetRegexApproval({ refId: owner.refId, approved: true, expectedRowVersion: 1 }), "NotFound")
   },
+  SetHtmlApproval: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetHtmlApproval({ refId: owner.editor.cardRefId, scripts: true, network: true }), "NotFound")
+  },
   GetCardGallery: {
     probe: (actor, owner) => refused(actor.api.GetCardGallery({ refId: owner.editor.cardRefId }), "NotFound")
   },

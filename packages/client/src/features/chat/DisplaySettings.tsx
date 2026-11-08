@@ -17,6 +17,7 @@ import { useSession } from "../../session.ts"
 import { onLibraryChange } from "../../libraryChanges.ts"
 import { globalRegexAtom } from "../regex/data.ts"
 import { useRefreshOnContext } from "../pickers/defaults.ts"
+import { useCaller } from "../editor/caller.ts"
 import { approvedScripts, CardScripts } from "./displayScripts.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
@@ -28,10 +29,31 @@ import { MessageDetailSettings } from "./messageDetails.tsx"
 
 const NO_SCRIPTS: ReadonlyArray<RegexScript> = []
 
+/** A preset's panel permissions (spec/HTML-MESSAGES.md §3.4), by its library entry. */
+interface PresetPanels {
+  readonly refId: RefId
+  readonly name: string
+  readonly scripts: boolean
+  readonly network: boolean
+}
+
+/**
+ * What a message's panels need to know whether their scripts run (panelPermits.ts): the
+ * members' cards, the cast that names a user-side message's character, the preset's
+ * permissions, and how to allow a source. Null while "Show HTML as formatting" is off.
+ */
+interface PanelSources {
+  readonly cards: CardScripts
+  readonly cast: Pick<Cast, "participants" | "playedByMe"> | null
+  readonly preset: PresetPanels | null
+  /** Lets a card's or the preset's panels run scripts; false when that failed. */
+  readonly allow: (refId: RefId) => Promise<boolean>
+}
+
 /**
  * What a message's display regex reads (displayScripts.ts): the global and approved preset
  * scripts, the approved card scripts by member, and the cast that names a user-side
- * message's character. Empty while the viewer's switch is off.
+ * message's character. Empty while the viewer's switch is off. `panels` is for its panels.
  */
 export interface DisplayScriptSources {
   readonly global: ReadonlyArray<RegexScript>
@@ -39,13 +61,15 @@ export interface DisplayScriptSources {
   readonly cards: CardScripts | null
   readonly cast: Pick<Cast, "participants" | "playedByMe"> | null
   readonly leafDepth: number | null
+  readonly panels: PanelSources | null
 }
 const DisplayContext = createContext<DisplayScriptSources>({
   global: NO_SCRIPTS,
   preset: NO_SCRIPTS,
   cards: null,
   cast: null,
-  leafDepth: null
+  leafDepth: null,
+  panels: null
 })
 export const useDisplayContext = () => useContext(DisplayContext)
 const presetQuery = Atom.family((key: string): Atom.Atom<AsyncResult.AsyncResult<EditorSnapshot | null, unknown>> => {
@@ -61,6 +85,7 @@ function ScriptDisplay({
   session,
   refId,
   on,
+  panels,
   cast,
   leafDepth,
   children
@@ -68,6 +93,8 @@ function ScriptDisplay({
   session: ChatSession
   refId: string | null
   on: boolean
+  /** Messages show HTML, so their panels' permissions are read too. */
+  panels: boolean
   cast: Cast | null
   leafDepth: number | null
   children: ReactNode
@@ -80,52 +107,102 @@ function ScriptDisplay({
   const globalResult = useAtomValue(global)
   const refreshGlobal = useAtomRefresh(global)
   useRefreshOnContext(on ? session : null, global)
-  const cards = useMemo(
+  const reads = on || panels
+  const store = useMemo(
     () =>
-      on
+      reads
         ? new CardScripts((entityId: EntityId) =>
             session
               .call((client) => client("GetCardForChat", { entityId }))
-              .then((read) => (read.ok ? (read.value.regex ?? null) : null))
+              .then((read) =>
+                read.ok
+                  ? {
+                      scripts: read.value.regex ?? NO_SCRIPTS,
+                      panels:
+                        read.value.refId === undefined
+                          ? null
+                          : {
+                              refId: read.value.refId,
+                              name: read.value.card.name,
+                              scripts: read.value.htmlScripts === true,
+                              network: read.value.htmlNetwork === true
+                            }
+                    }
+                  : null
+              )
           )
         : null,
-    [session, on]
+    [session, reads]
   )
   useEffect(() => {
-    if (!on) return
+    if (!reads) return
     // Server context notifications include edits from other devices, even when the
     // preset's id and prompt context did not change. Focus also refreshes after a
     // suspended tab resumes; the library signal covers same-origin editor and settings tabs.
     const all = () => {
       if (refId) refresh()
       refreshGlobal()
-      cards?.refresh()
+      store?.refresh()
     }
     const stopContext = session.subscribeContext((initialSnapshot) => {
       if (initialSnapshot) return
       if (refId) refresh()
-      cards?.refresh()
+      store?.refresh()
     })
     const stopLibrary = onLibraryChange(all)
     return () => {
       stopContext()
       stopLibrary()
     }
-  }, [session, on, refId, refresh, refreshGlobal, cards])
+  }, [session, reads, refId, refresh, refreshGlobal, store])
   // Only committed document content, never unsaved drafts or a previous failed read.
-  const preset = approvedScripts(AsyncResult.isSuccess(result) ? result.value?.doc : null)
+  const snapshot = AsyncResult.isSuccess(result) ? result.value : null
+  const preset = on ? approvedScripts(snapshot?.doc) : NO_SCRIPTS
   const globalScripts =
-    AsyncResult.isSuccess(globalResult) && globalResult.value ? globalResult.value.scripts : NO_SCRIPTS
+    on && AsyncResult.isSuccess(globalResult) && globalResult.value ? globalResult.value.scripts : NO_SCRIPTS
+  const call = useCaller()
+  const presetScripts = snapshot?.doc.html_scripts_approved === true
+  const presetNetwork = presetScripts && snapshot?.doc.html_network_approved === true
+  const presetRef = snapshot?.ref.id ?? null
+  const presetName = snapshot?.ref.label ?? ""
+  const panelSources = useMemo((): PanelSources | null => {
+    if (!panels || store === null) return null
+    return {
+      cards: store,
+      cast,
+      preset:
+        presetRef === null
+          ? null
+          : { refId: presetRef, name: presetName, scripts: presetScripts, network: presetNetwork },
+      allow: async (target) => {
+        // Allowing scripts keeps the internet off: that's the editor's, once scripts run.
+        const done = await call(
+          (client) => client("SetHtmlApproval", { refId: target, scripts: true, network: false }),
+          ["library"]
+        )
+        store.refresh()
+        return done.ok
+      }
+    }
+  }, [panels, store, cast, presetRef, presetName, presetScripts, presetNetwork, call])
   const value = useMemo(
-    () => ({ global: globalScripts, preset, cards, cast: on ? cast : null, leafDepth }),
-    [globalScripts, preset, cards, on, cast, leafDepth]
+    () => ({
+      global: globalScripts,
+      preset,
+      cards: on ? store : null,
+      cast: on ? cast : null,
+      leafDepth,
+      panels: panelSources
+    }),
+    [globalScripts, preset, store, on, cast, leafDepth, panelSources]
   )
   return <DisplayContext value={value}>{children}</DisplayContext>
 }
 export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
   const viewer = useViewPrefs()
   const on = viewer.prefs.displayRegex && view.history !== null
-  const refId = on ? (view.history?.preset?.ref ?? null) : null
+  const panels = viewer.prefs.htmlFormatting && view.history !== null
+  const refId = on || panels ? (view.history?.preset?.ref ?? null) : null
   const chatId = view.chat?.id
   const key = `${view.forkId}:${view.leafSlotId}`
   const loadedEntry = view.entries.find((entry) => entry.slotId === view.leafSlotId)
@@ -154,7 +231,7 @@ export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
   }, [session, chatId, on, loadedDepth, view.forkId, view.leafSlotId, key])
   const leafDepth = loadedDepth ?? (tip?.key === key ? tip.depth : view.leafSlotId === null ? 0 : null)
   return (
-    <ScriptDisplay session={session} refId={refId} on={on} cast={view.cast} leafDepth={leafDepth}>
+    <ScriptDisplay session={session} refId={refId} on={on} panels={panels} cast={view.cast} leafDepth={leafDepth}>
       {children}
     </ScriptDisplay>
   )

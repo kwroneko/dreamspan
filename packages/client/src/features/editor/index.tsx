@@ -18,6 +18,7 @@ import { ReplySectionsSettings } from "./ReplySectionsSettings.tsx"
 import { presetEditorSections } from "./presetSections.ts"
 import { registerPresetWarnings } from "./PromptDocument.tsx"
 import { editorTextFields, regexScriptFields } from "./fields.ts"
+import { CardPanelScripts, PresetPanelScripts } from "./PanelScripts.tsx"
 import { CardRegexScripts } from "./RegexScripts.tsx"
 import { registerCardTabs } from "./cardTabsRegister.tsx"
 import { lorebookFields, standaloneLorebookFields } from "./lorebookFields.ts"
@@ -91,12 +92,14 @@ export const register = () => {
   appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
   cardEditorSections.register({ id: CARD_LOREBOOK_SECTION, order: 100, component: EmbeddedLorebook })
   cardEditorSections.register({ id: "card.regex", order: 110, component: CardRegexScripts })
+  cardEditorSections.register({ id: "card.panels", order: 115, component: CardPanelScripts })
   editorTextFields.register({ id: "card.regex", kind: "card", fields: (doc) => regexScriptFields("card", doc) })
   registerCardTabs()
   registerLorebookTable()
   registerLorebookEntrySettings()
   presetEditorSections.register({ id: "preset.end-of-request", order: 100, component: EndOfRequest })
   presetEditorSections.register({ id: "preset.reply-sections", order: 110, component: ReplySectionsSettings })
+  presetEditorSections.register({ id: "preset.panels", order: 120, component: PresetPanelScripts })
   registerPresetWarnings()
   editorTextFields.register({ id: "card.embedded-lorebook", kind: "card", fields: lorebookFields })
   lorebookEditorSections.register({ id: "lorebook.use", order: 10, component: LorebookUse })

@@ -504,14 +504,11 @@ const readPreset = (file: Json, r: ReportBuilder): PresetDoc => {
       ignored.push(key)
       continue
     }
-    if (key === "regex_approved") {
+    if (key === "regex_approved" || key === "html_scripts_approved" || key === "html_network_approved") {
       // Not kept, so no export can carry a file's claim of approval anywhere.
-      r.add(
-        "warning",
-        "preset.approval_ignored",
-        "The file's `regex_approved` was dropped. Only you can allow scripts.",
-        [key]
-      )
+      r.add("warning", "preset.approval_ignored", `The file's \`${key}\` was dropped. Only you can allow scripts.`, [
+        key
+      ])
       continue
     }
     unsupported[key] = src[key]

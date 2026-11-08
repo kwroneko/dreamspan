@@ -23,7 +23,8 @@ import { makeLcmHandlers, makeSummaryRequestHandlers } from "./api/lcm.ts"
 // a health route, and the client build served as a single-page app.
 import { createServer } from "node:http"
 import { readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { randomBytes } from "node:crypto"
+import { join, posix } from "node:path"
 import type { Socket } from "node:net"
 import type { Duplex } from "node:stream"
 import { NodeHttpServer } from "@effect/platform-node"
@@ -32,6 +33,7 @@ import {
   type AppRpcs,
   AppCoreApi,
   AuthenticatedGalleryApi,
+  AuthenticatedPanelApprovalApi,
   AuthenticatedCardArchiveApi,
   AuthenticatedCardSourcesApi,
   AuthenticatedSummaryRequestApi,
@@ -57,6 +59,7 @@ import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import {
   makeEditorHandlers,
   makeGalleryHandlers,
+  makePanelApprovalHandlers,
   makeForkMergeHandlers,
   makeCardArchiveHandlers
 } from "./api/editor.ts"
@@ -176,7 +179,8 @@ const Handlers = Layer.mergeAll(
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
   AuthenticatedCardSourcesApi.toLayer(makeCardSourceHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
-  AuthenticatedProviderListApi.toLayer(makeProviderListHandlers)
+  AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),
+  AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
 )
 
 /**
@@ -258,46 +262,104 @@ const contentSecurityPolicy = (host: string | undefined) => {
 const FRAME_PANEL = "/frame/panel"
 /** Its one script, the client build's (packages/client/src/frame/bootstrap.ts). */
 const FRAME_BOOTSTRAP = "/frame/bootstrap.js"
+/** The vendored libraries a panel with scripts gets (the client build's `frame/lib/`). */
+const FRAME_LIB = "/frame/lib/"
 
 /**
- * The frame page's policy. The frame is sandboxed without allow-same-origin, so its origin is
- * opaque and `'self'` can't name the app: the bootstrap is named by the Host the browser used
- * when it's a plain host name (otherwise `'self'`, which matches the page's URL in current
- * browsers). Only the bootstrap runs: the block's own scripts and handlers stay off. Styles
- * and `data:`/`blob:` images and fonts are the block's own; it can't connect, submit, change
- * its base or be framed by another site.
+ * Whether a request path is under `/frame/lib/` as the static server will read it: decoded once
+ * and normalized, so `/frame/lib/..%2f..%2findex.html` is not.
  */
-const framePolicy = (host: string | undefined) => {
-  const script =
-    host !== undefined && HOST.test(host) && !host.startsWith("[")
-      ? `http://${host}${FRAME_BOOTSTRAP} https://${host}${FRAME_BOOTSTRAP}`
-      : "'self'"
+const underFrameLib = (path: string) => {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(path)
+  } catch {
+    return false
+  }
+  return !decoded.includes("\0") && posix.normalize(decoded).startsWith(FRAME_LIB)
+}
+
+/** What a frame page may run: scripts once its source allowed them, the internet once allowed too. */
+interface FrameMode {
+  readonly scripts: boolean
+  readonly network: boolean
+}
+const frameMode = (url: string): FrameMode => {
+  const query = new URLSearchParams(url.split("?")[1] ?? "")
+  const scripts = query.has("scripts")
+  return { scripts, network: scripts && query.has("network") }
+}
+
+/**
+ * The frame page's policy. Without scripts only the bootstrap runs, named by the page's nonce
+ * (`nonce`; none, as on a refusal, runs nothing): the block's own scripts and handlers stay off,
+ * and so does any other script of the app's, on any Host. With them (spec/HTML-MESSAGES.md §3.4)
+ * the block's inline scripts, `eval` and the vendored libraries run too, and with the internet
+ * allowed it may also load from and send to `https:` sites. A nonce would turn
+ * `'unsafe-inline'` off, so the bootstrap and libraries are named by path: the frame is
+ * sandboxed without allow-same-origin, so its origin is opaque and `'self'` can't name the
+ * app, and the paths take the Host the browser used. A bracketed IPv6 Host can't be written in
+ * a source expression, so there it's `'self'` (which matches the page's URL in current
+ * browsers): the block runs any code it likes already, and what it loads from the app it can't
+ * read (another origin's) nor send anywhere without the internet. A missing or malformed Host
+ * gets the policy without scripts. Styles and `data:`/`blob:` images and fonts are the block's
+ * own; it can never submit a form, change its base or be framed by another site. Whatever it
+ * fetches from the app carries `Origin: null`, which RequestGuard refuses.
+ */
+const framePolicy = (
+  host: string | undefined,
+  mode: FrameMode = { scripts: false, network: false },
+  nonce?: string
+) => {
+  const valid = host !== undefined && HOST.test(host)
+  if (mode.scripts && !valid) return framePolicy(host, { scripts: false, network: false }, nonce)
+  const ours = (path: string) => (host!.startsWith("[") ? "'self'" : `http://${host}${path} https://${host}${path}`)
+  const web = mode.network ? " https:" : ""
+  const lib = mode.scripts ? ` ${ours(FRAME_LIB)}` : ""
+  const script = mode.scripts
+    ? `'unsafe-inline' 'unsafe-eval' ${host!.startsWith("[") ? "'self'" : ours(FRAME_BOOTSTRAP) + lib}`
+    : nonce === undefined
+      ? "'none'"
+      : `'nonce-${nonce}'`
   return [
     "default-src 'none'",
-    `script-src ${script}`,
-    "style-src 'unsafe-inline'",
-    "img-src data: blob:",
-    "font-src data:",
-    "connect-src 'none'",
+    `script-src ${script}${web}`,
+    `style-src 'unsafe-inline'${lib}${web}`,
+    `img-src data: blob:${lib}${web}`,
+    `font-src data:${lib}${web}`,
+    ...(mode.network ? ["media-src data: blob: https:"] : []),
+    `connect-src ${mode.network ? "https:" : "'none'"}`,
     "form-action 'none'",
     "base-uri 'none'",
-    "frame-ancestors 'self'"
+    "frame-ancestors 'self'",
+    // Opaque however the page is loaded (the app's frame is sandboxed the same way): opened as
+    // a top-level page it would otherwise have the app's origin and this relaxed policy.
+    "sandbox allow-scripts"
   ].join("; ")
 }
 
-/** The frame page: nothing but the bootstrap, which writes the block's document when the app posts it. */
+/**
+ * The frame page: nothing but the bootstrap, which writes the block's document when the app
+ * posts it. Its policy (with the nonce) is set here; RequestGuard leaves it be.
+ */
 const FramePanelRoute = HttpRouter.add(
   "GET",
   FRAME_PANEL,
-  Effect.succeed(
-    HttpServerResponse.text(
-      `<!doctype html><html><head><meta charset="utf-8"><script src="${FRAME_BOOTSTRAP}"></script></head><body></body></html>`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest
+    const nonce = randomBytes(18).toString("base64")
+    return HttpServerResponse.text(
+      `<!doctype html><html><head><meta charset="utf-8"><script nonce="${nonce}" src="${FRAME_BOOTSTRAP}"></script></head><body></body></html>`,
       {
         contentType: "text/html; charset=utf-8",
-        headers: { "cache-control": "no-cache", "x-content-type-options": "nosniff" }
+        headers: {
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "content-security-policy": framePolicy(request.headers.host, frameMode(request.url), nonce)
+        }
       }
     )
-  )
+  })
 )
 
 /**
@@ -324,12 +386,30 @@ const RequestGuard = HttpRouter.middleware(
     }
     return (httpEffect) =>
       Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+        const path = request.url.split("?")[0]!
         const policy =
-          request.url.split("?")[0] === FRAME_PANEL
-            ? framePolicy(request.headers.host)
+          path === FRAME_PANEL
+            ? framePolicy(request.headers.host, frameMode(request.url))
             : contentSecurityPolicy(request.headers.host)
-        const csp = HttpServerResponse.setHeader("content-security-policy", policy)
-        const headers = { host: request.headers.host, origin: request.headers.origin }
+        // A panel's fonts load from its opaque origin, as CORS requests with `Origin: null`: the
+        // vendored libraries are public files, so only they answer it, to reads.
+        const library =
+          path.startsWith(FRAME_LIB) &&
+          underFrameLib(path) &&
+          (request.method === "GET" || request.method === "HEAD") &&
+          request.headers.origin === "null"
+        const csp = library
+          ? (response: HttpServerResponse.HttpServerResponse) =>
+              HttpServerResponse.setHeaders(response, {
+                "content-security-policy": policy,
+                "access-control-allow-origin": "*"
+              })
+          : (response: HttpServerResponse.HttpServerResponse) =>
+              // The frame page sets its own, with its nonce.
+              path === FRAME_PANEL && response.headers["content-security-policy"] !== undefined
+                ? response
+                : HttpServerResponse.setHeader(response, "content-security-policy", policy)
+        const headers = { host: request.headers.host, origin: library ? undefined : request.headers.origin }
         const problem = crossSiteProblem(headers, publicOrigins, checkHost)
         if (problem !== undefined) return Effect.succeed(csp(HttpServerResponse.text(problem, { status: 403 })))
         const withoutPeer = Headers.remove(request.headers, PEER_HEADER)

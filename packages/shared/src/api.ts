@@ -22,7 +22,7 @@ import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
-import { EditorApi, ForkMergeApi, GalleryApi, CardArchiveApi } from "./editorApi.ts"
+import { EditorApi, ForkMergeApi, GalleryApi, CardArchiveApi, PanelApprovalApi } from "./editorApi.ts"
 import { CardSourcesApi } from "./cardSources.ts"
 import {
   AccountRejected,
@@ -411,6 +411,7 @@ export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authenticat
 export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authentication)
 
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
+export const AuthenticatedPanelApprovalApi = PanelApprovalApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
 export const AuthenticatedShellUpdatesApi = ShellUpdatesApi.middleware(Authentication)
@@ -439,6 +440,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedCardArchiveApi)
   .merge(AuthenticatedCardSourcesApi)
   .merge(AuthenticatedGalleryApi)
+  .merge(AuthenticatedPanelApprovalApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi)

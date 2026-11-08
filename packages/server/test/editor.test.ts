@@ -716,6 +716,107 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect(
+    "panel scripts run only once allowed; the internet needs them; drafts, merges and restores change neither",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const card = yield* api.CreateCard({ label: "Lantern Inn", name: "Lantern Inn" })
+        const chatView = () => api.GetCardForChat({ entityId: card.entityId })
+        const before = yield* api.OpenEditor({ refId: card.id })
+        assert.isUndefined(before.doc.html_scripts_approved)
+        assert.isUndefined((yield* chatView()).htmlScripts)
+        assert.strictEqual((yield* chatView()).refId, card.id)
+        // The internet alone grants nothing.
+        yield* api.SetHtmlApproval({ refId: card.id, scripts: false, network: true })
+        assert.isUndefined((yield* doc(api, card.id)).html_network_approved)
+        // A chat's button sends no row version.
+        yield* api.SetHtmlApproval({ refId: card.id, scripts: true, network: false })
+        assert.isTrue((yield* doc(api, card.id)).html_scripts_approved)
+        assert.isTrue((yield* chatView()).htmlScripts)
+        assert.isUndefined((yield* chatView()).htmlNetwork)
+        assert.strictEqual(
+          (yield* api.ListRevisions({ refId: card.id, limit: 1 }))[0]!.message,
+          "Allowed panel scripts to run"
+        )
+        const opened = yield* api.OpenEditor({ refId: card.id })
+        yield* api.SetHtmlApproval({
+          refId: card.id,
+          scripts: true,
+          network: true,
+          expectedRowVersion: opened.ref.rowVersion
+        })
+        assert.isTrue((yield* chatView()).htmlNetwork)
+        // A stale editor's change is refused.
+        assert.strictEqual(
+          yield* outcome(
+            api.SetHtmlApproval({
+              refId: card.id,
+              scripts: false,
+              network: false,
+              expectedRowVersion: opened.ref.rowVersion
+            })
+          ),
+          "StaleWrite"
+        )
+        // A draft can't take or grant them.
+        yield* draft(api, card.id, valueField(["html_scripts_approved"]), "false")
+        assert.strictEqual(yield* outcome(commit(api, card.id)), "InvalidDocument")
+        const drafted = yield* api.OpenEditor({ refId: card.id })
+        const taking = drafted.drafts.find(
+          (d) => d.key.field === valueField(["html_scripts_approved"]) && d.status === "active"
+        )!
+        yield* api.DiscardEditorDraft({
+          refId: card.id,
+          field: valueField(["html_scripts_approved"]),
+          draftId: taking.id,
+          expectedRowVersion: taking.rowVersion
+        })
+        // Restoring the revision from before they were allowed keeps them allowed.
+        const current = yield* api.OpenEditor({ refId: card.id })
+        yield* api.RestoreRevision({
+          refId: card.id,
+          revisionId: before.ref.headRevisionId,
+          expectedRowVersion: current.ref.rowVersion
+        })
+        assert.isTrue((yield* doc(api, card.id)).html_network_approved)
+        // Stopping scripts stops the internet too.
+        yield* api.SetHtmlApproval({ refId: card.id, scripts: false, network: true })
+        const stopped = yield* doc(api, card.id)
+        assert.isUndefined(stopped.html_scripts_approved)
+        assert.isUndefined(stopped.html_network_approved)
+        assert.isUndefined((yield* chatView()).htmlScripts)
+      })
+  )
+
+  it.effect("a preset file never allows its panels' scripts, and a new version of it keeps what the user chose", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const library = yield* importPreset(
+        preset("full", (file) => {
+          Object.assign(file, { html_scripts_approved: true, html_network_approved: true })
+        })
+      )
+      const refId = library.ref.id
+      const imported = yield* doc(api, refId)
+      assert.isUndefined(imported.html_scripts_approved)
+      assert.isUndefined(imported.html_network_approved)
+      assert.notProperty(imported.unsupported as object, "html_scripts_approved")
+      yield* api.SetHtmlApproval({ refId, scripts: true, network: false })
+      // A new version that claims more is merged without it, and what was allowed stays.
+      yield* importPreset(
+        preset("full", (file) => {
+          file.temperature = 0.5
+          Object.assign(file, { html_network_approved: true })
+        }),
+        refId
+      )
+      const merged = yield* doc(api, refId)
+      assert.isTrue(merged.html_scripts_approved)
+      assert.isUndefined(merged.html_network_approved)
+    })
+  )
+
   it.effect("an update with conflicts is resolved per field, against the schema", () =>
     Effect.gen(function* () {
       const api = yield* client()

@@ -28,6 +28,8 @@ const watchViolations = async (page: Page) => {
 }
 
 test("every screen runs under the Content-Security-Policy", async ({ page }) => {
+  // It walks most screens: a loaded host needs more than the default minute (the gate's runs).
+  test.setTimeout(120_000)
   const violations = await watchViolations(page)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const response = await page.goto(`${server().url}/chats`)
@@ -137,7 +139,10 @@ test("a message's panel runs in a frame with an opaque origin, under its own pol
   const frame = await page.request.get(`${server().url}/frame/panel`)
   const policy = frame.headers()["content-security-policy"]!
   expect(policy).toContain("default-src 'none'")
-  expect(policy).toContain(`script-src http://127.0.0.1:${server().port}/frame/bootstrap.js`)
+  // The bootstrap by the page's nonce: no other script of the app's can run there.
+  const nonce = /script-src 'nonce-([^']+)';/.exec(policy)?.[1]
+  expect(nonce).toBeDefined()
+  expect(await frame.text()).toContain(`<script nonce="${nonce}" src="/frame/bootstrap.js">`)
   expect(policy).toContain("connect-src 'none'")
   expect(policy).toContain("frame-ancestors 'self'")
   // A request from a frame carries Origin: null, which no route takes.

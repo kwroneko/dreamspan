@@ -104,6 +104,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       // What the card has here that a file can't carry: a cutout, a favourite, approved scripts.
       let opened = yield* api.OpenEditor({ refId })
       yield* api.SetRegexApproval({ refId, approved: true, expectedRowVersion: opened.ref.rowVersion })
+      yield* api.SetHtmlApproval({ refId, scripts: true, network: false })
       opened = yield* api.OpenEditor({ refId })
       const crop = { x: 0, y: 0, width: 1, height: 1 }
       yield* api.SetCardAvatarCrop({ refId, crop, expectedRowVersion: opened.ref.rowVersion })
@@ -171,6 +172,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.deepStrictEqual(after.avatar_crop, before.avatar_crop, "the cutout stays with the same picture")
       assert.strictEqual(after.avatar_media_id, before.avatar_media_id)
       assert.isTrue(after.regex_approved, "identical scripts stay allowed")
+      assert.isTrue(after.html_scripts_approved, "its panels' scripts stay allowed")
       const head = db
         .prepare("SELECT parents, origin, message FROM entity_revisions WHERE id = ?")
         .get(opened.ref.headRevisionId) as { parents: string; origin: string; message: string }

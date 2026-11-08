@@ -139,6 +139,13 @@ const URI_SAFE = new Set([
 const ALLOWED_URI = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i
 // DOMPurify's ATTR_WHITESPACE
 const ATTR_WHITESPACE = /[\u0000-\u0020\u00A0\u1680\u180E\u2000-\u2029\u205F\u3000]/g
+
+/**
+ * An address as the browser's URL parser reads it: without the controls and spaces at its ends
+ * and the tabs and line breaks inside, so `" #root"` and `"#ro\not"` are fragments too.
+ */
+export const urlAddress = (value: string) =>
+  value.replace(/[\t\n\r]/g, "").replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "")
 const DATA_URI_TAGS = new Set(["audio", "video", "img", "source", "image", "track"])
 
 /** Attributes that name other elements by id, which follow the ids' prefix (fix 3). */
@@ -240,13 +247,11 @@ function finishParsed(node: Node, name: string): boolean {
     else if (typeof value === "string" && value !== "") properties[key] = value.split(/\s+/).map(renameId).join(" ")
   }
   delete properties.form
-  for (const key of ["href", "xLinkHref"]) {
+  for (const key of ["href", "xLinkHref", "useMap"]) {
     const value = properties[key]
-    if (typeof value === "string" && value.startsWith("#") && value.length > 1)
-      properties[key] = `#${renameId(value.slice(1))}`
+    const address = typeof value === "string" ? urlAddress(value) : ""
+    if (address.startsWith("#") && address.length > 1) properties[key] = `#${renameId(address.slice(1))}`
   }
-  if (typeof properties.useMap === "string" && properties.useMap.startsWith("#"))
-    properties.useMap = `#${renameId(properties.useMap.slice(1))}`
   for (const key of REFERENCES)
     if (typeof properties[key] === "string") properties[key] = renameReferences(properties[key])
   if (typeof properties.style === "string") {

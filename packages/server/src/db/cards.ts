@@ -22,6 +22,7 @@ interface CardRow {
   readonly doc_json: string
   readonly persona: number
   readonly in_bin: number
+  readonly ref_id?: string
 }
 
 /** The fields a chat reads from a card document; anything malformed reads as empty. */
@@ -37,6 +38,11 @@ export interface CardText {
   readonly scenario: string
   /** Its regex scripts, when the user allowed them. */
   readonly regex?: ReadonlyArray<RegexScript>
+  /** The ref it was read from, for its approvals; absent for a document outside the library. */
+  readonly refId?: string
+  /** Its panels' permissions (spec/HTML-MESSAGES.md §3.4): scripts, and the internet with them. */
+  readonly htmlScripts: boolean
+  readonly htmlNetwork: boolean
 }
 
 const text = (value: unknown) => (typeof value === "string" ? value : "")
@@ -93,18 +99,21 @@ const parse = (row: CardRow): CardText => {
     // Only scripts the user allowed are offered to run (the schema checked their shape).
     ...(doc.regex_approved === true && Array.isArray(doc.regex) && doc.regex.length > 0
       ? { regex: doc.regex as ReadonlyArray<RegexScript> }
-      : {})
+      : {}),
+    ...(row.ref_id === undefined ? {} : { refId: row.ref_id }),
+    htmlScripts: doc.html_scripts_approved === true,
+    htmlNetwork: doc.html_scripts_approved === true && doc.html_network_approved === true
   }
 }
 
 /**
  * A document not in the library, as a chat would read it: a card on a card source before
  * it's added (spec/CARD-SOURCES.md §4.2), under its placeholder id. Its regex scripts are
- * never offered (§4.6): only a user can allow them, once the card is theirs.
+ * never offered (§4.6), nor are its panels' scripts: only a user can allow them, once the card is theirs.
  */
 export const cardTextOfDoc = (entityId: EntityId, docJson: string): CardText => {
   const { regex: _, ...text } = parse({ entity_id: entityId, label: "", doc_json: docJson, persona: 0, in_bin: 0 })
-  return text
+  return { ...text, htmlScripts: false, htmlNetwork: false }
 }
 
 /** A card revision's summary (baseline `card_summaries`), as a query selects it: null without one. */
@@ -199,7 +208,7 @@ export const loadCards = (sql: SqlClient.SqlClient, userId: UserId, ids: Readonl
   ids !== null && ids.length === 0
     ? Effect.succeed([] as Array<CardText>)
     : sql<CardRow>`
-        SELECT e.id AS entity_id, r.label, rev.doc_json, e.deleted_at IS NOT NULL AS in_bin,
+        SELECT e.id AS entity_id, r.id AS ref_id, r.label, rev.doc_json, e.deleted_at IS NOT NULL AS in_bin,
           EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
         FROM entities e
         JOIN entity_refs r ON r.id = (

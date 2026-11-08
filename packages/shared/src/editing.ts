@@ -158,10 +158,34 @@ const indexIntoIdentified = (kind: EntityKind, doc: unknown, path: FieldPath) =>
     return known || identified
   })
 
+/** A card's or preset's permissions for its panels (spec/HTML-MESSAGES.md §3.4): SetHtmlApproval's. */
+const HTML_APPROVALS = ["html_scripts_approved", "html_network_approved"] as const
+
+/**
+ * `next` with the panel permissions `ours` has: a merge, a restored revision or a new version
+ * of a file neither grants nor takes them, since they're for the card, not for any one text.
+ */
+export const withHtmlApprovals = (ours: Doc, next: Doc): Doc => {
+  const doc: Record<string, unknown> = { ...next }
+  for (const key of HTML_APPROVALS) {
+    if (ours[key] === true) doc[key] = true
+    else delete doc[key]
+  }
+  return doc as Doc
+}
+
 /** Top-level fields a draft never changes: each changes through its own action, or never. */
 const PROTECTED: Partial<Record<EntityKind, ReadonlySet<string>>> = {
-  card: new Set(["schema_version", "avatar_media_id", "avatar_crop", "asset_media_ids", "assets", "regex_approved"]),
-  preset: new Set(["schema_version", "regex_approved"]),
+  card: new Set([
+    "schema_version",
+    "avatar_media_id",
+    "avatar_crop",
+    "asset_media_ids",
+    "assets",
+    "regex_approved",
+    ...HTML_APPROVALS
+  ]),
+  preset: new Set(["schema_version", "regex_approved", ...HTML_APPROVALS]),
   // A slot's link changes only by picking, saving as or unlinking a shared note.
   note: new Set(["schema_version", "owner", "link"])
 }

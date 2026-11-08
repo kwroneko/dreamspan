@@ -88,6 +88,12 @@ export const versionPlan = (
     notes.push("The file's regex scripts differ, so they won't run until you allow them again.")
   else if (hasScripts(after) && canonicalJson(after.regex) !== canonicalJson(current.regex))
     notes.push("The file's regex scripts won't run until you allow them.")
+  if (current.html_scripts_approved === true)
+    kept.push(
+      current.html_network_approved === true
+        ? "Permission to run its panels' scripts and let them use the internet."
+        : "Permission to run its panels' scripts."
+    )
   kept.push("Which chats it's in.")
   if (!card.hasImport)
     notes.push("This card wasn't imported from a file: this one becomes the file its later versions update from.")

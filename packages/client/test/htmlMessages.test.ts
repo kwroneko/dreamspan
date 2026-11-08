@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { StMarkdown } from "../src/ui/StMarkdown.tsx"
 import { scopeStyles } from "../src/ui/html/css.ts"
-import { extractStyles, HtmlMessageContext, HtmlSettingsContext } from "../src/ui/html/messageHtml.ts"
+import { extractStyles, HtmlMessageContext, HtmlSettingsContext, type PanelPermit } from "../src/ui/html/messageHtml.ts"
 import { htmlClassifiers, htmlSchemas, isDocumentBlock } from "../src/ui/html/parts.ts"
 import { registerHtmlParts } from "../src/ui/html/register.ts"
 import { htmlSchema } from "../src/ui/html/schema.ts"
@@ -19,7 +19,13 @@ afterAll(() => disposers.forEach((dispose) => dispose()))
 /** The rendered markup, without the copy metadata or the wrapper. */
 const render = (
   text: string,
-  { html = true, streaming = false, panelDepth = null as number | null, fromTip = null as number | null } = {}
+  {
+    html = true,
+    streaming = false,
+    panelDepth = null as number | null,
+    fromTip = null as number | null,
+    permit = undefined as PanelPermit | undefined
+  } = {}
 ) =>
   renderToStaticMarkup(
     createElement(
@@ -27,7 +33,7 @@ const render = (
       { value: { html, panelDepth } },
       createElement(
         HtmlMessageContext,
-        { value: { key: "slot", streaming, fromTip } },
+        { value: { key: "slot", streaming, fromTip, ...(permit ? { permit } : {}) } },
         createElement(StMarkdown, { text, streaming })
       )
     )
@@ -89,6 +95,18 @@ describe("inline HTML", () => {
     )
     expect(out).toContain('id="user-content-g"')
     expect(out).toContain('fill="url(#user-content-g)"')
+  })
+
+  it("reads SVG links as the browser does: padded fragments renamed, xlink-only links in a new tab", () => {
+    const out = render(
+      '<svg viewBox="0 0 10 10"><a xlink:href=" #root"><text>in</text></a><a href="#ro&#10;ot"><text>tab</text></a><a xlink:href="https://example.com/x"><text>out</text></a></svg>'
+    )
+    expect(out).not.toMatch(/href="\s*#root"/)
+    expect(out).toContain('xlink:href="#user-content-root"')
+    expect(out).toContain('href="#user-content-root"')
+    expect(out).toMatch(/<a xlink:href="https:\/\/example.com\/x" target="_blank" rel="noopener noreferrer nofollow">/)
+    const map = render('<img src="data:image/png;base64,AA==" usemap=" #m"><map name="m"></map>')
+    expect(map).toContain('useMap="#user-content-m"')
   })
 
   it("keeps only web and mail links, opening in a new tab (fix 4)", () => {
@@ -185,6 +203,21 @@ describe("document blocks", () => {
     expect(render(documentBlock, { panelDepth: 2, fromTip: 2 })).toContain("Run panel")
     expect(render(documentBlock, { panelDepth: 2, fromTip: 1 })).not.toContain("Run panel")
     expect(render(documentBlock, { fromTip: 50 })).not.toContain("Run panel")
+  })
+
+  it("says a panel has scripts that don't run, with the button that allows its card's", () => {
+    const scripted = "```html\n<html><body><p>HP</p><script>document.body.append('!')</script></body></html>\n```"
+    const asking: PanelPermit = {
+      scripts: false,
+      network: false,
+      ask: { name: "Lantern Inn", allow: async () => true }
+    }
+    expect(render(scripted, { permit: asking })).toContain("Run scripts from Lantern Inn")
+    expect(render(scripted, { permit: asking })).toContain("This panel has scripts.")
+    // Running, without scripts of its own, or with no one to ask: no strip.
+    expect(render(scripted, { permit: { scripts: true, network: false, ask: null } })).not.toContain("Run scripts")
+    expect(render(documentBlock, { permit: asking })).not.toContain("Run scripts")
+    expect(render(scripted)).not.toContain("Run scripts")
   })
 
   it("leaves a document block as code without a frame renderer", () => {

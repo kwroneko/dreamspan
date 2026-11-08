@@ -29,7 +29,7 @@ import {
   setStyleScoper
 } from "./html/messageHtml.ts"
 import { effectiveSchema, htmlPartsRevision, subscribeHtmlParts } from "./html/parts.ts"
-import { htmlFinish, htmlMark, htmlPrepare, htmlSanitize } from "./html/rehypeHtml.ts"
+import { htmlFinish, htmlMark, htmlPrepare, htmlSanitize, urlAddress } from "./html/rehypeHtml.ts"
 import type { MessageTextProps } from "./Markdown.tsx"
 import { withDefinitions } from "./referenceDefinitions.ts"
 import { sourcePositions, type SourceChar, type PositionedNode } from "./sourcePositions.ts"
@@ -100,9 +100,11 @@ const htmlPlugins = (parts: number, block: number) =>
     hardening(true)
   ] as Plugins
 
-function Link({ node: _node, ...props }: ComponentProps<"a"> & { node?: unknown }) {
+function Link({ node: _node, ...props }: ComponentProps<"a"> & { node?: unknown; xlinkHref?: unknown }) {
+  // An SVG link may have only `xlink:href`: the browser follows that one then.
+  const href = typeof props.href === "string" ? props.href : props.xlinkHref
   // A link to a place in the message (a card's own `#…` anchors) stays on the page.
-  if (typeof props.href !== "string" || props.href.startsWith("#")) {
+  if (typeof href !== "string" || urlAddress(href).startsWith("#")) {
     const { target: _target, rel: _rel, ...rest } = props
     return <a {...rest} />
   }
