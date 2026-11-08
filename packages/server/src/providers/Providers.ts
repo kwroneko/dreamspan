@@ -201,6 +201,9 @@ interface Prepared {
   readonly scrub: (text: string) => string
 }
 
+/** What the SDK is given as the key when the kind's transport authorizes the request (it drops it). */
+const TRANSPORT_AUTH = "authorized-by-transport"
+
 const isPlain = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
@@ -1371,8 +1374,11 @@ export const layer = (options: ProvidersOptions = {}) =>
               const breakpoints = options.cacheRetention === "none" ? [] : (options.breakpoints ?? [])
               const overrides = options.payload
               const events = prepared.kind.streams.streamSimple(piModel, transcript, {
-                // A keyless local server still needs a value; pi's direct calls require one.
-                apiKey: prepared.apiKey ?? "no-key",
+                // A keyless local server still needs a value; pi's direct calls require one. A
+                // kind with its own transport authorizes the request itself from the stored key,
+                // so the SDK never holds it: a service account's key file has line breaks, which
+                // no header can carry, and the SDK would put it in one (and in its error).
+                apiKey: prepared.kind.transport ? TRANSPORT_AUTH : (prepared.apiKey ?? "no-key"),
                 env: {},
                 maxRetries: 0,
                 signal,

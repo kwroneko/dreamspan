@@ -49,7 +49,8 @@ export interface ProviderKindEntry {
   /**
    * Wraps the request's `fetch` for a provider whose framing or signing differs from the wire API
    * the SDK speaks (Anthropic Messages on AWS Bedrock: `bedrock.ts`). It's given the controlled
-   * fetch, so routing, redirects and the request's secrets stay ours.
+   * fetch, so routing, redirects and the request's secrets stay ours. The SDK is then given a
+   * placeholder key, never the stored one: the transport authorizes from `request.apiKey`.
    */
   readonly transport?: (fetch: typeof globalThis.fetch, request: KindTransportRequest) => typeof globalThis.fetch
   /** Parts of a key that are secrets on their own (an AWS access key ID and its secret). */

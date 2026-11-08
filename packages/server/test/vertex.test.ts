@@ -328,3 +328,51 @@ describe("a reply through Vertex", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
+
+describe("a key file as Google downloads it", () => {
+  // Review (providers2): the downloaded file is pretty-printed, and the SDK put the key it was
+  // given in its x-api-key header, which can't carry line breaks, so every reply failed before
+  // reaching Vertex. The SDK now gets a placeholder; the transport signs in from the stored key.
+  it.live("reaches Vertex with a multi-line key file, and the SDK never holds the key", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      clearVertexTokens()
+      const g = google()
+      yield* Effect.promise(() => accessToken(g.fetch, account))
+      const mock = yield* resource((_req, res) =>
+        anthropicSse(res, [
+          {
+            type: "message_start",
+            message: {
+              id: "msg_vrtx_2",
+              type: "message",
+              role: "assistant",
+              model: "claude-haiku-4-5-20251001",
+              content: [],
+              usage: { input_tokens: 12, output_tokens: 1 }
+            }
+          },
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Lanterns lit." } },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } },
+          { type: "message_stop" }
+        ])
+      )
+      const api = yield* client()
+      const downloaded = JSON.stringify(JSON.parse(keyFile()), null, 2)
+      assert.include(downloaded, "\n  ")
+      const { version } = yield* generateReply(api, {
+        connection: { provider: "anthropic-vertex", kind: "anthropic-vertex", baseUrl: mock.url, apiKey: downloaded },
+        modelKey: "claude-haiku-4-5@20251001",
+        model: {}
+      })
+      assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
+      assert.include(version.content, "Lanterns lit.")
+      const sent = mock.requests().at(-1)!
+      assert.strictEqual(sent.headers.authorization, "Bearer ya29.synthetic-1")
+      assert.notInclude(JSON.stringify(sent.headers), "PRIVATE KEY")
+      assert.notInclude(JSON.stringify(sent.headers), "service_account")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
