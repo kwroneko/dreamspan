@@ -341,7 +341,7 @@ test("each frame's portrait height survives reload when frames show the same car
   await openPortrait(a)
   await openPortrait(b)
   await expect(viewers(page)).toHaveCount(2)
-  const handle = column(page).getByRole("separator", { name: /Resize .+'s and .+'s portraits/ })
+  const handle = column(page).getByRole("separator", { name: /Resize .+'s and .+'s (portraits|images)/ })
   await handle.press("Shift+ArrowDown")
   const weights = () =>
     viewers(page).evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).style.flexGrow).sort())
@@ -354,3 +354,173 @@ test("each frame's portrait height survives reload when frames show the same car
   await page.screenshot({ path: info.outputPath("frame-weights-restored.png") })
   expect(await weights()).toEqual(before)
 })
+
+// 5. "Can you open images attached to messages in the image viewer?" (owner, 2026-11-07): a
+//    message's attached image opens in the same shared column as portraits, from any frame.
+const ATTACHMENT = "harbor.png"
+const attachmentTab = (scope: Locator | Page) => scope.getByRole("tab", { name: ATTACHMENT, exact: true })
+/** The frame's message image (the first one, the message sent with it). */
+const messageImage = (frame: Locator | Page) =>
+  frame.locator("article[data-slot]").getByRole("button", { name: "View image 1", exact: true }).first()
+const openAttachment = async (frame: Locator) => {
+  await focusFrame(frame)
+  await messageImage(frame).click()
+}
+
+/** The chat's one message with a synthetic image, sent once for the file's tests. */
+const withAttachment = async (page: Page) => {
+  if ((await messageImage(page).count()) > 0) return
+  const base64 = await page.evaluate(() => {
+    const canvas = document.createElement("canvas")
+    canvas.width = 360
+    canvas.height = 240
+    const ctx = canvas.getContext("2d")!
+    ctx.fillStyle = "#dfe9ef"
+    ctx.fillRect(0, 0, 360, 240)
+    ctx.fillStyle = "#2f5d73"
+    ctx.fillRect(40, 150, 280, 50)
+    ctx.beginPath()
+    ctx.moveTo(180, 40)
+    ctx.lineTo(120, 150)
+    ctx.lineTo(240, 150)
+    ctx.fill()
+    return canvas.toDataURL("image/png").split(",")[1]!
+  })
+  // Attaching waits for the chat to load; the message's text replaces any draft left before.
+  await expect(page.getByRole("button", { name: "Attach images", exact: true })).toBeEnabled()
+  // An image an earlier test left attached (a file dropped from outside) goes first.
+  const left = page.getByRole("list", { name: "Attached images" }).getByRole("button", { name: /^Remove / })
+  for (let count = await left.count(); count > 0; count--) {
+    await left.first().click()
+    await expect(left).toHaveCount(count - 1)
+  }
+  await page.getByLabel("Message", { exact: true }).fill("A harbor sketch.")
+  await page
+    .getByLabel("Choose images")
+    .setInputFiles({ name: ATTACHMENT, mimeType: "image/png", buffer: Buffer.from(base64, "base64") })
+  await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(messageImage(page)).toBeVisible()
+  await expect
+    .poll(() =>
+      messageImage(page)
+        .locator("img")
+        .evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)
+    )
+    .toBeGreaterThan(0)
+  await expect(page.getByText("generating", { exact: true })).toHaveCount(0)
+}
+
+for (const theme of ["light", "dark"] as const)
+  test(`a message's attached image stacks in the one column with portraits from every frame, after a reload too ${theme}`, async ({
+    page
+  }, info) => {
+    await page.emulateMedia({ colorScheme: theme })
+    await openChat(page, 1440)
+    await withAttachment(page)
+    await page.getByRole("button", { name: "Split right" }).click()
+    await expect(frames(page)).toHaveCount(2)
+    const [a, b] = [frames(page).nth(0), frames(page).nth(1)]
+    await expect(messageImage(b)).toBeVisible()
+
+    // From the left frame, then a portrait and the same image from the right: one stack.
+    await openAttachment(a)
+    await expect(viewers(page)).toHaveCount(1)
+    expect(await names(page)).toEqual([ATTACHMENT])
+    await openPortrait(b)
+    await openAttachment(b)
+    await expect(column(page)).toHaveCount(1)
+    await expect(viewers(page)).toHaveCount(3)
+    expect(await names(page)).toEqual([ATTACHMENT, TALL.name, ATTACHMENT])
+    await expect(
+      viewers(page)
+        .first()
+        .getByRole("img", { name: `${ATTACHMENT}'s full image` })
+    ).toHaveJSProperty("complete", true)
+    await expectLayout(page, info, `shared-attachment-${theme}`, { scope: "[data-portrait-column]" })
+    await page.screenshot({ path: info.outputPath(`shared-attachment-${theme}.png`) })
+    // A second click in its frame closes only that frame's.
+    await openAttachment(b)
+    await expect(viewers(page)).toHaveCount(2)
+    expect(await names(page)).toEqual([TALL.name, ATTACHMENT])
+
+    // A reload brings both back.
+    await page.reload()
+    await expect(frames(page)).toHaveCount(2)
+    await expect(viewers(page)).toHaveCount(2)
+    expect((await names(page)).sort()).toEqual([ATTACHMENT, TALL.name].sort())
+
+    // Its viewer's ⋯ opens it as a tab, beside the frame it came from: the left one.
+    const own = column(page).getByRole("complementary", { name: `${ATTACHMENT}'s portrait`, exact: true })
+    await own.getByRole("button", { name: "Viewer options", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Open as a tab", exact: true }).click()
+    await expect(attachmentTab(frames(page).nth(0))).toBeVisible()
+    await expect(attachmentTab(frames(page).nth(1))).toHaveCount(0)
+    await expect(
+      frames(page)
+        .nth(0)
+        .getByRole("region", { name: `${ATTACHMENT}'s picture`, exact: true })
+    ).toBeVisible()
+    await expect(viewers(page)).toHaveCount(1)
+    await closeAll(page)
+    await frames(page)
+      .nth(0)
+      .getByRole("button", { name: `Close ${ATTACHMENT}`, exact: true })
+      .click()
+    await expect(attachmentTab(page)).toHaveCount(0)
+  })
+
+test("a message's attached image dragged onto a frame opens there as a tab; onto the composer it never attaches", async ({
+  page
+}) => {
+  await openChat(page)
+  await withAttachment(page)
+  await page.getByRole("button", { name: "Split right" }).click()
+  await expect(frames(page)).toHaveCount(2)
+  const [a, b] = [frames(page).nth(0), frames(page).nth(1)]
+  await expect(messageImage(b)).toBeVisible()
+
+  // Onto the other frame's body: a tab there, and no attachment anywhere.
+  const body = (await b.locator("[data-frame-body]").boundingBox())!
+  await messageImage(a).dragTo(b.locator("[data-frame-body]"), {
+    targetPosition: { x: body.width / 2, y: body.height / 3 }
+  })
+  await expect(attachmentTab(b)).toBeVisible()
+  await expect(b.getByRole("region", { name: `${ATTACHMENT}'s picture`, exact: true })).toBeVisible()
+  await expect(page.getByRole("list", { name: "Attached images" })).toHaveCount(0)
+  await b.getByRole("button", { name: `Close ${ATTACHMENT}`, exact: true }).click()
+  await expect(attachmentTab(page)).toHaveCount(0)
+
+  // Onto its own frame's composer: it opens as a tab as on any part of a frame, never in the message.
+  const message = a.getByLabel("Message", { exact: true })
+  await messageImage(a).dragTo(message)
+  await expect(attachmentTab(page)).toHaveCount(1)
+  await expect(page.getByRole("list", { name: "Attached images" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: `Remove ${ATTACHMENT}` })).toHaveCount(0)
+  await expect(page.getByLabel("Message", { exact: true }).first()).toHaveValue("")
+  await expect(page.getByText("reload to retry")).toHaveCount(0)
+  await page
+    .getByRole("button", { name: `Close ${ATTACHMENT}`, exact: true })
+    .first()
+    .click()
+})
+
+for (const theme of ["light", "dark"] as const)
+  test(`a message's attached image on a phone opens the full-screen viewer ${theme}`, async ({ page }, info) => {
+    await page.emulateMedia({ colorScheme: theme })
+    await openChat(page, 390)
+    await withAttachment(page)
+    await messageImage(page).click()
+    const screen = page.locator('[data-layout-overlay="The full-screen viewer covers the page"]')
+    await expect(screen.getByRole("heading", { name: ATTACHMENT, exact: true })).toBeVisible()
+    await expect(screen.getByRole("button", { name: "Fit", exact: true })).toBeVisible()
+    await expect(column(page)).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await expectLayout(page, info, `attachment-phone-${theme}`, {
+      scope: '[data-layout-overlay="The full-screen viewer covers the page"]'
+    })
+    await page.screenshot({ path: info.outputPath(`attachment-phone-${theme}.png`) })
+    await screen.getByRole("button", { name: "Close", exact: true }).click()
+    await expect(screen).toHaveCount(0)
+  })

@@ -10,6 +10,7 @@ import { useWorkbenchTab } from "../workbench/tab.tsx"
 import { pictureHref } from "./PicturePage.tsx"
 import type { Stack } from "../../ui/portraitStack.ts"
 import { castPortrait, type CastView } from "./cast.ts"
+import { attachmentOf } from "./attachmentPictures.ts"
 
 export function ChatPortraitProvider({
   wide,
@@ -67,6 +68,7 @@ export function ChatPortraitProvider({
     const portrait =
       gallery[id] ??
       castPortrait(cast, id) ??
+      attachmentOf(id) ??
       (id === "model" || id === "you" ? { id, name: id === "model" ? "Model" : "You", mediaId: null } : null)
     const weight = weights[id]
     return portrait
@@ -97,7 +99,7 @@ export function ChatPortraitProvider({
   return (
     <PortraitProvider
       inline={wide}
-      current={(portrait) => gallery[portrait.id] ?? castPortrait(cast, portrait.id)}
+      current={(portrait) => gallery[portrait.id] ?? castPortrait(cast, portrait.id) ?? attachmentOf(portrait.id)}
       stack={portraits}
       onStackChange={change}
       tabHref={tab ? pictureHref : undefined}

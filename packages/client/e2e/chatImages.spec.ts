@@ -1,11 +1,41 @@
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { join } from "node:path"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { apiLogin, ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu, showActions } from "./support/message.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
+const tooltip = (page: Page) => page.locator('[data-layout-overlay="Tooltip floats above the page"]')
+/** The viewer's zoom row: the slider, Fit and 100%, each explained. */
+const expectZoomControls = async (page: Page, scope: Locator) => {
+  await expect(scope.getByRole("slider", { name: "Zoom" })).toBeVisible()
+  const fit = scope.getByRole("button", { name: "Fit", exact: true })
+  await expect(fit).toHaveAttribute("aria-pressed", "true")
+  await fit.hover()
+  await expect(tooltip(page)).toHaveText("Fit: show all of the picture")
+  await scope.getByRole("button", { name: "100%", exact: true }).click()
+  await expect(scope.getByRole("button", { name: "100%", exact: true })).toHaveAttribute("aria-pressed", "true")
+  await fit.click()
+  await page.mouse.move(0, 0)
+}
+/** The image column's viewer on a wide screen; on a phone, its full-screen viewer. */
+const expectViewerOpen = async (page: Page, width: number, name: string) => {
+  const viewer =
+    width >= 1024
+      ? page.locator("[data-portrait-column]").getByRole("complementary", { name: `${name}'s portrait`, exact: true })
+      : page.locator('[data-layout-overlay="The full-screen viewer covers the page"]')
+  await expect(viewer).toBeVisible()
+  if (width < 1024) await expect(viewer.getByRole("heading", { name, exact: true })).toBeVisible()
+  await expect(page.locator("[data-picture-peek]")).toHaveCount(0)
+  return viewer
+}
+const closeViewer = async (page: Page, width: number, name: string) => {
+  const viewer = await expectViewerOpen(page, width, name)
+  await viewer.getByRole("button", { name: width >= 1024 ? "Close the portrait" : "Close", exact: true }).click()
+  await expect(viewer).toHaveCount(0)
+}
 const openChat = async (page: Page, title: string) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats`)
@@ -67,18 +97,90 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
       const screenshots = process.env.SCREENSHOT_DIR
       if (screenshots) await page.screenshot({ path: join(screenshots, `draft-${width}-${colorScheme}.png`) })
+
+      // Not sent yet, a click peeks at it in a modal with the column's viewer, never the column.
+      await attached.getByRole("button", { name: "View costume.png", exact: true }).click()
+      const peek = page.getByRole("dialog", { name: "costume.png", exact: true })
+      await expect(peek.locator("[data-picture-peek]")).toBeVisible()
+      await expectZoomControls(page, peek)
+      const peeked = peek.getByRole("img", { name: "costume.png at full size", exact: true })
+      await expect.poll(() => peeked.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
+      await expect(page.locator("[data-portrait-column]")).toHaveCount(0)
+      if (screenshots) await page.screenshot({ path: join(screenshots, `peek-${width}-${colorScheme}.png`) })
+      await expectLayout(page, test.info(), `attachment-peek-${width}-${colorScheme}`, {
+        scope: '[data-layout-overlay="Modal dialog covers the page"]'
+      })
+      await page.keyboard.press("Escape")
+      await expect(peek).toHaveCount(0)
+
+      // Its corner button opens it in the image column, explained on hover; shown always on touch.
+      const thumb = attached.getByRole("button", { name: "View costume.png", exact: true })
+      const toColumn = attached.getByRole("button", { name: "Open in image column", exact: true })
+      // Closing the peek returns focus to the thumbnail, which shows the button too.
+      await expect(thumb).toBeFocused()
+      await thumb.blur()
+      await page.mouse.move(0, 0)
+      await expect(toColumn).toHaveCSS("opacity", "0")
+      await thumb.hover()
+      await expect(toColumn).toHaveCSS("opacity", "1")
+      await toColumn.hover()
+      await expect(tooltip(page)).toHaveText("Opens this image in the image column, beside the chat.")
+      await expectLayout(page, test.info(), `attachment-thumbnail-${width}-${colorScheme}`, {
+        scope: '[aria-label="Image attachments"]',
+        hovered: true
+      })
+      await toColumn.click()
+      await closeViewer(page, width, "costume.png")
+
+      // Its app context menu: Open in image column, Open as a tab, each explained.
+      await thumb.click({ button: "right" })
+      const menu = page.getByRole("menu", { name: "Image", exact: true })
+      await expect(
+        menu.getByRole("menuitem", { name: "Open in image column", exact: true })
+      ).toHaveAccessibleDescription("Opens this image in the image column.")
+      await expect(menu.getByRole("menuitem", { name: "Open as a tab", exact: true })).toHaveAccessibleDescription(
+        /^Opens this image as a tab/
+      )
+      await expectLayout(page, test.info(), `attachment-menu-${width}-${colorScheme}`, {
+        scope: '[data-layout-overlay="Context menu floats above the page"]'
+      })
+      await menu.getByRole("menuitem", { name: "Open in image column", exact: true }).click()
+      await closeViewer(page, width, "costume.png")
+
       await page.getByRole("button", { name: "Send", exact: true }).click()
       await expect(page.getByRole("button", { name: "View image 1" })).toBeVisible()
       await expect(attached).toHaveCount(0)
-      await page.getByRole("button", { name: "View image 1" }).click()
-      const viewer = page.getByRole("dialog")
-      await expect(viewer.getByRole("img")).toBeVisible()
-      await expect(viewer).toHaveCSS("opacity", "1")
-      await expect.poll(() => viewer.getByRole("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
+      // Sent, a click opens it in the image column (full screen on a phone), as a portrait opens.
+      const sent = page.getByRole("button", { name: "View image 1" })
+      await sent.hover()
+      await expect(tooltip(page)).toContainText("Opens this image in the image viewer.")
+      await sent.click()
+      const viewer = await expectViewerOpen(page, width, "costume.png")
+      await expectZoomControls(page, viewer)
+      await expect
+        .poll(() =>
+          viewer
+            .getByRole("img", { name: "costume.png's full image" })
+            .evaluate((img: HTMLImageElement) => img.naturalWidth)
+        )
+        .toBe(480)
       if (screenshots) await page.screenshot({ path: join(screenshots, `viewer-${width}-${colorScheme}.png`) })
+      await expectLayout(page, test.info(), `attachment-viewer-${width}-${colorScheme}`, {
+        scope:
+          width >= 1024 ? "[data-portrait-column]" : '[data-layout-overlay="The full-screen viewer covers the page"]'
+      })
       await page.keyboard.press("Escape")
       await expect(viewer).toHaveCount(0)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+      // The timeline image has the same context menu.
+      await sent.click({ button: "right" })
+      const sentMenu = page.getByRole("menu", { name: "Image", exact: true })
+      await expect(sentMenu.getByRole("menuitem")).toHaveCount(2)
+      await expect(sentMenu.getByRole("menuitem", { name: "Open in image column", exact: true })).toBeEnabled()
+      await expect(sentMenu.getByRole("menuitem", { name: "Open as a tab", exact: true })).toHaveAccessibleDescription(
+        /^Opens this image as a tab in the chat's frame\. Dragging it onto a frame does the same\.$/
+      )
+      await page.keyboard.press("Escape")
       await context.close()
     })
   }
@@ -322,15 +424,69 @@ test("hide images covers draft, message and full-size attachment surfaces", asyn
   const draft = page.getByRole("list", { name: "Attached images" })
   await expect(draft.locator("img")).toHaveCSS("visibility", "hidden")
   await expect(draft.getByText("Image hidden", { exact: true })).toBeVisible()
+  // Not sent, its peek hides it too, and says so.
+  await draft.getByRole("button", { name: "View concealed.png" }).click()
+  const peek = page.locator("[data-picture-peek]")
+  // Hidden images leave the accessibility tree, so these find them by their alt text.
+  await expect(peek.locator('img[alt="concealed.png at full size"]')).toHaveCSS("visibility", "hidden")
+  await expect(peek.getByText("Images are hidden in this browser.", { exact: false })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(peek).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
   await page.getByRole("button", { name: "Send", exact: true }).click()
   const message = page.getByRole("article", { name: "Your message" })
   await expect(message.locator("img")).toHaveCSS("visibility", "hidden")
   await expect(message.getByText("Image hidden", { exact: true })).toBeVisible()
   await message.getByRole("button", { name: "View image 1" }).click()
-  const viewer = page.getByRole("dialog")
-  await expect(viewer.locator("img")).toHaveCSS("visibility", "hidden")
-  await expect(viewer.getByText("Image hidden", { exact: true })).toBeVisible()
+  const viewer = page.locator("[data-portrait-column]")
+  await expect(viewer.locator(`img[alt="concealed.png's full image"]`)).toHaveCSS("visibility", "hidden")
+  await expect(viewer.getByText("Images are hidden in this browser.", { exact: false })).toBeVisible()
+})
+
+test("an attachment still uploading peeks from its local copy; the column and tab wait for the upload", async ({
+  page
+}) => {
+  await openChat(page, "Uploading image")
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/chat/image", async (route) => {
+    await held
+    await route.continue()
+  })
+  await page
+    .getByLabel("Choose images")
+    .setInputFiles({ name: "slow.png", mimeType: "image/png", buffer: await drawing(page) })
+  const attached = page.getByRole("list", { name: "Attached images" })
+  const thumb = attached.getByRole("button", { name: "View slow.png", exact: true })
+  await expect(thumb).toBeVisible()
+  // The corner button says why it waits, and stays disabled.
+  const toColumn = attached.getByRole("button", { name: "Open in image column", exact: true })
+  await thumb.hover()
+  await expect(toColumn).toHaveAttribute("aria-disabled", "true")
+  await toColumn.hover()
+  await expect(tooltip(page)).toHaveText("This image can open there once it has finished uploading.")
+  // So do the context menu's items.
+  await thumb.click({ button: "right" })
+  const menu = page.getByRole("menu", { name: "Image", exact: true })
+  for (const name of ["Open in image column", "Open as a tab"]) {
+    const item = menu.getByRole("menuitem", { name, exact: true })
+    await expect(item).toHaveAttribute("aria-disabled", "true")
+    await expect(item).toHaveAccessibleDescription("This image can open there once it has finished uploading.")
+  }
+  await page.keyboard.press("Escape")
+  await expect(menu).toHaveCount(0)
+  // The peek shows the browser's own copy meanwhile.
+  await thumb.click()
+  const peeked = page.locator("[data-picture-peek]").getByRole("img", { name: "slow.png at full size" })
+  await expect.poll(() => peeked.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
+  await expect(peeked).toHaveAttribute("src", /^blob:/)
+  await page.locator("[data-window-close]").click()
+  await expect(peeked).toHaveCount(0)
+  release()
+  await expect(toColumn).not.toHaveAttribute("aria-disabled", "true")
+  await thumb.hover()
+  await toColumn.click()
+  await expect(page.getByRole("complementary", { name: "slow.png's portrait", exact: true })).toBeVisible()
 })
 
 for (const colorScheme of ["light", "dark"] as const) {
