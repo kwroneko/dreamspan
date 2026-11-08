@@ -2,9 +2,16 @@
 // AppCoreApi is at TypeScript's instantiation depth (TS2589).
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ProviderInfo } from "./providers.ts"
+import { ProviderError, ServerError } from "./errors.ts"
+import { Model, ModelId, ProviderInfo } from "./providers.ts"
 
 export class ProviderListApi extends RpcGroup.make(
   /** Built-in and from plugins, in picker order, each with an API type in effect. */
-  Rpc.make("ListProviders", { success: Schema.Array(ProviderInfo) })
+  Rpc.make("ListProviders", { success: Schema.Array(ProviderInfo) }),
+  /** Fetches OpenRouter's per-provider prices for one model, used when its routing pins a provider. */
+  Rpc.make("RefreshModelEndpoints", {
+    payload: { modelId: ModelId },
+    success: Model,
+    error: Schema.Union([ProviderError, ServerError])
+  })
 ) {}

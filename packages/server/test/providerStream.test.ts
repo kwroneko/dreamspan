@@ -185,6 +185,76 @@ describe("streaming through OpenRouter's Chat Completions", () => {
   )
 })
 
+describe("a model pinned to one OpenRouter provider", () => {
+  const pinned = (endpoints: (res: Parameters<Parameters<typeof mock>[0]>[1]) => void) =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) => {
+        if (request.path === "/v1/models/vendor/pinnable/endpoints") return endpoints(res)
+        if (request.path.endsWith("/models"))
+          return json(
+            res,
+            200,
+            openAiList([{ id: "vendor/pinnable", pricing: { prompt: "0.000002", completion: "0.00001" } }])
+          )
+        sse(res, completionChunks(["Hi."], { prompt_tokens: 1000, completion_tokens: 100 }))
+      })
+      const { userId, connection, modelId, providers, reader, writer } = yield* connect(
+        "openrouter",
+        `${server.url}/v1`,
+        "k",
+        "vendor/pinnable"
+      )
+      // The pin is saved straight to storage: nothing has opened the model page or fetched its prices.
+      const saved = yield* reader.GetModel({ userId, modelId })
+      yield* writer.EditModel({
+        userId,
+        modelId,
+        overrides: { settings: { routing: { only: ["Together"] } } },
+        expectedRowVersion: saved.rowVersion
+      })
+      assert.isUndefined((yield* reader.GetModel({ userId, modelId })).upstream.endpoints)
+      const events = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      )
+      const done = events.at(-1)!
+      if (done.type !== "done") return assert.fail("no done event")
+      return { done, stored: (yield* reader.GetModel({ userId, modelId })).upstream.endpoints, server }
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+
+  it.live("is costed at the pinned provider's price without its page ever being opened", () =>
+    Effect.gen(function* () {
+      const out = yield* pinned((res) =>
+        json(res, 200, {
+          data: {
+            endpoints: [
+              { provider_name: "Together", tag: "together", pricing: { prompt: "0.0000005", completion: "0.000001" } },
+              { provider_name: "Other", tag: "other", pricing: { prompt: "0.00001", completion: "0.00002" } }
+            ]
+          }
+        })
+      )
+      // 1000 × $0.5/M + 100 × $1/M, not the model's $2/M and $10/M (0.003).
+      assert.strictEqual(out!.done.cost?.formula, "builtin")
+      assert.closeTo(out!.done.cost!.amount, 0.0006, 1e-12)
+      assert.strictEqual(out!.stored?.list.length, 2)
+    })
+  )
+
+  it.live("keeps the model's general price when the provider list can't be had", () =>
+    Effect.gen(function* () {
+      const out = yield* pinned((res) => json(res, 404, { error: { message: "none" } }))
+      assert.closeTo(out!.done.cost!.amount, 0.003, 1e-12)
+      assert.match(out!.stored?.error ?? "", /not_found/)
+    })
+  )
+})
+
 describe("failures", () => {
   it.live("retries a rate limit before the first token, each attempt in the ledger", () =>
     Effect.gen(function* () {

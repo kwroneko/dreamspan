@@ -1,7 +1,7 @@
 // Fetching a connection's model list from its upstream (spec/PROVIDERS.md §3.3). Each
 // kind's API is used as that upstream defines it; the base URL moves the whole API.
 // What a list reports beats pi-ai's catalog, because it describes the endpoint in use.
-import type { ModelUpstream } from "@rp/shared/providers.ts"
+import type { ModelEndpoint, ModelUpstream, Price } from "@rp/shared/providers.ts"
 import { Effect, Schema } from "effect"
 
 export class ModelListError extends Schema.TaggedError<ModelListError>()("ModelListError", {
@@ -47,6 +47,47 @@ const OpenAiModel = Schema.Struct({
   )
 })
 const OpenAiList = Schema.Struct({ data: Schema.Array(OpenAiModel) })
+
+// OpenRouter's `GET /models/{author}/{slug}/endpoints` (https://openrouter.ai/docs/api-reference):
+// `data.endpoints[]`, each with `tag` (the routing slug), `provider_name`, `context_length` and
+// `pricing` as decimal strings in USD per token, a fractional `discount`, and `overrides` that
+// apply under conditions (a prompt length, a UTC window).
+const EndpointPricing = Schema.Struct({
+  prompt: PerToken,
+  completion: PerToken,
+  input_cache_read: PerToken,
+  input_cache_write: PerToken,
+  discount: OptionalNumber,
+  overrides: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Array(
+        Schema.Struct({
+          prompt: PerToken,
+          completion: PerToken,
+          input_cache_read: PerToken,
+          input_cache_write: PerToken,
+          min_prompt_tokens: OptionalNumber,
+          utc_days: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.Unknown))),
+          utc_start: OptionalNumber,
+          utc_end: OptionalNumber
+        })
+      )
+    )
+  )
+})
+const EndpointsResponse = Schema.Struct({
+  data: Schema.Struct({
+    endpoints: Schema.Array(
+      Schema.Struct({
+        name: Schema.optionalKey(Schema.String),
+        provider_name: Schema.optionalKey(Schema.String),
+        tag: Schema.optionalKey(Schema.NullOr(Schema.String)),
+        context_length: OptionalNumber,
+        pricing: Schema.optionalKey(Schema.NullOr(EndpointPricing))
+      })
+    )
+  })
+})
 
 const AnthropicModel = Schema.Struct({
   id: Schema.String,
@@ -112,6 +153,58 @@ const fromOpenAi = (model: typeof OpenAiModel.Type): ModelUpstream => {
   }) as ModelUpstream
 }
 
+/** An endpoint's price per million tokens, its discount applied; conditional overrides on prompt length become tiers. */
+const endpointPrice = (pricing: typeof EndpointPricing.Type | null | undefined): Price | undefined => {
+  const keep = 1 - Math.min(Math.max(pricing?.discount ?? 0, 0), 1)
+  const scaled = (value: string | number | null | undefined) => {
+    const n = perMillion(value)
+    // Rounded: 0.0000002 per token times a million is not 0.19999999999999998.
+    return n === undefined ? undefined : Number((n * keep).toPrecision(12))
+  }
+  const input = scaled(pricing?.prompt)
+  const output = scaled(pricing?.completion)
+  if (input === undefined || output === undefined) return undefined
+  const cacheRead = scaled(pricing?.input_cache_read)
+  const cacheWrite = scaled(pricing?.input_cache_write)
+  const tiers = (pricing?.overrides ?? [])
+    .filter(
+      (o) =>
+        typeof o.min_prompt_tokens === "number" &&
+        o.min_prompt_tokens >= 0 &&
+        (o.utc_days === undefined || o.utc_days === null) &&
+        o.utc_start == null &&
+        o.utc_end == null
+    )
+    .map((o) =>
+      defined({
+        inputTokensAbove: o.min_prompt_tokens,
+        input: scaled(o.prompt) ?? input,
+        output: scaled(o.completion) ?? output,
+        cacheRead: scaled(o.input_cache_read) ?? cacheRead,
+        cacheWrite: scaled(o.input_cache_write) ?? cacheWrite
+      })
+    )
+    .sort((a, b) => a.inputTokensAbove! - b.inputTokensAbove!) as NonNullable<Price["tiers"]>
+  return defined({ input, output, cacheRead, cacheWrite, tiers: tiers.length > 0 ? tiers : undefined }) as Price
+}
+
+/** The endpoints a decoded response lists; one without a tag or a name is left out. */
+const endpointsOf = (response: typeof EndpointsResponse.Type): Array<ModelEndpoint> =>
+  response.data.endpoints.flatMap((e) => {
+    const tag = e.tag?.trim()
+    const name = (e.provider_name ?? e.name)?.trim()
+    if (!tag && !name) return []
+    const price = endpointPrice(e.pricing)
+    return [
+      {
+        tag: tag || name!,
+        name: name || tag!,
+        ...(typeof e.context_length === "number" ? { context: e.context_length } : {}),
+        ...(price ? { price } : {})
+      }
+    ]
+  })
+
 const fromAnthropic = (model: typeof AnthropicModel.Type): ModelUpstream =>
   defined({
     name: model.display_name,
@@ -172,6 +265,28 @@ const decode =
           new ModelListError({ reason: "parse", status: null, message: `unexpected list format: ${error.message}` })
       )
     ) as Effect.Effect<S["Type"], ModelListError>
+
+/** OpenRouter's `author/slug` for a model key; a variant (`:free`, `:nitro`) has its own prices, which the list doesn't give. */
+export const endpointsPath = (key: string) => {
+  const [author, slug, ...rest] = key.split("/")
+  return author && slug && rest.length === 0 && !slug.includes(":") && !author.includes(":")
+    ? `models/${encodeURIComponent(author)}/${encodeURIComponent(slug)}/endpoints`
+    : null
+}
+
+/** Fetches OpenRouter's endpoint list for a model, with the models list's authentication and transport. */
+export const fetchEndpoints = (request: ListRequest, key: string) =>
+  Effect.gen(function* () {
+    const path = endpointsPath(key)
+    if (path === null)
+      return yield* new ModelListError({ reason: "not_found", status: null, message: "no endpoint list for this id" })
+    const raw = yield* getJson(
+      request,
+      joinUrl(request.baseUrl, path),
+      request.apiKey ? { authorization: `Bearer ${request.apiKey}` } : {}
+    )
+    return endpointsOf(yield* decode(EndpointsResponse)(raw))
+  })
 
 const MAX_PAGES = 20
 

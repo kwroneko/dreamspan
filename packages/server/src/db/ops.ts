@@ -127,6 +127,7 @@ import {
   Credential,
   CredentialId,
   Model,
+  ModelEndpoints,
   ModelId,
   ModelOverrides,
   ModelUse,
@@ -1347,6 +1348,12 @@ export class WriteOps extends RpcGroup.make(
   /** Sets or clears the context size learned from a provider's error, keeping the user's other edits. */
   Rpc.make("SetLearnedContext", {
     payload: { userId: UserId, modelId: ModelId, context: Schema.NullOr(Schema.Int), at: Schema.Number },
+    success: Model,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Stores the endpoint list fetched for a model (a price per provider), replacing an older one. */
+  Rpc.make("SetModelEndpoints", {
+    payload: { userId: UserId, modelId: ModelId, endpoints: ModelEndpoints },
     success: Model,
     error: Schema.Union([NotFound, StorageError])
   }),
