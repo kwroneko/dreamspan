@@ -93,7 +93,14 @@ export const ProviderSettings = Schema.Struct({
   /** Sends the chat's id as `prompt_cache_key`, which OpenAI routes cache reads by. */
   promptCacheKey: Schema.optionalKey(Schema.Boolean),
   /** The cloud region: it sets the default address and what requests are signed for. Unset: read from the address. */
-  region: Schema.optionalKey(Schema.String)
+  region: Schema.optionalKey(Schema.String),
+  /** The Google Cloud project requests are billed to (Vertex AI). Unset: the service account key's own. */
+  project: Schema.optionalKey(Schema.String),
+  /**
+   * How a cache marker is written on the wire, where the provider's API takes another encoding than
+   * the API type's own: `prompt_cache_breakpoint` for OpenAI's APIs on AWS Bedrock.
+   */
+  cacheMarker: Schema.optionalKey(Schema.Literal("prompt_cache_breakpoint"))
 })
 export type ProviderSettings = typeof ProviderSettings.Type
 
@@ -116,12 +123,18 @@ export class ProviderInfo extends Schema.Class<ProviderInfo>("ProviderInfo")({
   baseUrlExample: Schema.optionalKey(Schema.String),
   /** The address for a region, `{region}` replaced, for providers whose address names one. */
   regionUrl: Schema.optionalKey(Schema.String),
+  /** Regions whose address doesn't follow `regionUrl` (Vertex's `global`, `us` and `eu`). */
+  regionUrls: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  /** How its regions are written: the form's help, an example and the pattern a region must match. */
+  regionFormat: Schema.optionalKey(
+    Schema.Struct({ about: Schema.String, example: Schema.String, pattern: Schema.String })
+  ),
   keyOptional: Schema.Boolean,
   /** The ways a key signs requests; the first is the default. */
   auth: Schema.Array(ProviderChoice),
   /** The defaults of every setting that applies to it. */
   defaults: ProviderSettings,
-  /** The settings its advanced section shows, in order. */
+  /** The settings its connection forms show, in order. */
   settings: Schema.Array(Schema.String),
   /** How long its cache lasts, in the user's terms; null where no lifetime is documented. */
   cacheLifetime: Schema.NullOr(Schema.String),
@@ -269,6 +282,25 @@ export type FixedCapability = typeof FixedCapability.Type
 /** A compatibility shim that applies to a model (the server's registered shims), as the user reads it. */
 const ModelShim = Schema.Struct({ id: Schema.String, label: Schema.String })
 
+/** An upstream behind a router (an OpenRouter provider): its slug in the routing, and its name. */
+const RouteUpstream = Schema.Struct({ slug: Schema.String, name: Schema.String })
+
+/**
+ * A compatibility shim for some upstreams behind a router (DESIGN liveapi2): it applies when the
+ * model's routing pins one of them (`pinnedRoute`), wherever the model is resolved, so the
+ * assembly applies it at send and the model page shows it for the pinned route.
+ */
+export const RouteRule = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  upstreams: Schema.Array(RouteUpstream),
+  /** What goes wrong there, for a route that isn't pinned ("Prefill fails"). */
+  fails: Schema.String,
+  capabilities: Schema.optionalKey(Schema.Struct(capabilityFields)),
+  fixed: Schema.optionalKey(Schema.Array(FixedCapability))
+})
+export type RouteRule = typeof RouteRule.Type
+
 /** What pi-ai's catalog and the upstream list report. Rewritten by every refresh. */
 export const ModelUpstream = Schema.Struct({
   ...capabilityFields,
@@ -276,9 +308,106 @@ export const ModelUpstream = Schema.Struct({
   catalog: Schema.optionalKey(CatalogMatch),
   /** The compatibility shims that apply, and the capabilities they fix over the user's edits. */
   shims: Schema.optionalKey(Schema.Array(ModelShim)),
-  fixed: Schema.optionalKey(Schema.Array(FixedCapability))
+  fixed: Schema.optionalKey(Schema.Array(FixedCapability)),
+  /** Shims for some of the router's upstreams, applied when the routing pins one. */
+  routes: Schema.optionalKey(Schema.Array(RouteRule))
 })
 export type ModelUpstream = typeof ModelUpstream.Type
+
+/** A routing entry's provider: lower case, without a variant (`deepinfra/fp8` is DeepInfra). */
+const upstreamSlug = (slug: string) => slug.trim().toLowerCase().split("/")[0]!
+
+const slugsOf = (value: unknown): ReadonlyArray<string> | undefined =>
+  Array.isArray(value)
+    ? value.filter((slug): slug is string => typeof slug === "string").map((slug) => upstreamSlug(slug))
+    : undefined
+
+/**
+ * The upstreams an OpenRouter routing (`provider`) lets serve a request: `only`, narrowed to
+ * `order` when fallbacks are off, less `ignore`. Null means any of them, `ignore` aside.
+ */
+const routeCandidates = (routing: Readonly<Record<string, unknown>> | undefined) => {
+  const only = slugsOf(routing?.only)
+  const order = routing?.allow_fallbacks === false ? slugsOf(routing?.order) : undefined
+  const ignore = new Set(slugsOf(routing?.ignore) ?? [])
+  let candidates: ReadonlyArray<string> | null = only ?? order ?? null
+  if (only && order) candidates = only.filter((slug) => order.includes(slug))
+  return {
+    candidates: candidates === null ? null : [...new Set(candidates.filter((slug) => !ignore.has(slug)))],
+    ignore
+  }
+}
+
+/**
+ * The one upstream a routing pins (`only` with one entry, or `order` with one and fallbacks
+ * off), or null when the router may choose among several.
+ */
+export const pinnedRoute = (routing: Readonly<Record<string, unknown>> | undefined): string | null => {
+  const { candidates } = routeCandidates(routing)
+  return candidates?.length === 1 ? candidates[0]! : null
+}
+
+const listNames = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
+
+/** A model's upstream with the route rules for its routing's pinned upstream applied. */
+export interface RoutedUpstream {
+  readonly upstream: ModelUpstream
+  /** The pinned upstream's slug, or null. */
+  readonly route: string | null
+  /** The route rules that apply: the pinned upstream's. */
+  readonly applied: ReadonlyArray<RouteRule>
+  /** For a route that isn't pinned: what fails on which upstreams it may go to. */
+  readonly unpinned: ReadonlyArray<string>
+}
+
+/** What a route rule says fails, on the upstream named (`Prefill fails on Together`). */
+export const routeFailure = (rule: RouteRule, slug: string | null) =>
+  `${rule.fails} on ${rule.upstreams.find((u) => u.slug === slug)?.name ?? listNames(rule.upstreams.map((u) => u.name))}`
+
+/**
+ * Applies the route rules of the upstream the routing pins: their capabilities over the list's,
+ * their fixed fields, and their names among the shims. Unpinned, none apply, and the notes say
+ * what fails where the router may send it ("Prefill fails on Together and StreamLake").
+ */
+export const routedUpstream = (
+  upstream: ModelUpstream,
+  routing: Readonly<Record<string, unknown>> | undefined
+): RoutedUpstream => {
+  const rules = upstream.routes ?? []
+  if (rules.length === 0) return { upstream, route: null, applied: [], unpinned: [] }
+  const route = pinnedRoute(routing)
+  if (route === null) {
+    const { candidates, ignore } = routeCandidates(routing)
+    const reachable = (slug: string) => (candidates === null ? !ignore.has(slug) : candidates.includes(slug))
+    const byFailure = new Map<string, Array<string>>()
+    for (const rule of rules) {
+      const names = rule.upstreams.filter((u) => reachable(u.slug)).map((u) => u.name)
+      if (names.length > 0) byFailure.set(rule.fails, [...(byFailure.get(rule.fails) ?? []), ...names])
+    }
+    return {
+      upstream,
+      route,
+      applied: [],
+      unpinned: [...byFailure].map(([fails, names]) => `${fails} on ${listNames(names)}; pin a provider to be sure.`)
+    }
+  }
+  const applied = rules.filter((rule) => rule.upstreams.some((u) => u.slug === route))
+  if (applied.length === 0) return { upstream, route, applied, unpinned: [] }
+  const capabilities = Object.assign({}, ...applied.map((rule) => rule.capabilities ?? {})) as ModelUpstream
+  const fixed = [...new Set([...(upstream.fixed ?? []), ...applied.flatMap((rule) => rule.fixed ?? [])])]
+  return {
+    upstream: {
+      ...upstream,
+      ...capabilities,
+      shims: [...(upstream.shims ?? []), ...applied.map((rule) => ({ id: rule.id, label: rule.label }))],
+      ...(fixed.length > 0 ? { fixed } : {})
+    },
+    route,
+    applied,
+    unpinned: []
+  }
+}
 
 /**
  * Where a field's value came from: the user's setting, a limit learned from a provider's error,
@@ -311,6 +440,8 @@ export interface EffectiveModel {
   readonly price: ModelUpstream["price"] | null
   /** The catalog entry behind `catalog` sources. */
   readonly catalog: CatalogMatch | null
+  /** The router upstream the routing pins, its route rules applied (`routedUpstream`). */
+  readonly route: Omit<RoutedUpstream, "upstream">
 }
 
 /** Defaults for fields no source knows: the safe choice, shown as unknown, never as "no". */
@@ -322,14 +453,16 @@ const DEFAULT_MAX_OUTPUT = 4096
  * catalog matched by id reports, then a default. `connectionCompat` sits
  * under the model's own compat overrides. `provider` is the connection's provider settings
  * (`resolveProviderSettings`): its cache layout sits under the model's own edits, over the list.
+ * The route rules of an upstream the model's routing pins apply over the list (`routedUpstream`).
  */
 export const resolveModel = (
   key: string,
-  upstream: ModelUpstream,
+  listed: ModelUpstream,
   overrides: ModelOverrides,
   connectionCompat: Compat = {},
   provider: ProviderSettings = {}
 ): EffectiveModel => {
+  const { upstream, ...route } = routedUpstream(listed, { ...listed.settings, ...overrides.settings }.routing)
   const pick = <K extends Exclude<keyof ModelOverrides, "learned">, A>(
     field: K,
     fallback: A
@@ -342,6 +475,7 @@ export const resolveModel = (
     return { value: fallback, source: "unknown" }
   }
   const layout: CacheLayout = {
+    ...(provider.cacheMarker !== undefined ? { marker: provider.cacheMarker } : {}),
     ...(provider.lookback !== undefined ? { lookback: provider.lookback } : {}),
     ...(provider.maxMarkers !== undefined ? { maxMarkers: provider.maxMarkers } : {}),
     ...(provider.minTokens !== undefined ? { minTokens: provider.minTokens } : {})
@@ -372,7 +506,8 @@ export const resolveModel = (
     sampling: { ...upstream.sampling, ...overrides.sampling },
     settings: { ...upstream.settings, ...overrides.settings },
     price: upstream.price ?? null,
-    catalog: upstream.catalog ?? null
+    catalog: upstream.catalog ?? null,
+    route
   }
 }
 

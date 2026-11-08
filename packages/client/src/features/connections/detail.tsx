@@ -46,7 +46,9 @@ import {
   ProviderAdvanced,
   type ProviderDraft,
   providerDraftOf,
-  RegionField
+  ProjectField,
+  RegionField,
+  ServiceAccountKeyField
 } from "./providerFields.tsx"
 
 export interface ConnectionSectionProps {
@@ -118,6 +120,7 @@ export function SettingsSection({ connection, kinds, providers }: ConnectionSect
   const problems = {
     name: values.name.trim() === "" ? "Give the connection a name." : null,
     region: parsed.problems.region,
+    project: parsed.problems.project,
     baseUrl:
       values.baseUrl.trim() === ""
         ? defaultUrl === null
@@ -193,6 +196,14 @@ export function SettingsSection({ connection, kinds, providers }: ConnectionSect
             error={shown(problems.region)}
           />
         )}
+        {provider && (
+          <ProjectField
+            provider={provider}
+            draft={providerDraft}
+            onChange={editProvider}
+            error={shown(problems.project)}
+          />
+        )}
         <Field
           label="Base URL"
           about="Connect to this address instead of the provider’s default. Empty uses the default. Keys go only to allowed addresses."
@@ -261,7 +272,12 @@ export function SettingsSection({ connection, kinds, providers }: ConnectionSect
             provider={provider}
             draft={providerDraft}
             onChange={editProvider}
-            problems={{ region: null, maxMarkers: shown(problems.maxMarkers), minTokens: shown(problems.minTokens) }}
+            problems={{
+              region: null,
+              project: null,
+              maxMarkers: shown(problems.maxMarkers),
+              minTokens: shown(problems.minTokens)
+            }}
             cacheTtl={{
               value: values.cacheTtlS,
               onChange: (cacheTtlS) => edit({ cacheTtlS }),
@@ -337,6 +353,7 @@ function SetKeyDialog({
   connection,
   origin,
   aws,
+  google = false,
   open,
   onOpenChange
 }: {
@@ -344,6 +361,8 @@ function SetKeyDialog({
   origin: string | null
   /** The provider takes an AWS access key: its ID and secret are typed apart. */
   aws: boolean
+  /** The provider takes a service account's key file. */
+  google?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
@@ -374,6 +393,14 @@ function SetKeyDialog({
         {aws ? (
           // Keyed by the address, so a changed address empties the fields.
           <AwsKeyFields key={origin} origin={origin} error={null} onEmptyChange={awsTyped} />
+        ) : google ? (
+          <ServiceAccountKeyField
+            key={origin}
+            about="A service account’s JSON key file, with the Vertex AI User role. The key itself is never sent."
+            origin={origin}
+            error={null}
+            onLoad={(account) => setTypedFor(account ? origin : null)}
+          />
         ) : (
           <Field label="Key" about={origin ? `The key is sent only to ${origin}. It's never shown again.` : undefined}>
             {/* Keyed by the address, so a changed address empties the field. */}
@@ -463,7 +490,8 @@ export function KeySection(props: ConnectionSectionProps) {
   const [dialog, setDialog] = useState<"set" | "saved" | "remove" | "allow" | null>(null)
   const origin = effectiveOrigin(connection, props)
   const provider = providerOf(connection, props.providers)
-  const aws = { ...provider?.defaults, ...connection.providerSettings }.auth === "aws-sigv4"
+  const auth = { ...provider?.defaults, ...connection.providerSettings }.auth
+  const aws = auth === "aws-sigv4"
   const credential = credentials.find((entry) => entry.id === connection.credentialId)
   const blocked = credential !== undefined && origin !== null && !credential.origins.includes(origin)
   const close = (open: boolean) => setDialog(open ? dialog : null)
@@ -540,7 +568,16 @@ export function KeySection(props: ConnectionSectionProps) {
           </Alert>
         </div>
       )}
-      {dialog === "set" && <SetKeyDialog connection={connection} origin={origin} aws={aws} open onOpenChange={close} />}
+      {dialog === "set" && (
+        <SetKeyDialog
+          connection={connection}
+          origin={origin}
+          aws={aws}
+          google={auth === "gcp-service-account"}
+          open
+          onOpenChange={close}
+        />
+      )}
       {dialog === "saved" && <UseSavedKeyDialog {...props} open onOpenChange={close} />}
       {dialog === "allow" && credential && origin && (
         <AllowHostDialog

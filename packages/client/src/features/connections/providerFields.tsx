@@ -9,12 +9,14 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, formText, Input, SecretInput } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Disclosure } from "../../ui/Surface.tsx"
+import { useState } from "react"
 import { parseOptionalInt } from "./data.ts"
 
 /** The provider settings as the form holds them: only what the user changed, numbers as typed. */
 export interface ProviderDraft {
   readonly auth?: string
   readonly region?: string
+  readonly project?: string
   readonly cacheBreakpoints?: "auto" | "explicit" | "none"
   readonly lookback?: boolean
   readonly maxMarkers?: string
@@ -29,7 +31,11 @@ export const providerDraftOf = ({ maxMarkers, minTokens, ...settings }: Provider
   ...(minTokens !== undefined ? { minTokens: String(minTokens) } : {})
 })
 
-const REGION = /^[a-z]{2}(?:-[a-z]+)+-\d+$/
+/** AWS's Region codes, for a provider that doesn't say how its regions are written. */
+const awsRegions = { example: "eu-west-1", pattern: "^[a-z]{2}(?:-[a-z]+)+-\\d+$" }
+
+/** A Google Cloud project ID: 6 to 30 lowercase letters, digits and hyphens, from a letter. */
+const PROJECT = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/
 
 /** The settings in effect, the changes to store, and what's wrong with what's typed. */
 export const parseProviderDraft = (provider: ProviderInfo | undefined, draft: ProviderDraft) => {
@@ -39,10 +45,13 @@ export const parseProviderDraft = (provider: ProviderInfo | undefined, draft: Pr
   const maxMarkers = number(draft.maxMarkers)
   const minTokens = number(draft.minTokens)
   const region = draft.region?.trim() ?? ""
+  const regions = provider?.regionFormat ?? awsRegions
+  const project = draft.project?.trim() ?? ""
   const settings: ProviderSettings = {
     ...provider?.defaults,
     ...(draft.auth !== undefined ? { auth: draft.auth } : {}),
     ...(region !== "" ? { region } : {}),
+    ...(project !== "" ? { project } : {}),
     ...(draft.cacheBreakpoints !== undefined ? { cacheBreakpoints: draft.cacheBreakpoints } : {}),
     ...(draft.lookback !== undefined ? { lookback: draft.lookback } : {}),
     ...(maxMarkers.value !== null ? { maxMarkers: maxMarkers.value } : {}),
@@ -53,7 +62,11 @@ export const parseProviderDraft = (provider: ProviderInfo | undefined, draft: Pr
     settings,
     changes: providerChanges(provider, settings),
     problems: {
-      region: region !== "" && !REGION.test(region) ? "Enter a Region code, such as eu-west-1." : null,
+      region:
+        region !== "" && !new RegExp(regions.pattern).test(region)
+          ? `Enter a region code, such as ${regions.example}.`
+          : null,
+      project: project !== "" && !PROJECT.test(project) ? "Enter a project ID, such as my-project-123456." : null,
       maxMarkers: maxMarkers.problem,
       minTokens: minTokens.problem
     }
@@ -75,11 +88,14 @@ export function RegionField({
   error: string | null
 }) {
   if (!provider.settings.includes("region")) return null
-  const placeholder = (provider.baseUrl && awsRegionOf(provider.baseUrl)) ?? undefined
+  const placeholder = provider.defaults.region ?? (provider.baseUrl && awsRegionOf(provider.baseUrl)) ?? undefined
   return (
     <Field
       label="Region"
-      about="The AWS Region your models run in, such as eu-west-1. It sets the address. Empty uses the one shown."
+      about={
+        provider.regionFormat?.about ??
+        "The AWS Region your models run in, such as eu-west-1. It sets the address. Empty uses the one shown."
+      }
       error={error}
     >
       <Input
@@ -91,6 +107,107 @@ export function RegionField({
         spellCheck={false}
         className="sm:max-w-48"
       />
+    </Field>
+  )
+}
+
+/** The Google Cloud project, for a provider whose requests name one (Vertex AI). */
+export function ProjectField({
+  provider,
+  draft,
+  onChange,
+  error,
+  keyProject
+}: {
+  provider: ProviderInfo
+  draft: ProviderDraft
+  onChange: (draft: ProviderDraft) => void
+  error: string | null
+  /** The project the loaded key file names, if any. */
+  keyProject?: string | null
+}) {
+  if (!provider.settings.includes("project")) return null
+  return (
+    <Field
+      label="Project"
+      about="The Google Cloud project ID your requests are billed to. Empty uses the project the key file names."
+      error={error}
+    >
+      <Input
+        value={draft.project ?? ""}
+        onValueChange={(project) => onChange({ ...draft, project })}
+        placeholder={keyProject ?? "From the key file"}
+        autoCapitalize="none"
+        autoComplete="off"
+        spellCheck={false}
+        className="sm:max-w-64"
+      />
+    </Field>
+  )
+}
+
+/** What a service account key file shows about itself; null when the text isn't one. */
+const serviceAccountOf = (text: string): { email: string; project: string | null } | null => {
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>
+    if (typeof parsed.client_email !== "string" || typeof parsed.private_key !== "string") return null
+    if (parsed.type !== undefined && parsed.type !== "service_account") return null
+    return { email: parsed.client_email, project: typeof parsed.project_id === "string" ? parsed.project_id : null }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A service account's JSON key file, read in the browser and sent with the form as `apiKey` (a
+ * hidden field), so it's never part of the saved draft.
+ */
+export function ServiceAccountKeyField({
+  about,
+  origin,
+  error,
+  onLoad
+}: {
+  about: string | undefined
+  origin: string | null
+  error: string | null
+  /** The file's account, or null when none is loaded or it isn't a key file. */
+  onLoad: (account: { email: string; project: string | null } | null) => void
+}) {
+  const [key, setKey] = useState<{ text: string; email: string } | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  return (
+    <Field
+      label="Service account key"
+      about={about}
+      description={
+        key
+          ? `Loaded: ${key.email}. Used only for ${origin ?? "this connection"}, and never shown again.`
+          : "The JSON key file from Google Cloud’s IAM page. Never shown again."
+      }
+      error={problem ?? error}
+    >
+      <Input
+        type="file"
+        accept=".json,application/json"
+        className="py-1.5 leading-5"
+        onChange={async (event) => {
+          const file = event.currentTarget.files?.[0]
+          setKey(null)
+          setProblem(null)
+          onLoad(null)
+          if (!file) return
+          const text = file.size > 100_000 ? "" : await file.text().catch(() => "")
+          const account = serviceAccountOf(text)
+          if (!account) {
+            setProblem("This file isn’t a service account’s JSON key.")
+            return
+          }
+          setKey({ text: text.trim(), email: account.email })
+          onLoad(account)
+        }}
+      />
+      <input type="hidden" name="apiKey" value={key?.text ?? ""} />
     </Field>
   )
 }
@@ -187,8 +304,10 @@ export function ProviderAdvanced({
 }) {
   const { settings } = parseProviderDraft(provider, draft)
   const shows = (name: string) => provider.settings.includes(name)
-  const changed = Object.keys(draft).some((key) => key !== "auth" && key !== "region")
-  const shown = provider.settings.filter((name) => name !== "region" && name !== "auth")
+  // The Region, project and key type have fields of their own, outside this section.
+  const own = ["auth", "region", "project"]
+  const changed = Object.keys(draft).some((key) => !own.includes(key))
+  const shown = provider.settings.filter((name) => !own.includes(name))
   if (shown.length === 0 && provider.accounting.length === 0 && provider.rules.length === 0) return null
   return (
     <Disclosure
@@ -271,7 +390,11 @@ export function ProviderAdvanced({
           className="self-start"
           hint={`Puts these settings back to ${provider.label}’s defaults.`}
           onClick={() =>
-            onChange({ ...(draft.auth ? { auth: draft.auth } : {}), ...(draft.region ? { region: draft.region } : {}) })
+            onChange({
+              ...(draft.auth ? { auth: draft.auth } : {}),
+              ...(draft.region ? { region: draft.region } : {}),
+              ...(draft.project ? { project: draft.project } : {})
+            })
           }
         >
           Use the defaults

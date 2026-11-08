@@ -181,6 +181,38 @@ export const encodeEventStreamMessage = (headers: Readonly<Record<string, string
   return bytes
 }
 
+// --- Bedrock's keys -----------------------------------------------------------------------
+
+/**
+ * The headers that authorize a request to Bedrock's runtime, for every model it serves: `headers`
+ * signed with the connection's AWS access key (SigV4, service `bedrock`, the connection's Region),
+ * or sent with its Bedrock API key as a bearer token.
+ */
+export const bedrockAuthHeaders = (
+  request: KindTransportRequest,
+  signed: {
+    readonly method: string
+    readonly url: URL
+    readonly headers: Readonly<Record<string, string>>
+    readonly body: string
+  }
+): Record<string, string> => {
+  if (request.apiKey === null) throw new Error("This connection has no key.")
+  if (request.settings.auth !== "aws-sigv4") return { ...signed.headers, authorization: `Bearer ${request.apiKey}` }
+  const credentials = parseAwsKey(request.apiKey)
+  if (!credentials) throw new Error("The AWS access key isn't in the form ACCESS_KEY_ID:SECRET_ACCESS_KEY.")
+  return signV4({
+    ...signed,
+    credentials,
+    region: request.settings.region ?? awsRegionOf(request.baseUrl) ?? "us-east-1",
+    service: "bedrock",
+    now: new Date()
+  })
+}
+
+/** An access key ID or a secret alone is still a secret. */
+export const bedrockSecretsOf = (key: string) => key.split(":").filter((part) => part.length >= 8)
+
 // --- The transport ------------------------------------------------------------------------
 
 /** Betas Bedrock documents for Claude; it refuses unknown ones, so the rest are left out. */
@@ -208,7 +240,7 @@ const errorType = (exception: string) =>
               ? "not_found_error"
               : "api_error"
 
-const messageOf = (text: string) => {
+export const messageOf = (text: string) => {
   try {
     const parsed = JSON.parse(text) as { message?: unknown; Message?: unknown }
     const message = parsed.message ?? parsed.Message
@@ -252,7 +284,7 @@ const toSse = (body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> => 
   })
 }
 
-const requestUrl = (input: string | URL | Request) =>
+export const requestUrl = (input: string | URL | Request) =>
   new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url)
 
 /** Headers of the SDK's own that Bedrock has no use for: the key, Anthropic's versions and betas. */
@@ -299,23 +331,7 @@ const bedrockTransport =
       "content-type": "application/json",
       accept: stream ? "application/vnd.amazon.eventstream" : "application/json"
     }
-    if (request.settings.auth === "aws-sigv4") {
-      const credentials = parseAwsKey(request.apiKey)
-      if (!credentials) throw new Error("The AWS access key isn't in the form ACCESS_KEY_ID:SECRET_ACCESS_KEY.")
-      Object.assign(
-        headers,
-        signV4({
-          method: "POST",
-          url: target,
-          headers: signed,
-          body: payload,
-          credentials,
-          region: request.settings.region ?? awsRegionOf(request.baseUrl) ?? "us-east-1",
-          service: "bedrock",
-          now: new Date()
-        })
-      )
-    } else Object.assign(headers, signed, { authorization: `Bearer ${request.apiKey}` })
+    Object.assign(headers, bedrockAuthHeaders(request, { method: "POST", url: target, headers: signed, body: payload }))
     const response = await fetch(target.href, { method: "POST", headers, body: payload, signal: init.signal ?? null })
     const requestId = response.headers.get("x-amzn-requestid")
     const answered = (status: number, kind: string, body: string | ReadableStream<Uint8Array>) =>
@@ -362,8 +378,7 @@ export const bedrockKind: ProviderKindEntry = {
   cacheRelease: defaultCacheRelease,
   listsCatalog: true,
   transport: bedrockTransport,
-  // An access key ID or a secret alone is still a secret.
-  secretsOf: (key) => key.split(":").filter((part) => part.length >= 8),
+  secretsOf: bedrockSecretsOf,
   listModels: () =>
     Effect.promise(() => loadCatalog().catch(() => ({}))).pipe(
       Effect.map((catalog) =>

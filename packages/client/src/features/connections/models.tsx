@@ -10,7 +10,14 @@ import { StSettingsImporter } from "./StSettingsImport.tsx"
 // A connection's models: what the provider lists, merged with the user's edits
 // (spec/PROVIDERS.md §3.1). Each field shows where its value came from.
 import type { ModelRefresh } from "@rp/shared/api.ts"
-import { type CatalogMatch, type FieldSource, type Model, ModelOverrides, resolveModel } from "@rp/shared/providers.ts"
+import {
+  type CatalogMatch,
+  type FieldSource,
+  type Model,
+  ModelOverrides,
+  resolveModel,
+  routedUpstream
+} from "@rp/shared/providers.ts"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -429,6 +436,13 @@ export function ModelSettingsEditor({
   void _ownOutput
   const effective = resolveModel(model.key, savedModel.upstream, beneathOverrides)
   const learned = savedModel.overrides.learned
+  // The provider rules for the routing as edited: a pinned upstream's route rules apply.
+  const routed = routedUpstream(
+    model.upstream,
+    { ...model.upstream.settings, ...(current ?? savedModel.overrides.settings) }.routing
+  )
+  const prefillFixed = routed.upstream.fixed?.includes("prefill") ?? false
+  const rules = routed.upstream.shims ?? []
   return (
     <form ref={form} onSubmit={submit} className="flex min-w-0 flex-col gap-4 [overflow-wrap:anywhere]" noValidate>
       <UserDraftStatus draft={durable} history />
@@ -505,33 +519,39 @@ export function ModelSettingsEditor({
             <Field
               label="Prefill"
               about={
-                model.upstream.fixed?.includes("prefill")
+                prefillFixed
                   ? "This provider refuses a prefill for this model, so it stays off. Continue asks the model to go on from the reply so far."
                   : "Let replies start with text you supply, for the preset’s prefill and Continue. Choose Yes only if the model supports it."
               }
             >
               <Select
-                items={prefillItems(model.upstream.prefill)}
-                value={model.upstream.fixed?.includes("prefill") ? "auto" : prefill}
+                items={prefillItems(routed.upstream.prefill)}
+                value={prefillFixed ? "auto" : prefill}
                 onValueChange={setPrefill}
-                disabled={model.upstream.fixed?.includes("prefill") ?? false}
+                disabled={prefillFixed}
               />
             </Field>
           </div>
-          {model.upstream.shims && model.upstream.shims.length > 0 && (
+          {(rules.length > 0 || routed.unpinned.length > 0) && (
             <section aria-label="Provider rules" data-provider-rules="" className="mt-4 flex flex-col gap-1">
               <LabelWithHelp
                 help={
                   <AboutHint heading="Provider rules">
-                    What this provider refuses or needs for this model. Every request follows them.
+                    What this provider refuses or needs for this model. Every request follows them. Some apply only when
+                    the model’s routing picks one provider.
                   </AboutHint>
                 }
               >
                 <span className="font-medium text-text">Provider rules</span>
               </LabelWithHelp>
               <ul className="list-disc pl-5 text-sm text-muted">
-                {model.upstream.shims.map((rule) => (
+                {rules.map((rule) => (
                   <li key={rule.id}>{rule.label}</li>
+                ))}
+                {routed.unpinned.map((note) => (
+                  <li key={note} data-route-note="">
+                    {note}
+                  </li>
                 ))}
               </ul>
             </section>

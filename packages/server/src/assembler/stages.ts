@@ -1083,7 +1083,9 @@ const prefill = (assembly: Assembly) => {
     assembly.issues.push({
       kind: "prefill_dropped",
       message: assembly.model
-        ? `The preset's prefill wasn't sent: ${assembly.model.key} isn't known to take one. Set its prefill capability if it does.`
+        ? assembly.model.continueUnavailable && assembly.model.prefill === "none"
+          ? `The preset's prefill wasn't sent: ${assembly.model.continueUnavailable}`
+          : `The preset's prefill wasn't sent: ${assembly.model.key} isn't known to take one. Set its prefill capability if it does.`
         : "The preset's prefill wasn't sent: no model is chosen."
     })
   }

@@ -98,8 +98,9 @@ const anthropic: TextTokenCounter = {
   id: "anthropic-count-tokens",
   label: (model) => `${model}'s own count (Anthropic's token counting)`,
   remote: true,
-  // Bedrock counts tokens with its own API, at its own address (not built).
-  appliesTo: (target) => target.api === "anthropic-messages" && target.kind !== "anthropic-bedrock",
+  // Bedrock and Vertex count tokens with their own APIs, at their own addresses (not built).
+  appliesTo: (target) =>
+    target.api === "anthropic-messages" && !["anthropic-bedrock", "anthropic-vertex"].includes(target.kind),
   count: (request) => {
     const auth = { "x-api-key": request.apiKey ?? "", "anthropic-version": "2023-06-01" }
     const url = joinUrl(request.baseUrl, "v1/messages/count_tokens")

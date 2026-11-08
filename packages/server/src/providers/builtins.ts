@@ -23,6 +23,8 @@ import { builtinModelCatalogs } from "./contextCatalog.ts"
 import { builtinContextLimitParsers } from "./contextLimits.ts"
 import { systemOneKind } from "./systemOne.ts"
 import { bedrockKind } from "./bedrock.ts"
+import { bedrockOpenAIChatKind, bedrockOpenAIResponsesKind } from "./bedrockOpenAI.ts"
+import { vertexKind } from "./vertex.ts"
 import { builtinProviders } from "@rp/shared/providerDefinitions.ts"
 import { builtinShims } from "./shims.ts"
 
@@ -109,6 +111,11 @@ export const builtinKinds: ReadonlyArray<ProviderKindEntry> = [
   }),
   // Claude on Amazon Bedrock: Anthropic's Messages API in Bedrock's framing and signing.
   bedrockKind,
+  // Claude on Google Cloud: Anthropic's Messages API at Vertex AI's address, signed in as a service account.
+  vertexKind,
+  // OpenAI's models on Amazon Bedrock: OpenAI's own APIs at Bedrock's address, with Bedrock's keys.
+  bedrockOpenAIResponsesKind,
+  bedrockOpenAIChatKind,
   // Decision models (spec/AGENTIC.md §7): asked only for the points a user turns on.
   systemOneKind
 ]

@@ -32,6 +32,10 @@ export interface ProviderDefinition {
   readonly baseUrlExample?: string
   /** The address for a region (`{region}` replaced), for a provider whose address names one. */
   readonly regionUrl?: string
+  /** Regions whose address doesn't follow `regionUrl`. */
+  readonly regionUrls?: Readonly<Record<string, string>>
+  /** How its regions are written: the form's help, an example and the pattern (a regex) one must match. */
+  readonly regionFormat?: { readonly about: string; readonly example: string; readonly pattern: string }
   readonly keyOptional: boolean
   /** The ways a key signs requests (`ProviderSettings.auth`); the first is the default. */
   readonly auth: ReadonlyArray<Choice>
@@ -71,6 +75,22 @@ const responses: Choice = {
   label: "Responses",
   about: "OpenAI’s newer API. It keeps reasoning while tools are used."
 }
+
+const awsRegions = {
+  about: "The AWS Region your models run in, such as eu-west-1. It sets the address. Empty uses the one shown.",
+  example: "eu-west-1",
+  pattern: "^[a-z]{2}(?:-[a-z]+)+-\\d+$"
+}
+
+/** Bedrock's two kinds of key, the same for every model it serves. */
+const bedrockAuth: ReadonlyArray<Choice> = [
+  { id: "api-key", label: "Bedrock API key", about: "A key made in the Bedrock console." },
+  {
+    id: "aws-sigv4",
+    label: "AWS access key",
+    about: "An IAM access key ID and secret access key. Requests are signed with them; the secret is never sent."
+  }
+]
 
 /**
  * The built-in providers, in picker order. The first is the form's default selection, and its
@@ -129,15 +149,9 @@ export const builtinProviders: ReadonlyArray<ProviderDefinition> = [
     ],
     baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
     regionUrl: "https://bedrock-runtime.{region}.amazonaws.com",
+    regionFormat: awsRegions,
     keyOptional: false,
-    auth: [
-      { id: "api-key", label: "Bedrock API key", about: "A key made in the Bedrock console." },
-      {
-        id: "aws-sigv4",
-        label: "AWS access key",
-        about: "An IAM access key ID and secret access key. Requests are signed with them; the secret is never sent."
-      }
-    ],
+    auth: bedrockAuth,
     // Bedrock reads a cached prefix only at a marker position the previous request also marked
     // (no lookback; measured in reference-harness), so markers go at each reusable section and the
     // previous request's history marker is repeated.
@@ -150,6 +164,107 @@ export const builtinProviders: ReadonlyArray<ProviderDefinition> = [
       "Prices are Bedrock’s for the model ID; regional IDs can cost more than global ones."
     ],
     defaultFor: ["anthropic-bedrock"]
+  },
+  {
+    // Claude on Google Cloud's Vertex AI (vertex.ts): Anthropic's Messages API at the model's
+    // rawPredict address, signed in with a service account. Google: caching "behaves as described
+    // in the Anthropic documentation", so Anthropic's layout and lookback apply; 1-hour TTL except
+    // on Claude 3.x. Source: Google's Claude prompt caching page and Anthropic's Vertex page.
+    id: "anthropic-vertex",
+    label: "Anthropic (Google Vertex)",
+    about: "Claude through Google Cloud’s Vertex AI, in your Google Cloud project.",
+    apis: [
+      {
+        id: "anthropic-vertex",
+        label: "Messages on Vertex AI",
+        about: "Anthropic’s Messages API, as Vertex AI serves it."
+      }
+    ],
+    baseUrl: "https://aiplatform.googleapis.com",
+    regionUrl: "https://{region}-aiplatform.googleapis.com",
+    regionUrls: {
+      global: "https://aiplatform.googleapis.com",
+      us: "https://aiplatform.us.rep.googleapis.com",
+      eu: "https://aiplatform.eu.rep.googleapis.com"
+    },
+    regionFormat: {
+      about:
+        "Where Google Cloud runs your requests: global (any region, the lowest price), us or eu (within that area), or one region such as us-east5. Newer models need global, us or eu. Empty uses global.",
+      example: "us-east5",
+      pattern: "^(?:global|us|eu|[a-z]+-[a-z]+\\d+)$"
+    },
+    keyOptional: false,
+    auth: [
+      {
+        id: "gcp-service-account",
+        label: "Service account key",
+        about:
+          "A service account’s JSON key file, with the Vertex AI User role. It signs a short-lived sign-in with Google; the key itself is never sent."
+      }
+    ],
+    defaults: {
+      auth: "gcp-service-account",
+      region: "global",
+      cacheBreakpoints: "auto",
+      lookback: true,
+      maxMarkers: 4
+    },
+    settings: ["region", "project", ...cacheSettings],
+    cacheContract: "google-vertex",
+    cacheLifetime: "5 minutes, or 1 hour with long retention",
+    accounting: [
+      "Counted as Anthropic counts: cache reads and writes apart from other input.",
+      "Cache writes cost 1.25 times the input price, or twice it for the 1-hour cache; reads a tenth of it.",
+      "Prices are Google’s. A us, eu or single region costs about 10% more than global for newer models."
+    ],
+    defaultFor: ["anthropic-vertex"]
+  },
+  {
+    // OpenAI's models on Bedrock (bedrockOpenAI.ts): its runtime's OpenAI-compatible APIs, with
+    // Bedrock's keys and its own cache. GPT-5.6 and later cache at `prompt_cache_breakpoint`
+    // markers on the Responses API, read only at a position an earlier request also marked (a
+    // request "reads the cache only if it starts with an entire earlier request"), so markers go
+    // at each section and the previous history marker is repeated, as for Claude on Bedrock; the
+    // automatic marker on the latest message takes one of the four writes. Earlier models, and
+    // Chat Completions, cache automatically only (shims.ts). Source: AWS's prompt caching guide.
+    id: "openai-bedrock",
+    label: "OpenAI (AWS Bedrock)",
+    about: "GPT models through Amazon Bedrock, in your AWS account.",
+    apis: [
+      {
+        id: "openai-responses-bedrock",
+        label: "Responses",
+        about: "OpenAI’s Responses API, as Bedrock serves it. Only this one keeps cache markers."
+      },
+      {
+        id: "openai-chat-bedrock",
+        label: "Chat Completions",
+        about: "OpenAI’s Chat Completions API, as Bedrock serves it. Its caching is automatic only."
+      }
+    ],
+    baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+    regionUrl: "https://bedrock-runtime.{region}.amazonaws.com/openai/v1",
+    regionFormat: awsRegions,
+    keyOptional: false,
+    auth: bedrockAuth,
+    defaults: {
+      auth: "api-key",
+      cacheBreakpoints: "explicit",
+      cacheMarker: "prompt_cache_breakpoint",
+      lookback: false,
+      maxMarkers: 4,
+      // AWS's example sends one key across requests so they reach the same cache.
+      promptCacheKey: true
+    },
+    settings: ["region", "cacheBreakpoints", "lookback", "maxMarkers", "minTokens", "promptCacheKey", "cacheTtlS"],
+    cacheContract: "amazon-bedrock",
+    cacheLifetime: "At least 30 minutes for GPT-5.6 and later; not documented for earlier models",
+    accounting: [
+      "Cached input is part of the input count. Cache reads are billed at the cached price.",
+      "For GPT-5.6 and later, cache writes cost 1.25 times the input price. Earlier models charge nothing for writes.",
+      "Model IDs name an inference profile, such as us. or global.; global ones cost less."
+    ],
+    defaultFor: ["openai-responses-bedrock", "openai-chat-bedrock"]
   },
   {
     id: "openrouter",
@@ -291,9 +406,11 @@ export const awsRegionOf = (url: string): string | null => {
 
 /** A provider's default address: its region's, where it has regions and one is set; null when none. */
 export const providerBaseUrl = (
-  provider: Pick<ProviderDefinition, "baseUrl" | "regionUrl"> & Partial<Pick<ProviderDefinition, "defaults">>,
+  provider: Pick<ProviderDefinition, "baseUrl" | "regionUrl"> &
+    Partial<Pick<ProviderDefinition, "defaults" | "regionUrls">>,
   settings: ProviderSettings
 ): string | null => {
   const region = settings.region ?? provider.defaults?.region
-  return provider.regionUrl && region ? provider.regionUrl.replace("{region}", region) : provider.baseUrl
+  if (!provider.regionUrl || !region) return provider.baseUrl
+  return provider.regionUrls?.[region] ?? provider.regionUrl.replace("{region}", region)
 }

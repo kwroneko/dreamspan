@@ -72,6 +72,7 @@ import type { ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
+import { parseServiceAccount } from "./vertex.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
 import { readDecisionUsage, unwrapEnvelope } from "@rp/shared/decisions.ts"
 
@@ -199,6 +200,9 @@ interface Prepared {
   /** Removes this connection's secrets from text that will be stored or shown (PROVIDERS §5). */
   readonly scrub: (text: string) => string
 }
+
+/** What the SDK is given as the key when the kind's transport authorizes the request (it drops it). */
+const TRANSPORT_AUTH = "authorized-by-transport"
 
 const isPlain = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -689,11 +693,17 @@ export const layer = (options: ProvidersOptions = {}) =>
         return trimmed === "" ? null : trimmed
       }
 
-      /** Short keys get no hint: four characters would be most of the key. */
-      const encryptKey = (key: string, credentialId: CredentialId) => ({
-        enc: secrets.encrypt(key, credentialBinding(credentialId)),
-        hint: key.length >= 12 ? key.slice(-4) : ""
-      })
+      /**
+       * Short keys get no hint: four characters would be most of the key. A service account's
+       * key file ends in the same characters as every other, so its hint is its key ID's end.
+       */
+      const encryptKey = (key: string, credentialId: CredentialId) => {
+        const account = parseServiceAccount(key)
+        return {
+          enc: secrets.encrypt(key, credentialBinding(credentialId)),
+          hint: account ? (account.privateKeyId?.slice(-4) ?? "") : key.length >= 12 ? key.slice(-4) : ""
+        }
+      }
 
       /** A typed key as a credential owned by a connection, bound to the connection's origin. */
       const typedCredential = (name: string, key: string, baseUrl: string) =>
@@ -1364,8 +1374,11 @@ export const layer = (options: ProvidersOptions = {}) =>
               const breakpoints = options.cacheRetention === "none" ? [] : (options.breakpoints ?? [])
               const overrides = options.payload
               const events = prepared.kind.streams.streamSimple(piModel, transcript, {
-                // A keyless local server still needs a value; pi's direct calls require one.
-                apiKey: prepared.apiKey ?? "no-key",
+                // A keyless local server still needs a value; pi's direct calls require one. A
+                // kind with its own transport authorizes the request itself from the stored key,
+                // so the SDK never holds it: a service account's key file has line breaks, which
+                // no header can carry, and the SDK would put it in one (and in its error).
+                apiKey: prepared.kind.transport ? TRANSPORT_AUTH : (prepared.apiKey ?? "no-key"),
                 env: {},
                 maxRetries: 0,
                 signal,
@@ -1376,7 +1389,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                         ? prepared.kind.transport(observed, {
                             apiKey: prepared.apiKey,
                             baseUrl: prepared.baseUrl,
-                            settings: prepared.settings
+                            settings: prepared.settings,
+                            aside: routed
                           })
                         : observed
                     }
@@ -2018,6 +2032,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                   baseUrl: provider.baseUrl,
                   ...(provider.baseUrlExample ? { baseUrlExample: provider.baseUrlExample } : {}),
                   ...(provider.regionUrl ? { regionUrl: provider.regionUrl } : {}),
+                  ...(provider.regionUrls ? { regionUrls: provider.regionUrls } : {}),
+                  ...(provider.regionFormat ? { regionFormat: provider.regionFormat } : {}),
                   keyOptional: provider.keyOptional,
                   auth: provider.auth,
                   defaults: provider.defaults,
