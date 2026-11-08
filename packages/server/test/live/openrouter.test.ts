@@ -24,8 +24,8 @@ const base = { kind: "openrouter", dialect: "openrouter" as const, route: "openr
 const pinned = (slug: string, samplers?: Record<string, unknown>) => ({
   settings: { routing: { only: [slug], allow_fallbacks: false }, ...(samplers ? { samplers } : {}) }
 })
-// OpenRouter honors the request's `provider`, so each
-// upstream is reached by the model's routing setting.
+// OpenRouter honors the request's `provider`, so each upstream is reached by the model's
+// routing setting.
 const routes: ReadonlyArray<Profile & { readonly upstream: string }> = [
   {
     ...base,

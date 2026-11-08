@@ -888,6 +888,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       )
   },
+  RefreshModelEndpoints: {
+    probe: (actor, owner) =>
+      refused(actor.api.RefreshModelEndpoints({ modelId: owner.modelId }), "ProviderError:unusable")
+  },
   SetModelHidden: {
     probe: (actor, owner) => refused(actor.api.SetModelHidden({ modelId: owner.modelId, hidden: true }), "NotFound")
   },

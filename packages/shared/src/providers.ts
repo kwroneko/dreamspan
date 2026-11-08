@@ -171,11 +171,6 @@ export class Connection extends Schema.Class<Connection>("Connection")({
   maxConcurrent: Schema.NullOr(Schema.Int),
   proxyMode: ProxyMode,
   presetOverrideRefId: Schema.NullOr(RefId),
-  /**
-   * A router's prefix on its model ids (`acme.`), left out when matching catalogs. Null until a
-   * refresh sets what the list's ids share; empty means none.
-   */
-  modelIdPrefix: Schema.NullOr(Schema.String),
   rowVersion: Schema.Int,
   createdAt: Schema.Number,
   updatedAt: Schema.Number
@@ -189,8 +184,6 @@ export const ConnectionSettings = Schema.Struct({
   cacheTtlS: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   maxConcurrent: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   presetOverrideRefId: Schema.NullOr(RefId),
-  /** Left out: unchanged. Null: unset, so the next refresh fills it from the list. */
-  modelIdPrefix: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** The provider's defaults the user changed, replacing the stored ones. Left out: unchanged. */
   providerSettings: Schema.optionalKey(ProviderSettings)
 })
@@ -301,6 +294,35 @@ export const RouteRule = Schema.Struct({
 })
 export type RouteRule = typeof RouteRule.Type
 
+/**
+ * One OpenRouter endpoint of a model, from its endpoint list (`/models/{author}/{slug}/endpoints`):
+ * `tag` is the routing slug (`deepinfra/fp8`), `name` the provider's name, and `price` that
+ * endpoint's own price per million tokens.
+ */
+export const ModelEndpoint = Schema.Struct({
+  tag: Schema.String,
+  name: Schema.String,
+  context: Schema.optionalKey(Schema.Number),
+  price: Schema.optionalKey(Price)
+})
+export type ModelEndpoint = typeof ModelEndpoint.Type
+
+/** A model's endpoint list as fetched; `error` is why the fetch failed (the list is then empty). */
+export const ModelEndpoints = Schema.Struct({
+  fetchedAt: Schema.Number,
+  error: Schema.optionalKey(Schema.String),
+  list: Schema.Array(ModelEndpoint)
+})
+export type ModelEndpoints = typeof ModelEndpoints.Type
+
+/** How long a fetched endpoint list is used before it is fetched again; a failure is retried sooner. */
+const ENDPOINTS_TTL_MS = 24 * 60 * 60 * 1000
+export const ENDPOINTS_RETRY_MS = 10 * 60 * 1000
+
+export const endpointsStale = (endpoints: ModelEndpoints | undefined, now: number) =>
+  endpoints === undefined ||
+  now - endpoints.fetchedAt > (endpoints.error === undefined ? ENDPOINTS_TTL_MS : ENDPOINTS_RETRY_MS)
+
 /** What pi-ai's catalog and the upstream list report. Rewritten by every refresh. */
 export const ModelUpstream = Schema.Struct({
   ...capabilityFields,
@@ -310,7 +332,9 @@ export const ModelUpstream = Schema.Struct({
   shims: Schema.optionalKey(Schema.Array(ModelShim)),
   fixed: Schema.optionalKey(Schema.Array(FixedCapability)),
   /** Shims for some of the router's upstreams, applied when the routing pins one. */
-  routes: Schema.optionalKey(Schema.Array(RouteRule))
+  routes: Schema.optionalKey(Schema.Array(RouteRule)),
+  /** OpenRouter's endpoint list for the model, fetched when its routing pins one provider. Kept across refreshes. */
+  endpoints: Schema.optionalKey(ModelEndpoints)
 })
 export type ModelUpstream = typeof ModelUpstream.Type
 
@@ -346,6 +370,79 @@ export const pinnedRoute = (routing: Readonly<Record<string, unknown>> | undefin
   const { candidates } = routeCandidates(routing)
   return candidates?.length === 1 ? candidates[0]! : null
 }
+
+/** A provider's name as a routing slug would write it: lower case, letters and digits only. */
+const squash = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "")
+
+/** The full routing entry (`deepinfra/fp8`) behind the pinned upstream, or its base when entries differ. */
+const pinnedEntry = (routing: Readonly<Record<string, unknown>> | undefined, base: string): string => {
+  const entries = [routing?.only, routing?.order]
+    .flatMap((value) => (Array.isArray(value) ? value : []))
+    .filter((slug): slug is string => typeof slug === "string")
+    .map((slug) => slug.trim().toLowerCase())
+    .filter((slug) => upstreamSlug(slug) === base)
+  const distinct = [...new Set(entries)]
+  return distinct.length === 1 ? distinct[0]! : base
+}
+
+/**
+ * The endpoints of the model's list the pinned route names: by tag (a base slug matches every
+ * variant of that provider, a full slug that endpoint and the ones beneath it), else by the
+ * provider's name written as a slug (`Together` / `together`, `Google Vertex` / `google-vertex`).
+ */
+export const matchEndpoints = (
+  endpoints: ModelEndpoints | undefined,
+  routing: Readonly<Record<string, unknown>> | undefined
+): ReadonlyArray<ModelEndpoint> => {
+  const base = pinnedRoute(routing)
+  if (base === null || endpoints === undefined) return []
+  const entry = pinnedEntry(routing, base)
+  const byTag = endpoints.list.filter((e) => {
+    const tag = e.tag.trim().toLowerCase()
+    return tag === entry || tag.startsWith(`${entry}/`)
+  })
+  if (byTag.length > 0) return byTag
+  return endpoints.list.filter((e) => squash(upstreamSlug(e.tag)) === squash(base) || squash(e.name) === squash(base))
+}
+
+/** What the pinned upstream's price came from, for the model page. */
+export type PriceSource =
+  | { readonly state: "pinned"; readonly name: string; readonly several: boolean }
+  | { readonly state: "fallback"; readonly name: string; readonly reason: "failed" | "unlisted" }
+
+/**
+ * A model's price for its routing: when the routing pins one provider and the endpoint list has a
+ * priced endpoint for it, that endpoint's price (the dearest if several variants match);
+ * otherwise the model's general price, with `source` saying why when a provider is pinned.
+ */
+export const routedPrice = (
+  upstream: ModelUpstream,
+  routing: Readonly<Record<string, unknown>> | undefined
+): { readonly price: Price | null; readonly source: PriceSource | null } => {
+  const general = upstream.price ?? null
+  const base = pinnedRoute(routing)
+  if (base === null || upstream.endpoints === undefined) return { price: general, source: null }
+  const name = upstream.routes?.flatMap((r) => r.upstreams).find((u) => u.slug === base)?.name
+  const matches = matchEndpoints(upstream.endpoints, routing).filter((e) => e.price !== undefined)
+  if (matches.length === 0) {
+    const label = name ?? `${base.charAt(0).toUpperCase()}${base.slice(1)}`
+    return {
+      price: general,
+      source: { state: "fallback", name: label, reason: upstream.endpoints.error !== undefined ? "failed" : "unlisted" }
+    }
+  }
+  const dearest = matches.reduce((a, b) =>
+    b.price!.input + b.price!.output > a.price!.input + a.price!.output ? b : a
+  )
+  return { price: dearest.price!, source: { state: "pinned", name: dearest.name, several: matches.length > 1 } }
+}
+
+/** A stored model's price for its routing as saved (user edits over the list's settings). */
+export const modelPrice = (model: {
+  readonly upstream: ModelUpstream
+  readonly overrides: { readonly settings?: typeof ModelSettings.Type | undefined }
+}): Price | null =>
+  routedPrice(model.upstream, { ...model.upstream.settings, ...model.overrides.settings }.routing).price
 
 const listNames = (names: ReadonlyArray<string>) =>
   names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
@@ -438,6 +535,8 @@ export interface EffectiveModel {
   readonly sampling: Readonly<Record<string, unknown>>
   readonly settings: ModelSettings
   readonly price: ModelUpstream["price"] | null
+  /** Where the price came from when the routing pins a provider: its own price, or why not. */
+  readonly priceSource: PriceSource | null
   /** The catalog entry behind `catalog` sources. */
   readonly catalog: CatalogMatch | null
   /** The router upstream the routing pins, its route rules applied (`routedUpstream`). */
@@ -462,7 +561,9 @@ export const resolveModel = (
   connectionCompat: Compat = {},
   provider: ProviderSettings = {}
 ): EffectiveModel => {
-  const { upstream, ...route } = routedUpstream(listed, { ...listed.settings, ...overrides.settings }.routing)
+  const routing = { ...listed.settings, ...overrides.settings }.routing
+  const { upstream, ...route } = routedUpstream(listed, routing)
+  const priced = routedPrice(upstream, routing)
   const pick = <K extends Exclude<keyof ModelOverrides, "learned">, A>(
     field: K,
     fallback: A
@@ -505,7 +606,8 @@ export const resolveModel = (
     compat: { ...connectionCompat, ...upstream.compat, ...overrides.compat },
     sampling: { ...upstream.sampling, ...overrides.sampling },
     settings: { ...upstream.settings, ...overrides.settings },
-    price: upstream.price ?? null,
+    price: priced.price,
+    priceSource: priced.source,
     catalog: upstream.catalog ?? null,
     route
   }

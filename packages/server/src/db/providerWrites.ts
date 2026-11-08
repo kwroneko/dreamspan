@@ -31,7 +31,6 @@ const settingsColumns = (settings: ConnectionSettings) => ({
   cache_ttl_s: settings.cacheTtlS,
   max_concurrent: settings.maxConcurrent,
   preset_override_ref_id: settings.presetOverrideRefId,
-  ...(settings.modelIdPrefix !== undefined ? { model_id_prefix: settings.modelIdPrefix } : {}),
   ...(settings.providerSettings !== undefined
     ? { provider_settings_json: JSON.stringify(settings.providerSettings) }
     : {})
@@ -263,14 +262,9 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         transaction(sql, "SetConnectionProxy")
       ),
 
-    SyncFetchedModels: ({ userId, connectionId, models, fetchedAt, modelIdPrefix }) =>
+    SyncFetchedModels: ({ userId, connectionId, models, fetchedAt }) =>
       Effect.gen(function* () {
         yield* ownedConnection(userId, connectionId)
-        // The prefix the list's ids share, as the connection's default until the user sets one.
-        if (modelIdPrefix !== undefined)
-          yield* sql`UPDATE connections SET model_id_prefix = ${modelIdPrefix}, row_version = row_version + 1,
-                       updated_at = ${fetchedAt}
-                     WHERE id = ${connectionId} AND model_id_prefix IS NULL`
         const existing = yield* sql<{ id: string; model_key: string; fetched_at: number | null }>`
           SELECT id, model_key, fetched_at FROM models WHERE connection_id = ${connectionId}`
         const byKey = new Map(existing.map((row) => [row.model_key, row]))
@@ -282,7 +276,11 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           const known = byKey.get(model.key)
           const upstream = JSON.stringify(model.upstream)
           if (known) {
-            yield* sql`UPDATE models SET upstream_json = ${upstream}, fetched_at = ${fetchedAt}, missing_since = NULL
+            // A refresh rewrites the upstream but keeps the endpoint list fetched for a pinned route.
+            yield* sql`UPDATE models SET
+                         upstream_json = CASE WHEN json_extract(upstream_json, '$.endpoints') IS NULL THEN ${upstream}
+                           ELSE json_set(${upstream}, '$.endpoints', json(json_extract(upstream_json, '$.endpoints'))) END,
+                         fetched_at = ${fetchedAt}, missing_since = NULL
                        WHERE id = ${known.id}`
             updated++
           } else {
@@ -346,6 +344,14 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
                    WHERE id = ${modelId}`
         return yield* reloadModel(modelId)
       }).pipe(transaction(sql, "SetLearnedContext")),
+
+    SetModelEndpoints: ({ userId, modelId, endpoints }) =>
+      Effect.gen(function* () {
+        yield* ownedModel(userId, modelId)
+        yield* sql`UPDATE models SET upstream_json = json_set(upstream_json, '$.endpoints', json(${JSON.stringify(endpoints)}))
+                   WHERE id = ${modelId}`
+        return yield* reloadModel(modelId)
+      }).pipe(transaction(sql, "SetModelEndpoints")),
 
     SetModelHidden: ({ userId, modelId, hidden }) =>
       Effect.gen(function* () {

@@ -223,6 +223,8 @@ The two decision points:
 
 [P] lean, not a decision: a for lines interleaved within one path (it needs no new machinery), c for chat merges (already built). Left Open for the owner.
 
+**Owner, 2026-11-08** (DESIGN §6): shown the proposal that, within a chat, diverged stretches appear as labelled sections per storyline ("Mira and Tobin, 41–54", "Wren, 41–54"), the way a chat merge shows two chats, he said: "Okay, although I feel like both aren't really solved or fully settled yet." **[P]** That is the working default; the question stays **Open**. The same day he decided that a chat merge can also leave the characters' timelines separate by origin (DESIGN, "Merging another chat into this one"; §2.1, §2.2).
+
 ## 7. Schema impact
 
 - Own-turn notes and card-swap rotation: no table change. The note document's `Placement` (`@rp/shared/docs/note.ts`) gains one value, "at the preset's Own-turn notes", and the preset's order one marker identifier (`ownTurnNotes`); both are JSON documents, not SQL. Export carries the condition and the replacement target inside `extensions.rp_harness.notes`.
@@ -245,6 +247,6 @@ The two decision points:
 ### 8.2 Decisions for the owner
 
 1. **A shared past** (§2.4, Open). Whether separate contexts should also offer "Storylines rejoin here": everything before that message summarized once for everyone (one cache prefix, Wren learns the inn scene as a summary), separate recent history after it, and the same for merged chats. Default meanwhile: parallel contexts with their own summaries.
-2. **How a narrator's context shows diverged storylines** (§6, Open). Options a–d; my lean is a (labelled runs in path order) within a chat and c (the merge's section) for merged chats.
+2. **How a narrator's context shows diverged storylines** (§6, Open). Options a–d; my lean is a (labelled runs in path order) within a chat and c (the merge's section) for merged chats. Owner, 2026-11-08: labelled sections per storyline is OK as the working default, but "both aren't really solved or fully settled yet"; still Open.
 
 Turn picking with decision models (§5) is written as proposed, not listed: both points are opt-in, and the only proposal is that, with separate contexts, a decision-set away shows on the timeline with Undo.

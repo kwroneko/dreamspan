@@ -54,7 +54,7 @@ describe.skipIf(!liveEnabled)("live OpenAI", () => {
       Effect.gen(function* () {
         const chat = yield* startChat(api, recorder, dataDir, p, { cardTokens: 300 })
         const model = yield* checkModels(f, p, api, chat, {
-          listed: "acme.gpt-5.4-nano",
+          listed: "gpt-5.4-nano",
           vision: true,
           reasoning: true
         })
