@@ -1,4 +1,5 @@
 // Provider-specific prerequisites, resolved with the model independently of context budgeting.
+import { type EffectiveModel, routeFailure } from "@rp/shared/providers.ts"
 import type { ModelInput } from "./types.ts"
 
 /**
@@ -13,8 +14,15 @@ const deepseekNeedsBeta = (baseUrl: string | null) => {
 
 export const prefillUnavailable = (
   model: Pick<ModelInput, "kind" | "api" | "key" | "prefill">,
-  baseUrl: string | null
+  baseUrl: string | null,
+  /** Why the prefill may be off: the provider rules that fix it (the list's, the pinned route's). */
+  rules: { readonly fixed?: ReadonlyArray<string>; readonly route?: EffectiveModel["route"] } = {}
 ): string | undefined => {
+  const rule = rules.route?.applied.find((r) => r.fixed?.includes("prefill"))
+  if (model.prefill === "none" && rule)
+    return `${routeFailure(rule, rules.route!.route)} for ${model.key}, so its prefill is off (a provider rule). Choose another provider in its routing to use one.`
+  if (model.prefill === "none" && rules.fixed?.includes("prefill"))
+    return `The provider refuses a prefill for ${model.key}, so its prefill is off (a provider rule).`
   if (model.prefill === "none")
     return `${model.key} isn't set up to take the start of its reply (a prefill). If it can, turn on its Prefill capability in Settings → Connections.`
   if (model.prefill === "tool_schema" && model.api !== "openai-responses" && model.api !== "openai-completions")

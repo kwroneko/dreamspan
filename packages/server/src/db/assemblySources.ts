@@ -929,7 +929,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           prefill: effective.prefill.value,
           continueUnavailable: prefillUnavailable(
             { kind: c.kind, api: c.api, key: m.key, prefill: effective.prefill.value },
-            c.baseUrl
+            c.baseUrl,
+            { ...(m.upstream.fixed ? { fixed: m.upstream.fixed } : {}), route: effective.route }
           ),
           cacheBreakpoints: effective.cacheBreakpoints.value,
           cacheLayout: effective.cacheLayout.value,

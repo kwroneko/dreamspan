@@ -7,7 +7,12 @@
 // A shim can set capabilities (prefill, thinking levels, tools, vision...), which refreshes and
 // added models take over what the list and catalogs report, and can rewrite the final request
 // payload (samplers, reasoning parameters, tools, message shape) after the registered transforms.
-import type { FixedCapability, ModelUpstream } from "@rp/shared/providers.ts"
+//
+// A shim can also name upstreams behind a router (OpenRouter providers, liveapi2): then it's a
+// route rule, stored with the model's upstream and applied only when the model's routing pins one
+// of them (`routedUpstream` in the shared resolution, so the assembly applies it at send and the
+// model page shows it). Its payload rewrite applies when the request's own routing pins one.
+import { type FixedCapability, type ModelUpstream, pinnedRoute, type RouteRule } from "@rp/shared/providers.ts"
 import type { RequestTarget } from "./registry.ts"
 
 interface ShimRequest {
@@ -32,6 +37,13 @@ export interface CompatShim {
   readonly fixed?: ReadonlyArray<FixedCapability>
   /** Rewrites the final payload; returns it (the same object changed in place, or a new one). */
   readonly payload?: (payload: Record<string, unknown>, request: ShimRequest) => Record<string, unknown>
+  /**
+   * The router's upstreams it's for (OpenRouter provider slugs, lower case, and their names).
+   * Set, it applies only when the model's routing pins one of them.
+   */
+  readonly upstreams?: RouteRule["upstreams"]
+  /** With `upstreams`: what goes wrong there, for a route that isn't pinned ("Prefill fails"). */
+  readonly fails?: string
 }
 
 /** Where a shim is looked up: the connection's provider, and its wire API where known. */
@@ -57,9 +69,13 @@ const reasoning = (payload: Record<string, unknown>) => {
   return effort !== undefined && effort !== "none"
 }
 
+const routeShim = (shim: CompatShim) => shim.upstreams !== undefined
+
 /** Capabilities the shims that apply give a model, and the fields they fix. */
 const shimCapabilities = (shims: ReadonlyArray<CompatShim>, target: ShimTarget, model: string) => {
-  const applied = shims.filter((shim) => shimApplies(shim, target, model) && (shim.capabilities || shim.fixed))
+  const applied = shims.filter(
+    (shim) => !routeShim(shim) && shimApplies(shim, target, model) && (shim.capabilities || shim.fixed)
+  )
   if (applied.length === 0) return null
   const capabilities = Object.assign({}, ...applied.map((shim) => shim.capabilities ?? {})) as ModelUpstream
   const fixed = [...new Set(applied.flatMap((shim) => shim.fixed ?? []))]
@@ -76,10 +92,19 @@ export const shimmedUpstream = (
   key: string,
   upstream: ModelUpstream
 ): ModelUpstream => {
-  const { shims: _shims, fixed: _fixed, ...base } = upstream
+  const { shims: _shims, fixed: _fixed, routes: _routes, ...base } = upstream
   const target = typeof on === "string" ? { provider: on } : on
-  const named = shims.filter((shim) => shimApplies(shim, target, key))
-  if (named.length === 0) return base
+  const matching = shims.filter((shim) => shimApplies(shim, target, key))
+  const named = matching.filter((shim) => !routeShim(shim))
+  const routes = matching.filter(routeShim).map((shim): RouteRule => ({
+    id: shim.id,
+    label: shim.label,
+    upstreams: shim.upstreams!,
+    fails: shim.fails ?? shim.label,
+    ...(shim.capabilities ? { capabilities: shim.capabilities } : {}),
+    ...(shim.fixed ? { fixed: shim.fixed } : {})
+  }))
+  if (matching.length === 0) return base
   const applied = shimCapabilities(shims, target, key)
   return {
     ...base,
@@ -87,8 +112,9 @@ export const shimmedUpstream = (
     ...(applied?.capabilities.thinkingLevels
       ? { thinkingLevels: { ...base.thinkingLevels, ...applied.capabilities.thinkingLevels } }
       : {}),
-    shims: named.map((shim) => ({ id: shim.id, label: shim.label })),
-    ...(applied && applied.fixed.length > 0 ? { fixed: applied.fixed } : {})
+    ...(named.length > 0 ? { shims: named.map((shim) => ({ id: shim.id, label: shim.label })) } : {}),
+    ...(applied && applied.fixed.length > 0 ? { fixed: applied.fixed } : {}),
+    ...(routes.length > 0 ? { routes } : {})
   }
 }
 
@@ -101,7 +127,19 @@ export const withShims = <M extends { readonly key: string; readonly upstream: M
 
 /** A provider's shims, by the models they're for, for its connections' advanced section. */
 export const providerRules = (shims: ReadonlyArray<CompatShim>, provider: string) =>
-  shims.filter((shim) => shim.providers.includes(provider)).map((shim) => `${shim.models}: ${shim.label}`)
+  shims
+    .filter((shim) => shim.providers.includes(provider))
+    .map((shim) =>
+      shim.upstreams
+        ? `${shim.models} through ${shim.upstreams.map((u) => u.name).join(" or ")}: ${shim.label}`
+        : `${shim.models}: ${shim.label}`
+    )
+
+/** Whether a route rule's upstreams include the one a request's routing (`provider`) pins. */
+const pinsRoute = (shim: CompatShim, payload: Record<string, unknown>) => {
+  const route = pinnedRoute(object(payload.provider))
+  return route !== null && shim.upstreams!.some((u) => u.slug === route)
+}
 
 /** The payload rewrites of the shims that apply, in registration order. */
 export const applyShims = (
@@ -114,6 +152,7 @@ export const applyShims = (
   for (const shim of shims) {
     const on = { provider: target.provider ?? target.kind, api: target.api }
     if (!shim.payload || !shimApplies(shim, on, target.model ?? "")) continue
+    if (routeShim(shim) && !pinsRoute(shim, current)) continue
     current = shim.payload(current, { target })
     applied.push(shim.id)
   }
@@ -196,6 +235,46 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     models: "Gemini",
     providers: ["openrouter"],
     model: /^google\/gemini/i,
+    capabilities: { prefill: "none" },
+    fixed: ["prefill"]
+  },
+  // Route rules (liveapi2, 2026-11-07): the same model on OpenRouter took a prefill on some
+  // upstreams and not others. They apply when the model's routing pins the upstream.
+  {
+    // With reasoning on, the reply came back as reasoning and the text was empty; with it off,
+    // a stray `[[...]]` token came first.
+    id: "openrouter-deepseek-together-no-prefill",
+    label: "No prefill through Together: the reply comes back empty. Continue asks the model to go on instead.",
+    models: "DeepSeek",
+    providers: ["openrouter"],
+    model: /^deepseek\//i,
+    upstreams: [{ slug: "together", name: "Together" }],
+    fails: "Prefill fails",
+    capabilities: { prefill: "none" },
+    fixed: ["prefill"]
+  },
+  {
+    // The reply started over, with or without reasoning.
+    id: "openrouter-mimo-streamlake-no-prefill",
+    label: "No prefill through StreamLake: the reply starts over. Continue asks the model to go on instead.",
+    models: "MiMo",
+    providers: ["openrouter"],
+    model: /^xiaomi\/mimo/i,
+    upstreams: [{ slug: "streamlake", name: "StreamLake" }],
+    fails: "Prefill fails",
+    capabilities: { prefill: "none" },
+    fixed: ["prefill"]
+  },
+  {
+    // Went on from the prefill in some runs and started over (often repeating it) in others.
+    id: "openrouter-mimo-xiaomi-no-prefill",
+    label:
+      "No prefill through Xiaomi: the reply often starts over instead of going on. Continue asks the model to go on instead.",
+    models: "MiMo",
+    providers: ["openrouter"],
+    model: /^xiaomi\/mimo/i,
+    upstreams: [{ slug: "xiaomi", name: "Xiaomi" }],
+    fails: "Prefill is unreliable",
     capabilities: { prefill: "none" },
     fixed: ["prefill"]
   }
