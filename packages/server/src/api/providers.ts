@@ -147,9 +147,11 @@ export const makeProviderHandlers = Effect.gen(function* () {
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SaveLearnedContext"))),
     EditModel: ({ modelId, overrides, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
-        writer
-          .EditModel({ userId: id, modelId, overrides, expectedRowVersion })
-          .pipe(Effect.tap(() => warmth.refreshUser(id)))
+        writer.EditModel({ userId: id, modelId, overrides, expectedRowVersion }).pipe(
+          Effect.tap(() => warmth.refreshUser(id)),
+          // A pin saved: its provider's prices are fetched now, off the save's path.
+          Effect.tap((model) => Effect.forkDetach(providers.ensureEndpoints(id, model)))
+        )
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("EditModel"))),
     SetModelHidden: ({ modelId, hidden }) =>
       Effect.flatMap(userId, (id) => writer.SetModelHidden({ userId: id, modelId, hidden })).pipe(

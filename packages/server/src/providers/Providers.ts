@@ -35,7 +35,9 @@ import {
   type ConnectionSettings,
   type Credential,
   type CredentialId,
+  endpointsStale,
   modelPrice,
+  pinnedRoute,
   type ModelEndpoints,
   type EffectiveModel,
   type Model,
@@ -384,6 +386,11 @@ export interface ProvidersShape {
    * model's general price applies. Other kinds' models are returned unchanged.
    */
   readonly refreshEndpoints: (userId: UserId, modelId: ModelId) => Effect.Effect<Model, ProviderError | ServerError>
+  /**
+   * The model with a fresh endpoint list when its routing pins one provider and the stored list
+   * is missing or stale; never fails (a failed fetch is stored, and the model comes back as it was).
+   */
+  readonly ensureEndpoints: (userId: UserId, model: Model) => Effect.Effect<Model>
   /**
    * What the registered catalogs know of a model id on this connection (its window, its output
    * limit), for a model the user adds by id; empty when nothing matches or the connection is gone.
@@ -962,6 +969,15 @@ export const layer = (options: ProvidersOptions = {}) =>
           )
         })
 
+      const ensureEndpoints: ProvidersShape["ensureEndpoints"] = (userId, model) =>
+        pinnedRoute({ ...model.upstream.settings, ...model.overrides.settings }.routing) === null ||
+        !endpointsStale(model.upstream.endpoints, Date.now())
+          ? Effect.succeed(model)
+          : refreshEndpoints(userId, model.id).pipe(
+              Effect.timeout("10 seconds"),
+              Effect.catch(() => Effect.succeed(model))
+            )
+
       const catalogUpstream: ProvidersShape["catalogUpstream"] = (userId, connectionId, key) =>
         reader.GetConnection({ userId, connectionId }).pipe(
           Effect.flatMap((connection) => {
@@ -1171,10 +1187,12 @@ export const layer = (options: ProvidersOptions = {}) =>
                   ...sample
                 })
                 .pipe(Effect.catch((e) => Effect.logWarning("could not record an image token sample", e)))
+            // A pinned route is priced by its own endpoint: fetched here, after the reply, when none is stored.
+            const priced = prepared.kind.id === "openrouter" ? yield* ensureEndpoints(request.userId, model) : model
             const cost = costOf(
               registry.costs.list(),
               { kind: prepared.kind.id, api: prepared.api, model: model.key },
-              { counts, pricing, capture: state.capture, price: modelPrice(model) }
+              { counts, pricing, capture: state.capture, price: modelPrice(priced) }
             )
             yield* writer
               .CloseLlmRequest({
@@ -2089,6 +2107,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         setProxy,
         refreshModels,
         refreshEndpoints,
+        ensureEndpoints,
         catalogUpstream,
         testConnection,
         stream
