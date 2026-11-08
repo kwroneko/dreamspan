@@ -3,8 +3,9 @@
 // router's id prefix (F1, F2).
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { resolveModel } from "@rp/shared/providers.ts"
-import { applyShims, builtinShims, shimmedUpstream } from "../src/providers/shims.ts"
+import { pinnedRoute, resolveModel, routedUpstream } from "@rp/shared/providers.ts"
+import { prefillUnavailable } from "../src/assembler/prefill.ts"
+import { applyShims, builtinShims, providerRules, shimmedUpstream } from "../src/providers/shims.ts"
 import { detectModelIdPrefix, withoutModelIdPrefix } from "../src/providers/contextCatalog.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
@@ -270,6 +271,149 @@ describe("a reply with no text after its prefill (F12)", () => {
       })
       assert.strictEqual(version.status, "failed")
       assert.include(version.error?.message ?? "", "no text after the reply's prefill")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
+describe("route rules: shims for one OpenRouter upstream (liveapi2)", () => {
+  const deepseek = "deepseek/deepseek-v4.1-flash"
+  const mimo = "xiaomi/mimo-v2.6-pro"
+  const listed = (key: string) => shimmedUpstream(builtinShims, "openrouter", key, { prefill: "assistant" })
+  const routed = (key: string, routing?: Record<string, unknown>) =>
+    resolveModel(key, listed(key), routing ? { settings: { routing } } : {})
+
+  it("pins a route with one `only` entry, or one `order` entry with fallbacks off", () => {
+    assert.strictEqual(pinnedRoute({ only: ["together"] }), "together")
+    assert.strictEqual(pinnedRoute({ only: ["Together"], allow_fallbacks: false }), "together")
+    assert.strictEqual(pinnedRoute({ only: ["deepinfra/fp8"] }), "deepinfra")
+    assert.strictEqual(pinnedRoute({ order: ["together"], allow_fallbacks: false }), "together")
+    assert.strictEqual(
+      pinnedRoute({ only: ["together", "fireworks"], order: ["together"], allow_fallbacks: false }),
+      "together"
+    )
+    assert.strictEqual(pinnedRoute({ only: ["together", "fireworks"], ignore: ["fireworks"] }), "together")
+    // The router may still choose: fallbacks on, several entries, or no routing.
+    assert.isNull(pinnedRoute({ order: ["together"] }))
+    assert.isNull(pinnedRoute({ only: ["together", "fireworks"] }))
+    assert.isNull(pinnedRoute({ order: ["together", "fireworks"], allow_fallbacks: false }))
+    assert.isNull(pinnedRoute(undefined))
+  })
+
+  it("stores the route rules with the model, not as its own shims", () => {
+    const upstream = listed(deepseek)
+    assert.deepEqual(
+      upstream.routes?.map((r) => r.id),
+      ["openrouter-deepseek-together-no-prefill"]
+    )
+    assert.isUndefined(upstream.shims)
+    assert.isUndefined(upstream.fixed)
+    assert.strictEqual(upstream.prefill, "assistant")
+    // Another model, or a direct DeepSeek connection, gets none.
+    assert.isUndefined(listed("anthropic/claude-haiku-4.5").routes)
+    assert.isUndefined(shimmedUpstream(builtinShims, "deepseek", "deepseek-flash", {}).routes)
+    // A rule no longer registered leaves nothing behind.
+    assert.isUndefined(shimmedUpstream([], "openrouter", deepseek, upstream).routes)
+  })
+
+  it("pinned to Together, DeepSeek's prefill is locked off and Continue uses the nudge", () => {
+    const pinned = resolveModel(deepseek, listed(deepseek), {
+      prefill: "assistant",
+      settings: { routing: { only: ["together"], allow_fallbacks: false } }
+    })
+    assert.deepEqual(pinned.prefill, { value: "none", source: "upstream" })
+    assert.strictEqual(pinned.route.route, "together")
+    const message = prefillUnavailable(
+      { kind: "openrouter", api: "openai-completions", key: deepseek, prefill: pinned.prefill.value },
+      null,
+      { route: pinned.route }
+    )
+    assert.match(message ?? "", /^Prefill fails on Together for deepseek\/deepseek-v4\.1-flash, so its prefill is off/)
+    const page = routedUpstream(listed(deepseek), { only: ["together"] })
+    assert.deepEqual(page.upstream.fixed, ["prefill"])
+    assert.deepEqual(
+      page.upstream.shims?.map((s) => s.id),
+      ["openrouter-deepseek-together-no-prefill"]
+    )
+    // Elsewhere the user's choice stands.
+    const deepinfra = resolveModel(deepseek, listed(deepseek), {
+      prefill: "assistant",
+      settings: { routing: { only: ["deepinfra"] } }
+    })
+    assert.strictEqual(deepinfra.prefill.value, "assistant")
+    assert.deepEqual(deepinfra.route.applied, [])
+  })
+
+  it("unpinned, no route rule applies, and the notes name the upstreams that break it", () => {
+    const open = routed(deepseek)
+    assert.strictEqual(open.prefill.value, "assistant")
+    assert.deepEqual(open.route.unpinned, ["Prefill fails on Together; pin a provider to be sure."])
+    assert.deepEqual(routed(mimo).route.unpinned, [
+      "Prefill fails on StreamLake; pin a provider to be sure.",
+      "Prefill is unreliable on Xiaomi; pin a provider to be sure."
+    ])
+    // Only the upstreams the routing still allows are named.
+    assert.deepEqual(routed(mimo, { only: ["deepinfra", "streamlake"] }).route.unpinned, [
+      "Prefill fails on StreamLake; pin a provider to be sure."
+    ])
+    assert.deepEqual(routed(mimo, { ignore: ["streamlake", "xiaomi"] }).route.unpinned, [])
+    assert.strictEqual(routed(mimo, { only: ["xiaomi"] }).prefill.value, "none")
+    assert.strictEqual(routed(mimo, { only: ["streamlake"] }).prefill.value, "none")
+    assert.strictEqual(routed(mimo, { only: ["deepinfra"] }).prefill.value, "assistant")
+  })
+
+  it("lists route rules in the provider's advanced section by upstream", () => {
+    assert.include(
+      providerRules(builtinShims, "openrouter"),
+      "DeepSeek through Together: No prefill through Together: the reply comes back empty. Continue asks the model to go on instead."
+    )
+  })
+
+  it("a route rule's payload rewrite applies only when the request pins its upstream", () => {
+    const rule = {
+      id: "test-route-payload",
+      label: "Test",
+      models: "Test",
+      providers: ["openrouter"],
+      model: /^vendor\//,
+      upstreams: [{ slug: "together", name: "Together" }],
+      fails: "Test fails",
+      payload: (payload: Record<string, unknown>) => ({ ...payload, marked: true })
+    }
+    const target = { kind: "openrouter", provider: "openrouter", api: "openai-completions" as never, model: "vendor/m" }
+    assert.deepEqual(applyShims([rule], { provider: { only: ["together"] } }, target).applied, ["test-route-payload"])
+    assert.deepEqual(applyShims([rule], { provider: { only: ["fireworks"] } }, target).applied, [])
+    assert.deepEqual(applyShims([rule], {}, target).applied, [])
+  })
+
+  it.live("a pinned Together route drops the preset's prefill; another upstream keeps it", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource((_req, res) =>
+        sse(res, completionChunks(["The tide is out."], { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 }))
+      )
+      const api = yield* client()
+      const send = (only: string) =>
+        generateReply(api, {
+          connection: { kind: "openrouter", baseUrl: mock.url, apiKey: "synthetic-key" },
+          modelKey: deepseek,
+          model: { prefill: "assistant", settings: { routing: { only: [only], allow_fallbacks: false } } },
+          preset: { assistant_prefill: "*Mira sets down her pen.*" }
+        })
+      const chats = mock.requests
+      const lastOf = (i: number) =>
+        (
+          chats().filter((r) => r.path.endsWith("/chat/completions"))[i]!.body!.messages as Array<{
+            role: string
+            content: unknown
+          }>
+        ).at(-1)
+      const together = yield* send("together")
+      assert.strictEqual(together.version.status, "complete")
+      assert.notStrictEqual(lastOf(0)?.role, "assistant")
+      const fireworks = yield* send("fireworks")
+      assert.strictEqual(fireworks.version.status, "complete")
+      assert.strictEqual(lastOf(1)?.role, "assistant")
+      assert.include(JSON.stringify(lastOf(1)?.content), "Mira sets down her pen.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

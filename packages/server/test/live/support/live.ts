@@ -196,7 +196,7 @@ export const sseEvents = (body: string): Array<Record<string, unknown>> => {
 /**
  * The usage the provider itself streamed, merged over the stream's events: Anthropic's
  * message_start usage then message_delta's, OpenAI-style chunks' `usage`, Responses'
- * `response.completed`.
+ * `response.completed`, Gemini's `usageMetadata`.
  */
 export const wireUsage = (body: string): Record<string, unknown> | null => {
   let usage: Record<string, unknown> | null = null
@@ -204,7 +204,8 @@ export const wireUsage = (body: string): Record<string, unknown> | null => {
     const found =
       (event.message as { usage?: Record<string, unknown> } | undefined)?.usage ??
       (event.response as { usage?: Record<string, unknown> } | undefined)?.usage ??
-      (event.usage as Record<string, unknown> | undefined)
+      (event.usage as Record<string, unknown> | undefined) ??
+      (event.usageMetadata as Record<string, unknown> | undefined)
     if (found && typeof found === "object") usage = Object.assign({}, usage, found)
   }
   return usage
@@ -379,7 +380,7 @@ export interface Turn {
 
 export interface LiveChatOptions {
   readonly kind: string
-  /** The provider route: `anthropic`, `openai/v1`, `openrouter/v1`, `deepseek/v1`. */
+  /** The provider route: `anthropic`, `openai/v1`, `openrouter/v1`, `deepseek/v1`, `google/v1beta`. */
   readonly route: string
   readonly model: string
   /** Use the provider's listed model of this id (after a refresh) instead of adding `model`. */
@@ -407,7 +408,8 @@ const routeProviders: Readonly<Record<string, string>> = {
   anthropic: "anthropic",
   "openai": "openai",
   openrouter: "openrouter",
-  deepseek: "deepseek"
+  deepseek: "deepseek",
+  google: "google"
 }
 
 export const liveChat = (

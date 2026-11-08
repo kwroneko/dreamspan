@@ -12,6 +12,8 @@ const server = serverPerFile(withAdmin)
 let provider: FakeProvider
 let connectionId = ""
 const GEMINI = "google/gemini-3.5-flash-lite"
+const PINNED = "deepseek/deepseek-v4.1-flash"
+const UNPINNED = "xiaomi/mimo-v2.6-pro"
 
 test.beforeAll(async () => {
   provider = await startProvider()
@@ -30,6 +32,13 @@ test.beforeAll(async () => {
       })
       // Added by id: OpenRouter's Gemini gets its provider rules (no prefill, locked).
       yield* api.AddUserModel({ connectionId: connection.id, key: GEMINI, overrides: { prefill: "assistant" } })
+      // Route rules: DeepSeek pinned to Together, and MiMo left to the router.
+      yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: PINNED,
+        overrides: { prefill: "assistant", settings: { routing: { only: ["together"] } } }
+      })
+      yield* api.AddUserModel({ connectionId: connection.id, key: UNPINNED, overrides: { prefill: "assistant" } })
       return connection.id
     })
   )
@@ -96,3 +105,37 @@ for (const [width, height] of [
       await dialog.getByRole("button", { name: "Save" }).last().scrollIntoViewIfNeeded()
       await expectLayout(page, info, `model-provider-rules-end-${width}-${theme}`, { scope: '[role="dialog"]' })
     })
+
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844]
+] as const)
+  test(`route rules of a pinned and an unpinned model: ${width}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height })
+    await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/settings/connections/${connectionId}`)
+
+    // Pinned to Together: its rule applies and Prefill is locked.
+    await page.getByRole("button", { name: `Edit ${PINNED}`, exact: true }).click()
+    let dialog = page.getByRole("dialog")
+    let rules = dialog.getByRole("region", { name: "Provider rules", exact: true })
+    await rules.scrollIntoViewIfNeeded()
+    await expect(rules).toContainText("No prefill through Together")
+    await expect(dialog.getByRole("combobox", { name: "Prefill", exact: true })).toBeDisabled()
+    await help(page, "Provider rules", /Some apply only when the model.s routing picks one provider/)
+    await noInternals(page)
+    await expectLayout(page, info, `route-pinned-${width}`, { scope: '[role="dialog"]' })
+    await page.keyboard.press("Escape")
+
+    // Not pinned: a note says where prefill fails, and Prefill stays editable.
+    await page.getByRole("button", { name: `Edit ${UNPINNED}`, exact: true }).click()
+    dialog = page.getByRole("dialog")
+    rules = dialog.getByRole("region", { name: "Provider rules", exact: true })
+    await rules.scrollIntoViewIfNeeded()
+    await expect(rules).toContainText("Prefill fails on StreamLake")
+    await expect(rules).toContainText("pin a provider to be sure")
+    await expect(dialog.getByRole("combobox", { name: "Prefill", exact: true })).toBeEnabled()
+    await noInternals(page)
+    await expectLayout(page, info, `route-unpinned-${width}`, { scope: '[role="dialog"]' })
+  })

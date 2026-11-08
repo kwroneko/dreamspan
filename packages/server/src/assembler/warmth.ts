@@ -3,6 +3,7 @@
 // to the next (`preset:main`, `card:<entity>:description`, `message:<version>`), so the
 // first piece of the first differing message whose text differs says why.
 import type { ContextSource } from "@rp/shared/inspectorApi.ts"
+import { canonicalJson } from "@rp/shared/editing.ts"
 import { tokensOf } from "./st.ts"
 import { wireImages } from "./imageTokens.ts"
 import { wireContext, wireDigest } from "./wire.ts"
@@ -176,6 +177,14 @@ export const prefixChange = (
   }
   if (before?.connectionRevision !== after?.connectionRevision) {
     return { reason: "The connection's endpoint or route changed.", tokens: suffix(0) }
+  }
+  // OpenRouter's routing picks the provider that serves the request, and each provider's cache
+  // is its own (liveapi2: pinned from Anthropic to Vertex, the next request read nothing).
+  if (
+    after?.kind === "openrouter" &&
+    canonicalJson(before?.settings?.routing ?? null) !== canonicalJson(after.settings?.routing ?? null)
+  ) {
+    return { reason: "The model's provider routing changed, and each provider caches on its own.", tokens: suffix(0) }
   }
   if ((last.wire?.mapping ?? before?.mapping)?.revision !== (next.wire?.mapping ?? after?.mapping)?.revision) {
     return { reason: "The model's request-conversion capabilities changed.", tokens: suffix(0) }
