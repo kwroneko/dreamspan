@@ -24,7 +24,7 @@ const expectZoomControls = async (page: Page, scope: Locator) => {
 const expectViewerOpen = async (page: Page, width: number, name: string) => {
   const viewer =
     width >= 1024
-      ? page.locator("[data-portrait-column]").getByRole("complementary", { name: `${name}'s portrait`, exact: true })
+      ? page.locator("[data-portrait-column]").getByRole("complementary", { name: `${name}'s image`, exact: true })
       : page.locator('[data-layout-overlay="The full-screen viewer covers the page"]')
   await expect(viewer).toBeVisible()
   if (width < 1024) await expect(viewer.getByRole("heading", { name, exact: true })).toBeVisible()
@@ -33,7 +33,7 @@ const expectViewerOpen = async (page: Page, width: number, name: string) => {
 }
 const closeViewer = async (page: Page, width: number, name: string) => {
   const viewer = await expectViewerOpen(page, width, name)
-  await viewer.getByRole("button", { name: width >= 1024 ? "Close the portrait" : "Close", exact: true }).click()
+  await viewer.getByRole("button", { name: width >= 1024 ? "Close the image" : "Close", exact: true }).click()
   await expect(viewer).toHaveCount(0)
 }
 const openChat = async (page: Page, title: string) => {
@@ -486,7 +486,7 @@ test("an attachment still uploading peeks from its local copy; the column and ta
   await expect(toColumn).not.toHaveAttribute("aria-disabled", "true")
   await thumb.hover()
   await toColumn.click()
-  await expect(page.getByRole("complementary", { name: "slow.png's portrait", exact: true })).toBeVisible()
+  await expect(page.getByRole("complementary", { name: "slow.png's image", exact: true })).toBeVisible()
 })
 
 for (const colorScheme of ["light", "dark"] as const) {

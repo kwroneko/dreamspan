@@ -105,7 +105,10 @@ const openFromCast = async (page: Page, frame: Locator) => {
 
 const closeAll = async (page: Page) => {
   for (let count = await viewers(page).count(); count > 0; count--) {
-    await viewers(page).first().getByRole("button", { name: "Close the portrait", exact: true }).click()
+    await viewers(page)
+      .first()
+      .getByRole("button", { name: /^Close the (portrait|image)$/ })
+      .click()
     await expect(viewers(page)).toHaveCount(count - 1)
   }
   await expect(column(page)).toHaveCount(0)
@@ -452,7 +455,7 @@ for (const theme of ["light", "dark"] as const)
     expect((await names(page)).sort()).toEqual([ATTACHMENT, TALL.name].sort())
 
     // Its viewer's ⋯ opens it as a tab, beside the frame it came from: the left one.
-    const own = column(page).getByRole("complementary", { name: `${ATTACHMENT}'s portrait`, exact: true })
+    const own = column(page).getByRole("complementary", { name: `${ATTACHMENT}'s image`, exact: true })
     await own.getByRole("button", { name: "Viewer options", exact: true }).click()
     await page.getByRole("menuitem", { name: "Open as a tab", exact: true }).click()
     await expect(attachmentTab(frames(page).nth(0))).toBeVisible()

@@ -248,7 +248,7 @@ function Viewer({
   return (
     <aside
       ref={ref}
-      aria-label={`${portrait.name}'s portrait`}
+      aria-label={`${portrait.name}'s ${portrait.image ? "image" : "portrait"}`}
       data-portrait-viewer
       style={{ flex: `${entry.weight} 1 0px`, minHeight: 0 }}
       className={`relative flex flex-col ${first ? "" : "border-t border-border"}`}
@@ -310,7 +310,13 @@ function Viewer({
             </MenuCheckboxItem>
           </Menu>
         }
-        close={<IconButton label="Close the portrait" icon="close" onClick={() => viewer.close(portrait.id)} />}
+        close={
+          <IconButton
+            label={`Close the ${portrait.image ? "image" : "portrait"}`}
+            icon="close"
+            onClick={() => viewer.close(portrait.id)}
+          />
+        }
       />
       {boundary}
     </aside>
