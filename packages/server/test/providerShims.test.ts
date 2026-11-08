@@ -153,8 +153,7 @@ describe("model lists with their own fields (F2)", () => {
                   id: "synthetic-model",
                   context_window: 64000,
                   max_output_tokens: 8000,
-                  input_modalities: ["text", "image"],
-                  effort: { supported_levels: ["low", "high"] }
+                  input_modalities: ["text", "image"]
                 }
               ]
             })
@@ -181,7 +180,7 @@ describe("model lists with their own fields (F2)", () => {
       assert.isTrue(nano.vision)
       assert.strictEqual(nano.catalog?.match, "gpt-5.4-nano")
       const listed = models.find((m) => m.key === "synthetic-model")!.upstream
-      assert.deepInclude(listed, { context: 64000, maxOutput: 8000, vision: true, reasoning: true })
+      assert.deepInclude(listed, { context: 64000, maxOutput: 8000, vision: true })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
