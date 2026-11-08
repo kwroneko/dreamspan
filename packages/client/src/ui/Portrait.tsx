@@ -51,11 +51,6 @@ interface PortraitViewer {
   readonly tabHref?: ((portrait: Portrait) => string | null) | undefined
 }
 
-/**
- * A drag of the app's own portrait carries this, with the tab URL of its picture: a frame
- * opens it as a tab, and a chat's composer never takes it as an attachment.
- */
-export const PICTURE_TAB_MIME = "application/x-rp-picture-tab"
 export type { PortraitViewer }
 const Context = createContext<PortraitViewer | null>(null)
 

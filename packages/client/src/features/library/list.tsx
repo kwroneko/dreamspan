@@ -11,6 +11,7 @@ import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
 import { Link, useLocation, useNavigate, useRouter, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useRef, useState, type ReactNode } from "react"
+import { CARD_DRAG, carryOnDrag } from "../../ui/appDrags.ts"
 import { AsyncView } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -225,7 +226,15 @@ function OpenLink({
     : { title: itemName(entry), className }
   return entry.kind === "card" ? (
     <Tooltip label={`Opens ${entry.label}’s card.`}>
-      <Link to="/cards/$entityId" params={{ entityId: entry.entityId }} {...props}>
+      <Link
+        to="/cards/$entityId"
+        params={{ entityId: entry.entityId }}
+        // Dropped on a frame, the card's full-size editor opens there (owner, 2026-11-07).
+        onDragStart={(event) =>
+          carryOnDrag(event.dataTransfer, CARD_DRAG.id, `/library/${encodeURIComponent(entry.id)}`)
+        }
+        {...props}
+      >
         {children}
       </Link>
     </Tooltip>
