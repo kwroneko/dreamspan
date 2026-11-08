@@ -288,6 +288,31 @@ describe("fetching and storing the endpoint list", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("a failed refetch keeps the list fetched before, so the route keeps its own price", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource((req, res) =>
+        req.path.endsWith(`/models/${KEY}/endpoints`) ? json(res, 200, endpointsBody) : json(res, 404, {})
+      )
+      const { api, connection } = yield* connect(mock.url)
+      const model = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: KEY,
+        overrides: { settings: { routing: { only: ["together"] } } }
+      })
+      const first = yield* api.RefreshModelEndpoints({ modelId: model.id })
+      assert.closeTo(modelPrice(first)!.input, 0.2, 1e-9)
+      mock.setHandler((_req, res) => json(res, 503, { error: { message: "busy" } }))
+      const failed = yield* api.RefreshModelEndpoints({ modelId: model.id })
+      assert.match(failed.upstream.endpoints?.error ?? "", /http/)
+      assert.strictEqual(failed.upstream.endpoints?.list.length, 5)
+      assert.closeTo(modelPrice(failed)!.input, 0.2, 1e-9)
+      assert.strictEqual(routedPrice(failed.upstream, { only: ["together"] }).source?.state, "pinned")
+      // Retried sooner than a good list, as any failure is.
+      assert.isTrue(endpointsStale(failed.upstream.endpoints, Date.now() + 11 * 60 * 1000))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("a variant id isn't asked for, and another kind's model is left alone", () => {
     const config = testConfig()
     return Effect.gen(function* () {

@@ -72,7 +72,7 @@ import type { ListedModel } from "./modelLists.ts"
 import { applyShims, providerRules, withShims } from "./shims.ts"
 import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
-import { fetchEndpoints, type ModelListError } from "./modelLists.ts"
+import { fetchEndpoints, ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
@@ -308,6 +308,8 @@ export interface ProvidersOptions {
    * app or its agent (owner, 2026-10-11).
    */
   readonly bindKeysToOrigins?: boolean
+  /** How long an endpoint-list fetch may take before it counts as failed (default 10 s). */
+  readonly endpointsTimeoutMs?: number
 }
 
 export interface ProvidersShape {
@@ -926,6 +928,7 @@ export const layer = (options: ProvidersOptions = {}) =>
           return { ...result, route }
         })
 
+      const endpointsTimeoutMs = options.endpointsTimeoutMs ?? 10_000
       const refreshEndpoints: ProvidersShape["refreshEndpoints"] = (userId, modelId) =>
         Effect.gen(function* () {
           const model = yield* fromStorage(reader.GetModel({ userId, modelId }))
@@ -941,27 +944,49 @@ export const layer = (options: ProvidersOptions = {}) =>
               fetch: fetchFor(prepared, () => {}),
               scrub: prepared.scrub
             },
-            withoutModelIdPrefix(model.key, prepared.connection.modelIdPrefix)
+            model.key
           ).pipe(
+            // A hung fetch is a failure like any other: stored, so it's retried later, not on every reply.
+            Effect.timeoutOrElse({
+              duration: endpointsTimeoutMs,
+              orElse: () =>
+                Effect.fail(
+                  new ModelListError({
+                    reason: "network",
+                    status: null,
+                    message: `no answer in ${endpointsTimeoutMs / 1000} s`
+                  })
+                )
+            }),
             Effect.flatMap((list) => stored({ fetchedAt: Date.now(), list })),
             Effect.catchTag("ModelListError", (error) =>
               stored({
                 fetchedAt: Date.now(),
                 error: prepared.scrub(`${error.reason}: ${error.message}`).slice(0, 200),
-                list: []
+                // A list fetched before still prices the route better than the model's headline price.
+                list: model.upstream.endpoints?.list ?? []
               })
             )
           )
         })
 
+      /** Models whose endpoint list is being fetched, so concurrent replies (a backfill) ask once. */
+      const endpointsInFlight = new Set<ModelId>()
       const ensureEndpoints: ProvidersShape["ensureEndpoints"] = (userId, model) =>
-        pinnedRoute({ ...model.upstream.settings, ...model.overrides.settings }.routing) === null ||
-        !endpointsStale(model.upstream.endpoints, Date.now())
-          ? Effect.succeed(model)
-          : refreshEndpoints(userId, model.id).pipe(
-              Effect.timeout("10 seconds"),
-              Effect.catch(() => Effect.succeed(model))
-            )
+        // Checked and marked in one step, so two replies starting together ask once.
+        Effect.suspend(() => {
+          if (
+            pinnedRoute({ ...model.upstream.settings, ...model.overrides.settings }.routing) === null ||
+            !endpointsStale(model.upstream.endpoints, Date.now()) ||
+            endpointsInFlight.has(model.id)
+          )
+            return Effect.succeed(model)
+          endpointsInFlight.add(model.id)
+          return refreshEndpoints(userId, model.id).pipe(
+            Effect.catch(() => Effect.succeed(model)),
+            Effect.ensuring(Effect.sync(() => endpointsInFlight.delete(model.id)))
+          )
+        })
 
       const catalogUpstream: ProvidersShape["catalogUpstream"] = (userId, connectionId, key) =>
         reader.GetConnection({ userId, connectionId }).pipe(
@@ -1062,7 +1087,9 @@ export const layer = (options: ProvidersOptions = {}) =>
         request: StreamRequest,
         offer: (event: ProviderEvent) => void,
         number: number,
-        pricing: import("./userCosts.ts").UserPricing
+        pricing: import("./userCosts.ts").UserPricing,
+        /** The model with the newest endpoint list that has arrived (fetched alongside the reply). */
+        latest: { current: Model }
       ) => {
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
@@ -1172,12 +1199,12 @@ export const layer = (options: ProvidersOptions = {}) =>
                   ...sample
                 })
                 .pipe(Effect.catch((e) => Effect.logWarning("could not record an image token sample", e)))
-            // A pinned route is priced by its own endpoint: fetched here, after the reply, when none is stored.
-            const priced = prepared.kind.id === "openrouter" ? yield* ensureEndpoints(request.userId, model) : model
+            // A pinned route is priced by its own endpoint list: the one fetched alongside the reply
+            // if it has arrived, else the stored one. The close never waits for the fetch.
             const cost = costOf(
               registry.costs.list(),
               { kind: prepared.kind.id, api: prepared.api, model: model.key },
-              { counts, pricing, capture: state.capture, price: modelPrice(priced) }
+              { counts, pricing, capture: state.capture, price: modelPrice(latest.current) }
             )
             yield* writer
               .CloseLlmRequest({
@@ -1703,11 +1730,26 @@ export const layer = (options: ProvidersOptions = {}) =>
             // against a context some source actually reported.
             const knownContext = effective.context.source === "unknown" ? undefined : effective.context.value
             const capped = yield* withCap(prepared.connection)
+            // A pinned route's own prices, when none are stored or they're stale: fetched alongside
+            // the reply, off its path, so the close can price with them if they've arrived.
+            const latest = { current: model }
+            if (prepared.kind.id === "openrouter")
+              yield* Effect.forkDetach(
+                ensureEndpoints(request.userId, model).pipe(
+                  Effect.tap((fresh) =>
+                    Effect.sync(() => {
+                      latest.current = fresh
+                    })
+                  )
+                )
+              )
 
             for (let n = 0; ; n++) {
               const outcome = yield* capped(
                 waitForPause(prepared.connection.id, offer).pipe(
-                  Effect.andThen(attempt(prepared, model, piModel, knownContext, request, offer, n + 1, pricing))
+                  Effect.andThen(
+                    attempt(prepared, model, piModel, knownContext, request, offer, n + 1, pricing, latest)
+                  )
                 )
               )
               if (outcome.ok) {
