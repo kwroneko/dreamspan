@@ -24,7 +24,7 @@ import { makeLcmHandlers, makeSummaryRequestHandlers } from "./api/lcm.ts"
 import { createServer } from "node:http"
 import { readFile } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
-import { join } from "node:path"
+import { join, posix } from "node:path"
 import type { Socket } from "node:net"
 import type { Duplex } from "node:stream"
 import { NodeHttpServer } from "@effect/platform-node"
@@ -261,6 +261,20 @@ const FRAME_BOOTSTRAP = "/frame/bootstrap.js"
 /** The vendored libraries a panel with scripts gets (the client build's `frame/lib/`). */
 const FRAME_LIB = "/frame/lib/"
 
+/**
+ * Whether a request path is under `/frame/lib/` as the static server will read it: decoded once
+ * and normalized, so `/frame/lib/..%2f..%2findex.html` is not.
+ */
+const underFrameLib = (path: string) => {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(path)
+  } catch {
+    return false
+  }
+  return !decoded.includes("\0") && posix.normalize(decoded).startsWith(FRAME_LIB)
+}
+
 /** What a frame page may run: scripts once its source allowed them, the internet once allowed too. */
 interface FrameMode {
   readonly scripts: boolean
@@ -313,7 +327,10 @@ const framePolicy = (
     `connect-src ${mode.network ? "https:" : "'none'"}`,
     "form-action 'none'",
     "base-uri 'none'",
-    "frame-ancestors 'self'"
+    "frame-ancestors 'self'",
+    // Opaque however the page is loaded (the app's frame is sandboxed the same way): opened as
+    // a top-level page it would otherwise have the app's origin and this relaxed policy.
+    "sandbox allow-scripts"
   ].join("; ")
 }
 
@@ -374,6 +391,7 @@ const RequestGuard = HttpRouter.middleware(
         // vendored libraries are public files, so only they answer it, to reads.
         const library =
           path.startsWith(FRAME_LIB) &&
+          underFrameLib(path) &&
           (request.method === "GET" || request.method === "HEAD") &&
           request.headers.origin === "null"
         const csp = library

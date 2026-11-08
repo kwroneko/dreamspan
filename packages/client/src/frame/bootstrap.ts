@@ -26,6 +26,16 @@ type Incoming =
 
 const host = window.parent
 const hostOrigin = new URL(location.href).origin
+// This entry is wrapped in a private scope in development and production (vite.config.ts).
+// Save the native methods before panel code can replace globals or activation getters.
+const post = host.postMessage.bind(host)
+const activation = navigator.userActivation
+const locallyActivated = activation
+  ? Object.getOwnPropertyDescriptor(Object.getPrototypeOf(activation), "isActive")?.get?.bind(activation)
+  : undefined
+const actionToken = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+  byte.toString(16).padStart(2, "0")
+).join("")
 const scripts = new URLSearchParams(location.search).has("scripts")
 let rendered = false
 let reported = -1
@@ -111,7 +121,7 @@ function report() {
   )
   if (height === reported) return
   reported = height
-  host.postMessage({ type: "rp:height", height }, hostOrigin)
+  post({ type: "rp:height", height }, hostOrigin)
 }
 
 function setTheme(theme: Theme, element: HTMLElement = document.documentElement) {
@@ -135,9 +145,9 @@ function onClick(event: MouseEvent) {
   const link = event.target instanceof Element ? event.target.closest("a, area") : null
   if (!link) return
   event.preventDefault()
-  if (event.type !== "click") return
+  if (event.type !== "click" || !event.isTrusted || locallyActivated?.() !== true) return
   const href = (link.getAttribute("href") ?? link.getAttributeNS(XLINK, "href") ?? "").trim()
-  if (/^https?:\/\//i.test(href)) host.postMessage({ type: "rp:open", url: href }, hostOrigin)
+  if (/^https?:\/\//i.test(href)) post({ type: "rp:open", url: href, token: actionToken }, hostOrigin)
 }
 
 function onMessage(event: MessageEvent<Incoming>) {
@@ -151,9 +161,11 @@ function onMessage(event: MessageEvent<Incoming>) {
   else if (message.type === "rp:vh" && rendered) setViewport(message.vh)
 }
 
-/** The panel's helpers: copying needs the user's click, which the app checks. */
+/** Only a click in this frame grants its helpers activation; a parent click grants none. */
 const helpers = {
-  copy: (text: unknown) => host.postMessage({ type: "rp:copy", text: String(text) }, hostOrigin)
+  copy: (text: unknown) => {
+    if (locallyActivated?.() === true) post({ type: "rp:copy", text: String(text), token: actionToken }, hostOrigin)
+  }
 }
 
 function listen() {
@@ -164,7 +176,7 @@ function listen() {
 }
 
 listen()
-host.postMessage({ type: "rp:ready" }, hostOrigin)
+post({ type: "rp:ready", token: actionToken }, hostOrigin)
 
 // A module, so its names stay its own (it has no imports or exports when built).
 export {}

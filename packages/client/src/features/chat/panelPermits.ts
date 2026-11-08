@@ -1,16 +1,15 @@
 // Whether a message's panels run their scripts (spec/HTML-MESSAGES.md §3.4, "Approval"): as
 // display-regex approval follows its source, a panel's scripts run only when every source that
 // could have written them allowed it. Its text is its character's (messageCharacter), as are
-// that card's own scripts; the preset's display scripts count too when what they write has
-// scripts. The user's global scripts are the user's own. A message with no character (a user's
-// in a group) runs none and asks nothing.
+// that card's own scripts; applicable preset display scripts count too, since captures or
+// multiple replacements can assemble scripts. The user's global scripts are the user's own.
+// A message with no character (a user's in a group) runs none and asks nothing.
 import type { EntityId } from "@rp/shared/chat.ts"
-import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { useCallback, useMemo, useSyncExternalStore } from "react"
-import { panelHasScripts, type PanelPermit } from "../../ui/html/messageHtml.ts"
+import type { PanelPermit } from "../../ui/html/messageHtml.ts"
 import { useDisplayContext } from "./DisplaySettings.tsx"
-import { messageCharacter } from "./displayScripts.ts"
+import { displayRegexApplies, messageCharacter } from "./displayScripts.ts"
 
 /** A card or preset a panel comes from, with what it allowed. */
 interface PanelSource {
@@ -20,18 +19,16 @@ interface PanelSource {
   readonly network: boolean
 }
 
-const OFF: PanelPermit = { scripts: false, network: false, ask: null }
+/** Runs nothing and asks nothing. */
+export const OFF: PanelPermit = { scripts: false, network: false, ask: null }
 const noSubscription = () => () => {}
 
-/** Whether display scripts that run at this placement write scripts into what they show. */
-export const writesScripts = (scripts: ReadonlyArray<RegexScript>, placement: number) =>
-  scripts.some(
-    (script) =>
-      !script.disabled &&
-      script.markdown_only &&
-      script.placement.includes(placement) &&
-      panelHasScripts(script.replace_string)
-  )
+/**
+ * A preset with applicable display transforms is a source of the resulting panels. Looking
+ * for script syntax in a replacement is insufficient: captures, macros and composed
+ * replacements can supply it. Conservatively require its approval for any such transform.
+ */
+export const writesScripts = displayRegexApplies
 
 /**
  * The permit for panels from `sources`: scripts once all of them allowed them, the internet once

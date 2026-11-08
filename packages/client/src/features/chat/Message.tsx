@@ -40,7 +40,7 @@ import { invokeMessageAction, messageActions, MessageActions } from "./messageAc
 import { ReasoningPanels } from "./Reasoning.tsx"
 import { useDisplayContext } from "./DisplaySettings.tsx"
 import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
-import { usePanelPermit } from "./panelPermits.ts"
+import { OFF, usePanelPermit } from "./panelPermits.ts"
 import { MessageDetails, useMessageDetails } from "./messageDetails.tsx"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
@@ -96,9 +96,12 @@ function BodyText({
   const fromTip = leafDepth === null ? null : Math.max(0, leafDepth - depth)
   // Its panels run their scripts once its sources allowed them (panelPermits.ts).
   const permit = usePanelPermit(version.speakerEntityId, placement)
+  // The permit is about the current sources: text a previous preset or card wrote, shown
+  // while the display worker prepares the current text, runs no scripts under it.
+  const current = shown.current
   const html = useMemo(
-    () => ({ key: version.slotId, streaming, fromTip, ...(permit ? { permit } : {}) }),
-    [version.slotId, streaming, fromTip, permit]
+    () => ({ key: version.slotId, streaming, fromTip, ...(permit ? { permit: current ? permit : OFF } : {}) }),
+    [version.slotId, streaming, fromTip, permit, current]
   )
   return (
     <HtmlMessageContext value={html}>

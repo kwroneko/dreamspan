@@ -59,6 +59,20 @@ export const builtinDisplayScriptLists: ReadonlyArray<DisplayScriptList> = [
   { id: "display-regex.character", order: 30, scripts: (context) => context.character }
 ]
 
+const contentKeys = new WeakMap<ReadonlyArray<RegexScript>, string>()
+const contentKey = (scripts: ReadonlyArray<RegexScript>) => {
+  let key = contentKeys.get(scripts)
+  if (key === undefined) contentKeys.set(scripts, (key = JSON.stringify(scripts)))
+  return key
+}
+
+/**
+ * Whether two lists are the same scripts by content. A library refresh makes new objects for
+ * the same scripts, so identity can't say whether a text came from the scripts now in effect.
+ */
+export const sameScripts = (a: ReadonlyArray<RegexScript>, b: ReadonlyArray<RegexScript>) =>
+  a === b || contentKey(a) === contentKey(b)
+
 /** The scripts of every list in effect, in order. */
 export const displayScripts = (
   lists: ReadonlyArray<DisplayScriptList>,

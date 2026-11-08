@@ -41,7 +41,11 @@ function theme() {
 const frameUrl = (permit: PanelPermit | undefined) =>
   permit?.scripts ? `${FRAME_URL}?scripts=1${permit.network ? "&network=1" : ""}` : FRAME_URL
 
-/** The frame's click gave the app a moment to act on it (activation reaches the frame's ancestors). */
+/**
+ * The app has a click's activation. It isn't the proof of a click in the frame (the app's own
+ * clicks give it too): that is the bootstrap's, which signs its messages with a token only
+ * it holds (bootstrap.ts), checked with this.
+ */
 const clicked = () => navigator.userActivation?.isActive === true
 
 /** "This panel has scripts": the button that lets its source's scripts run. */
@@ -92,8 +96,9 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
   const holder = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLIFrameElement>(null)
   // WindowProxy identity survives navigation. Never redeliver HTML to a new document
-  // that took over the frame, even if it replays the bootstrap's ready message.
-  const delivered = useRef(new WeakSet<Window>())
+  // that took over the frame, even if it replays the bootstrap's ready message. The value
+  // is the original bootstrap's private action token, never posted back into the frame.
+  const delivered = useRef(new WeakMap<Window, string>())
 
   // Near the screen, claim a slot; away from it, offer it up.
   useEffect(() => {
@@ -133,7 +138,7 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
       if (data === null) return
       if (data.type === "rp:ready") {
         if (delivered.current.has(target)) return
-        delivered.current.add(target)
+        delivered.current.set(target, data.token)
         post({ type: "rp:render", html: source, vh: columnHeight(frame.current), theme: theme() })
       } else if (data.type === "rp:height") {
         const next = Math.max(0, Math.min(Math.ceil(data.height), window.innerHeight * 2))
@@ -141,8 +146,10 @@ export function DocumentFrame({ index, source, sourceMap }: DocumentBlockProps) 
         setHeight(next)
       } else if (data.type === "rp:open") {
         const link = bridgeLink(data.url)
-        if (link !== null && clicked()) window.open(link, "_blank", "noopener,noreferrer")
-      } else if (data.type === "rp:copy" && clicked()) void copyText(data.text).catch(() => {})
+        if (link !== null && data.token === delivered.current.get(target) && clicked())
+          window.open(link, "_blank", "noopener,noreferrer")
+      } else if (data.type === "rp:copy" && data.token === delivered.current.get(target) && clicked())
+        void copyText(data.text).catch(() => {})
     }
     window.addEventListener("message", onMessage)
     const themeChanged = () => post({ type: "rp:theme", theme: theme() })
