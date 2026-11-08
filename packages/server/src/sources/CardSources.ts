@@ -39,10 +39,10 @@ import { Context, Effect, Layer, Schedule, Schema } from "effect"
 import { AppConfig } from "../config.ts"
 import { cardTextOfDoc } from "../db/cards.ts"
 import { Reader, Writer } from "../db/Database.ts"
-import { docHash, searchText } from "../db/documents.ts"
 import { Formats } from "../importer/Formats.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { storeMedia } from "../importer/mediaFiles.ts"
+import { withSourceLink } from "../importer/sourceLink.ts"
 import { prepareAvatarThumbnails } from "../importer/prepareThumbnails.ts"
 import { describeImage } from "../importer/images.ts"
 import { Network } from "../net/Network.ts"
@@ -181,11 +181,17 @@ export interface CardSourcesShape {
     entityId: string,
     version: string
   ) => Effect.Effect<CardOrigin, SourceFailed | NotFound | ServerError>
-  /** The source's newest file of the card (the reported version, fetched again when the cache has another). */
+  /**
+   * The source's newest file of the card (the reported version, fetched again when the cache has
+   * another), with the card's link back to its page, which a new version taken from it keeps (§4.5).
+   */
   readonly newerFile: (
     user: User,
     entityId: string
-  ) => Effect.Effect<{ bytes: Uint8Array; fileName: string; version: string }, SourceFailed | NotFound | ServerError>
+  ) => Effect.Effect<
+    { bytes: Uint8Array; fileName: string; version: string; link: string },
+    SourceFailed | NotFound | ServerError
+  >
   /** Add as a separate card: the source's newest file as a new card, that version taken on this one. */
   readonly addVersionAsCard: (
     user: User,
@@ -208,6 +214,10 @@ export interface CardSourcesOptions {
 }
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex")
+
+/** A card's link back to its page on the source (§4.5): the page it named, else `<source>:<remoteId>`. */
+const linkOf = (sourceId: string, remoteId: string, summary: { readonly url?: string | undefined }) =>
+  summary.url ?? `${sourceId}:${remoteId}`
 const storage = (operation: string) => (error: unknown) =>
   Effect.logError(`card sources: ${operation} failed`, error).pipe(
     Effect.andThen(Effect.fail(new ServerError({ message: `${operation} failed` })))
@@ -676,10 +686,7 @@ const make = (options: CardSourcesOptions = {}) =>
               message: `This card couldn't be read, so it can't be added.`
             })
           // The card's page on the source joins its `source` list, as its link back (§4.5).
-          const doc = JSON.parse(card.docJson) as Record<string, unknown>
-          const link = summary.url ?? `${sourceId}:${remoteId}`
-          const sources = Array.isArray(doc.source) ? doc.source.filter((s) => typeof s === "string") : []
-          const stored = sources.includes(link) ? doc : { ...doc, source: [...sources, link] }
+          const stored = withSourceLink(card, linkOf(sourceId, remoteId, summary))
           return {
             name: summary.name,
             media: parsed.media,
@@ -690,9 +697,9 @@ const make = (options: CardSourcesOptions = {}) =>
               remoteVersion: summary.version.id,
               file: {
                 label: card.label,
-                docJson: JSON.stringify(stored),
-                docHash: docHash(stored as never),
-                searchText: searchText(stored),
+                docJson: stored.docJson,
+                docHash: stored.docHash,
+                searchText: stored.searchText,
                 schemaVersion: card.schemaVersion,
                 sourceName: fileName,
                 sourceHash: parsed.sha256,
@@ -809,7 +816,12 @@ const make = (options: CardSourcesOptions = {}) =>
           // The source may have moved on again since it was checked.
           if (version !== "" && version !== wanted)
             yield* noteVersions(user, row.sourceId, [{ remoteId: row.remoteId, version }])
-          return { bytes: file.bytes, fileName: file.fileName, version: version || wanted }
+          return {
+            bytes: file.bytes,
+            fileName: file.fileName,
+            version: version || wanted,
+            link: linkOf(row.sourceId, row.remoteId, file.summary)
+          }
         }),
       addVersionAsCard: (user, entityId) =>
         Effect.gen(function* () {

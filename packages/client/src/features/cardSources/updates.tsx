@@ -5,7 +5,7 @@
 // merge review, or into the new-version dialog (Replace, Merge…, Add as a separate card).
 // Nothing is sent to the source in the background (§9 D4).
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
-import { type CardOrigin, REMOTE_VERSION_HEADER } from "@rp/shared/cardSources.ts"
+import { type CardOrigin, REMOTE_VERSION_HEADER, SOURCE_LINK_HEADER } from "@rp/shared/cardSources.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 import { lazy, Suspense, useContext, useMemo, useState } from "react"
@@ -35,7 +35,7 @@ function useOrigin(entityId: string): CardOrigin | null {
 }
 
 type Fetched =
-  | { readonly _tag: "Done"; readonly file: File; readonly version: string }
+  | { readonly _tag: "Done"; readonly file: File; readonly version: string; readonly link: string }
   | { readonly _tag: "Failed"; readonly message: string }
 
 /** The file's name from `Content-Disposition` (`filename*=UTF-8''…`), else a name of the card's. */
@@ -65,8 +65,10 @@ async function fetchNewerFile(origin: CardOrigin): Promise<Fetched> {
     }
   }
   const version = decodeURIComponent(response.headers.get(REMOTE_VERSION_HEADER) ?? "")
+  // The card's link back to its page there, which the version taken keeps (the file doesn't name it).
+  const link = decodeURIComponent(response.headers.get(SOURCE_LINK_HEADER) ?? "")
   const bytes = await response.blob()
-  return { _tag: "Done", file: new File([bytes], fileNameOf(response, `${origin.remoteId}.png`)), version }
+  return { _tag: "Done", file: new File([bytes], fileNameOf(response, `${origin.remoteId}.png`)), version, link }
 }
 
 /** The notice's entry in `editorNotices`: only for a card with a revision of its own. */
@@ -80,7 +82,7 @@ export function SourceUpdateNotice({ store }: { store: EditorStore }) {
 
 type Open =
   | { readonly _tag: "Merge"; readonly revisionId: RevisionId; readonly fileName: string }
-  | { readonly _tag: "Choices"; readonly file: File; readonly version: string }
+  | { readonly _tag: "Choices"; readonly file: File; readonly version: string; readonly link: string }
 
 function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: RefId; label: string }) {
   const origin = useOrigin(entityId)
@@ -110,7 +112,7 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
   const review = async () => {
     const file = await fetched("merge")
     if (!file) return
-    const staged = await stageVersion(file.file, refId)
+    const staged = await stageVersion(file.file, refId, file.link)
     const revisionId = staged._tag === "Done" ? staged.result.library?.stagedRevisionId : undefined
     if (!revisionId) {
       setBusy(null)
@@ -127,7 +129,7 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
   const choices = async () => {
     const file = await fetched("choices")
     setBusy(null)
-    if (file) setOpen({ _tag: "Choices", file: file.file, version: file.version })
+    if (file) setOpen({ _tag: "Choices", file: file.file, version: file.version, link: file.link })
   }
 
   const addSeparate = async () => {
@@ -190,6 +192,7 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
             source={{
               name: sourceName,
               file: open.file,
+              link: open.link,
               taken: () => take(open.version),
               addSeparate
             }}

@@ -2,7 +2,7 @@
 // file's route (§3.8): authenticated and owner-scoped like every RPC. The source is reached
 // only through the CardSources service.
 import { CurrentUser } from "@rp/shared/api.ts"
-import { type CardSourcesApi, REMOTE_VERSION_HEADER } from "@rp/shared/cardSources.ts"
+import { type CardSourcesApi, REMOTE_VERSION_HEADER, SOURCE_LINK_HEADER } from "@rp/shared/cardSources.ts"
 import { Effect, Layer, Option } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"
@@ -47,8 +47,8 @@ const sourceStatus = (reason: string) =>
 /**
  * `GET /sources/held/<entityId>/file`: the newest file the source has of a card the user added
  * from it (§3.8), for Review and merge and the new-version dialog, which take it as they take
- * a file from disk. Its version is in `x-remote-version`. Fetched only when the user opens
- * the update.
+ * a file from disk. Its version is in `x-remote-version`, and the card's link back to its page
+ * in `x-source-link`, for the import route's `link`. Fetched only when the user opens the update.
  */
 export const newerFileRoute = Layer.unwrap(
   Effect.gen(function* () {
@@ -71,7 +71,8 @@ export const newerFileRoute = Layer.unwrap(
             "cache-control": "no-store",
             "x-content-type-options": "nosniff",
             "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
-            [REMOTE_VERSION_HEADER]: encodeURIComponent(file.version)
+            [REMOTE_VERSION_HEADER]: encodeURIComponent(file.version),
+            [SOURCE_LINK_HEADER]: encodeURIComponent(file.link)
           }
         })
       }).pipe(

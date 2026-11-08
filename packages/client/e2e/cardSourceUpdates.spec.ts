@@ -71,6 +71,8 @@ for (const width of [1440, 390])
         const dialog = page.getByRole("dialog", { name: /^The newer .+ on /u })
         await expect(dialog.getByRole("heading", { name: "What the newer version changes" })).toBeVisible()
         await expect(dialog.getByRole("button", { name: "Choose another file", exact: true })).toHaveCount(0)
+        // The card's link back to cardex stays: the newer file doesn't name it, and it isn't a change.
+        await expect(dialog.getByText("Source", { exact: true })).toHaveCount(0)
         await expectLayout(page, info, `source-update-choices-${width}-${theme}`)
         await dialog.getByRole("button", { name: "Add as a separate card", exact: true }).click()
         await expect(dialog).toHaveCount(0)
@@ -106,6 +108,10 @@ for (const width of [1440, 390])
         await expect(dialog).toHaveCount(0)
         await expect(page.getByText(`${card.name} is now cardex's newer version`)).toBeVisible()
         await expect.poll(description).toContain("Revised 3")
+        const sources =
+          ((await admin((api) => api.OpenEditor({ refId: added.refId as never }))).doc as { source?: string[] })
+            .source ?? []
+        expect(sources.filter((entry) => entry === `${fake}/c/${card.slug}`)).toHaveLength(1)
         await expect(notice).toHaveCount(0)
 
         // Yet another, seen in fresh results: the tile says so.

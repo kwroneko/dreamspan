@@ -645,6 +645,60 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("a newer version keeps the card's link back to its page on the source", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[23]!
+      const page = `${archive.origin}/c/${card.slug}`
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      const sourcesOf = Effect.map(
+        api.OpenEditor({ refId: added.refId as RefId }),
+        (opened) => (opened.doc as { source?: ReadonlyArray<string> }).source ?? []
+      )
+      assert.include(yield* sourcesOf, page)
+      archive.publish(card.slug)
+      yield* api.CheckRemoteVersion({ entityId: added.entityId })
+      const response = yield* newerFile(added.entityId, alice)
+      assert.strictEqual(response.status, 200)
+      assert.strictEqual(decodeURIComponent(response.headers.get("x-source-link") ?? ""), page)
+      const bytes = new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))
+      const preview = (query: Record<string, string>) =>
+        Effect.flatMap(
+          importFile(bytes, { name: `${card.slug}.png`, into: added.refId, mode: "preview", ...query }),
+          (r) => Effect.promise(() => r.json() as Promise<{ docJson: string; card: { headRevisionId: string } }>)
+        )
+      // The source's file doesn't name its own page: as it is, taking it would drop the link.
+      assert.notInclude(JSON.parse((yield* preview({})).docJson).source ?? [], page)
+      const shown = yield* preview({ link: page })
+      assert.include(JSON.parse(shown.docJson).source, page)
+      // Merge stages it with the link; Replace keeps it.
+      const staged = yield* importFile(bytes, {
+        name: `${card.slug}.png`,
+        into: added.refId,
+        mode: "merge",
+        link: page
+      })
+      assert.strictEqual(staged.status, 200)
+      const replaced = yield* importFile(bytes, {
+        name: `${card.slug}.png`,
+        into: added.refId,
+        mode: "replace",
+        head: shown.card.headRevisionId,
+        link: page
+      })
+      assert.strictEqual(replaced.status, 200, yield* Effect.promise(() => replaced.clone().text()))
+      const after = yield* api.OpenEditor({ refId: added.refId as RefId })
+      assert.include((after.doc as { description?: string }).description ?? "", "now keeps a garden")
+      assert.deepStrictEqual(
+        ((after.doc as { source?: ReadonlyArray<string> }).source ?? []).filter((entry) => entry === page),
+        [page]
+      )
+      // `link` is only for a new version of a card.
+      const misuse = yield* importFile(bytes, { name: `${card.slug}.png`, link: page })
+      assert.strictEqual(misuse.status, 400)
+    })
+  )
+
   it.effect("fresh results record a newer version; a page from the cache records nothing", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)

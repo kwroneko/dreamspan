@@ -294,6 +294,11 @@ export type CardOrigin = typeof CardOrigin.Type
 
 /** The header on the newer file's response (`GET /sources/held/<entityId>/file`): the version it is. */
 export const REMOTE_VERSION_HEADER = "x-remote-version"
+/**
+ * The header on the newer file's response: the card's link back to its page on the source, which
+ * the import route adds to the new version's `source` list when it's sent as `link` (§4.5).
+ */
+export const SOURCE_LINK_HEADER = "x-source-link"
 
 export class CardSourcesApi extends RpcGroup.make(
   /** The registered sources as this user has them. Never contacts a source. */

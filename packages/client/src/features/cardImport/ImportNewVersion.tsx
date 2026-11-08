@@ -53,6 +53,8 @@ export interface SourceVersion {
   /** The source's name: "cardex". */
   readonly name: string
   readonly file: File
+  /** The card's page on the source, which the version taken keeps in its Sources. */
+  readonly link: string
   /** Records that the card took this version (after Replace, or once Merge has staged it). */
   readonly taken: () => Promise<void>
   /** Add as a separate card: null when it was added, else what went wrong. */
@@ -174,7 +176,7 @@ export function NewVersionDialog({
       return
     }
     setStep({ _tag: "Reading", file })
-    const outcome = await previewVersion(file, refId)
+    const outcome = await previewVersion(file, refId, source?.link)
     if (outcome._tag !== "Done") {
       setStep({ _tag: "Pick" })
       setProblem(outcome._tag === "Failed" ? outcome.message : "Log in again to import a file.")
@@ -207,7 +209,8 @@ export function NewVersionDialog({
     setReplaceProblem(null)
     // Through useAction, so the library, the chats' cards and the editors' queries read again.
     const result = await action.run(
-      () => Effect.promise(() => replaceWithVersion(shown.file, refId, shown.preview.card!.headRevisionId)),
+      () =>
+        Effect.promise(() => replaceWithVersion(shown.file, refId, shown.preview.card!.headRevisionId, source?.link)),
       ["library"]
     )
     const outcome = result.ok ? result.value : { _tag: "Failed" as const, message: result.error.message }
@@ -228,7 +231,7 @@ export function NewVersionDialog({
     if (!shown) return
     setReplaceProblem(null)
     setStaging(true)
-    const outcome = await stageVersion(shown.file, refId)
+    const outcome = await stageVersion(shown.file, refId, source?.link)
     setStaging(false)
     if (outcome._tag !== "Done") {
       setReplaceProblem(outcome._tag === "Failed" ? outcome.message : "Log in again to import a file.")
