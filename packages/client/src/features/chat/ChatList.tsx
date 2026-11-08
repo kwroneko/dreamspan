@@ -12,6 +12,7 @@ import { AsyncResult } from "effect/reactivity"
 import { type MouseEvent, useEffect, useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
+import { carryLink, CHAT_DRAG } from "../../ui/appDrags.ts"
 import { AvatarStack } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
@@ -92,6 +93,8 @@ function Row({
           to="/chats/$chatId"
           params={{ chatId: chat.id }}
           search={search.panel ? { panel: search.panel } : {}}
+          // Dropped on a frame, the chat opens there, as a click does (owner, 2026-11-07).
+          onDragStart={carryLink(CHAT_DRAG.id)}
           aria-current={active ? "page" : undefined}
           className={`flex gap-3 rounded-lg px-2.5 py-2 outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:pr-16 ${
             active ? "bg-surface-raised" : "hover:bg-surface-raised/60"

@@ -21,9 +21,9 @@ import { Icon } from "../../ui/Icon.tsx"
 import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { PICTURE_TOGGLE, SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
+import { carryOnDrag, isAppDrag, PICTURE_DRAG } from "../../ui/appDrags.ts"
 import {
   EnsurePortraitViewer,
-  PICTURE_TAB_MIME,
   PicturePeek,
   type Portrait,
   usePortraitViewer
@@ -353,8 +353,8 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
         event.stopPropagation()
         void add(files)
       }
-      // The app's own portrait dragged here goes to the frame as a tab, not into the message.
-      const own = (event: DragEvent) => event.dataTransfer?.types.includes(PICTURE_TAB_MIME) ?? false
+      // Nothing dragged from inside the app is an attachment: a portrait goes to the frame as a tab.
+      const own = (event: DragEvent) => isAppDrag(event.dataTransfer)
       const over = (event: DragEvent) => {
         if (event.dataTransfer?.types.includes("Files") && !own(event)) event.preventDefault()
       }
@@ -647,12 +647,11 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
       <div
         className="flex min-h-0 flex-1 flex-col"
         onDragOver={(event) => {
-          if (event.dataTransfer.types.includes("Files") && !event.dataTransfer.types.includes(PICTURE_TAB_MIME))
-            event.preventDefault()
+          if (event.dataTransfer.types.includes("Files") && !isAppDrag(event.dataTransfer)) event.preventDefault()
         }}
         onDrop={(event) => {
-          // The app's own portrait dragged here goes to the frame as a tab, not into the message.
-          if (!event.dataTransfer.files.length || event.dataTransfer.types.includes(PICTURE_TAB_MIME)) return
+          // Nothing dragged from inside the app is an attachment: a portrait goes to the frame as a tab.
+          if (!event.dataTransfer.files.length || isAppDrag(event.dataTransfer)) return
           event.preventDefault()
           add(Array.from(event.dataTransfer.files))
         }}
@@ -862,8 +861,7 @@ function Thumbnails({
                     }}
                     onDragStart={(event) => {
                       // Dropped on a frame, it opens there as a tab (features/workbench), never as an attachment.
-                      const href = viewer?.tabHref?.(picture)
-                      if (href) event.dataTransfer.setData(PICTURE_TAB_MIME, href)
+                      carryOnDrag(event.dataTransfer, PICTURE_DRAG.id, viewer?.tabHref?.(picture))
                     }}
                     className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   >
