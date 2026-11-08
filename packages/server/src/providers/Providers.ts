@@ -35,6 +35,8 @@ import {
   type ConnectionSettings,
   type Credential,
   type CredentialId,
+  modelPrice,
+  type ModelEndpoints,
   type EffectiveModel,
   type Model,
   type ModelId,
@@ -68,7 +70,7 @@ import type { ListedModel } from "./modelLists.ts"
 import { applyShims, providerRules, withShims } from "./shims.ts"
 import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
-import type { ModelListError } from "./modelLists.ts"
+import { fetchEndpoints, type ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
@@ -376,6 +378,12 @@ export interface ProvidersShape {
     { readonly added: number; readonly updated: number; readonly missing: number; readonly route: string | null },
     ProviderError | ServerError
   >
+  /**
+   * Fetches OpenRouter's endpoint list for a model (a price per provider) and stores it with the
+   * model; a failed fetch is stored too, as the reason, so the model page can say why the
+   * model's general price applies. Other kinds' models are returned unchanged.
+   */
+  readonly refreshEndpoints: (userId: UserId, modelId: ModelId) => Effect.Effect<Model, ProviderError | ServerError>
   /**
    * What the registered catalogs know of a model id on this connection (its window, its output
    * limit), for a model the user adds by id; empty when nothing matches or the connection is gone.
@@ -926,6 +934,34 @@ export const layer = (options: ProvidersOptions = {}) =>
           return { ...result, route }
         })
 
+      const refreshEndpoints: ProvidersShape["refreshEndpoints"] = (userId, modelId) =>
+        Effect.gen(function* () {
+          const model = yield* fromStorage(reader.GetModel({ userId, modelId }))
+          const prepared = yield* prepare(userId, model.connectionId)
+          if (prepared.kind.id !== "openrouter") return model
+          const stored = (endpoints: ModelEndpoints) =>
+            fromStorage(writer.SetModelEndpoints({ userId, modelId, endpoints }))
+          return yield* fetchEndpoints(
+            {
+              baseUrl: prepared.baseUrl,
+              apiKey: prepared.apiKey,
+              headers: prepared.headers,
+              fetch: fetchFor(prepared, () => {}),
+              scrub: prepared.scrub
+            },
+            withoutModelIdPrefix(model.key, prepared.connection.modelIdPrefix)
+          ).pipe(
+            Effect.flatMap((list) => stored({ fetchedAt: Date.now(), list })),
+            Effect.catchTag("ModelListError", (error) =>
+              stored({
+                fetchedAt: Date.now(),
+                error: prepared.scrub(`${error.reason}: ${error.message}`).slice(0, 200),
+                list: []
+              })
+            )
+          )
+        })
+
       const catalogUpstream: ProvidersShape["catalogUpstream"] = (userId, connectionId, key) =>
         reader.GetConnection({ userId, connectionId }).pipe(
           Effect.flatMap((connection) => {
@@ -1138,7 +1174,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             const cost = costOf(
               registry.costs.list(),
               { kind: prepared.kind.id, api: prepared.api, model: model.key },
-              { counts, pricing, capture: state.capture, price: model.upstream.price ?? null }
+              { counts, pricing, capture: state.capture, price: modelPrice(model) }
             )
             yield* writer
               .CloseLlmRequest({
@@ -1232,11 +1268,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                     reasoning: null
                   },
                   capture: emptyCapture(),
-                  price: model.upstream.price ?? null
+                  price: modelPrice(model)
                 }) !== null
             )
             const bound =
-              formula?.upperBound?.({ inputTokens, outputTokens, pricing, price: model.upstream.price ?? null }) ?? null
+              formula?.upperBound?.({ inputTokens, outputTokens, pricing, price: modelPrice(model) }) ?? null
             const allowed = yield* fromStorage(
               writer.OpenLlmRequest({
                 userId: request.userId,
@@ -1770,7 +1806,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 counts,
                 pricing,
                 capture,
-                price: model.upstream.price ?? null
+                price: modelPrice(model)
               })
               yield* writer
                 .CloseLlmRequest({
@@ -1884,7 +1920,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 model: model.key
               },
               capture: emptyCapture(),
-              price: model.upstream.price ?? null
+              price: modelPrice(model)
             },
             true
           )
@@ -2052,6 +2088,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         setHeaders,
         setProxy,
         refreshModels,
+        refreshEndpoints,
         catalogUpstream,
         testConnection,
         stream

@@ -282,7 +282,11 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           const known = byKey.get(model.key)
           const upstream = JSON.stringify(model.upstream)
           if (known) {
-            yield* sql`UPDATE models SET upstream_json = ${upstream}, fetched_at = ${fetchedAt}, missing_since = NULL
+            // A refresh rewrites the upstream but keeps the endpoint list fetched for a pinned route.
+            yield* sql`UPDATE models SET
+                         upstream_json = CASE WHEN json_extract(upstream_json, '$.endpoints') IS NULL THEN ${upstream}
+                           ELSE json_set(${upstream}, '$.endpoints', json(json_extract(upstream_json, '$.endpoints'))) END,
+                         fetched_at = ${fetchedAt}, missing_since = NULL
                        WHERE id = ${known.id}`
             updated++
           } else {
@@ -346,6 +350,14 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
                    WHERE id = ${modelId}`
         return yield* reloadModel(modelId)
       }).pipe(transaction(sql, "SetLearnedContext")),
+
+    SetModelEndpoints: ({ userId, modelId, endpoints }) =>
+      Effect.gen(function* () {
+        yield* ownedModel(userId, modelId)
+        yield* sql`UPDATE models SET upstream_json = json_set(upstream_json, '$.endpoints', json(${JSON.stringify(endpoints)}))
+                   WHERE id = ${modelId}`
+        return yield* reloadModel(modelId)
+      }).pipe(transaction(sql, "SetModelEndpoints")),
 
     SetModelHidden: ({ userId, modelId, hidden }) =>
       Effect.gen(function* () {

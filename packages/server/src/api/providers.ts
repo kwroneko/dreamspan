@@ -3,6 +3,7 @@
 // ownership, so another user's ids are NotFound.
 import { type AppApi, ConnectionTest, CurrentUser, ModelRefresh, NetworkSettings } from "@rp/shared/api.ts"
 import { Forbidden, ServerError } from "@rp/shared/errors.ts"
+import type { ModelId } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
@@ -24,7 +25,11 @@ const admin = Effect.gen(function* () {
 /** The providers a new connection starts from (providerApi.ts), the same for every user. */
 export const makeProviderListHandlers = Effect.gen(function* () {
   const providers = yield* Providers
-  return { ListProviders: () => Effect.sync(() => providers.providers()) }
+  return {
+    ListProviders: () => Effect.sync(() => providers.providers()),
+    RefreshModelEndpoints: ({ modelId }: { modelId: ModelId }) =>
+      Effect.flatMap(CurrentUser, (user) => providers.refreshEndpoints(user.id, modelId))
+  }
 })
 
 export const makeProviderHandlers = Effect.gen(function* () {
