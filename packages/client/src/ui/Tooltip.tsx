@@ -156,7 +156,8 @@ export function SquareIconButton({
 /**
  * An icon button that toggles (`pressed`): label names it, hint explains the next click. Disabled,
  * it stays focusable and hoverable, so its tooltip can still say why it can't be used.
- * `className` places it and sets when it shows.
+ * `className` places it and sets when it shows. Without `pressed` it's a plain action in the
+ * same shape (a tile's corner button, `tile-action`).
  */
 export function ToggleIconButton({
   label,
@@ -169,7 +170,7 @@ export function ToggleIconButton({
 }: {
   label: string
   icon: IconName
-  pressed: boolean
+  pressed?: boolean | undefined
   hint?: ReactNode
   disabled?: boolean
   className?: string

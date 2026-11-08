@@ -17,6 +17,7 @@ export const pictureHref = (portrait: Portrait) => {
   if (portrait.mediaId === null) return null
   const params = new URLSearchParams({ media: portrait.mediaId, name: portrait.name })
   if (portrait.picture) params.set("crop", cropKey(portrait.picture))
+  if (portrait.image) params.set("image", "1")
   return `${PICTURE_PATH}?${params.toString()}`
 }
 
@@ -28,7 +29,13 @@ const pictureOf = (search: Record<string, unknown>): Portrait | null => {
   if (!media) return null
   const crop = text(search["crop"])
   const picture = crop === null ? undefined : (parseCropKey(crop) ?? undefined)
-  return { id: `picture:${media}`, name: text(search["name"]) || "Picture", mediaId: media, picture }
+  return {
+    id: `picture:${media}`,
+    name: text(search["name"]) || "Picture",
+    mediaId: media,
+    picture,
+    ...(text(search["image"]) === "1" ? { image: true as const } : {})
+  }
 }
 
 export function PicturePage() {

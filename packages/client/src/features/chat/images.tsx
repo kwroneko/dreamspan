@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentProps,
+  type ReactElement,
   type ReactNode
 } from "react"
 import { positionOf } from "./position.ts"
@@ -16,11 +17,21 @@ import { useSession } from "../../session.ts"
 import { uuid } from "../../uuid.ts"
 import { Button } from "../../ui/Button.tsx"
 import { ContentImage } from "../../ui/ContentImage.tsx"
-import { Dialog } from "../../ui/Dialog.tsx"
 import { Icon } from "../../ui/Icon.tsx"
-import { SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
+import { PICTURE_TOGGLE, SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
-import { PICTURE_TAB_MIME } from "../../ui/Portrait.tsx"
+import {
+  EnsurePortraitViewer,
+  PICTURE_TAB_MIME,
+  PicturePeek,
+  type Portrait,
+  usePortraitViewer
+} from "../../ui/Portrait.tsx"
+import { useOpenAsTab } from "../workbench/tab.tsx"
+import { attachmentName, attachmentPicture } from "./attachmentPictures.ts"
+import { messageSide, nameOf, useCast } from "./cast.ts"
+import { pictureHref } from "./PicturePage.tsx"
 import { Composer, type AttachmentInput } from "./Composer.tsx"
 import type { ComposerSource } from "./composerDraft.ts"
 import { composerWorkspace } from "./composerWorkspace.ts"
@@ -106,6 +117,147 @@ function AttachButton({
   )
 }
 
+const UPLOADING = "This image can open there once it has finished uploading."
+
+/**
+ * An image's other ways to open (owner, 2026-11-07), for its context menu and corner button:
+ * in the image column (full screen on a phone, as a portrait's) and as a tab. Disabled, with
+ * the reason, while `picture` is null: an attachment still uploading has no stored image yet.
+ */
+function useImageActions(picture: Portrait | null, drags = false) {
+  const viewer = usePortraitViewer()
+  const asTab = useOpenAsTab()
+  const href = picture ? pictureHref(picture) : null
+  return {
+    column: {
+      disabled: picture === null || viewer === null,
+      description: picture ? "Opens this image in the image column." : UPLOADING,
+      run: () => picture && viewer?.show(picture)
+    },
+    tab: asTab
+      ? {
+          disabled: href === null,
+          description: href
+            ? `Opens this image as a tab in the chat's frame.${drags ? " Dragging it onto a frame does the same." : ""}`
+            : UPLOADING,
+          run: () => href && asTab.open(href)
+        }
+      : null
+  }
+}
+
+/**
+ * The image's app context menu (right-click or a long press): Open in image column, Open as a
+ * tab. `drags`: the image also opens as a tab when dragged onto a frame (a sent one's).
+ */
+function ImageMenu({
+  picture,
+  drags = false,
+  trigger
+}: {
+  picture: Portrait | null
+  drags?: boolean
+  trigger: ReactElement
+}) {
+  const [open, setOpen] = useState(false)
+  const actions = useImageActions(picture, drags)
+  return (
+    <ContextMenu label="Image" open={open} onOpenChange={setOpen} trigger={trigger}>
+      <MenuItem
+        icon="sidebar"
+        disabled={actions.column.disabled}
+        description={actions.column.description}
+        onClick={actions.column.run}
+      >
+        Open in image column
+      </MenuItem>
+      {actions.tab && (
+        <MenuItem
+          icon="image"
+          disabled={actions.tab.disabled}
+          description={actions.tab.description}
+          onClick={actions.tab.run}
+        >
+          Open as a tab
+        </MenuItem>
+      )}
+    </ContextMenu>
+  )
+}
+
+/** The thumbnail's corner button: opens it in the image column (on hover and focus; always on touch). */
+function ColumnButton({ picture }: { picture: Portrait | null }) {
+  const { column } = useImageActions(picture)
+  return (
+    <span data-layout-overlay="Open in image column sits over the thumbnail" className="absolute top-1 right-1 flex">
+      <ToggleIconButton
+        label="Open in image column"
+        icon="sidebar"
+        hint={picture ? "Opens this image in the image column, beside the chat." : UPLOADING}
+        disabled={column.disabled}
+        onClick={column.run}
+        className={`tile-action ${PICTURE_TOGGLE}`}
+      />
+    </span>
+  )
+}
+
+/**
+ * An attached image not sent yet, as the list shows it: a click peeks at it in a modal with the
+ * column's viewer (owner, 2026-11-07: "Images attached to the composer should be peeked in a
+ * modal"); its context menu and corner button open it in the column, or as a tab, once stored.
+ */
+function AttachedThumbnail({
+  item,
+  onPeek
+}: {
+  item: AttachmentItem
+  onPeek: (picture: Portrait, file: Blob | undefined) => void
+}) {
+  const picture = item.mediaId ? attachmentPicture(item.mediaId, item.name) : null
+  const peekable = picture !== null || item.file !== undefined
+  return (
+    <div className="tile-toggle-surface relative">
+      <ImageMenu
+        picture={picture}
+        trigger={
+          <Tooltip
+            label={
+              peekable
+                ? "Opens this image to look at it closely. Right-click or long-press to open it in the image column."
+                : "This image is still being added."
+            }
+          >
+            <button
+              type="button"
+              aria-label={`View ${item.name}`}
+              aria-disabled={peekable ? undefined : true}
+              onClick={() => {
+                if (peekable) onPeek(picture ?? { id: `draft:${item.id}`, name: item.name, mediaId: null }, item.file)
+              }}
+              className="block rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              {item.thumbnail}
+            </button>
+          </Tooltip>
+        }
+      />
+      <ColumnButton picture={picture} />
+    </div>
+  )
+}
+
+interface AttachmentItem {
+  readonly id: string
+  readonly name: string
+  readonly thumbnail: ReactNode
+  readonly sending?: boolean
+  /** Its stored image, once uploaded. */
+  readonly mediaId: string | null
+  /** The local copy while it uploads. */
+  readonly file?: Blob | undefined
+}
+
 /** Removable thumbnails of attached images; the composer and the message editor use it. */
 function AttachmentList({
   label,
@@ -113,34 +265,44 @@ function AttachmentList({
   onRemove
 }: {
   label: string
-  items: ReadonlyArray<{
-    readonly id: string
-    readonly name: string
-    readonly thumbnail: ReactNode
-    readonly sending?: boolean
-  }>
+  items: ReadonlyArray<AttachmentItem>
   onRemove: (id: string) => void
 }) {
+  const [peek, setPeek] = useState<{ picture: Portrait; src: string | undefined } | null>(null)
+  useEffect(() => {
+    const src = peek?.src
+    return () => {
+      if (src?.startsWith("blob:")) URL.revokeObjectURL(src)
+    }
+  }, [peek?.src])
   return (
-    <ul className="flex flex-wrap gap-2" aria-label={label}>
-      {items.map((item) => (
-        <li key={item.id} className="flex flex-col items-center rounded-md border border-border p-1">
-          {item.thumbnail}
-          {item.sending ? (
-            <span className="text-xs text-muted">Sending…</span>
-          ) : (
-            <Button
-              hint="Removes this attached image."
-              variant="ghost"
-              aria-label={`Remove ${item.name}`}
-              onClick={() => onRemove(item.id)}
-            >
-              Remove
-            </Button>
-          )}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="flex flex-wrap gap-2" aria-label={label}>
+        {items.map((item) => (
+          <li key={item.id} className="flex flex-col items-center rounded-md border border-border p-2">
+            <AttachedThumbnail
+              item={item}
+              onPeek={(picture, file) =>
+                setPeek({ picture, src: picture.mediaId === null && file ? URL.createObjectURL(file) : undefined })
+              }
+            />
+            {item.sending ? (
+              <span className="text-xs text-muted">Sending…</span>
+            ) : (
+              <Button
+                hint="Removes this attached image."
+                variant="ghost"
+                aria-label={`Remove ${item.name}`}
+                onClick={() => onRemove(item.id)}
+              >
+                Remove
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <PicturePeek picture={peek?.picture ?? null} src={peek?.src} onClose={() => setPeek(null)} />
+    </>
   )
 }
 
@@ -234,7 +396,8 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
             label="Images of this version"
             items={current.map((image, index) => ({
               id: `${index}:${image.mediaId}`,
-              name: image.altText || `image ${index + 1}`,
+              name: attachmentName(image.altText, null, index, current.length),
+              mediaId: image.mediaId,
               thumbnail: (
                 <ContentImage
                   src={mediaUrl(image.mediaId, 160)}
@@ -556,6 +719,8 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
                     items={state.entries.map((entry) => ({
                       id: entry.id,
                       name: entry.name,
+                      mediaId: entry.mediaId ?? null,
+                      file: entry.file,
                       thumbnail: <DraftThumbnail entry={entry} />,
                       ...(entry.sending ? { sending: true } : {})
                     }))}
@@ -628,15 +793,33 @@ function ContextToggle({
   )
 }
 
-function ImageThumbnails({
+/**
+ * A message's images in the timeline. A click opens one in the image column, the same viewer
+ * and stack as portraits (owner, 2026-11-07), and a second click closes it; dragged onto a
+ * frame it opens there as a tab. The viewer's own place where none is given (outside a chat):
+ * a full-screen one.
+ */
+function ImageThumbnails(props: ComponentProps<typeof Thumbnails>) {
+  if (!props.images.length) return null
+  return (
+    <EnsurePortraitViewer>
+      <Thumbnails {...props} />
+    </EnsurePortraitViewer>
+  )
+}
+
+function Thumbnails({
   images,
+  speaker,
   controls
 }: {
   images: MessageImages
+  /** Who the message is from, naming an image without a file name of its own ("Image from Mira"). */
+  speaker: string
   /** A message's images: the context toggle and why each one isn't sent. */
   controls?: { entry: PathEntry; session: ChatSession }
 }) {
-  const [selected, setSelected] = useState<{ mediaId: string; altText?: string } | null>(null)
+  const viewer = usePortraitViewer()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const session = controls?.session
@@ -657,22 +840,43 @@ function ImageThumbnails({
           const excluded = controls?.entry.excludedImages?.includes(image.mediaId) ?? false
           const left = controls && !excluded ? leftOutBy(leftOut, controls.entry, index) : null
           const reason = excluded ? "taken out of the context by you" : left ? left.message : null
+          const picture = attachmentPicture(image.mediaId, attachmentName(image.altText, speaker, index, images.length))
           const view = (
-            <Tooltip label={reason ? `Not sent to the model: ${reason}` : "Opens this image at full size."}>
-              <button
-                type="button"
-                aria-label={`View image ${index + 1}${reason ? ` (not sent to the model: ${reason})` : ""}`}
-                onClick={() => setSelected(image)}
-                className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                <ContentImage
-                  src={mediaUrl(image.mediaId, 320)}
-                  alt={image.altText || `Image ${index + 1}`}
-                  loading="lazy"
-                  className={`max-h-48 max-w-full rounded-md object-contain ${reason ? "opacity-40 grayscale" : ""}`}
-                />
-              </button>
-            </Tooltip>
+            <ImageMenu
+              picture={picture}
+              drags
+              trigger={
+                <Tooltip
+                  label={
+                    reason
+                      ? `Not sent to the model: ${reason}`
+                      : "Opens this image in the image viewer. Right-click, or drag it onto a frame, to open it as a tab."
+                  }
+                >
+                  <button
+                    type="button"
+                    aria-label={`View image ${index + 1}${reason ? ` (not sent to the model: ${reason})` : ""}`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      viewer?.open(picture)
+                    }}
+                    onDragStart={(event) => {
+                      // Dropped on a frame, it opens there as a tab (features/workbench), never as an attachment.
+                      const href = viewer?.tabHref?.(picture)
+                      if (href) event.dataTransfer.setData(PICTURE_TAB_MIME, href)
+                    }}
+                    className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  >
+                    <ContentImage
+                      src={mediaUrl(image.mediaId, 320)}
+                      alt={image.altText || `Image ${index + 1}`}
+                      loading="lazy"
+                      className={`max-h-48 max-w-full rounded-md object-contain ${reason ? "opacity-40 grayscale" : ""}`}
+                    />
+                  </button>
+                </Tooltip>
+              }
+            />
           )
           return (
             <div
@@ -704,43 +908,35 @@ function ImageThumbnails({
           {error}
         </p>
       )}
-      <Dialog
-        open={selected !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null)
-        }}
-        title={selected?.altText || "Image"}
-        wide
-      >
-        {selected && (
-          <ContentImage
-            src={mediaUrl(selected.mediaId)}
-            alt={selected.altText || "Attached image"}
-            className="max-h-[75dvh] max-w-full object-contain"
-          />
-        )}
-        <Button hint="Closes the image viewer." onClick={() => setSelected(null)}>
-          Close image
-        </Button>
-      </Dialog>
     </>
   )
 }
 const noSubscribe = () => () => {}
+
+function MessageThumbnails({ entry, session }: { entry: PathEntry; session: ChatSession }) {
+  const cast = useCast()
+  const speaker =
+    nameOf(cast, entry.version.speakerEntityId ?? entry.firstSpeakerEntityId) ??
+    (messageSide(entry, cast.cast) === "assistant" ? "the model" : "you")
+  return <ImageThumbnails images={entry.version.images ?? []} speaker={speaker} controls={{ entry, session }} />
+}
+
+function QueuedThumbnails({ queued }: { queued: import("@rp/shared/chat.ts").QueuedMessage }) {
+  const cast = useCast()
+  return <ImageThumbnails images={queued.images ?? []} speaker={nameOf(cast, queued.speakerEntityId) ?? "you"} />
+}
 export const registerImages = () => [
   chatComposer.register({ id: "chat.composer", order: 10, component: ImageComposer }),
   chatSurfaceProviders.register({ id: "chat.images", order: 40, component: ImageProvider }),
   messagePreviews.register({
     id: "message.images",
     order: 20,
-    component: ({ entry, session }) => (
-      <ImageThumbnails images={entry.version.images ?? []} controls={{ entry, session }} />
-    )
+    component: MessageThumbnails
   }),
   messageEditorTools.register({ id: "message.editor-images", order: 5, component: EditorImages }),
   queuedPreviews.register({
     id: "queued.images",
     order: 10,
-    component: ({ queued }) => <ImageThumbnails images={queued.images ?? []} />
+    component: QueuedThumbnails
   })
 ]
