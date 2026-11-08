@@ -189,7 +189,7 @@ export const withCatalogs = (catalogs: ReadonlyArray<ModelCatalog>, kind: string
   Effect.forEach(listed, (model) => Effect.promise(() => fillFromCatalogs(catalogs, kind, model)))
 
 /**
- * The prefix a router puts on its model ids (`acme.gpt-5.4-nano`, `acme.deepseek-flash`), when
+ * The prefix a router puts on its model ids (`acme.gpt-5.4-nano`, `acme.o3`), when
  * at least half the listed ids share one: a lowercase segment and a dot before a letter. Vendor
  * and region prefixes (`anthropic.`, `us.`) are already left out by `baseModelId`; detecting one
  * of them changes no match.

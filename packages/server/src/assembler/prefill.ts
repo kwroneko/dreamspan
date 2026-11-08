@@ -5,8 +5,8 @@ import type { ModelInput } from "./types.ts"
 
 /**
  * DeepSeek's own API takes a prefix (prefill) only at its /beta address. Another host is a router
- * or compatible server in front of it that decides where a `prefix: true` request goes
- * (liveapi2), so only DeepSeek's host is held to the /beta address.
+ * or compatible server in front of it, and only that server knows where it forwards a
+ * `prefix: true` request, so only DeepSeek's own host is held to the /beta address.
  */
 const deepseekNeedsBeta = (baseUrl: string | null) => {
   const url = new URL(baseUrl ?? "https://api.deepseek.com")
