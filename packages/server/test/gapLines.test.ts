@@ -127,5 +127,23 @@ it.effect("a replacement card keeps its character's knowledge without acquiring 
     })
     assert.include(text(s), "REMEMBERED")
     assert.notInclude(text(s), "SECRET")
+    // Her earlier identity is never named among those who took part.
+    const gap = s.request.messages.find((m) => String(m.content).includes("wasn't present"))
+    assert.include(String(gap?.content), "in which Mira took part")
+  })
+)
+
+it.effect("a gap names who took part even after they left the cast", () =>
+  Effect.gen(function* () {
+    const fx = fixture([
+      known("Before."),
+      { side: "assistant", speaker: "kai", content: "SECRET", knowers: ["mira", "kai"] },
+      known("After.")
+    ])
+    // Kai was there for the missed message and has since left; Mira stayed.
+    const s = yield* assembleFixture({ ...fx, cards: [...fx.cards, { entity: "kai", doc: cardDoc("Kai") }] })
+    const gap = s.request.messages.find((m) => String(m.content).includes("wasn't present"))
+    assert.include(String(gap?.content), "in which Mira and Kai took part")
+    assert.notInclude(text(s), "SECRET")
   })
 )

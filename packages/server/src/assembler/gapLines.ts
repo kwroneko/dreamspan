@@ -8,7 +8,7 @@
 import { Effect } from "effect"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { ABSENT_GAP_DEFAULT, ABSENT_JOIN_DEFAULT } from "@rp/shared/knowledge.ts"
-import { need, type AssemblerStage, type Assembly, type ProjectedEntry } from "./pipeline.ts"
+import { AssemblySources, need, type AssemblerStage, type Assembly, type ProjectedEntry } from "./pipeline.ts"
 import type { SourceDescriptor } from "./sourceDescriptors.ts"
 import type { HistoryEntry } from "./types.ts"
 
@@ -62,7 +62,7 @@ const lineAt = (entry: HistoryEntry, piece: number): ProjectedEntry => {
 export const gapLinesStage: AssemblerStage = {
   id: "gap-lines",
   run: (assembly) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       const viewer = assembly.knowledge?.viewer ?? null
       if (viewer === null) return assembly
       const history = need(assembly, "history")
@@ -70,16 +70,37 @@ export const gapLinesStage: AssemblerStage = {
       const env = need(assembly, "macros")
       const cast = need(assembly, "cast")
       const utility = need(assembly, "preset").doc.utility_prompts
-      const nameOf = (entity: string) => {
-        if (cast.personas.some((p) => p.entity === entity)) return env.names.user
-        const card = cast.characters.find((c) => c.entity === entity)
-        return card ? modelName(card.doc) : null
-      }
+      // The viewer under every identity it had (card replacements): never named in its own line.
+      const self = new Set(assembly.knowledge?.aliases ?? [viewer])
       const projected = [...need(assembly, "projected")]
       // {{char}} is the character the line is for, as in the tail directive.
       const own = cast.speaker ? { names: { char: modelName(cast.speaker.doc) } } : {}
       const { stretches, joins } = stretchesOf(assembly, history)
       const gap = utility.absent_gap_prompt ?? ABSENT_GAP_DEFAULT
+      // Those who took part and have since left the cast are named too, from their cards (read
+      // only when a line names one, so a chat where nobody left reads nothing more).
+      const inCast = (entity: string) =>
+        cast.personas.some((p) => p.entity === entity) || cast.characters.some((c) => c.entity === entity)
+      const gone = gap.trim()
+        ? [
+            ...new Set(
+              stretches.flatMap(({ missed }) =>
+                missed.flatMap((e) =>
+                  (e.unknown?.knowers ?? []).filter((k) => !self.has(k) && !inCast(k) && !assembly.departed?.has(k))
+                )
+              )
+            )
+          ]
+        : []
+      const left = new Map((assembly.departed ?? new Map()).entries())
+      if (gone.length > 0)
+        for (const card of yield* (yield* AssemblySources).cards(gone, need(assembly, "state").cardBindings))
+          left.set(card.entity, card)
+      const nameOf = (entity: string) => {
+        if (cast.personas.some((p) => p.entity === entity)) return env.names.user
+        const card = cast.characters.find((c) => c.entity === entity) ?? left.get(entity)
+        return card ? modelName(card.doc) : null
+      }
       if (gap.trim())
         for (const { missed } of stretches) {
           const first = missed[0]!
@@ -89,7 +110,7 @@ export const gapLinesStage: AssemblerStage = {
           const names = [
             ...new Set(
               missed.flatMap((e) => [
-                ...(e.unknown?.knowers ?? []).flatMap((k) => (k === viewer ? [] : (nameOf(k) ?? []))),
+                ...(e.unknown?.knowers ?? []).flatMap((k) => (self.has(k) ? [] : (nameOf(k) ?? []))),
                 ...(e.speaker === null && e.side === "user" ? [env.names.user] : [])
               ])
             )
