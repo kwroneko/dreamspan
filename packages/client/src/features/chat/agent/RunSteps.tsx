@@ -8,8 +8,8 @@
 // Each step (thinking or text before a tool call, a call's arguments, its result) has Edit and
 // Resume from here (§4.4): the run carried on from that step, changed first or not, as a new
 // version of the message, which the chat then shows being written. What a resume or an edit cut
-// from the run it carried on shows folded where it was cut. An unsent edit is kept in this page
-// only: the spec gives step edits no draft.
+// from the run it carried on shows folded where it was cut. Step edits use server-kept drafts;
+// the URL records which editor is open, so reloading restores both the editor and its text.
 import type { CutSpan, OfferedTool, StepEdit, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
 import type { ForkId } from "@rp/shared/chat.ts"
 import type { InspectorUsage, RunContext } from "@rp/shared/inspectorApi.ts"
@@ -18,6 +18,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { Fragment, type ReactNode, useMemo, useState } from "react"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../../editor/userDraft.tsx"
 import { useAction } from "../../../actions.tsx"
 import { AppClient } from "../../../rpc.ts"
 import { Button } from "../../../ui/Button.tsx"
@@ -89,11 +90,12 @@ function Tools({ tools }: { tools: ReadonlyArray<OfferedTool> }) {
 /** What step edits need from the page: the tools' schemas, which step is open, and carrying on. */
 interface StepEditing {
   readonly tools: ReadonlyArray<OfferedTool>
+  readonly draftTarget: string
   /** The run is still going: its steps can't be carried on from yet. */
   readonly running: boolean
   readonly open: string | null
   readonly setOpen: (key: string | null) => void
-  readonly resume: (step: number, edit: StepEdit | undefined) => Promise<void>
+  readonly resume: (step: number, edit: StepEdit | undefined) => Promise<boolean>
   readonly pending: boolean
   readonly error: string | null
 }
@@ -117,10 +119,8 @@ const toolOf = (target: StepTarget) =>
 function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEditing | null; id: string }) {
   const step = target.kind === "result" ? target.entry.step : target.part.step
   const original = editableText(target)
-  const [text, setText] = useState(original)
   const title = titleOf(target)
   const note = noteOf(target)
-  const isArgs = target.kind === "part" && target.part.type === "toolCall"
   const shown = target.kind === "part" && target.part.type === "toolCall" ? json(target.part.args) : original
   if (editing === null || step === undefined || editing.running)
     return (
@@ -129,9 +129,6 @@ function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEdi
       </Box>
     )
   const open = editing.open === id
-  const parameters = editing.tools.find((t) => t.name === toolOf(target))?.parameters
-  const checked = stepEdit(target, text, parameters)
-  const problem = "problem" in checked ? checked.problem : null
   const actions = open ? null : (
     <span className="flex gap-1">
       <Button
@@ -139,10 +136,7 @@ function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEdi
         className="h-7 px-2 text-xs"
         hint="Change this step, then carry on from it as a new version."
         disabled={editing.pending}
-        onClick={() => {
-          setText(original)
-          editing.setOpen(id)
-        }}
+        onClick={() => editing.setOpen(id)}
       >
         Edit
       </Button>
@@ -159,59 +153,85 @@ function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEdi
   )
   return (
     <Box title={title} {...(note ? { note } : {})} actions={actions}>
-      {open ? (
-        <div className="flex flex-col gap-2">
-          <CodeEditor
-            label={`Edit ${title}`}
-            value={text}
-            base={original}
-            mono={isArgs}
-            rows={isArgs ? 6 : 4}
-            textActions={!isArgs}
-            expand={false}
-            autoFocus
-            onChange={setText}
-          />
-          {problem !== null && (
-            <p role="alert" className="text-sm text-danger">
-              {problem}
-            </p>
-          )}
-          {editing.error !== null && (
-            <p role="alert" className="text-sm text-danger">
-              {editing.error}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="primary"
-              pending={editing.pending}
-              disabled={problem !== null}
-              hint={
-                text === original
-                  ? "Carry on from this step, unchanged, as a new version."
-                  : "Carry on from this step, as you changed it, as a new version."
-              }
-              onClick={() => {
-                if ("edit" in checked) void editing.resume(step, checked.edit)
-              }}
-            >
-              Resume
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={editing.pending}
-              hint="Close the editor; the step stays as it was."
-              onClick={() => editing.setOpen(null)}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <Verbatim text={shown} />
-      )}
+      {open ? <StepEditor target={target} editing={editing} id={id} step={step} /> : <Verbatim text={shown} />}
     </Box>
+  )
+}
+
+/** A draft is scoped to this version and this part/result, shared by tabs and devices. */
+function StepEditor({
+  target,
+  editing,
+  id,
+  step
+}: {
+  target: StepTarget
+  editing: StepEditing
+  id: string
+  step: number
+}) {
+  const original = editableText(target)
+  const draft = useUserDraft(editing.draftTarget, id, original)
+  const [committing, setCommitting] = useState(false)
+  const text = draft.text
+  const title = titleOf(target)
+  const isArgs = target.kind === "part" && target.part.type === "toolCall"
+  const parameters = editing.tools.find((t) => t.name === toolOf(target))?.parameters
+  const checked = stepEdit(target, text, parameters)
+  const problem = "problem" in checked ? checked.problem : null
+  return (
+    <div className="flex flex-col gap-2">
+      <CodeEditor
+        label={`Edit ${title}`}
+        value={text}
+        base={original}
+        mono={isArgs}
+        rows={isArgs ? 6 : 4}
+        textActions={!isArgs}
+        expand={false}
+        autoFocus
+        onChange={draft.setText}
+        tools={<UserDraftUndo draft={draft} />}
+      />
+      <UserDraftNotices draft={draft} />
+      {problem !== null && (
+        <p role="alert" className="text-sm text-danger">
+          {problem}
+        </p>
+      )}
+      {editing.error !== null && (
+        <p role="alert" className="text-sm text-danger">
+          {editing.error}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="primary"
+          pending={editing.pending || committing}
+          disabled={problem !== null || !draft.ready}
+          hint={
+            text === original
+              ? "Carry on from this step, unchanged, as a new version."
+              : "Carry on from this step, as you changed it, as a new version."
+          }
+          onClick={() => {
+            if (!("edit" in checked) || committing) return
+            setCommitting(true)
+            void draft.commit(text, () => editing.resume(step, checked.edit)).finally(() => setCommitting(false))
+          }}
+        >
+          Resume
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={editing.pending || committing}
+          hint="Close the editor; your draft is kept for later."
+          onClick={() => editing.setOpen(null)}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -364,10 +384,17 @@ function Steps({
 
 /** Step edits' state, and carrying on: the slot's row version where the page shows it, then the new version. */
 function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): StepEditing {
-  const [open, setOpen] = useState<string | null>(null)
   const action = useAction()
   const navigate = useNavigate()
-  const search = useSearch({ strict: false }) as { fork?: unknown }
+  const search = useSearch({ strict: false }) as { fork?: unknown; stepEdit?: unknown }
+  const open = typeof search.stepEdit === "string" ? search.stepEdit : null
+  const setOpen = (key: string | null) => {
+    void navigate({
+      to: ".",
+      search: (previous: Record<string, unknown>) => ({ ...previous, stepEdit: key ?? undefined }),
+      resetScroll: false
+    })
+  }
   const fork = typeof search.fork === "string" && search.fork !== "" ? (search.fork as ForkId) : null
   const [missing, setMissing] = useState<string | null>(null)
   const resume = async (step: number, edit: StepEdit | undefined) => {
@@ -392,21 +419,22 @@ function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): Ste
         })
       })
     )
-    if (!result.ok) return
+    if (!result.ok) return false
     if (result.value === null) {
       setMissing("This message isn't on this branch any more.")
-      return
+      return false
     }
-    setOpen(null)
     // The chat shows the new version being written, as any reply.
     void navigate({
       to: "/chats/$chatId",
       params: { chatId: run.chatId },
       search: { ...(fork === null ? {} : { fork }), slot: run.slotId }
     })
+    return true
   }
   return {
     tools,
+    draftTarget: `run-step:${run.versionId}`,
     running: run.status === "running",
     open,
     setOpen: (key) => {
