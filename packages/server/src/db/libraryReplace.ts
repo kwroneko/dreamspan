@@ -347,8 +347,8 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
         current.forEach((entry, i) => {
           const { candidate } = entry
           const fields = new Set(chosen.get(candidate.ref_id)!.fields)
-          const picked = scanned[i]!.filter((f) => fields.has(fieldKey(f.field.path)))
-          if (picked.length === 0) return skip(candidate.ref_id, candidate.label, "Nothing chosen in it matches now.")
+          const picked = scanned[i]!.filter((f) => fields.has(fieldKey(f.field.path)) && f.after !== f.field.text)
+          if (picked.length === 0) return skip(candidate.ref_id, candidate.label, "Nothing chosen in it changes.")
           const replaced = withValues(
             entry.doc,
             picked.map((f) => ({ path: f.field.path, value: f.after }))

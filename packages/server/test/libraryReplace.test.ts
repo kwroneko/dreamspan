@@ -155,6 +155,32 @@ describe("library search and replace", () => {
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 
+  it.effect("a replacement that changes nothing neither checkpoints drafts nor creates an edit", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const opened = yield* f.api.OpenEditor({ refId: f.odo })
+      yield* f.api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
+        refId: f.odo,
+        field: textField(["description"]),
+        content: "{{char}} waits.",
+        expectedRowVersion: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      const asked = search("{{char}}", "{{char}}")
+      const result = yield* f.api.ApplyLibraryReplace({
+        search: asked,
+        choices: f.all(yield* f.api.PreviewLibraryReplace({ search: asked }))
+      })
+      assert.strictEqual(result.entries, 0)
+      assert.lengthOf(yield* f.api.ListLibraryEdits(), 0)
+      const after = yield* f.api.OpenEditor({ refId: f.odo })
+      assert.strictEqual(after.ref.headRevisionId, opened.ref.headRevisionId)
+      assert.isTrue(after.drafts.some((d) => d.status === "active"))
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
   it.effect("finds text in every kind, with counts per kind and the match in its context", () =>
     Effect.gen(function* () {
       const f = yield* setup
