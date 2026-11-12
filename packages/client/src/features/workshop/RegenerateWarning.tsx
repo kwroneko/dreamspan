@@ -11,13 +11,14 @@ import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { EFFECTS_KEY, effectId, effectKey, outstanding, type RolloutEffect } from "./effects.ts"
-import { keptCalls, useWarningRequest, warningText, type WarningRequest } from "./regenerateWarning.ts"
+import { warningEffects, useWarningRequest, warningText, type WarningRequest } from "./regenerateWarning.ts"
 
 function Warning({ asked }: { asked: WarningRequest }) {
   const call = useCaller()
   const [standing, setStanding] = useState<ReadonlyArray<RolloutEffect> | null>(null)
   const [pending, setPending] = useState<"undo" | "keep" | null>(null)
   const [error, setError] = useState<AppError | null>(null)
+  const [readFailed, setReadFailed] = useState(false)
   const started = useRef(false)
   useEffect(() => {
     // Once per request, also where React runs effects twice.
@@ -25,16 +26,18 @@ function Warning({ asked }: { asked: WarningRequest }) {
     started.current = true
     void (async () => {
       const read = await call((client) => client("ListVersionEffects", { versionId: asked.request.versionId }))
-      // It couldn't be read: asking about nothing would only stand in the way.
-      let left = read.ok ? outstanding(read.value) : []
-      // The new version keeps the reply's own calls (before the step it carries on from).
-      if (left.length > 0) {
-        const steps = await call((client) => client("GetRolloutSteps", { versionId: asked.request.versionId }))
-        if (steps.ok) {
-          const kept = keptCalls(steps.value, asked.request)
-          left = left.filter((effect) => !kept.has(effect.toolCallId))
-        }
+      const steps =
+        read.ok && outstanding(read.value).length > 0
+          ? await call((client) => client("GetRolloutSteps", { versionId: asked.request.versionId }))
+          : { ok: true as const, value: [] }
+      const selected = warningEffects(asked.request, read, steps)
+      if (!selected.ok) {
+        setReadFailed(true)
+        setError(selected.error)
+        setStanding([])
+        return
       }
+      const left = selected.value
       if (left.length === 0) return asked.settle(true)
       setStanding(left)
     })()
@@ -77,7 +80,14 @@ function Warning({ asked }: { asked: WarningRequest }) {
           </li>
         ))}
       </ul>
-      <ErrorAlert error={error} title="Not all undone, so no new version yet" />
+      <ErrorAlert
+        error={error}
+        title={
+          readFailed
+            ? "The changes couldn't be read. Close this and try again."
+            : "Not all undone, so no new version yet"
+        }
+      />
       <DialogActions>
         <Button
           variant="ghost"
@@ -88,7 +98,7 @@ function Warning({ asked }: { asked: WarningRequest }) {
           Cancel
         </Button>
         <Button
-          disabled={pending === "undo"}
+          disabled={readFailed || pending === "undo"}
           pending={pending === "keep"}
           hint="Leaves these changes as they are and asks for a new version."
           onClick={() => {
@@ -100,7 +110,7 @@ function Warning({ asked }: { asked: WarningRequest }) {
         </Button>
         <Button
           variant="primary"
-          disabled={pending === "keep" || fixed === standing.length}
+          disabled={readFailed || pending === "keep" || fixed === standing.length}
           pending={pending === "undo"}
           hint={
             fixed > 0

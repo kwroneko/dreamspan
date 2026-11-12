@@ -124,6 +124,80 @@ const fixture = (dataDir: string, api: Api) =>
   })
 
 describe("workshop setup effects", () => {
+  it.live("consumes an approval once, and refuses consumption after Off wins the transaction", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const key = { userId: f.user.id, rolloutId: f.rolloutId, toolCallId: "consume" }
+      const prompt = {
+        rolloutId: f.rolloutId,
+        toolCallId: "consume",
+        digest: "digest",
+        capability: "library.write",
+        capabilityLabel: "Create and edit library items",
+        title: "Create a card",
+        rows: [],
+        uncertain: false
+      }
+      const request = { ...key, digest: "digest", capability: "library.write", prompt }
+      yield* f.writer.RequestToolApproval(request)
+      assert.strictEqual(yield* outcome(f.writer.RequestToolApproval(request)), "ApprovalRefused")
+      yield* f.writer.AnswerToolApproval({ ...key, digest: "digest", answer: "allow", note: null })
+      yield* f.writer.SetWorkshopGrant({
+        userId: f.user.id,
+        chatId: f.chat.id,
+        capability: "library.write",
+        mode: "off"
+      })
+      assert.isFalse(yield* f.writer.SettleToolApproval({ ...key, status: "used" }))
+      yield* f.writer.SetWorkshopGrant({
+        userId: f.user.id,
+        chatId: f.chat.id,
+        capability: "library.write",
+        mode: "ask"
+      })
+      assert.isFalse(yield* f.writer.SettleToolApproval({ ...key, status: "used" }))
+      const fresh = { ...key, toolCallId: "consume-fresh" }
+      yield* f.writer.RequestToolApproval({ ...request, ...fresh, prompt: { ...prompt, toolCallId: fresh.toolCallId } })
+      yield* f.writer.AnswerToolApproval({ ...fresh, digest: "digest", answer: "allow", note: null })
+      assert.isTrue(yield* f.writer.SettleToolApproval({ ...fresh, status: "used" }))
+      assert.isFalse(yield* f.writer.SettleToolApproval({ ...fresh, status: "used" }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  for (const mode of ["off", "ask"] as const)
+    it.live(`the writer refuses a change when permission becomes ${mode} after the call was admitted`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const api = yield* client()
+        const f = yield* fixture(config.dataDir, api)
+        // Same tool/context, but a second tab changes permission before its write transaction.
+        yield* api.SetWorkshopGrant({ chatId: f.chat.id, capability: "library.write", mode })
+        const result = yield* f.run("create_card", { name: "Must not commit" }, "raced")
+        assert.isTrue(result.isError)
+        assert.isEmpty((yield* api.ListLibrary({ kind: "card" })).filter((r) => r.label === "Must not commit"))
+        assert.isEmpty(yield* api.ListRolloutEffects({ chatId: f.chat.id }))
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+
+  it.live("a described copy stays bound to its original target and refuses if that target changes", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const source = yield* api.CreateCard({ label: "Source", name: "Source", description: "Originally shown" })
+      const registry = yield* ExecutionRegistry
+      const tool = toolForKind(registry, "workshop", "clone_card")!
+      const args = { card: "Source", name: "Approved copy" }
+      yield* tool.describe!({ ...f.context, toolCallId: "copy" }, args as never)
+      yield* edit(api, source.id, "Changed after approval")
+      const result = yield* f.run("clone_card", args, "copy")
+      assert.isTrue(result.isError)
+      assert.isEmpty((yield* api.ListLibrary({ kind: "card" })).filter((r) => r.label === "Approved copy"))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("reads registered capabilities for the owned chat kind and its offered tools", () => {
     const config = testConfig()
     return Effect.gen(function* () {

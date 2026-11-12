@@ -1,4 +1,5 @@
 import { rolloutEffectClasses } from "./agent/effects.ts"
+import { outsideEffect } from "./agent/effects.ts"
 import { capabilityDefaults, workshopCapabilities } from "./agent/capabilities.ts"
 import { libraryEditCard, setupTools } from "./agent/tools/setup.ts"
 import { chatKinds, type ChatKindProfile } from "@rp/shared/chatKinds.ts"
@@ -63,9 +64,26 @@ export class ExecutionRegistry extends Context.Service<
       const orchestrationModes = makeRegistry<OrchestrationMode>()
       yield* orchestrationModes.register(defaultMode)
       yield* orchestrationModes.register(workshopMode)
-      const kindTools = makeRegistry<{ readonly id: string; readonly tool: RolloutTool<never> }>()
+      const validate = (tool: RolloutTool<never>) => {
+        if (
+          (outsideEffect(tool.effect) && !tool.capability) ||
+          (tool.capability && !workshopCapabilities.get(tool.capability))
+        )
+          throw new Error(`Tool ${tool.id} needs a registered capability.`)
+      }
+      const variants = makeRegistry<{ readonly id: string; readonly tool: RolloutTool<never> }>()
+      const kindTools = {
+        ...variants,
+        register: (entry: { readonly id: string; readonly tool: RolloutTool<never> }) =>
+          Effect.sync(() => validate(entry.tool)).pipe(Effect.andThen(variants.register(entry)))
+      }
       yield* kindTools.register({ id: "workshop:edit_card", tool: libraryEditCard })
-      const rolloutTools = makeRegistry<RolloutTool<never>>()
+      const catalog = makeRegistry<RolloutTool<never>>()
+      const rolloutTools = {
+        ...catalog,
+        register: (tool: RolloutTool<never>) =>
+          Effect.sync(() => validate(tool)).pipe(Effect.andThen(catalog.register(tool)))
+      }
       for (const tool of [
         ...historyTools,
         ...libraryTools,

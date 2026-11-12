@@ -16,6 +16,7 @@ import { NotFound, type WriteOps } from "./ops.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
+import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type OperationName =
@@ -26,7 +27,13 @@ type Operations = {
     input: Parameters<Handlers[K]>[0]
   ) => Effect.Effect<Rpc.Success<OperationRpc<K>>, Rpc.Error<OperationRpc<K>> | import("effect/sql").SqlError.SqlError>
 }
-type Key = { readonly userId: UserId; readonly rolloutId: string; readonly toolCallId: string }
+type Key = {
+  readonly userId: UserId
+  readonly rolloutId: string
+  readonly toolCallId: string
+  readonly approvalDigest?: string
+  readonly expectedRefs?: ReadonlyArray<{ readonly refId: RefId; readonly rowVersion: number }>
+}
 interface EffectRow {
   rollout_id: string
   tool_call_id: string
@@ -307,6 +314,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       })
     const receipted = <E>(
       key: Key,
+      capability: string,
       body: Effect.Effect<
         {
           result: string
@@ -325,6 +333,33 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         if (receipt) return JSON.parse(receipt.result_json) as string
         if (!["running", "created"].includes(rollout.status))
           return yield* new EffectUndoRefused({ message: "This workshop run is no longer running." })
+        // Check the current permission in the same transaction as the change. An Off choice
+        // or a new Ask-first choice in another tab cannot race the main-thread permit.
+        const grants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
+          FROM workshop_grants WHERE chat_id = (SELECT chat_id FROM rollouts WHERE id = ${key.rolloutId})
+            AND owner_user_id = ${key.userId} AND target = '' AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+        const mode = resolveMode(
+          { workshopCapabilities, capabilityDefaults },
+          new Map(grants.map((g) => [g.capability, g.mode])),
+          capability,
+          "library"
+        )
+        if (mode === "off")
+          return yield* new EffectUndoRefused({ message: "This capability is turned off in this workshop." })
+        if (mode === "ask") {
+          const [approval] = yield* sql`SELECT 1 FROM tool_approvals WHERE rollout_id = ${key.rolloutId}
+            AND tool_call_id = ${key.toolCallId} AND capability = ${capability}
+            AND digest = ${key.approvalDigest ?? null} AND status = 'used'`
+          if (!approval)
+            return yield* new EffectUndoRefused({ message: "This change needs a current approval. Ask again." })
+        }
+        for (const expected of key.expectedRefs ?? []) {
+          const ref = yield* lib.ownedRef(key.userId, expected.refId)
+          if (ref.row_version !== expected.rowVersion)
+            return yield* new EffectUndoRefused({
+              message: "The saved item changed while waiting. Read it again before making this change."
+            })
+        }
         const [used] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM rollout_receipts
           WHERE rollout_id = ${key.rolloutId} AND is_error = 0`
         if (used!.n >= limits.calls)
@@ -392,6 +427,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       AgentCreateEntity: (input) =>
         receipted(
           input,
+          "library.write",
           Effect.gen(function* () {
             yield* checkDocument(input.doc)
             const valid = validateDoc(
@@ -431,6 +467,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       AgentReviseEntity: (input) =>
         receipted(
           input,
+          "library.write",
           Effect.gen(function* () {
             yield* checkDocument(input.doc)
             const before = yield* lib.ownedRef(input.userId, input.refId)
@@ -469,6 +506,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       AgentCloneCard: (input) =>
         receipted(
           input,
+          "library.write",
           Effect.gen(function* () {
             const source = yield* lib.ownedRef(input.userId, input.refId)
             // Bound the whole fork before it copies any notes or moves any drafts.
@@ -527,6 +565,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       AgentStartChat: (input) =>
         receipted(
           input,
+          "chats.setup",
           Effect.gen(function* () {
             const greetings = input.greeters.flatMap((greeter) => greeter.options)
             if (

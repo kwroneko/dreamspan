@@ -11,6 +11,7 @@ import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { callsFrom } from "../agent/steps.ts"
+import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
 
 type Sql = SqlClient.SqlClient
 
@@ -30,7 +31,10 @@ const ownedWorkshop = (sql: Sql, userId: string, chatId: string) =>
 /** The rollout, in a chat the user owns. */
 const ownedRollout = (sql: Sql, userId: string, rolloutId: string) =>
   Effect.gen(function* () {
-    const [row] = yield* sql<{ chat_id: string }>`SELECT r.chat_id FROM rollouts r JOIN chats c ON c.id = r.chat_id
+    const [row] = yield* sql<{
+      chat_id: string
+      status: string
+    }>`SELECT r.chat_id, r.status FROM rollouts r JOIN chats c ON c.id = r.chat_id
       WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
     if (!row) return yield* new NotFound({ entity: "rollout", id: rolloutId })
     return row
@@ -57,12 +61,16 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* ownedWorkshop(sql, userId, chatId)
         yield* writeGrant(sql, userId, chatId, capability, mode)
+        if (mode === "off")
+          yield* sql`UPDATE tool_approvals SET status = CASE WHEN status = 'allowed' THEN 'used' ELSE 'cancelled' END
+            WHERE capability = ${capability} AND status IN ('pending', 'allowed')
+              AND rollout_id IN (SELECT id FROM rollouts WHERE chat_id = ${chatId})`
       }).pipe(transaction(sql, "SetWorkshopGrant")),
     RequestToolApproval: ({ userId, rolloutId, toolCallId, digest, capability, prompt }) =>
       Effect.gen(function* () {
-        yield* ownedRollout(sql, userId, rolloutId)
-        // A call asked again in the same run (after a stop) starts waiting afresh; an answered one stays answered.
-        yield* sql`INSERT INTO tool_approvals ${sql.insert({
+        const run = yield* ownedRollout(sql, userId, rolloutId)
+        if (run.status !== "running") return yield* new ApprovalRefused({ message: "This run is no longer running." })
+        const rows = yield* sql`INSERT INTO tool_approvals ${sql.insert({
           rollout_id: rolloutId,
           tool_call_id: toolCallId,
           digest,
@@ -73,8 +81,9 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
           note: null,
           created_at: Date.now(),
           answered_at: null
-        })} ON CONFLICT (rollout_id, tool_call_id) DO UPDATE SET status = 'pending', prompt_json = excluded.prompt_json
-          WHERE tool_approvals.status = 'cancelled' AND tool_approvals.digest = excluded.digest`
+        })} ON CONFLICT (rollout_id, tool_call_id) DO NOTHING RETURNING tool_call_id`
+        if (rows.length !== 1)
+          return yield* new ApprovalRefused({ message: "This call already asked. Use a new call." })
       }).pipe(transaction(sql, "RequestToolApproval")),
     AnswerToolApproval: ({ userId, rolloutId, toolCallId, digest, answer, note }) =>
       Effect.gen(function* () {
@@ -88,8 +97,25 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "approval", id: toolCallId })
         if (row.digest !== digest)
           return yield* new ApprovalRefused({ message: "This answer is for a different request. Look again." })
-        if (row.status !== "pending" && row.status !== "cancelled")
+        const [run] = yield* sql<{ status: string }>`SELECT status FROM rollouts WHERE id = ${rolloutId}`
+        if (row.status !== "pending" || run?.status !== "running")
           return yield* new ApprovalRefused({ message: "This was already answered." })
+        const grants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
+          FROM workshop_grants WHERE chat_id = ${chat_id} AND owner_user_id = ${userId} AND target = ''
+            AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+        if (
+          resolveMode(
+            { workshopCapabilities, capabilityDefaults },
+            new Map(grants.map((g) => [g.capability, g.mode])),
+            row.capability,
+            "outside"
+          ) === "off"
+        )
+          return yield* new ApprovalRefused({
+            message: "This capability is turned off. Look again before allowing it."
+          })
+        if (answer === "allow_chat" && workshopCapabilities.get(row.capability)?.modes?.includes("allow") === false)
+          return yield* new ApprovalRefused({ message: "This capability must ask each time." })
         yield* sql`UPDATE tool_approvals SET status = ${answer === "deny" ? "denied" : "allowed"}, answer = ${answer},
           note = ${note}, answered_at = ${Date.now()} WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
         if (answer === "allow_chat") {
@@ -99,12 +125,31 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
       }).pipe(transaction(sql, "AnswerToolApproval")),
     SettleToolApproval: ({ userId, rolloutId, toolCallId, status }) =>
       Effect.gen(function* () {
-        yield* ownedRollout(sql, userId, rolloutId)
-        yield* status === "used"
+        const run = yield* ownedRollout(sql, userId, rolloutId)
+        if (status === "used" && run.status !== "running") return false
+        if (status === "used") {
+          const [approval] = yield* sql<{ capability: string }>`SELECT capability FROM tool_approvals
+            WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
+          const grants = yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
+            FROM workshop_grants WHERE chat_id = ${run.chat_id} AND owner_user_id = ${userId} AND target = ''
+              AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+          if (
+            !approval ||
+            resolveMode(
+              { workshopCapabilities, capabilityDefaults },
+              new Map(grants.map((g) => [g.capability, g.mode])),
+              approval.capability,
+              "outside"
+            ) === "off"
+          )
+            return false
+        }
+        const rows = yield* status === "used"
           ? sql`UPDATE tool_approvals SET status = 'used'
-              WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId} AND status = 'allowed'`
+              WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId} AND status = 'allowed' RETURNING tool_call_id`
           : sql`UPDATE tool_approvals SET status = 'cancelled'
-              WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId} AND status = 'pending'`
+              WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId} AND status = 'pending' RETURNING tool_call_id`
+        return rows.length === 1
       }).pipe(transaction(sql, "SettleToolApproval"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
 })

@@ -11,7 +11,13 @@ import { guardReply, replyGuards, type ReplyGuardRequest } from "../src/features
 import { chatKindLooks } from "../src/features/chat/kindLooks.ts"
 import { openTarget, outstanding, undoable, undoHint } from "../src/features/workshop/effects.ts"
 import { workshopLook } from "../src/features/workshop/kinds.ts"
-import { askBeforeReply, keptCalls, mayWarn, warningText } from "../src/features/workshop/regenerateWarning.ts"
+import {
+  askBeforeReply,
+  keptCalls,
+  mayWarn,
+  warningEffects,
+  warningText
+} from "../src/features/workshop/regenerateWarning.ts"
 
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
@@ -75,6 +81,18 @@ describe("a workshop change", () => {
 })
 
 describe("the regenerate warning", () => {
+  it("blocks regeneration when effects or retained steps cannot be read", () => {
+    const failure = {
+      ok: false as const,
+      error: { tag: "ServerError", message: "Unavailable", problems: [], reason: null },
+      cause: null
+    }
+    const effects = { ok: true as const, value: [effect({})] }
+    const steps = { ok: true as const, value: [tool("done")] }
+    expect(warningEffects(request(), failure, steps)).toBe(failure)
+    expect(warningEffects(request(), effects, failure)).toBe(failure)
+    expect(warningEffects(request(), effects, steps)).toEqual({ ok: true, value: [] })
+  })
   it("is only for a reply that made tool calls, in a kind with changes", () => {
     const close = chatKindLooks.register(workshopLook)
     try {

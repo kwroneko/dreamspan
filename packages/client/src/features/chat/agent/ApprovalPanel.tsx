@@ -10,6 +10,7 @@ import { Button } from "../../../ui/Button.tsx"
 import { Field, Textarea } from "../../../ui/Field.tsx"
 import { RevisionDiff } from "../../../ui/RevisionDiff.tsx"
 import { Alert } from "../../../ui/Surface.tsx"
+import { Tooltip } from "../../../ui/Tooltip.tsx"
 import type { StepActionProps } from "./stepActions.ts"
 
 /** What the app shows when it stopped while the call may have been running. */
@@ -57,8 +58,21 @@ export function ApprovalPanel({ step }: StepActionProps) {
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs" aria-label="What it will write">
           {approval.rows.map((row) => (
             <div key={row.label} className="contents">
-              <dt className="text-muted">{row.label}</dt>
-              <dd className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{row.value}</dd>
+              <dt className="max-w-28 text-muted [overflow-wrap:anywhere]">{row.label}</dt>
+              <dd className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                {row.value.length <= 4000 ? (
+                  row.value
+                ) : (
+                  <details>
+                    <Tooltip label="Opens the full text the assistant will use for this field.">
+                      <summary className="cursor-pointer">
+                        {row.value.slice(0, 240)}… (cut short; show all {row.value.length.toLocaleString()} characters)
+                      </summary>
+                    </Tooltip>
+                    <div className="mt-1 max-h-60 overflow-y-auto">{row.value}</div>
+                  </details>
+                )}
+              </dd>
             </div>
           ))}
         </dl>

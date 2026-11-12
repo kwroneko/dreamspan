@@ -8,7 +8,7 @@ import { internal } from "./internal.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { capabilityView } from "../agent/capabilities.ts"
-import { deliverAnswer } from "../agent/approvals.ts"
+import { cancelCapability, deliverAnswer } from "../agent/approvals.ts"
 
 export const makeWorkshopHandlers = Effect.gen(function* () {
   const writer = yield* Writer
@@ -54,6 +54,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         if (mode !== null && !offered.modes.includes(mode))
           return yield* new GrantRefused({ message: `“${offered.label}” can't be set that way.` })
         yield* writer.SetWorkshopGrant({ userId, chatId, capability, mode })
+        if (mode === "off") cancelCapability(chatId, capability)
         return yield* capabilitiesOf(userId, chatId)
       }).pipe(internal("SetWorkshopGrant")),
     AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note }) =>

@@ -4,7 +4,6 @@
 // its default. Plugins add, replace or disable entries in either registry.
 import type { CapabilityMode, WorkshopCapability } from "@rp/shared/workshopApi.ts"
 import { makeRegistry } from "@rp/shared/registry.ts"
-import { rolloutEffectClasses } from "./effects.ts"
 
 export interface CapabilityEntry {
   readonly id: string
@@ -118,13 +117,6 @@ export interface CapabilityRegistries {
   readonly capabilityDefaults: typeof capabilityDefaults
 }
 
-/** A tool's effect class's own default, for a tool without a registered capability. */
-const classDefault = (effect: string): CapabilityMode => {
-  const mode = rolloutEffectClasses.get(effect)?.defaultMode
-  // Unknown classes ask: nothing unclassified runs unseen.
-  return mode === "allow" || mode === "ask" || mode === "off" ? mode : "ask"
-}
-
 /**
  * How a call of this capability and effect stands, given the workshop's grants. A choice the
  * capability doesn't offer falls back to its nearest stricter one.
@@ -133,15 +125,16 @@ export const resolveMode = (
   registries: CapabilityRegistries,
   grants: ReadonlyMap<string, CapabilityMode>,
   capability: string | undefined,
-  effect: string
+  _effect: string
 ): CapabilityMode => {
   const entry = capability === undefined ? undefined : registries.workshopCapabilities.get(capability)
-  if (!entry || capability === undefined) return classDefault(effect)
+  if (!entry || capability === undefined) return "off"
   const modes = entry.modes ?? ALL_MODES
-  const wanted = grants.get(capability) ?? registries.capabilityDefaults.get(capability)?.mode ?? classDefault(effect)
+  if (!grants.has(capability) && !registries.capabilityDefaults.get(capability)) return "off"
+  const wanted = grants.get(capability) ?? registries.capabilityDefaults.get(capability)?.mode ?? "off"
   if (modes.includes(wanted)) return wanted
   const stricter: ReadonlyArray<CapabilityMode> = wanted === "allow" ? ["ask", "off"] : ["off"]
-  return stricter.find((mode) => modes.includes(mode)) ?? modes[0]!
+  return stricter.find((mode) => modes.includes(mode)) ?? "off"
 }
 
 /** A capability as the chip shows it in one workshop. */

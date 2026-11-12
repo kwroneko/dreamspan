@@ -6,6 +6,7 @@ import { newCardDoc } from "@rp/shared/editing.ts"
 import { Effect, Schema } from "effect"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { ModelId } from "@rp/shared/providers.ts"
+import type { LibraryRef } from "@rp/shared/library.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 import { resolveLibrary } from "./library.ts"
 import { workshopLimits as limits } from "../../workshopLimits.ts"
@@ -32,7 +33,22 @@ const receiptFirst = <A>(tool: RolloutTool<A>): RolloutTool<A> => ({
       )
     )
 })
-const key = (ctx: ToolContext) => ({ userId: ctx.userId, rolloutId: ctx.rolloutId, toolCallId: ctx.toolCallId })
+const targetKey = (ctx: ToolContext) => `approval:targets:${ctx.toolCallId}`
+const targets = (ctx: ToolContext) => ctx.cache.get(targetKey(ctx)) as Map<string, LibraryRef> | undefined
+const remember = (ctx: ToolContext, kind: string, name: string, ref: LibraryRef) => {
+  const refs = targets(ctx) ?? new Map<string, LibraryRef>()
+  refs.set(`${kind}:${name}`, ref)
+  ctx.cache.set(targetKey(ctx), refs)
+}
+const key = (ctx: ToolContext) => ({
+  userId: ctx.userId,
+  rolloutId: ctx.rolloutId,
+  toolCallId: ctx.toolCallId,
+  ...(ctx.approvalDigest ? { approvalDigest: ctx.approvalDigest } : {}),
+  ...(targets(ctx)
+    ? { expectedRefs: [...targets(ctx)!.values()].map((ref) => ({ refId: ref.id, rowVersion: ref.rowVersion })) }
+    : {})
+})
 const safely = <E>(body: Effect.Effect<ToolOutput, E>) =>
   body.pipe(
     Effect.catch((error) => {
@@ -49,9 +65,13 @@ const safely = <E>(body: Effect.Effect<ToolOutput, E>) =>
     })
   )
 const findRef = (ctx: ToolContext, kind: "card" | "preset", name: string) =>
-  resolveLibrary(ctx, kind, name).pipe(
-    Effect.flatMap((found) => ("error" in found ? Effect.fail({ message: found.error }) : Effect.succeed(found.ref)))
-  )
+  targets(ctx)?.has(`${kind}:${name}`)
+    ? Effect.succeed(targets(ctx)!.get(`${kind}:${name}`)!)
+    : resolveLibrary(ctx, kind, name).pipe(
+        Effect.flatMap((found) =>
+          "error" in found ? Effect.fail({ message: found.error }) : Effect.succeed(found.ref)
+        )
+      )
 /** A value as the approval shows it: the text as given, a list one item a line. */
 const shown = (value: unknown) =>
   typeof value === "string" ? value : Array.isArray(value) ? value.map(String).join("\n") : JSON.stringify(value)
@@ -63,8 +83,14 @@ const rowsOf = (args: object, skip: ReadonlyArray<string> = []) =>
 /** A name as the library has it, or the name asked for when nothing matches. */
 const realName = (ctx: ToolContext, kind: "card" | "preset", name: string) =>
   resolveLibrary(ctx, kind, name).pipe(
-    Effect.map((found) => ("error" in found ? `${name} (not in your library)` : found.ref.label)),
-    Effect.orElseSucceed(() => name)
+    Effect.flatMap((found) =>
+      "error" in found
+        ? Effect.fail(new Error(found.error))
+        : Effect.sync(() => {
+            remember(ctx, kind, name, found.ref)
+            return found.ref.label
+          })
+    )
   )
 const text = Type.String({ maxLength: limits.textChars })
 const name = Type.String({ minLength: 1, maxLength: limits.nameChars })
@@ -207,9 +233,10 @@ const editCard: RolloutTool<{
   describe: (ctx, args) =>
     Effect.gen(function* () {
       const found = yield* resolveLibrary(ctx, "card", args.card)
-      if ("error" in found)
-        return { title: `Edit the card “${args.card}”`, rows: [{ label: "card", value: found.error }] }
+      if ("error" in found) return yield* Effect.fail(new Error(found.error))
+      remember(ctx, "card", args.card, found.ref)
       const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: found.ref.id })
+      ctx.cache.set(`approval:edit:${ctx.toolCallId}`, saved)
       const result = changed(saved.doc, args.changes)
       const title = `Edit the card “${found.ref.label}”`
       if ("error" in result) return { title, rows: [{ label: "changes", value: result.error }] }
@@ -222,7 +249,10 @@ const editCard: RolloutTool<{
     safely(
       Effect.gen(function* () {
         const ref = yield* findRef(ctx, "card", args.card)
-        const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id })
+        const saved =
+          (ctx.cache.get(`approval:edit:${ctx.toolCallId}`) as
+            Effect.Success<ReturnType<ToolContext["reader"]["OpenEditor"]>> | undefined) ??
+          (yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id }))
         const result = changed(saved.doc, args.changes)
         if ("error" in result) return { text: result.error, isError: true }
         const doc = result.doc

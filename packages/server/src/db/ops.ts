@@ -1806,6 +1806,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       kind: EntityKind,
       label: LibraryLabel,
       doc: Doc,
@@ -1819,6 +1821,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       refId: RefId,
       expectedRowVersion: Schema.Int,
       doc: Doc
@@ -1831,6 +1835,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       refId: RefId,
       name: Schema.String.check(Schema.isMinLength(1)),
       nickname: Schema.String,
@@ -1855,6 +1861,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       cards: StartChatFields.cards,
       persona: StartChatFields.persona,
       greeters: StartChatFields.greeters,
@@ -1889,7 +1897,7 @@ export class WriteOps extends RpcGroup.make(
       prompt: ApprovalPrompt
     },
     success: Schema.Void,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, ApprovalRefused, StorageError])
   }),
   /**
    * The user's answer, only for a pending approval of that exact call (rollout, id, digest) in
@@ -1915,7 +1923,7 @@ export class WriteOps extends RpcGroup.make(
       toolCallId: Schema.String,
       status: Schema.Literals(["cancelled", "used"])
     },
-    success: Schema.Void,
+    success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("CreateWorkshop", {

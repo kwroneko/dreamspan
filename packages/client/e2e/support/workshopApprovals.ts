@@ -21,6 +21,8 @@ import { startWorkshopProvider, WORKSHOP_ANSWER, WORKSHOP_FIRST } from "./worksh
 
 const shots = process.env.SCREENSHOT_DIR
 const CREATED = "Created the card Mara Quill"
+const DESCRIPTION =
+  "A synthetic lighthouse keeper. " + "x".repeat(4100) + " <script>hostile_tail()</script> FULL_ARGUMENT_END"
 
 export function workshopApprovalTests() {
   test.describe("workshop approvals", () => {
@@ -34,7 +36,7 @@ export function workshopApprovalTests() {
         perTask: true,
         calls: [
           { name: "send_message", arguments: { message: WORKSHOP_FIRST } },
-          { name: "create_card", arguments: { name: "Mara Quill", description: "A synthetic lighthouse keeper." } }
+          { name: "create_card", arguments: { name: "Mara Quill", description: DESCRIPTION } }
         ]
       })
       await admin((api) =>
@@ -123,6 +125,12 @@ export function workshopApprovalTests() {
           await expect(asked).toContainText("Create the card “Mara Quill”")
           await expect(asked).toContainText("Asks first: Create and edit library items")
           await expect(asked).toContainText("A synthetic lighthouse keeper.")
+          await expect(asked.locator("summary")).toContainText("cut short; show all")
+          await expect(asked.getByText(DESCRIPTION, { exact: true })).toBeHidden()
+          await asked.locator("summary").click()
+          await expect(asked.getByText(DESCRIPTION, { exact: true })).toBeVisible()
+          await expect(asked.locator("script")).toHaveCount(0)
+          await asked.locator("summary").click()
           await expect(first.locator('[data-step-status="waiting"]')).toHaveCount(1)
           await expect(first.locator("[data-steps-badge]")).toHaveText("Waiting for you")
           await expect(asked.getByRole("button", { name: "Allow", exact: true })).toHaveAccessibleDescription(

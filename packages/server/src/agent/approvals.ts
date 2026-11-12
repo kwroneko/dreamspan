@@ -4,8 +4,8 @@
 // digest) and waits, holding no provider request, until the user answers through
 // `AnswerToolApproval`, Stop cancels the wait, or the process ends. A run the process ended is
 // parked as interrupted, and the built Resume runs the call through here again: its approval row
-// says whether it can have run, so a call that was only waiting asks again plainly, and one that
-// may have started asks with a warning.
+// supplies uncertainty only; consent never transfers to a new run. Resume describes the
+// current targets again, and a call that may have started asks with a warning.
 import { createHash } from "node:crypto"
 import type { ApprovalPrompt } from "@rp/shared/agent.ts"
 import type { ApprovalAnswer, CapabilityMode } from "@rp/shared/workshopApi.ts"
@@ -39,7 +39,11 @@ const offText = (label: string) =>
   `“${label}” is turned off in this workshop, so this wasn't done. Don't try it again unless the user turns it on.`
 
 /** Waiting calls by `<rollout>:<call>`. A rollout id is unique, so one map serves every server. */
-const waiters = new Map<string, (answer: { readonly answer: ApprovalAnswer; readonly note: string | null }) => void>()
+type Answer = { readonly answer: ApprovalAnswer; readonly note: string | null; readonly revoked?: boolean }
+const waiters = new Map<
+  string,
+  { readonly chatId: string; readonly capability: string; readonly settle: (answer: Answer) => void }
+>()
 const keyOf = (rolloutId: string, toolCallId: string) => `${rolloutId}:${toolCallId}`
 
 /** Hands an answer the server stored to the call waiting for it; false when none waits here. */
@@ -47,23 +51,30 @@ export const deliverAnswer = (rolloutId: string, toolCallId: string, answer: App
   const waiter = waiters.get(keyOf(rolloutId, toolCallId))
   if (!waiter) return false
   waiters.delete(keyOf(rolloutId, toolCallId))
-  waiter({ answer, note })
+  waiter.settle({ answer, note })
   return true
 }
 
-const clip = (text: string, max = 4000) =>
-  text.length <= max ? text : `${text.slice(0, max)}… (${(text.length - max).toLocaleString("en")} more characters)`
+/** Off also ends current waits, including one displayed in another tab. */
+export const cancelCapability = (chatId: string, capability: string) => {
+  for (const [key, waiter] of waiters) {
+    if (waiter.chatId !== chatId || waiter.capability !== capability) continue
+    waiters.delete(key)
+    waiter.settle({ answer: "deny", note: null, revoked: true })
+  }
+}
 
 /** The arguments as they are, one row a field: the description of a tool that has none of its own. */
 const argumentRows = (args: unknown) =>
   args !== null && typeof args === "object" && !Array.isArray(args)
     ? Object.entries(args as Record<string, unknown>).map(([label, value]) => ({
         label,
-        value: clip(typeof value === "string" ? value : JSON.stringify(value, null, 2))
+        value: typeof value === "string" ? value : JSON.stringify(value, null, 2)
       }))
-    : [{ label: "arguments", value: clip(JSON.stringify(args)) }]
+    : [{ label: "arguments", value: JSON.stringify(args) }]
 
-export type PermitResult = { readonly run: true } | { readonly run: false; readonly text: string }
+export type PermitResult =
+  { readonly run: true; readonly approvalDigest?: string } | { readonly run: false; readonly text: string }
 
 export interface PermitInput {
   readonly tool: RolloutTool<never>
@@ -103,34 +114,27 @@ export const makePermit =
       const capability = tool.capability ?? `effect:${tool.effect}`
       const capabilityLabel = registries.workshopCapabilities.get(tool.capability ?? "")?.label ?? tool.label
       if (mode === "off") return { run: false, text: offText(capabilityLabel) } as const
-      const digest = argsDigest(args)
+      const digest = argsDigest({ tool: tool.id, capability, args })
       const toolCallId = context.toolCallId
       let uncertain = false
       if (dangling && !IN_REPLY.has(tool.effect)) {
         const prior = yield* reader.ToolApprovalFor({ userId: userId as never, rolloutId, toolCallId, digest })
-        if (prior?.status === "allowed") {
-          // Answered while the run was parked, and never started.
-          yield* writer.SettleToolApproval({
-            userId: userId as never,
-            rolloutId: prior.rolloutId,
-            toolCallId,
-            status: "used"
-          })
-          return { run: true } as const
-        }
-        if (prior?.status === "denied")
-          return { run: false, text: prior.note ? `${DECLINED} Their note: ${prior.note}` : DECLINED } as const
         // Only waiting before: it never ran. Otherwise it may have.
         uncertain = prior?.status !== "pending" && prior?.status !== "cancelled"
       } else if (mode === "allow") return { run: true } as const
       if (mode === "allow" && !uncertain) return { run: true } as const
 
-      // A description that can't be worked out (a malformed call, a missing card) falls back to the arguments.
+      // A missing target cannot become a different target after the user approves.
       const described = tool.describe
         ? yield* Effect.suspend(() => tool.describe!(context, args as never)).pipe(
             Effect.catchCause(() => Effect.succeed(undefined))
           )
         : undefined
+      if (tool.describe && !described)
+        return {
+          run: false,
+          text: "This change couldn't be described safely. Read the item again before trying."
+        } as const
       const prompt: ApprovalPrompt = {
         rolloutId,
         toolCallId,
@@ -143,9 +147,14 @@ export const makePermit =
         uncertain
       }
       const key = keyOf(rolloutId, toolCallId)
+      if (waiters.has(key)) return { run: false, text: "This call is already waiting. Use a new call." } as const
       // Waiting before the row exists, so an answer can't arrive with no one to hand it to.
-      const deferred = Deferred.makeUnsafe<{ readonly answer: ApprovalAnswer; readonly note: string | null }>()
-      waiters.set(key, (answer) => Deferred.doneUnsafe(deferred, Effect.succeed(answer)))
+      const deferred = Deferred.makeUnsafe<Answer>()
+      waiters.set(key, {
+        chatId: deps.chatId,
+        capability,
+        settle: (answer) => Deferred.doneUnsafe(deferred, Effect.succeed(answer))
+      })
       const answered = yield* writer
         .RequestToolApproval({ userId: userId as never, rolloutId, toolCallId, digest, capability, prompt })
         .pipe(
@@ -158,12 +167,27 @@ export const makePermit =
           ),
           Effect.ensuring(Effect.sync(() => (waiters.delete(key), onWaiting(null))))
         )
+      if (answered.revoked) return { run: false, text: offText(capabilityLabel) } as const
       if (answered.answer === "deny")
         return { run: false, text: answered.note ? `${DECLINED} Their note: ${answered.note}` : DECLINED } as const
-      yield* writer.SettleToolApproval({ userId: userId as never, rolloutId, toolCallId, status: "used" })
-      return { run: true } as const
+      const grantsNow = new Map<string, CapabilityMode>(
+        (yield* reader.WorkshopGrants({ userId: userId as never, chatId: deps.chatId as never, now: Date.now() })).map(
+          (g) => [g.capability, g.mode]
+        )
+      )
+      if (resolveMode(registries, grantsNow, tool.capability, tool.effect) === "off")
+        return { run: false, text: offText(capabilityLabel) } as const
+      const consumed = yield* writer.SettleToolApproval({
+        userId: userId as never,
+        rolloutId,
+        toolCallId,
+        status: "used"
+      })
+      return consumed
+        ? ({ run: true, approvalDigest: digest } as const)
+        : ({ run: false, text: "This approval is no longer current. Ask again." } as const)
     }).pipe(
-      Effect.catchTag(["NotFound", "StorageError", "RpcClientError"], () =>
+      Effect.catchTag(["NotFound", "StorageError", "RpcClientError", "ApprovalRefused"], () =>
         Effect.succeed<PermitResult>({ run: false, text: "The app couldn't check whether this is allowed. Try again." })
       )
     )

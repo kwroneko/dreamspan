@@ -426,7 +426,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 .pipe(
                   Effect.flatMap((permit) =>
                     permit.run
-                      ? tool.execute(context(toolCallId), params as never)
+                      ? tool.execute(
+                          {
+                            ...context(toolCallId),
+                            ...(permit.approvalDigest ? { approvalDigest: permit.approvalDigest } : {})
+                          },
+                          params as never
+                        )
                       : Effect.succeed<ToolOutput>({ text: permit.text, isError: true })
                   )
                 )

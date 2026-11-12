@@ -91,6 +91,7 @@ const outside: RolloutTool<Record<string, never>> = {
   id: "outside_test",
   label: "Read a test source",
   effect: "external",
+  capability: "network",
   description: "A synthetic outside tool.",
   parameters: Type.Object({}),
   execute: () => Effect.succeed({ text: "Outside result." })
@@ -404,7 +405,7 @@ describe("workshop", () => {
       assert.strictEqual(ran, 0, "An unoffered outside call must be refused before a resumed version is created.")
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
-      // An outside tool without a capability asks first by its class's default.
+      // Its registered capability asks first; the class only marks it as outside the reply.
       const replying = yield* Effect.forkScoped(answer(api, chat, events))
       yield* eventually(() =>
         events.some((e) => e._tag === "Steps" && e.steps.some((s) => s.kind === "tool" && s.status === "waiting"))

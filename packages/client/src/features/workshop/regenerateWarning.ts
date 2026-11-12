@@ -8,6 +8,8 @@ import type { RolloutStep } from "@rp/shared/agent.ts"
 import type { ReplyGuardRequest } from "../chat/replyGuards.ts"
 import { kindShows } from "../chat/kindLooks.ts"
 import { CHANGES } from "./effects.ts"
+import { outstanding, type RolloutEffect } from "./effects.ts"
+import type { CallResult } from "../editor/caller.ts"
 
 export interface WarningRequest {
   readonly id: number
@@ -43,6 +45,20 @@ export const keptCalls = (steps: ReadonlyArray<RolloutStep>, request: ReplyGuard
       .slice(0, request.fromStep ? request.fromStep.index + (request.fromStep.keepsCall ? 1 : 0) : steps.length)
       .flatMap((step) => (step.kind === "tool" ? [step.id] : []))
   )
+
+/** A failed read cannot prove there were no changes, or which calls regeneration retains. */
+export const warningEffects = (
+  request: ReplyGuardRequest,
+  effects: CallResult<ReadonlyArray<RolloutEffect>>,
+  steps: CallResult<ReadonlyArray<RolloutStep>>
+): CallResult<ReadonlyArray<RolloutEffect>> => {
+  if (!effects.ok) return effects
+  const left = outstanding(effects.value)
+  if (left.length === 0) return { ok: true, value: [] }
+  if (!steps.ok) return steps
+  const kept = keptCalls(steps.value, request)
+  return { ok: true, value: left.filter((effect) => !kept.has(effect.toolCallId)) }
+}
 
 /** Whether a request can need the warning: a reply that made tool calls, in a kind with changes. */
 export const mayWarn = (request: ReplyGuardRequest) =>

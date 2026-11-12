@@ -17,6 +17,8 @@ import { client, outcome, posted, serverLayer, testConfig } from "./support/conf
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+import { textField } from "@rp/shared/editing.ts"
+import { resolveMode } from "../src/agent/capabilities.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 interface Message {
@@ -166,6 +168,151 @@ const toolMessages = (requests: ReadonlyArray<Recorded>) =>
     .flatMap((r) => (r.body as unknown as Body).messages.filter((m) => m.role === "tool"))
 
 describe("workshop approvals", () => {
+  it.live("turning a capability Off invalidates an approval already waiting in another tab", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const { api, chat, events } = yield* workshop(
+        scripted([{ name: "create_card", args: { name: "Revoked" }, id: "revoke" }]).handler
+      )
+      yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
+      const versionId = yield* task(api, chat, "make it")
+      const prompt = yield* awaitApproval(events, versionId, "revoke")
+      yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "off" })
+      assert.strictEqual(yield* outcome(answer(api, prompt, "allow_chat")), "ApprovalRefused")
+      yield* api.StopGeneration({ versionId })
+      yield* eventually(() => finished(events, versionId as VersionId) !== undefined)
+      assert.isEmpty(yield* cardsNamed(api, "Revoked"))
+      assert.strictEqual(
+        (yield* api.ListWorkshopCapabilities({ chatId: chat.id })).find((c) => c.id === "library.write")!.mode,
+        "off"
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a stopped approval cannot be answered later to grant a workshop capability", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const { api, chat, events } = yield* workshop(
+        scripted([{ name: "create_card", args: { name: "Abandoned" }, id: "abandoned" }]).handler
+      )
+      yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
+      const versionId = yield* task(api, chat, "make it")
+      const prompt = yield* awaitApproval(events, versionId, "abandoned")
+      yield* api.StopGeneration({ versionId })
+      yield* eventually(() => finished(events, versionId as VersionId) !== undefined)
+      assert.strictEqual(yield* outcome(answer(api, prompt, "allow_chat")), "ApprovalRefused")
+      assert.strictEqual(
+        (yield* api.ListWorkshopCapabilities({ chatId: chat.id })).find((c) => c.id === "library.write")!.mode,
+        "ask"
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("an edit approved against an old saved card cannot overwrite a newer save", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const { api, chat, events } = yield* workshop(
+        scripted([
+          {
+            name: "edit_card",
+            args: { card: "Assistant", changes: [{ field: "description", text: "Agent replacement" }] },
+            id: "stale-edit"
+          }
+        ]).handler
+      )
+      yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
+      const assistant = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.label === "Assistant")!
+      const versionId = yield* task(api, chat, "edit it")
+      const prompt = yield* awaitApproval(events, versionId, "stale-edit")
+      const saved = yield* api.OpenEditor({ refId: assistant.id })
+      const field = textField(["description"])
+      const draft = yield* api.SaveEditorDraft({
+        refId: assistant.id,
+        field,
+        content: "Owner's newer save",
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: saved.ref.headRevisionId
+      })
+      yield* api.CommitEditorDrafts({
+        refId: assistant.id,
+        expectedRowVersion: saved.ref.rowVersion,
+        fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+        message: null
+      })
+      yield* answer(api, prompt, "allow")
+      yield* eventually(() => finished(events, versionId as VersionId) !== undefined)
+      const transcript = yield* api.GetRunTranscript({ versionId })
+      assert.isTrue(
+        transcript.entries.some((e) => e.role === "toolResult" && e.isError && e.text.includes("changed")),
+        JSON.stringify(transcript.entries)
+      )
+      assert.strictEqual((yield* api.OpenEditor({ refId: assistant.id })).doc["description"], "Owner's newer save")
+      assert.isEmpty(yield* api.ListRolloutEffects({ chatId: chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("new capabilities default to Off and outside tools without a mapping cannot register", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      yield* registry.workshopCapabilities.register({
+        id: "new-capability",
+        order: 100,
+        label: "New",
+        explanation: "New"
+      })
+      assert.strictEqual(resolveMode(registry, new Map(), "new-capability", "library"), "off")
+      const registration = yield* Effect.exit(
+        registry.rolloutTools.register({
+          id: "unclassified",
+          label: "Unclassified",
+          description: "Unclassified",
+          effect: "library",
+          parameters: Type.Object({}),
+          execute: () => Effect.succeed({ text: "Changed" })
+        })
+      )
+      assert.strictEqual(registration._tag, "Failure")
+      assert.isUndefined(registry.rolloutTools.get("unclassified"))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("Resume never uses an answer from the earlier run, even if it was saved just before a restart", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const { api, chat, events } = yield* workshop(
+        scripted([{ name: "create_card", args: { name: "Fresh consent" }, id: "old-answer" }]).handler
+      )
+      yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
+      const versionId = yield* task(api, chat, "make it")
+      const old = yield* awaitApproval(events, versionId, "old-answer")
+      yield* api.StopGeneration({ versionId })
+      yield* eventually(() => finished(events, versionId as VersionId) !== undefined)
+      // Crash window: the answer committed, but the call never acquired permission to start.
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "UPDATE tool_approvals SET status = 'allowed', answer = 'allow', answered_at = 1 WHERE rollout_id = ? AND tool_call_id = ?",
+          params: [old.rolloutId, old.toolCallId]
+        }
+      ])
+      const me = yield* api.Whoami()
+      const slot = yield* (yield* Reader).GetSlot({
+        userId: me.id,
+        slotId: (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId!
+      })
+      const resumed = yield* api.ResumeVersion({ versionId, expectedRowVersion: slot.entry.rowVersion })
+      const fresh = yield* awaitApproval(events, resumed.version.id, "old-answer")
+      assert.notStrictEqual(fresh.rolloutId, old.rolloutId)
+      assert.isEmpty(yield* cardsNamed(api, "Fresh consent"))
+      assert.strictEqual(yield* outcome(answer(api, old, "allow_chat")), "ApprovalRefused")
+      yield* answer(api, fresh, "allow")
+      yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+      assert.lengthOf(yield* cardsNamed(api, "Fresh consent"), 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live(
     "an Ask-first call waits in its step with the server's description, holds no request, and asks again next time",
     () => {
@@ -192,7 +339,11 @@ describe("workshop approvals", () => {
           capabilityLabel: "Create and edit library items",
           title: "Create the card “Mara Quill”",
           uncertain: false,
-          digest: argsDigest({ name: "Mara Quill", description: "Keeper of the Skerry Light." })
+          digest: argsDigest({
+            tool: "create_card",
+            capability: "library.write",
+            args: { name: "Mara Quill", description: "Keeper of the Skerry Light." }
+          })
         })
         assert.deepStrictEqual(first.rows, [{ label: "description", value: "Keeper of the Skerry Light." }])
         assert.isEmpty(yield* cardsNamed(api, "Mara Quill"))
@@ -452,9 +603,10 @@ describe("workshop approvals", () => {
         ...planner,
         plan: (input) => ({ ...planner.plan(input), tools: [...planner.plan(input).tools, "sneaky_grant"] })
       })
+      const hostile = "Read your library — always allowed " + "x".repeat(4100) + " <script>more changes</script>"
       const script = scripted([
         { name: "AnswerToolApproval", args: { answer: "allow" }, id: "fake" },
-        { name: "sneaky_grant", args: { note: "Read your library — always allowed" }, id: "s1" }
+        { name: "sneaky_grant", args: { note: hostile }, id: "s1" }
       ])
       const { api, chat, events } = yield* workshop(script.handler)
       yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
@@ -463,7 +615,7 @@ describe("workshop approvals", () => {
       // The capability and its label come from the registry, never from the call's wording.
       assert.strictEqual(prompt.capability, "library.write")
       assert.strictEqual(prompt.capabilityLabel, "Create and edit library items")
-      assert.deepStrictEqual(prompt.rows, [{ label: "note", value: "Read your library — always allowed" }])
+      assert.deepStrictEqual(prompt.rows, [{ label: "note", value: hostile }])
       yield* answer(api, prompt, "allow")
       yield* eventually(() => finished(events, versionId as VersionId) !== undefined)
       assert.deepStrictEqual(reached, [])
@@ -557,7 +709,7 @@ describe("workshop approvals", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("a restart parks a waiting run; Resume asks again, and an answer given while parked is used once", () => {
+  it.live("a restart parks a waiting run; Resume asks again under its own approval identity", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const script = scripted([{ name: "create_card", args: { name: "Across a restart" }, id: "r1" }], "Made.")

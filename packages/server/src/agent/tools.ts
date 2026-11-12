@@ -32,6 +32,8 @@ export interface ToolContext {
   readonly writer: ToolWriter
   /** Values a tool works out once per rollout (the path, the summaries), by key. */
   readonly cache: Map<string, unknown>
+  /** A one-call approval, checked again in the change's transaction. */
+  readonly approvalDigest?: string
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */
