@@ -554,6 +554,13 @@ export class StImports extends Context.Service<
             yield* writer.SetEntityTags({ userId: user.id, entityId: imported.entity.entityId, tags: ["persona"] })
           }
           session.personas.set(file, imported.entity.entityId)
+          if (session.settings?.defaultPersona === file) {
+            yield* writer.StImportDefaultPersona({
+              userId: user.id,
+              importId: session.id,
+              entityId: imported.entity.entityId
+            })
+          }
           // Where the author's note was: switched off in chats whose author's note ST disabled.
           if (riding && imported.note !== null) session.personaNotes.set(imported.entity.entityId, imported.note)
           if (persona !== null && persona.position === 9) {

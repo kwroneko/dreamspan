@@ -17,7 +17,8 @@ import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { Effect, Schedule, Stream } from "effect"
 import { applyShellCards, applyShellForks } from "@rp/shared/shellUpdates.ts"
-import { createContext, type ReactNode, useContext, useState } from "react"
+import { createContext, type DragEvent, type ReactNode, useContext, useState } from "react"
+import { CARD_DRAG, carryOnDrag } from "../../ui/appDrags.ts"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -440,12 +441,17 @@ function CharacterTile({
       </span>
     </TileFace>
   )
+  // Dropped on a frame, the card's full-size editor opens there (owner, 2026-11-07): the
+  // picker's own editor, bound to its chat; a click still does what it does.
+  const editor = pick?.href?.(card) ?? `/library/${encodeURIComponent(c.refId)}`
+  const onDragStart = (event: DragEvent) => carryOnDrag(event.dataTransfer, CARD_DRAG.id, editor)
   const tileClass = `${pick?.onOpen ? TILE_OPEN_CLASS : TILE_CLASS} ${!pick?.onOpen && (state.done || state.pending) ? "cursor-default" : "hover:border-focus"}`
   const button = !pick ? (
     // A link to the chat it opens, so it opens in a new browser tab too.
     <Link
       {...characterLink(card)}
       onClick={openOnPlainClick(() => open(c.entityId))}
+      onDragStart={onDragStart}
       aria-label={`Open ${c.label}${marked ? " (persona)" : ""}`}
       className={tileClass}
     >
@@ -455,6 +461,7 @@ function CharacterTile({
     <a
       href={pick.href(card)}
       onClick={openOnPlainClick(() => pick.onOpen?.(card))}
+      onDragStart={onDragStart}
       aria-label={`Open ${c.label}${marked ? " (persona)" : ""}`}
       data-layout-audit-ignore="inset: The open area fills the tile above its joined footer"
       className={tileClass}
@@ -464,6 +471,9 @@ function CharacterTile({
   ) : (
     <button
       type="button"
+      // A phone has one frame; there a long press is the browser's own.
+      draggable={canBeside}
+      onDragStart={onDragStart}
       onClick={() => {
         if (pick.onOpen) return pick.onOpen(card)
         if (!state.done && !state.pending) pick.onPick(card)

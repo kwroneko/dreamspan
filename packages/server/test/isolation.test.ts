@@ -660,6 +660,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   PreviewStSettings: { global: "pure preview of the supplied file; no stored user data is read or changed" },
   ListExportFormats: { global: "the instance's worker exporter registry, with no user documents" },
   ListProviderKinds: { global: "the instance's provider registry, the same for every user" },
+  ListProviders: { global: "the instance's provider definitions, the same for every user" },
   GetCostSettings: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -886,6 +887,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           "NotFound"
         )
       )
+  },
+  RefreshModelEndpoints: {
+    probe: (actor, owner) =>
+      refused(actor.api.RefreshModelEndpoints({ modelId: owner.modelId }), "ProviderError:unusable")
   },
   SetModelHidden: {
     probe: (actor, owner) => refused(actor.api.SetModelHidden({ modelId: owner.modelId, hidden: true }), "NotFound")
@@ -2707,6 +2712,21 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   AdoptRemoteCard: {
     probe: (actor) => refused(actor.api.AdoptRemoteCard({ sourceId: "cardex", remoteId: "x" }), "NotFound")
   },
+  // A card source's origin of another user's card is never shown or changed (cardSources.test.ts
+  // checks it with a card added from the fake archive).
+  CardOrigin: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.CardOrigin({ entityId: owner.cardId }), (origin) => assert.isNull(origin))
+  },
+  CheckRemoteVersion: {
+    probe: (actor, owner) => refused(actor.api.CheckRemoteVersion({ entityId: owner.cardId }), "NotFound")
+  },
+  TakeRemoteVersion: {
+    probe: (actor, owner) => refused(actor.api.TakeRemoteVersion({ entityId: owner.cardId, version: "v" }), "NotFound")
+  },
+  AddRemoteVersionAsCard: {
+    probe: (actor, owner) => refused(actor.api.AddRemoteVersionAsCard({ entityId: owner.cardId }), "NotFound")
+  },
   ListRecentRemote: {
     probe: (actor) => Effect.map(actor.api.ListRecentRemote({ sourceId: "cardex" }), (list) => assert.lengthOf(list, 0))
   },
@@ -3944,6 +3964,19 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  StImportDefaultPersona: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportDefaultPersona({ userId: actor.user.id, importId, entityId: owner.cardId }),
+        "ImportLeaseLost"
+      )
+      const mine = yield* actor.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportDefaultPersona({ userId: actor.user.id, importId: mine.importId, entityId: owner.cardId }),
+        "NotFound"
+      )
+    }),
   StImportDefaultPreset: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })

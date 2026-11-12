@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
+import { prefillUnavailable } from "../src/assembler/prefill.ts"
 
 const mockProvider = (badPrefix = false) =>
   Effect.acquireRelease(
@@ -175,7 +176,24 @@ describe("R4-C review acceptance regressions", () => {
       assert.strictEqual(versions[0]!.content, version.content)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
-  it.live("continues on DeepSeek without its beta endpoint through the nudge, and says why", () => {
+  it("holds only DeepSeek's own host to its /beta address for a prefill", () => {
+    const deepseek = {
+      kind: "deepseek",
+      api: "openai-completions",
+      key: "deepseek-flash",
+      prefill: "assistant"
+    } as const
+    // Without /beta on DeepSeek's host (or no address, which is that host), Continue goes
+    // without a prefill and says why (owner, 2026-10-31).
+    assert.include(prefillUnavailable(deepseek, null) ?? "", "/beta endpoint")
+    assert.include(prefillUnavailable(deepseek, "https://api.deepseek.com") ?? "", "/beta endpoint")
+    assert.include(prefillUnavailable(deepseek, "https://api.deepseek.com/v1") ?? "", "/beta endpoint")
+    assert.isUndefined(prefillUnavailable(deepseek, "https://api.deepseek.com/beta"))
+    // Another host in front of DeepSeek decides where a prefix goes itself.
+    assert.isUndefined(prefillUnavailable(deepseek, "https://router.example/deepseek/v1"))
+  })
+
+  it.live("sends DeepSeek's prefix on another host's own address", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* mockProvider()
@@ -185,30 +203,23 @@ describe("R4-C review acceptance regressions", () => {
         model: { prefill: "assistant" }
       })
       const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
-      assert.include(next.model?.continueUnavailable ?? "", "/beta endpoint")
+      assert.isUndefined(next.model?.continueUnavailable)
       const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
       const continued = yield* api.ContinueVersion({
         versionId: version.id,
         expectedRowVersion: path.entries.at(-1)!.rowVersion
       })
       yield* eventually(() => finished(events, continued.version.id) !== undefined)
-      // No prefill reached the endpoint (owner, 2026-10-31): the reply went as the model's own
-      // message, the continue nudge after it, and the inspector says why.
       assert.strictEqual(finished(events, continued.version.id)!.status, "complete")
-      assert.strictEqual(
-        finished(events, continued.version.id)!.content,
-        "The ledger says otherwise. The ledger says otherwise."
-      )
-      const last = (mock.requests().at(-1)!.body as { messages: Array<{ role: string; content: string }> }).messages
+      const request = mock.requests().at(-1)!
+      assert.match(request.path, /\/v1\/chat\/completions$/)
+      const last = (request.body as { messages: Array<{ role: string; content: string; prefix?: boolean }> }).messages
       assert.deepStrictEqual(
-        last.slice(-2).map((m) => [m.role, m.content, "prefix" in m]),
-        [
-          ["assistant", "The ledger says otherwise.", false],
-          ["user", "[Continue your last message without repeating its original content.]", false]
-        ]
+        [last.at(-1)!.role, last.at(-1)!.content, last.at(-1)!.prefix],
+        ["assistant", "The ledger says otherwise.", true]
       )
       const run = yield* api.GetRunContext({ versionId: continued.version.id })
-      assert.isTrue(run.issues.some((issue) => issue.message.includes("/beta endpoint")))
+      assert.isFalse(run.issues.some((issue) => issue.message.includes("/beta endpoint")))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
   it.live("rejects a schema provider that changes the required prefix without corrupting the source", () => {

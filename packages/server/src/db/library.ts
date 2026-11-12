@@ -49,6 +49,8 @@ export interface RefRow {
   readonly last_used_at: number | null
   /** What it merges from: its latest import, else its live parent's head. */
   readonly followed_head: string | null
+  /** A card from a card source whose source reported a newer version (1), else 0 or null. */
+  readonly source_update?: number | null
   /** The parent's label when the parent is what it merges from; null for an import line. */
   readonly followed_label: string | null
   readonly card_nickname: unknown
@@ -79,10 +81,12 @@ export const toLibraryRef = (row: RefRow) =>
     hasImport: row.import_head !== null,
     // The library's "update available": a card fork's parent's new revisions show only in its
     // editor's merge notice (card forks for a chat are many); a preset's or lorebook's here too.
+    // A card added from a card source also has one when the source has a newer version (§11.5).
     updateAvailable:
-      (row.kind !== "card" || row.parent_ref_id === null) &&
-      row.followed_head !== null &&
-      row.followed_head !== row.merge_base_revision_id,
+      row.source_update === 1 ||
+      ((row.kind !== "card" || row.parent_ref_id === null) &&
+        row.followed_head !== null &&
+        row.followed_head !== row.merge_base_revision_id),
     rowVersion: row.row_version,
     updatedAt: row.updated_at,
     ...(row.created_at === undefined ? {} : { addedAt: row.created_at }),
@@ -108,7 +112,11 @@ const refSelect = `
       ELSE NULL END AS card_nickname,
     CASE WHEN e.kind = 'lorebook' THEN
       (SELECT json_array_length(h.doc_json, '$.entries') FROM entity_revisions h WHERE h.id = r.head_revision_id)
-      ELSE NULL END AS lorebook_entries
+      ELSE NULL END AS lorebook_entries,
+    CASE WHEN e.kind = 'card' THEN
+      (SELECT o.seen_version IS NOT NULL AND o.seen_version <> o.remote_version FROM card_origins o
+        WHERE o.entity_id = r.entity_id)
+      ELSE NULL END AS source_update
   FROM entity_refs r
   JOIN entities e ON e.id = r.entity_id
   LEFT JOIN entity_refs p ON p.entity_id = (SELECT pe.id FROM entities pe

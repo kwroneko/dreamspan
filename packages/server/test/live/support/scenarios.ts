@@ -10,7 +10,7 @@ import type { Reader, Writer } from "../../../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "../../support/config.ts"
 import {
   LIVE_TIMEOUT,
-  liveKey,
+  liveKeys,
   startRecorder,
   type Exchange,
   type Findings,
@@ -26,7 +26,7 @@ import {
 type Api = Effect.Success<ReturnType<typeof client>>
 
 /** How a provider reports cache usage. */
-export type CacheDialect = "anthropic" | "openai" | "responses" | "deepseek" | "openrouter"
+export type CacheDialect = "anthropic" | "openai" | "responses" | "deepseek" | "openrouter" | "google"
 
 export interface Profile {
   /** The report's name for it: "anthropic", "openrouter→bedrock claude". */
@@ -92,6 +92,22 @@ export const wireCounts = (dialect: CacheDialect, u: Record<string, unknown> | n
       reasoning: num(obj(u.output_tokens_details).reasoning_tokens)
     }
   }
+  if (dialect === "google") {
+    // usageMetadata: the prompt count includes the cached tokens; the output is the reply's
+    // tokens plus the thoughts'.
+    const prompt = num(u.promptTokenCount)
+    const read = num(u.cachedContentTokenCount) ?? 0
+    const thoughts = num(u.thoughtsTokenCount)
+    const candidates = num(u.candidatesTokenCount)
+    return {
+      uncached: prompt === null ? null : prompt - read,
+      read,
+      write: null,
+      writeLong: null,
+      output: candidates === null && thoughts === null ? null : (candidates ?? 0) + (thoughts ?? 0),
+      reasoning: thoughts ?? 0
+    }
+  }
   const prompt = num(u.prompt_tokens)
   const details = obj(u.prompt_tokens_details)
   const read = dialect === "deepseek" ? (num(u.prompt_cache_hit_tokens) ?? 0) : (num(details.cached_tokens) ?? 0)
@@ -121,7 +137,7 @@ export const totalInput = (c: Counts | LlmRequest["counts"] | null | undefined) 
   return (c.inputUncached ?? 0) + (c.cacheRead ?? 0) + (c.cacheWrite ?? 0)
 }
 
-/** A turn's request id at the provider (or gateway), for the report. */
+/** A turn's request id at the provider, for the report. */
 const ref = (t: Turn | undefined) => (t?.exchange ? Object.values(t.exchange.ids)[0] : undefined)
 
 /**
@@ -129,11 +145,20 @@ const ref = (t: Turn | undefined) => (t?.exchange ? Object.values(t.exchange.ids
  * wire, and our cost equals the documented prices applied to that usage (or OpenRouter's own
  * figure). Returns the provider's counts.
  */
-export const checkTurn = (f: Findings, p: Profile, label: string, t: Turn, model: Model | null) => {
+export const checkTurn = (
+  f: Findings,
+  p: Profile,
+  label: string,
+  t: Turn,
+  model: Model | null,
+  /** Stops the turn is meant to end with (a reply cut at its output limit on purpose). */
+  stops: ReadonlyArray<string> = []
+) => {
   const row = t.row
   if (row) f.addSpend(p.id, row, t.stored.at(-1)?.reportedCost ?? null)
-  f.check(p.id, `${label}: reply completes`, t.version.status === "complete", {
-    expected: "complete",
+  const stopped = t.version.error?.class !== undefined && stops.includes(t.version.error.class)
+  f.check(p.id, `${label}: reply completes`, t.version.status === "complete" || stopped, {
+    expected: stops.length > 0 ? ["complete", ...stops] : "complete",
     actual: {
       status: t.version.status,
       error: t.version.error,
@@ -182,12 +207,23 @@ export const checkTurn = (f: Findings, p: Profile, label: string, t: Turn, model
       }
     )
     const price = model?.upstream.price
+    // OpenRouter lists one price per model; a model whose providers charge differently is billed
+    // at the pinned provider's own price (liveapi2: DeepSeek via DeepInfra, gpt-oss on Bedrock).
+    // A first-party model on its own vendor's cloud keeps the listed price.
+    const routing = p.overrides?.settings?.routing as { only?: ReadonlyArray<string> } | undefined
+    const vendorClouds: Record<string, ReadonlyArray<string>> = {
+      anthropic: ["anthropic", "google-vertex", "amazon-bedrock"],
+      openai: ["openai", "azure"],
+      google: ["google-vertex", "google-ai-studio"]
+    }
+    const clouds = vendorClouds[p.model.split("/")[0] ?? ""] ?? []
+    const ownPrice = !routing?.only || routing.only.every((slug) => clouds.includes(slug))
     if (price && reported !== null) {
       const listed = priceOf(price, wire, false)
       f.check(
         p.id,
         `${label}: listed price × usage ≈ OpenRouter's billed cost (cache write premium)`,
-        Math.abs(listed - reported) <= Math.max(1e-7, reported * 0.02),
+        ownPrice ? Math.abs(listed - reported) <= Math.max(1e-7, reported * 0.02) : null,
         {
           expected: reported,
           actual: { fromListedPrice: listed, price },
@@ -566,7 +602,7 @@ export const liveTest = <E>(
       const before = f.failures().length
       return Effect.gen(function* () {
         const recorder = yield* Effect.acquireRelease(
-          Effect.promise(() => startRecorder(liveKey())),
+          Effect.promise(() => startRecorder(liveKeys())),
           (r) => Effect.promise(() => r.close())
         )
         const api = yield* client()

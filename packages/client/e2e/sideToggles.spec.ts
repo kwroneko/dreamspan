@@ -5,7 +5,7 @@
 // user. SCREENSHOT_DIR saves full-surface screenshots; LAYOUT_AUDIT audits the strips.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
@@ -179,4 +179,78 @@ for (const theme of ["light", "dark"] as const) {
     await only.getByRole("button", { name: "Show the sidebar", exact: true }).click()
     await expect(sidebar(page)).toBeVisible()
   })
+
+  // Review of sidetoggles (2026-11-07): with four frames at 1024 and both bars open, the top-right
+  // strip's buttons overflowed into the panel, which covered its toggle. The tabs give way first,
+  // then Maximize (the ⋯ menu has it); the ⋯ menu and the toggle stay inside the frame.
+  test(`narrow split frames keep the frame menu and the panel's toggle inside the frame (${theme})`, async ({
+    page
+  }) => {
+    test.setTimeout(180_000)
+    await fresh(page, theme)
+    await page.getByRole("button", { name: "Split right", exact: true }).click()
+    await hideSidebar(page)
+    await page.setViewportSize({ width: 1024, height: 900 })
+    for (let i = 0; i < 2; i++) {
+      await page.locator("[data-frame]").last().getByRole("button", { name: "Tab and frame actions" }).click()
+      await page.getByRole("menuitem", { name: "Split right", exact: true }).click()
+    }
+    await expect(page.locator("[data-frame]")).toHaveCount(4)
+    await panelToggle(page).click()
+    await expect(chatPanel(page)).toBeVisible()
+    await panelToggle(page).click()
+    await expect(chatPanel(page)).toHaveCount(0)
+    await showSidebar(page).click()
+    await expect(sidebar(page)).toBeVisible()
+    await panelToggle(page).click()
+    await expect(chatPanel(page)).toBeVisible()
+    // Both bars open: the last frame is narrow, its tab strip holds the ⋯ menu and the toggle.
+    const last = page.locator("[data-frame]").last()
+    const strip = last.locator("[data-tab-strip]")
+    const menu = strip.getByRole("button", { name: "Tab and frame actions" })
+    const toggle = strip.getByRole("button", { name: "Hide panel" })
+    for (const control of [menu, toggle]) await expectInside(control, last)
+    // Maximize has left the strip for the ⋯ menu, under the same name.
+    await expect(strip.getByRole("button", { name: "Maximize frame" })).toBeHidden()
+    await menu.click()
+    await expect(page.getByRole("menuitem", { name: "Maximize frame" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("menuitem", { name: "Maximize frame" })).toHaveCount(0)
+    await shot(page, `narrow-splits-both-bars-1024-${theme}`)
+    if (process.env.LAYOUT_AUDIT)
+      await expectLayout(page, test.info(), `narrow-splits-strips-1024-${theme}`, { scope: "[data-tab-strip]" })
+    // The close click while both bars are open reaches the toggle, not the panel over it.
+    await toggle.click({ timeout: 5000 })
+    await expect(chatPanel(page)).toHaveCount(0)
+    // The phone's strip, then the wide split again.
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(strips(page)).toHaveCount(1)
+    await shot(page, `split-strip-390-${theme}`)
+    if (process.env.LAYOUT_AUDIT)
+      await expectLayout(page, test.info(), `split-strip-390-${theme}`, { scope: "[data-tab-strip]" })
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await expect(page.locator("[data-frame]")).toHaveCount(4)
+    // The frames keep the widths they had (dividers stay put); each strip's ⋯ is in its frame.
+    for (const frame of await page.locator("[data-frame]").all())
+      await expectInside(frame.getByRole("button", { name: "Tab and frame actions" }), frame)
+    await expect(page.locator("[data-frame]").last().getByRole("button", { name: "Maximize frame" })).toBeVisible()
+    await shot(page, `four-frames-1440-${theme}`)
+    if (process.env.LAYOUT_AUDIT)
+      await expectLayout(page, test.info(), `four-frames-strips-1440-${theme}`, { scope: "[data-tab-strip]" })
+  })
+}
+
+/** Wholly inside its frame, and what a click at its middle reaches. */
+const expectInside = async (control: Locator, frame: Locator) => {
+  await expect(control).toBeVisible()
+  const box = (await control.boundingBox())!
+  const outer = (await frame.boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(outer.x - 0.5)
+  expect(box.x + box.width).toBeLessThanOrEqual(outer.x + outer.width + 0.5)
+  const reached = await control.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+    return top !== null && el.contains(top)
+  })
+  expect(reached).toBe(true)
 }

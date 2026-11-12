@@ -2,9 +2,11 @@
 
 /* Opacity keeps tile toggles in the tab order; each sits alone in its corner, so a hidden one
  * moves nothing, and it takes no clicks: a click there reaches the tile. Touch controls stay
- * visible: tapping the tile already opens it. Focus anywhere inside reveals its off toggles. */
+ * visible: tapping the tile already opens it. Focus anywhere inside reveals its off toggles.
+ * A tile's action button (`tile-action`, not a toggle) shows the same way. */
 @media (hover: hover) and (pointer: fine) {
-  .tile-toggle-surface:not(:hover):not(:focus-within) .tile-toggle[aria-pressed="false"] {
+  .tile-toggle-surface:not(:hover):not(:focus-within) .tile-toggle[aria-pressed="false"],
+  .tile-toggle-surface:not(:hover):not(:focus-within) .tile-action {
     opacity: 0;
     pointer-events: none;
   }
@@ -753,6 +755,22 @@ main:has(> [data-fill]) {
 .fork-row:hover,
 .fork-row:has([aria-current="page"]) {
   --fork-row-background: var(--surface-raised);
+}
+/* A frame's tab strip too narrow for all its buttons (Show, Maximize, ⋯, the panel's toggle,
+ * with no room left for tabs) leaves Maximize to the ⋯ menu's own item: 6.5rem holds Maximize,
+ * ⋯ and the panel's toggle; 9.25rem also the hidden sidebar's Show. */
+[data-tab-strip] {
+  container: tab-strip / inline-size;
+}
+@container tab-strip (width < 6.5rem) {
+  [data-strip-maximize] {
+    display: none;
+  }
+}
+@container tab-strip (width < 9.25rem) {
+  [data-tab-strip]:has([data-strip-show] > *) [data-strip-maximize] {
+    display: none;
+  }
 }
 [data-row-portraits] > [data-portrait] {
   position: relative;

@@ -49,13 +49,30 @@ import {
   type Direction
 } from "./model.ts"
 import { type DropZone, dropZone } from "./dropOpen.ts"
-import { PICTURE_TAB_MIME } from "../../ui/Portrait.tsx"
+import { dragPayloadOf, isAppDrag } from "../../ui/appDrags.ts"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
 import { readTabLayout, writeTabLayout } from "./tabLayout.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
 
 const TAB_MIME = "application/x-rp-workbench-tab"
+
+/** A drag a frame takes: a tab, or something of the app's that opens as one (ui/appDrags.ts). */
+const opensHere = (dataTransfer: DataTransfer | null) =>
+  (dataTransfer?.types.includes(TAB_MIME) ?? false) || dragPayloadOf(dataTransfer) !== null
+
+/**
+ * Something else of the app's dragged over a frame (a link, a message's image): the frame
+ * doesn't take it, and the browser doesn't open it either, so its drop does nothing. Text
+ * fields and editors take their own drops; so does whatever handled it already.
+ */
+const refuseOther = (event: DragEvent | React.DragEvent) => {
+  if (event.defaultPrevented || !isAppDrag(event.dataTransfer) || opensHere(event.dataTransfer)) return
+  const target = event.target instanceof Element ? event.target : null
+  if (target?.closest("input, textarea, [contenteditable]:not([contenteditable=false])")) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "none"
+}
 const MIN_WIDTH = 320
 const MIN_HEIGHT = 160
 
@@ -500,11 +517,10 @@ function useFrameEvents(
   useEffect(() => {
     if (!element) return
     const focus = () => store.focusFrame(frameId)
-    // A tab, or the app's own portrait, which opens as a tab (`PICTURE_TAB_MIME`).
-    const isTab = (event: DragEvent) =>
-      (event.dataTransfer?.types.includes(TAB_MIME) || event.dataTransfer?.types.includes(PICTURE_TAB_MIME)) ?? false
+    // A tab, or a picture, card or chat of the app's, which opens as a tab (ui/appDrags.ts).
+    const isTab = (event: DragEvent) => opensHere(event.dataTransfer)
     const dragover = (event: DragEvent) => {
-      if (!isTab(event)) return
+      if (!isTab(event)) return refuseOther(event)
       event.preventDefault()
       if (event.dataTransfer) event.dataTransfer.dropEffect = "move"
       setOver(dropZone(element, event))
@@ -516,9 +532,9 @@ function useFrameEvents(
       if (!isTab(event)) return
       event.preventDefault()
       setOver(null)
-      const picture = event.dataTransfer?.getData(PICTURE_TAB_MIME)
-      if (picture) {
-        store.dropOpen(picture, frameId, dropZone(element, event))
+      const payload = dragPayloadOf(event.dataTransfer)
+      if (payload) {
+        if (payload.href) store.dropOpen(payload.href, frameId, dropZone(element, event))
         return
       }
       const tabId = event.dataTransfer?.getData(TAB_MIME)
@@ -660,16 +676,18 @@ function TabStrip({
   const setPanelToggleHost = useContext(PanelToggleHostRef)
   const drop = (event: React.DragEvent, index: number) => {
     const tabId = event.dataTransfer.getData(TAB_MIME)
-    const picture = event.dataTransfer.getData(PICTURE_TAB_MIME)
+    // A phone's one frame opens what's picked there; nothing dragged opens on it.
+    const href = phone ? "" : (dragPayloadOf(event.dataTransfer)?.href ?? "")
     setOver(null)
-    if (!tabId && !picture) return
+    if (!tabId && !href) return
     event.preventDefault()
     event.stopPropagation()
-    if (picture) store.dropOpen(picture, frame.id, "center", index)
+    if (href) store.dropOpen(href, frame.id, "center", index)
     else store.move(tabId, frame.id, index)
   }
   const dragOver = (event: React.DragEvent, index: number) => {
-    if (!event.dataTransfer.types.includes(TAB_MIME) && !event.dataTransfer.types.includes(PICTURE_TAB_MIME)) return
+    if (!event.dataTransfer.types.includes(TAB_MIME) && (phone || !dragPayloadOf(event.dataTransfer)))
+      return refuseOther(event)
     event.preventDefault()
     event.stopPropagation()
     event.dataTransfer.dropEffect = "move"
@@ -678,14 +696,17 @@ function TabStrip({
   return (
     <div
       data-tab-strip
-      className="flex h-9 shrink-0 items-stretch border-b border-border bg-surface"
+      // In a frame too narrow for everything, the tabs give way first, then Maximize (the ⋯ menu
+      // has it too, styles.css); what still doesn't fit is cut at the start, never the end, so
+      // the ⋯ menu and the panel's toggle stay inside the frame (sidetoggles review, 2026-11-07).
+      className="flex h-9 shrink-0 items-stretch justify-end overflow-hidden border-b border-border bg-surface"
       onDragOver={(event) => dragOver(event, tabs.length)}
       onDragLeave={() => setOver(null)}
       onDrop={(event) => drop(event, tabs.length)}
     >
       {!phone && corners.topLeft === frame.id && (
         // Empty while the sidebar shows; the first tab moves right only while it's hidden.
-        <div className="flex shrink-0 items-center px-2 empty:hidden">
+        <div data-strip-show className="flex shrink-0 items-center px-2 empty:hidden">
           <SlotOutlet slot={sidebarToggle} props={{ place: "strip" }} />
         </div>
       )}
@@ -718,7 +739,7 @@ function TabStrip({
             />
           )
         })}
-        {over === tabs.length && <span aria-hidden="true" className="w-0.5 shrink-0 bg-accent" />}
+        {over === tabs.length && <span aria-hidden="true" data-drop-before className="w-0.5 shrink-0 bg-accent" />}
       </div>
       {!phone && (
         <div className="flex shrink-0 items-center gap-0.5 px-2">
@@ -733,6 +754,7 @@ function TabStrip({
               icon="expand"
               aria-pressed={layout.maximized === frame.id}
               className="size-7"
+              data-strip-maximize
               onClick={() => store.maximize(layout.maximized === frame.id ? null : frame.id)}
             />
           )}
@@ -803,6 +825,7 @@ function TabButton({
       {dropBefore && (
         <span
           aria-hidden="true"
+          data-drop-before
           data-layout-overlay="Where a dragged tab drops"
           className="absolute inset-y-0 left-0 w-0.5 bg-accent"
         />

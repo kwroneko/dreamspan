@@ -11,7 +11,8 @@ import {
   CardScripts,
   type DisplayScriptList,
   displayScripts,
-  messageCharacter
+  messageCharacter,
+  sameScripts
 } from "../src/features/chat/displayScripts.ts"
 import { makeRegistry } from "../src/registry.ts"
 import { regexDisplay } from "../src/features/chat/displayWorker.ts"
@@ -178,4 +179,20 @@ it("a member's panel permissions are read with its scripts, and a change to them
   await vi.waitFor(() => expect(cards.panels(mira)?.scripts).toBe(true))
   expect(listener).toHaveBeenCalledTimes(2)
   expect(cards.panels(null)).toBe(null)
+})
+
+it("compares the scripts a text came from by content, not identity", () => {
+  const a = [script("a", "x", "<b>1</b>"), script("b", "y", "2")]
+  // A library refresh makes new objects with the same content: the same scripts.
+  expect(
+    sameScripts(
+      a,
+      a.map((s) => ({ ...s, placement: [...s.placement] }))
+    )
+  ).toBe(true)
+  expect(sameScripts([], [])).toBe(true)
+  expect(sameScripts(a, [script("a", "x", "<script>go()</script>"), a[1]!])).toBe(false)
+  expect(sameScripts(a, [a[1]!, a[0]!])).toBe(false)
+  expect(sameScripts(a, [a[0]!])).toBe(false)
+  expect(sameScripts(a, [script("a", "x", "<b>1</b>", { placement: [2] }), a[1]!])).toBe(false)
 })

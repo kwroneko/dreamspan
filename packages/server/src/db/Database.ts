@@ -15,6 +15,7 @@ import { prepareDataDirectory } from "../dataDirectory.ts"
 import { ReadOps, WriteOps } from "./ops.ts"
 import * as ReaderPool from "./readerPool.ts"
 import { stampMatches } from "./workerStamp.ts"
+import { ProviderDefinitions, providerDefinitionClient } from "../providers/definitions.ts"
 
 export class Writer extends Context.Service<
   Writer,
@@ -191,9 +192,12 @@ export const layer = (options: DatabaseOptions) => {
       const draftClock = yield* DraftClock
       const modules = yield* AssemblyModules
       const stateModules = yield* StateModules
+      const providers = yield* ProviderDefinitions
       const WriterLive = Layer.effect(
         Writer,
-        Effect.map(RpcClient.make(WriteOps), (calls) => stateModuleClient(calls, stateModules))
+        Effect.map(RpcClient.make(WriteOps), (calls) =>
+          providerDefinitionClient(stateModuleClient(calls, stateModules), providers)
+        )
       ).pipe(
         Layer.provide(
           writerProtocol(
@@ -213,7 +217,7 @@ export const layer = (options: DatabaseOptions) => {
           return Layer.effect(
             Reader,
             Effect.map(ReaderPool.client(ReadOps), (calls) =>
-              stateModuleClient(moduleClient(calls, modules), stateModules)
+              providerDefinitionClient(stateModuleClient(moduleClient(calls, modules), stateModules), providers)
             )
           ).pipe(
             // Reads are idempotent, so one whose reader crashed can run again.
@@ -243,6 +247,7 @@ export const layer = (options: DatabaseOptions) => {
   return Workers.pipe(
     Layer.provide(Guards),
     Layer.provideMerge(AssemblyModules.layer),
-    Layer.provideMerge(StateModules.layer)
+    Layer.provideMerge(StateModules.layer),
+    Layer.provideMerge(ProviderDefinitions.layer)
   )
 }

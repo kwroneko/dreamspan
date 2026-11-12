@@ -516,6 +516,8 @@ describe("content security policy", () => {
       assert.strictEqual(directives.get("connect-src"), "'none'")
       assert.strictEqual(directives.get("form-action"), "'none'")
       assert.strictEqual(directives.get("frame-ancestors"), "'self'")
+      // Opaque however it's loaded, as the frame's own sandbox makes it in the app.
+      assert.strictEqual(directives.get("sandbox"), "allow-scripts")
       assert.notInclude(csp, String(port), "no path of the app's is a script source")
       // An IPv6 Host can't be named in a source, and still runs only the bootstrap.
       for (const host of ["[::1]", `[::1]:${port}`]) {
@@ -539,6 +541,7 @@ describe("content security policy", () => {
       const clientDist = tempDir("client")
       mkdirSync(join(clientDist, "frame", "lib"), { recursive: true })
       writeFileSync(join(clientDist, "frame", "lib", "jquery.min.js"), "/* jquery */")
+      writeFileSync(join(clientDist, "index.html"), "<!doctype html><title>t</title>")
       const config = testConfig({ clientDist })
       return Effect.gen(function* () {
         const port = yield* serverPort
@@ -555,6 +558,12 @@ describe("content security policy", () => {
         assert.strictEqual(scripts.get("img-src"), `data: blob: ${lib}`)
         assert.strictEqual(scripts.get("connect-src"), "'none'", "no network without its own permission")
         assert.strictEqual(scripts.get("form-action"), "'none'")
+        for (const query of ["", "?scripts=1", "?scripts=1&network=1", "?network=1"])
+          assert.strictEqual(
+            directivesOf((yield* cspOf(`/frame/panel${query}`)).csp).get("sandbox"),
+            "allow-scripts",
+            query
+          )
         // The internet only with scripts: `network` alone is the plain page.
         const alone = directivesOf((yield* cspOf("/frame/panel?network=1")).csp)
         assert.notInclude(alone.get("script-src"), "unsafe-inline")
@@ -569,22 +578,32 @@ describe("content security policy", () => {
         assert.strictEqual(ipv6.get("script-src"), "'unsafe-inline' 'unsafe-eval' 'self'")
         assert.strictEqual(ipv6.get("connect-src"), "'none'")
         // The libraries answer a panel's own reads (fonts come with Origin: null) and nothing else.
-        const read = yield* Effect.flatMap(serverPort, (p) =>
-          Effect.callback<{ status: number; allow: unknown }, Error>((resume) => {
-            const req = request(
-              { host: "127.0.0.1", port: p, path: "/frame/lib/jquery.min.js", headers: { Origin: "null" } },
-              (res) => {
+        const libRead = (path: string) =>
+          Effect.flatMap(serverPort, (p) =>
+            Effect.callback<{ status: number; allow: unknown }, Error>((resume) => {
+              const req = request({ host: "127.0.0.1", port: p, path, headers: { Origin: "null" } }, (res) => {
                 res.resume()
                 resume(
                   Effect.succeed({ status: res.statusCode ?? 0, allow: res.headers["access-control-allow-origin"] })
                 )
-              }
-            )
-            req.on("error", (error) => resume(Effect.fail(error)))
-            req.end()
-          })
-        )
+              })
+              req.on("error", (error) => resume(Effect.fail(error)))
+              req.end()
+            })
+          )
+        const read = yield* libRead("/frame/lib/jquery.min.js")
         assert.deepStrictEqual(read, { status: 200, allow: "*" })
+        // Only a path that stays under the library's folder once decoded and normalized: the
+        // static server decodes `%2f` and `..`, so these would reach the rest of the build.
+        for (const path of [
+          "/frame/lib/..%2f..%2findex.html",
+          "/frame/lib/%2e%2e%2findex.html",
+          "/frame/lib/..%2Findex.html",
+          "/frame/lib/../index.html",
+          "/frame/lib/%2e%2e/index.html",
+          "/frame/lib/a/..%2f..%2f..%2findex.html"
+        ])
+          assert.strictEqual((yield* libRead(path)).status, 403, path)
         assert.strictEqual((yield* cspOf("/frame/panel?scripts=1", { Origin: "null" })).status, 403)
         assert.strictEqual((yield* cspOf("/rpc", { Origin: "null" })).status, 403)
         assert.strictEqual((yield* cspOf("/library/media?id=x", { Origin: "null" })).status, 403)

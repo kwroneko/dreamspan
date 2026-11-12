@@ -4,7 +4,8 @@ import { Tooltip } from "./Tooltip.tsx"
 
 import type { AvatarCrop } from "@rp/shared/media.ts"
 import { type ComponentProps, type CSSProperties, useState } from "react"
-import { PICTURE_TAB_MIME, PortraitFrame, usePortraitViewer } from "./Portrait.tsx"
+import { carryOnDrag, PICTURE_DRAG } from "./appDrags.ts"
+import { PortraitFrame, usePortraitViewer } from "./Portrait.tsx"
 import { useMediaWidth } from "./mediaImage.ts"
 import { portraitUrl } from "./portraitParts.ts"
 
@@ -133,7 +134,7 @@ export function Avatar({
         onDragStart={(event) => {
           // Dropped on a frame, it opens there as a tab (features/workbench), never as an attachment.
           const href = viewer?.tabHref?.({ id, name, mediaId, picture: crop?.picture })
-          if (href) event.dataTransfer.setData(PICTURE_TAB_MIME, href)
+          carryOnDrag(event.dataTransfer, PICTURE_DRAG.id, href)
         }}
       >
         <PortraitFrame className="@container size-full">{content}</PortraitFrame>

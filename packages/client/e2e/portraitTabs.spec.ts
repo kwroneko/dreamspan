@@ -9,6 +9,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
 import { storedLayout } from "./support/workbench.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 test.setTimeout(180_000)
@@ -207,3 +208,101 @@ for (const theme of ["light", "dark"] as const) {
     await expect(pictureTab(frames(page).first())).toBeVisible()
   })
 }
+
+// A message's attached image is a picture like a portrait (owner, 2026-11-07): its context menu
+// opens it as a tab, whose URL names its media and name, so a reload brings it back.
+const ATTACHMENT = "lighthouse.png"
+const messageImage = (scope: Locator | Page) =>
+  scope.locator("article[data-slot]").getByRole("button", { name: "View image 1", exact: true }).first()
+
+const withAttachment = async (page: Page) => {
+  if ((await messageImage(page).count()) > 0) return
+  const base64 = await page.evaluate(() => {
+    const canvas = document.createElement("canvas")
+    canvas.width = 240
+    canvas.height = 360
+    const ctx = canvas.getContext("2d")!
+    ctx.fillStyle = "#e9e4d8"
+    ctx.fillRect(0, 0, 240, 360)
+    ctx.fillStyle = "#8a3b2e"
+    ctx.fillRect(95, 80, 50, 240)
+    ctx.fillStyle = "#f2c14e"
+    ctx.fillRect(85, 50, 70, 30)
+    return canvas.toDataURL("image/png").split(",")[1]!
+  })
+  // Attaching waits for the chat to load; the message's text replaces any draft left before.
+  await expect(page.getByRole("button", { name: "Attach images", exact: true })).toBeEnabled()
+  // An image an earlier test left attached (a file dropped from outside) goes first.
+  const left = page.getByRole("list", { name: "Attached images" }).getByRole("button", { name: /^Remove / })
+  for (let count = await left.count(); count > 0; count--) {
+    await left.first().click()
+    await expect(left).toHaveCount(count - 1)
+  }
+  await page.getByLabel("Message", { exact: true }).fill("A lighthouse sketch.")
+  await page
+    .getByLabel("Choose images")
+    .setInputFiles({ name: ATTACHMENT, mimeType: "image/png", buffer: Buffer.from(base64, "base64") })
+  await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await expect(messageImage(page)).toBeVisible()
+  await expect
+    .poll(() =>
+      messageImage(page)
+        .locator("img")
+        .evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)
+    )
+    .toBeGreaterThan(0)
+  await expect(page.getByText("generating", { exact: true })).toHaveCount(0)
+}
+
+for (const theme of ["light", "dark"] as const)
+  test(`a message's attached image opens as a tab from its context menu and its tab survives a reload ${theme}`, async ({
+    page
+  }, info) => {
+    await openChat(page, theme)
+    await withAttachment(page)
+    const frame = frames(page).first()
+    const tab = frame.getByRole("tab", { name: ATTACHMENT, exact: true })
+    const shown = (scope: Locator) => scope.getByRole("region", { name: `${ATTACHMENT}'s picture`, exact: true })
+    const loaded = async (scope: Locator) => {
+      const image = shown(scope).getByRole("img", { name: `${ATTACHMENT}'s full image` })
+      await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(240)
+    }
+
+    // The app's own context menu, each item explained.
+    await messageImage(frame).click({ button: "right" })
+    const item = page.getByRole("menuitem", { name: "Open as a tab", exact: true })
+    await expect(item).toHaveAccessibleDescription(/^Opens this image as a tab/)
+    await expectLayout(page, info, `attachment-image-menu-${theme}`, {
+      scope: '[data-layout-overlay="Context menu floats above the page"]'
+    })
+    await item.click()
+    await expect(tab).toBeVisible()
+    await expect(column(page)).toHaveCount(0)
+    await loaded(frame)
+    await expect.poll(async () => (await storedLayout(page)) ?? "").toContain(`name=${ATTACHMENT}`)
+    await shot(page, `attachment-tab-${theme}`)
+    await expectLayout(page, info, `attachment-tab-${theme}`, { scope: "[data-picture-tab]" })
+
+    await page.reload()
+    await expect(frames(page).first().getByRole("tab", { name: ATTACHMENT, exact: true })).toBeVisible()
+    await loaded(frames(page).first())
+
+    // On a phone, the tab stays reachable, with no sideways scroll.
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(frames(page)).toHaveCount(1)
+    await loaded(frames(page).first())
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await expectLayout(page, info, `attachment-tab-phone-${theme}`, { scope: "[data-picture-tab]" })
+    await shot(page, `attachment-tab-phone-${theme}`)
+    await page.setViewportSize({ width: 1440, height: 900 })
+
+    // Closed by its own Close; a click on the image still opens the column.
+    await shown(frames(page).first()).getByRole("button", { name: "Close the picture", exact: true }).click()
+    await expect(shown(page.locator("body"))).toHaveCount(0)
+    await messageImage(frames(page).first()).click()
+    await expect(page.getByRole("complementary", { name: `${ATTACHMENT}'s image`, exact: true })).toBeVisible()
+    await page.getByRole("button", { name: "Close the image", exact: true }).click()
+    await expect(column(page)).toHaveCount(0)
+  })

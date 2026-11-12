@@ -185,6 +185,136 @@ describe("streaming through OpenRouter's Chat Completions", () => {
   )
 })
 
+describe("a model pinned to one OpenRouter provider", () => {
+  const ENDPOINTS = "/v1/models/vendor/pinnable/endpoints"
+  const priced = {
+    data: {
+      endpoints: [
+        { provider_name: "Together", tag: "together", pricing: { prompt: "0.0000005", completion: "0.000001" } },
+        { provider_name: "Other", tag: "other", pricing: { prompt: "0.00001", completion: "0.00002" } }
+      ]
+    }
+  }
+  type Res = Parameters<Parameters<typeof mock>[0]>[1]
+
+  /**
+   * A pinned model on a mock OpenRouter whose endpoint list `endpoints` answers. With `gate`, each
+   * reply waits until the list is stored, so the close sees it whatever the scheduling.
+   */
+  const pinned = (endpoints: (res: Res) => void, options: { readonly gate?: boolean } = {}) =>
+    Effect.gen(function* () {
+      let stored: () => Promise<boolean> = async () => true
+      const server = yield* mock(async (request, res) => {
+        if (request.path === ENDPOINTS) return endpoints(res)
+        if (request.path.endsWith("/models"))
+          return json(
+            res,
+            200,
+            openAiList([{ id: "vendor/pinnable", pricing: { prompt: "0.000002", completion: "0.00001" } }])
+          )
+        if (options.gate) {
+          while (!(await stored())) await new Promise((wake) => setTimeout(wake, 10))
+          await new Promise((wake) => setTimeout(wake, 50))
+        }
+        sse(res, completionChunks(["Hi."], { prompt_tokens: 1000, completion_tokens: 100 }))
+      })
+      const { userId, connection, modelId, providers, reader, writer } = yield* connect(
+        "openrouter",
+        `${server.url}/v1`,
+        "k",
+        "vendor/pinnable"
+      )
+      stored = () =>
+        Effect.runPromise(reader.GetModel({ userId, modelId })).then((m) => m.upstream.endpoints !== undefined)
+      // The pin is saved straight to storage: nothing has opened the model page or fetched its prices.
+      const saved = yield* reader.GetModel({ userId, modelId })
+      yield* writer.EditModel({
+        userId,
+        modelId,
+        overrides: { settings: { routing: { only: ["Together"] } } },
+        expectedRowVersion: saved.rowVersion
+      })
+      assert.isUndefined((yield* reader.GetModel({ userId, modelId })).upstream.endpoints)
+      const reply = Effect.gen(function* () {
+        const events = yield* collect(
+          providers.stream({
+            userId,
+            connectionId: connection.id,
+            modelId,
+            context,
+            attribution: { purpose: "generation" }
+          })
+        )
+        const done = events.at(-1)!
+        if (done.type !== "done") return assert.fail("no done event")
+        return done
+      })
+      /** The stored list, once the background fetch has stored one. */
+      const settled = Effect.gen(function* () {
+        for (let i = 0; i < 500; i++) {
+          const endpoints = (yield* reader.GetModel({ userId, modelId })).upstream.endpoints
+          if (endpoints) return endpoints
+          yield* Effect.sleep("10 millis")
+        }
+        return assert.fail("the endpoint list was never stored")
+      })
+      const asked = () => server.requests().filter((r) => r.path === ENDPOINTS).length
+      return { reply, settled, asked }
+    })
+
+  const pinnedLayer = () =>
+    Providers.layer({
+      retry: { maxRetries: 2, baseDelayMs: 5, maxDelayMs: 1_000 },
+      endpointsTimeoutMs: 3_000
+    }).pipe(
+      Layer.provideMerge(Network.layer),
+      Layer.provideMerge(ProviderBuiltins.layer),
+      Layer.provideMerge(
+        Database.layer({ dataDir: tempDir("stream-pinned"), readers: 1, allowNetworkFs: false, ...testWorkers })
+      ),
+      Layer.provideMerge(Layer.succeed(Secrets)(makeSecrets("a server secret for tests")))
+    )
+
+  it.live("is costed at the pinned provider's price from its first reply, its page never opened", () =>
+    Effect.gen(function* () {
+      const { reply, settled } = yield* pinned((res) => json(res, 200, priced), { gate: true })
+      const done = yield* reply
+      // 1000 × $0.5/M + 100 × $1/M, not the model's $2/M and $10/M (0.003).
+      assert.strictEqual(done.cost?.formula, "builtin")
+      assert.closeTo(done.cost!.amount, 0.0006, 1e-12)
+      assert.strictEqual((yield* settled).list.length, 2)
+    }).pipe(Effect.scoped, Effect.provide(pinnedLayer()))
+  )
+
+  it.live("keeps the model's general price when the provider list can't be had", () =>
+    Effect.gen(function* () {
+      const { reply, settled } = yield* pinned((res) => json(res, 404, { error: { message: "none" } }), {
+        gate: true
+      })
+      const done = yield* reply
+      assert.closeTo(done.cost!.amount, 0.003, 1e-12)
+      assert.match((yield* settled).error ?? "", /not_found/)
+    }).pipe(Effect.scoped, Effect.provide(pinnedLayer()))
+  )
+
+  it.live("a list that never answers delays no reply, is asked for once, and is stored as failed", () =>
+    Effect.gen(function* () {
+      const { reply, settled, asked } = yield* pinned(() => {})
+      const started = Date.now()
+      // Two replies at once (a backfill, say): neither waits for the list, and it's asked for once.
+      const [a, b] = yield* Effect.all([reply, reply], { concurrency: 2 })
+      assert.isBelow(Date.now() - started, 2_500)
+      assert.closeTo(a.cost!.amount, 0.003, 1e-12)
+      assert.closeTo(b.cost!.amount, 0.003, 1e-12)
+      assert.strictEqual(asked(), 1)
+      // The timeout is stored as a failure, so the next reply doesn't ask again.
+      assert.match((yield* settled).error ?? "", /no answer/)
+      yield* reply
+      assert.strictEqual(asked(), 1)
+    }).pipe(Effect.scoped, Effect.provide(pinnedLayer()))
+  )
+})
+
 describe("failures", () => {
   it.live("retries a rate limit before the first token, each attempt in the ledger", () =>
     Effect.gen(function* () {
@@ -1511,7 +1641,19 @@ describe("provider registry", () => {
   it("lists built-in kinds in picker order", () =>
     assert.deepStrictEqual(
       ProviderBuiltins.builtinKinds.map((k) => k.id),
-      ["openai-chat", "anthropic", "openai-responses", "openrouter", "deepseek", "google", "system-one"]
+      [
+        "openai-chat",
+        "anthropic",
+        "openai-responses",
+        "openrouter",
+        "deepseek",
+        "google",
+        "anthropic-bedrock",
+        "anthropic-vertex",
+        "openai-responses-bedrock",
+        "openai-chat-bedrock",
+        "system-one"
+      ]
     ))
 })
 

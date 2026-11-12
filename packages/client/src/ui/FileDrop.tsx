@@ -1,8 +1,10 @@
 // A place to drop files that is also a file picker: a label around a visually hidden file
 // input, so a click, Enter or Space opens the picker, and screen readers announce the label.
 // With `directory`, it picks a folder, and each file keeps its path in the folder
-// (`webkitRelativePath`); a dropped folder has no paths, so dropping is off.
+// (`webkitRelativePath`); a dropped folder has no paths, so dropping is off. Only files from
+// outside drop here: a picture dragged from the app is no file to take (ui/appDrags.ts).
 import { type DragEvent, type ReactNode, useState } from "react"
+import { isAppDrag } from "./appDrags.ts"
 
 export function FileDrop({
   label,
@@ -23,6 +25,7 @@ export function FileDrop({
 }) {
   const [over, setOver] = useState(false)
   const drop = (event: DragEvent<HTMLLabelElement>) => {
+    if (isAppDrag(event.dataTransfer)) return
     event.preventDefault()
     setOver(false)
     if (disabled || directory) return
@@ -32,6 +35,7 @@ export function FileDrop({
   return (
     <label
       onDragOver={(event) => {
+        if (isAppDrag(event.dataTransfer)) return
         event.preventDefault()
         if (!disabled && !directory) setOver(true)
       }}

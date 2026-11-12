@@ -6,10 +6,17 @@
 //
 // Nothing here contacts a source unless the user asked for something from it: listing the
 // sources, the switches and the recently viewed list are local (§5.1).
+//
+// Updates (§3.8): a page of results, or a card's file, fetched from the source reports the
+// versions of the cards the user added from it, recorded as each origin's `seen_version` (a
+// page read from the cache reports nothing, so an older page can't undo a newer version).
+// Check for a newer version asks the source for one card's version; the newer file is fetched
+// only when the user opens the update.
 import { createHash, timingSafeEqual } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
+  type CardOrigin,
   type RecentRemote,
   remoteEntityId,
   remoteMediaId,
@@ -22,7 +29,7 @@ import {
   type SourcePrefs,
   type SourceQuery
 } from "@rp/shared/cardSources.ts"
-import { CastCard } from "@rp/shared/chat.ts"
+import { CastCard, type EntityId } from "@rp/shared/chat.ts"
 import { CardForChat } from "@rp/shared/chatSetupApi.ts"
 import type { CredentialId } from "@rp/shared/providers.ts"
 import type { User, UserId } from "@rp/shared/domain.ts"
@@ -32,10 +39,10 @@ import { Context, Effect, Layer, Schedule, Schema } from "effect"
 import { AppConfig } from "../config.ts"
 import { cardTextOfDoc } from "../db/cards.ts"
 import { Reader, Writer } from "../db/Database.ts"
-import { docHash, searchText } from "../db/documents.ts"
 import { Formats } from "../importer/Formats.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { storeMedia } from "../importer/mediaFiles.ts"
+import { withSourceLink } from "../importer/sourceLink.ts"
 import { prepareAvatarThumbnails } from "../importer/prepareThumbnails.ts"
 import { describeImage } from "../importer/images.ts"
 import { Network } from "../net/Network.ts"
@@ -161,6 +168,35 @@ export interface CardSourcesShape {
     key: string,
     width: number | null
   ) => Effect.Effect<SourceImage, SourceFailed | NotFound | ServerError>
+  /** The card's origin when it was added from a source that's on for this user (§3.8); local. */
+  readonly origin: (user: User, entityId: string) => Effect.Effect<CardOrigin | null, ServerError>
+  /** Check for a newer version: the source's current version of the card, recorded. */
+  readonly checkVersion: (
+    user: User,
+    entityId: string
+  ) => Effect.Effect<CardOrigin, SourceFailed | NotFound | ServerError>
+  /** The version the user took into the card (Review and merge, Replace); local. */
+  readonly takeVersion: (
+    user: User,
+    entityId: string,
+    version: string
+  ) => Effect.Effect<CardOrigin, SourceFailed | NotFound | ServerError>
+  /**
+   * The source's newest file of the card (the reported version, fetched again when the cache has
+   * another), with the card's link back to its page, which a new version taken from it keeps (§4.5).
+   */
+  readonly newerFile: (
+    user: User,
+    entityId: string
+  ) => Effect.Effect<
+    { bytes: Uint8Array; fileName: string; version: string; link: string },
+    SourceFailed | NotFound | ServerError
+  >
+  /** Add as a separate card: the source's newest file as a new card, that version taken on this one. */
+  readonly addVersionAsCard: (
+    user: User,
+    entityId: string
+  ) => Effect.Effect<{ entityId: string; refId: string; name: string }, SourceFailed | NotFound | ServerError>
   readonly recent: (user: User, sourceId: string) => Effect.Effect<ReadonlyArray<RecentRemote>, ServerError>
   readonly clearRecent: (user: User, sourceId: string) => Effect.Effect<void, ServerError>
   /** The cache, for tests and pinning (phase 3: drafts and open tabs pin their card). */
@@ -178,6 +214,10 @@ export interface CardSourcesOptions {
 }
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex")
+
+/** A card's link back to its page on the source (§4.5): the page it named, else `<source>:<remoteId>`. */
+const linkOf = (sourceId: string, remoteId: string, summary: { readonly url?: string | undefined }) =>
+  summary.url ?? `${sourceId}:${remoteId}`
 const storage = (operation: string) => (error: unknown) =>
   Effect.logError(`card sources: ${operation} failed`, error).pipe(
     Effect.andThen(Effect.fail(new ServerError({ message: `${operation} failed` })))
@@ -353,13 +393,17 @@ const make = (options: CardSourcesOptions = {}) =>
         return value
       })
 
-    /** A remote card's file: from the cache while it lasts, else fetched and kept (the user asked for it). */
-    const cardFile = (user: User, sourceId: string, remoteId: string) =>
+    /**
+     * A remote card's file, unparsed: from the cache while it lasts, else fetched and kept (the
+     * user asked for it); `fresh` fetches it again. `fetched` says it came from the source just now.
+     */
+    const cardBytes = (user: User, sourceId: string, remoteId: string, fresh = false) =>
       Effect.gen(function* () {
         const adapter = yield* known(sourceId)
         const key = cacheKey(user, sourceId, "card", remoteId)
-        let entry = yield* cache.get(key)
+        let entry = fresh ? undefined : yield* cache.get(key)
         let bytes: Uint8Array
+        const fetched = !entry
         if (!entry) {
           const file = yield* ask(user, sourceId, `card:${remoteId}`, (http) => adapter.card(http, remoteId))
           // Admission may evict this very file when it exceeds the cache cap. The active
@@ -374,12 +418,34 @@ const make = (options: CardSourcesOptions = {}) =>
           bytes = new Uint8Array(yield* cache.readBlob(entry.blob!))
         }
         const { summary, fileName } = entry.value as { summary: AdapterSummary; fileName: string }
-        const parsed = yield* formats.parse(bytes, fileName).pipe(Effect.catch(storage("reading the card")))
-        return { summary, fileName, parsed }
+        return { summary, fileName, bytes, fetched }
       })
 
-    /** The user's own cards among `items` (§3.7), marked on each; nothing is sent to the source. */
-    const withHeld = (user: User, sourceId: string, items: ReadonlyArray<RemoteSummary>) =>
+    /** The card's file, parsed. Parsing transfers its bytes to a worker: they aren't returned. */
+    const cardFile = (user: User, sourceId: string, remoteId: string) =>
+      Effect.gen(function* () {
+        const { bytes, ...file } = yield* cardBytes(user, sourceId, remoteId)
+        const parsed = yield* formats.parse(bytes, file.fileName).pipe(Effect.catch(storage("reading the card")))
+        return { ...file, parsed }
+      })
+
+    /** Versions the source just reported for cards the user added from it (§3.8). */
+    const noteVersions = (
+      user: User,
+      sourceId: string,
+      items: ReadonlyArray<{ readonly remoteId: string; readonly version: string }>
+    ) =>
+      items.length === 0
+        ? Effect.void
+        : writer
+            .NoteRemoteVersions({ userId: user.id, sourceId, items })
+            .pipe(Effect.catch(storage("recording the source's versions")), Effect.asVoid)
+
+    /**
+     * The user's own cards among `items` (§3.7), marked on each; nothing is sent to the source.
+     * `reported`: the items came from the source just now, so their versions are recorded (§3.8).
+     */
+    const withHeld = (user: User, sourceId: string, items: ReadonlyArray<RemoteSummary>, reported = false) =>
       Effect.gen(function* () {
         if (items.length === 0) return items
         const held = yield* reader
@@ -394,19 +460,32 @@ const make = (options: CardSourcesOptions = {}) =>
           .pipe(Effect.catch(storage("finding your cards among the results")))
         if (held.length === 0) return items
         const byId = new Map(held.map((card) => [card.remoteId, card]))
+        if (reported)
+          yield* noteVersions(
+            user,
+            sourceId,
+            items.flatMap((item) => {
+              const card = byId.get(item.remoteId)
+              const version = item.version.id
+              return card?.tracked && version !== "" && (card.seenVersion ?? card.remoteVersion) !== version
+                ? [{ remoteId: item.remoteId, version }]
+                : []
+            })
+          )
         return items.map((item): RemoteSummary => {
           const card = byId.get(item.remoteId)
-          return card
-            ? {
-                ...item,
-                held: {
-                  entityId: card.entityId,
-                  refId: card.refId,
-                  archived: card.archived,
-                  update: card.remoteVersion !== null && card.remoteVersion !== item.version.id
-                }
-              }
-            : item
+          if (!card) return item
+          // Just reported, the item's version decides; from the cache, the recorded one does.
+          const newest = reported && item.version.id !== "" ? item.version.id : (card.seenVersion ?? card.remoteVersion)
+          return {
+            ...item,
+            held: {
+              entityId: card.entityId,
+              refId: card.refId,
+              archived: card.archived,
+              update: card.tracked && newest !== null && newest !== card.remoteVersion
+            }
+          }
         })
       })
 
@@ -422,6 +501,36 @@ const make = (options: CardSourcesOptions = {}) =>
         Effect.tap(() => Effect.sync(() => void (admin.value = next))),
         Effect.catch(storage("saving card source settings"))
       )
+
+    // --- Updates (§3.8): a card's origin row, as the editor shows it.
+    const originRow = (user: User, entityId: string) =>
+      reader
+        .CardOrigin({ userId: user.id, entityId: entityId as EntityId })
+        .pipe(Effect.catch(storage("reading where the card came from")))
+    type OriginRow = NonNullable<Effect.Success<ReturnType<typeof originRow>>>
+    const originOf = (entityId: string, adapter: CardSourceAdapter, row: OriginRow): CardOrigin => ({
+      entityId,
+      sourceId: row.sourceId,
+      sourceName: adapter.name,
+      remoteId: row.remoteId,
+      remoteVersion: row.remoteVersion,
+      newerVersion: row.seenVersion !== null && row.seenVersion !== row.remoteVersion ? row.seenVersion : null
+    })
+    const noOrigin = (entityId: string) => new NotFound({ entity: "card from a card source", id: entityId })
+    /** The card's origin, on a source that's on for this user: else NotFound, or `disabled`. */
+    const heldOrigin = (user: User, entityId: string) =>
+      Effect.gen(function* () {
+        const row = yield* originRow(user, entityId)
+        if (row === null) return yield* noOrigin(entityId)
+        const { adapter } = yield* usable(user, row.sourceId)
+        return { row, adapter }
+      })
+    const originAgain = (user: User, entityId: string, adapter: CardSourceAdapter) =>
+      Effect.gen(function* () {
+        const row = yield* originRow(user, entityId)
+        if (row === null) return yield* noOrigin(entityId)
+        return originOf(entityId, adapter, row)
+      })
 
     const service: CardSourcesShape = {
       registry,
@@ -493,15 +602,17 @@ const make = (options: CardSourcesOptions = {}) =>
       search: (user, sourceId, query, page) =>
         Effect.gen(function* () {
           const adapter = yield* known(sourceId)
+          let reported = false
           const result = yield* cached(user, sourceId, "page", queryKey(query, page), (http) =>
-            adapter.search(http, query, page)
+            adapter.search(http, query, page).pipe(Effect.tap(() => Effect.sync(() => void (reported = true))))
           )
           return {
             ...result,
             items: yield* withHeld(
               user,
               sourceId,
-              result.items.map((item) => forClient(user, sourceId, item))
+              result.items.map((item) => forClient(user, sourceId, item)),
+              reported
             )
           }
         }),
@@ -516,9 +627,9 @@ const make = (options: CardSourcesOptions = {}) =>
         }),
       card: (user, sourceId, remoteId) =>
         Effect.gen(function* () {
-          const { summary, parsed } = yield* cardFile(user, sourceId, remoteId)
+          const { summary, parsed, fetched } = yield* cardFile(user, sourceId, remoteId)
           const card = parsed.library?.kind === "card" ? parsed.library : null
-          const [shown] = yield* withHeld(user, sourceId, [forClient(user, sourceId, summary)])
+          const [shown] = yield* withHeld(user, sourceId, [forClient(user, sourceId, summary)], fetched)
           yield* writer
             .RecordRecentRemote({
               userId: user.id,
@@ -575,10 +686,7 @@ const make = (options: CardSourcesOptions = {}) =>
               message: `This card couldn't be read, so it can't be added.`
             })
           // The card's page on the source joins its `source` list, as its link back (§4.5).
-          const doc = JSON.parse(card.docJson) as Record<string, unknown>
-          const link = summary.url ?? `${sourceId}:${remoteId}`
-          const sources = Array.isArray(doc.source) ? doc.source.filter((s) => typeof s === "string") : []
-          const stored = sources.includes(link) ? doc : { ...doc, source: [...sources, link] }
+          const stored = withSourceLink(card, linkOf(sourceId, remoteId, summary))
           return {
             name: summary.name,
             media: parsed.media,
@@ -589,9 +697,9 @@ const make = (options: CardSourcesOptions = {}) =>
               remoteVersion: summary.version.id,
               file: {
                 label: card.label,
-                docJson: JSON.stringify(stored),
-                docHash: docHash(stored as never),
-                searchText: searchText(stored),
+                docJson: stored.docJson,
+                docHash: stored.docHash,
+                searchText: stored.searchText,
                 schemaVersion: card.schemaVersion,
                 sourceName: fileName,
                 sourceHash: parsed.sha256,
@@ -660,6 +768,80 @@ const make = (options: CardSourcesOptions = {}) =>
             }
           }
           return { bytes, mime, etag: `"${blob}"` }
+        }),
+      origin: (user, entityId) =>
+        Effect.gen(function* () {
+          const row = yield* originRow(user, entityId)
+          const adapter = row === null ? undefined : registry.get(row.sourceId)
+          if (row === null || !adapter) return null
+          if (!info(adapter, yield* prefsOf(user.id)).enabled) return null
+          return originOf(entityId, adapter, row)
+        }),
+      checkVersion: (user, entityId) =>
+        Effect.gen(function* () {
+          const { row, adapter } = yield* heldOrigin(user, entityId)
+          const versions = adapter.versions
+          const version = versions
+            ? (yield* ask(user, row.sourceId, `versions:${row.remoteId}`, (http) =>
+                versions(http, [row.remoteId])
+              )).find((item) => item.remoteId === row.remoteId)?.version.id
+            : (yield* cardBytes(user, row.sourceId, row.remoteId, true)).summary.version.id
+          if (!version)
+            return yield* new SourceFailed({
+              sourceId: row.sourceId,
+              reason: "not_found",
+              message: `${adapter.name} no longer has this card.`
+            })
+          yield* noteVersions(user, row.sourceId, [{ remoteId: row.remoteId, version }])
+          return yield* originAgain(user, entityId, adapter)
+        }),
+      takeVersion: (user, entityId, version) =>
+        Effect.gen(function* () {
+          const { adapter } = yield* heldOrigin(user, entityId)
+          yield* writer
+            .TakeRemoteVersion({ userId: user.id, entityId: entityId as EntityId, version })
+            .pipe(Effect.catchIf((error) => error._tag !== "NotFound", storage("recording the version taken")))
+          return yield* originAgain(user, entityId, adapter)
+        }),
+      newerFile: (user, entityId) =>
+        Effect.gen(function* () {
+          const { row } = yield* heldOrigin(user, entityId)
+          const wanted = row.seenVersion ?? row.remoteVersion
+          const cachedFile = yield* cardBytes(user, row.sourceId, row.remoteId)
+          const file =
+            cachedFile.summary.version.id === wanted
+              ? cachedFile
+              : yield* cardBytes(user, row.sourceId, row.remoteId, true)
+          const version = file.summary.version.id
+          // The source may have moved on again since it was checked.
+          if (version !== "" && version !== wanted)
+            yield* noteVersions(user, row.sourceId, [{ remoteId: row.remoteId, version }])
+          return {
+            bytes: file.bytes,
+            fileName: file.fileName,
+            version: version || wanted,
+            link: linkOf(row.sourceId, row.remoteId, file.summary)
+          }
+        }),
+      addVersionAsCard: (user, entityId) =>
+        Effect.gen(function* () {
+          const { row } = yield* heldOrigin(user, entityId)
+          // The newest file into the cache, then made ready as an adoption is.
+          yield* service.newerFile(user, entityId)
+          const prepared = yield* service.prepareAdoption(user, row.sourceId, row.remoteId)
+          const added = yield* service.storingAdoptions(
+            [prepared],
+            writer
+              .AdoptRemoteVersionAsCard({
+                userId: user.id,
+                entityId: entityId as EntityId,
+                version: prepared.payload.remoteVersion,
+                file: prepared.payload.file
+              })
+              .pipe(Effect.catchIf((error) => error._tag !== "NotFound", storage("adding the new version"))),
+            () => [true]
+          )
+          return { entityId: added.entityId, refId: added.refId, name: prepared.name }
         }),
       recent: (user, sourceId) =>
         Effect.map(prefsOf(user.id), (prefs) => prefs.recent.filter((r) => r.sourceId === sourceId)),

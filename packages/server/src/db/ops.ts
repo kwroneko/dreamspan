@@ -127,6 +127,7 @@ import {
   Credential,
   CredentialId,
   Model,
+  ModelEndpoints,
   ModelId,
   ModelOverrides,
   ModelUse,
@@ -1200,6 +1201,8 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       connectionId: ConnectionId,
+      /** The provider chosen (providerDefinitions.ts); left out, the kind's default provider. */
+      provider: Schema.optionalKey(Schema.String),
       kind: ProviderKind,
       /** The kind's wire API, resolved by the provider registry on the main thread. */
       api: Schema.String,
@@ -1316,9 +1319,7 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       connectionId: ConnectionId,
       models: Schema.Array(Schema.Struct({ key: Schema.String, upstream: ModelUpstream })),
-      fetchedAt: Schema.Number,
-      /** Set on the connection when it has none yet. */
-      modelIdPrefix: Schema.optionalKey(Schema.String)
+      fetchedAt: Schema.Number
     },
     success: Schema.Struct({ added: Schema.Int, updated: Schema.Int, missing: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
@@ -1345,6 +1346,12 @@ export class WriteOps extends RpcGroup.make(
   /** Sets or clears the context size learned from a provider's error, keeping the user's other edits. */
   Rpc.make("SetLearnedContext", {
     payload: { userId: UserId, modelId: ModelId, context: Schema.NullOr(Schema.Int), at: Schema.Number },
+    success: Model,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Stores the endpoint list fetched for a model (a price per provider), replacing an older one. */
+  Rpc.make("SetModelEndpoints", {
+    payload: { userId: UserId, modelId: ModelId, endpoints: ModelEndpoints },
     success: Model,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -1614,6 +1621,38 @@ export class WriteOps extends RpcGroup.make(
   Rpc.make("AdoptRemoteCard", {
     payload: AdoptFields,
     success: Schema.Struct({ entityId: EntityId, refId: RefId, existing: Schema.Boolean }),
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  /**
+   * The versions a source reported for cards the user added from it (results, Check for a
+   * newer version; spec/CARD-SOURCES.md §3.8): each becomes the origin's `seen_version`, null
+   * when it's the version the user has. A version already recorded writes nothing.
+   */
+  Rpc.make("NoteRemoteVersions", {
+    payload: {
+      userId: UserId,
+      sourceId: Schema.String,
+      items: Schema.Array(Schema.Struct({ remoteId: Schema.String, version: Schema.String })).check(
+        Schema.isMaxLength(200)
+      )
+    },
+    success: Schema.Struct({ noted: Schema.Int }),
+    error: StorageError
+  }),
+  /** The source's version the user took into their card (Review and merge, Replace): the origin's `remote_version`. */
+  Rpc.make("TakeRemoteVersion", {
+    payload: { userId: UserId, entityId: EntityId, version: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Add as a separate card (§3.8): the source's newer file as a new card, stored as an import
+   * of it is, with no origin row (the first card keeps it), and that version taken on the
+   * first card, in one transaction.
+   */
+  Rpc.make("AdoptRemoteVersionAsCard", {
+    payload: { userId: UserId, entityId: EntityId, version: Schema.String, file: AdoptFields.file },
+    success: Schema.Struct({ entityId: EntityId, refId: RefId }),
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   // --- Chats: the chat RPCs beyond the graph operations above (writes.ts).
@@ -1956,6 +1995,12 @@ export class WriteOps extends RpcGroup.make(
   /** Adopts ST's selected preset only while the user has no stored default. */
   Rpc.make("StImportDefaultPreset", {
     payload: { userId: UserId, importId: Schema.String, refId: RefId },
+    success: Schema.Boolean,
+    error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
+  }),
+  /** Adopts ST's default persona only while the user has no stored default. */
+  Rpc.make("StImportDefaultPersona", {
+    payload: { userId: UserId, importId: Schema.String, entityId: EntityId },
     success: Schema.Boolean,
     error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
   }),
@@ -3869,8 +3914,25 @@ export class ReadOps extends RpcGroup.make(
         entityId: EntityId,
         refId: RefId,
         archived: Schema.Boolean,
-        /** The source's version when it was added; null when unknown. */
-        remoteVersion: Schema.NullOr(Schema.String)
+        /** The source's version the user has; for a card found by its file's hash, that hash. */
+        remoteVersion: Schema.NullOr(Schema.String),
+        /** The newest version the source reported, when it isn't that one. */
+        seenVersion: Schema.NullOr(Schema.String),
+        /** Found by its origin row, which records versions (not by its file's hash). */
+        tracked: Schema.Boolean
+      })
+    ),
+    error: StorageError
+  }),
+  /** A live card's origin, when it was added from a card source; never contacts the source. */
+  Rpc.make("CardOrigin", {
+    payload: { userId: UserId, entityId: EntityId },
+    success: Schema.NullOr(
+      Schema.Struct({
+        sourceId: Schema.String,
+        remoteId: Schema.String,
+        remoteVersion: Schema.String,
+        seenVersion: Schema.NullOr(Schema.String)
       })
     ),
     error: StorageError

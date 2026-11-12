@@ -1,24 +1,33 @@
 // What a panel's frame may say to the app (spec/HTML-MESSAGES.md §3.4, "The bridge", Tier A), and
 // all it may say: each message type has a schema, anything else is dropped. Nothing here reads
 // or writes the app's data. Opening a link and copying need the user's click in the frame,
-// which the parent checks when the message arrives (DocumentFrame.tsx).
+// checked in the bootstrap with a captured native getter, and again in the parent
+// (DocumentFrame.tsx). Ancestor activation alone cannot authorize a panel action.
 import { Option, Schema } from "effect"
 
 /** At most this many characters copied from a panel, and this long a link. */
 export const MAX_BRIDGE_COPY = 100_000
 const MAX_BRIDGE_URL = 4096
 
-const Ready = Schema.Struct({ type: Schema.Literal("rp:ready") })
+// Generated privately by the bootstrap before any panel script runs. A token-bearing
+// action can only come through its helpers, which check the frame's own native activation.
+const Token = Schema.String.check(Schema.isMinLength(32), Schema.isMaxLength(32))
+const Ready = Schema.Struct({ type: Schema.Literal("rp:ready"), token: Token })
 const Height = Schema.Struct({ type: Schema.Literal("rp:height"), height: Schema.Finite })
 const Open = Schema.Struct({
   type: Schema.Literal("rp:open"),
+  token: Token,
   url: Schema.String.check(Schema.isMaxLength(MAX_BRIDGE_URL))
 })
 const Copy = Schema.Struct({
   type: Schema.Literal("rp:copy"),
+  token: Token,
   text: Schema.String.check(Schema.isMaxLength(MAX_BRIDGE_COPY))
 })
-const BridgeMessage = Schema.Union([Ready, Height, Open, Copy])
+// A trusted press in the frame: the user meant to give it focus (DocumentFrame.tsx takes focus
+// back from a frame that grabs it on its own, so typing meant for the app never reaches it).
+const Focus = Schema.Struct({ type: Schema.Literal("rp:focus"), token: Token })
+const BridgeMessage = Schema.Union([Ready, Height, Open, Copy, Focus])
 export type BridgeMessage = typeof BridgeMessage.Type
 
 const decode = Schema.decodeUnknownOption(BridgeMessage)

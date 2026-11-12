@@ -78,6 +78,7 @@ With per-character agents (Phase 4), only agents whose character was in the sour
 
 ## 6. Cast and state
 
+- **Separate timelines option** (owner, 2026-11-08, DESIGN "Merging another chat into this one" [D]): "the chat merge should be possible with the other way where the timelines remain separate for the characters from chat A and chat B." Besides the built layout (one shared transcript of the source), a merge can leave each character with the history of the chat it came from, as separate contexts by origin (CHARACTER-CONTEXT §2.1, §2.2). Not designed here yet.
 - After J, the destination's cast is the union of both casts at the merge point: `participant.join` events at J for source members the destination lacks, in one transaction. J's version pins the union, so the merged-in characters count as having taken part (DESIGN §3.5 [D]: their messages are in this chat now).
 - The source's chat notes, switched on at its tip, are listed in the dialog with a tick each, off by default; a ticked one is copied into the destination as a new chat note, switched on from J. Card notes need nothing: they belong to the cards, which are now in the cast. Other source state (preset, model, lorebooks, variables) is never adopted: the destination's settings apply (DESIGN §3.3 [D]).
 

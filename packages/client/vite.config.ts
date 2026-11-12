@@ -25,7 +25,8 @@ const frameBootstrap: Plugin = {
         .transformRequest("/src/frame/bootstrap.ts")
         .then((result) => {
           response.setHeader("content-type", "text/javascript; charset=utf-8")
-          response.end((result?.code ?? "").replace(/^export\s*\{\s*\};?\s*$/m, ""))
+          const code = (result?.code ?? "").replace(/^export\s*\{\s*\};?\s*$/m, "")
+          response.end(`(() => {\n${code}\n})()`)
         })
         .catch(next)
     })
@@ -111,6 +112,10 @@ export default defineConfig({
     rolldownOptions: {
       input: { index: "index.html", "frame-bootstrap": "src/frame/bootstrap.ts" },
       output: {
+        // The bootstrap is served as a classic script. Keep its action token and captured
+        // native getters out of the panel's global scope, after bundling and minification.
+        banner: (chunk) => (chunk.name === "frame-bootstrap" ? "(() => {" : ""),
+        footer: (chunk) => (chunk.name === "frame-bootstrap" ? "})()" : ""),
         entryFileNames: (chunk) => (chunk.name === "frame-bootstrap" ? FRAME_BOOTSTRAP : "assets/[name]-[hash].js")
       }
     }

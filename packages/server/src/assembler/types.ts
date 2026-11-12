@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 53
+export const ASSEMBLER_VERSION = 54
 
 export type Role = "system" | "user" | "assistant"
 
@@ -722,6 +722,11 @@ export interface ModelInput {
   /** The provider kind (`openai-chat`, `anthropic`, …) and its wire API. */
   readonly kind: string
   readonly api: string
+  /**
+   * Whose documented cache contract applies (cachePolicy.ts: `anthropic`, `amazon-bedrock`, …),
+   * from the connection's provider; null where none is known, absent on older snapshots.
+   */
+  readonly cacheContract?: string | null
   readonly key: string
   readonly prefill: "none" | "assistant" | "tool_schema"
   readonly continueUnavailable?: string | undefined

@@ -10,7 +10,19 @@ import { StSettingsImporter } from "./StSettingsImport.tsx"
 // A connection's models: what the provider lists, merged with the user's edits
 // (spec/PROVIDERS.md §3.1). Each field shows where its value came from.
 import type { ModelRefresh } from "@rp/shared/api.ts"
-import { type CatalogMatch, type FieldSource, type Model, ModelOverrides, resolveModel } from "@rp/shared/providers.ts"
+import {
+  type CatalogMatch,
+  ENDPOINTS_RETRY_MS,
+  endpointsStale,
+  type FieldSource,
+  type Model,
+  ModelOverrides,
+  type PriceSource,
+  pinnedRoute,
+  resolveModel,
+  routedPrice,
+  routedUpstream
+} from "@rp/shared/providers.ts"
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -429,6 +441,16 @@ export function ModelSettingsEditor({
   void _ownOutput
   const effective = resolveModel(model.key, savedModel.upstream, beneathOverrides)
   const learned = savedModel.overrides.learned
+  // The provider rules for the routing as edited: a pinned upstream's route rules apply.
+  const routed = routedUpstream(
+    model.upstream,
+    { ...model.upstream.settings, ...(current ?? savedModel.overrides.settings) }.routing
+  )
+  const prefillFixed = routed.upstream.fixed?.includes("prefill") ?? false
+  const rules = routed.upstream.shims ?? []
+  const editedRouting = { ...model.upstream.settings, ...(current ?? savedModel.overrides.settings) }.routing
+  useEndpointsFetch(model, pinnedRoute(editedRouting) !== null)
+  const note = priceNote(routedPrice(model.upstream, editedRouting).source)
   return (
     <form ref={form} onSubmit={submit} className="flex min-w-0 flex-col gap-4 [overflow-wrap:anywhere]" noValidate>
       <UserDraftStatus draft={durable} history />
@@ -505,34 +527,47 @@ export function ModelSettingsEditor({
             <Field
               label="Prefill"
               about={
-                model.upstream.fixed?.includes("prefill")
+                prefillFixed
                   ? "This provider refuses a prefill for this model, so it stays off. Continue asks the model to go on from the reply so far."
                   : "Let replies start with text you supply, for the preset’s prefill and Continue. Choose Yes only if the model supports it."
               }
             >
               <Select
-                items={prefillItems(model.upstream.prefill)}
-                value={model.upstream.fixed?.includes("prefill") ? "auto" : prefill}
+                items={prefillItems(routed.upstream.prefill)}
+                value={prefillFixed ? "auto" : prefill}
                 onValueChange={setPrefill}
-                disabled={model.upstream.fixed?.includes("prefill") ?? false}
+                disabled={prefillFixed}
               />
             </Field>
           </div>
-          {model.upstream.shims && model.upstream.shims.length > 0 && (
+          {(rules.length > 0 || routed.unpinned.length > 0 || note !== null) && (
             <section aria-label="Provider rules" data-provider-rules="" className="mt-4 flex flex-col gap-1">
               <LabelWithHelp
                 help={
                   <AboutHint heading="Provider rules">
-                    What this provider refuses or needs for this model. Every request follows them.
+                    What this provider refuses or needs for this model. Every request follows them. Some apply only when
+                    the model’s routing picks one provider.
                   </AboutHint>
                 }
               >
                 <span className="font-medium text-text">Provider rules</span>
               </LabelWithHelp>
               <ul className="list-disc pl-5 text-sm text-muted">
-                {model.upstream.shims.map((rule) => (
+                {rules.map((rule) => (
                   <li key={rule.id}>{rule.label}</li>
                 ))}
+                {routed.unpinned.map((unpinned) => (
+                  <li key={unpinned} data-route-note="">
+                    {unpinned}
+                  </li>
+                ))}
+                {note !== null && (
+                  <li data-price-note="">
+                    <Tooltip label={note.hint}>
+                      <span>{note.text}</span>
+                    </Tooltip>
+                  </li>
+                )}
               </ul>
             </section>
           )}
@@ -786,12 +821,47 @@ function AddModelDialog({
   )
 }
 
+/** When each model's endpoint list was last asked for, so a failed fetch isn't retried on every render. */
+const endpointsAsked = new Map<string, number>()
+
+/** Asks for the model's per-provider prices once its routing pins one provider and none are stored or they're stale. */
+function useEndpointsFetch(model: Model, pinned: boolean) {
+  const fetch = useAction()
+  const run = fetch.run
+  useEffect(() => {
+    const now = Date.now()
+    if (!pinned || !endpointsStale(model.upstream.endpoints, now)) return
+    const last = endpointsAsked.get(model.id)
+    if (last !== undefined && now - last < ENDPOINTS_RETRY_MS) return
+    endpointsAsked.set(model.id, now)
+    void run((client) => client("RefreshModelEndpoints", { modelId: model.id }), ["models"])
+  }, [model.id, model.upstream.endpoints, pinned, run])
+}
+
+/** The note under Provider rules, and its hover, for a pinned provider's price. */
+const priceNote = (source: PriceSource | null) =>
+  source === null
+    ? null
+    : source.state === "pinned"
+      ? {
+          text: `Priced as ${source.name}${source.several ? ", its dearest variant" : ""}.`,
+          hint: "Costs use this provider’s own price, not the model’s usual one, because the routing pins this provider."
+        }
+      : {
+          text:
+            source.reason === "failed"
+              ? `${source.name}’s own price couldn’t be fetched, so the model’s usual price applies.`
+              : `${source.name} has no price of its own listed, so the model’s usual price applies.`,
+          hint: "The routing pins this provider, but OpenRouter gave no price for it. Costs use the model’s usual price, which may differ."
+        }
+
 function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionProps["connection"]["compat"] }) {
   const hide = useAction()
   const [selectedModel, setSelectedModel] = usePlaceParam("model", "")
   const editing = selectedModel === model.id
   const setEditing = (on: boolean) => setSelectedModel(on ? model.id : "")
   const resolved = resolveModel(model.key, model.upstream, model.overrides, compat)
+  useEndpointsFetch(model, pinnedRoute({ ...model.upstream.settings, ...model.overrides.settings }.routing) !== null)
   return (
     <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1">
@@ -812,9 +882,18 @@ function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionPr
             Output <Value resolved={resolved.maxOutput} model={resolved} show={tokens} />
           </span>
           {resolved.price && (
-            <span className="text-muted">
-              ${resolved.price.input} / ${resolved.price.output} per M tokens
-            </span>
+            <Tooltip
+              label={
+                resolved.priceSource?.state === "pinned"
+                  ? `${resolved.priceSource.name}’s own price, because the routing pins it.`
+                  : "What the model costs per million tokens in and out."
+              }
+            >
+              <span className="text-muted" data-price-source={resolved.priceSource?.state ?? "general"}>
+                ${resolved.price.input} / ${resolved.price.output} per M tokens
+                {resolved.priceSource?.state === "pinned" ? ` (${resolved.priceSource.name})` : ""}
+              </span>
+            </Tooltip>
           )}
           {capabilityBadges(resolved).map(([label]) => (
             <Badge key={label} tone="accent">

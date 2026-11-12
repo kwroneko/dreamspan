@@ -14,6 +14,7 @@ import {
   ModelOverrides,
   ModelUpstream,
   type ProviderKind,
+  ProviderSettings,
   type ProxyMode,
   type WireApi
 } from "@rp/shared/providers.ts"
@@ -32,6 +33,8 @@ export interface ConnectionRow {
   readonly id: string
   readonly owner_user_id: string
   readonly name: string
+  readonly provider: string
+  readonly provider_settings_json: string
   readonly kind: ProviderKind
   readonly api: WireApi
   readonly base_url: string | null
@@ -49,13 +52,13 @@ export interface ConnectionRow {
   readonly proxy_url_enc: Uint8Array | null
   readonly preset_override_ref_id: string | null
   readonly cache_revision: number
-  readonly model_id_prefix: string | null
   readonly row_version: number
   readonly created_at: number
   readonly updated_at: number
 }
 
 const decodeCompat = Schema.decodeUnknownSync(Compat)
+const decodeProviderSettings = Schema.decodeUnknownSync(ProviderSettings)
 const decodeNames = Schema.decodeUnknownSync(Schema.Array(Schema.String))
 const decodeUpstream = Schema.decodeUnknownSync(ModelUpstream)
 const decodeOverrides = Schema.decodeUnknownSync(ModelOverrides)
@@ -64,6 +67,8 @@ export const toConnection = (row: ConnectionRow) =>
   new Connection({
     id: row.id as ConnectionId,
     name: row.name,
+    provider: row.provider,
+    providerSettings: decodeProviderSettings(JSON.parse(row.provider_settings_json)),
     kind: row.kind,
     api: row.api,
     baseUrl: row.base_url,
@@ -77,7 +82,6 @@ export const toConnection = (row: ConnectionRow) =>
     maxConcurrent: row.max_concurrent,
     proxyMode: row.proxy_mode,
     presetOverrideRefId: row.preset_override_ref_id as RefId | null,
-    modelIdPrefix: row.model_id_prefix,
     rowVersion: row.row_version,
     createdAt: row.created_at,
     updatedAt: row.updated_at

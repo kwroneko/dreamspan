@@ -26,6 +26,39 @@ const chain = (
 const layer = () => writerConnection(join(tempDir("mig"), "db.sqlite"))
 
 describe("0001_baseline", () => {
+  it.effect("bumps existing connections for provider setting writes, never for reads or unchanged values", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* Effect.scoped(Layer.build(Migrations))
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO connections (id, owner_user_id, name, provider, kind, api, created_at, updated_at)
+        VALUES ('c', 'u', 'Synthetic', 'anthropic-bedrock', 'anthropic-bedrock', 'anthropic-messages', 0, 0)`
+      const revision = () =>
+        sql<{ cache_revision: number }>`SELECT cache_revision FROM connections WHERE id = 'c'`.pipe(
+          Effect.map(([row]) => row!.cache_revision)
+        )
+      const start = yield* revision()
+      // Each provider setting can change the transport or the reusable prefix.
+      for (const [index, changes] of [
+        { auth: "aws-sigv4" },
+        { region: "eu-west-3" },
+        { cacheBreakpoints: "explicit" },
+        { lookback: true },
+        { maxMarkers: 3 },
+        { minTokens: 1024 },
+        { promptCacheKey: true }
+      ].entries()) {
+        const encoded = JSON.stringify(changes)
+        yield* sql`UPDATE connections SET provider_settings_json = ${encoded} WHERE id = 'c'`
+        assert.strictEqual(yield* revision(), start + index + 1)
+        yield* sql`UPDATE connections SET provider_settings_json = ${encoded} WHERE id = 'c'`
+        yield* sql`SELECT * FROM connections WHERE id = 'c'`
+        assert.strictEqual(yield* revision(), start + index + 1)
+      }
+      yield* sql`UPDATE connections SET name = 'Renamed', row_version = row_version + 1 WHERE id = 'c'`
+      assert.strictEqual(yield* revision(), start + 7)
+    }).pipe(Effect.provide(layer()))
+  )
   it.effect("matches the recorded baseline schema and seeds nothing", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient

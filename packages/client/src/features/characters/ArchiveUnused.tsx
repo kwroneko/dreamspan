@@ -1,7 +1,9 @@
+import { useAtomValue } from "@effect/atom-react"
 import { useState } from "react"
-import { Atom } from "effect/reactivity"
+import { AsyncResult, Atom } from "effect/reactivity"
 import { ArchiveCriteria, cardArchiveCriteria, type ArchiveCandidate } from "@rp/shared/cardArchive.ts"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
+import { sourcesAtom } from "../cardSources/remote.ts"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -19,6 +21,24 @@ const candidates = Atom.family((key: string) =>
   )
 )
 const date = (at: number) => new Date(at).toLocaleDateString()
+
+/** The names of the card sources that are on for this user; a criterion for them shows only then. */
+function useSourceNames() {
+  const result = useAtomValue(sourcesAtom)
+  return AsyncResult.isSuccess(result) ? result.value.sources.filter((s) => s.enabled).map((s) => s.name) : []
+}
+
+/** How many cards a criterion matches on its own, beside it ("12 cards"). */
+function MatchCount({ id, amount }: { id: string; amount: number }) {
+  const result = useAtomValue(candidates(JSON.stringify({ [id]: amount })))
+  if (!AsyncResult.isSuccess(result)) return null
+  const count = result.value.length
+  return (
+    <span className="text-sm text-muted" data-criterion-count={id}>
+      {count === 1 ? "1 card" : `${count.toLocaleString()} cards`}
+    </span>
+  )
+}
 
 function Selection({
   cards,
@@ -90,6 +110,8 @@ function Selection({
               <p className="mt-1 text-xs text-muted">
                 Added {date(card.addedAt)} ·{" "}
                 {card.lastUsedAt === null ? "Never used" : `Last used ${date(card.lastUsedAt)}`}
+                {card.userMessages !== undefined &&
+                  ` · ${card.userMessages === 1 ? "1 message" : `${card.userMessages.toLocaleString()} messages`} of yours`}
               </p>
             </div>
           </div>
@@ -116,7 +138,9 @@ function Selection({
 }
 
 function ArchiveDialog({ close }: { close: () => void }) {
-  const entries = cardArchiveCriteria.list()
+  const sourceNames = useSourceNames()
+  // A criterion for card sources shows only while one is on.
+  const entries = cardArchiveCriteria.list().filter((entry) => !entry.forCardSources || sourceNames.length > 0)
   const [amounts, setAmounts] = useState<Record<string, number>>(() =>
     Object.fromEntries(entries.map((entry) => [entry.id, entry.initial]))
   )
@@ -124,7 +148,7 @@ function ArchiveDialog({ close }: { close: () => void }) {
     Object.fromEntries(entries.map((entry) => [entry.id, entry.enabled]))
   )
   const criteria = Object.fromEntries(
-    entries.filter((entry) => enabled[entry.id]).map((entry) => [entry.id, amounts[entry.id]!])
+    entries.filter((entry) => enabled[entry.id]).map((entry) => [entry.id, amounts[entry.id] ?? entry.initial])
   )
   const key = JSON.stringify(criteria)
   return (
@@ -137,38 +161,43 @@ function ArchiveDialog({ close }: { close: () => void }) {
       placement="top"
     >
       <p className="text-sm text-muted">
-        Matches either checked rule. Favourites stay. Sending a message, receiving a reply, editing or forking a card
+        Matches any checked rule. Favourites stay. Sending a message, receiving a reply, editing or forking a card
         counts as use; a greeting alone doesn’t.
       </p>
-      {entries.map((entry) => (
-        <div key={entry.id} className="flex flex-col gap-2">
-          <Checkbox
-            checked={enabled[entry.id] === true}
-            hint={`Click to ${enabled[entry.id] ? "stop matching" : "match"} this rule`}
-            hintInline={false}
-            onCheckedChange={(checked) => setEnabled((old) => ({ ...old, [entry.id]: checked }))}
-          >
-            {entry.label}
-          </Checkbox>
-          <Field label={`${entry.unit} (${entry.label.toLowerCase()})`} labelHidden>
-            <div className="flex items-center gap-2 pl-6">
-              <Input
-                type="number"
-                aria-label={entry.inputLabel}
-                min={1}
-                max={36000}
-                value={amounts[entry.id]}
-                onChange={(event) => {
-                  const amount = event.currentTarget.valueAsNumber
-                  if (Number.isInteger(amount) && amount >= 1 && amount <= 36000)
-                    setAmounts((old) => ({ ...old, [entry.id]: amount }))
-                }}
-              />
-              <span className="text-sm text-muted">{entry.unit}</span>
-            </div>
-          </Field>
-        </div>
-      ))}
+      {entries.map((entry) => {
+        const label = entry.forCardSources?.(sourceNames) ?? entry.label
+        const amount = amounts[entry.id] ?? entry.initial
+        return (
+          <div key={entry.id} className="flex flex-col gap-2" data-archive-criterion={entry.id}>
+            <Checkbox
+              checked={enabled[entry.id] === true}
+              hint={`Click to ${enabled[entry.id] ? "stop matching" : "match"} this rule`}
+              hintInline={false}
+              onCheckedChange={(checked) => setEnabled((old) => ({ ...old, [entry.id]: checked }))}
+            >
+              {label}
+            </Checkbox>
+            <Field label={`${entry.unit} (${label.toLowerCase()})`} labelHidden>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-6">
+                <Input
+                  type="number"
+                  aria-label={entry.inputLabel}
+                  min={1}
+                  max={36000}
+                  value={amount}
+                  onChange={(event) => {
+                    const next = event.currentTarget.valueAsNumber
+                    if (Number.isInteger(next) && next >= 1 && next <= 36000)
+                      setAmounts((old) => ({ ...old, [entry.id]: next }))
+                  }}
+                />
+                <span className="text-sm text-muted">{entry.unit}</span>
+                {entry.forCardSources && <MatchCount id={entry.id} amount={amount} />}
+              </div>
+            </Field>
+          </div>
+        )
+      })}
       <AsyncView atom={candidates(key)} loading="Finding cards…">
         {(cards) => <Selection key={key} cards={cards} criteria={criteria} close={close} />}
       </AsyncView>

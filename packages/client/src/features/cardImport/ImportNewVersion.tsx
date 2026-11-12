@@ -4,7 +4,9 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // everywhere"). Pick a file, see what it changes and what the card keeps, then Replace: the
 // file's content becomes the card's next revision, an ordinary one History can undo. Or Merge:
 // the file goes on the card's import line unchanged and the merge review (forkMerge) picks which
-// of its changes to take, keeping the card's own edits.
+// of its changes to take, keeping the card's own edits. A card source's newer version
+// (spec/CARD-SOURCES.md §3.8) opens the same dialog with its file already read (`source`), and
+// a third choice, Add as a separate card.
 import { AsyncResult } from "effect/reactivity"
 import { useAtomValue } from "@effect/atom-react"
 import type { CardReplacePreview } from "@rp/shared/cardReplace.ts"
@@ -12,7 +14,7 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
 import { Effect } from "effect"
-import { lazy, type ReactNode, Suspense, useCallback, useMemo, useState } from "react"
+import { lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -42,7 +44,21 @@ const EXPLAIN = {
   merge:
     "Review the file's changes one by one and take the ones you want. The card's own edits stay where the file didn't change them.",
   another: "Pick a different file to compare instead.",
-  cancel: "Close without changing anything."
+  cancel: "Close without changing anything.",
+  separate: "Add the newer version as a card of its own, beside this one. This card stays as it is."
+}
+
+/** A card source's newer version of the card (§3.8): its file, and what taking it records. */
+export interface SourceVersion {
+  /** The source's name: "cardex". */
+  readonly name: string
+  readonly file: File
+  /** The card's page on the source, which the version taken keeps in its Sources. */
+  readonly link: string
+  /** Records that the card took this version (after Replace, or once Merge has staged it). */
+  readonly taken: () => Promise<void>
+  /** Add as a separate card: null when it was added, else what went wrong. */
+  readonly addSeparate: () => Promise<string | null>
 }
 
 const isText = (value: unknown) => value === undefined || typeof value === "string"
@@ -132,9 +148,21 @@ type Step =
   | { readonly _tag: "Reading"; readonly file: File }
   | { readonly _tag: "Shown"; readonly file: File; readonly preview: CardReplacePreview }
 
-/** The dialog: pick a file, see the comparison, Replace. */
-export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; label: string; onClose: () => void }) {
-  const [step, setStep] = useState<Step>({ _tag: "Pick" })
+/** The dialog: pick a file (or a source's newer version), see the comparison, Replace. */
+export function NewVersionDialog({
+  refId,
+  label,
+  source,
+  onClose
+}: {
+  refId: RefId
+  label: string
+  source?: SourceVersion
+  onClose: () => void
+}) {
+  const [step, setStep] = useState<Step>(source ? { _tag: "Reading", file: source.file } : { _tag: "Pick" })
+  const [adding, setAdding] = useState(false)
+  const [separateProblem, setSeparateProblem] = useState<string | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [replaceProblem, setReplaceProblem] = useState<string | null>(null)
   const [staged, setStaged] = useState<{ revisionId: RevisionId; file: string } | null>(null)
@@ -148,7 +176,7 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
       return
     }
     setStep({ _tag: "Reading", file })
-    const outcome = await previewVersion(file, refId)
+    const outcome = await previewVersion(file, refId, source?.link)
     if (outcome._tag !== "Done") {
       setStep({ _tag: "Pick" })
       setProblem(outcome._tag === "Failed" ? outcome.message : "Log in again to import a file.")
@@ -163,6 +191,14 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
     setStep({ _tag: "Shown", file, preview: outcome.result })
   }
 
+  // A source's file is read once, as soon as the dialog opens.
+  const started = useRef(false)
+  useEffect(() => {
+    if (!source || started.current) return
+    started.current = true
+    void read(source.file)
+  })
+
   const shown = step._tag === "Shown" ? step : null
   const plan = shown ? versionPlan({ ...shown.preview, card: shown.preview.card! }) : null
 
@@ -173,7 +209,8 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
     setReplaceProblem(null)
     // Through useAction, so the library, the chats' cards and the editors' queries read again.
     const result = await action.run(
-      () => Effect.promise(() => replaceWithVersion(shown.file, refId, shown.preview.card!.headRevisionId)),
+      () =>
+        Effect.promise(() => replaceWithVersion(shown.file, refId, shown.preview.card!.headRevisionId, source?.link)),
       ["library"]
     )
     const outcome = result.ok ? result.value : { _tag: "Failed" as const, message: result.error.message }
@@ -181,8 +218,12 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
       setReplaceProblem(outcome._tag === "Failed" ? outcome.message : "Log in again to import a file.")
       return
     }
+    await source?.taken()
     await refreshOpenEditors()
-    showToast({ title: `${label} is now the file's version`, description: "History can restore the one before." })
+    showToast({
+      title: source ? `${label} is now ${source.name}'s newer version` : `${label} is now the file's version`,
+      description: "History can restore the one before."
+    })
     onClose()
   }
 
@@ -190,7 +231,7 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
     if (!shown) return
     setReplaceProblem(null)
     setStaging(true)
-    const outcome = await stageVersion(shown.file, refId)
+    const outcome = await stageVersion(shown.file, refId, source?.link)
     setStaging(false)
     if (outcome._tag !== "Done") {
       setReplaceProblem(outcome._tag === "Failed" ? outcome.message : "Log in again to import a file.")
@@ -198,6 +239,7 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
     }
     const revisionId = outcome.result.library?.stagedRevisionId
     if (!revisionId) return setReplaceProblem("The file couldn't be set aside for merging.")
+    await source?.taken()
     setStaged({ revisionId, file: shown.file.name })
   }
 
@@ -210,9 +252,14 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
 
   const warnings = shown?.preview.report.issues.filter((issue) => issue.level === "warning") ?? []
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()} wide title={`Import a new version of ${label}`}>
+    <Dialog
+      open
+      onOpenChange={(open) => !open && onClose()}
+      wide
+      title={source ? `The newer ${label} on ${source.name}` : `Import a new version of ${label}`}
+    >
       {problem && (
-        <Alert tone="danger" title="Couldn't read this file">
+        <Alert tone="danger" title={source ? "Couldn't read the newer version" : "Couldn't read this file"}>
           <p>{problem}</p>
         </Alert>
       )}
@@ -222,7 +269,12 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
           <p>{replaceProblem}</p>
         </Alert>
       )}
-      {step._tag === "Pick" && (
+      {separateProblem && (
+        <Alert tone="danger" title="Couldn't add the separate card">
+          <p>{separateProblem}</p>
+        </Alert>
+      )}
+      {step._tag === "Pick" && !source && (
         <div className="flex flex-col gap-2">
           <LabelWithHelp
             help={
@@ -243,14 +295,14 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
       )}
       {step._tag === "Reading" && (
         <p role="status" className="text-sm text-muted">
-          Reading {step.file.name}…
+          {source ? `Reading the newer version from ${source.name}…` : `Reading ${step.file.name}…`}
         </p>
       )}
       {shown && plan && (
         <div className="flex min-w-0 flex-col gap-4">
           <section aria-labelledby="new-version-changes" className="flex flex-col gap-2">
             <h3 id="new-version-changes" className="font-medium">
-              What the file changes
+              {source ? "What the newer version changes" : "What the file changes"}
             </h3>
             {plan.changes.length === 0 ? (
               <p className="text-sm text-muted">The file's text and settings are the same as the card's.</p>
@@ -320,9 +372,27 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
         <Button hint={EXPLAIN.cancel} onClick={onClose}>
           Cancel
         </Button>
-        {shown && (
+        {shown && !source && (
           <Button hint={EXPLAIN.another} onClick={() => setStep({ _tag: "Pick" })}>
             Choose another file
+          </Button>
+        )}
+        {shown && source && (
+          <Button
+            hint={EXPLAIN.separate}
+            pending={adding}
+            disabled={action.pending || staging}
+            onClick={() => {
+              setAdding(true)
+              setSeparateProblem(null)
+              void source.addSeparate().then((failed) => {
+                setAdding(false)
+                if (failed === null) onClose()
+                else setSeparateProblem(failed)
+              })
+            }}
+          >
+            Add as a separate card
           </Button>
         )}
         {shown && (

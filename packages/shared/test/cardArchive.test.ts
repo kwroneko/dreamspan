@@ -11,9 +11,17 @@ describe("card archive calendar-month cutoff", () => {
   ])("subtracts from %s by %i months without overflowing the target month", (now, months, cutoff) => {
     const matches = cardArchiveCriteria.get("inactive")!.matches
     const at = Date.parse(cutoff)
-    expect(matches(0, at - 1, Date.parse(now), months)).toBe(true)
-    expect(matches(0, at, Date.parse(now), months)).toBe(false)
-    expect(matches(0, at + 1, Date.parse(now), months)).toBe(false)
-    expect(matches(0, null, Date.parse(now), months)).toBe(false)
+    expect(
+      matches({ addedAt: 0, lastUsedAt: at - 1, fromSource: null, userMessages: 0 }, Date.parse(now), months)
+    ).toBe(true)
+    expect(matches({ addedAt: 0, lastUsedAt: at, fromSource: null, userMessages: 0 }, Date.parse(now), months)).toBe(
+      false
+    )
+    expect(
+      matches({ addedAt: 0, lastUsedAt: at + 1, fromSource: null, userMessages: 0 }, Date.parse(now), months)
+    ).toBe(false)
+    expect(matches({ addedAt: 0, lastUsedAt: null, fromSource: null, userMessages: 0 }, Date.parse(now), months)).toBe(
+      false
+    )
   })
 })

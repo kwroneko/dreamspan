@@ -38,18 +38,22 @@ const encoder = (encoding: LocalEncoding) => {
 }
 
 /** Each text's token count. Special-token text ("<|endoftext|>") counts as ordinary text. */
-export const countTokens = async (encoding: LocalEncoding, texts: ReadonlyArray<string>) => {
+export const prepareTokenizer = async (encoding: LocalEncoding): Promise<(text: string) => number> => {
   if (encoding === "llama3") {
     const { default: tokenizer } = await import("llama3-tokenizer-js")
-    return texts.map((text) => (text === "" ? 0 : tokenizer.encode(text, { bos: false, eos: false }).length))
+    return (text) => (text === "" ? 0 : tokenizer.encode(text, { bos: false, eos: false }).length)
   }
   if (encoding !== "o200k_base" && encoding !== "cl100k_base") {
     const tokenizer = await hfEncoder(encoding)
-    return texts.map((text) => (text === "" ? 0 : tokenizer.encode(text, { add_special_tokens: false }).ids.length))
+    return (text) => (text === "" ? 0 : tokenizer.encode(text, { add_special_tokens: false }).ids.length)
   }
   const tiktoken = await encoder(encoding)
-  return texts.map((text) => (text === "" ? 0 : tiktoken.encode(text, [], []).length))
+  return (text) => (text === "" ? 0 : tiktoken.encode(text, [], []).length)
 }
+
+/** Batch counting and assembly use the same loaded tokenizer. */
+export const countTokens = async (encoding: LocalEncoding, texts: ReadonlyArray<string>) =>
+  texts.map(await prepareTokenizer(encoding))
 
 // Vendored, revision-pinned files; no download or provider request at runtime.
 const hfEncoders = new Map<string, Promise<import("@huggingface/tokenizers").Tokenizer>>()

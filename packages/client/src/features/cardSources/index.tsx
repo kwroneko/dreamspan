@@ -1,16 +1,20 @@
 // Card sources: the built-in site recognizers (the card editor places `CardSources`), and the
-// archives the server can browse (spec/CARD-SOURCES.md): their Settings page here.
+// archives the server can browse (spec/CARD-SOURCES.md): their Settings page here, and the
+// notice of a newer version of a card added from one (§3.8) under every card editor's actions.
 import { routes } from "../../routes.tsx"
+import { editorNotices } from "../editor/editorSlots.ts"
 import { settingsGroups } from "../settings/groups.ts"
 import { tabKinds } from "../workbench/kinds.ts"
 import { RemoteCardPage } from "./RemoteCardPage.tsx"
 import { SourcesSettingsPage } from "./SourcesSettings.tsx"
 import { builtinRecognizers, sourceRecognizers } from "./sources.ts"
+import { SourceUpdateNotice } from "./updates.tsx"
 
 export { CardSources } from "./CardSources.tsx"
 
 export const register = () => [
   ...builtinRecognizers.map((recognizer) => sourceRecognizers.register(recognizer)),
+  editorNotices.register({ id: "card-sources.update", order: 5, component: SourceUpdateNotice }),
   settingsGroups.register({ id: "cards", label: "Cards", order: 25, pages: ["settings.cardSources"] }),
   routes.register({
     id: "settings.cardSources",

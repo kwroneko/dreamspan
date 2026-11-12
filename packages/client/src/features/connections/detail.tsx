@@ -8,7 +8,15 @@ import { Effect } from "effect"
 import { useEffect } from "react"
 // One connection's page. Its sections are entries in the `connection.sections` slot, so a
 // plugin's provider can add its own.
-import type { Connection, Credential, CredentialId, ProviderKindInfo, ProxyMode } from "@rp/shared/providers.ts"
+import { providerBaseUrl } from "@rp/shared/providerDefinitions.ts"
+import type {
+  Connection,
+  Credential,
+  CredentialId,
+  ProviderInfo,
+  ProviderKindInfo,
+  ProxyMode
+} from "@rp/shared/providers.ts"
 import { originOf } from "@rp/shared/providers.ts"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { type FormEvent, useId, useState } from "react"
@@ -22,11 +30,32 @@ import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { AllowHostDialog } from "../credentials.tsx"
-import { effectiveBaseUrl, effectiveOrigin, parseOptionalInt, providerSetupAtom } from "./data.ts"
+import {
+  effectiveBaseUrl,
+  effectiveOrigin,
+  parseOptionalInt,
+  providerLabel,
+  providerOf,
+  providerSetupAtom
+} from "./data.ts"
+import {
+  AwsKeyFields,
+  awsKey,
+  KeyTypeField,
+  parseProviderDraft,
+  ProviderAdvanced,
+  type ProviderDraft,
+  providerDraftOf,
+  ProjectField,
+  RegionField,
+  ServiceAccountKeyField
+} from "./providerFields.tsx"
 
 export interface ConnectionSectionProps {
   readonly connection: Connection
   readonly kinds: ReadonlyArray<ProviderKindInfo>
+  /** The providers offered: a connection's own is `providerOf(connection, providers)`. */
+  readonly providers: ReadonlyArray<ProviderInfo>
   readonly credentials: ReadonlyArray<Credential>
 }
 
@@ -38,11 +67,11 @@ interface SettingsDraft {
   readonly baseUrl: string
   readonly maxConcurrent: string
   readonly cacheTtlS: string
-  /** Absent in drafts saved before the field existed. */
-  readonly modelIdPrefix?: string
   /** The version the edit started from, so a change made elsewhere meanwhile is a StaleWrite. */
   readonly rowVersion: number
   readonly preset: string
+  /** The provider's settings the user changed; absent in drafts saved before providers had any. */
+  readonly provider?: ProviderDraft
 }
 
 const draftOf = (connection: Connection): SettingsDraft => ({
@@ -51,11 +80,11 @@ const draftOf = (connection: Connection): SettingsDraft => ({
   baseUrl: connection.baseUrl ?? "",
   maxConcurrent: connection.maxConcurrent?.toString() ?? "",
   cacheTtlS: connection.cacheTtlS?.toString() ?? "",
-  modelIdPrefix: connection.modelIdPrefix ?? "",
-  rowVersion: connection.rowVersion
+  rowVersion: connection.rowVersion,
+  provider: providerDraftOf(connection.providerSettings)
 })
 
-export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
+export function SettingsSection({ connection, kinds, providers }: ConnectionSectionProps) {
   const action = useAction()
   const [presets, setPresets] = useState<{ live: ReadonlyArray<LibraryRef>; archived: ReadonlyArray<LibraryRef> }>({
     live: [],
@@ -77,16 +106,29 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
   const [submitted, setSubmitted] = useState(false)
   const edit = (change: Partial<SettingsDraft>) => durable.setText(JSON.stringify({ ...values, ...change }))
   const kind = kinds.find((entry) => entry.id === connection.kind)
+  const provider = providerOf(connection, providers)
+  const providerDraft = values.provider ?? providerDraftOf(connection.providerSettings)
+  const parsed = parseProviderDraft(provider, providerDraft)
+  const defaultUrl = provider ? providerBaseUrl(provider, parsed.settings) : (kind?.defaultBaseUrl ?? null)
+  const editProvider = (draft: ProviderDraft) => edit({ provider: draft })
 
   const concurrency = parseOptionalInt(values.maxConcurrent, 1)
   const ttl = parseOptionalInt(values.cacheTtlS, 1)
   const problems = {
     name: values.name.trim() === "" ? "Give the connection a name." : null,
+    region: parsed.problems.region,
+    project: parsed.problems.project,
     baseUrl:
-      values.baseUrl.trim() !== "" && originOf(values.baseUrl.trim()) === null
-        ? "Enter a full URL, such as http://localhost:8000/v1."
-        : null,
+      values.baseUrl.trim() === ""
+        ? defaultUrl === null
+          ? "Enter the server’s address."
+          : null
+        : originOf(values.baseUrl.trim()) === null
+          ? "Enter a full URL, such as http://localhost:8000/v1."
+          : null,
     maxConcurrent: concurrency.problem,
+    maxMarkers: parsed.problems.maxMarkers,
+    minTokens: parsed.problems.minTokens,
     cacheTtlS: ttl.problem
   }
   const shown = (problem: string | null) => (submitted ? problem : null)
@@ -96,8 +138,6 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
     setSubmitted(true)
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
     let savedVersion = values.rowVersion
-    // Sent only when changed: an unset prefix stays unset until a refresh detects one.
-    const prefix = (values.modelIdPrefix ?? "").trim()
     await durable.commit(
       durable.text,
       async () => {
@@ -113,7 +153,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
                 cacheTtlS: ttl.value,
                 maxConcurrent: concurrency.value,
                 presetOverrideRefId: values.preset === "none" ? null : (values.preset as LibraryRef["id"]),
-                ...(prefix !== (connection.modelIdPrefix ?? "") ? { modelIdPrefix: prefix } : {})
+                providerSettings: parsed.changes
               }
             }),
           ["connections"]
@@ -139,9 +179,25 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
       <CardHeader inline title="Settings" actions={<UserDraftUndo draft={durable} />} />
       <UserDraftNotices draft={durable} />
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
-        <Field label="Name" error={shown(problems.name)}>
+        <Field label="Name" about="How this connection is listed and picked." error={shown(problems.name)}>
           <Input value={values.name} onValueChange={(name) => edit({ name })} autoComplete="off" />
         </Field>
+        {provider && (
+          <RegionField
+            provider={provider}
+            draft={providerDraft}
+            onChange={editProvider}
+            error={shown(problems.region)}
+          />
+        )}
+        {provider && (
+          <ProjectField
+            provider={provider}
+            draft={providerDraft}
+            onChange={editProvider}
+            error={shown(problems.project)}
+          />
+        )}
         <Field
           label="Base URL"
           about="Connect to this address instead of the provider’s default. Empty uses the default. Keys go only to allowed addresses."
@@ -150,21 +206,9 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
           <Input
             value={values.baseUrl}
             onValueChange={(baseUrl) => edit({ baseUrl })}
-            placeholder={kind?.defaultBaseUrl}
+            placeholder={defaultUrl ?? undefined}
             inputMode="url"
             autoCapitalize="none"
-            spellCheck={false}
-          />
-        </Field>
-        <Field
-          label="Model ID prefix"
-          about="Text this provider puts before its model IDs, such as acme. It’s left out when looking up a model’s price and limits. Refresh fills it in from the model list. Empty means none."
-        >
-          <Input
-            value={values.modelIdPrefix ?? ""}
-            onValueChange={(modelIdPrefix) => edit({ modelIdPrefix })}
-            autoCapitalize="none"
-            autoComplete="off"
             spellCheck={false}
           />
         </Field>
@@ -185,26 +229,57 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
             onValueChange={(preset) => edit({ preset })}
           />
         </Field>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field
-            label="Concurrent requests"
-            about="Limit how many requests can run at once. Others wait. Empty means no limit."
-            error={shown(problems.maxConcurrent)}
-          >
-            <Input
-              value={values.maxConcurrent}
-              onValueChange={(maxConcurrent) => edit({ maxConcurrent })}
-              inputMode="numeric"
-            />
-          </Field>
+        {provider && (
+          <KeyTypeField
+            provider={provider}
+            draft={providerDraft}
+            onChange={editProvider}
+            about="The kind of key this connection uses. After changing it, enter a key of that kind."
+          />
+        )}
+        <Field
+          label="Concurrent requests"
+          about="Limit how many requests can run at once. Others wait. Empty means no limit."
+          error={shown(problems.maxConcurrent)}
+        >
+          <Input
+            value={values.maxConcurrent}
+            onValueChange={(maxConcurrent) => edit({ maxConcurrent })}
+            inputMode="numeric"
+            className="sm:max-w-32"
+          />
+        </Field>
+        {provider ? (
+          <ProviderAdvanced
+            provider={provider}
+            draft={providerDraft}
+            onChange={editProvider}
+            problems={{
+              region: null,
+              project: null,
+              maxMarkers: shown(problems.maxMarkers),
+              minTokens: shown(problems.minTokens)
+            }}
+            cacheTtl={{
+              value: values.cacheTtlS,
+              onChange: (cacheTtlS) => edit({ cacheTtlS }),
+              error: shown(problems.cacheTtlS)
+            }}
+          />
+        ) : (
           <Field
             label="Cache lifetime (seconds)"
-            about="How long the provider keeps a prompt ready for cheaper reuse. Empty uses the model’s default."
+            about="How long the provider keeps a request’s start ready for cheaper reuse. Empty uses each model’s default."
             error={shown(problems.cacheTtlS)}
           >
-            <Input value={values.cacheTtlS} onValueChange={(cacheTtlS) => edit({ cacheTtlS })} inputMode="numeric" />
+            <Input
+              value={values.cacheTtlS}
+              onValueChange={(cacheTtlS) => edit({ cacheTtlS })}
+              inputMode="numeric"
+              className="sm:max-w-32"
+            />
           </Field>
-        </div>
+        )}
         <ErrorAlert
           error={action.error}
           title="Not saved"
@@ -259,11 +334,17 @@ function AddressChanged({ from, to }: { from: string | null; to: string | null }
 function SetKeyDialog({
   connection,
   origin,
+  aws,
+  google = false,
   open,
   onOpenChange
 }: {
   connection: Connection
   origin: string | null
+  /** The provider takes an AWS access key: its ID and secret are typed apart. */
+  aws: boolean
+  /** The provider takes a service account's key file. */
+  google?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
@@ -271,9 +352,16 @@ function SetKeyDialog({
   const [opened] = useState(origin)
   /** The address the key in the field was typed for; null while it's empty. */
   const [typedFor, setTypedFor] = useState<string | null>(null)
+  /** For an AWS key, which of its two required parts are still empty. */
+  const [awsEmpty, setAwsEmpty] = useState({ accessKeyId: true, secretAccessKey: true })
+  const awsTyped = (name: "accessKeyId" | "secretAccessKey") => (empty: boolean) => {
+    const next = { ...awsEmpty, [name]: empty }
+    setAwsEmpty(next)
+    setTypedFor(next.accessKeyId || next.secretAccessKey ? null : origin)
+  }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const apiKey = formText(event.currentTarget, "apiKey")
+    const apiKey = aws ? awsKey(event.currentTarget) : formText(event.currentTarget, "apiKey")
     const result = await action.run(
       (client) =>
         client("SetConnectionKey", { connectionId: connection.id, apiKey, expectedRowVersion: connection.rowVersion }),
@@ -284,10 +372,23 @@ function SetKeyDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="Enter a new key">
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <Field label="Key" about={origin ? `The key is sent only to ${origin}. It's never shown again.` : undefined}>
-          {/* Keyed by the address, so a changed address empties the field. */}
-          <SecretInput key={origin} name="apiKey" onEmptyChange={(empty) => setTypedFor(empty ? null : origin)} />
-        </Field>
+        {aws ? (
+          // Keyed by the address, so a changed address empties the fields.
+          <AwsKeyFields key={origin} origin={origin} error={null} onEmptyChange={awsTyped} />
+        ) : google ? (
+          <ServiceAccountKeyField
+            key={origin}
+            about="A service account’s JSON key file, with the Vertex AI User role. The key itself is never sent."
+            origin={origin}
+            error={null}
+            onLoad={(account) => setTypedFor(account ? origin : null)}
+          />
+        ) : (
+          <Field label="Key" about={origin ? `The key is sent only to ${origin}. It's never shown again.` : undefined}>
+            {/* Keyed by the address, so a changed address empties the field. */}
+            <SecretInput key={origin} name="apiKey" onEmptyChange={(empty) => setTypedFor(empty ? null : origin)} />
+          </Field>
+        )}
         <AddressChanged from={opened} to={origin} />
         <ErrorAlert error={action.error} />
         <DialogActions>
@@ -366,10 +467,13 @@ function UseSavedKeyDialog({
 }
 
 export function KeySection(props: ConnectionSectionProps) {
-  const { connection, kinds, credentials } = props
+  const { connection, credentials } = props
   const remove = useAction()
   const [dialog, setDialog] = useState<"set" | "saved" | "remove" | "allow" | null>(null)
-  const origin = effectiveOrigin(connection, kinds)
+  const origin = effectiveOrigin(connection, props)
+  const provider = providerOf(connection, props.providers)
+  const auth = { ...provider?.defaults, ...connection.providerSettings }.auth
+  const aws = auth === "aws-sigv4"
   const credential = credentials.find((entry) => entry.id === connection.credentialId)
   const blocked = credential !== undefined && origin !== null && !credential.origins.includes(origin)
   const close = (open: boolean) => setDialog(open ? dialog : null)
@@ -446,12 +550,21 @@ export function KeySection(props: ConnectionSectionProps) {
           </Alert>
         </div>
       )}
-      {dialog === "set" && <SetKeyDialog connection={connection} origin={origin} open onOpenChange={close} />}
+      {dialog === "set" && (
+        <SetKeyDialog
+          connection={connection}
+          origin={origin}
+          aws={aws}
+          google={auth === "gcp-service-account"}
+          open
+          onOpenChange={close}
+        />
+      )}
       {dialog === "saved" && <UseSavedKeyDialog {...props} open onOpenChange={close} />}
       {dialog === "allow" && credential && origin && (
         <AllowHostDialog
           credential={credential}
-          url={effectiveBaseUrl(connection, kinds) ?? origin}
+          url={effectiveBaseUrl(connection, props) ?? origin}
           open
           onOpenChange={close}
         />
@@ -603,7 +716,8 @@ function HeadersDialog({
   )
 }
 
-export function HeadersSection({ connection, kinds }: ConnectionSectionProps) {
+export function HeadersSection(props: ConnectionSectionProps) {
+  const { connection } = props
   const [place, setPlace] = usePlaceParam("connectionDialog", "", ["", "headers"])
   const open = place === "headers"
   const setOpen = (on: boolean) => setPlace(on ? "headers" : "")
@@ -632,7 +746,7 @@ export function HeadersSection({ connection, kinds }: ConnectionSectionProps) {
       {open && (
         <HeadersDialog
           connection={connection}
-          origin={effectiveOrigin(connection, kinds)}
+          origin={effectiveOrigin(connection, props)}
           open
           onOpenChange={setOpen}
         />
@@ -797,10 +911,10 @@ export function ConnectionPage() {
   const { connectionId }: { connectionId?: string } = useParams({ strict: false })
   return (
     <AsyncView atom={providerSetupAtom} loading="Loading the connection…">
-      {({ kinds, connections, credentials }) => {
+      {({ kinds, providers, connections, credentials }) => {
         const connection = connections.find((entry) => entry.id === connectionId)
         return connection ? (
-          <ConnectionView connection={connection} kinds={kinds} credentials={credentials} />
+          <ConnectionView connection={connection} kinds={kinds} providers={providers} credentials={credentials} />
         ) : (
           <EmptyState title="This connection doesn't exist">
             <p>It may have been deleted.</p>
@@ -817,7 +931,7 @@ export function ConnectionPage() {
 }
 
 function ConnectionView(props: ConnectionSectionProps) {
-  const { connection, kinds } = props
+  const { connection } = props
   useTitle(connection.name)
   return (
     <div className="flex flex-col gap-4">
@@ -832,8 +946,7 @@ function ConnectionView(props: ConnectionSectionProps) {
           <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{connection.name}</h1>
         </CenterHeaderContent>
         <p className="text-sm text-muted [overflow-wrap:anywhere]">
-          {kinds.find((kind) => kind.id === connection.kind)?.label ?? connection.kind} ·{" "}
-          {effectiveBaseUrl(connection, kinds)}
+          {providerLabel(connection, props)} · {effectiveBaseUrl(connection, props)}
         </p>
       </div>
       <SlotOutlet slot={connectionSections} props={props} />

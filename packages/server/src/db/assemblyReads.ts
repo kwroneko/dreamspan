@@ -1,3 +1,4 @@
+import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { tokensOf } from "../assembler/st.ts"
 import { textDisplay } from "./textDisplay.ts"
 import { fitSummaryOutput } from "../lcm/requestBudget.ts"
@@ -369,12 +370,20 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               ? previous.wire.cache.ttlS
               : next.inputs.model.cacheTtlS
             : next.inputs.model.cacheTtlS) ?? null
-        const prefixTokens = tokensBetween(previous, 0, end)
+        const previousCount = yield* prepareTextTokens(assembler.textCounters.list(), previous.inputs.model)
+        const nextCount = yield* prepareTextTokens(assembler.textCounters.list(), next.inputs.model)
+        const prefixTokens = tokensBetween(previous, 0, end, previousCount)
         // A prefix below the model's minimum cacheable size is never cached (liveapi F6).
-        const target = { provider: next.inputs.model.kind, api: next.inputs.model.api, model: next.inputs.model.key }
+        // The provider's documented contract; a snapshot from before providers names only its kind.
+        const contract = next.inputs.model.cacheContract
+        const target = {
+          provider: contract === undefined ? next.inputs.model.kind : (contract ?? ""),
+          api: next.inputs.model.api,
+          model: next.inputs.model.key
+        }
         const minimum = next.inputs.model.cacheLayout?.minTokens ?? documentedCacheMinimum(target)
         const nextEnd = lastBreakpoint(next)
-        const nextTokens = nextEnd < 0 ? 0 : tokensBetween(next, 0, nextEnd)
+        const nextTokens = nextEnd < 0 ? 0 : tokensBetween(next, 0, nextEnd, nextCount)
         if (minimum !== null && end >= 0 && prefixTokens < minimum) {
           return {
             ...boundary,
@@ -402,7 +411,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const compared = prefixChange(
           previous,
           next,
-          yield* describer(sql, userId, chatId, [previous, next], assembler)
+          yield* describer(sql, userId, chatId, [previous, next], assembler),
+          nextCount
         )
         const changed =
           compared && bestEffort ? { ...compared, tokens: Math.max(compared.tokens, nextTokens) } : compared

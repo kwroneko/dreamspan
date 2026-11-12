@@ -88,11 +88,13 @@ export const problemText = (name: string, problem: SourceProblem) =>
           ? `${name} refused the API key.`
           : problem.reason === "disabled"
             ? `${name} is turned off in Settings.`
-            : problem.reason === "bad_response"
-              ? `${name} sent something this app can't read.`
-              : "message" in problem
-                ? problem.message
-                : `${name} couldn't answer.`
+            : problem.reason === "refused"
+              ? `${name} doesn't allow downloading this card.`
+              : problem.reason === "bad_response"
+                ? `${name} sent something this app can't read.`
+                : "message" in problem
+                  ? problem.message
+                  : `${name} couldn't answer.`
 
 export interface Adopted {
   readonly entityId: string

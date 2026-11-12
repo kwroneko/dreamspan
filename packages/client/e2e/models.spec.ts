@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { type FakeProvider, startProvider } from "./support/provider.ts"
+import { chooseCustomServer, type FakeProvider, startProvider } from "./support/provider.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -14,6 +14,7 @@ test.afterAll(async () => {
 test("refresh, hide, edit and add models", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/settings/connections/new`)
+  await chooseCustomServer(page)
   await page.getByLabel("Name", { exact: true }).fill("Models test")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   // Left empty, the key is optional for this kind: no key is sent.
@@ -60,6 +61,7 @@ test("model generation settings take typed decimals and keep the reply length ap
 }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/settings/connections/new`)
+  await chooseCustomServer(page)
   await page.getByLabel("Name", { exact: true }).fill("Settings test")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   await page.getByRole("button", { name: "Create connection" }).click()
@@ -94,6 +96,7 @@ test("model generation settings take typed decimals and keep the reply length ap
 test("the model's form keeps the provider's limits apart from your settings for the model", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/settings/connections/new`)
+  await chooseCustomServer(page)
   await page.getByLabel("Name", { exact: true }).fill("Limits test")
   await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   // Creating it fetches the models.

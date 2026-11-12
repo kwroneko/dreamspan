@@ -1,11 +1,10 @@
-// Compatibility shims per provider kind and model (liveapi F7, F9, F10, F11, F13), a reply with
-// nothing after its prefill (F12), and catalog facts for models added by id or listed behind a
-// router's id prefix (F1, F2).
+// Compatibility shims per provider, API type and model (liveapi F7, F9, F10, F11, F13), a reply with
+// nothing after its prefill (F12), and catalog facts for models added by id or listed with their own fields (F1, F2).
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { resolveModel } from "@rp/shared/providers.ts"
-import { applyShims, builtinShims, shimmedUpstream } from "../src/providers/shims.ts"
-import { detectModelIdPrefix, withoutModelIdPrefix } from "../src/providers/contextCatalog.ts"
+import { pinnedRoute, resolveModel, routedUpstream } from "@rp/shared/providers.ts"
+import { prefillUnavailable } from "../src/assembler/prefill.ts"
+import { applyShims, builtinShims, providerRules, shimmedUpstream } from "../src/providers/shims.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
 import { anthropicSse, completionChunks, json, sse, startMockProvider, type Handler } from "./support/mockProvider.ts"
@@ -16,8 +15,8 @@ const resource = (handler: Handler) =>
     (m) => Effect.promise(() => m.close())
   )
 
-const shim = (kind: string, api: string, model: string, payload: Record<string, unknown>) =>
-  applyShims(builtinShims, structuredClone(payload), { kind, api: api as never, model })
+const shim = (provider: string, api: string, model: string, payload: Record<string, unknown>) =>
+  applyShims(builtinShims, structuredClone(payload), { kind: provider, provider, api: api as never, model })
 
 describe("payload shims", () => {
   it("Claude Haiku 5 drops top_p; Haiku 4.5 keeps it (F7)", () => {
@@ -27,31 +26,38 @@ describe("payload shims", () => {
     assert.deepEqual(five.applied, ["claude-haiku-5-no-top-p"])
     assert.strictEqual(shim("anthropic", "anthropic-messages", "claude-haiku-4-5", sent).payload.top_p, 0.9)
     assert.notProperty(shim("openrouter", "openai-completions", "anthropic/claude-haiku-5.5", sent).payload, "top_p")
+    // Keyed by provider, not API type: Bedrock speaks the Messages API and gets it too.
+    assert.notProperty(
+      shim("anthropic-bedrock", "anthropic-messages", "us.anthropic.claude-haiku-5-5-v1:0", sent).payload,
+      "top_p"
+    )
+  })
+
+  it("an OpenAI rule applies to OpenAI and custom servers, not to OpenRouter's OpenAI models", () => {
+    const sent = { top_p: 0.9, temperature: 0.7, reasoning: { effort: "low" } }
+    assert.notProperty(shim("openai-compatible", "openai-responses", "gpt-5.4-nano", sent).payload, "top_p")
+    assert.strictEqual(shim("openrouter", "openai-completions", "openai/gpt-5.4-nano", sent).payload.top_p, 0.9)
   })
 
   it("Responses GPT-5.1 to 5.4 with an effort drop the samplers and ask for the summary (F9)", () => {
     const sent = { top_p: 0.9, temperature: 0.7, reasoning: { effort: "low" } }
-    const shimmed = shim("openai-responses", "openai-responses", "gpt-5.4-nano", sent).payload
+    const shimmed = shim("openai", "openai-responses", "gpt-5.4-nano", sent).payload
     assert.deepEqual(shimmed, { reasoning: { effort: "low", summary: "auto" } })
-    // Behind a router prefix too; without an effort, or on 5.5, nothing changes.
-    assert.notProperty(shim("openai-responses", "openai-responses", "acme.gpt-5.1", sent).payload, "top_p")
+    // Without an effort, or on 5.5, nothing changes.
     const none = { ...sent, reasoning: { effort: "none" } }
-    assert.deepEqual(shim("openai-responses", "openai-responses", "gpt-5.4-nano", none).payload, none)
-    assert.deepEqual(shim("openai-responses", "openai-responses", "gpt-5.5", sent).payload, sent)
+    assert.deepEqual(shim("openai", "openai-responses", "gpt-5.4-nano", none).payload, none)
+    assert.deepEqual(shim("openai", "openai-responses", "gpt-5.5", sent).payload, sent)
   })
 
   it("Chat Completions GPT-5.4 with tools sends effort none (F10)", () => {
     const tools = [{ type: "function", function: { name: "look", parameters: {} } }]
     const sent = { tools, reasoning_effort: "low" }
-    assert.strictEqual(shim("openai-chat", "openai-completions", "gpt-5.4-nano", sent).payload.reasoning_effort, "none")
+    assert.strictEqual(shim("openai", "openai-completions", "gpt-5.4-nano", sent).payload.reasoning_effort, "none")
     assert.strictEqual(
-      shim("openai-chat", "openai-completions", "gpt-5.4-nano", { reasoning_effort: "low" }).payload.reasoning_effort,
+      shim("openai", "openai-completions", "gpt-5.4-nano", { reasoning_effort: "low" }).payload.reasoning_effort,
       "low"
     )
-    assert.strictEqual(
-      shim("openai-responses", "openai-responses", "gpt-5.4-nano", sent).payload.reasoning_effort,
-      "low"
-    )
+    assert.strictEqual(shim("openai", "openai-responses", "gpt-5.4-nano", sent).payload.reasoning_effort, "low")
   })
 
   it("a shim is replaced or disabled by id: only the registered list applies", () => {
@@ -134,30 +140,20 @@ describe("capability shims", () => {
   })
 })
 
-describe("router model id prefixes (F2)", () => {
-  it("detects the prefix most listed ids share", () => {
-    assert.strictEqual(detectModelIdPrefix(["acme.gpt-5.4-nano", "acme.gpt-5.5", "text-embedding-3"]), "acme.")
-    assert.isNull(detectModelIdPrefix(["gpt-5.4-nano", "gpt-4.1", "o3"]))
-    assert.isNull(detectModelIdPrefix(["anthropic/claude-haiku-4.5", "google/gemini-3.5-pro"]))
-    assert.isNull(detectModelIdPrefix(["acme.deepseek-flash", "a", "b", "c"]))
-    assert.strictEqual(withoutModelIdPrefix("acme.gpt-5.4-nano", "acme."), "gpt-5.4-nano")
-    assert.strictEqual(withoutModelIdPrefix("gpt-5.4-nano", "acme."), "gpt-5.4-nano")
-  })
-
-  it.live("a refresh reads the list's own fields, matches the catalog without the prefix, and keeps it", () => {
+describe("model lists with their own fields (F2)", () => {
+  it.live("a refresh reads the list's own fields and matches the catalog", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* resource((req, res) =>
         req.path.endsWith("/models")
           ? json(res, 200, {
               data: [
-                { id: "acme.gpt-5.4-nano", architecture: { output_modalities: ["text"] } },
+                { id: "gpt-5.4-nano", architecture: { output_modalities: ["text"] } },
                 {
-                  id: "acme.synthetic-model",
+                  id: "synthetic-model",
                   context_window: 64000,
                   max_output_tokens: 8000,
-                  input_modalities: ["text", "image"],
-                  effort: { supported_levels: ["low", "high"] }
+                  input_modalities: ["text", "image"]
                 }
               ]
             })
@@ -167,7 +163,7 @@ describe("router model id prefixes (F2)", () => {
       const connection = yield* api.CreateConnection({
         kind: "openai-chat",
         settings: {
-          name: "Gateway",
+          name: "Compatible server",
           baseUrl: `${mock.url}/v1`,
           compat: {},
           cacheTtlS: null,
@@ -176,35 +172,15 @@ describe("router model id prefixes (F2)", () => {
         },
         apiKey: "sk-synthetic"
       })
-      assert.isNull(connection.modelIdPrefix)
       yield* api.RefreshModels({ connectionId: connection.id })
       const models = yield* api.ListModels({ connectionId: connection.id, includeHidden: true })
-      const nano = models.find((m) => m.key === "acme.gpt-5.4-nano")!.upstream
+      const nano = models.find((m) => m.key === "gpt-5.4-nano")!.upstream
       assert.isDefined(nano.price)
       assert.isTrue(nano.reasoning)
       assert.isTrue(nano.vision)
       assert.strictEqual(nano.catalog?.match, "gpt-5.4-nano")
-      const listed = models.find((m) => m.key === "acme.synthetic-model")!.upstream
-      assert.deepInclude(listed, { context: 64000, maxOutput: 8000, vision: true, reasoning: true })
-      const [saved] = (yield* api.ListConnections()).filter((c) => c.id === connection.id)
-      assert.strictEqual(saved!.modelIdPrefix, "acme.")
-      // The user's choice stands: cleared, a refresh doesn't set it again.
-      yield* api.UpdateConnection({
-        connectionId: connection.id,
-        expectedRowVersion: saved!.rowVersion,
-        settings: {
-          name: "Gateway",
-          baseUrl: `${mock.url}/v1`,
-          compat: {},
-          cacheTtlS: null,
-          maxConcurrent: null,
-          presetOverrideRefId: null,
-          modelIdPrefix: ""
-        }
-      })
-      yield* api.RefreshModels({ connectionId: connection.id })
-      const [cleared] = (yield* api.ListConnections()).filter((c) => c.id === connection.id)
-      assert.strictEqual(cleared!.modelIdPrefix, "")
+      const listed = models.find((m) => m.key === "synthetic-model")!.upstream
+      assert.deepInclude(listed, { context: 64000, maxOutput: 8000, vision: true })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
@@ -262,6 +238,149 @@ describe("a reply with no text after its prefill (F12)", () => {
       })
       assert.strictEqual(version.status, "failed")
       assert.include(version.error?.message ?? "", "no text after the reply's prefill")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
+describe("route rules: shims for one OpenRouter upstream (liveapi2)", () => {
+  const deepseek = "deepseek/deepseek-v4.1-flash"
+  const mimo = "xiaomi/mimo-v2.6-pro"
+  const listed = (key: string) => shimmedUpstream(builtinShims, "openrouter", key, { prefill: "assistant" })
+  const routed = (key: string, routing?: Record<string, unknown>) =>
+    resolveModel(key, listed(key), routing ? { settings: { routing } } : {})
+
+  it("pins a route with one `only` entry, or one `order` entry with fallbacks off", () => {
+    assert.strictEqual(pinnedRoute({ only: ["together"] }), "together")
+    assert.strictEqual(pinnedRoute({ only: ["Together"], allow_fallbacks: false }), "together")
+    assert.strictEqual(pinnedRoute({ only: ["deepinfra/fp8"] }), "deepinfra")
+    assert.strictEqual(pinnedRoute({ order: ["together"], allow_fallbacks: false }), "together")
+    assert.strictEqual(
+      pinnedRoute({ only: ["together", "fireworks"], order: ["together"], allow_fallbacks: false }),
+      "together"
+    )
+    assert.strictEqual(pinnedRoute({ only: ["together", "fireworks"], ignore: ["fireworks"] }), "together")
+    // The router may still choose: fallbacks on, several entries, or no routing.
+    assert.isNull(pinnedRoute({ order: ["together"] }))
+    assert.isNull(pinnedRoute({ only: ["together", "fireworks"] }))
+    assert.isNull(pinnedRoute({ order: ["together", "fireworks"], allow_fallbacks: false }))
+    assert.isNull(pinnedRoute(undefined))
+  })
+
+  it("stores the route rules with the model, not as its own shims", () => {
+    const upstream = listed(deepseek)
+    assert.deepEqual(
+      upstream.routes?.map((r) => r.id),
+      ["openrouter-deepseek-together-no-prefill"]
+    )
+    assert.isUndefined(upstream.shims)
+    assert.isUndefined(upstream.fixed)
+    assert.strictEqual(upstream.prefill, "assistant")
+    // Another model, or a direct DeepSeek connection, gets none.
+    assert.isUndefined(listed("anthropic/claude-haiku-4.5").routes)
+    assert.isUndefined(shimmedUpstream(builtinShims, "deepseek", "deepseek-flash", {}).routes)
+    // A rule no longer registered leaves nothing behind.
+    assert.isUndefined(shimmedUpstream([], "openrouter", deepseek, upstream).routes)
+  })
+
+  it("pinned to Together, DeepSeek's prefill is locked off and Continue uses the nudge", () => {
+    const pinned = resolveModel(deepseek, listed(deepseek), {
+      prefill: "assistant",
+      settings: { routing: { only: ["together"], allow_fallbacks: false } }
+    })
+    assert.deepEqual(pinned.prefill, { value: "none", source: "upstream" })
+    assert.strictEqual(pinned.route.route, "together")
+    const message = prefillUnavailable(
+      { kind: "openrouter", api: "openai-completions", key: deepseek, prefill: pinned.prefill.value },
+      null,
+      { route: pinned.route }
+    )
+    assert.match(message ?? "", /^Prefill fails on Together for deepseek\/deepseek-v4\.1-flash, so its prefill is off/)
+    const page = routedUpstream(listed(deepseek), { only: ["together"] })
+    assert.deepEqual(page.upstream.fixed, ["prefill"])
+    assert.deepEqual(
+      page.upstream.shims?.map((s) => s.id),
+      ["openrouter-deepseek-together-no-prefill"]
+    )
+    // Elsewhere the user's choice stands.
+    const deepinfra = resolveModel(deepseek, listed(deepseek), {
+      prefill: "assistant",
+      settings: { routing: { only: ["deepinfra"] } }
+    })
+    assert.strictEqual(deepinfra.prefill.value, "assistant")
+    assert.deepEqual(deepinfra.route.applied, [])
+  })
+
+  it("unpinned, no route rule applies, and the notes name the upstreams that break it", () => {
+    const open = routed(deepseek)
+    assert.strictEqual(open.prefill.value, "assistant")
+    assert.deepEqual(open.route.unpinned, ["Prefill fails on Together; pin a provider to be sure."])
+    assert.deepEqual(routed(mimo).route.unpinned, [
+      "Prefill fails on StreamLake; pin a provider to be sure.",
+      "Prefill is unreliable on Xiaomi; pin a provider to be sure."
+    ])
+    // Only the upstreams the routing still allows are named.
+    assert.deepEqual(routed(mimo, { only: ["deepinfra", "streamlake"] }).route.unpinned, [
+      "Prefill fails on StreamLake; pin a provider to be sure."
+    ])
+    assert.deepEqual(routed(mimo, { ignore: ["streamlake", "xiaomi"] }).route.unpinned, [])
+    assert.strictEqual(routed(mimo, { only: ["xiaomi"] }).prefill.value, "none")
+    assert.strictEqual(routed(mimo, { only: ["streamlake"] }).prefill.value, "none")
+    assert.strictEqual(routed(mimo, { only: ["deepinfra"] }).prefill.value, "assistant")
+  })
+
+  it("lists route rules in the provider's advanced section by upstream", () => {
+    assert.include(
+      providerRules(builtinShims, "openrouter"),
+      "DeepSeek through Together: No prefill through Together: the reply comes back empty. Continue asks the model to go on instead."
+    )
+  })
+
+  it("a route rule's payload rewrite applies only when the request pins its upstream", () => {
+    const rule = {
+      id: "test-route-payload",
+      label: "Test",
+      models: "Test",
+      providers: ["openrouter"],
+      model: /^vendor\//,
+      upstreams: [{ slug: "together", name: "Together" }],
+      fails: "Test fails",
+      payload: (payload: Record<string, unknown>) => ({ ...payload, marked: true })
+    }
+    const target = { kind: "openrouter", provider: "openrouter", api: "openai-completions" as never, model: "vendor/m" }
+    assert.deepEqual(applyShims([rule], { provider: { only: ["together"] } }, target).applied, ["test-route-payload"])
+    assert.deepEqual(applyShims([rule], { provider: { only: ["fireworks"] } }, target).applied, [])
+    assert.deepEqual(applyShims([rule], {}, target).applied, [])
+  })
+
+  it.live("a pinned Together route drops the preset's prefill; another upstream keeps it", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource((_req, res) =>
+        sse(res, completionChunks(["The tide is out."], { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 }))
+      )
+      const api = yield* client()
+      const send = (only: string) =>
+        generateReply(api, {
+          connection: { kind: "openrouter", baseUrl: mock.url, apiKey: "synthetic-key" },
+          modelKey: deepseek,
+          model: { prefill: "assistant", settings: { routing: { only: [only], allow_fallbacks: false } } },
+          preset: { assistant_prefill: "*Mira sets down her pen.*" }
+        })
+      const chats = mock.requests
+      const lastOf = (i: number) =>
+        (
+          chats().filter((r) => r.path.endsWith("/chat/completions"))[i]!.body!.messages as Array<{
+            role: string
+            content: unknown
+          }>
+        ).at(-1)
+      const together = yield* send("together")
+      assert.strictEqual(together.version.status, "complete")
+      assert.notStrictEqual(lastOf(0)?.role, "assistant")
+      const fireworks = yield* send("fireworks")
+      assert.strictEqual(fireworks.version.status, "complete")
+      assert.strictEqual(lastOf(1)?.role, "assistant")
+      assert.include(JSON.stringify(lastOf(1)?.content), "Mira sets down her pen.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

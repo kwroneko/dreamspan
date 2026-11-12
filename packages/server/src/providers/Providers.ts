@@ -35,16 +35,29 @@ import {
   type ConnectionSettings,
   type Credential,
   type CredentialId,
+  endpointsStale,
+  modelPrice,
+  pinnedRoute,
+  type ModelEndpoints,
   type EffectiveModel,
   type Model,
   type ModelId,
   type ModelUpstream,
   type ProviderKind,
+  ProviderInfo,
   ProviderKindInfo,
+  type ProviderSettings,
   type ProxyMode,
   originOf,
   resolveModel
 } from "@rp/shared/providers.ts"
+import {
+  findProvider,
+  type ProviderDefinition,
+  providerBaseUrl,
+  providerChanges,
+  resolveProviderSettings
+} from "@rp/shared/providerDefinitions.ts"
 import type { Cost, LlmRequestId, RequestPurpose, TokenCounts } from "@rp/shared/usage.ts"
 import { createHash, timingSafeEqual } from "node:crypto"
 import { ServerError, StaleWrite } from "@rp/shared/errors.ts"
@@ -54,15 +67,16 @@ import { Network, type ProxyOverride, type RequestNetwork, RedirectRefused } fro
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
 import { catalogEntry, withCatalog } from "./catalog.ts"
-import { detectModelIdPrefix, withCatalogs, withoutModelIdPrefix } from "./contextCatalog.ts"
+import { withCatalogs } from "./contextCatalog.ts"
 import type { ListedModel } from "./modelLists.ts"
-import { applyShims, withShims } from "./shims.ts"
+import { applyShims, providerRules, withShims } from "./shims.ts"
 import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
-import type { ModelListError } from "./modelLists.ts"
+import { fetchEndpoints, ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
+import { parseServiceAccount } from "./vertex.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
 import { readDecisionUsage, unwrapEnvelope } from "@rp/shared/decisions.ts"
 
@@ -175,6 +189,11 @@ export interface TestResult {
 /** Everything a request on a connection needs, secrets decrypted. Lives for one request. */
 interface Prepared {
   readonly connection: Connection
+  /** The connection's provider (providerDefinitions.ts) and its settings in effect. */
+  readonly provider: string
+  readonly settings: ProviderSettings
+  /** Whose documented cache contract applies (cachePolicy.ts); null where none is known. */
+  readonly cacheContract: string | null
   readonly kind: ProviderKindEntry
   readonly api: string
   readonly baseUrl: string
@@ -185,6 +204,9 @@ interface Prepared {
   /** Removes this connection's secrets from text that will be stored or shown (PROVIDERS §5). */
   readonly scrub: (text: string) => string
 }
+
+/** What the SDK is given as the key when the kind's transport authorizes the request (it drops it). */
+const TRANSPORT_AUTH = "authorized-by-transport"
 
 const isPlain = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -286,6 +308,8 @@ export interface ProvidersOptions {
    * app or its agent (owner, 2026-10-11).
    */
   readonly bindKeysToOrigins?: boolean
+  /** How long an endpoint-list fetch may take before it counts as failed (default 10 s). */
+  readonly endpointsTimeoutMs?: number
 }
 
 export interface ProvidersShape {
@@ -295,6 +319,8 @@ export interface ProvidersShape {
    */
   readonly createConnection: (input: {
     readonly userId: UserId
+    /** The provider chosen; left out, the kind's default provider. */
+    readonly provider?: string | undefined
     readonly kind: ProviderKind
     readonly settings: ConnectionSettings
     readonly apiKey?: string | null
@@ -357,6 +383,17 @@ export interface ProvidersShape {
     ProviderError | ServerError
   >
   /**
+   * Fetches OpenRouter's endpoint list for a model (a price per provider) and stores it with the
+   * model; a failed fetch is stored too, as the reason, so the model page can say why the
+   * model's general price applies. Other kinds' models are returned unchanged.
+   */
+  readonly refreshEndpoints: (userId: UserId, modelId: ModelId) => Effect.Effect<Model, ProviderError | ServerError>
+  /**
+   * The model with a fresh endpoint list when its routing pins one provider and the stored list
+   * is missing or stale; never fails (a failed fetch is stored, and the model comes back as it was).
+   */
+  readonly ensureEndpoints: (userId: UserId, model: Model) => Effect.Effect<Model>
+  /**
    * What the registered catalogs know of a model id on this connection (its window, its output
    * limit), for a model the user adds by id; empty when nothing matches or the connection is gone.
    */
@@ -385,6 +422,8 @@ export interface ProvidersShape {
   ) => Effect.Effect<Cost | null, ProviderError | ServerError>
   /** The provider kinds in effect, built-in and from plugins, in picker order. */
   readonly kinds: () => ReadonlyArray<ProviderKindInfo>
+  /** The providers a new connection starts from, with an API type in effect, in picker order. */
+  readonly providers: () => ReadonlyArray<ProviderInfo>
   /**
    * One image's exact token count for a model, from a registered image counter (ARCHITECTURE
    * §6); null when none applies. Never part of a send. A counter that asks a provider runs only
@@ -529,6 +568,19 @@ export const layer = (options: ProvidersOptions = {}) =>
       }
       const bindKeysToOrigins = options.bindKeysToOrigins ?? true
 
+      /** A connection's provider: the one it names, or its kind's default (providerDefinitions.ts). */
+      const providerOf = (connection: Pick<Connection, "provider" | "kind" | "baseUrl">) =>
+        findProvider(registry.providers.list(), connection.provider, connection.kind, connection.baseUrl)
+      /**
+       * The address a connection without its own uses: the provider's (its region's, where one is
+       * set), else the kind's; null when none.
+       */
+      const defaultBaseUrl = (
+        provider: ProviderDefinition | undefined,
+        kind: ProviderKindEntry,
+        settings: ProviderSettings | undefined
+      ) => (provider ? providerBaseUrl(provider, settings ?? {}) : kind.defaultBaseUrl)
+
       const prepare = (userId: UserId, connectionId: ConnectionId) =>
         Effect.gen(function* () {
           const resolved = yield* fromStorage(reader.ResolveConnection({ userId, connectionId }))
@@ -552,7 +604,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                   Effect.map(inventory.add),
                   Effect.mapError((error) => providerError("unusable", error.message))
                 )
-          const baseUrl = connection.baseUrl ?? info.defaultBaseUrl
+          const provider = providerOf(connection)
+          const baseUrl = connection.baseUrl ?? defaultBaseUrl(provider, info, connection.providerSettings)
+          if (baseUrl === null) {
+            return yield* providerError("unusable", `${connection.name} has no address; enter the server's base URL`)
+          }
           const origin = originOf(baseUrl)
           if (origin === null) {
             return yield* providerError("unusable", `${connection.name}'s base URL isn't a valid URL: "${baseUrl}"`)
@@ -568,7 +624,10 @@ export const layer = (options: ProvidersOptions = {}) =>
           }
           const apiKey =
             credential === null ? null : yield* decryptWith(credential.keyEnc, credentialBinding(credential.id))
-          if (apiKey === null && !info.keyOptional) {
+          if (apiKey !== null) for (const part of info.secretsOf?.(apiKey) ?? []) inventory.add(part)
+          // Keyless where the API type or the provider allows it: a custom server's Responses API,
+          // say, or a kind a plugin registered for a keyless server.
+          if (apiKey === null && !(provider?.keyOptional || info.keyOptional)) {
             return yield* providerError("unusable", `${connection.name} has no API key`)
           }
           // Header values often carry credentials, so they're bound to their origin like a key.
@@ -609,6 +668,9 @@ export const layer = (options: ProvidersOptions = {}) =>
           }
           const prepared: Prepared = {
             connection,
+            provider: provider?.id ?? connection.provider,
+            settings: resolveProviderSettings(provider, connection.providerSettings),
+            cacheContract: provider ? provider.cacheContract : info.piProvider,
             kind: info,
             api: info.api,
             baseUrl,
@@ -648,11 +710,17 @@ export const layer = (options: ProvidersOptions = {}) =>
         return trimmed === "" ? null : trimmed
       }
 
-      /** Short keys get no hint: four characters would be most of the key. */
-      const encryptKey = (key: string, credentialId: CredentialId) => ({
-        enc: secrets.encrypt(key, credentialBinding(credentialId)),
-        hint: key.length >= 12 ? key.slice(-4) : ""
-      })
+      /**
+       * Short keys get no hint: four characters would be most of the key. A service account's
+       * key file ends in the same characters as every other, so its hint is its key ID's end.
+       */
+      const encryptKey = (key: string, credentialId: CredentialId) => {
+        const account = parseServiceAccount(key)
+        return {
+          enc: secrets.encrypt(key, credentialBinding(credentialId)),
+          hint: account ? (account.privateKeyId?.slice(-4) ?? "") : key.length >= 12 ? key.slice(-4) : ""
+        }
+      }
 
       /** A typed key as a credential owned by a connection, bound to the connection's origin. */
       const typedCredential = (name: string, key: string, baseUrl: string) =>
@@ -710,22 +778,45 @@ export const layer = (options: ProvidersOptions = {}) =>
           return yield* fromStorage(writer.AddCredentialOrigin({ userId, credentialId, origin: origin! }))
         })
 
-      const createConnection: ProvidersShape["createConnection"] = ({ userId, kind, settings, apiKey, credentialId }) =>
+      const createConnection: ProvidersShape["createConnection"] = ({
+        userId,
+        provider: providerId,
+        kind,
+        settings,
+        apiKey,
+        credentialId
+      }) =>
         Effect.gen(function* () {
           const entry = registry.kinds.get(kind)
           if (!entry) return yield* providerError("bad_request", `unknown provider kind "${kind}"`)
+          const named = providerId === undefined ? undefined : registry.providers.get(providerId)
+          if (providerId !== undefined && !named)
+            return yield* providerError("bad_request", `unknown provider "${providerId}"`)
+          const provider = named ?? findProvider(registry.providers.list(), null, kind, settings.baseUrl)
+          if (named && !named.apis.some((api) => api.id === kind)) {
+            return yield* providerError("bad_request", `${named.label} doesn't offer the API type "${kind}"`)
+          }
+          const baseUrl = settings.baseUrl ?? defaultBaseUrl(provider, entry, settings.providerSettings)
+          if (baseUrl === null) return yield* providerError("bad_request", "enter the server's base URL")
           const key = typedKey(apiKey)
           const credential =
             key === null
               ? { existing: credentialId ?? null }
-              : { typed: yield* typedCredential(settings.name, key, settings.baseUrl ?? entry.defaultBaseUrl) }
+              : { typed: yield* typedCredential(settings.name, key, baseUrl) }
           return yield* fromStorage(
             writer.CreateConnection({
               userId,
               connectionId: uuidv7() as ConnectionId,
+              ...(provider ? { provider: provider.id } : {}),
               kind,
               api: entry.api,
-              settings,
+              // Only what differs from the provider's defaults is stored.
+              settings: {
+                ...settings,
+                ...(settings.providerSettings
+                  ? { providerSettings: providerChanges(provider, settings.providerSettings) }
+                  : {})
+              },
               credential
             })
           )
@@ -737,7 +828,10 @@ export const layer = (options: ProvidersOptions = {}) =>
           const connection = yield* fromStorage(reader.GetConnection({ userId, connectionId }))
           const entry = registry.kinds.get(connection.kind)
           if (!entry) return yield* providerError("unusable", `the provider kind "${connection.kind}" isn't available`)
-          return { connection, baseUrl: connection.baseUrl ?? entry.defaultBaseUrl }
+          const baseUrl =
+            connection.baseUrl ?? defaultBaseUrl(providerOf(connection), entry, connection.providerSettings)
+          if (baseUrl === null) return yield* providerError("unusable", `${connection.name} has no address`)
+          return { connection, baseUrl }
         })
 
       const setKey: ProvidersShape["setKey"] = (userId, connectionId, apiKey, expectedRowVersion) =>
@@ -809,17 +903,17 @@ export const layer = (options: ProvidersOptions = {}) =>
           .pipe(Effect.mapError((error) => scrubbed(prepared, fromList(error))))
 
       /**
-       * What the catalogs know of listed (or added) models, matched without the router's id
-       * prefix (liveapi F1, F2): the kind's own catalog (price, reasoning, vision, thinking levels),
-       * then the registered ones for a window; then the compatibility shims. Keys stay as listed.
+       * What the catalogs know of listed (or added) models (liveapi F1, F2): the kind's own
+       * catalog (price, reasoning, vision, thinking levels), then the registered ones for a
+       * window; then the compatibility shims.
        */
-      const describeModels = (kind: ProviderKindEntry, prefix: string | null, listed: ReadonlyArray<ListedModel>) =>
+      const describeModels = (kind: ProviderKindEntry, provider: string, listed: ReadonlyArray<ListedModel>) =>
         Effect.gen(function* () {
-          const stripped = listed.map((model) => ({ ...model, key: withoutModelIdPrefix(model.key, prefix) }))
-          const fromKind = yield* withCatalog(kind, stripped)
+          const fromKind = yield* withCatalog(kind, listed)
           const filled = yield* withCatalogs(registry.catalogs.list(), kind.id, fromKind)
           const shims = registry.shims.list()
-          return filled.map((model, i) => withShims(shims, kind.id, { key: listed[i]!.key, upstream: model.upstream }))
+          const on = { provider, api: kind.api }
+          return filled.map((model, i) => withShims(shims, on, { key: listed[i]!.key, upstream: model.upstream }))
         })
 
       const refreshModels: ProvidersShape["refreshModels"] = (userId, connectionId) =>
@@ -827,28 +921,80 @@ export const layer = (options: ProvidersOptions = {}) =>
           const prepared = yield* prepare(userId, connectionId)
           let route: string | null = null
           const listed = yield* listModels(prepared, (d) => (route = d))
-          const detected =
-            prepared.connection.modelIdPrefix === null ? detectModelIdPrefix(listed.map((model) => model.key)) : null
-          const prefix = prepared.connection.modelIdPrefix ?? detected
-          const models = yield* describeModels(prepared.kind, prefix, listed)
+          const models = yield* describeModels(prepared.kind, prepared.provider, listed)
           const result = yield* fromStorage(
-            writer.SyncFetchedModels({
-              userId,
-              connectionId,
-              models,
-              fetchedAt: Date.now(),
-              ...(detected !== null ? { modelIdPrefix: detected } : {})
-            })
+            writer.SyncFetchedModels({ userId, connectionId, models, fetchedAt: Date.now() })
           )
           return { ...result, route }
+        })
+
+      const endpointsTimeoutMs = options.endpointsTimeoutMs ?? 10_000
+      const refreshEndpoints: ProvidersShape["refreshEndpoints"] = (userId, modelId) =>
+        Effect.gen(function* () {
+          const model = yield* fromStorage(reader.GetModel({ userId, modelId }))
+          const prepared = yield* prepare(userId, model.connectionId)
+          if (prepared.kind.id !== "openrouter") return model
+          const stored = (endpoints: ModelEndpoints) =>
+            fromStorage(writer.SetModelEndpoints({ userId, modelId, endpoints }))
+          return yield* fetchEndpoints(
+            {
+              baseUrl: prepared.baseUrl,
+              apiKey: prepared.apiKey,
+              headers: prepared.headers,
+              fetch: fetchFor(prepared, () => {}),
+              scrub: prepared.scrub
+            },
+            model.key
+          ).pipe(
+            // A hung fetch is a failure like any other: stored, so it's retried later, not on every reply.
+            Effect.timeoutOrElse({
+              duration: endpointsTimeoutMs,
+              orElse: () =>
+                Effect.fail(
+                  new ModelListError({
+                    reason: "network",
+                    status: null,
+                    message: `no answer in ${endpointsTimeoutMs / 1000} s`
+                  })
+                )
+            }),
+            Effect.flatMap((list) => stored({ fetchedAt: Date.now(), list })),
+            Effect.catchTag("ModelListError", (error) =>
+              stored({
+                fetchedAt: Date.now(),
+                error: prepared.scrub(`${error.reason}: ${error.message}`).slice(0, 200),
+                // A list fetched before still prices the route better than the model's headline price.
+                list: model.upstream.endpoints?.list ?? []
+              })
+            )
+          )
+        })
+
+      /** Models whose endpoint list is being fetched, so concurrent replies (a backfill) ask once. */
+      const endpointsInFlight = new Set<ModelId>()
+      const ensureEndpoints: ProvidersShape["ensureEndpoints"] = (userId, model) =>
+        // Checked and marked in one step, so two replies starting together ask once.
+        Effect.suspend(() => {
+          if (
+            pinnedRoute({ ...model.upstream.settings, ...model.overrides.settings }.routing) === null ||
+            !endpointsStale(model.upstream.endpoints, Date.now()) ||
+            endpointsInFlight.has(model.id)
+          )
+            return Effect.succeed(model)
+          endpointsInFlight.add(model.id)
+          return refreshEndpoints(userId, model.id).pipe(
+            Effect.catch(() => Effect.succeed(model)),
+            Effect.ensuring(Effect.sync(() => endpointsInFlight.delete(model.id)))
+          )
         })
 
       const catalogUpstream: ProvidersShape["catalogUpstream"] = (userId, connectionId, key) =>
         reader.GetConnection({ userId, connectionId }).pipe(
           Effect.flatMap((connection) => {
             const kind = registry.kinds.get(connection.kind)
+            const provider = providerOf(connection)?.id ?? connection.provider
             return kind
-              ? describeModels(kind, connection.modelIdPrefix, [{ key, upstream: {} }])
+              ? describeModels(kind, provider, [{ key, upstream: {} }])
               : Effect.succeed<ReadonlyArray<ListedModel>>([{ key, upstream: {} }])
           }),
           Effect.map(([model]) => model!.upstream),
@@ -862,7 +1008,10 @@ export const layer = (options: ProvidersOptions = {}) =>
           return yield* listModels(prepared, (d) => (route = d)).pipe(
             Effect.map((models): TestResult => ({
               ok: true,
-              detail: `${models.length} models listed`,
+              // Nothing was sent: the list is a catalog, so the key is checked by the first reply.
+              detail: prepared.kind.listsCatalog
+                ? `${models.length} models in the built-in list; nothing was sent, so the key is checked by the first reply`
+                : `${models.length} models listed`,
               route,
               models: models.length
             })),
@@ -938,7 +1087,9 @@ export const layer = (options: ProvidersOptions = {}) =>
         request: StreamRequest,
         offer: (event: ProviderEvent) => void,
         number: number,
-        pricing: import("./userCosts.ts").UserPricing
+        pricing: import("./userCosts.ts").UserPricing,
+        /** The model with the newest endpoint list that has arrived (fetched alongside the reply). */
+        latest: { current: Model }
       ) => {
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
@@ -1048,10 +1199,12 @@ export const layer = (options: ProvidersOptions = {}) =>
                   ...sample
                 })
                 .pipe(Effect.catch((e) => Effect.logWarning("could not record an image token sample", e)))
+            // A pinned route is priced by its own endpoint list: the one fetched alongside the reply
+            // if it has arrived, else the stored one. The close never waits for the fetch.
             const cost = costOf(
               registry.costs.list(),
               { kind: prepared.kind.id, api: prepared.api, model: model.key },
-              { counts, pricing, capture: state.capture, price: model.upstream.price ?? null }
+              { counts, pricing, capture: state.capture, price: modelPrice(latest.current) }
             )
             yield* writer
               .CloseLlmRequest({
@@ -1145,11 +1298,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                     reasoning: null
                   },
                   capture: emptyCapture(),
-                  price: model.upstream.price ?? null
+                  price: modelPrice(model)
                 }) !== null
             )
             const bound =
-              formula?.upperBound?.({ inputTokens, outputTokens, pricing, price: model.upstream.price ?? null }) ?? null
+              formula?.upperBound?.({ inputTokens, outputTokens, pricing, price: modelPrice(model) }) ?? null
             const allowed = yield* fromStorage(
               writer.OpenLlmRequest({
                 userId: request.userId,
@@ -1187,7 +1340,13 @@ export const layer = (options: ProvidersOptions = {}) =>
               normalizeContext(
                 limitImages(
                   request.context,
-                  resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat).maxImages.value
+                  resolveModel(
+                    model.key,
+                    model.upstream,
+                    model.overrides,
+                    prepared.connection.compat,
+                    prepared.settings
+                  ).maxImages.value
                 )
               ),
             catch: (error) => providerError("bad_request", `the request context is invalid: ${String(error)}`)
@@ -1260,20 +1419,48 @@ export const layer = (options: ProvidersOptions = {}) =>
                 state.retryAfterMs = parseRetryAfter(response.headers.get("retry-after") ?? undefined)
                 return response
               }
-              const options = request.options ?? {}
-              const target: RequestTarget = { kind: prepared.kind.id, api: prepared.api, model: model.key }
+              const cacheMode = resolveModel(
+                model.key,
+                model.upstream,
+                model.overrides,
+                prepared.connection.compat,
+                prepared.settings
+              ).cacheBreakpoints.value
+              // An empty breakpoint list alone leaves the SDK's automatic markers enabled.
+              const options =
+                cacheMode === "none" ? { ...request.options, cacheRetention: "none" as const } : (request.options ?? {})
+              const target: RequestTarget = {
+                kind: prepared.kind.id,
+                api: prepared.api,
+                provider: prepared.provider,
+                model: model.key
+              }
               const transforms = registry.transforms.list().filter((t) => t.appliesTo(target))
               const observers = registry.observers.list().filter((o) => o.appliesTo(target))
               const breakpoints = options.cacheRetention === "none" ? [] : (options.breakpoints ?? [])
               const overrides = options.payload
               const events = prepared.kind.streams.streamSimple(piModel, transcript, {
-                // A keyless local server still needs a value; pi's direct calls require one.
-                apiKey: prepared.apiKey ?? "no-key",
+                // A keyless local server still needs a value; pi's direct calls require one. A
+                // kind with its own transport authorizes the request itself from the stored key,
+                // so the SDK never holds it: a service account's key file has line breaks, which
+                // no header can carry, and the SDK would put it in one (and in its error).
+                apiKey: prepared.kind.transport ? TRANSPORT_AUTH : (prepared.apiKey ?? "no-key"),
                 env: {},
                 maxRetries: 0,
                 signal,
                 headers: prepared.headers,
-                ...(prepared.kind.acceptsFetch ? { fetch: observed } : {}),
+                ...(prepared.kind.acceptsFetch
+                  ? {
+                      fetch: prepared.kind.transport
+                        ? prepared.kind.transport(observed, {
+                            apiKey: prepared.apiKey,
+                            baseUrl: prepared.baseUrl,
+                            settings: prepared.settings,
+                            aside: routed
+                          })
+                        : observed
+                    }
+                  : {}),
                 ...(options.reasoning !== undefined ? { reasoning: options.reasoning } : {}),
                 ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
                 ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
@@ -1298,14 +1485,26 @@ export const layer = (options: ProvidersOptions = {}) =>
                     ? wireContext(request.inspection.request, {
                         ...request.inspection.model,
                         mapping: mappingCapabilities(
-                          resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
+                          resolveModel(
+                            model.key,
+                            model.upstream,
+                            model.overrides,
+                            prepared.connection.compat,
+                            prepared.settings
+                          )
                         )
                       })
                     : undefined
                   const initial =
                     overrides === undefined ? (payload as Record<string, unknown>) : merged(payload, overrides)
                   if (sources) markWireSources(initial, sources)
-                  const effective = resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
+                  const effective = resolveModel(
+                    model.key,
+                    model.upstream,
+                    model.overrides,
+                    prepared.connection.compat,
+                    prepared.settings
+                  )
                   const transformed = transforms.reduce(
                     (current, t) =>
                       t.transform(current, {
@@ -1315,7 +1514,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                         cacheLayout: effective.cacheLayout.value,
                         ...(options.stable && options.cacheRetention !== "none" ? { stable: options.stable } : {}),
                         ...(options.cacheRetention !== undefined ? { cacheRetention: options.cacheRetention } : {}),
-                        ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {})
+                        ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+                        settings: prepared.settings
                       }),
                     initial
                   )
@@ -1324,7 +1524,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                   const final = limitImages(shimmed, effective.maxImages.value)
                   await Effect.runPromise(open(final), { signal })
                   const policy = documentedCachePolicy(
-                    { provider: prepared.kind.piProvider, api: prepared.api, model: model.key },
+                    { provider: prepared.cacheContract ?? "", api: prepared.api, model: model.key },
                     final
                   )
                   const selected = request.inspection?.model
@@ -1514,7 +1714,13 @@ export const layer = (options: ProvidersOptions = {}) =>
               connectionId: prepared.connection.id,
               model: model.key
             }
-            const effective = resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
+            const effective = resolveModel(
+              model.key,
+              model.upstream,
+              model.overrides,
+              prepared.connection.compat,
+              prepared.settings
+            )
             const piModel = yield* Effect.tryPromise({
               try: () => buildPiModel(prepared, model, effective),
               catch: (error) =>
@@ -1524,11 +1730,26 @@ export const layer = (options: ProvidersOptions = {}) =>
             // against a context some source actually reported.
             const knownContext = effective.context.source === "unknown" ? undefined : effective.context.value
             const capped = yield* withCap(prepared.connection)
+            // A pinned route's own prices, when none are stored or they're stale: fetched alongside
+            // the reply, off its path, so the close can price with them if they've arrived.
+            const latest = { current: model }
+            if (prepared.kind.id === "openrouter")
+              yield* Effect.forkDetach(
+                ensureEndpoints(request.userId, model).pipe(
+                  Effect.tap((fresh) =>
+                    Effect.sync(() => {
+                      latest.current = fresh
+                    })
+                  )
+                )
+              )
 
             for (let n = 0; ; n++) {
               const outcome = yield* capped(
                 waitForPause(prepared.connection.id, offer).pipe(
-                  Effect.andThen(attempt(prepared, model, piModel, knownContext, request, offer, n + 1, pricing))
+                  Effect.andThen(
+                    attempt(prepared, model, piModel, knownContext, request, offer, n + 1, pricing, latest)
+                  )
                 )
               )
               if (outcome.ok) {
@@ -1630,7 +1851,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 counts,
                 pricing,
                 capture,
-                price: model.upstream.price ?? null
+                price: modelPrice(model)
               })
               yield* writer
                 .CloseLlmRequest({
@@ -1744,7 +1965,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 model: model.key
               },
               capture: emptyCapture(),
-              price: model.upstream.price ?? null
+              price: modelPrice(model)
             },
             true
           )
@@ -1877,6 +2098,33 @@ export const layer = (options: ProvidersOptions = {}) =>
                 ...(entry.decide ? { decisions: true } : {})
               })
           ),
+        providers: () =>
+          registry.providers
+            .list()
+            .filter((provider) => provider.apis.some((api) => registry.kinds.get(api.id) !== undefined))
+            .map(
+              (provider) =>
+                new ProviderInfo({
+                  id: provider.id,
+                  label: provider.label,
+                  about: provider.about,
+                  // Only the API types whose kinds are in effect (a plugin's may be gone).
+                  apis: provider.apis.filter((api) => registry.kinds.get(api.id) !== undefined),
+                  baseUrl: provider.baseUrl,
+                  ...(provider.baseUrlExample ? { baseUrlExample: provider.baseUrlExample } : {}),
+                  ...(provider.regionUrl ? { regionUrl: provider.regionUrl } : {}),
+                  ...(provider.regionUrls ? { regionUrls: provider.regionUrls } : {}),
+                  ...(provider.regionFormat ? { regionFormat: provider.regionFormat } : {}),
+                  keyOptional: provider.keyOptional,
+                  auth: provider.auth,
+                  defaults: provider.defaults,
+                  settings: provider.settings,
+                  cacheLifetime: provider.cacheLifetime,
+                  accounting: provider.accounting,
+                  rules: providerRules(registry.shims.list(), provider.id),
+                  ...(provider.decisions ? { decisions: true } : {})
+                })
+            ),
         createConnection,
         createCredential,
         replaceCredentialKey,
@@ -1885,6 +2133,8 @@ export const layer = (options: ProvidersOptions = {}) =>
         setHeaders,
         setProxy,
         refreshModels,
+        refreshEndpoints,
+        ensureEndpoints,
         catalogUpstream,
         testConnection,
         stream

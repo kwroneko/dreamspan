@@ -183,7 +183,8 @@ function LorebookPanelBody({
             book={book}
             panel
             tools={
-              <div className="flex items-center gap-2">
+              // gap-1: Add entry and five icon actions fit the panel's 1024 px width with its scrollbar.
+              <div className="flex items-center gap-1">
                 <SearchReplaceButton
                   ref={findButton}
                   className="@max-[30rem]:[&>span]:hidden"

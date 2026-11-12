@@ -3,7 +3,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { applyRouterCacheControl } from "../src/providers/breakpoints.ts"
-import { bestEffortCache, documentedCacheMinimum, documentedCachePolicy } from "../src/providers/cachePolicy.ts"
+import { documentedCacheMinimum, documentedCachePolicy } from "../src/providers/cachePolicy.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
@@ -150,11 +150,88 @@ describe("default cache markers", () => {
       const mock = yield* resource(completionReply)
       const api = yield* client()
       const { chat } = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
+        connection: { provider: "openai", kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
         modelKey: "gpt-5.4-nano",
         model: {}
       })
       assert.strictEqual(mock.requests().at(-1)!.body!.prompt_cache_key, chat.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a custom server gets no prompt_cache_key unless its connection turns it on", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource(completionReply)
+      const api = yield* client()
+      yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
+        modelKey: "gpt-5.4-nano",
+        model: {}
+      })
+      assert.notProperty(mock.requests().at(-1)!.body!, "prompt_cache_key")
+      const { chat } = yield* generateReply(api, {
+        connection: {
+          provider: "openai-compatible",
+          kind: "openai-chat",
+          baseUrl: mock.url,
+          providerSettings: { promptCacheKey: true }
+        },
+        modelKey: "gpt-5.4-nano",
+        model: {}
+      })
+      assert.strictEqual(mock.requests().at(-1)!.body!.prompt_cache_key, chat.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a custom Responses server gets no SDK-generated cache key until opted in", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* resource((_req, res) =>
+        sse(res, [
+          {
+            type: "response.output_item.added",
+            output_index: 0,
+            item: { type: "message", id: "msg_1", role: "assistant", content: [] }
+          },
+          { type: "response.output_text.delta", output_index: 0, delta: "The tide is out." },
+          {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: {
+              type: "message",
+              id: "msg_1",
+              role: "assistant",
+              content: [{ type: "output_text", text: "The tide is out." }]
+            }
+          },
+          {
+            type: "response.completed",
+            response: {
+              id: "r1",
+              status: "completed",
+              model: "m",
+              output: [],
+              usage: { input_tokens: 2, output_tokens: 5 }
+            }
+          }
+        ])
+      )
+      const api = yield* client()
+      for (const promptCacheKey of [false, true]) {
+        const { chat, version } = yield* generateReply(api, {
+          connection: {
+            provider: "openai-compatible",
+            kind: "openai-responses",
+            baseUrl: mock.url,
+            providerSettings: { promptCacheKey }
+          },
+          modelKey: "synthetic",
+          model: {}
+        })
+        assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
+        if (promptCacheKey) assert.strictEqual(mock.requests().at(-1)!.body!.prompt_cache_key, chat.id)
+        else assert.notProperty(mock.requests().at(-1)!.body!, "prompt_cache_key")
+      }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -174,43 +251,10 @@ describe("default cache markers", () => {
       )
       const api = yield* client()
       const { chat } = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
+        connection: { provider: "openai", kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
         modelKey: "gpt-5.4-nano",
         model: { cacheLayout: { minTokens: 1 } }
       })
-      const me = yield* api.Whoami()
-      const reader = yield* Reader
-      const estimate = yield* reader.CacheWarmth({
-        userId: me.id as never,
-        chatId: chat.id,
-        leafSlotId: null,
-        forkId: null
-      })
-      assert.strictEqual(estimate.warmth?.prefixTokens, 5)
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
-  })
-
-  it.live("router-prefixed OpenAI models retain the best-effort cache estimate", () => {
-    const config = testConfig()
-    return Effect.gen(function* () {
-      const mock = yield* resource((_req, res) =>
-        sse(
-          res,
-          completionChunks(["The tide is out."], {
-            prompt_tokens: 2000,
-            completion_tokens: 5,
-            total_tokens: 2005,
-            prompt_tokens_details: { cached_tokens: 5 }
-          })
-        )
-      )
-      const api = yield* client()
-      const { chat } = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: mock.url, apiKey: "synthetic-key" },
-        modelKey: "acme.gpt-5.4-nano",
-        model: { cacheTtlS: 300, cacheLayout: { minTokens: 1 } }
-      })
-      assert.strictEqual(mock.requests().at(-1)!.body!.model, "acme.gpt-5.4-nano")
       const me = yield* api.Whoami()
       const reader = yield* Reader
       const estimate = yield* reader.CacheWarmth({
@@ -257,8 +301,6 @@ describe("documented cache rules", () => {
     assert.strictEqual(min("anthropic", "claude-opus-4-7"), 2048)
     assert.strictEqual(min("openrouter", "anthropic/claude-haiku-4.5"), 4096)
     assert.strictEqual(min("openai-chat", "gpt-5.4-nano"), 1024)
-    assert.strictEqual(min("openai-chat", "acme.gpt-5.4-nano"), 1024)
-    assert.isTrue(bestEffortCache({ provider: "openai-chat", api: "openai-completions", model: "acme.gpt-5.4-nano" }))
     assert.strictEqual(min("openrouter", "google/gemini-3.5-flash-lite"), 1024)
     assert.strictEqual(min("openrouter", "google/gemini-3.5-pro"), 4096)
     assert.isNull(min("anthropic", "claude-3-5-haiku"))

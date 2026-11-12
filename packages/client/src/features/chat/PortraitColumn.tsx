@@ -122,7 +122,7 @@ function Column({ asTabOf }: { asTabOf: (id: string) => OpenAsTab }) {
       className="relative flex shrink-0 flex-col border-r border-border bg-surface"
     >
       <ResizeHandle
-        label="Resize the portrait"
+        label={`Resize the ${shown.length > 0 && shown.every((entry) => entry.portrait.image) ? "image" : "portrait"}`}
         width={width}
         min={MIN}
         max={max}
@@ -154,7 +154,7 @@ function Column({ asTabOf }: { asTabOf: (id: string) => OpenAsTab }) {
                 height !== undefined &&
                 pair !== null && (
                   <ResizeHandle
-                    label={`Resize ${name(index)}'s and ${name(index + 1)}'s portraits`}
+                    label={`Resize ${name(index)}'s and ${name(index + 1)}'s ${shown[index]?.portrait.image && shown[index + 1]?.portrait.image ? "images" : "portraits"}`}
                     axis="y"
                     width={height}
                     min={Math.min(MIN_VIEWER_HEIGHT, pair / 2)}
@@ -248,7 +248,7 @@ function Viewer({
   return (
     <aside
       ref={ref}
-      aria-label={`${portrait.name}'s portrait`}
+      aria-label={`${portrait.name}'s ${portrait.image ? "image" : "portrait"}`}
       data-portrait-viewer
       style={{ flex: `${entry.weight} 1 0px`, minHeight: 0 }}
       className={`relative flex flex-col ${first ? "" : "border-t border-border"}`}
@@ -310,7 +310,13 @@ function Viewer({
             </MenuCheckboxItem>
           </Menu>
         }
-        close={<IconButton label="Close the portrait" icon="close" onClick={() => viewer.close(portrait.id)} />}
+        close={
+          <IconButton
+            label={`Close the ${portrait.image ? "image" : "portrait"}`}
+            icon="close"
+            onClick={() => viewer.close(portrait.id)}
+          />
+        }
       />
       {boundary}
     </aside>

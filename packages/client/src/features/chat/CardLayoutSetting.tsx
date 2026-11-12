@@ -27,9 +27,7 @@ export function CardLayoutSetting({ session }: { session: ChatSession }) {
           disabled={pending !== null}
           onCheckedChange={(next) => void change(next)}
           hint={on ? "Click to send every character's card." : "Click to send only the replying character's card."}
-          description={
-            on ? "Cards change with each speaker, so less of the context can be cached." : "The preset's layout."
-          }
+          description={on ? "Cards change with each speaker, so less of the context can be cached." : undefined}
         >
           Card swap
         </Switch>

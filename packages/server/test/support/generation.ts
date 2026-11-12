@@ -4,7 +4,7 @@ import { type Chat, type EntityId, NewVersion, type VersionId } from "@rp/shared
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import type { ModelOverrides } from "@rp/shared/providers.ts"
+import type { ModelOverrides, ProviderSettings } from "@rp/shared/providers.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Stream } from "effect"
 import { Writer } from "../../src/db/Database.ts"
@@ -38,8 +38,12 @@ export const generateReply = (
   api: Api,
   options: {
     readonly connection: {
+      /** The provider (providerDefinitions.ts); by default the one the API type and base URL imply. */
+      readonly provider?: string
       readonly kind: string
       readonly baseUrl: string
+      /** Changes to the provider's defaults (its advanced section). */
+      readonly providerSettings?: ProviderSettings
       readonly apiKey?: string
       readonly cacheTtlS?: number
     }
@@ -78,6 +82,7 @@ export const generateReply = (
     const me = yield* api.Whoami()
     const userId = me.id as UserId
     const connection = yield* api.CreateConnection({
+      ...(options.connection.provider ? { provider: options.connection.provider } : {}),
       kind: options.connection.kind,
       settings: {
         name: "Mock",
@@ -85,7 +90,8 @@ export const generateReply = (
         compat: {},
         cacheTtlS: options.connection.cacheTtlS ?? null,
         maxConcurrent: null,
-        presetOverrideRefId: null
+        presetOverrideRefId: null,
+        ...(options.connection.providerSettings ? { providerSettings: options.connection.providerSettings } : {})
       },
       ...(options.connection.apiKey ? { apiKey: options.connection.apiKey } : {})
     })

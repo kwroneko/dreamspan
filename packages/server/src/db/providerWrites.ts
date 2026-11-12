@@ -4,6 +4,8 @@ import { admitRequest } from "./lcmBackfill.ts"
 // in the writer worker, each as one transaction. Secrets arrive already encrypted.
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionSettings } from "@rp/shared/providers.ts"
+import { findProvider, providerChanges } from "@rp/shared/providerDefinitions.ts"
+import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -29,7 +31,9 @@ const settingsColumns = (settings: ConnectionSettings) => ({
   cache_ttl_s: settings.cacheTtlS,
   max_concurrent: settings.maxConcurrent,
   preset_override_ref_id: settings.presetOverrideRefId,
-  ...(settings.modelIdPrefix !== undefined ? { model_id_prefix: settings.modelIdPrefix } : {})
+  ...(settings.providerSettings !== undefined
+    ? { provider_settings_json: JSON.stringify(settings.providerSettings) }
+    : {})
 })
 
 export const makeProviderWriteHandlers = Effect.gen(function* () {
@@ -113,8 +117,10 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         const revision = yield* writeSetting(sql, "user", userId, "cost", rules, expectedRevision)
         return { revision, rules }
       }).pipe(transaction(sql, "SetCostSettings")),
-    CreateConnection: ({ userId, connectionId, kind, api, settings, credential }) =>
+    CreateConnection: ({ userId, connectionId, provider, kind, api, settings, credential }) =>
       Effect.gen(function* () {
+        const definitions = yield* CurrentProviderDefinitions
+        const definition = findProvider(definitions, provider ?? null, kind, settings.baseUrl)
         yield* checkPresetRef(userId, settings.presetOverrideRefId)
         const credentialId = "typed" in credential ? credential.typed.credentialId : credential.existing
         if ("typed" in credential) yield* insertCredential(userId, credential.typed, true)
@@ -123,9 +129,15 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO connections ${sql.insert({
           id: connectionId,
           owner_user_id: userId,
+          provider: provider ?? definition?.id ?? kind,
           kind,
           api,
-          ...settingsColumns(settings),
+          ...settingsColumns({
+            ...settings,
+            ...(settings.providerSettings !== undefined
+              ? { providerSettings: providerChanges(definition, settings.providerSettings) }
+              : {})
+          }),
           credential_id: credentialId,
           created_at: now,
           updated_at: now
@@ -136,6 +148,8 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
     UpdateConnection: ({ userId, connectionId, settings, expectedRowVersion }) =>
       Effect.gen(function* () {
         const row = yield* ownedConnection(userId, connectionId)
+        const definitions = yield* CurrentProviderDefinitions
+        const definition = findProvider(definitions, row.provider, row.kind, row.base_url)
         yield* checkPresetRef(userId, settings.presetOverrideRefId)
         if (row.row_version !== expectedRowVersion) {
           return yield* new StaleWrite({
@@ -145,7 +159,13 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
             actual: row.row_version
           })
         }
-        yield* sql`UPDATE connections SET ${sql.update({ ...settingsColumns(settings), updated_at: Date.now() })},
+        const normalized = {
+          ...settings,
+          ...(settings.providerSettings !== undefined
+            ? { providerSettings: providerChanges(definition, settings.providerSettings) }
+            : {})
+        }
+        yield* sql`UPDATE connections SET ${sql.update({ ...settingsColumns(normalized), updated_at: Date.now() })},
                      row_version = row_version + 1
                    WHERE id = ${connectionId}`
         return yield* reloadConnection(connectionId)
@@ -242,14 +262,9 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         transaction(sql, "SetConnectionProxy")
       ),
 
-    SyncFetchedModels: ({ userId, connectionId, models, fetchedAt, modelIdPrefix }) =>
+    SyncFetchedModels: ({ userId, connectionId, models, fetchedAt }) =>
       Effect.gen(function* () {
         yield* ownedConnection(userId, connectionId)
-        // The prefix the list's ids share, as the connection's default until the user sets one.
-        if (modelIdPrefix !== undefined)
-          yield* sql`UPDATE connections SET model_id_prefix = ${modelIdPrefix}, row_version = row_version + 1,
-                       updated_at = ${fetchedAt}
-                     WHERE id = ${connectionId} AND model_id_prefix IS NULL`
         const existing = yield* sql<{ id: string; model_key: string; fetched_at: number | null }>`
           SELECT id, model_key, fetched_at FROM models WHERE connection_id = ${connectionId}`
         const byKey = new Map(existing.map((row) => [row.model_key, row]))
@@ -261,7 +276,11 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           const known = byKey.get(model.key)
           const upstream = JSON.stringify(model.upstream)
           if (known) {
-            yield* sql`UPDATE models SET upstream_json = ${upstream}, fetched_at = ${fetchedAt}, missing_since = NULL
+            // A refresh rewrites the upstream but keeps the endpoint list fetched for a pinned route.
+            yield* sql`UPDATE models SET
+                         upstream_json = CASE WHEN json_extract(upstream_json, '$.endpoints') IS NULL THEN ${upstream}
+                           ELSE json_set(${upstream}, '$.endpoints', json(json_extract(upstream_json, '$.endpoints'))) END,
+                         fetched_at = ${fetchedAt}, missing_since = NULL
                        WHERE id = ${known.id}`
             updated++
           } else {
@@ -325,6 +344,14 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
                    WHERE id = ${modelId}`
         return yield* reloadModel(modelId)
       }).pipe(transaction(sql, "SetLearnedContext")),
+
+    SetModelEndpoints: ({ userId, modelId, endpoints }) =>
+      Effect.gen(function* () {
+        yield* ownedModel(userId, modelId)
+        yield* sql`UPDATE models SET upstream_json = json_set(upstream_json, '$.endpoints', json(${JSON.stringify(endpoints)}))
+                   WHERE id = ${modelId}`
+        return yield* reloadModel(modelId)
+      }).pipe(transaction(sql, "SetModelEndpoints")),
 
     SetModelHidden: ({ userId, modelId, hidden }) =>
       Effect.gen(function* () {

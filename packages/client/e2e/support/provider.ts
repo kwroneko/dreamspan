@@ -3,10 +3,25 @@
 // was sent. No real provider or key is ever used.
 import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
+import { expect, type Page } from "@playwright/test"
+
+/** On the new connection form, picks the provider the fake one stands for: a custom server. */
+export const chooseCustomServer = async (page: Page) => {
+  const picker = page.getByRole("combobox", { name: "Provider", exact: true })
+  await picker.click()
+  // By its label: on a phone the option's explanation is part of its name.
+  await page
+    .getByRole("option")
+    .filter({ has: page.getByText("OpenAI-compatible (custom)", { exact: true }) })
+    .click()
+  await expect(picker).toContainText("OpenAI-compatible")
+}
 
 export interface FakeProvider {
   readonly baseUrl: string
   readonly listings: number
+  /** The model ids whose endpoint lists were asked for (`author/slug`), in order. */
+  readonly endpointRequests: ReadonlyArray<string>
   /** The bearer tokens received, in order. */
   readonly keys: ReadonlyArray<string>
   /** The chat completion requests received, parsed, in order. */
@@ -26,12 +41,20 @@ export const startProvider = async (
   options: {
     holdAfterText?: boolean
     /** Streamed instead of REPLY. */ reply?: string
-    models?: ReadonlyArray<{ id: string; name: string; context_length: number }>
+    models?: ReadonlyArray<{
+      id: string
+      name: string
+      context_length: number
+      pricing?: { prompt: string; completion: string }
+    }>
+    /** Served at `/models/{author}/{slug}/endpoints`, by `author/slug`; any other model's list is a 404. */
+    endpoints?: Readonly<Record<string, unknown>>
   } = {}
 ): Promise<FakeProvider> => {
   const reply = options.reply ?? REPLY
   const keys: Array<string> = []
   let listings = 0
+  const endpointRequests: Array<string> = []
   const completions: Array<FakeProvider["completions"][number]> = []
   let holding = false
   let holdingText = options.holdAfterText ?? false
@@ -71,6 +94,15 @@ export const startProvider = async (
       )
       return
     }
+    const endpointsOf = /^\/v1\/models\/([^/]+\/[^/]+)\/endpoints$/.exec(request.url ?? "")
+    if (endpointsOf) {
+      const id = decodeURIComponent(endpointsOf[1]!)
+      endpointRequests.push(id)
+      const body = options.endpoints?.[id]
+      response.writeHead(body === undefined ? 404 : 200, { "content-type": "application/json" })
+      response.end(JSON.stringify(body ?? { error: { message: "no endpoints" } }))
+      return
+    }
     if (request.url === "/v1/chat/completions" && request.method === "POST") {
       let body = ""
       request.on("data", (data: Buffer) => (body += data.toString()))
@@ -90,6 +122,7 @@ export const startProvider = async (
     get listings() {
       return listings
     },
+    endpointRequests,
     keys,
     completions,
     hold: () => {

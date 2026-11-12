@@ -6,6 +6,7 @@ import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { createContext, type ReactElement, type ReactNode, useContext, useState } from "react"
 import { initials } from "./Avatar.tsx"
 import { ImageViewer, MAX_ZOOM, type NaturalSize, type Zoom } from "./ImageViewer.tsx"
+import { Dialog } from "./Dialog.tsx"
 import { useImagePrefs } from "./imagePrefs.ts"
 import type { AvatarCrop } from "@rp/shared/media.ts"
 import { mediaUrl, pictureUrl } from "./mediaImage.ts"
@@ -22,6 +23,8 @@ export interface Portrait {
   readonly name: string
   readonly mediaId: string | null
   readonly picture?: AvatarCrop | undefined
+  /** A message's attached image rather than a portrait: the viewer's labels say "image". */
+  readonly image?: true | undefined
 }
 interface PortraitViewer {
   /**
@@ -51,11 +54,6 @@ interface PortraitViewer {
   readonly tabHref?: ((portrait: Portrait) => string | null) | undefined
 }
 
-/**
- * A drag of the app's own portrait carries this, with the tab URL of its picture: a frame
- * opens it as a tab, and a chat's composer never takes it as an attachment.
- */
-export const PICTURE_TAB_MIME = "application/x-rp-picture-tab"
 export type { PortraitViewer }
 const Context = createContext<PortraitViewer | null>(null)
 
@@ -183,7 +181,9 @@ export function PortraitView({
   toggle,
   close,
   alignToChatHeader = false,
-  header = (node) => node
+  header = (node) => node,
+  src,
+  alt = `${portrait.name}'s full ${portrait.image ? "image" : "portrait"}`
 }: {
   portrait: Portrait
   title: (name: string) => ReactNode
@@ -191,11 +191,15 @@ export function PortraitView({
   close: ReactNode
   alignToChatHeader?: boolean
   header?: (node: ReactElement) => ReactNode
+  /** The image's own address, in place of its media's: a local copy not uploaded yet. */
+  src?: string | undefined
+  alt?: string
 }) {
   const { mode } = useImagePrefs()
   const [zoom, setZoom] = useState<Zoom>("fit")
   const [scale, setScale] = useState<{ value: number; natural: NaturalSize | null; min: number } | null>(null)
-  const visible = portrait.mediaId !== null && mode === "show"
+  const shows = portrait.mediaId !== null || src !== undefined
+  const visible = shows && mode === "show"
   const shownScale = scale?.value ?? 1
   const min = scale?.min ?? 1
   const atOwnSize = zoom !== "fit" && Math.abs(shownScale - 1) < 0.000001
@@ -276,13 +280,17 @@ export function PortraitView({
         </p>
       )}
       <div className="min-h-0 flex-1 p-2">
-        {portrait.mediaId !== null ? (
+        {shows ? (
           <ImageViewer
-            src={pictureUrl(portrait.mediaId, portrait.picture)}
-            placeholder={
-              portrait.picture ? pictureUrl(portrait.mediaId, portrait.picture) : mediaUrl(portrait.mediaId, 768)
-            }
-            alt={`${portrait.name}'s full portrait`}
+            src={src ?? pictureUrl(portrait.mediaId!, portrait.picture)}
+            {...(src !== undefined
+              ? {}
+              : {
+                  placeholder: portrait.picture
+                    ? pictureUrl(portrait.mediaId!, portrait.picture)
+                    : mediaUrl(portrait.mediaId!, 768)
+                })}
+            alt={alt}
             zoom={visible ? zoom : "fit"}
             onZoom={(next) => visible && setZoom(next)}
             onScale={(value, natural, least) => setScale({ value, natural, min: least })}
@@ -296,6 +304,40 @@ export function PortraitView({
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * A look at an image that doesn't open in the column (one attached to the composer, not sent
+ * yet; owner, 2026-11-07): the column's viewer, with its zoom, Fit, 100%, wheel, drag and pinch,
+ * in a modal over the page. `src` shows a local copy still uploading.
+ */
+export function PicturePeek({
+  picture,
+  src,
+  onClose
+}: {
+  picture: Portrait | null
+  src?: string | undefined
+  onClose: () => void
+}) {
+  return (
+    <Dialog open={picture !== null} onOpenChange={(open) => !open && onClose()} title={picture?.name ?? ""} wide>
+      {picture && (
+        <div
+          data-picture-peek
+          className="flex h-[min(70dvh,48rem)] min-h-0 shrink-0 flex-col overflow-hidden rounded-md border border-border"
+        >
+          <PortraitView
+            portrait={picture}
+            src={src}
+            alt={`${picture.name} at full size`}
+            title={() => null}
+            close={null}
+          />
+        </div>
+      )}
+    </Dialog>
   )
 }
 

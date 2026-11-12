@@ -6,6 +6,8 @@ import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
+import { prepareTokenizer } from "../src/importer/tokenizer.ts"
+import { tokensOf } from "../src/assembler/st.ts"
 
 for (const mode of ["st", "layouts"] as const)
   lcmTest(`${mode}: failed ranges stay raw until overflow, then carry a budgeted, pinned marker`, (server) =>
@@ -53,7 +55,7 @@ for (const mode of ["st", "layouts"] as const)
       assert.include(wireText(fitting), "Message 1.")
       assert.notInclude(wireText(fitting), "could not be summarized")
       assert.isEmpty(fitting.lcm!.failures!)
-      for (let n = 0; n < 36; n++) yield* h.append(`New ${n}. ` + "x".repeat(1000))
+      for (let n = 0; n < 36; n++) yield* h.append(`New ${n}. ` + "x".repeat(2000))
       yield* h.append("target")
       const overflowing = yield* assemble()
       assert.include(wireText(overflowing), "[Messages 1–2 could not be summarized.]")
@@ -61,8 +63,9 @@ for (const mode of ["st", "layouts"] as const)
       assert.notInclude(wireText(overflowing), "Message 1.")
       assert.deepStrictEqual(overflowing.lcm!.failures, [{ from: 1, to: 2 }])
       assert.isTrue(overflowing.issues.some((i) => i.kind === "summary_failed" && i.message.includes("1–2")))
+      const count = yield* Effect.promise(() => prepareTokenizer("o200k_base"))
       assert.isAtMost(
-        overflowing.request.messages.reduce((n, m) => n + Math.ceil(m.content.length / 4) + 3, 3),
+        overflowing.request.messages.reduce((n, m) => n + tokensOf(m, count), 3),
         8192 - 512
       )
       // Both the raw decision and the failure survive a later edit and successful repair.
@@ -149,7 +152,7 @@ lcmTest("unused failure markers consume no space while many short originals stil
       schemaVersion: 1,
       origin: "user",
       sourcePath: null,
-      doc: importStPreset(JSON.stringify({ openai_max_context: 512, openai_max_tokens: 64 })).document!
+      doc: importStPreset(JSON.stringify({ openai_max_context: 640, openai_max_tokens: 64 })).document!
     })
     yield* h.api.SetGenerationDefaults({ defaults: { model: h.primary, preset: preset.ref.id } })
     // The small budget is the model's own setting.
@@ -159,7 +162,7 @@ lcmTest("unused failure markers consume no space while many short originals stil
     yield* h.api.EditModel({
       modelId: primary.id,
       expectedRowVersion: primary.rowVersion,
-      overrides: { ...primary.overrides, settings: { samplers: { openai_max_context: 512, openai_max_tokens: 64 } } }
+      overrides: { ...primary.overrides, settings: { samplers: { openai_max_context: 640, openai_max_tokens: 64 } } }
     })
     for (let n = 0; n < 80; n++) yield* h.append(`m${n}`)
     yield* h.append("target")
@@ -206,7 +209,7 @@ lcmTest("an adjacent failed range keeps its originals when only the older one mu
   Effect.gen(function* () {
     // The cut's target holds the later range (about 4,100 tokens), the maximum not both.
     const h = yield* lcmHarness(server, { messages: 0, settings: { recentTarget: 4_300, recentMax: 5_400 } })
-    for (let n = 0; n < 32; n++) yield* h.append(`${n < 16 ? "Older" : "Later"} original ${n}. ` + "x".repeat(1000))
+    for (let n = 0; n < 32; n++) yield* h.append(`${n < 16 ? "Older" : "Later"} original ${n}. ` + "x".repeat(2000))
     yield* h.append("target")
     yield* fixtureSql(
       h.dataDir,

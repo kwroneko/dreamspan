@@ -9,7 +9,13 @@ import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { castView, modelNameOf, useCast } from "./cast.ts"
 import { applyDisplayTransforms, type DisplayInput, displayTransforms } from "./displayPipeline.ts"
 import { useDisplayContext } from "./DisplaySettings.tsx"
-import { displayRegexApplies, displayScriptLists, displayScripts, messageCharacter } from "./displayScripts.ts"
+import {
+  displayRegexApplies,
+  displayScriptLists,
+  displayScripts,
+  messageCharacter,
+  sameScripts
+} from "./displayScripts.ts"
 import { displayText } from "./macros.ts"
 import type { ChatSession } from "./session.ts"
 
@@ -30,14 +36,23 @@ export interface DisplayAt {
  * newest text, so a frame never shows text a display script hides; before their first answer
  * it shows nothing where a display script applies (`text: null`). A finished text that waits
  * for its first answer is `pending`: shown invisibly, so it keeps its place without showing
- * what a display script hides.
+ * what a display script hides. `current` says the shown text came from the scripts, preferences
+ * and transforms in effect now (by content: a library refresh with the same scripts keeps it),
+ * which a panel's permissions are about: its scripts must not run on text the previous sources
+ * wrote (Message.tsx).
  */
 export function useDisplayed(
   at: DisplayAt,
   text: string,
   placement: 1 | 2 | 6,
   streaming: boolean
-): { readonly text: string | null; readonly issues: ReadonlyArray<string>; readonly pending?: boolean } {
+): {
+  readonly text: string | null
+  readonly issues: ReadonlyArray<string>
+  readonly pending?: boolean
+  /** The text came from the scripts, preferences and transforms in effect now. */
+  readonly current: boolean
+} {
   const { version, session, parentSlotId, depth } = at
   const viewer = useViewPrefs()
   const needsContext = version.macroMode === "template" || viewer.prefs.outputMacros || viewer.prefs.displayRegex
@@ -133,13 +148,23 @@ export function useDisplayed(
     }
     next()
   }, [input, stages, streaming])
-  if (result?.input === input && result.stages === stages) return result
+  if (result?.input === input && result.stages === stages) return { ...result, current: true }
   // Until the transforms answer: what they last said of this version (a reply that just
   // finished keeps its streamed display rather than flashing its text without the scripts).
   if (result && result.input.version.id === version.id)
-    return { text: result.text, issues: streaming ? [] : result.issues }
+    return {
+      text: result.text,
+      issues: streaming ? [] : result.issues,
+      current:
+        result.stages === stages &&
+        result.input.prefs.displayRegex === viewer.prefs.displayRegex &&
+        sameScripts(result.input.scripts, scripts)
+    }
   const expanded = displayText(text, version.macroMode, input.names, input.card, version.frozenMacros ?? {})
   if (viewer.prefs.displayRegex && displayRegexApplies(scripts, placement))
-    return streaming ? { text: null, issues: [] } : { text: expanded, issues: [], pending: true }
-  return { text: expanded, issues: [] }
+    return streaming
+      ? { text: null, issues: [], current: false }
+      : { text: expanded, issues: [], pending: true, current: false }
+  // No display script applies: nothing but the text itself is what a panel's sources wrote.
+  return { text: expanded, issues: [], current: true }
 }

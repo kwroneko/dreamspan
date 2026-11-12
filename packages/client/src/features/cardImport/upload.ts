@@ -33,11 +33,24 @@ const send = async <A>(
   }
 }
 
-export const previewVersion = (file: File, refId: RefId) =>
-  send(file, { into: refId, mode: "preview" }, Schema.decodeUnknownSync(CardReplacePreview), "read the file")
+/** `link`: the card's page on the card source the file came from, which the new version keeps in its `source`. */
+const linked = (link: string | undefined) => (link ? { link } : {})
 
-export const replaceWithVersion = (file: File, refId: RefId, head: RevisionId) =>
-  send(file, { into: refId, mode: "replace", head }, Schema.decodeUnknownSync(ImportResult), "replace the card")
+export const previewVersion = (file: File, refId: RefId, link?: string) =>
+  send(
+    file,
+    { into: refId, mode: "preview", ...linked(link) },
+    Schema.decodeUnknownSync(CardReplacePreview),
+    "read the file"
+  )
 
-export const stageVersion = (file: File, refId: RefId) =>
-  send(file, { into: refId, mode: "merge" }, Schema.decodeUnknownSync(ImportResult), "read the file")
+export const replaceWithVersion = (file: File, refId: RefId, head: RevisionId, link?: string) =>
+  send(
+    file,
+    { into: refId, mode: "replace", head, ...linked(link) },
+    Schema.decodeUnknownSync(ImportResult),
+    "replace the card"
+  )
+
+export const stageVersion = (file: File, refId: RefId, link?: string) =>
+  send(file, { into: refId, mode: "merge", ...linked(link) }, Schema.decodeUnknownSync(ImportResult), "read the file")

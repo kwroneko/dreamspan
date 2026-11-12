@@ -1145,11 +1145,11 @@ describe("the context assembler", () => {
       [
         { side: "assistant", content: "Old." },
         { side: "user", content: "Go on." },
-        { side: "assistant", content: "q".repeat(500_000) },
+        { side: "assistant", content: "q ".repeat(250_000) },
         { side: "user", content: "Last." }
       ],
       copies,
-      200_000
+      400_000
     )
     expect(copied.issues.map((i) => i.message)).toContain(tooMuch)
     expect(copied.issues.some((i) => i.message.startsWith("The regex scripts ran out of time"))).toBe(false)
