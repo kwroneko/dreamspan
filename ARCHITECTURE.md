@@ -2849,6 +2849,9 @@ The instruction is always one final user-role message (DESIGN §2.2), for both p
 
 **Registered workshop effects (review-workshop3).** Setup and undo resolve the chat-kind profile in the worker, requiring its outside-effect policy and workshop rollout kind. The baseline fences effects to workshop rollouts and owned targets without hard-coding the built-in chat kind, so registered workshop kinds can reuse the operations in source and bundled workers. Story profiles remain refused. `workshopKinds.test.ts` exercises both worker modes. **BASELINE CHANGED**.
 
+**Extensible undo results (review-workshop3).** `rollout_effects.undo_json` is immutable for every kind. A separate object, `undo_result_json` (returned as `undoResult`), records the successful undoer’s result, atomically with its one-way undo timestamp. This supports later setting revisions, changeset outcomes and plugin revert commits without adding kind-specific columns or making recipes mutable. Revision-chain undo reads its new head from that result. A database CHECK couples the result and timestamp; neither can be written a second time. A synthetic registered plugin undoer tests non-revision results and repeat undo in source and bundled workers in `workshopEffectSchema.test.ts`. **BASELINE CHANGED**.
+
+
 
 
 

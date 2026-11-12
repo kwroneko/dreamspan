@@ -606,8 +606,10 @@ export const baseline: ReadonlyArray<string> = [
     target_id TEXT NOT NULL,
     title TEXT NOT NULL,
     undo_json TEXT CHECK (undo_json IS NULL OR (json_valid(undo_json) AND json_type(undo_json) = 'object')),
+    undo_result_json TEXT CHECK (undo_result_json IS NULL OR (json_valid(undo_result_json) AND json_type(undo_result_json) = 'object')),
     undone_at INTEGER CHECK (undone_at IS NULL OR undone_at >= created_at),
     created_at INTEGER NOT NULL,
+    CHECK ((undone_at IS NULL) = (undo_result_json IS NULL)),
     PRIMARY KEY (rollout_id, tool_call_id, seq),
     FOREIGN KEY (rollout_id, tool_call_id) REFERENCES rollout_receipts(rollout_id, tool_call_id) ON DELETE CASCADE
   ) STRICT, WITHOUT ROWID`,
@@ -638,8 +640,7 @@ export const baseline: ReadonlyArray<string> = [
       OR NEW.title <> OLD.title OR NEW.created_at <> OLD.created_at;
     SELECT RAISE(ABORT, 'effect cannot be undone twice') WHERE OLD.undone_at IS NOT NULL;
     SELECT RAISE(ABORT, 'effect updates must record undo') WHERE NEW.undone_at IS NULL;
-    SELECT RAISE(ABORT, 'undo recipe is retained') WHERE json_remove(NEW.undo_json, '$.restoredHead', '$.restoredRowVersion')
-      IS NOT json_remove(OLD.undo_json, '$.restoredHead', '$.restoredRowVersion');
+    SELECT RAISE(ABORT, 'undo recipe is retained') WHERE NEW.undo_json IS NOT OLD.undo_json;
   END`,
   `CREATE TABLE rollout_branches (
     rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,

@@ -36,6 +36,7 @@ interface EffectRow {
   target_id: string
   title: string
   undo_json: string | null
+  undo_result_json: string | null
   undone_at: number | null
   created_at: number
 }
@@ -48,6 +49,7 @@ export const toRolloutEffect = (row: EffectRow): RolloutEffect => ({
   targetId: row.target_id,
   title: row.title,
   undo: row.undo_json === null ? null : JSON.parse(row.undo_json),
+  undoResult: row.undo_result_json === null ? null : JSON.parse(row.undo_result_json),
   undoneAt: row.undone_at,
   createdAt: row.created_at
 })
@@ -86,10 +88,15 @@ const checkedRef = (ctx: UndoContext, effect: RolloutEffect) =>
     const ref = yield* makeLibraryQueries(ctx.sql).ownedRef(ctx.userId, String(undo.refId))
     let head = String(undo.head)
     let version = Number(undo.rowVersion)
-    const restored = yield* ctx.sql<{ undo_json: string }>`SELECT undo_json FROM rollout_effects
+    const restored = yield* ctx.sql<{
+      undo_json: string
+      undo_result_json: string
+    }>`SELECT undo_json, undo_result_json FROM rollout_effects
     WHERE target_kind = 'entity' AND target_id = ${effect.targetId} AND kind = 'library.revise' AND undone_at IS NOT NULL ORDER BY undone_at, created_at DESC`
     // A chain may have been undone at the same millisecond. Follow edges rather than clock order.
-    const remaining = restored.map((r) => JSON.parse(r.undo_json) as Record<string, unknown>)
+    const remaining = restored.map(
+      (r) => ({ ...JSON.parse(r.undo_json), ...JSON.parse(r.undo_result_json) }) as Record<string, unknown>
+    )
     for (;;) {
       const at = remaining.findIndex(
         (r) => r.before === head && Number(r.beforeRowVersion) === version && typeof r.restoredHead === "string"
@@ -178,7 +185,7 @@ const createUndoer: Undoer = {
       }
       // Use the bin's ordinary delete, without capacity eviction: undo never purges history.
       yield* ctx.bin.deleteEntity(ctx.userId, ref.entity_id)
-      return undo
+      return {}
     })
 }
 const reviseUndoer: Undoer = {
@@ -192,7 +199,7 @@ const reviseUndoer: Undoer = {
         revisionId: String(effect.undo!.before) as RevisionId,
         expectedRowVersion: ref.row_version
       })
-      return { ...effect.undo!, restoredHead: change.ref.headRevisionId, restoredRowVersion: change.ref.rowVersion }
+      return { restoredHead: change.ref.headRevisionId, restoredRowVersion: change.ref.rowVersion }
     })
 }
 const chatStamp = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
@@ -218,7 +225,7 @@ const chatUndoer: Undoer = {
       const [chat] = yield* chatStamp(ctx.sql, ctx.userId, effect.targetId)
       if (!chat || chat.stamp !== effect.undo!.stamp) return yield* refuse()
       yield* ctx.bin.deleteChat(ctx.userId, effect.targetId)
-      return effect.undo!
+      return {}
     })
 }
 export const rolloutUndoers = makeRegistry<Undoer>([createUndoer, reviseUndoer, chatUndoer])
@@ -246,7 +253,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       body: Effect.Effect<
         {
           result: string
-          effects: ReadonlyArray<Omit<RolloutEffect, "rolloutId" | "toolCallId" | "seq" | "undoneAt" | "createdAt">>
+          effects: ReadonlyArray<
+            Omit<RolloutEffect, "rolloutId" | "toolCallId" | "seq" | "undoResult" | "undoneAt" | "createdAt">
+          >
         },
         E
       >
@@ -522,14 +531,14 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           const undoer = rolloutUndoers.get(row.kind)
           if (!undoer || row.undo_json === null)
             return yield* new EffectUndoRefused({ message: "This change cannot be undone here." })
-          const undo = yield* undoer
+          const undoResult = yield* undoer
             .run({ sql, userId: input.userId, ops, bin }, toRolloutEffect(row))
             .pipe(
               Effect.catchTag(["StaleWrite", "InvalidDocument", "RefOperationRefused"], () => Effect.fail(refuse()))
             )
           const at = Date.now()
-          yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_json = ${JSON.stringify(undo)} WHERE rollout_id = ${input.rolloutId} AND tool_call_id = ${input.toolCallId} AND seq = ${input.seq}`
-          return toRolloutEffect({ ...row, undone_at: at, undo_json: JSON.stringify(undo) })
+          yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_result_json = ${JSON.stringify(undoResult)} WHERE rollout_id = ${input.rolloutId} AND tool_call_id = ${input.toolCallId} AND seq = ${input.seq}`
+          return toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })
         }).pipe(transaction(sql, "UndoRolloutEffect"))
     } satisfies Pick<
       Handlers,

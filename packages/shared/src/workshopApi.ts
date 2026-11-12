@@ -20,6 +20,7 @@ export const RolloutEffect = Schema.Struct({
   toolCallId: Schema.String,
   seq: Schema.Int,
   ...RolloutEffectRecord.fields,
+  undoResult: Schema.NullOr(Schema.Record(Schema.String, Schema.Unknown)),
   undoneAt: Schema.NullOr(Schema.Number),
   createdAt: Schema.Number
 })
