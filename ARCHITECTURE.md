@@ -2921,3 +2921,5 @@ Fork cost measurements (forkcost, 2026-11-05): `test/forkCostScale.test.ts` belo
 Chatsettings cache diagnostics (2026-11-06): rotating card-field macros in preset prompts now mark a changing prefix even when definition markers are disabled. Assembler version 53; `assembler.test.ts` covers macro-only rotation and byte-identical settings plans against the former assembly paths.
 
 Shell stream errors (review-shellrefresh, 2026-11-07): card and fork streams retry transport failures, while application errors reach the existing failure view. An expired session therefore returns to login even when a new stream starts without navigation, such as through Show more. `e2e/shellRefresh.spec.ts` covers that pagination case and shell updates after a server restart.
+
+Summary style review tests (review-small, 2026-11-12): `test/lcmSettings.test.ts` checks new-chat copying, account inheritance, chat overrides and reset through `AssembleSummary`; `e2e/lcmSettings.spec.ts` exercises Written as in both settings surfaces across reloads, account changes and reset at 1440 and 390 in both themes.

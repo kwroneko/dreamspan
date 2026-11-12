@@ -242,6 +242,47 @@ test("Settings → Chats sets the defaults a new chat copies", async ({ page }) 
   await expect(pair(again, "Recent messages kept as written").getByLabel("Maximum")).toHaveValue("25000")
 })
 
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`Written as defaults survive reload and a new chat keeps its choice ${width} ${theme}`, async ({ page }) => {
+      await open(page, width, theme)
+      await page.goto(`${server().url}/settings/chats`)
+      const defaults = page.getByRole("region", { name: "Summary defaults for new chats" })
+      await defaults.getByRole("button", { name: "With tools", exact: true }).click()
+      await expect(defaults.getByRole("button", { name: "With tools", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      await page.reload()
+      await expect(defaults.getByRole("button", { name: "With tools", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      const made = await admin((api) => api.CreateChat({ title: "Written with tools" }))
+      await defaults.getByRole("button", { name: "A reply", exact: true }).click()
+      await expect(defaults.getByRole("button", { name: "A reply", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      await page.goto(`${server().url}/chats/${made.id}`)
+      let section = await summaries(page)
+      await expect(section.getByRole("button", { name: "With tools", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      await section.getByRole("button", { name: "Reset to account default", exact: true }).click()
+      await expect(section.getByRole("button", { name: "A reply", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      await page.reload()
+      section = await summaries(page)
+      await expect(section.getByRole("button", { name: "A reply", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+    })
+
 // The phone first: the desktop run turns summaries on.
 for (const width of [390, 1440])
   test(`the summary note, the preset badge and the enable dialog at ${width}`, async ({ page }) => {
