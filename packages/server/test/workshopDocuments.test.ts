@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Fiber } from "effect"
+import { Effect, Fiber, Stream } from "effect"
+import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { ApprovalPrompt } from "@rp/shared/agent.ts"
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { Doc, RefId } from "@rp/shared/library.ts"
@@ -11,9 +12,10 @@ import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
 import { makePermit, offeredByGrants } from "../src/agent/approvals.ts"
-import { client, login, outcome, serverLayer, testConfig } from "./support/config.ts"
+import { client, login, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
-import { eventually } from "./support/generation.ts"
+import { eventually, finished, generateReply } from "./support/generation.ts"
+import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 const fixture = (dataDir: string, api: Api) =>
@@ -76,6 +78,207 @@ const script: RegexScript = {
 }
 
 describe("workshop preset and lorebook documents", () => {
+  it.live(
+    "live story bindings follow document edits and exact Undo, while archive only changes the library shelf",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((_request, response) => sse(response, completionChunks(["Ready."], {})))
+          ),
+          (server) => Effect.promise(() => server.close())
+        )
+        const api = yield* client()
+        const story = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {}
+        })
+        const f = yield* fixture(config.dataDir, api)
+        const preset = yield* api.CreatePreset({ label: "Live story preset" })
+        const book = yield* api.CreateLorebook({ label: "Live story book" })
+        yield* f.run(
+          "edit_preset",
+          { preset: preset.id, changes: [{ prompt: "main", text: "Initial story instruction." }] },
+          "live-preset-initial"
+        )
+        yield* f.run(
+          "edit_lorebook",
+          { lorebook: book.id, changes: [{ add: { uid: 1, constant: true, content: "Initial story fact." } }] },
+          "live-book-initial"
+        )
+        yield* api.ChangeCast({
+          chatId: story.chat.id,
+          forkId: story.chat.currentForkId,
+          slotId: story.version.slotId,
+          change: { _tag: "Preset", ref: preset.id }
+        })
+        yield* api.ChangeCast({
+          chatId: story.chat.id,
+          forkId: story.chat.currentForkId,
+          slotId: story.version.slotId,
+          change: { _tag: "Lorebook", ref: book.id, active: true }
+        })
+        // The changed bindings follow this reply; they must not alter its historical request.
+        const next = yield* posted(
+          api.SendMessage({
+            chatId: story.chat.id,
+            parentSlotId: story.version.slotId,
+            branch: false,
+            content: "Inspect the next synthetic turn."
+          })
+        )
+        const context = () =>
+          f.reader
+            .AssembleContext({
+              userId: f.user.id,
+              chatId: story.chat.id,
+              slotId: next.entry.slotId,
+              versionId: next.entry.version.id,
+              frozen: null,
+              now: 1,
+              timeZone: "UTC"
+            })
+            .pipe(Effect.map((result) => JSON.stringify(JSON.parse(result.snapshot).request)))
+        const initial = yield* context()
+        assert.include(initial, "Initial story instruction.")
+        assert.include(initial, "Initial story fact.")
+        yield* f.run(
+          "edit_preset",
+          { preset: preset.id, changes: [{ prompt: "main", text: "Changed story instruction." }] },
+          "live-preset-edit"
+        )
+        yield* f.run(
+          "edit_lorebook",
+          { lorebook: book.id, changes: [{ entry: 1, text: "Changed story fact." }] },
+          "live-book-edit"
+        )
+        const changed = yield* context()
+        assert.include(changed, "Changed story instruction.")
+        assert.include(changed, "Changed story fact.")
+        for (const [kind, ref] of [
+          ["preset", preset],
+          ["lorebook", book]
+        ] as const) {
+          const result = yield* f.run(
+            "set_ref_archived",
+            { kind, item: ref.id, archived: true },
+            `live-archive-${kind}`
+          )
+          assert.isUndefined(result.isError, result.text)
+        }
+        assert.strictEqual(yield* context(), changed)
+        const events: ChatEvent[] = []
+        yield* api.SubscribeChat({ chatId: story.chat.id }).pipe(
+          Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+          Effect.forkScoped
+        )
+        yield* eventually(() => events.length > 0)
+        const generated = yield* posted(
+          api.Generate({ chatId: story.chat.id, parentSlotId: next.entry.slotId, branch: false })
+        )
+        yield* eventually(() => finished(events, generated.entry.version.id)?.status === "complete")
+        assert.include(JSON.stringify(mock.requests().at(-1)!.body), "Changed story instruction.")
+        assert.include(JSON.stringify(mock.requests().at(-1)!.body), "Changed story fact.")
+        const usedAt = (yield* api.OpenEditor({ refId: preset.id })).ref.lastUsedAt
+        assert.isNumber(usedAt)
+        const effects = yield* api.ListRolloutEffects({ chatId: f.chat.id })
+        for (const kind of ["lorebook", "preset"] as const) {
+          yield* api.UndoRolloutEffect(effects.find((e) => e.toolCallId === `live-archive-${kind}`)!)
+          yield* api.UndoRolloutEffect(
+            effects.find((e) => e.toolCallId === `live-${kind === "lorebook" ? "book" : "preset"}-edit`)!
+          )
+        }
+        assert.strictEqual(yield* context(), initial)
+        assert.strictEqual((yield* api.OpenEditor({ refId: preset.id })).ref.lastUsedAt, usedAt)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    }
+  )
+  it.live("refuses a pinned edit after its document is archived while approval waits", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* api.SetWorkshopGrant({ chatId: f.chat.id, capability: "library.write", mode: "ask" })
+      for (const kind of ["preset", "lorebook"] as const) {
+        const ref =
+          kind === "preset"
+            ? yield* api.CreatePreset({ label: "Pinned archive preset" })
+            : yield* api.CreateLorebook({ label: "Pinned archive book" })
+        const old = (yield* api.OpenEditor({ refId: ref.id })).doc
+        const tool = toolForKind(f.registry, "workshop", `edit_${kind}`)!
+        const args = {
+          [kind]: ref.id,
+          changes:
+            kind === "preset"
+              ? [{ prompt: "main", text: "Must not be saved" }]
+              : [{ add: { uid: 1, content: "Must not be saved" } }]
+        }
+        const ctx = { ...f.context, toolCallId: `archive-race-${kind}` }
+        let prompt: ApprovalPrompt | null = null
+        const pending = yield* makePermit({
+          registries: f.registry,
+          reader: f.reader,
+          writer: f.writer,
+          userId: f.user.id,
+          chatId: f.chat.id,
+          rolloutId: f.rolloutId
+        })({
+          tool,
+          context: ctx,
+          args,
+          dangling: false,
+          onWaiting: (p) => {
+            if (p) prompt = p
+          }
+        }).pipe(Effect.forkScoped)
+        yield* eventually(() => prompt !== null)
+        yield* api.SetRefArchived({ refId: ref.id, archived: true })
+        const asked = prompt as unknown as ApprovalPrompt
+        yield* api.AnswerToolApproval({
+          rolloutId: asked.rolloutId,
+          toolCallId: asked.toolCallId,
+          digest: asked.digest,
+          answer: "allow"
+        })
+        const allowed = yield* Fiber.join(pending)
+        assert.isTrue(allowed.run)
+        const result = yield* tool.execute({ ...ctx, ...allowed }, args as never)
+        assert.isTrue(result.isError, result.text)
+        assert.include(result.text, "changed")
+        assert.deepStrictEqual((yield* api.OpenEditor({ refId: ref.id })).doc, old)
+      }
+      assert.isEmpty(yield* api.ListRolloutEffects({ chatId: f.chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("revision restores refuse permission-only HTML changes without resurrecting old approvals", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const ref = yield* api.CreatePreset({ label: "Old approvals" })
+      const initial = yield* api.OpenEditor({ refId: ref.id })
+      yield* f.save(ref.id, { ...initial.doc, html_scripts_approved: true, html_network_approved: true })
+      const approved = yield* api.OpenEditor({ refId: ref.id })
+      yield* f.save(ref.id, { ...initial.doc, html_scripts_approved: false, html_network_approved: false })
+      const result = yield* f.run(
+        "restore_revision",
+        {
+          kind: "preset",
+          item: ref.id,
+          revision: approved.ref.headRevisionId
+        },
+        "restore-old-approvals"
+      )
+      assert.isTrue(result.isError, result.text)
+      assert.include(result.text, "permissions")
+      const after = yield* api.OpenEditor({ refId: ref.id })
+      assert.isFalse(after.doc.html_scripts_approved === true)
+      assert.isFalse(after.doc.html_network_approved === true)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   for (const kind of ["preset", "lorebook"] as const)
     it.live(`${kind}: each change kind is atomic, recorded once and undone exactly without touching drafts`, () => {
       const config = testConfig()
@@ -235,6 +438,33 @@ describe("workshop preset and lorebook documents", () => {
           html_network_approved: true
         })
         const approved = yield* api.OpenEditor({ refId: preset.id })
+        const changedPrefill = yield* f.run(
+          "edit_preset",
+          {
+            preset: preset.id,
+            changes: [
+              {
+                settings: {
+                  prefill: {
+                    assistant: "<script>newPanel()</script>",
+                    impersonation: "",
+                    continue: false,
+                    continue_postfix: ""
+                  }
+                }
+              }
+            ]
+          },
+          "prefill-code"
+        )
+        assert.isUndefined(changedPrefill.isError, changedPrefill.text)
+        const newPanel = yield* api.OpenEditor({ refId: preset.id })
+        assert.isFalse(newPanel.doc.html_scripts_approved === true)
+        assert.isFalse(newPanel.doc.html_network_approved === true)
+        yield* api.UndoRolloutEffect(
+          (yield* api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === "prefill-code")!
+        )
+        assert.deepStrictEqual((yield* api.OpenEditor({ refId: preset.id })).doc, approved.doc)
         const changed = yield* f.run(
           "edit_preset",
           {
@@ -302,6 +532,9 @@ describe("workshop preset and lorebook documents", () => {
         const book = yield* api.CreateLorebook({ label: "Regex book" })
         for (const [i, fields] of [
           { use_regex: true, keys: ["/lamp/i"] },
+          { use_regex: false, keys: ["/lamp/i"] },
+          { use_regex: false, secondary_keys: ["/lamp/i"] },
+          { use_regex: false, keys: ["{{getvar::pattern}}"] },
           { content: "<b>HTML entry</b>" },
           { automation_id: "script-action" },
           { extensions: { "test:script": "run()" } }
@@ -312,6 +545,15 @@ describe("workshop preset and lorebook documents", () => {
             `entry-code-${i}`
           )
           assert.isUndefined(result.isError, result.text)
+          assert.isFalse(
+            ((yield* api.OpenEditor({ refId: book.id })).doc as unknown as LorebookDoc).entries.at(-1)!.enabled
+          )
+          const enabled = yield* f.run(
+            "edit_lorebook",
+            { lorebook: book.id, changes: [{ entry: i, enabled: true }] },
+            `entry-enable-${i}`
+          )
+          assert.isUndefined(enabled.isError, enabled.text)
           assert.isFalse(
             ((yield* api.OpenEditor({ refId: book.id })).doc as unknown as LorebookDoc).entries.at(-1)!.enabled
           )
@@ -574,6 +816,32 @@ describe("workshop preset and lorebook documents", () => {
       const bob = yield* client({ cookie: (yield* login("bob", "bob-password")).cookie })
       const a = yield* fixture(config.dataDir, alice)
       const b = yield* fixture(config.dataDir, bob)
+      const foreignBook = yield* alice.CreateLorebook({ label: "Private attachment" })
+      const ownPreset = yield* bob.CreatePreset({ label: "Own attachment preset" })
+      const attachment = yield* b.run(
+        "edit_preset",
+        {
+          preset: ownPreset.id,
+          changes: [{ settings: { lorebooks: [{ id: foreignBook.id, enabled: true }] } }]
+        },
+        "foreign-attachment"
+      )
+      assert.isTrue(attachment.isError, attachment.text)
+      const attachmentHead = yield* bob.OpenEditor({ refId: ownPreset.id })
+      assert.strictEqual(
+        yield* outcome(
+          b.writer.AgentReviseEntity({
+            userId: b.user.id,
+            rolloutId: b.rolloutId,
+            toolCallId: "raw-foreign-attachment",
+            refId: ownPreset.id,
+            expectedRowVersion: attachmentHead.ref.rowVersion,
+            doc: { ...attachmentHead.doc, lorebooks: [{ id: foreignBook.id, enabled: true }] }
+          })
+        ),
+        "NotFound",
+        "The writer checks ownership independently of the tool adapter"
+      )
       for (const kind of ["preset", "lorebook"] as const) {
         const ref =
           kind === "preset"

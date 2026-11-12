@@ -1822,7 +1822,15 @@ export class WriteOps extends RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
-      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            rowVersion: Schema.Int,
+            archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+          })
+        )
+      ),
       kind: EntityKind,
       label: LibraryLabel,
       doc: Doc,
@@ -1837,7 +1845,15 @@ export class WriteOps extends RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
-      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            rowVersion: Schema.Int,
+            archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+          })
+        )
+      ),
       refId: RefId,
       expectedRowVersion: Schema.Int,
       doc: Doc
@@ -1851,7 +1867,15 @@ export class WriteOps extends RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
-      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            rowVersion: Schema.Int,
+            archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+          })
+        )
+      ),
       refId: RefId,
       name: Schema.String.check(Schema.isMinLength(1)),
       nickname: Schema.String,
@@ -1877,7 +1901,15 @@ export class WriteOps extends RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
-      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            rowVersion: Schema.Int,
+            archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+          })
+        )
+      ),
       cards: StartChatFields.cards,
       persona: StartChatFields.persona,
       greeters: StartChatFields.greeters,

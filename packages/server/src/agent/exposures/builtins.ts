@@ -1,4 +1,4 @@
-import { documentDiff, safeAgentDocument, executableNotice } from "../../db/agentDocuments.ts"
+import { documentDiff, documentChangeRows, safeAgentDocument, executableNotice } from "../../db/agentDocuments.ts"
 import { promptPreset } from "@rp/shared/docs/preset.ts"
 import { builtinPreset } from "../../db/assemblySources.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
@@ -156,7 +156,10 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
     describe: (payload) =>
       Effect.succeed({
         title: `Create the preset “${String(payload.label)}”`,
-        rows: [{ label: "Executable content", value: executableNotice }],
+        rows: [
+          ...documentChangeRows(documentDiff({}, promptPreset(builtinPreset))),
+          { label: "Executable content", value: executableNotice }
+        ],
         changes: documentDiff({}, promptPreset(builtinPreset))
       })
   }),
@@ -201,10 +204,11 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
           refId: ref.id,
           revisionId: payload.revisionId as RevisionId
         })
+        const changes = documentDiff(doc, safeAgentDocument(ref.kind, doc, revision))
         return {
           title: `Restore a revision of the ${ref.kind} “${ref.label}”`,
-          rows: [{ label: "Executable content", value: executableNotice }],
-          changes: documentDiff(doc, safeAgentDocument(ref.kind, doc, revision))
+          rows: [...documentChangeRows(changes), { label: "Executable content", value: executableNotice }],
+          changes
         }
       })
   }),

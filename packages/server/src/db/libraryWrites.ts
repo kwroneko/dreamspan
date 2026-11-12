@@ -698,6 +698,11 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
             doc = safeAgentDocument(ref.kind, yield* lib.loadDoc(ref.head_revision_id), valid.doc)
             yield* checkReferences(userId, doc)
+            if (ref.kind === "preset")
+              for (const book of (doc.lorebooks ?? []) as ReadonlyArray<{ id: string }>) {
+                const owned = yield* lib.ownedRef(userId, book.id)
+                if (owned.kind !== "lorebook") return yield* new NotFound({ entity: "lorebook", id: book.id })
+              }
           }
           yield* drafts.commit(userId, commitDraft, {
             targetKind: "entity_field",

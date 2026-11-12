@@ -1,6 +1,6 @@
 import { editDocument, presetEditArguments, lorebookEditArguments } from "./documents.ts"
 import { boundedArguments } from "../operations.ts"
-import { documentDiff, executableNotice } from "../../db/agentDocuments.ts"
+import { documentDiff, documentChangeRows, executableNotice } from "../../db/agentDocuments.ts"
 import { ToolInputRefused } from "../tools.ts"
 import { LibraryLabel } from "@rp/shared/editorApi.ts"
 import { offeredGreetings } from "@rp/shared/greetings.ts"
@@ -52,7 +52,13 @@ const key = (ctx: ToolContext) => ({
   toolCallId: ctx.toolCallId,
   ...(ctx.approvalDigest ? { approvalDigest: ctx.approvalDigest } : {}),
   ...(targets(ctx)
-    ? { expectedRefs: [...targets(ctx)!.values()].map((ref) => ({ refId: ref.id, rowVersion: ref.rowVersion })) }
+    ? {
+        expectedRefs: [...targets(ctx)!.values()].map((ref) => ({
+          refId: ref.id,
+          rowVersion: ref.rowVersion,
+          archivedAt: ref.archivedAt ?? null
+        }))
+      }
     : {})
 })
 const safely = <E>(body: Effect.Effect<ToolOutput, E>) =>
@@ -432,7 +438,19 @@ const editLibraryDocument = (kind: "preset" | "lorebook", schema: Schema.Top): R
         try: () => editDocument(kind, saved.doc, args.changes as readonly Record<string, unknown>[]),
         catch: (error) => error as Error
       })
-      return { saved, doc }
+      const attachments: Array<{ label: string; value: string }> = []
+      if (kind === "preset")
+        for (const book of (doc.lorebooks ?? []) as ReadonlyArray<{ id: string; enabled: boolean }>) {
+          const linked = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: book.id as LibraryRef["id"] })
+          if (linked.ref.kind !== "lorebook") return yield* Effect.fail(new Error("That attachment is not a lorebook."))
+          // A linked book can change the prompt too. Keep its owned head pinned with the preset.
+          if (!targets(ctx)?.has(`lorebook:${book.id}`)) remember(ctx, "lorebook", book.id, linked.ref)
+          attachments.push({
+            label: `Lorebook ${linked.ref.label} (${book.id})`,
+            value: `${book.enabled ? "On" : "Off"}; ${(linked.doc.entries as readonly unknown[]).length} entries`
+          })
+        }
+      return { saved, doc, attachments }
     })
   return {
     id: `edit_${kind}`,
@@ -446,12 +464,16 @@ const editLibraryDocument = (kind: "preset" | "lorebook", schema: Schema.Top): R
     summarize: (args) => String(args[kind]),
     describe: (ctx, args) =>
       prepare(ctx, args).pipe(
-        Effect.map(({ saved, doc }) => {
+        Effect.map(({ saved, doc, attachments }) => {
           remember(ctx, kind, String(args[kind]), saved.ref)
           ctx.cache.set(`approval:document:${ctx.toolCallId}`, { saved, doc })
           return {
             title: `Edit the ${kind} “${saved.ref.label}”`,
-            rows: [{ label: "Executable content", value: executableNotice }],
+            rows: [
+              ...documentChangeRows(documentDiff(saved.doc, doc)),
+              ...attachments,
+              { label: "Executable content", value: executableNotice }
+            ],
             changes: documentDiff(saved.doc, doc)
           }
         }),

@@ -6,7 +6,7 @@ import { textField } from "@rp/shared/editing.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { loginCookie, withCookie, type Client } from "./rpc.ts"
 import { startWorkshopProvider, WORKSHOP_ANSWER } from "./workshopProvider.ts"
-import { expectTextBox, replaceEditorText } from "./textbox.ts"
+import { expectTextBox, replaceEditorText, textBoxValue } from "./textbox.ts"
 import { saveButton, saveCluster } from "./saveRevision.ts"
 import { expectLayout } from "./layoutAudit.ts"
 
@@ -30,11 +30,22 @@ export function workshopDocumentTests() {
           const suffix = `${width} ${theme}`
           const preset = await admin((api) => api.CreatePreset({ label: `Draft preset ${suffix}` }))
           const book = await admin((api) => api.CreateLorebook({ label: `Draft book ${suffix}` }))
+          const longPrompt = "Synthetic long prompt. ".repeat(240) + "Review the final instruction too."
+          const lastReviewId = `last-review-${"x".repeat(180)}`
           const provider = await startWorkshopProvider({
             calls: [
               {
                 name: "edit_preset",
-                arguments: { preset: preset.id, changes: [{ prompt: "main", text: "Workshop saved prompt." }] }
+                arguments: {
+                  preset: preset.id,
+                  changes: [
+                    { prompt: "main", text: "Workshop saved prompt." },
+                    { add: { identifier: "long-review", name: "Long review", content: longPrompt } },
+                    {
+                      add: { identifier: lastReviewId, name: "Last review", content: "A separate final instruction." }
+                    }
+                  ]
+                }
               },
               {
                 name: "edit_lorebook",
@@ -112,6 +123,24 @@ export function workshopDocumentTests() {
               await expect(approval).toContainText(`Edit the ${kind} “${label}”`, { timeout: 30_000 })
               await expect(approval).toContainText(text)
               await expect(approval).toContainText("stays disabled or unapproved")
+              if (kind === "preset") {
+                await expect(approval.getByRole("definition").first()).toContainText("3 prompts")
+                await expect(approval.locator(`[data-approval-change='prompts["${lastReviewId}"]']`)).toContainText(
+                  "A separate final instruction."
+                )
+                const full = approval.locator("[data-approval-change='prompts[\"long-review\"]']")
+                const summary = full.locator("summary")
+                await expect(summary).toContainText("Full change")
+                await expect(full.getByRole("textbox")).toHaveCount(0)
+                await summary.click()
+                await expect
+                  .poll(() => textBoxValue(full.getByRole("textbox").last()))
+                  .toContain("Review the final instruction too.")
+                await expectLayout(page, info, `document-approval-expanded-${width}-${theme}`, {
+                  scope: "[data-approval]"
+                })
+                await summary.click()
+              }
               await approval.evaluate((element) => element.scrollIntoView({ block: "start" }))
               await expectLayout(page, info, `document-approval-${kind}-${width}-${theme}`, {
                 scope: "[data-approval]"

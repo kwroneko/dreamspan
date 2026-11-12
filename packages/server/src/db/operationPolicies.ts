@@ -31,6 +31,8 @@ interface Policy<I, B> {
   readonly targetKind: string
   readonly target: (input: I, after: B) => string
   readonly before: (sql: SqlClient.SqlClient, userId: UserId, input: I) => Effect.Effect<B, unknown>
+  /** Compare saved target state; a policy may exclude metadata that ordinary use updates. */
+  readonly matches?: (current: B, expected: B) => boolean
   readonly undo: (
     sql: SqlClient.SqlClient,
     ops: OperationHandlers,
@@ -43,6 +45,10 @@ interface Policy<I, B> {
 // Each policy stays typed. Only the heterogeneous registry erases its input and snapshot types.
 export type OperationPolicy = Policy<never, never>
 const policy = <I, B>(entry: Policy<I, B>): OperationPolicy => entry as unknown as OperationPolicy
+export const operationSnapshotMatches = (entry: OperationPolicy, current: unknown, expected: unknown) =>
+  entry.matches
+    ? entry.matches(current as never, expected as never)
+    : JSON.stringify(current) === JSON.stringify(expected)
 interface ChatSnapshot {
   id: ChatId
   title: string
@@ -105,6 +111,13 @@ const refSnapshot = (sql: SqlClient.SqlClient, userId: UserId, input: { refId: R
     }>`SELECT archived_at FROM entities WHERE id = ${ref.entity_id}`
     return { ref, archived: entity!.archived_at }
   })
+type RefSnapshot = Effect.Success<ReturnType<typeof refSnapshot>>
+const refSnapshotMatches = (current: RefSnapshot, expected: RefSnapshot) => {
+  // Keep complete snapshots in the receipt. Using a preset updates this timestamp
+  // without changing its document or version, and Undo must retain that usage record.
+  const target = (snapshot: RefSnapshot) => ({ ...snapshot, ref: { ...snapshot.ref, last_used_at: null } })
+  return JSON.stringify(target(current)) === JSON.stringify(target(expected))
+}
 /** Undo may restore only an immutable revision of this owned entry, even if a
  * stored recipe is malformed. The caller already checks the current saved head. */
 export const previousLibraryDocument = (sql: SqlClient.SqlClient, userId: UserId, refId: string, revisionId: string) =>
@@ -133,10 +146,11 @@ const refPolicy = (id: string): OperationPolicy =>
     targetKind: "entity",
     target: (_input, after) => after.ref.entity_id,
     before: refSnapshot,
+    matches: refSnapshotMatches,
     undo: (sql, ops, userId, input, before, after) =>
       Effect.gen(function* () {
         const now = yield* refSnapshot(sql, userId, input)
-        if (JSON.stringify(now) !== JSON.stringify(after))
+        if (!refSnapshotMatches(now, after))
           return yield* refuseOperation("The library entry changed since. Open its history.")
         if (before.ref.head_revision_id !== after.ref.head_revision_id)
           if (before.ref.kind === "preset" || before.ref.kind === "lorebook")

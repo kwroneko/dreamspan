@@ -5,6 +5,7 @@ import {
   operationPolicies,
   operationInfo,
   previousLibraryDocument,
+  operationSnapshotMatches,
   refuseOperation,
   type OperationHandlers
 } from "./operationPolicies.ts"
@@ -61,7 +62,11 @@ type Key = {
   readonly rolloutId: string
   readonly toolCallId: string
   readonly approvalDigest?: string
-  readonly expectedRefs?: ReadonlyArray<{ readonly refId: RefId; readonly rowVersion: number }>
+  readonly expectedRefs?: ReadonlyArray<{
+    readonly refId: RefId
+    readonly rowVersion: number
+    readonly archivedAt?: number | null
+  }>
 }
 interface EffectRow {
   rollout_id: string
@@ -318,7 +323,7 @@ const operationUndo: Undoer = {
       const policy = operationPolicies.get(String(recipe.operation))
       if (!policy) return false
       const current = yield* policy.before(sql, userId, recipe.input as never)
-      return JSON.stringify(current) === JSON.stringify(recipe.next)
+      return operationSnapshotMatches(policy, current, recipe.next)
     }).pipe(Effect.orElseSucceed(() => false)),
   run: (ctx, effect) =>
     Effect.gen(function* () {
@@ -326,7 +331,7 @@ const operationUndo: Undoer = {
       const policy = operationPolicies.get(String(recipe.operation))
       if (!policy) return yield* refuse("This operation no longer has an undo policy.")
       const current = yield* policy.before(ctx.sql, ctx.userId, recipe.input as never)
-      if (JSON.stringify(current) !== JSON.stringify(recipe.next)) return yield* refuse()
+      if (!operationSnapshotMatches(policy, current, recipe.next)) return yield* refuse()
       return (yield* policy.undo(
         ctx.sql,
         ctx.ops as OperationHandlers,
@@ -443,7 +448,10 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         }
         for (const expected of key.expectedRefs ?? []) {
           const ref = yield* lib.ownedRef(key.userId, expected.refId)
-          if (ref.row_version !== expected.rowVersion)
+          if (
+            ref.row_version !== expected.rowVersion ||
+            ("archivedAt" in expected && ref.archived_at !== expected.archivedAt)
+          )
             return yield* new EffectUndoRefused({
               message: "The saved item changed while waiting. Read it again before making this change."
             })
@@ -611,13 +619,34 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     yield* sql`SELECT 1 FROM entity_revisions WHERE id = ${String(value.revisionId)} AND entity_id = ${ref.entity_id}`
                   if (!revision) return yield* new NotFound({ entity: "revision", id: String(value.revisionId) })
                   const next = yield* lib.loadDoc(String(value.revisionId))
+                  // Content restores are sanitized below. Permission-only restores retain
+                  // W6's explicit refusal rather than claiming to change a user's grant.
+                  const presetPermissionChange =
+                    ref.kind === "preset" &&
+                    ((isDeepStrictEqual(old.regex, next.regex) &&
+                      (next.regex_approved === true) !== (old.regex_approved === true)) ||
+                      ([
+                        "regex",
+                        "prompts",
+                        "order",
+                        "utility_prompts",
+                        "prefill",
+                        "reply_sections",
+                        "lorebooks",
+                        "extensions",
+                        "unsupported"
+                      ].every((key) => isDeepStrictEqual(old[key], next[key])) &&
+                        ["html_scripts_approved", "html_network_approved"].some(
+                          (key) => (old[key] === true) !== (next[key] === true)
+                        )))
                   if (
-                    ref.kind !== "preset" &&
-                    ref.kind !== "lorebook" &&
-                    (!isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, old, next), next) ||
-                      !isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, next, old), old) ||
-                      !isDeepStrictEqual(withHtmlApprovals(old, next), next) ||
-                      (next.regex_approved === true) !== (old.regex_approved === true))
+                    presetPermissionChange ||
+                    (ref.kind !== "preset" &&
+                      ref.kind !== "lorebook" &&
+                      (!isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, old, next), next) ||
+                        !isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, next, old), old) ||
+                        !isDeepStrictEqual(withHtmlApprovals(old, next), next) ||
+                        (next.regex_approved === true) !== (old.regex_approved === true)))
                   )
                     return yield* refuseOperation(
                       "Restoring this revision would change permissions. Restore it yourself from History."
