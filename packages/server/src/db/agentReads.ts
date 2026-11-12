@@ -1,3 +1,12 @@
+import { continuityEffectsReason, toRolloutEffect } from "./workshopEffects.ts"
+import { budgetTokens } from "@rp/shared/imageTokens.ts"
+import { WorkerAssembler } from "../assembler/assembler.ts"
+import { prepareTextTokens } from "../assembler/textTokens.ts"
+import { providerRequest } from "../assembler/wire.ts"
+import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
+import { liveSuffix } from "../agent/messages.ts"
+import { rolloutRequest } from "../agent/wire.ts"
+import type { Tool } from "@earendil-works/pi-ai"
 // Agent rollouts' reads (spec/AGENTIC.md §5): a version's steps, projected from its stored
 // transcript with the tools its snapshot froze, as the live display projects the running one;
 // the same transcript verbatim for the run inspector; and a chat's Activity, its model work
@@ -46,10 +55,14 @@ const transcriptEntries = (
 ): Array<TranscriptEntry> => {
   let request = requests
   const stepAt = new Map(steps.map((s, i) => [`${s.message}:${s.part}`, i]))
-  const callStep = new Map(steps.flatMap((s, i) => (s.step.kind === "tool" ? [[s.step.id, i] as const] : [])))
+  const callStep = new Map(
+    steps.flatMap((s, i) => (s.step.kind === "tool" ? [[`${s.message}:${s.step.id}`, i] as const] : []))
+  )
+  let assistantAt = -1
   const index = (step: number | undefined) => (step === undefined ? {} : { step })
   return messages.flatMap((m, at): Array<TranscriptEntry> => {
-    if (m.role === "assistant")
+    if (m.role === "assistant") {
+      assistantAt = at
       return [
         {
           role: "assistant",
@@ -68,6 +81,7 @@ const transcriptEntries = (
           ...(m.errorMessage ? { error: m.errorMessage } : {})
         }
       ]
+    }
     if (m.role === "toolResult")
       return [
         {
@@ -76,9 +90,13 @@ const transcriptEntries = (
           tool: m.toolName,
           text: textOf(m.content),
           isError: m.isError,
-          ...index(callStep.get(m.toolCallId))
+          ...index(callStep.get(`${assistantAt}:${m.toolCallId}`))
         }
       ]
+    if (m.role === "rpUser") {
+      request = 0
+      return [{ role: "app", text: m.message.content + (m.message.images?.length ? " [image]" : "") }]
+    }
     const other = m as { readonly role: string; readonly content?: unknown }
     if (other.role === "rpHarness" || other.role === "user") return [{ role: "app", text: textOf(other.content) }]
     return []
@@ -156,7 +174,7 @@ const listActivity = (
         max(q.cost_currency) AS currency, max(q.usage_source = 'estimated') AS estimated,
         max(q.version_id) AS version_id
       FROM llm_requests q
-      WHERE q.chat_id = ? AND q.owner_user_id = ? AND q.purpose NOT IN ('generation', 'test')
+      WHERE q.chat_id = ? AND q.owner_user_id = ? AND q.purpose NOT IN ('generation', 'workshop', 'test')
       GROUP BY gid, q.purpose
       HAVING (min(q.started_at), gid, q.purpose) < (?, ?, ?)
       ORDER BY started DESC, gid DESC, kind DESC
@@ -210,6 +228,7 @@ const activityRow = (row: ActivitySqlRow): ActivityRow => ({
 export const makeAgentReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const lib = makeLibraryQueries(sql)
+  const assembler = yield* WorkerAssembler
   return {
     AgentCards: ({ userId, chatId, entityIds, bindings }) =>
       Effect.gen(function* () {
@@ -255,7 +274,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })
         if (!row.transcript) return []
         const tools = row.tools ? (JSON.parse(row.tools) as ReadonlyArray<FrozenTool>) : []
-        return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0)
+        return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0, versionId)
       }).pipe(query("RolloutSteps")),
 
     SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit }) =>
@@ -376,6 +395,32 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("LookupLore")),
 
+    ListRolloutEffects: ({ userId, chatId, before, limit }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{
+          id: string
+        }>`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const rows = yield* sql<
+          Parameters<typeof toRolloutEffect>[0]
+        >`SELECT e.* FROM rollout_effects e JOIN rollouts r ON r.id = e.rollout_id
+        WHERE r.chat_id = ${chatId} AND ${before ? sql`(e.created_at, e.rollout_id, e.tool_call_id, e.seq) < (${before.createdAt}, ${before.rolloutId}, ${before.toolCallId}, ${before.seq})` : sql`1`}
+        ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC LIMIT ${Math.max(1, Math.min(200, limit ?? 50))}`
+        return rows.map(toRolloutEffect)
+      }).pipe(query("ListRolloutEffects")),
+    RolloutToolReceipt: ({ userId, rolloutId, toolCallId }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{
+          result_json: string | null
+          is_error: number | null
+        }>`SELECT receipt.result_json, receipt.is_error
+        FROM rollouts r JOIN chats c ON c.id = r.chat_id LEFT JOIN rollout_receipts receipt ON receipt.rollout_id = r.id AND receipt.tool_call_id = ${toolCallId}
+        WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        if (!row) return yield* new NotFound({ entity: "rollout", id: rolloutId })
+        return row.result_json === null
+          ? null
+          : { text: JSON.parse(row.result_json) as string, isError: row.is_error === 1 }
+      }).pipe(query("RolloutToolReceipt")),
     RolloutReceipt: ({ userId, rolloutId, toolCallId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{ readonly result: string | null }>`
@@ -386,27 +431,67 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return row.result === null ? null : (JSON.parse(row.result) as string)
       }).pipe(query("RolloutReceipt")),
 
+    CountRolloutContext: ({ model, request, transcript, tools }) =>
+      Effect.gen(function* () {
+        const target = JSON.parse(model) as ModelInput
+        const count = yield* prepareTextTokens(assembler.textCounters.list(), target)
+        const definitions = JSON.parse(tools) as ReadonlyArray<FrozenTool>
+        const assembled = JSON.parse(request) as AssembledRequest
+        const history = JSON.parse(transcript) as Array<AgentMessage>
+        const images = [
+          ...assembled.messages.flatMap((m) => m.images ?? []),
+          ...history.flatMap((m) => (m.role === "rpUser" ? (m.message.images ?? []) : []))
+        ]
+        const imageTokens = images.reduce((n, image) => n + budgetTokens(image.estimate), 0)
+        const wire = rolloutRequest(
+          providerRequest(assembled, target),
+          target.api,
+          liveSuffix(history),
+          definitions as ReadonlyArray<Tool>,
+          { replayReasoning: true, reasoningTarget: target }
+        )
+        const messages =
+          target.api === "openai-completions"
+            ? wire.payload.messages
+            : wire.context.messages.map((m) => ({
+                role: m.role,
+                content: m.content,
+                ...(m.role === "toolResult" ? { toolCallId: m.toolCallId, isError: m.isError } : {})
+              }))
+        return (
+          imageTokens +
+          count(JSON.stringify(messages)) +
+          count(wire.context.systemPrompt ?? "") +
+          count(JSON.stringify(definitions))
+        )
+      }).pipe(query("CountRolloutContext")),
     RolloutMaterial: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{
           readonly rollout_id: string
           readonly status: string
           readonly version_status: string
+          readonly resumed: number
           readonly mode: string | null
           readonly snapshot: string | null
           readonly transcript: string | null
         }>`
           SELECT r.id AS rollout_id, r.status, v.status AS version_status, r.mode,
+            EXISTS (SELECT 1 FROM versions child WHERE child.rollout_id = r.id AND child.origin = 'resumed') AS resumed,
             p.context_snapshot_json AS snapshot, p.transcript_json AS transcript
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
-          WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind = 'generation'
+          WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind IN ('generation', 'workshop')
             AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!row || row.snapshot === null) return yield* new NotFound({ entity: "rollout", id: versionId })
         return {
           rolloutId: row.rollout_id,
           status: row.status,
           versionStatus: row.version_status,
+          resumed: !!row.resumed,
+          effectsReason: JSON.parse(row.snapshot).continuity
+            ? yield* continuityEffectsReason(sql, userId, row.rollout_id)
+            : null,
           mode: row.mode,
           snapshot: row.snapshot,
           transcript: row.transcript
@@ -441,9 +526,11 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             label: t.label,
             description: t.description,
             parameters: t.parameters,
+            ...(t.capability ? { capability: t.capability } : {}),
+            ...(t.titleField ? { titleField: t.titleField } : {}),
             effect: t.effect
           })),
-          entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true)),
+          entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true, versionId)),
           cut: cutSpans(messages, branches, tools.length, turnCap)
         }
       }).pipe(query("RolloutTranscript")),

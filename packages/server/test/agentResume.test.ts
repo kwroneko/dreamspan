@@ -462,6 +462,10 @@ describe("resuming agent replies", () => {
       const resumed = finished(generated.events, resumedId)!
       assert.strictEqual(resumed.status, "complete", JSON.stringify(resumed.error))
       assert.strictEqual(resumed.content, "Ansel waves.")
+      const inspected = yield* api.GetRunContext({ versionId: resumedId })
+      assert.strictEqual(inspected.capture, "captured")
+      assert.isNotNull(inspected.model)
+      assert.isNotEmpty(inspected.messages)
       assert.strictEqual(runs, 2, "the call was run again")
 
       // The model was sent its own request again, then the call and its result: as if never stopped.

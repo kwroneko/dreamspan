@@ -12,6 +12,7 @@ import { SEND_NUDGE, WRITE_NOW } from "../src/agent/session.ts"
 import { agentInstructions } from "../src/agent/modes.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
+import type { InspectionInputs } from "../src/assembler/types.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { Reader } from "../src/db/Database.ts"
@@ -613,7 +614,10 @@ describe("agent rollouts", () => {
       const db = read(config.dataDir, version.id)
       assert.deepInclude(db.rollout, { status: "completed", mode: "default", step_count: 1, llm_requests: 2 })
       assert.strictEqual(db.requests.length, 2)
-      assert.deepStrictEqual(db.snapshot.agent, {
+      const { inspection, ...frozenPlan } = db.snapshot.agent as { inspection: InspectionInputs }
+      assert.isNotNull(inspection.model)
+      assert.isNotEmpty(inspection.sources)
+      assert.deepStrictEqual(frozenPlan, {
         mode: "default",
         contract: "final_text",
         turnCap: 4,

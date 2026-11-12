@@ -2,7 +2,7 @@
 // and afterwards from its transcript.
 import { Schema } from "effect"
 
-const EffectClass = Schema.Literals(["read", "chat_state", "external"])
+const EffectClass = Schema.Literals(["read", "chat_state", "external", "library", "setup", "outside"])
 
 /**
  * A step: thinking or intermediate text from a turn that went on to call a tool, or one tool
@@ -22,7 +22,10 @@ export const RolloutStep = Schema.Union([
     args: Schema.Unknown,
     status: Schema.Literals(["running", "done", "error"]),
     result: Schema.optionalKey(Schema.String),
-    effect: EffectClass
+    /** Existing steps render these three display classes. */
+    effect: Schema.Literals(["read", "chat_state", "external"]),
+    /** The refined execution class, when it differs from the display class. */
+    effectClass: Schema.optionalKey(EffectClass)
   })
 ])
 
@@ -53,6 +56,8 @@ export const StepEdit = Schema.Union([
 export type StepEdit = typeof StepEdit.Type
 /** One tool the run was offered, as frozen into its snapshot: exactly what the model saw. */
 export const OfferedTool = Schema.Struct({
+  capability: Schema.optionalKey(Schema.String),
+  titleField: Schema.optionalKey(Schema.String),
   name: Schema.String,
   label: Schema.String,
   description: Schema.String,

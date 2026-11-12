@@ -1,7 +1,8 @@
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
+import { EffectKey, EffectList, RolloutEffect, RolloutEffectRecord, EffectUndoRefused } from "@rp/shared/workshopApi.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
-import { EditRefused } from "@rp/shared/editorApi.ts"
+import { EditRefused, LibraryLabel } from "@rp/shared/editorApi.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
@@ -1089,12 +1090,13 @@ export class WriteOps extends RpcGroup.make(
       subtitle: Schema.String,
       doc: Doc,
       schemaVersion: Schema.Int,
-      origin: Schema.Literals(["user", "import"]),
+      origin: Schema.Literals(["user", "import", "agent"]),
+      originRef: Schema.optionalKey(Schema.String),
       sourcePath: Schema.NullOr(Schema.String),
       tags: Schema.optionalKey(Schema.Array(Schema.String))
     },
     success: Schema.Struct({ entityId: EntityId, ref: LibraryRef }),
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   /**
    * Commits an edit to a ref: a new revision on top of its head (DATA-MODEL §3.2). Refs
@@ -1107,10 +1109,11 @@ export class WriteOps extends RpcGroup.make(
       doc: Doc,
       expectedRowVersion: Schema.Int,
       message: Schema.NullOr(Schema.String),
-      commitDraft: CommitDraft
+      commitDraft: CommitDraft,
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: RefChange,
-    error: Schema.Union([NotFound, StaleWrite, StorageError])
+    error: Schema.Union([NotFound, InvalidDocument, StaleWrite, StorageError])
   }),
   /**
    * Replaces an entity's tags. Tags are folders; the reserved tag "persona" is the
@@ -1777,6 +1780,92 @@ export class WriteOps extends RpcGroup.make(
    * start, the persona is played by the user, every greeting of the first card becomes a
    * version of the first message (`greeting` selected), then the first turn.
    */
+  Rpc.make("RecordRolloutEffects", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      result: Schema.String,
+      isError: Schema.optionalKey(Schema.Boolean),
+      effects: Schema.optionalKey(Schema.Array(RolloutEffectRecord))
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("AgentCreateEntity", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      kind: EntityKind,
+      label: LibraryLabel,
+      doc: Doc,
+      tags: Schema.Array(Schema.String)
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, InvalidDocument, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("AgentReviseEntity", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      refId: RefId,
+      expectedRowVersion: Schema.Int,
+      doc: Doc
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, InvalidDocument, StaleWrite, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("AgentCloneCard", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      refId: RefId,
+      name: Schema.String.check(Schema.isMinLength(1)),
+      nickname: Schema.String,
+      characterVersion: Schema.String
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, InvalidDocument, RefOperationRefused, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("StartGreetingChat", {
+    payload: {
+      userId: UserId,
+      cards: StartChatFields.cards,
+      persona: StartChatFields.persona,
+      greeters: StartChatFields.greeters,
+      title: StartChatFields.title
+    },
+    success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("AgentStartChat", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      cards: StartChatFields.cards,
+      persona: StartChatFields.persona,
+      greeters: StartChatFields.greeters,
+      title: StartChatFields.title,
+      preset: Schema.NullOr(RefId),
+      model: Schema.NullOr(ModelId)
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("UndoRolloutEffect", {
+    payload: { userId: UserId, ...EffectKey },
+    success: RolloutEffect,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("CreateWorkshop", {
+    payload: { userId: UserId, title: Schema.optionalKey(Schema.String) },
+    success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("StartChat", {
     payload: StartChatFields,
     success: StartChatResult,
@@ -1937,11 +2026,26 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("PostRolloutMessage", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      versionId: VersionId,
+      toolCallId: Schema.String,
+      content: Schema.String,
+      reasoning: Schema.optionalKey(Schema.String),
+      replySections: Schema.optionalKey(ReplySections),
+      rewrite: Schema.optionalKey(StoredRewrite)
+    },
+    success: Schema.Struct({ slotId: SlotId, versionId: VersionId, postedVersionId: VersionId }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("FinishGeneration", {
     payload: {
       userId: UserId,
       versionId: VersionId,
       content: Schema.String,
+      discardEmpty: Schema.optionalKey(Schema.Boolean),
       /** The reasoning streamed; left as it is when absent. */
       reasoning: Schema.optionalKey(Schema.String),
       /** The reply's leading tagged sections; left as they are when absent. */
@@ -1951,7 +2055,7 @@ export class WriteOps extends RpcGroup.make(
       /** What regex scripts did to `content` and `reasoning` as it finished, and the text before. */
       rewrite: Schema.optionalKey(StoredRewrite)
     },
-    success: Schema.Struct({ ...QueueOutcome.fields, version: Version }),
+    success: Schema.Struct({ ...QueueOutcome.fields, version: Version, removedSlotId: Schema.optionalKey(SlotId) }),
     error: Schema.Union([NotFound, StorageError])
   }),
   // --- ST data folder import (ARCHITECTURE.md §13). A chat goes in as a pending chat, its
@@ -2480,6 +2584,8 @@ export class WriteOps extends RpcGroup.make(
       connectionId: ConnectionId,
       modelId: ModelId,
       snapshot: Schema.String,
+      parentRolloutId: Schema.optionalKey(Schema.String),
+      transcript: Schema.optionalKey(Schema.String),
       /** The orchestration mode it ran in, when not plain (spec/AGENTIC.md §6). */
       mode: Schema.optionalKey(Schema.String),
       /** The snapshot's issues, kept on the rollout for its version to show. */
@@ -2584,6 +2690,8 @@ export class WriteOps extends RpcGroup.make(
       expectedRowVersion: Schema.Int,
       rolloutId: Schema.String,
       version: NewVersion,
+      model: Schema.optionalKey(ModelChoice),
+      snapshot: Schema.optionalKey(Schema.String),
       transcript: Schema.String,
       steps: Schema.Int,
       keptCalls: Schema.Array(Schema.String),
@@ -3573,7 +3681,14 @@ export class ReadOps extends RpcGroup.make(
       timeZone: Schema.String,
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String))),
       /** An agent reply's assembly (spec/AGENTIC.md §6). */
-      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, speakerCardOnly: Schema.Boolean })),
+      agent: Schema.optionalKey(
+        Schema.Struct({
+          instructions: Schema.String,
+          speakerCardOnly: Schema.Boolean,
+          workshop: Schema.optionalKey(Schema.Boolean),
+          stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
+        })
+      ),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
       decisions: Schema.optionalKey(
         Schema.Struct({
@@ -3712,6 +3827,16 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
+  Rpc.make("ListRolloutEffects", {
+    payload: { userId: UserId, ...EffectList },
+    success: Schema.Array(RolloutEffect),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("RolloutToolReceipt", {
+    payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String },
+    success: Schema.NullOr(Schema.Struct({ text: Schema.String, isError: Schema.Boolean })),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("RolloutReceipt", {
     payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String },
     success: Schema.NullOr(Schema.String),
@@ -3721,12 +3846,19 @@ export class ReadOps extends RpcGroup.make(
    * What resuming an agent reply needs of its run (agentReads.ts): the rollout, its status and
    * mode, the frozen snapshot and the transcript as last saved, and the version's own status.
    */
+  Rpc.make("CountRolloutContext", {
+    payload: { model: Schema.String, request: Schema.String, transcript: Schema.String, tools: Schema.String },
+    success: Schema.Int,
+    error: StorageError
+  }),
   Rpc.make("RolloutMaterial", {
     payload: { userId: UserId, versionId: VersionId },
     success: Schema.Struct({
       rolloutId: Schema.String,
       status: Schema.String,
       versionStatus: Schema.String,
+      resumed: Schema.Boolean,
+      effectsReason: Schema.NullOr(Schema.String),
       mode: Schema.NullOr(Schema.String),
       snapshot: Schema.String,
       transcript: Schema.NullOr(Schema.String)

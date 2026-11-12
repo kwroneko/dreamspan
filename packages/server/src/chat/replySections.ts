@@ -344,6 +344,11 @@ export const throughParse = <R>(
         current = fresh()
         return [chunk]
       }
+      if (typeof chunk === "object" && "post" in chunk) {
+        const tail = current.end()
+        if (fresh) current = fresh()
+        return [...tail, chunk]
+      }
       return current.push(chunk)
     }),
     Stream.flattenIterable,

@@ -1,3 +1,4 @@
+import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { displayEndOf } from "./displayPath.ts"
 import { castAt } from "./participation.ts"
 import { canonicalJson } from "@rp/shared/editing.ts"
@@ -199,7 +200,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           yield* sql`INSERT INTO chats ${sql.insert({ id: chatId, owner_user_id: userId, kind, status, title, created_at: at })}`
           yield* insertStateEvent(userId, chatId, null, null, null, {
             key: "lcm.settings",
-            value: yield* newChatLcmSettings(sql, userId)
+            value: yield* newChatLcmSettings(sql, userId, chatKinds.get(kind)?.allowsSummaries ? undefined : false)
           })
           for (const entity of participants) {
             yield* insertStateEvent(userId, chatId, null, null, null, { key: "participant.join", value: { entity } })

@@ -114,6 +114,7 @@ export interface StreamRequest {
      * important first. Applied for Anthropic Messages; pi-ai's own markers stay.
      */
     readonly breakpoints?: ReadonlyArray<number>
+    readonly preserveBreakpoints?: boolean
     /** The automatic layout's reusable endpoint, for transforms that place markers there. */
     readonly stable?: StableEndpoint
     /**
@@ -1511,6 +1512,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                         target,
                         messages: request.context.messages,
                         breakpoints,
+                        ...(options.preserveBreakpoints ? { preserveBreakpoints: true } : {}),
                         cacheLayout: effective.cacheLayout.value,
                         ...(options.stable && options.cacheRetention !== "none" ? { stable: options.stable } : {}),
                         ...(options.cacheRetention !== undefined ? { cacheRetention: options.cacheRetention } : {}),

@@ -18,6 +18,7 @@ import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { useTitle } from "../shell.tsx"
 import { readableChatTitle } from "../chat/chatTitle.ts"
+import { KindBadge } from "../chat/KindBadge.tsx"
 import { RESTORED_KEYS, restoreItem } from "./deleted.ts"
 import { binTitle, purgeTitle, recoveredSource } from "./titles.ts"
 
@@ -158,6 +159,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
       <div className="flex flex-wrap items-center gap-2">
         <Badge>{kindLabel(item)}</Badge>
         <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{title}</span>
+        <KindBadge kind={typeof item.origin.chatKind === "string" ? item.origin.chatKind : undefined} />
       </div>
       {item.origin.kind !== "card" && typeof item.origin.subtitle === "string" && item.origin.subtitle && (
         <p className="text-sm text-muted">{item.origin.subtitle}</p>

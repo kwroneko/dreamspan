@@ -1155,6 +1155,20 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.lengthOf(yield* actor.api.ListChatSummaries({ chatIds }), 0)
       })
   },
+  ListRolloutEffects: {
+    probe: (actor, owner) => refused(actor.api.ListRolloutEffects({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  ListWorkshopCapabilities: {
+    probe: (actor, owner) => refused(actor.api.ListWorkshopCapabilities({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  UndoRolloutEffect: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.UndoRolloutEffect({ rolloutId: owner.chat.rolloutId, toolCallId: "call_1", seq: 0 }),
+        "NotFound"
+      )
+  },
+  CreateWorkshop: { createOnly: "creates a workshop and its private defaults for the caller" },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
   GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },
   ReadPath: {
@@ -4279,6 +4293,13 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  ListRolloutEffects: (reader, actor, owner) =>
+    refused(reader.ListRolloutEffects({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
+  RolloutToolReceipt: (reader, actor, owner) =>
+    refused(
+      reader.RolloutToolReceipt({ userId: actor.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "call_1" }),
+      "NotFound"
+    ),
   RolloutReceipt: (reader, actor, owner) =>
     Effect.gen(function* () {
       yield* refused(
@@ -4297,6 +4318,17 @@ const storage: Record<
         toolCallId: "call_1",
         events: [],
         result: "Done."
+      }),
+      "NotFound"
+    ),
+  PostRolloutMessage: (_reader, actor, owner, writer) =>
+    refused(
+      writer.PostRolloutMessage({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        versionId: owner.chat.generatingId,
+        toolCallId: "foreign-send",
+        content: "Must not post."
       }),
       "NotFound"
     ),

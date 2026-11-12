@@ -3087,7 +3087,7 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
           at(null, { key: "agent.enabled", value: { on: tools } }),
           at(null, { key: "cards.rotation", value: { on: rotation } })
         ]
-        const plan = defaultMode.plan({ state: foldState(events.map((e) => e.event)) })
+        const plan = defaultMode.plan({ state: foldState(events.map((e) => e.event)), kind: "rp" })
         const agent = plan.assembly
           ? {
               instructions: plan.assembly.instructions(plan.tools, plan.contract),

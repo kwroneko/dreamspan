@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom"
+import { kindRootProps, kindTitle, useChatKindLook } from "./kindLooks.ts"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The chat panel host: descriptors own its tabs and bodies; the host owns layout and retention.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
@@ -195,6 +196,8 @@ export function ChatSidePanel({
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
   const { tracker, dirty } = useUnsavedTabs()
+  // Shown apart from the chat (beside the frames, or as a sheet), it takes the chat kind's accent itself.
+  const kindRoot = kindRootProps(useChatKindLook(content.view.chat?.kind))
   const editorChanges = useWorkspaceChanges()
   const userId = useSession().user.id
   const { width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, wide)
@@ -309,10 +312,10 @@ export function ChatSidePanel({
       <Sheet
         open
         onOpenChange={(open) => !open && onClose()}
-        title={title}
+        title={kindTitle(title, content.view.chat?.kind)}
         container={document.getElementById("content")}
       >
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div {...kindRoot} className="flex min-h-0 flex-1 flex-col">
           {nav}
           {panels}
         </div>
@@ -321,7 +324,8 @@ export function ChatSidePanel({
   const aside = (
     <aside
       aria-label="Chat panel"
-      style={{ width }}
+      {...kindRoot}
+      style={{ ...kindRoot.style, width }}
       className="relative flex shrink-0 flex-col border-l border-border bg-surface"
     >
       <ResizeHandle

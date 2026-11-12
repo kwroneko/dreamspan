@@ -433,6 +433,7 @@ function Branches({ entry, onBranch }: { entry: PathEntry; onBranch: (entry: Pat
       className="flex shrink-0 items-center rounded-md border border-border"
       role="group"
       aria-label={`Branches: ${entry.branchIndex + 1} of ${entry.branchCount}`}
+      data-layout-audit-ignore="inset: Joined branch controls share a single outer border"
     >
       <IconButton
         label="Previous branch"

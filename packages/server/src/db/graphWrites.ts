@@ -1,3 +1,4 @@
+import { requireSummaries } from "./chatKindPolicy.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
 // What the writer's chat operations share (writes.ts, chatSetupWrites.ts): ownership
@@ -222,6 +223,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     Effect.gen(function* () {
       if (data.key === "lcm.settings" && (slotId !== null || versionId !== null || scope !== null))
         return yield* new NotFound({ entity: "chat-wide settings", id: chatId })
+      if (data.key === "lcm.settings" && data.value.enabled) yield* requireSummaries(sql, chatId)
       const fork = forkId ?? (yield* forkAt(sql, chatId, slotId))
       if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
       const [owned] = yield* sql<{

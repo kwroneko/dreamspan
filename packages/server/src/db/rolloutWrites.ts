@@ -1,3 +1,4 @@
+import { ownedModel } from "./generationSettings.ts"
 // A resumed agent reply's writes (spec/AGENTIC.md §4.2): the new version and its rollout, with
 // the stopped one's effects for the calls kept. The effects themselves: rolloutEffects.ts.
 import { NotResumable } from "@rp/shared/agent.ts"
@@ -7,7 +8,8 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { effectRef } from "./rolloutEffects.ts"
-import { nextSeq } from "./forkState.ts"
+import { nextSeq, insertFork } from "./forkState.ts"
+import type { ForkRow } from "./rows.ts"
 import type { StorageError, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
@@ -35,9 +37,13 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
         transcript,
         steps,
         keptCalls,
-        branch
+        branch,
+        model,
+        snapshot
       }) =>
         Effect.gen(function* () {
+          if (model && !(yield* ownedModel(sql, userId, model.connection, model.model)))
+            return yield* new NotFound({ entity: "model", id: model.model })
           const [source] = yield* sql<{
             readonly rollout_id: string
             readonly slot_id: string
@@ -48,7 +54,7 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
             SELECT r.id AS rollout_id, v.slot_id, v.status, r.connection_id, r.model_id
             FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
             JOIN rollouts r ON r.id = v.rollout_id
-            WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind = 'generation'
+            WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind IN ('generation', 'workshop')
               AND r.mode IS NOT NULL AND v.deleted_at IS NULL AND c.deleted_at IS NULL`
           if (!source) return yield* new NotFound({ entity: "agent reply", id: versionId })
           if (source.status === "generating")
@@ -57,27 +63,49 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
             SELECT 1 FROM versions WHERE source_version_id = ${versionId} AND origin = 'resumed'
               AND status = 'generating' AND deleted_at IS NULL`
           if (resuming) return yield* new NotResumable({ versionId, message: "It's already being resumed." })
+          const [payload] = yield* sql<{
+            several: number
+          }>`SELECT json_extract(context_snapshot_json, '$.agent.contract') = 'several' AS several
+            FROM rollout_payloads WHERE rollout_id = ${source.rollout_id}`
+          let targetFork = forkId ?? null
+          if (payload?.several) {
+            const [current] = yield* sql<ForkRow>`SELECT f.* FROM forks f JOIN chats c ON c.id = f.chat_id
+              WHERE f.id = coalesce(${targetFork}, c.current_fork_id) AND c.id = (SELECT chat_id FROM slots WHERE id = ${source.slot_id})`
+            if (current && current.tip_slot_id !== source.slot_id) {
+              const branch = yield* insertFork(sql, {
+                chatId: current.chat_id,
+                parent: current,
+                baseSlotId: source.slot_id,
+                tipSlotId: source.slot_id,
+                at: Date.now()
+              })
+              targetFork = branch.id as ForkId
+              yield* sql`UPDATE chats SET current_fork_id = ${targetFork} WHERE id = ${current.chat_id}`
+            }
+          }
           const added = yield* addSelectedVersion({
             userId,
             slotId: source.slot_id as never,
-            forkId: forkId ?? null,
+            forkId: targetFork,
             version,
             expectedRowVersion,
-            ...(source.connection_id && source.model_id
-              ? { model: { connection: source.connection_id as never, model: source.model_id as never } }
-              : {})
+            ...(model
+              ? { model }
+              : source.connection_id && source.model_id
+                ? { model: { connection: source.connection_id as never, model: source.model_id as never } }
+                : {})
           })
           const now = Date.now()
           // The same run, carried on: its model, mode, cast and frozen context are the source's.
           yield* sql`INSERT INTO rollouts (id, chat_id, kind, status, slot_id, leaf_slot_id, parent_rollout_id,
               role, connection_id, model_id, request_class, context_issues_json, history_start_slot_id,
               history_start_depth, history_depth, fork_id, step_count, mode, created_at, started_at, updated_at)
-            SELECT ${rolloutId}, chat_id, kind, 'running', slot_id, leaf_slot_id, id, role, connection_id, model_id,
+            SELECT ${rolloutId}, chat_id, kind, 'running', ${source.slot_id}, leaf_slot_id, id, role, coalesce(${model?.connection ?? null}, connection_id), coalesce(${model?.model ?? null}, model_id),
               request_class, context_issues_json, history_start_slot_id, history_start_depth, history_depth,
               ${added.forkId}, ${steps}, mode, ${now}, ${now}, ${now}
             FROM rollouts WHERE id = ${source.rollout_id}`
           yield* sql`INSERT INTO rollout_payloads (rollout_id, context_snapshot_json, transcript_json)
-            SELECT ${rolloutId}, context_snapshot_json, ${transcript}
+            SELECT ${rolloutId}, coalesce(${snapshot ?? null}, context_snapshot_json), ${transcript}
             FROM rollout_payloads WHERE rollout_id = ${source.rollout_id}`
           yield* sql`INSERT INTO lore_activations (rollout_id, entries_json, message_offset)
             SELECT ${rolloutId}, entries_json, message_offset FROM lore_activations WHERE rollout_id = ${source.rollout_id}`
@@ -129,9 +157,11 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
             }
           }
           for (const id of keptCalls)
-            yield* sql`INSERT INTO rollout_receipts (rollout_id, tool_call_id, result_json, created_at)
-              SELECT ${rolloutId}, tool_call_id, result_json, ${now} FROM rollout_receipts
+            yield* sql`INSERT INTO rollout_receipts (rollout_id, tool_call_id, result_json, is_error, created_at)
+              SELECT ${rolloutId}, tool_call_id, result_json, is_error, ${now} FROM rollout_receipts
               WHERE rollout_id = ${source.rollout_id} AND tool_call_id = ${id}`
+          // Library/setup changes have one canonical undo record on their originating run.
+          // Only receipts travel: replay never creates another change or another undo target.
           if (branch)
             yield* sql`INSERT INTO rollout_branches ${sql.insert({
               rollout_id: rolloutId,

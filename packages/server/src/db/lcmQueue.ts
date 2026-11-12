@@ -1,3 +1,4 @@
+import { requireSummaries } from "./chatKindPolicy.ts"
 import { inJobFork, withdrawReruns } from "./lcmFork.ts"
 import { viewAt } from "./forkState.ts"
 import { onPath as slotOnPath } from "./forks.ts"
@@ -86,6 +87,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
     SaveLcmMaintenance: ({ userId, chatId, leafSlotId, forkId, pins }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
+        yield* requireSummaries(sql, chatId)
         yield* sql`INSERT INTO lcm_reply_maintenance(chat_id,fork_id,leaf_slot_id,pins_json) VALUES (${chatId},${yield* viewAt(sql, chatId, leafSlotId)},${leafSlotId},${pins})
           ON CONFLICT(chat_id,fork_id,leaf_slot_id) DO UPDATE SET pins_json=excluded.pins_json`
       }).pipe(inFork(sql, chatId, forkId, leafSlotId), transaction(sql, "SaveLcmMaintenance")),
@@ -94,6 +96,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
     EnqueueSummaries: ({ userId, chatId, leafSlotId, forkId, chunks, requestClass, triggerVersionId }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
+        yield* requireSummaries(sql, chatId)
         if (chunks.length > 8)
           return yield* reject("EnqueueSummaries", "A write accepts at most eight bounded chunks; plan again.")
         if (triggerVersionId) {
@@ -239,6 +242,7 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
     EnqueueCondensations: ({ userId, chatId, leafSlotId, forkId, triggerVersionId, jobs: planned, requestClass }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
+        yield* requireSummaries(sql, chatId)
         const onPath = (slotId: string) =>
           sql<{ n: number }>`WITH RECURSIVE path(id) AS (
             SELECT ${leafSlotId} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
