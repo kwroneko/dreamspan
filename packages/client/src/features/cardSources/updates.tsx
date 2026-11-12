@@ -20,6 +20,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { stageVersion } from "../cardImport/upload.ts"
+import { uploadFile } from "../library/files.ts"
 import { type EditorStore, useEditorState } from "../editor/store.ts"
 import { problemText, useSourceCall } from "./remote.ts"
 
@@ -88,13 +89,79 @@ async function fetchNewerFile(origin: CardOrigin): Promise<Fetched> {
   }
 }
 
-/** The notice's entry in `editorNotices`: only for a card with a revision of its own. */
+/**
+ * The notice's entry in `editorNotices`: for a card with a revision of its own, and for a
+ * standalone lorebook added from a source (§3.9), in the full editor and the side panel alike.
+ */
 export function SourceUpdateNotice({ store }: { store: EditorStore }) {
   const snapshot = useEditorState(store).snapshot
   const ref = snapshot?.ref
+  if (ref?.kind === "lorebook" && ref.entityId)
+    return <LorebookUpdateNotice key={ref.entityId} entityId={ref.entityId} refId={ref.id} label={ref.label} />
   return ref && ref.kind === "card" && snapshot.revisionNumber > 0 ? (
     <UpdateNotice key={ref.entityId} entityId={ref.entityId} refId={ref.id} label={ref.label} />
   ) : null
+}
+
+/**
+ * A lorebook added from a source (§3.9): Update merges the newer file into it as Update from
+ * file… does, and Check for a newer version asks the source. Neither is offered for a lorebook
+ * that didn't come from a source that's on.
+ */
+function LorebookUpdateNotice({ entityId, refId, label }: { entityId: string; refId: RefId; label: string }) {
+  const origin = useOrigin(entityId)
+  const registry = useContext(RegistryContext)
+  const action = useAction()
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+  if (!origin) return null
+  const update = async () => {
+    setProblem(null)
+    setBusy(true)
+    const file = await fetchNewerFile(origin)
+    if (file._tag === "Failed") {
+      setBusy(false)
+      return setProblem(file.message)
+    }
+    // A World Info file names no lorebook: the importer takes the file's name, so it keeps this one's.
+    const named = new File([file.file], `${label}.json`)
+    const merged = await uploadFile(named, refId)
+    if (merged._tag !== "Done") {
+      setBusy(false)
+      return setProblem(merged._tag === "Failed" ? merged.message : "Sign in again to update this lorebook.")
+    }
+    await action.run(
+      (client) => client("TakeRemoteVersion", { entityId, version: file.version, receipt: file.receipt }),
+      [...ORIGIN_KEYS]
+    )
+    invalidateKeys(registry, ORIGIN_KEYS)
+    setBusy(false)
+    showToast({ title: `Updated ${label} from ${origin.sourceName}` })
+  }
+  return (
+    <>
+      {origin.newerVersion && (
+        <Alert
+          title={`A newer version is on ${origin.sourceName}`}
+          actions={
+            <Button
+              hint={`Merges the newer file from ${origin.sourceName} into this lorebook, as Update from file… does.`}
+              pending={busy}
+              disabled={busy}
+              onClick={() => void update()}
+            >
+              Update
+            </Button>
+          }
+        >
+          <p>Its changes aren&apos;t in this lorebook until you update it.</p>
+          {problem && <p className="text-danger">{problem}</p>}
+          {action.error && <p className="text-danger">{action.error.message}</p>}
+        </Alert>
+      )}
+      <CheckForNewer entityId={entityId} name={label} what="lorebook" />
+    </>
+  )
 }
 
 type Open =
@@ -229,7 +296,15 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
 }
 
 /** Check for a newer version, in the card's Sources (§3.8): only for a card added from a source that's on. */
-export function CheckForNewer({ entityId, name }: { entityId: string; name: string }) {
+export function CheckForNewer({
+  entityId,
+  name,
+  what = "card"
+}: {
+  entityId: string
+  name: string
+  what?: "card" | "lorebook"
+}) {
   const origin = useOrigin(entityId)
   const call = useSourceCall()
   const registry = useContext(RegistryContext)
@@ -254,7 +329,7 @@ export function CheckForNewer({ entityId, name }: { entityId: string; name: stri
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 pt-2" data-card-source-check>
       <Button
-        hint={`Asks ${origin.sourceName} whether ${name || "this card"} has changed since you added it.`}
+        hint={`Asks ${origin.sourceName} whether ${name || `this ${what}`} has changed since you added it.`}
         pending={pending}
         onClick={() => void check()}
       >

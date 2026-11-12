@@ -6,6 +6,8 @@
 
 **Built 2026-11-12 (cardex2):** long choice lists use the existing picker and date criteria are date fields (ARCHITECTURE §11.5, "Long choices and dates"); creator pages (ARCHITECTURE §11.5, "Creators"); §3.7's recognition by a card's Sources, the newest live fork holding a binned card's origin, and each card's versions and forks on the source (ARCHITECTURE §11.5, "Families and recognition"). Built deltas: the creator view is the browsing view with the creator filter set and their profile above it, not a page of its own, so every filter and sort still applies (the archive's own list of a creator's cards is not used); a recognized card has no version recorded, so it offers no update check; cards imported before this change are recognized only when imported again. §4.1's pinning is built for edits (ARCHITECTURE §11.5, "Edited cards stay cached"); a card is not yet pinned while only an open tab shows it, and §4.2's context estimate and inspector before the first send are not built (no pending chat has them yet).
 
+**Built 2026-11-12 (cardex3):** §3.9's standalone lorebooks, as written (ARCHITECTURE §11.5, "Standalone lorebooks"); this spec is obsolete for them. Built delta: Update applies the newer file the way Update from file… does today, which merges it straight into the lorebook rather than staging it on an import line.
+
 **cardex** is a public card archive run by a third party. We use only its public API, as any client would ([D] owner, 2026-10-26). Its public API documentation wasn't found (§10), so our side is designed against an adapter interface (§2.2), and §10 lists exactly what we need from any archive's API.
 
 ## 0. The owner's decisions this builds on

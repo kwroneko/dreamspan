@@ -778,6 +778,82 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("a standalone lorebook is added to the lorebooks once, held in results, and updated by merge (§3.9)", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const book = archive.lorebooks[1]!
+      const cards = (yield* api.ListLibrary({ kind: "card" })).length
+      const before = (yield* api.ListLibrary({ kind: "lorebook" })).length
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: book.slug })
+      assert.isFalse(added.existing)
+      assert.strictEqual(added.name, book.name)
+      const lorebooks = yield* api.ListLibrary({ kind: "lorebook" })
+      assert.lengthOf(lorebooks, before + 1)
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), cards)
+      const ref = lorebooks.find((r) => r.id === added.refId)!
+      assert.strictEqual(ref.entityId, added.entityId)
+      // Named as the archive lists it: a World Info file names no lorebook.
+      assert.strictEqual(ref.label, book.name)
+      const opened = (refId: string) =>
+        Effect.map(
+          api.OpenEditor({ refId: refId as RefId }),
+          (editor) => editor.doc as { name: string; entries: ReadonlyArray<{ content: string }> }
+        )
+      const entries = (refId: string) => Effect.map(opened(refId), (doc) => doc.entries)
+      assert.strictEqual((yield* opened(added.refId)).name, book.name)
+      assert.lengthOf(yield* entries(added.refId), 2)
+      // Opened again (a click, a link, a new tab): the same lorebook, nothing new.
+      const again = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: book.slug })
+      assert.deepStrictEqual([again.existing, again.refId], [true, added.refId])
+      assert.lengthOf(yield* api.ListLibrary({ kind: "lorebook" }), before + 1)
+      // Results mark it as the user's, for them only.
+      const search = (who: Record<string, string>) =>
+        Effect.flatMap(client(who), (c) =>
+          c.SourceSearch({
+            sourceId: "cardex",
+            query: { ...emptySourceQuery, filters: { kind: "lorebook" } },
+            page: null
+          })
+        )
+      const shown = (yield* search(alice)).items.find((item) => item.remoteId === book.slug)!
+      assert.deepStrictEqual([shown.kind, shown.held?.refId], ["lorebook", added.refId])
+      assert.isUndefined((yield* search(bob)).items.find((item) => item.remoteId === book.slug)?.held)
+      // Its origin, read locally.
+      const entityId = added.entityId
+      archive.reset()
+      assert.strictEqual((yield* api.CardOrigin({ entityId }))?.remoteVersion, book.sha256)
+      assert.strictEqual(archive.hits(), 0)
+      // The author adds an entry: Check finds it; Update merges the newer file in, as Update from file… does.
+      const next = archive.publish(book.slug)
+      assert.strictEqual((yield* api.CheckRemoteVersion({ entityId })).newerVersion, next.sha256)
+      const response = yield* newerFile(entityId, alice)
+      assert.strictEqual(response.status, 200)
+      assert.strictEqual(response.headers.get("x-remote-version"), next.sha256)
+      const receipt = response.headers.get("x-source-version-receipt") ?? ""
+      const bytes = new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))
+      // The editor's Update names the file after the lorebook, so its name stays.
+      const merged = yield* importFile(bytes, { name: `${book.name}.json`, into: added.refId })
+      assert.strictEqual(merged.status, 200, yield* Effect.promise(() => merged.clone().text()))
+      const updated = yield* entries(added.refId)
+      assert.strictEqual((yield* opened(added.refId)).name, book.name)
+      assert.lengthOf(updated, 3)
+      assert.isTrue(updated.some((entry) => entry.content.includes("garden")))
+      const taken = yield* api.TakeRemoteVersion({ entityId, version: next.sha256, receipt })
+      assert.deepStrictEqual([taken.remoteVersion, taken.newerVersion], [next.sha256, null])
+      // A successor on the archive under a new slug is followed by the lorebook's stable listing.
+      const successor = archive.publishSuccessor(book.slug)
+      assert.strictEqual((yield* api.CheckRemoteVersion({ entityId })).newerVersion, successor.sha256)
+      const newer = yield* newerFile(entityId, alice)
+      assert.strictEqual(newer.status, 200)
+      assert.strictEqual(newer.headers.get("x-remote-version"), successor.sha256)
+      // Nobody else sees, checks or fetches it.
+      const theirs = yield* client(bob)
+      assert.isNull(yield* theirs.CardOrigin({ entityId }))
+      assert.strictEqual(yield* outcome(theirs.CheckRemoteVersion({ entityId })), "NotFound")
+      assert.strictEqual((yield* newerFile(entityId, bob)).status, 404)
+    })
+  )
+
   it.effect("a newer version keeps the card's link back to its page on the source", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)

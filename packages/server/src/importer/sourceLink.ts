@@ -21,3 +21,27 @@ export const withSourceLink = <
     searchText: searchText(stored)
   }
 }
+
+/**
+ * A standalone lorebook from a card source (§3.9), named as the source lists it: a World Info
+ * file names no lorebook, so the importer names it after its file, which a source names by its
+ * id. A name the file itself gives is kept.
+ */
+export const withSourceName = <
+  L extends { readonly label: string; readonly docJson: string; readonly docHash: string; readonly searchText: string }
+>(
+  library: L,
+  name: string,
+  fileBase: string
+): L => {
+  const doc = JSON.parse(library.docJson) as Record<string, unknown>
+  if (!name || (doc.name !== fileBase && doc.name !== "")) return library
+  const stored = { ...doc, name }
+  return {
+    ...library,
+    label: name,
+    docJson: JSON.stringify(stored),
+    docHash: docHash(stored as never),
+    searchText: searchText(stored)
+  }
+}

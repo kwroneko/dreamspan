@@ -36,12 +36,14 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import { canHideCreator, CreatorHeader, hideCreator, showCreator, shownCreator } from "./creator.tsx"
 import {
   cardSourceViews,
+  lorebookPath,
   recentAtom,
   remoteImageUrl,
   SOURCES_KEY,
   sourcesAtom,
   type SourceProblem,
   useAdoptRemote,
+  useAdoptRemoteLorebook,
   useSourceCall,
   problemText
 } from "./remote.ts"
@@ -1100,6 +1102,189 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
   )
 }
 
+/**
+ * A standalone lorebook among the results (§3.9): the Lorebook badge on its picture's corner,
+ * and opening it adds it, then shows it in the lorebook editor. One the user has from there
+ * opens theirs. Nothing here inspects it or starts a chat with it.
+ */
+function RemoteLorebookTile({ card, browse }: { card: RemoteSummary; browse: SourceBrowse }) {
+  const [menu, setMenu] = useState(false)
+  const info = browse.info!
+  const view = cardSourceViews.get(info.id)
+  const href = lorebookPath(info.id, card.remoteId)
+  const link = {
+    to: "/sources/$sourceId/lorebooks/$remoteId",
+    params: { sourceId: info.id, remoteId: card.remoteId }
+  } as const
+  const navigate = useNavigate()
+  const adopt = useAdoptRemoteLorebook()
+  const [added, setAdded] = useState<{ refId: string; archived: boolean } | null>(null)
+  const [flash, setFlash] = useState(false)
+  const mine = added ?? (card.held ? { refId: card.held.refId, archived: card.held.archived } : null)
+  const face = (
+    <TileFace
+      name={card.name}
+      title={card.name}
+      portrait={
+        <>
+          <Avatar
+            id={`${info.id}:${card.remoteId}`}
+            name={card.name}
+            size="fill"
+            {...(card.thumb ? { src: remoteImageUrl(info.id, card.thumb) } : {})}
+          />
+          <Tooltip label="A lorebook, not a character. Opening it adds it to your lorebooks.">
+            <span
+              data-lorebook-badge
+              data-layout-overlay="The lorebook badge sits over the picture"
+              tabIndex={0}
+              aria-label="Lorebook"
+              className="absolute right-2 bottom-2 inline-flex items-center gap-1 rounded-sm border border-border bg-surface/90 px-1.5 text-[0.6875rem] font-medium outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <Icon name="book" size={12} />
+              Lorebook
+            </span>
+          </Tooltip>
+          {mine !== null && (
+            <Tooltip label={mine.archived ? "You have this lorebook, archived." : "You have this lorebook."}>
+              <span
+                data-held-badge
+                data-layout-overlay="The held badge sits over the picture"
+                tabIndex={0}
+                aria-label={mine.archived ? "You have this lorebook, archived" : "You have this lorebook"}
+                className="absolute top-2 left-2 inline-flex size-5 items-center justify-center rounded-sm bg-accent text-accent-contrast shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <Icon name="check" size={14} />
+              </span>
+            </Tooltip>
+          )}
+          {card.held?.update && mine !== null && (
+            <span
+              data-held-update
+              data-layout-overlay="The update badge sits over the picture"
+              className="absolute bottom-8 left-2"
+            >
+              <Badge tone="warning">update available</Badge>
+            </span>
+          )}
+        </>
+      }
+    >
+      <span data-remote-creator className="truncate text-xs text-muted">
+        {card.creator ? `by ${card.creator}` : " "}
+      </span>
+      <span className="mt-auto truncate text-xs text-muted">
+        {view?.tileLine?.(card) ?? defaultLine(card, browse.caps)}
+      </span>
+    </TileFace>
+  )
+  const addToMine = () =>
+    void adopt(info.id, info.name, card.remoteId).then((out) => {
+      if (!out?.ok) return
+      setAdded({ refId: out.value.refId, archived: false })
+      setFlash(true)
+      window.setTimeout(() => setFlash(false), 1200)
+    })
+  const openMine = (refId: string) => void navigate({ to: "/library/$refId", params: { refId } })
+  return (
+    <div
+      data-remote-card={card.remoteId}
+      data-remote-lorebook
+      {...(mine !== null ? { "data-held": true } : {})}
+      className={`${TILE_SURFACE_CLASS} [content-visibility:auto] [contain-intrinsic-size:auto_18rem] ${flash ? "ring-2 ring-accent" : ""}`}
+    >
+      <ContextMenu
+        label={`Actions for ${card.name}`}
+        open={menu}
+        onOpenChange={setMenu}
+        trigger={
+          mine !== null ? (
+            <Tooltip label={`Opens your ${card.name} in the lorebook editor.`}>
+              <Link
+                to="/library/$refId"
+                params={{ refId: mine.refId }}
+                aria-label={`Open ${card.name}`}
+                className={`${TILE_CLASS} hover:border-focus`}
+              >
+                {face}
+              </Link>
+            </Tooltip>
+          ) : (
+            <Tooltip label={`Adds ${card.name} to your lorebooks and opens it.`}>
+              <Link {...link} aria-label={`Open ${card.name}`} className={`${TILE_CLASS} hover:border-focus`}>
+                {face}
+              </Link>
+            </Tooltip>
+          )
+        }
+      >
+        {mine !== null ? (
+          <MenuItem icon="book" description="Opens your copy, as a click does." onClick={() => openMine(mine.refId)}>
+            Open your lorebook
+          </MenuItem>
+        ) : (
+          <MenuItem
+            icon="book"
+            description="Adds it to your lorebooks and opens it, as a click does."
+            onClick={() => void navigate(link)}
+          >
+            Open
+          </MenuItem>
+        )}
+        {mine === null && (
+          <MenuItem
+            icon="plus"
+            description={`Adds ${card.name} to your lorebooks without opening it.`}
+            onClick={addToMine}
+          >
+            Add to my lorebooks
+          </MenuItem>
+        )}
+        <MenuItem
+          icon="external"
+          description={
+            mine === null
+              ? "Adds it and opens it in a new tab of the browser."
+              : "Opens it in a new tab of the browser."
+          }
+          onClick={() =>
+            window.open(mine === null ? href : `/library/${encodeURIComponent(mine.refId)}`, "_blank", "noopener")
+          }
+        >
+          Open in a new browser tab
+        </MenuItem>
+        {card.url !== undefined && (
+          <MenuItem
+            icon="external"
+            description={`Opens this lorebook's page on ${info.name}, in a new tab.`}
+            onClick={() => window.open(card.url, "_blank", "noopener,noreferrer")}
+          >
+            Open on {info.name}
+          </MenuItem>
+        )}
+        {card.creator !== undefined && shownCreator(browse) !== (card.creatorQuery ?? card.creator) && (
+          <MenuItem
+            icon="person"
+            description={`Shows everything by ${card.creator} on ${info.name}, with their profile.`}
+            onClick={() => showCreator(browse, card.creatorQuery ?? card.creator!)}
+          >
+            Cards by {card.creator}
+          </MenuItem>
+        )}
+        {card.creatorQuery !== undefined && canHideCreator(browse) && (
+          <MenuItem
+            icon="ban"
+            description={`Leaves ${card.creator ?? card.creatorQuery}'s work out of these results.`}
+            onClick={() => hideCreator(browse, card.creatorQuery!)}
+          >
+            Not by {card.creator ?? card.creatorQuery}
+          </MenuItem>
+        )}
+      </ContextMenu>
+    </div>
+  )
+}
+
 /** What each failure says, worded for what the user can do (§5.4). */
 function ProblemAlert({
   browse,
@@ -1315,9 +1500,13 @@ export function SourceResults({ browse, className }: { browse: SourceBrowse; cla
           aria-label={`Cards on ${name}`}
           className={`${className} ${results?.status === "loading" ? "opacity-60" : ""}`}
         >
-          {items.map((card) => (
-            <RemoteTile key={card.remoteId} card={card} browse={browse} />
-          ))}
+          {items.map((card) =>
+            card.kind === "lorebook" ? (
+              <RemoteLorebookTile key={card.remoteId} card={card} browse={browse} />
+            ) : (
+              <RemoteTile key={card.remoteId} card={card} browse={browse} />
+            )
+          )}
           {results?.status === "more-failed" && problem ? (
             <ProblemAlert browse={browse} problem={problem} more />
           ) : results?.next !== null && results?.status !== "loading" ? (
