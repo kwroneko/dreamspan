@@ -222,3 +222,32 @@ test("SVG panel links cannot navigate into an attacker document", async ({ page 
   await expect(panel.locator("p")).toHaveText("Private synthetic expanded content")
   expect(requests).toEqual([])
 })
+
+// A message whose markup the HTML step can't turn into a tree (an SVG `<template>`, which has no
+// template contents) shows that markup as text; it doesn't take the chat down with it.
+test("markup the HTML step can't convert shows as text, and the chat stays", async ({ page }) => {
+  const errors: string[] = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Unconvertible markup" })
+      yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        reply: false,
+        content: 'Lantern **lit** <svg class="x"><template id="t">kept</template></svg>'
+      })
+      return chat
+    })
+  )
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  await expect(page.getByRole("heading", { level: 1, name: "Unconvertible markup" })).toBeVisible()
+  const message = page.getByRole("article", { name: "Your message" })
+  await expect(message.locator("strong")).toHaveText("lit")
+  await expect(message).toContainText('<svg class="x"><template id="t">')
+  await expect(message.locator("svg.x, template")).toHaveCount(0)
+  expect(errors).toEqual([])
+})

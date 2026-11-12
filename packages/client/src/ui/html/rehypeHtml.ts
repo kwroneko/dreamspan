@@ -3,6 +3,7 @@ import { proxyMediaUrl } from "./media.ts"
 // StMarkdown: mark Markdown's own elements, parse the raw HTML, prepare it, sanitize it with the
 // registered schema, then finish what the five fixes need on the parsed elements only. Media
 // from elsewhere is taken out, and a marker element tells the renderer to say so.
+import rehypeRaw from "rehype-raw"
 import rehypeSanitize from "rehype-sanitize"
 import type { PositionedNode } from "../sourcePositions.ts"
 import { sliceText } from "../sourcePositions.ts"
@@ -38,6 +39,31 @@ export function htmlMark() {
       for (const child of node.children ?? []) visit(child)
     }
     visit(tree)
+  }
+}
+
+type RawParse = ReturnType<typeof rehypeRaw>
+
+/**
+ * Step 1b, rehype-raw: the raw HTML parsed into the tree. A document its conversion can't take
+ * (parse5 gives an SVG or MathML `<template>` no template contents, and the conversion reads
+ * them) keeps its markup as text, as with HTML formatting off, instead of failing the message's
+ * render and the chat view around it.
+ */
+export function htmlRaw() {
+  const parse = rehypeRaw()
+  return (tree: Parameters<RawParse>[0], file: Parameters<RawParse>[1]) => {
+    try {
+      return parse(tree, file)
+    } catch {
+      const visit = (node: Node) => {
+        for (const child of node.children ?? [])
+          if ((child.type as string) === "raw") child.type = "text"
+          else visit(child)
+      }
+      visit(tree as unknown as Node)
+      return tree
+    }
   }
 }
 

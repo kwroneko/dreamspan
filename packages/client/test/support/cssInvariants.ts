@@ -90,6 +90,25 @@ export function loadingViolations(
   return found
 }
 
+/** Grouping rules a style rule may nest: relative to the rule, so scoped with it. */
+const NESTED_AT = new Set(["media", "supports", "container", "starting-style"])
+
+/** A style rule's contents: declarations, nested rules and nested grouping rules, nothing loading. */
+function styleBlockViolations(values: ReadonlyArray<ComponentValue>, consent: boolean): string[] {
+  const found: string[] = []
+  const rest: ComponentValue[] = []
+  for (const value of values) {
+    const token = tokenOf(value)
+    if (token?.[0] === TokenType.AtKeyword) {
+      const name = (token[4] as { value: string }).value.toLowerCase()
+      if (!NESTED_AT.has(name)) found.push(`nested at-rule @${name}`)
+    } else if (isSimpleBlockNode(value) && value.startToken[0] === TokenType.OpenCurly)
+      found.push(...styleBlockViolations(value.value, consent))
+    else rest.push(value)
+  }
+  return [...found, ...loadingViolations(rest, consent)]
+}
+
 function parseOrViolation(css: string): { values: ComponentValue[] } | { violation: string } {
   let error: string | null = null
   const tokens = tokenize({ css }, { onParseError: (problem) => (error ??= problem.message) })
@@ -117,7 +136,7 @@ export function stylesheetViolations(css: string, consent: boolean): string[] {
           } else if (name === "keyframes" || name === "-webkit-keyframes" || name === "font-face")
             found.push(...loadingViolations(value.value, consent))
           else {
-            found.push(...loadingViolations(prelude, false))
+            found.push(...loadingViolations(prelude.slice(1), false))
             rules(value.value, scoped)
           }
         } else {
@@ -130,7 +149,7 @@ export function stylesheetViolations(css: string, consent: boolean): string[] {
             const ok = scoped ? /^:scope\s/.test(selector) : /^\.message-html\s+(?![+~|])/.test(selector)
             if (!ok) found.push(`selector outside the scope: ${selector}`)
           }
-          found.push(...loadingViolations(prelude, false), ...loadingViolations(value.value, consent))
+          found.push(...loadingViolations(prelude, false), ...styleBlockViolations(value.value, consent))
         }
         prelude = []
       } else if (tokenOf(value)?.[0] === TokenType.Semicolon && tokenOf(prelude[0])?.[0] === TokenType.AtKeyword) {
@@ -154,6 +173,21 @@ export function valueViolations(value: string, consent: boolean, fragmentsOnly =
     if (token && [TokenType.Semicolon, TokenType.OpenCurly, TokenType.CloseCurly].includes(token[0]))
       found.push(`declaration syntax ${token[1]} in a value`)
     if (isSimpleBlockNode(node) && node.startToken[0] === TokenType.OpenCurly) found.push("a block in a value")
+  }
+  return found
+}
+
+/** Violations of a style attribute's text: declarations only, nothing that loads. */
+export function declarationListViolations(text: string, consent: boolean): string[] {
+  const parsed = parseOrViolation(text)
+  if ("violation" in parsed) return [parsed.violation]
+  const found = loadingViolations(parsed.values, consent)
+  for (const node of parsed.values) {
+    const token = tokenOf(node)
+    if (token && [TokenType.OpenCurly, TokenType.CloseCurly].includes(token[0]))
+      found.push(`rule syntax ${token[1]} in a style attribute`)
+    if (isSimpleBlockNode(node) && node.startToken[0] === TokenType.OpenCurly)
+      found.push("a block in a style attribute")
   }
   return found
 }

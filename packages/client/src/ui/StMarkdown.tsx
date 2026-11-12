@@ -9,6 +9,7 @@ import {
   type ComponentProps
 } from "react"
 import { diff } from "@codemirror/merge"
+import rehypeRaw from "rehype-raw"
 import {
   Block,
   type BlockProps,
@@ -17,7 +18,6 @@ import {
   parseMarkdownIntoBlocks,
   Streamdown
 } from "streamdown"
-import rehypeRaw from "rehype-raw"
 import { fixMarkdownMapped, stFormatting } from "./stFormatting.ts"
 import { MESSAGE_SCOPE, scopeStyles } from "./html/css.ts"
 import { BlockedMediaNote, htmlComponents, MediaBlocked } from "./html/HtmlParts.tsx"
@@ -30,7 +30,7 @@ import {
   setStyleScoper
 } from "./html/messageHtml.ts"
 import { effectiveSchema, htmlPartsRevision, subscribeHtmlParts } from "./html/parts.ts"
-import { htmlFinish, htmlMark, htmlPrepare, htmlSanitize, urlAddress } from "./html/rehypeHtml.ts"
+import { htmlFinish, htmlMark, htmlPrepare, htmlRaw, htmlSanitize, urlAddress } from "./html/rehypeHtml.ts"
 import type { MessageTextProps } from "./Markdown.tsx"
 import { withDefinitions } from "./referenceDefinitions.ts"
 import { sourcePositions, type SourceChar, type PositionedNode } from "./sourcePositions.ts"
@@ -95,7 +95,10 @@ const rehypePlugins = [defaultRehypePlugins.sanitize!, hardening(false)] as Plug
 const htmlPlugins = (parts: number, block: number, mediaScope: string | null) =>
   [
     htmlMark,
-    rehypeRaw,
+    // Streamdown keeps raw HTML as HTML only when rehype-raw is in the list (it compares the
+    // plugin); off here, so unified skips it and htmlRaw parses in its place.
+    [rehypeRaw, false],
+    htmlRaw,
     [htmlPrepare, { parts }],
     [htmlSanitize, { parts }],
     [htmlFinish, { parts, block, mediaScope }],

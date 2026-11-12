@@ -162,6 +162,19 @@ describe("inline HTML", () => {
     )
   })
 
+  it("shows HTML as text when the parser's tree can't be converted, keeping the Markdown", () => {
+    // parse5 gives an SVG <template> no template contents; the conversion used to throw on it.
+    expect(render("<b>before</b>")).toBe("<p><b>before</b></p>")
+    for (const markup of [
+      '<svg class="x"><template id="t">kept</template></svg>',
+      "<math><template>m</template></math>"
+    ])
+      expect(render(`**lit** ${markup}`)).toBe(
+        `<p><strong>lit</strong> ${markup.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")}</p>`
+      )
+    expect(render("<b>after</b>")).toBe("<p><b>after</b></p>")
+  })
+
   it("shows HTML as text with the schema part disabled", () => {
     disposers.forEach((dispose) => dispose())
     try {
