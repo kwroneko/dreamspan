@@ -286,7 +286,7 @@ Client units, for the UI job after the server units (each with e2e at 1440 and 3
 
 | # | Unit | Depends on | Implements |
 |---|---|---|---|
-| CU1 | This chat's **Context** setting: the existing `settings.context` section (`SharedContextSetting`) becomes a choice, "One shared context" or "Separate contexts", each explained on hover | C3 | §2 |
+| CU1 | **Built** (ARCHITECTURE §3.8 "The Context setting"; the choices are the installed context views, read through `ContextViews`). This chat's **Context** setting: the existing `settings.context` section (`SharedContextSetting`) becomes a choice, "One shared context" or "Separate contexts", each explained on hover | C3 | §2 |
 | CU2 | **Cast tab**: an Away mark per character beside Mute, and the **Narrator** switch ("Sees everything and is never in or out of the scene"); a narrator's row has no Away mark | C8 | §2.1, §6 |
 | CU3 | **Timeline away rows**: "Wren left · scene check" at the message, with Undo, labelled by who set it (the user, a character's tool, the scene check) | C9 | §5 |
 | CU4 | **Preset editor**: the gap line and the join line among the utility prompts, beside the merge framing | C4 | §2.2 |

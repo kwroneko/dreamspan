@@ -1,0 +1,170 @@
+// Separate contexts per character in the app (spec/CHARACTER-CONTEXT.md §9.2 units CU1–CU5), on a
+// synthetic three-character chat (Mira, Tobin, Wren) with the fake provider: This chat's Context
+// setting. Each check at 1440 and 390, light and dark, with the layout audit of what it touched.
+import { createServer, type Server } from "node:http"
+import type { AddressInfo } from "node:net"
+import { expect, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
+import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
+import { openPanel } from "./support/panel.ts"
+import { type FakeProvider, startProvider } from "./support/provider.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+
+const server = serverPerFile({ ...withAdmin, DECISION_TIMEOUT_MS: "60000" })
+let cookie: string
+let provider: FakeProvider
+let decide: Server
+let decisionConnection = ""
+/** The characters the scene check says left during the latest message. */
+const leaving = new Set<string>()
+
+const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), cookie, use)
+
+test.beforeAll(async () => {
+  cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+  provider = await startProvider({ reply: "*nods* The lantern gutters." })
+  // The scene check's model: a character named in `leaving` left, everyone else is still there.
+  decide = createServer((request, response) => {
+    let raw = ""
+    request.on("data", (chunk) => (raw += chunk))
+    request.on("end", () => {
+      const body = JSON.parse(raw) as { questions: Record<string, { instructions?: string }> }
+      const answers = Object.fromEntries(
+        Object.entries(body.questions).map(([id, question]) => {
+          const name = /^(\w+) is in the scene/.exec(question.instructions ?? "")?.[1] ?? ""
+          return [id, { noul: leaving.has(name) ? 0.01 : 0.99 }]
+        })
+      )
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify({ model: "typesafe/jev-1.13-20260917", answers, usage: {} }))
+    })
+  })
+  await new Promise<void>((resolve) => decide.listen(0, "127.0.0.1", resolve))
+  const decideUrl = `http://127.0.0.1:${(decide.address() as AddressInfo).port}`
+  decisionConnection = await admin((api) =>
+    Effect.gen(function* () {
+      for (const name of ["Mira", "Tobin", "Wren"]) yield* api.CreateCard({ label: name, name })
+      const chat = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Local model",
+          baseUrl: provider.baseUrl,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "sk-contexts-chat-0042"
+      })
+      yield* api.RefreshModels({ connectionId: chat.id })
+      const model = (yield* api.ListModels({ connectionId: chat.id, includeHidden: false })).find(
+        (m) => m.key === "fake-small"
+      )!
+      yield* api.SetGenerationDefaults({ defaults: { model: { connection: chat.id, model: model.id }, preset: null } })
+      const connection = yield* api.CreateConnection({
+        kind: "system-one",
+        settings: {
+          name: "Jev",
+          baseUrl: `${decideUrl}/decide`,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "sk-contexts-decide-0042"
+      })
+      const jev = yield* api.AddUserModel({ connectionId: connection.id, key: "typesafe/jev-1.13", overrides: {} })
+      yield* api.SetDecisionSettings({ connectionId: connection.id, model: jev.id, points: {} })
+      return connection.id
+    })
+  )
+})
+
+test.afterAll(async () => {
+  await provider.stop()
+  await new Promise((resolve) => decide.close(resolve))
+})
+
+/** The three characters' ids, by name. */
+const castIds = () =>
+  admin((api) =>
+    Effect.map(api.ListCards(), (cards) => {
+      const id = (name: string) => cards.find((card) => card.name === name)!.entityId as EntityId
+      return { mira: id("Mira"), tobin: id("Tobin"), wren: id("Wren") }
+    })
+  )
+
+/** A new chat of Mira, Tobin and Wren, with the user's first line; one reply per send. */
+const threeCharacters = () =>
+  admin((api) =>
+    Effect.gen(function* () {
+      const cards = yield* api.ListCards()
+      const id = (name: string) => cards.find((card) => card.name === name)!.entityId as EntityId
+      const started = yield* api.StartChat({
+        cards: [id("Mira"), id("Tobin"), id("Wren")],
+        persona: null,
+        greeting: null,
+        greeters: [],
+        first: { _tag: "Send", content: "*The inn's door creaks open.*", speakerEntityId: null }
+      })
+      yield* api.ChangeCast({ chatId: started.chat.id, slotId: null, change: { _tag: "ReplySingle", on: true } })
+      return {
+        chatId: started.chat.id as ChatId,
+        slotId: started.entry.slotId as SlotId,
+        forkId: started.chat.currentForkId
+      }
+    })
+  )
+
+const look = async (page: Page, width: number, theme: "light" | "dark") => {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+  await page.emulateMedia({ colorScheme: theme })
+  await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+}
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`This chat's Context setting at ${width} ${theme}`, async ({ page }, info) => {
+      await look(page, width, theme)
+      const { chatId, slotId } = await threeCharacters()
+      const read = () => admin((api) => api.GetCast({ chatId, slotId }))
+      await page.goto(`${server().url}/chats/${chatId}`)
+      let settings = await openPanel(page, "This chat")
+      const context = () => settings.getByRole("radiogroup", { name: "Context" })
+      await expect(context().getByRole("radio", { name: /^One shared context/ })).toBeChecked()
+      await expect(context().getByRole("radio", { name: /^Separate contexts/ })).not.toBeChecked()
+      // The explanation: what it does, when, what the model sees, with an example.
+      await settings.getByRole("button", { name: "About Context", exact: true }).click()
+      await expect(
+        page.getByText("Example: you mark Wren away", { exact: false }).filter({ visible: true })
+      ).toBeVisible()
+      await page.mouse.move(0, 0)
+      await expectLayout(page, info, `contexts-setting-${width}-${theme}`, {
+        scope: '[role="tabpanel"][aria-label="This chat"]'
+      })
+      await context()
+        .getByRole("radio", { name: /^Separate contexts/ })
+        .click()
+      await expect.poll(async () => (await read()).contextPerSpeaker).toBe("separate")
+      await expect(settings.getByText(/^Costs more: once a character misses part of the chat/)).toBeVisible()
+      await expectLayout(page, info, `contexts-setting-separate-${width}-${theme}`, {
+        scope: '[role="tabpanel"][aria-label="This chat"]'
+      })
+      // Server state: it survives a reload.
+      await page.reload()
+      settings = await openPanel(page, "This chat")
+      await expect(context().getByRole("radio", { name: /^Separate contexts/ })).toBeChecked()
+      await context()
+        .getByRole("radio", { name: /^One shared context/ })
+        .click()
+      await expect.poll(async () => (await read()).contextPerSpeaker).toBe("shared")
+      await expect(settings.getByText(/^Costs more/)).toHaveCount(0)
+    })
+  }
+
+// Used by the later units' tests.
+void castIds
+void decisionConnection

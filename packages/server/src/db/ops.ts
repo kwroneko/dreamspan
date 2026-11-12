@@ -3570,6 +3570,8 @@ export class ReadOps extends RpcGroup.make(
   }),
   Rpc.make("RoleProjections", { success: Schema.Array(RoleProjectionOption) }),
   Rpc.make("MergeLayouts", { success: Schema.Array(RoleProjectionOption) }),
+  /** The context views installed (`contextViews`), as This chat's Context setting offers them. */
+  Rpc.make("ContextViews", { success: Schema.Array(RoleProjectionOption) }),
   Rpc.make("AssembleContext", {
     payload: {
       partialBatch: Schema.optionalKey(Schema.Boolean),

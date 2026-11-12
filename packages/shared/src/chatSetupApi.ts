@@ -333,6 +333,10 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   mergeLayout: Schema.optionalKey(Schema.String),
   /** The merge layouts installed, as the chat's settings offer them (spec/CHAT-MERGE.md §4). */
   mergeLayouts: Schema.optionalKey(Schema.Array(RoleProjectionOption)),
+  /** How each reply's history is chosen (`context.per_speaker`, an open id); absent: one shared context. */
+  contextPerSpeaker: Schema.optionalKey(Schema.String),
+  /** The context views installed, as the chat's Context setting offers them (spec/CHARACTER-CONTEXT.md §9.2 CU1). */
+  contextViews: Schema.optionalKey(Schema.Array(RoleProjectionOption)),
   /** Who replies when nobody is picked (`reply.order`, a reply policy's id); absent is the default, natural order. */
   replyOrder: Schema.optionalKey(Schema.String),
   /** True: one reply per user action instead of the reply order's round (`reply.single`); absent is off, as in ST. */
@@ -381,6 +385,8 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("Roles", { projection: RolesProjection }),
   /** How merged chats are laid out (`merge.layout`): a merge layout's id. */
   Schema.TaggedStruct("MergeLayout", { layout: Schema.String }),
+  /** How each reply's history is chosen from here on (`context.per_speaker`): a context view's id. */
+  Schema.TaggedStruct("ContextPerSpeaker", { view: Schema.String.check(Schema.isMaxLength(200)) }),
   /** A note on or off (`note.activate`, `note.deactivate`): the chat's own, or a participant card's. */
   Schema.TaggedStruct("Lorebook", { ref: RefId, active: Schema.Boolean }),
   /** A card's own lorebook on or off (`lorebook.embedded`). */

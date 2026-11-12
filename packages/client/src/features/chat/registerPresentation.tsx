@@ -4,7 +4,8 @@ import { MacroBindings } from "./MacroBindings.tsx"
 import { registerImages } from "./images.tsx"
 import { registerTimelineTransforms } from "./timelineContributions.tsx"
 import { NextImagesNote } from "./imageTokens.tsx"
-import { ReplyChoicesSetting, SharedContextSetting } from "./ReplyChoicesSetting.tsx"
+import { ReplyChoicesSetting } from "./ReplyChoicesSetting.tsx"
+import { ContextSetting } from "./ContextSetting.tsx"
 import { lazy, Suspense, type ComponentType } from "react"
 import {
   accountSettingSections,
@@ -143,7 +144,7 @@ export const registerPresentation = () => [
   // This chat leads with what a person touches; what few need comes after, collapsed.
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
-  chatSettingSections.register({ id: "settings.context", order: 15, component: SharedContextSetting }),
+  chatSettingSections.register({ id: "settings.context", order: 15, component: ContextSetting }),
   chatSettingSections.register({ id: "settings.card-layout", order: 30, component: CardLayoutSetting }),
   chatSettingSections.register({ id: "settings.who-replies", order: 40, component: ReplyChoicesSetting }),
   chatSettingSections.register({ id: "settings.macro-bindings", order: 80, component: MacroBindings }),

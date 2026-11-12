@@ -4,16 +4,6 @@ import { Button } from "../../ui/Button.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 
-export function SharedContextSetting() {
-  return (
-    <section aria-label="Context">
-      <Fieldset legend="Context" about="Every reply sees the same conversation history.">
-        <p className="text-sm text-muted">One shared context.</p>
-      </Fieldset>
-    </section>
-  )
-}
-
 export function ReplyChoicesSetting() {
   const navigate = useNavigate()
   const choose = async () => {

@@ -81,6 +81,10 @@ export interface Assembler {
   readonly mergeLayoutOptions: Effect.Effect<
     ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
   >
+  /** The context views installed, as the chat's Context setting offers them (CU1). */
+  readonly contextViewOptions: Effect.Effect<
+    ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
+  >
   readonly assemble: (
     request: Omit<AssemblyRequest, "macros" | "projections" | "imageTokens">
   ) => ReturnType<typeof assemble>
@@ -183,6 +187,12 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
       withAssemblyModules(
         assembler,
         Effect.sync(() => mergeLayouts.list().map(({ id, label, description }) => ({ id, label, description })))
+      )
+    ),
+    contextViewOptions: Effect.suspend(() =>
+      withAssemblyModules(
+        assembler,
+        Effect.sync(() => contextViews.list().map(({ id, label, description }) => ({ id, label, description })))
       )
     ),
     assemble: (request) =>
