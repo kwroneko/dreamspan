@@ -60,7 +60,7 @@ export const toUser = (row: UserRow) =>
 
 export interface ChatRow {
   readonly id: string
-  readonly kind: "rp" | "workshop"
+  readonly kind: string
   readonly status: "pending" | "active" | "archived"
   readonly title: string
   readonly active_leaf_slot_id: string | null

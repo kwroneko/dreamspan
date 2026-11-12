@@ -1,3 +1,4 @@
+import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { putUserSetting, writeSetting } from "./settings.ts"
 import { nextSeq, eventApplies } from "./forkState.ts"
 // Generation's writes: rollouts and the user's defaults (ARCHITECTURE §15).
@@ -132,11 +133,13 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         const fork =
           named ??
           (leafSlotId === null ? null : yield* forkThrough(sql, chatId, leafSlotId, chat?.current_fork_id ?? null))
+        const profile = chatKinds.get(chat!.kind)
+        if (!profile) return yield* new NotFound({ entity: "chat kind", id: chat!.kind })
         yield* sql`INSERT INTO rollouts ${sql.insert({
           id: rolloutId,
           chat_id: chatId,
           fork_id: fork?.id ?? chat?.current_fork_id ?? null,
-          kind: chat?.kind === "workshop" ? "workshop" : "generation",
+          kind: profile.rolloutKind,
           status: "running",
           slot_id: slotId,
           leaf_slot_id: leafSlotId,

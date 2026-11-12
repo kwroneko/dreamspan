@@ -153,7 +153,7 @@ export const layer = Layer.effect(
           return tool && (profile.allowsOutside || tool.effect !== "external") ? [tool] : []
         })
         const reply = strategy.run({
-          purpose: chat.kind === "workshop" ? "workshop" : "generation",
+          purpose: profile.purpose,
           request,
           generation,
           rolloutId,
@@ -412,7 +412,7 @@ export const layer = Layer.effect(
           if (!strategy)
             return yield* new GenerationFailed({ class: "unavailable", message: "Reply strategy is unavailable." })
           const reply = strategy.run({
-            purpose: chat.kind === "workshop" ? "workshop" : "generation",
+            purpose: profile.purpose,
             request,
             generation,
             rolloutId,

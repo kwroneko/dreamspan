@@ -1,4 +1,4 @@
-import { builtinChatKinds, type ChatKindProfile } from "./agent/chatKinds.ts"
+import { chatKinds, type ChatKindProfile } from "@rp/shared/chatKinds.ts"
 import { workshopMode } from "./agent/workshop.ts"
 import { libraryTools } from "./agent/tools/library.ts"
 import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
@@ -55,8 +55,6 @@ export class ExecutionRegistry extends Context.Service<
       const orchestrationModes = makeRegistry<OrchestrationMode>()
       yield* orchestrationModes.register(defaultMode)
       yield* orchestrationModes.register(workshopMode)
-      const chatKinds = makeRegistry<ChatKindProfile>()
-      for (const profile of builtinChatKinds) yield* chatKinds.register(profile)
       const rolloutTools = makeRegistry<RolloutTool<never>>()
       for (const tool of [
         ...historyTools,
