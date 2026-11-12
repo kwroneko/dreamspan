@@ -616,7 +616,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER rollout_effects_owner BEFORE INSERT ON rollout_effects BEGIN
     SELECT RAISE(ABORT, 'effect target must belong to the workshop owner') WHERE NOT EXISTS (
       SELECT 1 FROM rollouts r JOIN chats c ON c.id = r.chat_id
-      WHERE r.id = NEW.rollout_id AND c.kind = 'workshop' AND r.kind = 'workshop'
+      WHERE r.id = NEW.rollout_id AND r.kind = 'workshop'
         AND (NEW.target_kind NOT IN ('entity', 'chat')
           OR (NEW.target_kind = 'entity' AND EXISTS (SELECT 1 FROM entities e WHERE e.id = NEW.target_id AND e.owner_user_id = c.owner_user_id))
           OR (NEW.target_kind = 'chat' AND EXISTS (SELECT 1 FROM chats t WHERE t.id = NEW.target_id AND t.owner_user_id = c.owner_user_id)))

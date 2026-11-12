@@ -1,6 +1,7 @@
 // Setup tools compose the same typed user operations in one outer writer transaction.
 // The receipt and all undo recipes commit with them. No external work occurs here.
 import { EffectUndoRefused, type RolloutEffect } from "@rp/shared/workshopApi.ts"
+import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { newCardDoc, validateDoc, withoutGrantedAgentEdits, withHtmlApprovals } from "@rp/shared/editing.ts"
 import { InvalidDocument } from "@rp/shared/editorApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -228,9 +229,16 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
     const lib = makeLibraryQueries(sql)
     const owned = (key: Key) =>
       Effect.gen(function* () {
-        const [row] = yield* sql<{ status: string }>`SELECT r.status FROM rollouts r JOIN chats c ON c.id = r.chat_id
-      WHERE r.id = ${key.rolloutId} AND c.owner_user_id = ${key.userId} AND c.kind = 'workshop' AND r.kind = 'workshop' AND c.deleted_at IS NULL`
+        const [row] = yield* sql<{
+          status: string
+          chat_kind: string
+          kind: string
+        }>`SELECT r.status, c.kind AS chat_kind, r.kind FROM rollouts r JOIN chats c ON c.id = r.chat_id
+      WHERE r.id = ${key.rolloutId} AND c.owner_user_id = ${key.userId} AND r.kind = 'workshop' AND c.deleted_at IS NULL`
         if (!row) return yield* new NotFound({ entity: "workshop rollout", id: key.rolloutId })
+        const profile = chatKinds.get(row.chat_kind)
+        if (!profile?.allowsOutside || profile.rolloutKind !== row.kind)
+          return yield* new NotFound({ entity: "workshop rollout", id: key.rolloutId })
         return row
       })
     const receipted = <E>(

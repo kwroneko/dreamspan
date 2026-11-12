@@ -8,9 +8,50 @@ import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+import { newCardDoc } from "@rp/shared/editing.ts"
 
 for (const workers of ["source", "bundle"] as const) {
   describe(`chat kind profiles in ${workers} workers`, () => {
+    it.live("uses setup effects and undo in a registered workshop kind", () => {
+      const config = testConfig({ dbWorkers: workers })
+      return Effect.gen(function* () {
+        yield* (yield* StateModules).register({
+          id: "review/chat-kind",
+          module: new URL("./support/chatKindPlugin.ts", import.meta.url).href,
+          exportName: "install"
+        })
+        const api = yield* client()
+        const user = yield* api.Whoami()
+        const writer = yield* Writer
+        const chat = yield* writer.CreateChat({
+          userId: user.id,
+          kind: "review/assistant",
+          status: "active",
+          title: "Plugin workshop",
+          participants: [],
+          greeting: null
+        })
+        const rolloutId = `r-${chat.id}`
+        yield* fixtureSql(config.dataDir, [
+          {
+            sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?,?,'workshop','running','assistant','interactive',1,1)",
+            params: [rolloutId, chat.id]
+          }
+        ])
+        yield* writer.AgentCreateEntity({
+          userId: user.id,
+          rolloutId,
+          toolCallId: "create",
+          kind: "card",
+          label: "Plugin keeper",
+          doc: newCardDoc("Plugin keeper"),
+          tags: []
+        })
+        const effects = yield* api.ListRolloutEffects({ chatId: chat.id })
+        assert.lengthOf(effects, 1)
+        assert.isNotNull((yield* api.UndoRolloutEffect(effects[0]!)).undoneAt)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
     it.live("round-trips a plugin kind, replaces its planner and attributes its turn through the profile", () => {
       const config = testConfig({ dbWorkers: workers })
       return Effect.gen(function* () {
