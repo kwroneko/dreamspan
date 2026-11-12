@@ -718,7 +718,7 @@ export class ChatSession {
       this.reads--
       const missed = this.missed
       if (this.reads === 0) this.missed = []
-      if (!this.disposed) for (const event of missed) this.applyState(event)
+      if (!this.disposed) for (const event of missed) this.applyState(event, true)
     }
   }
 
@@ -1170,11 +1170,14 @@ export class ChatSession {
     return current !== undefined && current.version.id !== entry.version.id
   }
 
-  /** Applies a change to loaded state; applying it again, or after a newer one, changes nothing. */
-  private applyState(event: Replayable) {
+  /**
+   * Applies a change to loaded state; applying it again, or after a newer one, changes nothing.
+   * `replay`: an event received while a read was in flight, applied again once it landed.
+   */
+  private applyState(event: Replayable, replay = false) {
     switch (event._tag) {
       case "Slot":
-        return void this.applySlot(event.entry)
+        return void this.applySlot(event.entry, replay)
       case "Version":
         return this.applyVersion(event.version)
       case "Chat":
@@ -1200,18 +1203,21 @@ export class ChatSession {
    * A slot added or changed; returns whether it's in the window. A new one joins when it
    * continues the loaded bottom of the path.
    */
-  private applySlot(entry: PathEntry): boolean {
+  private applySlot(entry: PathEntry, replay = false): boolean {
     const { entries } = this.view
     const index = entries.findIndex((e) => e.slotId === entry.slotId)
     // Another fork's choices (its selection, its row version) aren't this one's: a slot shown
-    // here is read again as this fork shows it.
+    // here is read again as this fork shows it. Only when the event arrives: replayed (`reading`),
+    // it would start another read, whose landing replays it again while any read is in flight,
+    // so the reads never end (a new version of a message another fork now shows, 2026-11-12).
+    // The read the event started already reads this fork's state, which is newer.
     if (
       entry.shownForkId !== undefined &&
       this.view.forkId !== null &&
       entry.shownForkId !== this.view.forkId &&
       index >= 0
     ) {
-      void this.refreshSlot(entry.slotId)
+      if (!replay) void this.refreshSlot(entry.slotId)
       return true
     }
     const known = this.view.branchNames.get(entry.slotId)

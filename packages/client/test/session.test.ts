@@ -507,6 +507,37 @@ describe("ChatSession", () => {
     s.dispose()
   })
 
+  it("reads a slot another fork now shows once per event, never again on replay", async () => {
+    // A new version of a message that another fork shows (a split): its slot events say so, and
+    // this fork reads the slot again as it shows it. Events that arrive while those reads are in
+    // flight are replayed when each lands; a replay that read again kept a read in flight
+    // forever, each landing starting more (the tab ran out of memory).
+    const { s, answers, receive } = session()
+    const opening = s.open(null)
+    answers[0]!(window([first, second]))
+    await opening
+    const internals = s as unknown as { view: ReturnType<typeof s.snapshot> }
+    internals.view = { ...s.snapshot(), forkId: "root" as ForkId }
+    const elsewhere = (rowVersion: number) =>
+      ({
+        _tag: "Slot",
+        entry: { ...first, rowVersion, shownForkId: "split" as ForkId, versionCount: 2 }
+      }) as ChatEvent
+    receive(elsewhere(2))
+    receive(elsewhere(3))
+    const asShownHere = window([{ ...first, shownForkId: "root" as ForkId, versionCount: 2 } as PathEntry])
+    // Answer every read made, up to a bound well past what a finite exchange needs.
+    let answered = 1
+    while (answered < answers.length && answered < 20) {
+      answers[answered++]!(asShownHere)
+      await new Promise((settle) => setTimeout(settle, 0))
+    }
+    // The opening read, then one for each of the two events: no more.
+    expect(answers.length).toBe(3)
+    expect(s.snapshot().entries[0]!.version.id).toBe(first.version.id)
+    s.dispose()
+  })
+
   it("keeps steps on their version across swipes and clears only the run that stops", async () => {
     const { s, registry, answers, receive } = session()
     const opening = s.open(null)
