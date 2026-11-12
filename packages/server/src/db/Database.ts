@@ -12,15 +12,18 @@ import { Worker as Workers } from "effect/workers"
 import { type BinLimits, defaultBinLimits } from "@rp/shared/bin.ts"
 import { acquireInstanceLock, checkFilesystem, databaseFile } from "./connection.ts"
 import { prepareDataDirectory } from "../dataDirectory.ts"
-import { ReadOps, WriteOps } from "./ops.ts"
+import { ReadOps, WriteOps, type WriteOpsChat, type WriteOpsLibrary } from "./ops.ts"
 import * as ReaderPool from "./readerPool.ts"
 import { stampMatches } from "./workerStamp.ts"
 import { ProviderDefinitions, providerDefinitionClient } from "../providers/definitions.ts"
 
-export class Writer extends Context.Service<
-  Writer,
-  RpcClient.FromGroup<typeof WriteOps, RpcClientError.RpcClientError>
->()("rp/db/Writer") {}
+// One client type over every write operation passes TypeScript's instantiation limit; each half
+// is computed in its own declaration and the writer's client joins them.
+type WriterChat = RpcClient.FromGroup<typeof WriteOpsChat, RpcClientError.RpcClientError>
+type WriterLibrary = RpcClient.FromGroup<typeof WriteOpsLibrary, RpcClientError.RpcClientError>
+interface WriterClient extends WriterChat, WriterLibrary {}
+
+export class Writer extends Context.Service<Writer, WriterClient>()("rp/db/Writer") {}
 
 export class Reader extends Context.Service<
   Reader,
