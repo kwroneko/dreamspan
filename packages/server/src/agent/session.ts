@@ -231,7 +231,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             ? suffix
             : [...suffix, { ...emptyAssistant(piModel), content: [{ type: "text", text: carried }] }],
           last ? undefined : piTools,
-          { explicitTail: model.cacheBreakpoints === "explicit" }
+          {
+            explicitTail: model.cacheBreakpoints === "explicit",
+            replayReasoning: several || plan.continuity === "resume_previous",
+            reasoningTarget: model
+          }
         )
         // Text streams into the body as it comes; a tool call in the same turn makes it an
         // intermediate step, and the body starts over (DESIGN §7.2: not the message).

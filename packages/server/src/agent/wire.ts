@@ -4,9 +4,21 @@
 // is added there in the wire's own form. The summarizer's tool loop shares this.
 import type { Message, Tool } from "@earendil-works/pi-ai"
 import type { ProviderRequest } from "../assembler/wire.ts"
+import type { ModelInput } from "../assembler/types.ts"
+type ReasoningTarget = Pick<ModelInput, "api" | "kind" | "key">
 
 /** A suffix message as Chat Completions takes it: assistant `tool_calls`, `role: "tool"` results. */
-const completionsMessage = (m: Message): unknown => {
+const signedDetails = (signature: string | undefined): ReadonlyArray<unknown> | undefined => {
+  if (!signature) return undefined
+  try {
+    const parsed: unknown = JSON.parse(signature)
+    return Array.isArray(parsed) && parsed.length ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const completionsMessage = (m: Message, replayReasoning = false, target?: ReasoningTarget): unknown => {
   if (m.role === "assistant") {
     const text = m.content
       .filter((p) => p.type === "text")
@@ -20,11 +32,32 @@ const completionsMessage = (m: Message): unknown => {
       .filter((p) => p.type === "thinking")
       .map((p) => p.thinking)
       .join("")
+    // pi-ai stores OpenRouter's opaque reasoning_details in thinkingSignature.
+    // Replaying only visible thinking loses encrypted reasoning required by Claude/Gemini.
+    const provider = target?.kind === "openai-chat" || target?.kind === "openai-responses" ? "openai" : target?.kind
+    const sameModel = !target || (m.api === target.api && m.model === target.key && m.provider === provider)
+    const details =
+      replayReasoning && sameModel
+        ? m.content
+            .flatMap((p) => (p.type === "thinking" ? [signedDetails(p.thinkingSignature)] : []))
+            .find((d) => d !== undefined)
+        : undefined
+    const field =
+      replayReasoning && sameModel
+        ? m.content.find(
+            (p) => p.type === "thinking" && ["reasoning", "reasoning_content"].includes(p.thinkingSignature ?? "")
+          )
+        : undefined
+    const reasoningField = field?.type === "thinking" ? field.thinkingSignature : undefined
     return {
       role: "assistant",
       content: text,
       ...(calls.length ? { tool_calls: calls } : {}),
-      ...(reasoning && calls.length ? { reasoning_content: reasoning } : {})
+      ...(details
+        ? { reasoning_details: details }
+        : reasoning && (calls.length || reasoningField)
+          ? { [reasoningField ?? "reasoning_content"]: reasoning }
+          : {})
     }
   }
   if (m.role === "toolResult") {
@@ -67,7 +100,11 @@ export const rolloutRequest = (
   api: string,
   suffix: ReadonlyArray<Message>,
   tools: ReadonlyArray<Tool> | undefined,
-  options: { readonly explicitTail?: boolean } = {}
+  options: {
+    readonly explicitTail?: boolean
+    readonly replayReasoning?: boolean
+    readonly reasoningTarget?: ReasoningTarget
+  } = {}
 ): ProviderRequest => {
   const messages = [...prefix.context.messages, ...suffix]
   const context = { ...prefix.context, messages, ...(tools?.length ? { tools: [...tools] } : {}) }
@@ -75,7 +112,10 @@ export const rolloutRequest = (
     suffix.length && api === "openai-completions" && Array.isArray(prefix.payload.messages)
       ? {
           ...prefix.payload,
-          messages: [...(prefix.payload.messages as Array<unknown>), ...suffix.map(completionsMessage)]
+          messages: [
+            ...(prefix.payload.messages as Array<unknown>),
+            ...suffix.map((message) => completionsMessage(message, options.replayReasoning, options.reasoningTarget))
+          ]
         }
       : prefix.payload
   const tail = messages.length - 1

@@ -415,7 +415,8 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           providerRequest(assembled, target),
           target.api,
           liveSuffix(history),
-          definitions as ReadonlyArray<Tool>
+          definitions as ReadonlyArray<Tool>,
+          { replayReasoning: true, reasoningTarget: target }
         )
         const messages =
           target.api === "openai-completions"

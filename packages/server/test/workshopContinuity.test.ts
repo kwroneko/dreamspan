@@ -254,17 +254,35 @@ for (const kind of ["openai-chat", "anthropic"] as const) {
               useTool
                 ? [
                     start,
+                    { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
                     {
-                      type: "content_block_start",
+                      type: "content_block_delta",
                       index: 0,
-                      content_block: { type: "tool_use", id: `toolu_${number}`, name: "read_card", input: {} }
+                      delta: { type: "thinking_delta", thinking: "Check the library." }
                     },
                     {
                       type: "content_block_delta",
                       index: 0,
-                      delta: { type: "input_json_delta", partial_json: '{"card":"Assistant"}' }
+                      delta: { type: "signature_delta", signature: "c3ludGhldGljLXNpZ25hdHVyZQ==" }
                     },
                     { type: "content_block_stop", index: 0 },
+                    {
+                      type: "content_block_start",
+                      index: 1,
+                      content_block: { type: "redacted_thinking", data: "c3ludGhldGljLXJlZGFjdGVk" }
+                    },
+                    { type: "content_block_stop", index: 1 },
+                    {
+                      type: "content_block_start",
+                      index: 2,
+                      content_block: { type: "tool_use", id: `toolu_${number}`, name: "read_card", input: {} }
+                    },
+                    {
+                      type: "content_block_delta",
+                      index: 2,
+                      delta: { type: "input_json_delta", partial_json: '{"card":"Assistant"}' }
+                    },
+                    { type: "content_block_stop", index: 2 },
                     { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 5 } },
                     { type: "message_stop" }
                   ]
@@ -299,6 +317,10 @@ for (const kind of ["openai-chat", "anthropic"] as const) {
         )
       )
       const previous = mock.requests().at(-1)!.body!
+      if (kind === "anthropic") {
+        assert.include(JSON.stringify(previous.messages), "c3ludGhldGljLXNpZ25hdHVyZQ==")
+        assert.include(JSON.stringify(previous.messages), "c3ludGhldGljLXJlZGFjdGVk")
+      }
       const before = mock.requests().length
       const second = yield* send(api, chat, "Second request.")
       yield* eventually(() =>
