@@ -2,6 +2,7 @@ import { workshopDocumentTests } from "./support/workshopDocuments.ts"
 import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
 import { workshopChatTests } from "./support/workshopChat.ts"
 import { workshopApprovalTests } from "./support/workshopApprovals.ts"
+import { workshopChangesTests } from "./support/workshopChanges.ts"
 import { cardSourceUpdateTests } from "./support/cardSourceUpdates.ts"
 import { workshopSideChatTests, workshopSideChatEffectsTests } from "./support/workshopSideChat.ts"
 import { googleConnectionTests } from "./support/googleConnection.ts"
@@ -54,6 +55,7 @@ if (process.env.LAYOUT_AUDIT_WORKSHOP_ONLY === "1") {
   workshopBoundaryTests()
   workshopChatTests()
   workshopApprovalTests()
+  workshopChangesTests()
   workshopSideChatTests()
   workshopSideChatEffectsTests()
 }

@@ -405,6 +405,20 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           return yield* new NotFound({ entity: "workshop rollout", id: key.rolloutId })
         return row
       })
+    /** One effect's undo, inside the caller's transaction; one already undone stays as it is. */
+    const undoRow = (userId: UserId, row: EffectRow) =>
+      Effect.gen(function* () {
+        if (row.undone_at !== null) return toRolloutEffect(row)
+        const undoer = rolloutUndoers.get(row.kind)
+        if (!undoer || row.undo_json === null)
+          return yield* new EffectUndoRefused({ message: "This change cannot be undone here." })
+        const undoResult = yield* undoer
+          .run({ sql, userId, ops, bin }, toRolloutEffect(row))
+          .pipe(Effect.catchTag(["StaleWrite", "InvalidDocument", "RefOperationRefused"], () => Effect.fail(refuse())))
+        const at = Date.now()
+        yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_result_json = ${JSON.stringify(undoResult)} WHERE rollout_id = ${row.rollout_id} AND tool_call_id = ${row.tool_call_id} AND seq = ${row.seq}`
+        return toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })
+      })
     const receipted = <E>(
       key: Key,
       capability: string,
@@ -927,19 +941,42 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               entity: "rollout effect",
               id: `${input.rolloutId}:${input.toolCallId}:${input.seq}`
             })
-          if (row.undone_at !== null) return toRolloutEffect(row)
-          const undoer = rolloutUndoers.get(row.kind)
-          if (!undoer || row.undo_json === null)
-            return yield* new EffectUndoRefused({ message: "This change cannot be undone here." })
-          const undoResult = yield* undoer
-            .run({ sql, userId: input.userId, ops, bin }, toRolloutEffect(row))
-            .pipe(
-              Effect.catchTag(["StaleWrite", "InvalidDocument", "RefOperationRefused"], () => Effect.fail(refuse()))
+          return yield* undoRow(input.userId, row)
+        }).pipe(transaction(sql, "UndoRolloutEffect")),
+      // "Undo all of this reply": one transaction, newest change first. Each undo runs in its own
+      // savepoint, so a refused one leaves nothing half done; the first refusal stops the rest,
+      // since an older change may be what a newer one built on.
+      UndoRolloutEffects: (input) =>
+        Effect.gen(function* () {
+          yield* owned({ userId: input.userId, rolloutId: input.rolloutId, toolCallId: "" })
+          const [inChat] =
+            yield* sql`SELECT 1 FROM rollouts WHERE id = ${input.rolloutId} AND chat_id = ${input.chatId}`
+          if (!inChat) return yield* new NotFound({ entity: "workshop rollout", id: input.rolloutId })
+          const rows = yield* sql<EffectRow>`SELECT * FROM rollout_effects
+            WHERE rollout_id = ${input.rolloutId} AND undone_at IS NULL
+            ORDER BY created_at DESC, tool_call_id DESC, seq DESC`
+          const undone: Array<RolloutEffect> = []
+          for (const [at, row] of rows.entries()) {
+            const outcome = yield* sql.withTransaction(undoRow(input.userId, row)).pipe(
+              Effect.map((effect) => ({ effect }) as const),
+              Effect.catchTag(["EffectUndoRefused", "NotFound"], (error) =>
+                Effect.succeed({
+                  reason: error._tag === "NotFound" ? "What it changed is gone." : (error as EffectUndoRefused).message
+                } as const)
+              )
             )
-          const at = Date.now()
-          yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_result_json = ${JSON.stringify(undoResult)} WHERE rollout_id = ${input.rolloutId} AND tool_call_id = ${input.toolCallId} AND seq = ${input.seq}`
-          return toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })
-        }).pipe(transaction(sql, "UndoRolloutEffect"))
+            if ("effect" in outcome) {
+              undone.push(outcome.effect)
+              continue
+            }
+            return {
+              undone,
+              refused: { effect: toRolloutEffect(row), reason: outcome.reason },
+              left: rows.slice(at + 1).map(toRolloutEffect)
+            }
+          }
+          return { undone, refused: null, left: [] }
+        }).pipe(transaction(sql, "UndoRolloutEffects"))
     } satisfies Pick<
       Handlers,
       | "RunWorkshopOperation"
@@ -948,5 +985,6 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       | "AgentCloneCard"
       | "AgentStartChat"
       | "UndoRolloutEffect"
+      | "UndoRolloutEffects"
     >
   })

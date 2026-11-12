@@ -62,6 +62,17 @@ export const RolloutEffect = Schema.Struct({
   createdAt: Schema.Number
 })
 export type RolloutEffect = typeof RolloutEffect.Type
+/**
+ * What "Undo all of this reply" did: the changes it undid, newest first; the one it couldn't undo
+ * and why; and the older ones it left untried because of it.
+ */
+export const UndoAllReport = Schema.Struct({
+  undone: Schema.Array(RolloutEffect),
+  refused: Schema.NullOr(Schema.Struct({ effect: RolloutEffect, reason: Schema.String })),
+  left: Schema.Array(RolloutEffect)
+})
+export type UndoAllReport = typeof UndoAllReport.Type
+export const ReplyEffects = { chatId: Chat.fields.id, rolloutId: Schema.String }
 export const EffectKey = { rolloutId: Schema.String, toolCallId: Schema.String, seq: Schema.Int }
 export const EffectList = {
   chatId: Chat.fields.id,
@@ -98,6 +109,12 @@ export class WorkshopApi extends RpcGroup.make(
     payload: EffectKey,
     success: RolloutEffect,
     error: Schema.Union([NotFound, EffectUndoRefused, ServerError])
+  }),
+  /** Undoes every change one reply made, newest first, stopping at the first that can't be undone. */
+  Rpc.make("UndoRolloutEffects", {
+    payload: ReplyEffects,
+    success: UndoAllReport,
+    error: Schema.Union([NotFound, ServerError])
   }),
   /** Sets what the assistant may do with a capability in this workshop; null goes back to the default. */
   Rpc.make("SetWorkshopGrant", {

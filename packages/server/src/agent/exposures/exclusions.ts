@@ -261,6 +261,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   UndoForkMerge: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UndoHistoryEdit: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UndoRolloutEffect: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  UndoRolloutEffects: "Not exposed: undoing a whole reply's changes is the user's, from the Changes tab.",
   UnhideImportedRun: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UnlinkNote: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UpdateConnection: "User-only security, consent, account, credential or network configuration.",
