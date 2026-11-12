@@ -14,6 +14,7 @@ import { importStPreset } from "../src/formats/preset.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { generateReply } from "./support/generation.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
@@ -214,6 +215,92 @@ describe("separate contexts", () => {
 })
 
 describe("separate contexts and summaries", () => {
+  lcmTest("a stale summary cannot reveal the away version after selecting a present swipe", (server) =>
+    Effect.gen(function* () {
+      const h = yield* lcmHarness(server, { messages: 120, summarizer: () => ({ text: "SECRET-SUMMARY" }) })
+      yield* h.settle
+      const made = yield* h.writer.CreateEntity({
+        userId: h.userId,
+        kind: "card",
+        label: "Wren",
+        subtitle: "",
+        doc: cardDoc("Wren"),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const wren = made.entityId as EntityId
+      yield* h.writer.AddStateEvent({
+        userId: h.userId,
+        chatId: h.chat.id,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "participant.join", value: { entity: wren } }
+      })
+      yield* h.writer.AddStateEvent({
+        userId: h.userId,
+        chatId: h.chat.id,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "context.per_speaker", value: "separate" }
+      })
+      yield* fixtureSql(server.config.dataDir, [
+        {
+          sql: "UPDATE version_records SET cast_json = ? WHERE slot_id IN (SELECT id FROM slots WHERE chat_id = ?)",
+          params: [JSON.stringify([wren]), h.chat.id]
+        },
+        {
+          sql: "UPDATE version_records SET presence_json = ? WHERE id = ?",
+          params: [JSON.stringify({ away: [wren] }), h.rows[0]!.version.id]
+        }
+      ])
+      yield* h.writer.AddVersion({
+        userId: h.userId,
+        slotId: h.rows[0]!.slotId,
+        version: new NewVersion({
+          speakerEntityId: null,
+          writer: "human",
+          content: "Public replacement.",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        }),
+        select: true,
+        commitDraft: null
+      })
+      const row = yield* h.writer.AppendMessage({
+        userId: h.userId,
+        chatId: h.chat.id,
+        parentSlotId: h.rows.at(-1)!.slotId,
+        branch: false,
+        commitDraft: null,
+        version: new NewVersion({
+          speakerEntityId: wren,
+          writer: "model",
+          content: "",
+          status: "generating",
+          macroMode: "verbatim",
+          origin: "generated"
+        })
+      })
+      const built = yield* h.reader.AssembleContext({
+        userId: h.userId,
+        chatId: h.chat.id,
+        slotId: row.slotId,
+        versionId: row.version.id,
+        now: 1,
+        timeZone: "UTC",
+        frozen: null
+      })
+      const snapshot = JSON.parse(built.snapshot) as ContextSnapshot
+      assert.notInclude(sentText(snapshot), "SECRET-SUMMARY")
+      assert.isTrue(snapshot.issues.some((i) => i.kind === "summaries_withheld"))
+    })
+  )
+
+
   lcmTest("summaries covering what the speaker missed are withheld, with an issue", (server) =>
     Effect.gen(function* () {
       const h = yield* lcmHarness(server, { messages: 120, summarizer: () => ({ text: "SUMMARY-TEXT" }) })

@@ -24,11 +24,15 @@ export const lcmStage: AssemblerStage = {
       const layer = yield* sources.summaryLayer(leaf)
       // A separate context: summaries covering what the speaker missed are withheld until
       // summaries are kept per view (spec/CHARACTER-CONTEXT.md §9.2 C7).
-      if (layer.cursor !== null && !(yield* layerKnown(assembly, leaf, layer.cursorDepth))) {
+      if (
+        layer.cursor !== null &&
+        ((assembly.knowledge?.viewer != null && layer.summaries.some((s) => !s.fresh)) ||
+          !(yield* layerKnown(assembly, leaf, layer.cursorDepth)))
+      ) {
         assembly.issues.push({
           kind: "summaries_withheld",
           message:
-            "Summaries aren't used for this reply: they cover messages its speaker wasn't present for. The messages it was present for are sent instead, as far as they fit."
+            "Summaries aren't used for this reply: they cover messages its speaker wasn't present for, or their earlier inputs can no longer be verified. The messages it was present for are sent instead, as far as they fit."
         })
         return assembly
       }
