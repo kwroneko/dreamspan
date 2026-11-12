@@ -871,7 +871,8 @@ export const Message = memo(function Message({
         </div>
       </div>
       <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
-        <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">
+        {/* A chat in a narrow column (the workshop in a story's panel, `@container/chat`) wraps as a phone's does. */}
+        <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1 @max-[30rem]/chat:flex-wrap @max-[30rem]/chat:gap-y-1">
           {choosing ? (
             <span
               data-choosing-speaker
@@ -910,7 +911,8 @@ export const Message = memo(function Message({
             // The rest of the header's width: the pinned buttons that fit, then More actions.
             <MessageActions
               context={actionContext}
-              className={`hidden justify-end transition-opacity duration-100 sm:flex ${
+              // In a narrow column it keeps room for More actions, on a line of its own if need be.
+              className={`hidden justify-end transition-opacity duration-100 sm:flex @max-[30rem]/chat:min-w-8 ${
                 revealed
                   ? "opacity-100"
                   : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100"

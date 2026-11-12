@@ -276,10 +276,23 @@ export function ChatSidePanel({
           role="tabpanel"
           aria-label={t.label}
           hidden={t.value !== tab}
-          className="@container min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none"
+          className={
+            t.descriptor.fill
+              ? "@container flex min-h-0 flex-1 flex-col outline-none"
+              : "@container min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none"
+          }
         >
           {/* The panel's whole width, its text at a readable measure (styles.css), unless the tab asks for less. */}
-          <div data-measure className={t.descriptor.width === "readable" ? "max-w-[52rem]" : ""}>
+          <div
+            data-measure
+            className={
+              t.descriptor.fill
+                ? "flex min-h-0 flex-1 flex-col"
+                : t.descriptor.width === "readable"
+                  ? "max-w-[52rem]"
+                  : ""
+            }
+          >
             <UnsavedScope tracker={tracker} tab={t.value}>
               {"pending" in content ? (
                 <PendingPanelContent

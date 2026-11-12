@@ -69,7 +69,7 @@ declare module "@tanstack/react-router" {
 }
 
 /** What MessageList flashed last, kept across its remounts (a timeline layout switch). */
-interface Flashes {
+export interface Flashes {
   opened: number
   again: boolean
 }
@@ -84,7 +84,11 @@ const SUMMARIZED: ContextMark = {
   reason: "Summarized: a summary stands in for this message in the context."
 }
 
-function MessageList({
+/**
+ * The messages, virtualized. `embedded`: a chat shown inside another's panel (the workshop beside
+ * a story), which keeps no reading position in the page's history: that's the page's chat's.
+ */
+export function MessageList({
   session,
   view,
   anchor,
@@ -93,10 +97,12 @@ function MessageList({
   rail,
   onBranch,
   onOpenSummaries,
-  restore
+  restore,
+  embedded = false
 }: {
   session: ChatSession
   view: ChatView
+  embedded?: boolean
   anchor: SlotId | null
   /** The message jumped to, which flashes when the window opens at it (jumpFlash.ts); null: none. */
   jump: SlotId | null
@@ -480,7 +486,7 @@ function MessageList({
   }, [restore, view.opened, hold, virtualizer])
   useEffect(() => {
     const list = parent.current
-    if (!list) return
+    if (!list || embedded) return
     let timer: ReturnType<typeof setTimeout> | undefined
     const save = () => {
       if (!settled.current || !view.forkId) return
@@ -514,7 +520,7 @@ function MessageList({
       list.removeEventListener("scroll", scroll)
       window.removeEventListener("pagehide", save)
     }
-  }, [navigate, session, userId, view.forkId, view.newer])
+  }, [navigate, session, userId, view.forkId, view.newer, embedded])
 
   const items = virtualizer.getVirtualItems()
   const first = items[0]?.index
@@ -566,7 +572,7 @@ function MessageList({
     <TooltipProvider>
       <div
         ref={parent}
-        data-testid="messages"
+        data-testid={embedded ? "side-chat-messages" : "messages"}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
         <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>

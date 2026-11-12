@@ -11,7 +11,9 @@ import type { Bin } from "./bin.ts"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { readDefaults, newChatLcmSettings } from "./generationSettings.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
-import type { WriteOps } from "./ops.ts"
+import { NotFound, type WriteOps } from "./ops.ts"
+import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { writeGrant } from "./workshopGrants.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { putUserSetting, readSetting } from "./settings.ts"
 import { transaction } from "./tx.ts"
@@ -46,8 +48,16 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   const { sql } = steps
   const graph = makeGraphWrites(sql, bin.drafts)
   return {
-    CreateWorkshop: ({ userId, title }) =>
+    CreateWorkshop: ({ userId, title, attachTo }) =>
       Effect.gen(function* () {
+        // A side chat's story: the user's, live, of a kind that takes one (spec/WORKSHOP.md §4).
+        const [story] =
+          attachTo === undefined
+            ? []
+            : yield* sql<{ title: string | null; kind: string }>`SELECT title, kind FROM chats
+                WHERE id = ${attachTo} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (attachTo !== undefined && (!story || chatKinds.get(story.kind)?.allowsSideChat !== true))
+          return yield* new NotFound({ entity: "chat", id: attachTo })
         const stored = (yield* readSetting(sql, "user", userId, "workshop.defaults")).value as {
           card: string
           preset: string
@@ -81,7 +91,17 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         const account = yield* readDefaults(sql, userId)
         const at = Date.now()
         const chatId = uuidv7() as ChatId
-        yield* sql`INSERT INTO chats ${sql.insert({ id: chatId, owner_user_id: userId, kind: "workshop", status: "active", title: title?.trim() || "Workshop", created_at: at })}`
+        const storyTitle = story?.title?.trim()
+        const name = title?.trim() || (storyTitle ? `About ${storyTitle}` : "Workshop")
+        yield* sql`INSERT INTO chats ${sql.insert({ id: chatId, owner_user_id: userId, kind: "workshop", status: "active", title: name, created_at: at })}`
+        if (attachTo !== undefined) {
+          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
+            key: "workshop.attached",
+            value: { chat: attachTo }
+          })
+          // §4: reading the story it's beside is allowed in this workshop; the strip can change it.
+          yield* writeGrant(sql, userId, chatId, "chats.read", "allow")
+        }
         yield* graph.insertStateEvent(userId, chatId, null, null, null, {
           key: "lcm.settings",
           value: yield* newChatLcmSettings(sql, userId, false)

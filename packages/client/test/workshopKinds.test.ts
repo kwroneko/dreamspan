@@ -99,8 +99,9 @@ describe("chat kind looks", () => {
     expect(tabs("workshop")).not.toContain("summaries")
     // It adds its Changes tab, which a story chat doesn't have.
     expect(tabs("rp")).not.toContain("workshop.changes")
+    // A story chat has the Workshop tab beside it (W9); a workshop doesn't.
     expect(tabs("workshop").filter((tab) => tab !== "workshop.changes")).toEqual(
-      tabs("rp").filter((tab) => tab !== "summaries")
+      tabs("rp").filter((tab) => tab !== "summaries" && tab !== "workshop")
     )
     expect(tabs("workshop")).toContain("workshop.changes")
     expect(summarizes(chatOf("workshop"))).toBe(false)

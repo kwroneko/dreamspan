@@ -25,7 +25,12 @@ interface Item {
 }
 
 /** One user's things: an entity of each kind, with its ref and head revision, and a model. */
-type Things = { readonly [K in EntityKind]: Item } & { readonly connection: ConnectionId; readonly model: ModelId }
+type Things = { readonly [K in EntityKind]: Item } & {
+  readonly connection: ConnectionId
+  readonly model: ModelId
+  /** A story chat other than the one the events go to (a workshop's attachment names one). */
+  readonly chat: ChatId
+}
 
 type Value = Readonly<Record<string, unknown>>
 
@@ -59,7 +64,8 @@ const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
   "lorebook.detach": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
   "lorebook.remove": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
   "lorebook.embedded": { value: (t) => ({ entity: t.card.entity, on: false }) },
-  "agent.permission": { value: (t) => ({ note: t.note.entity, card: t.card.entity, field: "description", on: true }) }
+  "agent.permission": { value: (t) => ({ note: t.note.entity, card: t.card.entity, field: "description", on: true }) },
+  "workshop.attached": { value: (t) => ({ chat: t.chat }) }
 }
 
 const kinds: ReadonlyArray<EntityKind> = ["card", "preset", "lorebook", "note", "preset_overlay"]
@@ -117,7 +123,15 @@ const fixture = Layer.effect(
           credential: { existing: null }
         })
         const model = yield* writer.AddUserModel({ userId, connectionId: connection.id, key: "m", overrides: {} })
-        return { ...Object.fromEntries(items), connection: connection.id, model: model.id } as Things
+        const story = yield* writer.CreateChat({
+          userId,
+          kind: "rp",
+          status: "active",
+          title: "Story",
+          participants: [],
+          greeting: null
+        })
+        return { ...Object.fromEntries(items), connection: connection.id, model: model.id, chat: story.id } as Things
       })
     const bob = (yield* writer.EnsureUser({ handle: "bob", displayName: "Bob" })).id
     const ana = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id
@@ -132,6 +146,7 @@ const fixture = Layer.effect(
     const deleted = yield* things(bob, chat.id)
     for (const kind of kinds) yield* writer.DeleteEntity({ userId: bob, entityId: deleted[kind].entity })
     yield* writer.DeleteConnection({ userId: bob, connectionId: deleted.connection })
+    yield* writer.DeleteChat({ userId: bob, chatId: deleted.chat })
     const otherChat = yield* writer.CreateChat({
       userId: bob,
       kind: "rp",
@@ -275,6 +290,7 @@ function placeholder(prefix: string): Things {
     note: item("note"),
     preset_overlay: item("preset_overlay"),
     connection: `${prefix}-c` as ConnectionId,
-    model: `${prefix}-m` as ModelId
+    model: `${prefix}-m` as ModelId,
+    chat: `${prefix}-chat` as ChatId
   }
 }

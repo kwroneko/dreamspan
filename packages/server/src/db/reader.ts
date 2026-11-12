@@ -26,6 +26,7 @@ import { makeImportReadHandlers } from "./importReads.ts"
 import { makeInspectorReadHandlers } from "./inspectorReads.ts"
 import { makeAgentReadHandlers } from "./agentReads.ts"
 import { makeWorkshopGrantReadHandlers } from "./workshopGrants.ts"
+import { makeWorkshopAttachReadHandlers } from "./workshopAttach.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
 import { makeReadHandlers } from "./reads.ts"
@@ -60,7 +61,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               makeLcmEnableReadHandlers,
               makeMergeReadHandlers,
               makeAgentReadHandlers,
-              makeWorkshopGrantReadHandlers
+              makeWorkshopGrantReadHandlers,
+              makeWorkshopAttachReadHandlers
             ]),
             ([
               history,
@@ -79,7 +81,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               lcmEnable,
               merges,
               agent,
-              grants
+              grants,
+              attached
             ]) =>
               ReadOps.of(
                 stateModuleHandlers(
@@ -101,7 +104,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                       ...lcmEnable,
                       ...merges,
                       ...agent,
-                      ...grants
+                      ...grants,
+                      ...attached
                     })
                   )
                 )

@@ -2,7 +2,7 @@
 // open a summary, search the summaries. All causal: the path read ends at the message before
 // the one being generated, in the generation's fork, with each message as that fork shows it.
 import { Type } from "@earendil-works/pi-ai"
-import type { EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -385,4 +385,167 @@ export const historyTools: ReadonlyArray<RolloutTool<never>> = [
   readMessages,
   expandSummary,
   searchSummaries
+] as unknown as ReadonlyArray<RolloutTool<never>>
+
+// --- A side chat's story (spec/WORKSHOP.md §4). A workshop attached to a story reads it with these,
+// never through its own history: the story's messages reach the workshop's model only as tool
+// results. Each call reads where the story is now: its current branch (the one last written in)
+// up to that branch's newest message, as the user sees it there. Never another branch, another
+// chat or another user's: the story is the one the workshop's `workshop.attached` names, read as
+// its owner, and no character's own view of it.
+
+/** The tools a planner offers a side chat, by name. */
+export const STORY_TOOLS: ReadonlyArray<string> = [
+  "search_story",
+  "read_story",
+  "open_story_summary",
+  "search_story_summaries"
+]
+
+const NOT_BESIDE = "This workshop isn't beside a story."
+const STORY_GONE = "The story this workshop is beside isn't available any more."
+
+/** The workshop's story at this moment, as a context the history reads take; null: none, or gone. */
+const storyContext = (context: ToolContext) =>
+  Effect.gen(function* () {
+    const story = yield* cached(
+      context,
+      "story",
+      Effect.map(
+        context.reader.StateEventsAt({
+          userId: context.userId,
+          chatId: context.chatId,
+          slotId: context.leafSlotId,
+          forkId: context.forkId
+        }),
+        (events) => foldState(events).workshopAttached ?? null
+      )
+    )
+    if (story === null) return { error: NOT_BESIDE } as const
+    const chat = yield* context.reader
+      .GetChat({ userId: context.userId, chatId: story as ChatId })
+      .pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
+    if (chat === null) return { error: STORY_GONE } as const
+    // The reads of one position are kept for the run; the story moving on reads it again.
+    const key = `story:${chat.currentForkId}:${chat.activeLeafSlotId}`
+    const cache = (context.cache.get(key) as Map<string, unknown> | undefined) ?? new Map<string, unknown>()
+    context.cache.set(key, cache)
+    return {
+      title: chat.title?.trim() || null,
+      context: {
+        ...context,
+        chatId: chat.id,
+        forkId: chat.currentForkId,
+        leafSlotId: chat.activeLeafSlotId,
+        cache
+      } satisfies ToolContext
+    } as const
+  })
+
+/** A history tool over the story: the same reads, at the story's position. */
+const overStory = <A>(
+  tool: RolloutTool<A>,
+  definition: Pick<RolloutTool<A>, "id" | "label" | "explanation" | "description"> &
+    Partial<Pick<RolloutTool<A>, "parameters" | "summarize">> & {
+      /** What it asks to do, for its approval while reading the story asks first: "Read the story". */
+      readonly ask: string
+    },
+  execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput, unknown> = tool.execute
+): RolloutTool<A> => ({
+  ...tool,
+  id: definition.id,
+  label: definition.label,
+  ...(definition.explanation === undefined ? {} : { explanation: definition.explanation }),
+  description: definition.description,
+  ...(definition.parameters ? { parameters: definition.parameters } : {}),
+  ...(definition.summarize ? { summarize: definition.summarize } : {}),
+  effect: "read",
+  capability: "chats.read",
+  replyTool: false,
+  // The approval names the story by its title, as the user knows it.
+  describe: (context, args) =>
+    Effect.map(storyContext(context), (story) => ({
+      title: "error" in story ? definition.ask : `${definition.ask} “${story.title ?? "Untitled"}”`,
+      rows: Object.entries(args as object)
+        .filter(([, value]) => value !== undefined && value !== "")
+        .map(([label, value]) => ({ label: label.replaceAll("_", " "), value: String(value) }))
+    })),
+  execute: (context, args) =>
+    safely(
+      definition.id,
+      Effect.gen(function* () {
+        const story = yield* storyContext(context)
+        if ("error" in story) return { text: story.error, isError: true }
+        return yield* execute(story.context, args)
+      })
+    )
+})
+
+const searchStory = overStory(searchChat, {
+  id: "search_story",
+  ask: "Search the story",
+  label: "Searched the story",
+  explanation: "Search the story this workshop is beside",
+  description:
+    "Searches the story this workshop is beside for words, newest first, and returns short excerpts with their message numbers. Use it to find when something happened or was said, then read_story to read the passage."
+})
+
+const readStory = overStory<{ readonly from?: number; readonly count?: number }>(
+  readMessages as unknown as RolloutTool<{ readonly from?: number; readonly count?: number }>,
+  {
+    id: "read_story",
+    ask: "Read the story",
+    label: "Read the story",
+    explanation: "Read the story's messages in full",
+    description:
+      "Reads messages of the story this workshop is beside verbatim, from a message number on, or its newest messages without one. Use it to read a passage search_story found, or what happened last.",
+    parameters: Type.Object({
+      from: Type.Optional(
+        Type.Integer({ minimum: 1, description: "The first message's number; leave it out for the newest." })
+      ),
+      count: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "How many (5, at most 20)." }))
+    }),
+    summarize: ({ from, count = 5 }) =>
+      from === undefined ? `The newest ${count}` : `Messages ${from}–${from + count - 1}`
+  },
+  (context, { from, count = 5 }) =>
+    Effect.gen(function* () {
+      const messages = yield* pathMessages(context)
+      const many = Math.min(count, 20)
+      const read = from === undefined ? messages.slice(-many) : messages.filter((m) => m.n >= from).slice(0, many)
+      if (read.length === 0)
+        return {
+          text:
+            messages.length === 0
+              ? "The story has no messages yet."
+              : `The story's messages end at message ${messages.at(-1)!.n}.`,
+          isError: true
+        }
+      return { text: read.map(line).join("\n\n") }
+    })
+)
+
+const openStorySummary = overStory(expandSummary, {
+  id: "open_story_summary",
+  ask: "Open a summary of the story",
+  label: "Opened a story summary",
+  explanation: "Open one of the story's summaries for more detail",
+  description:
+    "Opens one of the story's summaries, named by the messages it covers (its from and to): a first-level summary gives its messages, a higher one the summaries it condenses. Use it when a summary leaves out a detail you need."
+})
+
+const searchStorySummaries = overStory(searchSummaries, {
+  id: "search_story_summaries",
+  ask: "Search the summaries of the story",
+  label: "Searched the story's summaries",
+  explanation: "Search the story's summaries",
+  description:
+    "Searches the summaries of the story this workshop is beside for words, and returns which messages each match covers. Use it to find roughly when something happened in a long story, then open_story_summary or read_story."
+})
+
+export const storyTools: ReadonlyArray<RolloutTool<never>> = [
+  searchStory,
+  readStory,
+  openStorySummary,
+  searchStorySummaries
 ] as unknown as ReadonlyArray<RolloutTool<never>>

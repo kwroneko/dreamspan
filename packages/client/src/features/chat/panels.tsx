@@ -61,6 +61,11 @@ export interface PanelDescriptor {
    * from the left, for a body of controls that would only stretch.
    */
   readonly width?: "readable" | "full"
+  /**
+   * Its body fills the panel edge to edge, without the panel's padding or scrolling, for one that
+   * scrolls a part of itself and keeps the rest in place: the Workshop tab's chat and composer.
+   */
+  readonly fill?: boolean
   /** Dynamic tab families, such as the cast's cards. Exact registered IDs take precedence. */
   readonly matches?: (value: string) => boolean
   readonly tabs?: (view: ChatView, selected: string | null) => ReadonlyArray<PanelTabEntry>

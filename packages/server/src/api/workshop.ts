@@ -84,6 +84,10 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       Effect.flatMap(CurrentUser, (user) => writer.UndoRolloutEffect({ ...input, userId: user.id })).pipe(
         internal("UndoRolloutEffect")
       ),
+    ListAttachedWorkshops: ({ chatId }) =>
+      Effect.flatMap(CurrentUser, (user) => reader.AttachedWorkshops({ userId: user.id, chatId })).pipe(
+        internal("ListAttachedWorkshops")
+      ),
     CreateWorkshop: (input) =>
       Effect.flatMap(CurrentUser, (user) => writer.CreateWorkshop({ ...input, userId: user.id })).pipe(
         internal("CreateWorkshop")
