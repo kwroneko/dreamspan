@@ -1,7 +1,10 @@
 // The owner's shell reports of 2026-10-31: no Forks link between chats, a left-panel switch
 // the size of its labels, home tiles of one height per row, and breadcrumbs tied to the URL.
+import { writeFileSync } from "node:fs"
 import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
+import { showAppNavigation } from "./support/appMenu.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -48,20 +51,76 @@ const sidebar = (page: Page) => page.getByRole("complementary").first()
 const crumbs = (page: Page) => sidebar(page).getByRole("navigation", { name: "Chat breadcrumbs" })
 const path = (page: Page) => new URL(page.url()).pathname
 
-test("the sidebar lists chats without a link between them, under a switch that fills its narrow row", async ({
-  page
-}) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(server().url)
-  await expect(sidebar(page).getByRole("link", { name: "Open chat Lamp story" }).first()).toBeVisible()
-  await expect(sidebar(page).getByRole("button", { name: "Forks", exact: true })).toHaveCount(0)
-  const left = await sidebar(page).getByRole("group", { name: "Left panel", exact: true }).boundingBox()
-  const find = await sidebar(page).getByLabel("Find a chat").boundingBox()
-  // DESIGN §10.1 left-panel name filter (2026-11-04): fill the row when stacked.
-  expect(Math.abs(left!.width - find!.width)).toBeLessThanOrEqual(1)
-  expect(find!.y).toBeGreaterThanOrEqual(left!.y + left!.height)
-})
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`the sidebar lists chats without a Forks link and fills the search row: ${width} ${theme}`, async ({
+      page
+    }, info) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(server().url)
+      await showAppNavigation(page)
+      const scope = width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
+      const panel = page.locator(scope)
+      await expect(panel.getByRole("link", { name: "Open chat Lamp story" }).first()).toBeVisible()
+      await expect(panel.getByRole("button", { name: "Forks", exact: true })).toHaveCount(0)
+      const switcher = panel.getByRole("group", { name: "Left panel", exact: true })
+      const toggle = panel.getByRole("button", { name: "Search message text", exact: true })
+      const measurements = []
+      for (const state of ["names", "messages", "names-again", "characters"] as const) {
+        const messages = state === "messages"
+        const characters = state === "characters"
+        if (characters) await switcher.getByRole("button", { name: "Characters", exact: true }).click()
+        else {
+          if (state !== "names") await toggle.click()
+          await expect(toggle).toHaveAttribute("aria-pressed", String(messages))
+        }
+        const input = panel.getByRole("textbox", {
+          name: characters ? "Find a character" : messages ? "Find in messages" : "Find a chat",
+          exact: true
+        })
+        await expect(input).toBeVisible()
+        const row = input.locator("..")
+        const left = (await switcher.boundingBox())!
+        const find = (await input.boundingBox())!
+        const searchRow = (await row.boundingBox())!
+        const tool = characters ? null : (await toggle.boundingBox())!
+        const gap = tool ? await row.evaluate((el) => parseFloat(getComputedStyle(el).columnGap)) : 0
+        // DESIGN §10.1 / ARCHITECTURE §12: the field shares its grid cell with the
+        // message toggle. Measure the actual controls plus CSS gap, so a full-width
+        // wrapper cannot hide an input that leaves some of its space unused.
+        const contentWidth = find.width + (tool?.width ?? 0) + gap
+        expect(Math.abs(searchRow.width - contentWidth)).toBeLessThanOrEqual(1)
+        expect(Math.abs(left.width - contentWidth)).toBeLessThanOrEqual(1)
+        expect(Math.abs(left.x - find.x)).toBeLessThanOrEqual(1)
+        expect(find.y).toBeGreaterThanOrEqual(left.y + left.height)
+        expect(Math.abs(searchRow.height - find.height)).toBeLessThanOrEqual(1)
+        if (tool) {
+          expect(Math.abs(tool.x - (find.x + find.width + gap))).toBeLessThanOrEqual(1)
+          expect(Math.abs(tool.y - find.y)).toBeLessThanOrEqual(1)
+          expect(Math.abs(tool.height - find.height)).toBeLessThanOrEqual(1)
+          // Clicking suppresses the explanation until the pointer leaves the control.
+          await page.mouse.move(width - 10, 850)
+          await toggle.hover()
+          await expect(
+            page
+              .getByText(messages ? "Click to search chat and character names again." : "instead of names.", {
+                exact: false
+              })
+              .filter({ visible: true })
+          ).toBeVisible()
+        } else await expect(toggle).toHaveCount(0)
+        await page.mouse.move(width - 10, 850)
+        await input.blur()
+        await expectLayout(page, info, `shell-search-${width}-${theme}-${state}`, {
+          scope: `${scope} [class~="@container/leftsearch"]`
+        })
+        await switcher.locator("../..").screenshot({ path: info.outputPath(`${state}.png`) })
+        measurements.push({ state, left, find, searchRow, tool, gap, contentWidth })
+      }
+      writeFileSync(info.outputPath("search-geometry.json"), JSON.stringify(measurements, null, 2))
+    })
 
 test("home tiles in a row are one height, their last lines aligned", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
