@@ -179,8 +179,8 @@ function Member({
           label={away ? `Mark ${name} back` : `Mark ${name} away`}
           hint={
             away
-              ? `Click when ${name} is back in the scene, from the latest message on: picked to reply again, and with separate contexts seeing what's said from here.`
-              : `Click when ${name} leaves the scene, from the latest message on: not picked to reply, and with separate contexts ${name}'s replies leave out what's said meanwhile.`
+              ? `Click when ${name} is back in the scene, from the latest message on: picked to reply again, and with separate contexts seeing what's said from here. The scene check can also mark ${name} back.`
+              : `Click when ${name} leaves the scene, from the latest message on: not picked to reply, and with separate contexts ${name}'s replies leave out what's said meanwhile. Unlike Mute, which only stops replies, Away says ${name} isn't in the scene: the scene check can set or clear it too.`
           }
           className={away ? "text-warning!" : ""}
           onClick={() => onChange({ _tag: "Away", entityId: card.entityId, away: !away })}

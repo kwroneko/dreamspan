@@ -1,4 +1,5 @@
 import { SplitChatDivider } from "./SplitChatDivider.tsx"
+import { AwayRows } from "./AwayRows.tsx"
 import { messageStream } from "./presentation.tsx"
 import { MacroBindings } from "./MacroBindings.tsx"
 import { registerImages } from "./images.tsx"
@@ -107,6 +108,8 @@ const RolesSetting = deferred<Parameters<typeof import("./ThisChatTab.tsx").Role
 
 export const registerPresentation = () => [
   messageStream.register({ id: "chat.split-divider", order: 30, component: SplitChatDivider }),
+  // Where a character left the scene or came back, with Undo for the scene check's (CU3).
+  messageStream.register({ id: "chat.away-rows", order: 20, component: AwayRows }),
   ...registerTimelineTransforms(),
   chatBranchControls.register({ id: "chat.branches", order: 10, component: BranchControl }),
   messagePreviews.register({ id: "history.message-preview", order: 10, component: HistoryMessagePreview }),

@@ -20,6 +20,7 @@ import {
   MergeRequest
 } from "@rp/shared/mergeApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
+import { AwayMark } from "@rp/shared/contextsApi.ts"
 import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
@@ -3570,6 +3571,12 @@ export class ReadOps extends RpcGroup.make(
   }),
   Rpc.make("RoleProjections", { success: Schema.Array(RoleProjectionOption) }),
   Rpc.make("MergeLayouts", { success: Schema.Array(RoleProjectionOption) }),
+  /** The away marks on a fork's display path through `slotId`, in fold order (`db/awayMarks.ts`). */
+  Rpc.make("AwayMarks", {
+    payload: { userId: UserId, chatId: ChatId, forkId: ForkId, slotId: Schema.NullOr(SlotId) },
+    success: Schema.Array(AwayMark),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The context views installed (`contextViews`), as This chat's Context setting offers them. */
   Rpc.make("ContextViews", { success: Schema.Array(RoleProjectionOption) }),
   Rpc.make("AssembleContext", {

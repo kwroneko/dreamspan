@@ -39,7 +39,7 @@ test.beforeAll(async () => {
         })
       )
       response.writeHead(200, { "content-type": "application/json" })
-      response.end(JSON.stringify({ model: "typesafe/jev-1.13-20260917", answers, usage: {} }))
+      response.end(JSON.stringify({ model: "typesafe/jev-1.13-20260917", answers, usage: { input_tokens: 320, output_tokens: 1 } }))
     })
   })
   await new Promise<void>((resolve) => decide.listen(0, "127.0.0.1", resolve))
@@ -230,4 +230,95 @@ for (const width of [1440, 390])
     })
   }
 
-void decisionConnection
+/** The scene check on or off; `leaving` names who it says left. */
+const sceneCheck = (on: boolean) =>
+  admin((api) =>
+    Effect.gen(function* () {
+      const [model] = yield* api.ListModels({ connectionId: decisionConnection as never, includeHidden: false })
+      yield* api.SetDecisionSettings({
+        connectionId: decisionConnection as never,
+        model: model!.id,
+        points: { presence: { on, threshold: 0.85 } }
+      })
+    })
+  )
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`the timeline's away rows and Undo of the scene check at ${width} ${theme}`, async ({ page }, info) => {
+      await look(page, width, theme)
+      await sceneCheck(true)
+      leaving.clear()
+      leaving.add("Wren")
+      try {
+        const { chatId, forkId, slotId } = await threeCharacters()
+        const ids = await castIds()
+        await admin((api) =>
+          api.Generate({ chatId, parentSlotId: slotId, branch: false, speakerEntityId: ids.mira })
+        )
+        // The branch's tip, the reply, once it's there.
+        let leaf: SlotId | null = null
+        await expect
+          .poll(async () => {
+            const path = await admin((api) =>
+              api.ReadPath({ chatId, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 2 })
+            )
+            leaf = path.entries.length === 2 ? path.leafSlotId : null
+            return leaf
+          })
+          .not.toBeNull()
+        const marks = () => admin((api) => api.GetAwayMarks({ chatId, forkId: forkId as never, slotId: leaf }))
+        // The reply completes, then the scene check marks Wren away at it.
+        await expect
+          .poll(async () => (await marks()).map((mark) => [mark.entityId, mark.away, mark.by]), { timeout: 30_000 })
+          .toEqual([[ids.wren, true, "decision"]])
+        leaving.clear()
+        await page.goto(`${server().url}/chats/${chatId}`)
+        const rows = page.locator("[data-away-row]")
+        const left = rows.filter({ hasText: "Wren left · scene check" })
+        await expect(left).toBeVisible()
+        // The scene check's own request doesn't break the chat's cache estimate (it used to).
+        await expect(page.getByText("Something went wrong.")).toHaveCount(0)
+        // In this one-shared-context chat too, the Cast row shows the scene check's Away, with
+        // the control that clears it beside Mute.
+        let castPanel = await openPanel(page, "Cast")
+        const wrenRow = castPanel.getByRole("listitem", { name: "Wren", exact: true })
+        await expect(wrenRow.getByText("Away", { exact: true })).toBeVisible()
+        await expect(wrenRow.getByRole("button", { name: "Mark Wren back", exact: true })).toBeVisible()
+        await expect(wrenRow.getByRole("button", { name: "Mute Wren", exact: true })).toBeVisible()
+        await closeSheet(page)
+        // The row explains itself on hover: who decided, what follows.
+        await left.getByText("Wren left · scene check").hover()
+        await expect(
+          page.getByText("A decision model judged that Wren left", { exact: false }).filter({ visible: true })
+        ).toBeVisible()
+        const undo = left.getByRole("button", { name: "Undo", exact: true })
+        await undo.hover()
+        await expect(page.getByText("Wren was there after all", { exact: false }).filter({ visible: true })).toBeVisible()
+        await page.mouse.move(0, 0)
+        await expectLayout(page, info, `contexts-away-row-${width}-${theme}`, { scope: "[data-away-row]" })
+        await undo.click()
+        await expect(left).toHaveCount(0)
+        await expect.poll(async () => (await admin((api) => api.GetCast({ chatId, slotId: leaf }))).away).toBeUndefined()
+        // The user's own mark: a row with no Undo (the Cast tab takes it back).
+        castPanel = await openPanel(page, "Cast")
+        await expect(wrenRow.getByText("Away", { exact: true })).toHaveCount(0)
+        await castPanel
+          .getByRole("listitem", { name: "Mira", exact: true })
+          .getByRole("button", { name: "Mark Mira away", exact: true })
+          .click()
+        await closeSheet(page)
+        const mine = rows.filter({ hasText: "Mira left · you" })
+        await expect(mine).toBeVisible()
+        await expect(mine.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
+        await expectLayout(page, info, `contexts-away-row-user-${width}-${theme}`, { scope: "[data-away-row]" })
+        // Server state: a reload shows the same rows.
+        await page.reload()
+        await expect(rows.filter({ hasText: "Mira left · you" })).toBeVisible()
+        await expect(rows.filter({ hasText: "Wren left" })).toHaveCount(0)
+      } finally {
+        leaving.clear()
+        await sceneCheck(false)
+      }
+    })
+  }

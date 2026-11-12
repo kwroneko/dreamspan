@@ -546,6 +546,9 @@ describe("decision models", () => {
         }
         assert.deepStrictEqual(away, [wren.entityId])
         assert.deepStrictEqual((yield* stateAt).absent, [ansel.entityId])
+        // The scene check's request is the chat's newest, but the cache estimate compares with
+        // the reply's: a decision snapshot has no request to compare (it used to throw).
+        yield* reader.CacheWarmth({ userId: me.id, chatId: chat.id, leafSlotId: version.slotId, forkId: null })
         const events = yield* reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId })
         assert.deepInclude(
           events.map((e) => e.data),

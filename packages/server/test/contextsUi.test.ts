@@ -1,7 +1,7 @@
 // The reads and changes the client's separate-context controls use (spec/CHARACTER-CONTEXT.md
 // §9.2 units CU1–CU5): the Context setting, as the cast reports it and as This chat changes it.
 import { assert, describe, it } from "@effect/vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
+import { type EntityId, type ForkId, NewVersion } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -87,6 +87,65 @@ describe("separate contexts in the client's reads", () => {
       const cleared = yield* change({ _tag: "Role", entityId: mira, role: null })
       assert.strictEqual(cleared.roles, undefined)
       assert.deepStrictEqual(cleared.away, [mira])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("the timeline's away marks, who set them, and Undo of the scene check's", () =>
+    Effect.gen(function* () {
+      const { api, started, mira, wren, userId } = yield* threeCharacters
+      const writer = yield* Writer
+      const chatId = started.chat.id
+      const forkId = started.chat.currentForkId as ForkId
+      const slotId = started.entry.slotId
+      const reply = yield* writer.AppendMessage({
+        userId,
+        chatId,
+        forkId,
+        parentSlotId: slotId,
+        branch: false,
+        version: new NewVersion({
+          speakerEntityId: mira,
+          writer: "human",
+          content: "*Mira sets down her cup.*",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        }),
+        commitDraft: null
+      })
+      // The scene check judged that Wren left at the end of the user's line.
+      const decision = yield* writer.AddStateEvent({
+        userId,
+        chatId,
+        forkId,
+        slotId,
+        versionId: null,
+        scope: null,
+        data: { key: "away.set", value: { entity: wren, away: true, source: "decision" } }
+      })
+      yield* api.ChangeCast({
+        chatId,
+        forkId,
+        slotId: reply.slotId,
+        change: { _tag: "Away", entityId: mira, away: true }
+      })
+      const shape = (marks: ReadonlyArray<{ slotId: string; entityId: string; away: boolean; by: string }>) =>
+        marks.map(({ slotId, entityId, away, by }) => ({ slotId, entityId, away, by }))
+      const marks = yield* api.GetAwayMarks({ chatId, forkId, slotId: reply.slotId })
+      assert.deepStrictEqual(shape(marks), [
+        { slotId, entityId: wren, away: true, by: "decision" },
+        { slotId: reply.slotId, entityId: mira, away: true, by: "user" }
+      ])
+      assert.strictEqual(marks[0]!.eventId, decision.id)
+      // A user's mark isn't the scene check's: Undo refuses it.
+      assert.isFalse(yield* api.UndoAwayMark({ chatId, forkId, eventId: marks[1]!.eventId }))
+      assert.isTrue(yield* api.UndoAwayMark({ chatId, forkId, eventId: decision.id }))
+      assert.deepStrictEqual(shape(yield* api.GetAwayMarks({ chatId, forkId, slotId: reply.slotId })), [
+        { slotId, entityId: wren, away: false, by: "user" },
+        { slotId: reply.slotId, entityId: mira, away: true, by: "user" }
+      ])
+      assert.isFalse(yield* api.UndoAwayMark({ chatId, forkId, eventId: decision.id }))
+      assert.deepStrictEqual((yield* api.GetCast({ chatId, forkId, slotId: reply.slotId })).away, [mira])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 })

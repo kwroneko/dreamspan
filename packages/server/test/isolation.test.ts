@@ -1786,6 +1786,21 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.GetSplitChats({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
   },
+  // Separate contexts' away rows and their Undo (contextsApi.ts).
+  GetAwayMarks: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.GetAwayMarks({ chatId: owner.chat.chatId, forkId: owner.chat.forkId, slotId: owner.chat.slotId }),
+        "NotFound"
+      )
+  },
+  UndoAwayMark: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.UndoAwayMark({ chatId: owner.chat.chatId, forkId: owner.chat.forkId, eventId: "an-event" }),
+        "NotFound"
+      )
+  },
   // Merging another chat in (spec/CHAT-MERGE.md): neither side may be someone else's chat.
   PreviewChatMerge: {
     probe: (actor, owner) =>
@@ -3845,6 +3860,16 @@ const storage: Record<
         forkId: owner.chat.forkId,
         expectedForkIds: [owner.chat.forkId],
         title: "Foreign"
+      }),
+      "NotFound"
+    ),
+  AwayMarks: (reader, actor, owner) =>
+    refused(
+      reader.AwayMarks({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        forkId: owner.chat.forkId,
+        slotId: owner.chat.slotId
       }),
       "NotFound"
     ),

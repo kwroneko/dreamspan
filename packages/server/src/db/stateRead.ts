@@ -91,6 +91,25 @@ export const stateEventRowsThrough = (sql: SqlClient.SqlClient, chatId: ChatId, 
   )
 
 /**
+ * The away marks (`away.set`) that apply on the fork's display path through `slotId`, in fold
+ * order, with where each was written and by whom: the timeline's away rows (contextsui CU3).
+ */
+export const awayEventsThrough = (sql: SqlClient.SqlClient, chatId: ChatId, slotId: SlotId | null, fork: string) =>
+  Effect.map(
+    Effect.flatMap(displayIn(sql, chatId, slotId, fork), (shown) =>
+      eventsOnPath<ProvenancedEventRow & { readonly slot_id: string | null }>(
+        sql,
+        chatId,
+        slotId,
+        fork,
+        "ev.id, ev.origin, ev.slot_id, ev.version_id, ev.key, ev.scope, ev.value_json",
+        shown
+      )
+    ),
+    (rows) => rows.filter((row) => row.key === "away.set")
+  )
+
+/**
  * A card fork carries every note switch on the path, including switches on unselected
  * versions and deleted slots: swiping or restoring later must retain those settings.
  * Keep this positional projection separate from stateEventsOnPath's public row shape.
