@@ -1,4 +1,5 @@
 import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
+import { sidebarMessageResults, sidebarSearchTools, useMessageSearch } from "./MessageSearch.tsx"
 import { useSplitChats } from "../chat/splitChats.ts"
 import { requestSplitReveal, useSplitReveal } from "../chat/splitReveal.ts"
 import type { ChatBrowse } from "@rp/shared/chatBrowse.ts"
@@ -825,6 +826,9 @@ function Browser({ data }: { data: ShellLibrary }) {
   const cardLabel = card ? card.card.label : "Character not found"
   const needle = search.trim().toLowerCase()
   const kind = scope.chat ? "chat" : scope.entity ? "character" : "all"
+  // The search looks through message text (MessageSearch.tsx): only in the list of all chats.
+  const [inMessages] = useMessageSearch()
+  const messages = inMessages && !grid && kind === "all"
   const sections = SECTIONS[kind]
   // Each list's length, by scope and search: another scope or search starts from its first page.
   const listKey = `${scope.entity}/${scope.chat}/${needle}/${JSON.stringify(chatBrowse)}`
@@ -841,7 +845,7 @@ function Browser({ data }: { data: ShellLibrary }) {
   const forks = useShellForks({
     entity: scope.entity,
     chat: scope.chat as ChatId | null,
-    search: needle,
+    search: messages ? "" : needle,
     sort: "recent",
     ...(!grid && kind !== "chat" ? { browse: chatBrowse } : {}),
     sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
@@ -898,13 +902,16 @@ function Browser({ data }: { data: ShellLibrary }) {
               onChange={(e) => sources.change({ text: e.currentTarget.value })}
             />
           ) : (
-            <Input
-              aria-label={grid ? "Find a character" : "Find a chat"}
-              placeholder="Find by name"
-              className="min-w-0"
-              value={search}
-              onChange={(e) => setSearch(e.currentTarget.value)}
-            />
+            <div className="flex min-w-0 items-center gap-1">
+              <Input
+                aria-label={grid ? "Find a character" : messages ? "Find in messages" : "Find a chat"}
+                placeholder={messages ? "Find in messages" : "Find by name"}
+                className="min-w-0 flex-1"
+                value={search}
+                onChange={(e) => setSearch(e.currentTarget.value)}
+              />
+              {kind === "all" && <SlotOutlet slot={sidebarSearchTools} props={{ grid }} />}
+            </div>
           )}
         </div>
       </div>
@@ -953,7 +960,7 @@ function Browser({ data }: { data: ShellLibrary }) {
           )}
         </nav>
       )}
-      {!grid && kind !== "chat" && (
+      {!grid && kind !== "chat" && !messages && (
         <SlotOutlet
           slot={sidebarChatBrowse}
           props={{ browse: chatBrowse, counts: forks.filterCounts, onChange: setChatBrowse }}
@@ -1016,6 +1023,10 @@ function Browser({ data }: { data: ShellLibrary }) {
               />
             </>
           )
+        ) : messages ? (
+          <div className="max-w-controls pt-2 pb-2">
+            <SlotOutlet slot={sidebarMessageResults} props={{ text: search }} />
+          </div>
         ) : (
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
           <div className="max-w-controls">

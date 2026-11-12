@@ -4,7 +4,8 @@ import { replyHooks } from "../chat/replyHooks.ts"
 import { editorExtensions } from "../../ui/editorExtensions.ts"
 import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
 import { registerUserDraftNotices } from "./userDraft.tsx"
-import { libraryActions } from "../library/slots.ts"
+import { libraryActions, libraryPanels } from "../library/slots.ts"
+import { LibraryReplaceButton, LibraryReplacePanel } from "./LibraryReplace.tsx"
 import { NewCardButton } from "./NewCard.tsx"
 import { NewPresetButton } from "./NewPreset.tsx"
 import { NewDocumentButton } from "./NewDocument.tsx"
@@ -89,6 +90,10 @@ export const register = () => {
     order: 40,
     component: ({ kind }) => (kind === "note" ? <NewDocumentButton kind="note" /> : null)
   })
+  // Search and replace through every entry at once (LibraryReplace.tsx): its button among the
+  // library's actions, its panel under them.
+  libraryActions.register({ id: "editor.library-replace", order: 90, component: LibraryReplaceButton })
+  libraryPanels.register({ id: "editor.library-replace", order: 10, component: LibraryReplacePanel })
   appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
   cardEditorSections.register({ id: CARD_LOREBOOK_SECTION, order: 100, component: EmbeddedLorebook })
   cardEditorSections.register({ id: "card.regex", order: 110, component: CardRegexScripts })

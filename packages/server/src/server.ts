@@ -40,6 +40,7 @@ import {
   AuthenticatedGalleryApi,
   AuthenticatedPanelApprovalApi,
   AuthenticatedCardArchiveApi,
+  AuthenticatedTextSearchApi,
   AuthenticatedCardSourcesApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
@@ -110,6 +111,7 @@ import * as Network from "./net/Network.ts"
 import * as ProviderBuiltins from "./providers/builtins.ts"
 import * as Providers from "./providers/Providers.ts"
 import * as Secrets from "./secrets.ts"
+import { makeTextSearchHandlers } from "./api/textSearch.ts"
 
 const VERSION = "0.0.0"
 const startedAt = Date.now()
@@ -188,6 +190,8 @@ const Handlers = Layer.mergeAll(
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),
   AuthenticatedExternalMediaApi.toLayer(makeExternalMediaHandlers),
+
+  AuthenticatedTextSearchApi.toLayer(makeTextSearchHandlers),
   AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
 )
 

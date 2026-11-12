@@ -2761,3 +2761,51 @@ for (const width of [1440, 390])
 
 // Focus with --grep "Google connection"; the same surfaces as the provider gate.
 test.describe("Google connection layout", googleConnectionTests)
+
+// Focused audit for the two new text-search surfaces; no large import is needed.
+test.describe("text search review layout", () => {
+  let local: TestServer
+  test.beforeAll(async () => {
+    local = await startServer(withAdmin)
+    const cookie = await loginCookie(local, ADMIN.handle, ADMIN.password)
+    await withCookie(local, cookie, (api) =>
+      Effect.gen(function* () {
+        yield* api.CreateCard({
+          label: "Lighthouse keeper",
+          name: "Lighthouse keeper",
+          description: "The lighthouse is lit."
+        })
+        const chat = yield* api.CreateChat({ title: "Harbour nights" })
+        yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: null,
+          branch: false,
+          content: "The lighthouse is lit.",
+          reply: false
+        })
+      })
+    )
+  })
+  test.afterAll(async () => {
+    await local?.stop()
+  })
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const)
+      test(`${width} ${theme}`, async ({ page }, info) => {
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+        await apiLogin(page.request, local, ADMIN.handle, ADMIN.password)
+        await page.goto(`${local.url}/?side=chats&sideIn=messages&sideQ=lighthouse`)
+        if (width === 390) await page.getByRole("button", { name: "Chats and menu", exact: true }).click()
+        await expect(page.locator("[data-message-hit]:visible")).toHaveCount(1)
+        await expectLayout(page, info, `message-search-review-${width}-${theme}`, {
+          scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
+        })
+        await page.goto(`${local.url}/library?replace=open&find=lighthouse`)
+        const panel = page.getByRole("region", { name: "Search and replace across the library" })
+        await panel.getByRole("textbox", { name: "Replace with", exact: true }).fill("beacon")
+        await panel.getByRole("button", { name: "Find", exact: true }).click()
+        await expect(panel.locator("[data-library-hit]")).toHaveCount(1)
+        await expectLayout(page, info, `library-search-review-${width}-${theme}`, { scope: "main" })
+      })
+})

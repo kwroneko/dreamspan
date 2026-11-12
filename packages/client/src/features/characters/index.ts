@@ -8,6 +8,7 @@ import { SplitChatSection } from "../chat/SplitChatSection.tsx"
 import { panelEditorActions } from "../editor/panelActions.tsx"
 import { PanelFavourite } from "./CardFavourite.tsx"
 import { ChatBrowseBar, sidebarChatBrowse } from "./ChatBrowseBar.tsx"
+import { MessageResults, MessageSearchToggle, sidebarMessageResults, sidebarSearchTools } from "./MessageSearch.tsx"
 import { registerCharacterPanels } from "./panels.tsx"
 import { routes } from "../../routes.tsx"
 import { CardPage } from "./CardPage.tsx"
@@ -49,6 +50,8 @@ export const register = () => {
   })
   castMemberNavigation.register({ id: "characters.chats-link", order: 10, component: CastChatsLink })
   sidebarChatBrowse.register({ id: "chats.browse", order: 10, component: ChatBrowseBar })
+  sidebarSearchTools.register({ id: "chats.message-search", order: 10, component: MessageSearchToggle })
+  sidebarMessageResults.register({ id: "chats.message-results", order: 10, component: MessageResults })
   // The Persona switch in a card's header and on its page (personaFolder.tsx).
   cardContributions.register({
     id: "characters.persona-folder",
