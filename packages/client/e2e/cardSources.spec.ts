@@ -124,7 +124,8 @@ for (const width of [1440, 390])
         // An error says what the user can do, and Retry asks again.
         // Pictures are in by now, so the failure meets the search.
         await page.waitForLoadState("networkidle")
-        await fake.fail(503, 1, "/api/v1/search")
+        // Both the requested order and its one substitute fail; Retry remains available.
+        await fake.fail(503, 2, "/api/v1/search")
         await search.fill("amber")
         await expect(main.getByText("Can't reach cardex right now.", { exact: true })).toBeVisible()
         await main.getByRole("button", { name: "Retry", exact: true }).click()
@@ -160,6 +161,10 @@ for (const width of [1440, 390])
         await page.getByRole("menuitem", { name: "Inspect", exact: true }).click()
         await expect(page.getByRole("heading", { name, exact: true })).toBeVisible()
         await expect(page.getByText("On cardex. It isn't in your cards.", { exact: true })).toBeVisible()
+        await expect(page.getByRole("heading", { name: "Description · 40 tokens", exact: true })).toBeVisible()
+        await expect(
+          page.getByRole("link", { name: "Earlier listing on Synthetic site", exact: true })
+        ).toHaveAttribute("href", /\/o\//)
         await expect(page.getByRole("link", { name: "Start a chat", exact: true })).toBeVisible()
         await page.getByRole("button", { name: "Add to my cards", exact: true }).click()
         await expect(page.getByText(`Added ${name} to your cards.`, { exact: true })).toBeVisible()

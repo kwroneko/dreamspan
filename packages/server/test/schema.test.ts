@@ -3,6 +3,7 @@
 import { DatabaseSync } from "node:sqlite"
 import { beforeEach, describe, expect, it } from "vitest"
 import { baseline } from "../src/db/baseline.ts"
+import { presenceCandidatesFrom } from "../src/db/presenceCorrection.ts"
 
 let db: DatabaseSync
 let n = 0
@@ -150,6 +151,14 @@ describe("version authoring provenance", () => {
 })
 
 describe("version payload separation", () => {
+  it("presence corrections use chat-bounded covering presence probes, independent of swipe prose", () => {
+    const plan = all<{
+      detail: string
+    }>(`EXPLAIN QUERY PLAN SELECT v.id,t.presence_json FROM ${presenceCandidatesFrom}
+      WHERE t.presence_json IS NOT NULL AND s.chat_id='chat' AND v.purged_at IS NULL`)
+    expect(plan.some((p) => p.detail.includes("COVERING INDEX version_texts_presence"))).toBe(true)
+    expect(plan.filter((p) => /SCAN/.test(p.detail))).toHaveLength(0)
+  })
   it("projects presence corrections and speaker changes into historical membership on a bare connection", () => {
     const owner = user()
     for (const card of ["mira", "wren"])
@@ -1396,5 +1405,77 @@ describe("inserted messages (spec/MESSAGE-INSERT.md §2.2)", () => {
     expect(() => run("UPDATE fork_overrides SET kind = 'hide' WHERE id = ?", placed)).toThrow(
       /keeps its fork, kind and target/
     )
+  })
+})
+
+describe("library replace records", () => {
+  it("enforces ownership, revision identity, positive counts and immutable unique membership", () => {
+    const owner = user(),
+      other = user()
+    const make = (e: string, u: string) => {
+      run("INSERT INTO entities(id,owner_user_id,kind,created_at) VALUES (?,?,'card',1)", e, u)
+      for (const suffix of ["before", "after", "undo"])
+        run(
+          "INSERT INTO entity_revisions(id,entity_id,doc_json,doc_hash,schema_version,origin,created_at) VALUES (?,?,'{}','h',1,'user',1)",
+          e + suffix,
+          e
+        )
+      run(
+        "INSERT INTO entity_refs(id,entity_id,head_revision_id,label,created_at,updated_at) VALUES (?,?,?,'Card',1,1)",
+        e + "ref",
+        e,
+        e + "after"
+      )
+    }
+    make("mine", owner)
+    make("theirs", other)
+    for (const [g, u] of [
+      ["own", owner],
+      ["foreign", other]
+    ])
+      run(
+        "INSERT INTO changeset_groups(id,owner_user_id,title,origin,created_at) VALUES (?,?,'Replace','user',1)",
+        g!,
+        u!
+      )
+    const insert = (
+      group = "own",
+      ref = "mineref",
+      before = "minebefore",
+      after = "mineafter",
+      matches = 1,
+      undo: string | null = null
+    ) =>
+      run(
+        "INSERT INTO library_edit_items(group_id,ref_id,before_revision_id,after_revision_id,matches,undone_by_revision_id) VALUES (?,?,?,?,?,?)",
+        group,
+        ref,
+        before,
+        after,
+        matches,
+        undo
+      )
+    expect(() => insert("foreign")).toThrow()
+    expect(() => insert("own", "mineref", "theirsbefore")).toThrow()
+    expect(() => insert("own", "mineref", "minebefore", "theirsafter")).toThrow()
+    expect(() => insert("own", "mineref", "minebefore", "mineafter", 0)).toThrow()
+    expect(() => insert("own", "mineref", "minebefore", "mineafter", 1, "theirsundo")).toThrow()
+    insert()
+    expect(() => insert()).toThrow()
+    for (const [column, value] of [
+      ["group_id", "foreign"],
+      ["ref_id", "theirsref"],
+      ["before_revision_id", "theirsbefore"],
+      ["after_revision_id", "theirsafter"],
+      ["matches", 2]
+    ])
+      expect(() => run(`UPDATE library_edit_items SET ${column}=?`, value!)).toThrow()
+    expect(() => run("UPDATE changeset_groups SET owner_user_id=? WHERE id='own'", other)).toThrow()
+    expect(() => run("UPDATE library_edit_items SET undone_by_revision_id='theirsundo'")).toThrow()
+    run("UPDATE library_edit_items SET undone_by_revision_id='mineundo'")
+    run("DELETE FROM entity_revisions WHERE id='mineundo'")
+    expect(get<{ u: string | null }>("SELECT undone_by_revision_id AS u FROM library_edit_items").u).toBeNull()
+    run("DELETE FROM entity_refs WHERE id='mineref'")
+    expect(all("SELECT * FROM library_edit_items")).toHaveLength(0)
   })
 })

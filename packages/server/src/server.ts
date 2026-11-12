@@ -1,6 +1,11 @@
+import { ExternalMedia, externalMediaRoute, makeExternalMediaHandlers } from "./api/externalMedia.ts"
+import { AuthenticatedExternalMediaApi } from "@rp/shared/api.ts"
+import { makeWorkshopHandlers } from "./api/workshop.ts"
 import {
   AuthenticatedAgentApi,
+  AuthenticatedWorkshopApi,
   AuthenticatedChatEventsApi,
+  AuthenticatedMessageVersionApi,
   AuthenticatedChatMergeApi,
   AuthenticatedDecisionApi,
   AuthenticatedProviderListApi,
@@ -39,6 +44,7 @@ import {
   AuthenticatedGalleryApi,
   AuthenticatedPanelApprovalApi,
   AuthenticatedCardArchiveApi,
+  AuthenticatedTextSearchApi,
   AuthenticatedCardSourcesApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
@@ -58,7 +64,7 @@ import {
 import { RpcSerialization, RpcServer, type RpcGroup } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
-import { makeChatEventHandlers, makeChatHandlers } from "./api/chats.ts"
+import { makeChatEventHandlers, makeChatHandlers, makeMessageVersionHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import {
   makeEditorHandlers,
@@ -109,6 +115,7 @@ import * as Network from "./net/Network.ts"
 import * as ProviderBuiltins from "./providers/builtins.ts"
 import * as Providers from "./providers/Providers.ts"
 import * as Secrets from "./secrets.ts"
+import { makeTextSearchHandlers } from "./api/textSearch.ts"
 
 const VERSION = "0.0.0"
 const startedAt = Date.now()
@@ -167,6 +174,7 @@ const CoreHandlers = AppCoreApi.toLayer(
 
 const Handlers = Layer.mergeAll(
   CoreHandlers,
+  AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
   AuthenticatedShellUpdatesApi.toLayer(
     Effect.map(makeChatSetupHandlers, ({ WatchShellCards, WatchShellForks }) => ({
       WatchShellCards,
@@ -180,12 +188,16 @@ const Handlers = Layer.mergeAll(
   AuthenticatedChatMergeApi.toLayer(makeMergeHandlers),
   AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),
+  AuthenticatedWorkshopApi.toLayer(makeWorkshopHandlers),
   AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
   AuthenticatedCardSourcesApi.toLayer(makeCardSourceHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),
+  AuthenticatedExternalMediaApi.toLayer(makeExternalMediaHandlers),
+
+  AuthenticatedTextSearchApi.toLayer(makeTextSearchHandlers),
   AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
 )
 
@@ -247,7 +259,8 @@ const HOST = /^[A-Za-z0-9.-]+(?::\d{1,5})?$|^\[[0-9A-Fa-f:.]+\](?::\d{1,5})?$/
  * which make no request), so text can't report on the chat through an image URL (the
  * message renderer blocks them as well). Connections go to the app and its WebSocket,
  * on the host the browser used; `'self'` covers the WebSocket in current browsers, the
- * explicit origins cover older ones.
+ * explicit origins cover older ones. No form submits natively (every form of the app's handles
+ * its submit), so none may: a form that slipped past sanitizing can't post to the app's routes.
  */
 const contentSecurityPolicy = (host: string | undefined) => {
   const socket = host !== undefined && HOST.test(host) ? ` ws://${host} wss://${host}` : ""
@@ -256,10 +269,11 @@ const contentSecurityPolicy = (host: string | undefined) => {
     "script-src 'self'",
     "style-src 'self'",
     "img-src 'self' blob: data:",
+    "media-src 'self' blob: data:",
     `connect-src 'self'${socket}`,
     "object-src 'none'",
     "base-uri 'none'",
-    "form-action 'self'",
+    "form-action 'none'",
     "frame-ancestors 'none'"
   ].join("; ")
 }
@@ -412,7 +426,8 @@ const RequestGuard = HttpRouter.middleware(
               })
           : (response: HttpServerResponse.HttpServerResponse) =>
               // The frame page sets its own, with its nonce.
-              path === FRAME_PANEL && response.headers["content-security-policy"] !== undefined
+              (path === FRAME_PANEL || path === "/media/external") &&
+              response.headers["content-security-policy"] !== undefined
                 ? response
                 : HttpServerResponse.setHeader(response, "content-security-policy", policy)
         const headers = { host: request.headers.host, origin: library ? undefined : request.headers.origin }
@@ -659,6 +674,7 @@ export const serverWith = <E>(
       AuthRoutes,
       ImportRoutes.layer,
       SourceImageRoute,
+      externalMediaRoute,
       SourceNewerFileRoute,
       StaticRoutes,
       InterruptedRequests,
@@ -693,6 +709,7 @@ export const serverWith = <E>(
     Layer.provideMerge(Commands.layer),
     Layer.provideMerge(Notices.layer),
     Layer.provideMerge(sources),
+    Layer.provideMerge(ExternalMedia.layer),
     // One set of held files for uploads, the ST folder import and adopting a source's cards.
     Layer.provideMerge(MediaHolds.layer),
     Layer.provide(ProvidersLive),

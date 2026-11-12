@@ -1,3 +1,5 @@
+import { replacingBook } from "@rp/shared/lorebookLink.ts"
+
 // The Lorebooks tab's one list (owner, 2026-11-01: rows mustn't appear, vanish or show twice):
 // each member card's own book, the books added to this chat in the order they were added, then
 // the preset's books not already listed. A book added to the chat stays listed, off, when it's
@@ -43,4 +45,27 @@ export const lorebookRows = (input: RowInput): ReadonlyArray<BookRow> => {
     ...input.listed.map((book) => row("chat", book.ref, book.on, sentByPreset.has(book.ref))),
     ...input.preset.filter((book) => !listed.has(book.id)).map((book) => row("preset", book.id, book.enabled))
   ]
+}
+
+/**
+ * The world file that replaces a card's own book in the context, by the assembler's own rule
+ * (`replacingBook`): among the books read (on in this chat, or sent by the preset), the one linked
+ * to the card or named as its world. Null when the card's own book is used.
+ */
+export const replacedBy = (
+  card: { readonly entity: string; readonly world: string | undefined },
+  bindings: Readonly<Record<string, string | null>> | undefined,
+  listed: RowInput["listed"],
+  preset: RowInput["preset"],
+  sourceOf: (ref: string) => string | undefined
+): string | null => {
+  const read = [
+    ...listed.filter((book) => book.on).map((book) => book.ref),
+    ...preset.filter((book) => book.enabled && !listed.some((own) => own.ref === book.id && own.on)).map((b) => b.id)
+  ]
+  return replacingBook(
+    bindings?.[card.entity],
+    card.world,
+    read.map((id) => ({ id, sourceName: sourceOf(id) }))
+  )
 }

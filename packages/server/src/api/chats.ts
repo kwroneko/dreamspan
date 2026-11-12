@@ -1,9 +1,10 @@
+import { regenerateSeveral } from "./agent.ts"
 // Chat RPC handlers (@rp/shared/chatApi.ts). Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { originalReply } from "@rp/shared/replySections.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, EntityId, ForkId, NewVersion, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import { PathEntry, type ChatId, type EntityId, type ForkId, type NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import { NotFound } from "@rp/shared/errors.ts"
@@ -365,6 +366,20 @@ export const makeChatHandlers = Effect.gen(function* () {
         // A swipe keeps the speaker and the direction of the version it replaces (DESIGN §2.2,
         // guidance on swipes), unless a direction is given now: an empty one is none.
         const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
+        if (before.version.context) {
+          const resumed = yield* regenerateSeveral({
+            versionId: before.version.id,
+            forkId: forkId ?? null,
+            expectedRowVersion,
+            ...(model ? { model } : {}),
+            ...(direction !== undefined ? { direction } : {})
+          })
+          if (resumed) {
+            yield* publishChat(id, chatId)
+            hub.publish(chatId, { _tag: "Reload" })
+            return resumed
+          }
+        }
         const guidance = direction ?? before.version.direction
         const added = yield* writer.AddSelectedVersion({
           userId: id,
@@ -909,4 +924,20 @@ export const makeChatEventHandlers = Effect.gen(function* () {
         }).pipe(internal("SubscribeChat"))
       )
   }
+})
+
+/** Reads for URL-selected dialogs, served separately to keep core handler inference bounded. */
+export const makeMessageVersionHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const userId = Effect.map(CurrentUser, (user) => user.id)
+  return {
+    ReadMessageVersion: ({ chatId, forkId, versionId }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const version = yield* reader.GetVersion({ userId: id, versionId })
+        const slot = yield* reader.GetSlot({ userId: id, slotId: version.slotId, forkId })
+        if (slot.chatId !== chatId) return yield* new NotFound({ entity: "version", id: versionId })
+        return new PathEntry({ ...slot.entry, version })
+      }).pipe(internal("ReadMessageVersion"))
+  } satisfies Pick<Parameters<typeof AppApi.of>[0], "ReadMessageVersion">
 })

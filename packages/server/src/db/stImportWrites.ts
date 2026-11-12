@@ -1,3 +1,4 @@
+import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { readSetting, putUserSetting } from "./settings.ts"
 import type { StImportPrefix } from "./stImportPrefix.ts"
 import { insertStMessageBatch, prepareStMessageBatch } from "./stMessageBatch.ts"
@@ -133,9 +134,13 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
   const sql = yield* SqlClient.SqlClient
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
-    sql<{ id: string; active_leaf_slot_id: string | null }>`
-      SELECT id, active_leaf_slot_id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`.pipe(
-      Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "chat", id: chatId }))))
+    sql<{ id: string; kind: string; active_leaf_slot_id: string | null }>`
+      SELECT id, kind, active_leaf_slot_id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`.pipe(
+      Effect.flatMap(([row]) =>
+        row && chatKinds.get(row.kind)?.allowsStImport
+          ? Effect.succeed(row)
+          : Effect.fail(new NotFound({ entity: row ? "importable chat" : "chat", id: chatId }))
+      )
     )
 
   const ownedSlot = (chatId: string, slotId: string) =>

@@ -4,14 +4,28 @@
 // the context since the one before (the tools' results, the app's own messages) and the model's
 // turn, all verbatim. Request N's context is the request above plus everything listed before it.
 // A plain reply's run has no transcript, and this shows nothing.
-import type { OfferedTool, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
+//
+// Each step (thinking or text before a tool call, a call's arguments, its result) has Edit and
+// Resume from here (§4.4): the run carried on from that step, changed first or not, as a new
+// version of the message, which the chat then shows being written. What a resume or an edit cut
+// from the run it carried on shows folded where it was cut. Step edits use server-kept drafts;
+// the URL records which editor is open, so reloading restores both the editor and its text.
+import type { CutSpan, OfferedTool, StepEdit, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
+import type { ForkId } from "@rp/shared/chat.ts"
 import type { InspectorUsage, RunContext } from "@rp/shared/inspectorApi.ts"
 import { useAtomValue } from "@effect/atom-react"
+import { useNavigate, useSearch } from "@tanstack/react-router"
+import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useMemo } from "react"
+import { Fragment, type ReactNode, useMemo, useState } from "react"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../../editor/userDraft.tsx"
+import { useAction } from "../../../actions.tsx"
 import { AppClient } from "../../../rpc.ts"
+import { Button } from "../../../ui/Button.tsx"
+import { CodeEditor } from "../../../ui/CodeEditor.tsx"
 import { Card, CardHeader, Disclosure } from "../../../ui/Surface.tsx"
 import { requestStatusText } from "../requestWords.ts"
+import { editableText, stepEdit, type StepTarget } from "./resume.ts"
 import { turnsOf } from "./steps.ts"
 
 const json = (value: unknown) => JSON.stringify(value, null, 2)
@@ -19,12 +33,27 @@ const json = (value: unknown) => JSON.stringify(value, null, 2)
 const count = (n: number | null) => (n === null ? "unknown" : n.toLocaleString())
 
 /** A titled box, as the inspector's context blocks are: the inspector's label above the verbatim text. */
-function Box({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
+function Box({
+  title,
+  note,
+  actions,
+  children
+}: {
+  title: string
+  note?: string
+  actions?: ReactNode
+  children: ReactNode
+}) {
   return (
     <section aria-label={title} className="overflow-hidden rounded-md border border-border">
-      <header className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-border bg-surface-raised px-2.5 py-1.5 font-sans text-xs">
+      <header
+        className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border bg-surface-raised px-2.5 font-sans text-xs ${actions ? "py-2" : "py-1.5"}`}
+      >
         <span className="font-medium text-text">{title}</span>
-        {note && <span className="text-muted">{note}</span>}
+        <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          {note && <span className="min-w-0 text-muted [overflow-wrap:anywhere]">{note}</span>}
+          {actions}
+        </span>
       </header>
       <div className="bg-canvas px-2.5 py-2">{children}</div>
     </section>
@@ -58,25 +87,169 @@ function Tools({ tools }: { tools: ReadonlyArray<OfferedTool> }) {
   )
 }
 
-function Part({ part }: { part: TurnPart }) {
-  if (part.type === "toolCall")
+/** What step edits need from the page: the tools' schemas, which step is open, and carrying on. */
+interface StepEditing {
+  readonly tools: ReadonlyArray<OfferedTool>
+  readonly draftTarget: string
+  /** The run is still going: its steps can't be carried on from yet. */
+  readonly running: boolean
+  readonly open: string | null
+  readonly setOpen: (key: string | null) => void
+  readonly resume: (step: number, edit: StepEdit | undefined) => Promise<boolean>
+  readonly pending: boolean
+  readonly error: string | null
+}
+
+const titleOf = (target: StepTarget) =>
+  target.kind === "result"
+    ? `Result of ${target.entry.tool}${target.entry.isError ? " (an error)" : ""}`
+    : target.part.type === "toolCall"
+      ? `Tool call: ${target.part.name}`
+      : target.part.type === "thinking"
+        ? "Thinking"
+        : "Text"
+
+const noteOf = (target: StepTarget) =>
+  target.kind === "result" ? target.entry.toolCallId : target.part.type === "toolCall" ? target.part.id : undefined
+
+const toolOf = (target: StepTarget) =>
+  target.kind === "result" ? target.entry.tool : target.part.type === "toolCall" ? target.part.name : null
+
+/** A step's box: its text, or its editor once Edit is chosen, with Edit and Resume from here. */
+function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEditing | null; id: string }) {
+  const step = target.kind === "result" ? target.entry.step : target.part.step
+  const original = editableText(target)
+  const title = titleOf(target)
+  const note = noteOf(target)
+  const shown = target.kind === "part" && target.part.type === "toolCall" ? json(target.part.args) : original
+  if (editing === null || step === undefined || editing.running)
     return (
-      <Box title={`Tool call: ${part.name}`} note={part.id}>
-        <Verbatim text={json(part.args)} />
+      <Box title={title} {...(note ? { note } : {})}>
+        <Verbatim text={shown} />
       </Box>
     )
+  const open = editing.open === id
+  const actions = open ? null : (
+    <span className="flex gap-1">
+      <Button
+        variant="ghost"
+        className="h-7 px-2 text-xs"
+        hint="Change this step, then carry on from it as a new version."
+        disabled={editing.pending}
+        onClick={() => editing.setOpen(id)}
+      >
+        Edit
+      </Button>
+      <Button
+        variant="ghost"
+        className="h-7 px-2 text-xs"
+        hint="Carry on from this step as a new version."
+        disabled={editing.pending}
+        onClick={() => void editing.resume(step, undefined)}
+      >
+        Resume from here
+      </Button>
+    </span>
+  )
   return (
-    <Box title={part.type === "thinking" ? "Thinking" : "Text"}>
-      <Verbatim text={part.text} />
+    <Box title={title} {...(note ? { note } : {})} actions={actions}>
+      {open ? <StepEditor target={target} editing={editing} id={id} step={step} /> : <Verbatim text={shown} />}
     </Box>
   )
 }
 
-function Added({ entry }: { entry: Exclude<TranscriptEntry, { role: "assistant" }> }) {
+/** A draft is scoped to this version and this part/result, shared by tabs and devices. */
+function StepEditor({
+  target,
+  editing,
+  id,
+  step
+}: {
+  target: StepTarget
+  editing: StepEditing
+  id: string
+  step: number
+}) {
+  const original = editableText(target)
+  const draft = useUserDraft(editing.draftTarget, id, original)
+  const [committing, setCommitting] = useState(false)
+  const text = draft.text
+  const title = titleOf(target)
+  const isArgs = target.kind === "part" && target.part.type === "toolCall"
+  const parameters = editing.tools.find((t) => t.name === toolOf(target))?.parameters
+  const checked = stepEdit(target, text, parameters)
+  const problem = "problem" in checked ? checked.problem : null
+  return (
+    <div className="flex flex-col gap-2">
+      <CodeEditor
+        label={`Edit ${title}`}
+        value={text}
+        base={original}
+        mono={isArgs}
+        rows={isArgs ? 6 : 4}
+        textActions={!isArgs}
+        expand={false}
+        autoFocus
+        onChange={draft.setText}
+        tools={<UserDraftUndo draft={draft} />}
+      />
+      <UserDraftNotices draft={draft} />
+      {problem !== null && (
+        <p role="alert" className="text-sm text-danger">
+          {problem}
+        </p>
+      )}
+      {editing.error !== null && (
+        <p role="alert" className="text-sm text-danger">
+          {editing.error}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="primary"
+          pending={editing.pending || committing}
+          disabled={problem !== null || !draft.ready}
+          hint={
+            text === original
+              ? "Carry on from this step, unchanged, as a new version."
+              : "Carry on from this step, as you changed it, as a new version."
+          }
+          onClick={() => {
+            if (!("edit" in checked) || committing) return
+            setCommitting(true)
+            void draft.commit(text, () => editing.resume(step, checked.edit)).finally(() => setCommitting(false))
+          }}
+        >
+          Resume
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={editing.pending || committing}
+          hint="Close the editor; your draft is kept for later."
+          onClick={() => editing.setOpen(null)}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function Part({ part, editing, id }: { part: TurnPart; editing: StepEditing | null; id: string }) {
+  return <StepBox target={{ kind: "part", part }} editing={editing} id={id} />
+}
+
+function Added({
+  entry,
+  editing,
+  id
+}: {
+  entry: Exclude<TranscriptEntry, { role: "assistant" }>
+  editing: StepEditing | null
+  id: string
+}) {
   return entry.role === "toolResult" ? (
-    <Box title={`Result of ${entry.tool}${entry.isError ? " (an error)" : ""}`} note={entry.toolCallId}>
-      <Verbatim text={entry.text} />
-    </Box>
+    <StepBox target={{ kind: "result", entry }} editing={editing} id={id} />
   ) : (
     <Box title="Added by the app">
       <Verbatim text={entry.text} />
@@ -96,54 +269,209 @@ function UsageLine({ request }: { request: InspectorUsage }) {
   )
 }
 
-function Steps({ run, entries }: { run: RunContext; entries: ReadonlyArray<TranscriptEntry> }) {
+/** How many transcript entries a turn holds: what it added, and its answer. */
+const sizeOf = (turn: ReturnType<typeof turnsOf>[number]) => turn.added.length + (turn.answer === null ? 0 : 1)
+
+const CUT_TITLE = { edit: "Cut when this step was edited", resume: "Cut when this reply was resumed" } as const
+
+/** What resuming dropped from the run it carried on, folded where it was cut: verbatim, without actions. */
+function Cut({ span }: { span: CutSpan }) {
+  return (
+    <div data-run-cut={span.reason} className="rounded-md border border-dashed border-border px-2.5 py-1">
+      <Disclosure
+        title={CUT_TITLE[span.reason]}
+        hint="Click to show or hide what the earlier run had from here, which this run doesn’t."
+      >
+        <div className="flex flex-col gap-2">
+          {span.entries.length === 0 && <p className="text-sm text-muted">Nothing was cut.</p>}
+          {span.entries.map((entry, i) =>
+            entry.role === "assistant" ? (
+              <Fragment key={i}>
+                {entry.parts.map((part, j) => (
+                  <Part key={j} part={part} editing={null} id="" />
+                ))}
+                {entry.error && <p className="text-sm text-danger">{entry.error}</p>}
+              </Fragment>
+            ) : (
+              <Added key={i} entry={entry} editing={null} id="" />
+            )
+          )}
+        </div>
+      </Disclosure>
+    </div>
+  )
+}
+
+function Steps({
+  run,
+  entries,
+  cut,
+  editing
+}: {
+  run: RunContext
+  entries: ReadonlyArray<TranscriptEntry>
+  cut: ReadonlyArray<CutSpan>
+  editing: StepEditing
+}) {
   const turns = turnsOf(entries)
   // Each request's ledger row, when they line up one for one (a retry adds a row of its own).
   const answered = turns.filter((t) => t.answer !== null).length
   const usage = run.requests.length === answered ? run.requests : null
+  // A cut span shows just before the entry it was cut at, or after the last.
+  const cutsAt = (at: number) => cut.filter((span) => Math.min(span.at, entries.length) === at)
+  const cuts = (at: number) => cutsAt(at).map((span, i) => <Cut key={`cut-${at}-${i}`} span={span} />)
+  // Where each turn's first entry is in `entries`.
+  const starts = turns.reduce<Array<number>>(
+    (at, turn, i) => [...at, (at[i - 1] ?? 0) + (i === 0 ? 0 : sizeOf(turns[i - 1]!))],
+    []
+  )
   return (
     <section aria-label="Steps" id="run-steps" className="flex flex-col gap-3">
       <h2 className="text-base font-semibold">Steps</h2>
       <p className="text-sm text-muted">
         Every request of this run after the first is the context above, then everything listed before it here.
       </p>
-      {turns.map((turn, i) => (
-        <Card key={i}>
-          <CardHeader title={turn.answer === null ? "Not sent" : `Request ${i + 1}`} />
-          <div className="flex flex-col gap-2">
-            {i === 0 && turn.added.length === 0 && <p className="text-sm text-muted">The context above, as it was.</p>}
-            {turn.added.length > 0 && (
-              <>
-                <h3 className="text-sm font-medium">
-                  {turn.answer === null ? "Added after the last answer" : "Added to the context"}
-                </h3>
-                {turn.added.map((entry, j) => (
-                  <Added key={j} entry={entry} />
-                ))}
-              </>
-            )}
-            {turn.answer && (
-              <>
-                <p className="text-sm text-muted">
-                  {turn.answer.toolsOffered ? "The tools above were offered." : "No tools were offered."}
-                </p>
-                <h3 className="text-sm font-medium">The model's answer</h3>
-                {turn.answer.parts.length === 0 && <p className="text-sm text-muted">Nothing came back.</p>}
-                {turn.answer.parts.map((part, j) => (
-                  <Part key={j} part={part} />
-                ))}
-                {turn.answer.error && (
-                  <p role="note" className="text-sm text-danger">
-                    {turn.answer.error}
+      {turns.map((turn, i) => {
+        const first = starts[i]!
+        const answerAt = first + turn.added.length
+        return (
+          <Card key={i}>
+            <CardHeader title={turn.answer === null ? "Not sent" : `Request ${i + 1}`} />
+            <div className="flex flex-col gap-2">
+              {i === 0 && turn.added.length === 0 && (
+                <p className="text-sm text-muted">The context above, as it was.</p>
+              )}
+              {turn.added.length > 0 && (
+                <>
+                  <h3 className="text-sm font-medium">
+                    {turn.answer === null ? "Added after the last answer" : "Added to the context"}
+                  </h3>
+                  {turn.added.map((entry, j) => (
+                    <Fragment key={j}>
+                      {cuts(first + j)}
+                      <Added entry={entry} editing={editing} id={`${first + j}`} />
+                    </Fragment>
+                  ))}
+                </>
+              )}
+              {turn.answer && (
+                <>
+                  {cuts(answerAt)}
+                  <p className="text-sm text-muted">
+                    {turn.answer.toolsOffered ? "The tools above were offered." : "No tools were offered."}
                   </p>
-                )}
-                {usage?.[i] && <UsageLine request={usage[i]} />}
-              </>
-            )}
-          </div>
-        </Card>
-      ))}
+                  <h3 className="text-sm font-medium">The model's answer</h3>
+                  {turn.answer.parts.length === 0 && <p className="text-sm text-muted">Nothing came back.</p>}
+                  {turn.answer.parts.map((part, j) => (
+                    <Part key={j} part={part} editing={editing} id={`${answerAt}:${j}`} />
+                  ))}
+                  {turn.answer.error && (
+                    <p role="note" className="text-sm text-danger">
+                      {turn.answer.error}
+                    </p>
+                  )}
+                  {usage?.[i] && <UsageLine request={usage[i]} />}
+                </>
+              )}
+            </div>
+          </Card>
+        )
+      })}
+      {cuts(entries.length)}
     </section>
+  )
+}
+
+/** Step edits' state, and carrying on: the slot's row version where the page shows it, then the new version. */
+function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): StepEditing {
+  const action = useAction()
+  const navigate = useNavigate()
+  const search = useSearch({ strict: false }) as { fork?: unknown; stepEdit?: unknown }
+  const open = typeof search.stepEdit === "string" ? search.stepEdit : null
+  const setOpen = (key: string | null) => {
+    void navigate({
+      to: ".",
+      search: (previous: Record<string, unknown>) => ({ ...previous, stepEdit: key ?? undefined }),
+      resetScroll: false
+    })
+  }
+  const fork = typeof search.fork === "string" && search.fork !== "" ? (search.fork as ForkId) : null
+  const [missing, setMissing] = useState<string | null>(null)
+  const resume = async (step: number, edit: StepEdit | undefined) => {
+    setMissing(null)
+    const result = await action.run((client) =>
+      Effect.gen(function* () {
+        const window = yield* client("ReadPath", {
+          chatId: run.chatId,
+          forkId: fork,
+          leafSlotId: null,
+          range: { _tag: "Around", slot: run.slotId },
+          limit: 3
+        })
+        const entry = window.entries.find((e) => e.slotId === run.slotId)
+        if (entry === undefined) return null
+        return yield* client("ResumeFromStep", {
+          versionId: run.versionId,
+          step,
+          ...(edit === undefined ? {} : { edit }),
+          forkId: fork,
+          expectedRowVersion: entry.rowVersion
+        })
+      })
+    )
+    if (!result.ok) return false
+    if (result.value === null) {
+      setMissing("This message isn't on this branch any more.")
+      return false
+    }
+    // The chat shows the new version being written, as any reply.
+    void navigate({
+      to: "/chats/$chatId",
+      params: { chatId: run.chatId },
+      search: { ...(fork === null ? {} : { fork }), slot: run.slotId }
+    })
+    return true
+  }
+  return {
+    tools,
+    draftTarget: `run-step:${run.versionId}`,
+    running: run.status === "running",
+    open,
+    setOpen: (key) => {
+      action.clearError()
+      setMissing(null)
+      setOpen(key)
+    },
+    resume,
+    pending: action.pending,
+    error: missing ?? action.error?.message ?? null
+  }
+}
+
+function Transcript({
+  run,
+  tools,
+  entries,
+  cut
+}: {
+  run: RunContext
+  tools: ReadonlyArray<OfferedTool>
+  entries: ReadonlyArray<TranscriptEntry>
+  cut: ReadonlyArray<CutSpan>
+}) {
+  const editing = useStepEditing(run, tools)
+  // Resume from here (not inside an open editor) reports its refusal under the steps' heading.
+  const outside = editing.open === null && editing.error !== null
+  return (
+    <>
+      {tools.length > 0 && <Tools tools={tools} />}
+      {outside && (
+        <p role="alert" className="text-sm text-danger">
+          {editing.error}
+        </p>
+      )}
+      {(entries.length > 0 || cut.length > 0) && <Steps run={run} entries={entries} cut={cut} editing={editing} />}
+    </>
   )
 }
 
@@ -160,10 +488,5 @@ export function RunSteps({ run }: { run: RunContext }) {
   if (!AsyncResult.isSuccess(result)) return null
   const transcript = result.value
   if (transcript.tools.length === 0 && transcript.entries.length === 0) return null
-  return (
-    <>
-      {transcript.tools.length > 0 && <Tools tools={transcript.tools} />}
-      {transcript.entries.length > 0 && <Steps run={run} entries={transcript.entries} />}
-    </>
-  )
+  return <Transcript run={run} tools={transcript.tools} entries={transcript.entries} cut={transcript.cut} />
 }

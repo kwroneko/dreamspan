@@ -155,6 +155,31 @@ const settings = (name: string, presetOverrideRefId: RefId | null = null): Conne
 
 const credentialKey = (handle: string) => `sk-${handle}-credential-key`
 
+/** A search for the lorebook every party has, named "Lore". */
+const LORE_SEARCH = {
+  find: "Lore",
+  replace: "",
+  matchCase: true,
+  wholeWord: true,
+  regex: false,
+  preserveCase: false,
+  kinds: ["lorebook"] as const
+}
+
+/** A replace of the owner's own, in a lorebook of its own: its id. */
+const ownerLibraryEdit = (owner: Party) =>
+  Effect.gen(function* () {
+    const book = yield* owner.api.CreateLorebook({ label: "Isolation tides" })
+    const search = { ...LORE_SEARCH, find: "Isolation tides", replace: "Isolation ebb" }
+    const preview = yield* owner.api.PreviewLibraryReplace({ search })
+    const entry = preview.entries.find((e) => e.refId === book.id)!
+    const result = yield* owner.api.ApplyLibraryReplace({
+      search,
+      choices: [{ refId: entry.refId, stamp: entry.stamp, fields: entry.fields.map((f) => f.field) }]
+    })
+    return result.editId!
+  })
+
 const refused = <A, E>(attempt: Effect.Effect<A, E>, expected: string) =>
   Effect.map(
     outcome(attempt, () => "allowed"),
@@ -1155,6 +1180,20 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.lengthOf(yield* actor.api.ListChatSummaries({ chatIds }), 0)
       })
   },
+  ListRolloutEffects: {
+    probe: (actor, owner) => refused(actor.api.ListRolloutEffects({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  ListWorkshopCapabilities: {
+    probe: (actor, owner) => refused(actor.api.ListWorkshopCapabilities({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  UndoRolloutEffect: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.UndoRolloutEffect({ rolloutId: owner.chat.rolloutId, toolCallId: "call_1", seq: 0 }),
+        "NotFound"
+      )
+  },
+  CreateWorkshop: { createOnly: "creates a workshop and its private defaults for the caller" },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
   GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },
   ReadPath: {
@@ -1325,6 +1364,24 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           "NotFound"
         )
       )
+  },
+  GetExternalMediaPrefs: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetExternalMediaPrefs({})
+        yield* owner.api.SetExternalMedia({ target: { _tag: "Default" }, allow: !before.default })
+        assert.deepStrictEqual(yield* actor.api.GetExternalMediaPrefs({}), before)
+      })
+  },
+  SetExternalMedia: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(actor.api.SetExternalMedia({ target: { _tag: "Card", id: owner.cardId }, allow: true }), "NotFound"),
+        refused(
+          actor.api.SetExternalMedia({ target: { _tag: "Chat", id: owner.chat.chatId }, allow: true }),
+          "NotFound"
+        )
+      ])
   },
   GetDisplayPrefs: {
     probe: (actor, owner) =>
@@ -1504,6 +1561,35 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
             forkId: owner.chat.forkId,
             content: "planted",
             expectedRowVersion: 1
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  ReadMessageVersion: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.ReadMessageVersion({
+            chatId: owner.chat.chatId,
+            forkId: owner.chat.forkId,
+            versionId: owner.chat.versionId
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.ReadMessageVersion({
+            chatId: actor.chat.chatId,
+            forkId: actor.chat.forkId,
+            versionId: owner.chat.versionId
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.ReadMessageVersion({
+            chatId: actor.chat.chatId,
+            forkId: owner.chat.forkId,
+            versionId: actor.chat.versionId
           }),
           "NotFound"
         )
@@ -2010,7 +2096,8 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         yield* refused(actor.api.GetRunTranscript({ versionId: owner.chat.generatingId }), "NotFound")
         assert.deepStrictEqual(yield* owner.api.GetRunTranscript({ versionId: owner.chat.generatingId }), {
           tools: [],
-          entries: []
+          entries: [],
+          cut: []
         })
       })
   },
@@ -2751,6 +2838,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  SourceSuggestions: {
+    probe: (actor) =>
+      refused(
+        actor.api.SourceSuggestions({ sourceId: "cardex", kind: "creators", prefix: "f", page: null }),
+        "NotFound"
+      )
+  },
   SourceTags: { probe: (actor) => refused(actor.api.SourceTags({ sourceId: "cardex", prefix: "f" }), "NotFound") },
   SourceCard: { probe: (actor) => refused(actor.api.SourceCard({ sourceId: "cardex", remoteId: "x" }), "NotFound") },
   SourceCardForChat: {
@@ -2778,6 +2872,63 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor) => Effect.map(actor.api.ListRecentRemote({ sourceId: "cardex" }), (list) => assert.lengthOf(list, 0))
   },
   ClearRecentRemote: { probe: (actor) => Effect.asVoid(actor.api.ClearRecentRemote({ sourceId: "cardex" })) },
+  SearchMessages: {
+    // Both quiet chats say "hi": each finds its own message, never the other's.
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const own = yield* owner.api.SearchMessages({ text: "hi", cursor: null })
+        assert.isTrue(own.hits.some((h) => h.chatId === owner.quiet.chatId))
+        const page = yield* actor.api.SearchMessages({ text: "hi", cursor: null })
+        assert.isTrue(page.hits.some((h) => h.chatId === actor.quiet.chatId))
+        assert.isFalse(page.hits.some((h) => h.chatId === owner.quiet.chatId || h.chatId === owner.chat.chatId))
+      })
+  },
+  PreviewLibraryReplace: {
+    // Both have a lorebook named "Lore": each finds its own, never the other's.
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const search = { ...LORE_SEARCH, replace: "Lore" }
+        const own = yield* owner.api.PreviewLibraryReplace({ search })
+        assert.isTrue(own.entries.some((e) => e.refId === owner.loreRefId))
+        const theirs = yield* actor.api.PreviewLibraryReplace({ search })
+        assert.isTrue(theirs.entries.some((e) => e.refId === actor.loreRefId))
+        assert.isFalse(theirs.entries.some((e) => e.refId === owner.loreRefId))
+      })
+  },
+  ApplyLibraryReplace: {
+    // The owner's lorebook, with the owner's own stamp: left as it is.
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const search = { ...LORE_SEARCH, replace: "Taken" }
+        const own = yield* owner.api.PreviewLibraryReplace({ search })
+        const entry = own.entries.find((e) => e.refId === owner.loreRefId)!
+        const result = yield* actor.api.ApplyLibraryReplace({
+          search,
+          choices: [{ refId: entry.refId, stamp: entry.stamp, fields: entry.fields.map((f) => f.field) }]
+        })
+        assert.strictEqual(result.entries, 0)
+        assert.isNull(result.editId)
+        const after = yield* owner.api.PreviewLibraryReplace({ search })
+        assert.strictEqual(after.entries.find((e) => e.refId === owner.loreRefId)?.stamp, entry.stamp)
+      })
+  },
+  ListLibraryEdits: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const editId = yield* ownerLibraryEdit(owner)
+        assert.isTrue((yield* owner.api.ListLibraryEdits()).some((e) => e.id === editId))
+        assert.isFalse((yield* actor.api.ListLibraryEdits()).some((e) => e.id === editId))
+      })
+  },
+  UndoLibraryEdit: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const editId = yield* ownerLibraryEdit(owner)
+        yield* refused(actor.api.UndoLibraryEdit({ editId }), "NotFound")
+        const listed = (yield* owner.api.ListLibraryEdits()).find((e) => e.id === editId)
+        assert.strictEqual(listed?.undone, 0)
+      })
+  },
   ListArchiveCandidates: {
     probe: (actor, owner) =>
       Effect.map(actor.api.ListArchiveCandidates({ criteria: { never: 1, inactive: 1 } }), (cards) =>
@@ -3296,6 +3447,19 @@ const httpGet = (party: Party, path: string) =>
 
 /** The HTTP routes that act on a user's data (ARCHITECTURE.md §11.4), probed the same way. */
 const routes: Record<string, Probe> = {
+  "GET /media/external": (actor, owner) =>
+    Effect.gen(function* () {
+      const port = actor.port
+      for (const scope of [{ chat: owner.chat.chatId }, { card: owner.cardId }]) {
+        const response = yield* Effect.promise(() =>
+          fetch(
+            `http://127.0.0.1:${port}/media/external?${new URLSearchParams({ url: "https://media.invalid/a.png", ...scope })}`,
+            { headers: { cookie: actor.cookie, "sec-fetch-site": "same-origin" } }
+          )
+        )
+        assert.strictEqual(response.status, 404)
+      }
+    }),
   "POST /library/import": (actor, owner) =>
     Effect.gen(function* () {
       const into = yield* http(
@@ -3835,6 +3999,14 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  CheckExternalMedia: (reader, actor, owner) =>
+    Effect.all([
+      refused(
+        reader.CheckExternalMedia({ userId: actor.user.id, chatId: owner.chat.chatId, cardId: null }),
+        "NotFound"
+      ),
+      refused(reader.CheckExternalMedia({ userId: actor.user.id, chatId: null, cardId: owner.cardId }), "NotFound")
+    ]).pipe(Effect.asVoid),
   AddCardAsset: (_reader, actor, owner, writer) =>
     refused(
       writer.AddCardAsset({
@@ -4260,6 +4432,13 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  ListRolloutEffects: (reader, actor, owner) =>
+    refused(reader.ListRolloutEffects({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
+  RolloutToolReceipt: (reader, actor, owner) =>
+    refused(
+      reader.RolloutToolReceipt({ userId: actor.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "call_1" }),
+      "NotFound"
+    ),
   RolloutReceipt: (reader, actor, owner) =>
     Effect.gen(function* () {
       yield* refused(
@@ -4278,6 +4457,17 @@ const storage: Record<
         toolCallId: "call_1",
         events: [],
         result: "Done."
+      }),
+      "NotFound"
+    ),
+  PostRolloutMessage: (_reader, actor, owner, writer) =>
+    refused(
+      writer.PostRolloutMessage({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        versionId: owner.chat.generatingId,
+        toolCallId: "foreign-send",
+        content: "Must not post."
       }),
       "NotFound"
     ),

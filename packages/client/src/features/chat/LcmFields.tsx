@@ -459,6 +459,35 @@ export function LcmFields({
         write={write}
         disabled={disabled}
       />
+      <Fieldset legend="Written as">
+        <Segmented
+          label="Written as"
+          wrap
+          value={resolved.style}
+          onValueChange={(style) => void choose({ style })}
+          options={[
+            {
+              value: "direct",
+              label: "A reply",
+              description: "The model's reply is the summary. Works with every model."
+            },
+            {
+              value: "tool",
+              label: "With tools",
+              description: "The model writes the summary through a tool. Needs a model that can call tools."
+            }
+          ]}
+        />
+        <Origin
+          scope={scope}
+          from={resolved.from.style ?? "builtin"}
+          same={resolved.style === (fallback.style ?? LCM_BUILTIN.style)}
+          fallback={(fallback.style ?? LCM_BUILTIN.style) === "tool" ? "with tools" : "a reply"}
+          disabled={disabled}
+          onReset={() => void choose({ style: null })}
+        />
+        {errorFor("style") && <p className="text-sm text-danger">{errorFor("style")}</p>}
+      </Fieldset>
       <Fieldset legend="When it runs">
         <RadioGroup<LcmWhen>
           value={resolved.when}

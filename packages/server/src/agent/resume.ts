@@ -4,7 +4,14 @@
 // failed tail, plus the interruption policies and editing a step first. Pure: the API reads the
 // transcript and writes the new version; the agent session runs what this keeps.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai"
+import {
+  validateToolArguments,
+  type AssistantMessage,
+  type Tool,
+  type ToolCall,
+  type ToolResultMessage
+} from "@earendil-works/pi-ai"
+import { isDeepStrictEqual } from "node:util"
 import { placedSteps } from "./steps.ts"
 import type { FrozenTool } from "./tools.ts"
 
@@ -57,10 +64,13 @@ const isFailedTurn = (m: AgentMessage) =>
 const isInterruptedResult = (m: AgentMessage) =>
   m.role === "toolResult" && (m.details as { interrupted?: unknown } | null | undefined)?.interrupted === true
 
-const callsOf = (messages: ReadonlyArray<AgentMessage>) =>
-  messages.flatMap((m) =>
-    m.role === "assistant" ? m.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])) : []
+const callsOf = (messages: ReadonlyArray<AgentMessage>) => [
+  ...new Set(
+    messages.flatMap((m) =>
+      m.role === "assistant" ? m.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])) : []
+    )
   )
+]
 
 /** The last assistant turn's tool calls that no result answers: what a resume runs first. */
 export const danglingCalls = (messages: ReadonlyArray<AgentMessage>) => {
@@ -82,7 +92,10 @@ const fresh = (cut: ReadonlyArray<AgentMessage>): ResumePlan => ({
  * Resume a stopped, failed or interrupted run (§4.2). `prefill`: the model takes the start of
  * its reply (`ModelInput.prefill` is `assistant`), so text cut off can be carried on.
  */
-export const planResume = (json: string | null, options: { readonly prefill: boolean }): ResumePlan => {
+export const planResume = (
+  json: string | null,
+  options: { readonly prefill: boolean; readonly historical?: number }
+): ResumePlan => {
   const messages = parse(json)
   if (messages === null) return fresh([])
   const kept = messages.slice()
@@ -116,7 +129,7 @@ export const planResume = (json: string | null, options: { readonly prefill: boo
     transcript: kept,
     ...(continuation === undefined ? {} : { continuation }),
     cut,
-    keptCalls: callsOf(kept)
+    keptCalls: callsOf(kept.slice(options.historical ?? 0))
   }
 }
 
@@ -139,19 +152,25 @@ export const planStepResume = (
   tools: ReadonlyArray<FrozenTool>,
   step: number,
   edit: StepEdit | undefined,
-  newCallId: string
+  newCallId: string,
+  versionId?: string,
+  historical = 0
 ): ResumePlan | StepNotResumable => {
   const messages = parse(json)
   if (messages === null) return new StepNotResumable("This reply has no steps to resume from.")
-  const placed = placedSteps(messages, tools, true)[step]
+  const placed = placedSteps(messages, tools, true, versionId)[step]
   if (placed === undefined) return new StepNotResumable("That step isn't in this reply.")
   const at = placed.message
   const turn = messages[at] as AssistantMessage
   const part = turn.content[placed.part]!
+  const nextTurn = messages.findIndex((m, i) => i > at && m.role === "assistant")
   const resultsAfter = (upTo: (id: string) => boolean) =>
-    messages.slice(at + 1).filter((m): m is ToolResultMessage => m.role === "toolResult" && upTo(m.toolCallId))
+    messages
+      .slice(at + 1, nextTurn < 0 ? undefined : nextTurn)
+      .filter((m): m is ToolResultMessage => m.role === "toolResult" && upTo(m.toolCallId))
   const calls = turn.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : []))
   let kept: Array<AgentMessage>
+  let replayedCalls: ReadonlySet<string> = new Set()
   if (placed.step.kind !== "tool") {
     if (edit !== undefined && edit.kind !== "text") return new StepNotResumable("Only text can replace this step.")
     const content = turn.content.map((p, i) => {
@@ -171,6 +190,19 @@ export const planStepResume = (
     const index = calls.indexOf(part.id)
     const before = new Set(calls.slice(0, index))
     if (edit?.kind === "arguments") {
+      const tool = tools.find((t) => t.name === part.name)
+      if (tool === undefined) return new StepNotResumable("That tool wasn't offered to this reply.")
+      try {
+        const validated: unknown = validateToolArguments(
+          { name: tool.name, description: tool.description, parameters: tool.parameters as Tool["parameters"] },
+          { ...part, arguments: edit.arguments as ToolCall["arguments"] }
+        )
+        // Human edits must fit as written; provider argument coercion must not silently change them.
+        if (!isDeepStrictEqual(validated, edit.arguments))
+          return new StepNotResumable("The arguments don't fit this tool's parameters.")
+      } catch {
+        return new StepNotResumable("The arguments don't fit this tool's parameters.")
+      }
       // The call runs again with the new arguments, under a new id; later calls of the turn go.
       const content = turn.content
         .slice(0, placed.part + 1)
@@ -189,12 +221,50 @@ export const planStepResume = (
       if (!results.some((m) => m.toolCallId === part.id))
         return new StepNotResumable("That tool call has no result to carry on from.")
       kept = [...messages.slice(0, at), turn, ...results]
+      // Later calls remain in the assistant turn to be run again. Their old results,
+      // receipts and effects belong to the cut tail, even though their call ids are retained.
+      replayedCalls = new Set(calls.slice(index + 1))
     } else return new StepNotResumable("A tool call takes new arguments or a new result.")
   }
   return {
     policy: danglingCalls(kept).length > 0 ? "rerun" : "continue",
     transcript: kept,
     cut: messages.slice(at),
-    keptCalls: callsOf(kept).filter((id) => id !== newCallId)
+    keptCalls: callsOf(kept.slice(historical)).filter((id) => id !== newCallId && !replayedCalls.has(id))
   }
+}
+
+/** A several-message swipe replays the request that wrote this message, retaining all
+ * earlier sends. Final text has no send boundary, so only its last assistant turn is cut. */
+export const planMessageResume = (
+  json: string | null,
+  versionId: string,
+  historical = 0
+): ResumePlan | StepNotResumable => {
+  const messages = parse(json)
+  if (!messages) return new StepNotResumable("This message has no saved run to carry on.")
+  const resultIndex = messages.findIndex(
+    (m) => m.role === "toolResult" && (m.details as { versionId?: string } | null)?.versionId === versionId
+  )
+  const result = messages[resultIndex]
+  const callId = result?.role === "toolResult" ? result.toolCallId : undefined
+  const at = callId
+    ? messages
+        .slice(0, resultIndex)
+        .findLastIndex((m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && p.id === callId))
+    : messages.findLastIndex((m) => m.role === "assistant")
+  if (at < 0) return new StepNotResumable("This message has no saved turn to write again.")
+  const kept = messages.slice(0, at)
+  const turn = messages[at]
+  if (callId && turn?.role === "assistant") {
+    const part = turn.content.findIndex((p) => p.type === "toolCall" && p.id === callId)
+    const content = turn.content.slice(0, part)
+    const calls = new Set(content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])))
+    if (calls.size)
+      kept.push(
+        { ...turn, content },
+        ...messages.slice(at + 1, resultIndex).filter((m) => m.role === "toolResult" && calls.has(m.toolCallId))
+      )
+  }
+  return { policy: "continue", transcript: kept, cut: messages.slice(at), keptCalls: callsOf(kept.slice(historical)) }
 }

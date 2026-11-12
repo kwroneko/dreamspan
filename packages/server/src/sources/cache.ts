@@ -14,7 +14,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, unlink, utimes, writeFile }
 import { join } from "node:path"
 import { Effect } from "effect"
 
-type CacheKind = "page" | "caps" | "tags" | "card" | "image"
+type CacheKind = "page" | "caps" | "tags" | "card" | "image" | "response"
 
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -24,7 +24,8 @@ const LIFETIMES: Record<CacheKind, { readonly ms: number; readonly from: "create
   caps: { ms: DAY, from: "created" },
   tags: { ms: DAY, from: "created" },
   card: { ms: 7 * DAY, from: "used" },
-  image: { ms: 7 * DAY, from: "used" }
+  image: { ms: 7 * DAY, from: "used" },
+  response: { ms: 30 * DAY, from: "used" }
 }
 export const DEFAULT_CAP_BYTES = 1024 ** 3
 
@@ -268,6 +269,7 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
     get,
     put,
     readBlob,
+    remove: (key: CacheKey) => Effect.promise(() => drop(keyString(key))),
     noteDerivative,
     pin,
     clearUser,

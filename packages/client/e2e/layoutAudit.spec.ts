@@ -1,3 +1,8 @@
+import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
+import { workshopChatTests } from "./support/workshopChat.ts"
+import { googleConnectionTests } from "./support/googleConnection.ts"
+import { agentResumeTests } from "./support/agentResumeFlows.ts"
+import { cardexCriteriaTests } from "./support/cardexCriteria.ts"
 import { exercisePhoneFooters } from "./support/phoneFooters.ts"
 import { newflowTests } from "./support/newflows.ts"
 import { seedSplitChats } from "./support/splitChats.ts"
@@ -31,7 +36,13 @@ import { modelCatalog } from "./support/modelCatalog.ts"
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
+if (process.env.LAYOUT_AUDIT_CARDEX_ONLY === "1") cardexCriteriaTests()
 if (process.env.LAYOUT_AUDIT_NEWFLOWS_ONLY === "1") newflowTests()
+if (process.env.LAYOUT_AUDIT_WORKSHOP_ONLY === "1") {
+  workshopBoundaryTests()
+  workshopChatTests()
+}
+if (process.env.LAYOUT_AUDIT_RESUME_ONLY === "1") agentResumeTests()
 
 test.describe("model picker catalog layout", () => {
   let server: TestServer
@@ -863,6 +874,20 @@ test.describe("synthetic library and every app surface", () => {
             await audit(`dialog-picture-${tab.toLowerCase()}`, '[role="dialog"]')
             await dialog.screenshot({ path: join(work, `${width}-${theme}-${tab.toLowerCase()}.png`) })
           }
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_HTML_MESSAGES_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          await openPanel(page, "This chat")
+          await audit("html-chat-settings", '[role="tabpanel"][aria-label="This chat"]')
+          await openPanel(page, "Interface")
+          await audit("html-interface", '[role="tabpanel"][aria-label="Interface"]')
+          await openPanel(page, cardName)
+          await page.getByRole("tab", { name: "Extra", exact: true }).click()
+          await audit("html-card-panel", '[data-card-tabs] [role="tabpanel"]')
+          await page.goto(`${server.url}/library/${cardRef}`)
+          await page.getByRole("tab", { name: "Extra", exact: true }).click()
+          await audit("html-card-editor")
           return
         }
         if (process.env.LAYOUT_AUDIT_INTERFACE_ONLY === "1") {
@@ -2733,3 +2758,54 @@ for (const width of [1440, 390])
         await local.stop()
       }
     })
+
+// Focus with --grep "Google connection"; the same surfaces as the provider gate.
+test.describe("Google connection layout", googleConnectionTests)
+
+// Focused audit for the two new text-search surfaces; no large import is needed.
+test.describe("text search review layout", () => {
+  let local: TestServer
+  test.beforeAll(async () => {
+    local = await startServer(withAdmin)
+    const cookie = await loginCookie(local, ADMIN.handle, ADMIN.password)
+    await withCookie(local, cookie, (api) =>
+      Effect.gen(function* () {
+        yield* api.CreateCard({
+          label: "Lighthouse keeper",
+          name: "Lighthouse keeper",
+          description: "The lighthouse is lit."
+        })
+        const chat = yield* api.CreateChat({ title: "Harbour nights" })
+        yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: null,
+          branch: false,
+          content: "The lighthouse is lit.",
+          reply: false
+        })
+      })
+    )
+  })
+  test.afterAll(async () => {
+    await local?.stop()
+  })
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const)
+      test(`${width} ${theme}`, async ({ page }, info) => {
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+        await apiLogin(page.request, local, ADMIN.handle, ADMIN.password)
+        await page.goto(`${local.url}/?side=chats&sideIn=messages&sideQ=lighthouse`)
+        if (width === 390) await page.getByRole("button", { name: "Chats and menu", exact: true }).click()
+        await expect(page.locator("[data-message-hit]:visible")).toHaveCount(1)
+        await expectLayout(page, info, `message-search-review-${width}-${theme}`, {
+          scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
+        })
+        await page.goto(`${local.url}/library?replace=open&find=lighthouse`)
+        const panel = page.getByRole("region", { name: "Search and replace across the library" })
+        await panel.getByRole("textbox", { name: "Replace with", exact: true }).fill("beacon")
+        await panel.getByRole("button", { name: "Find", exact: true }).click()
+        await expect(panel.locator("[data-library-hit]")).toHaveCount(1)
+        await expectLayout(page, info, `library-search-review-${width}-${theme}`, { scope: "main" })
+      })
+})

@@ -27,7 +27,8 @@ import {
   type SourceInfo,
   type SourcePage,
   type SourcePrefs,
-  type SourceQuery
+  type SourceQuery,
+  type SourceSuggestions
 } from "@rp/shared/cardSources.ts"
 import { CastCard, type EntityId } from "@rp/shared/chat.ts"
 import { CardForChat } from "@rp/shared/chatSetupApi.ts"
@@ -52,6 +53,7 @@ import { Secrets } from "../secrets.ts"
 import type { AdapterSummary, CardSourceAdapter, SourceHttp } from "./adapter.ts"
 import { blobPath, DEFAULT_CAP_BYTES, makeSourceCache, type SourceCache } from "./cache.ts"
 import { makeSourceHttp } from "./guard.ts"
+import { withConditionalGets } from "./httpCache.ts"
 import { makeCoalescer, makeLimiter } from "./limiter.ts"
 
 const ADMIN_KEY = "sources.admin"
@@ -115,6 +117,13 @@ export interface CardSourcesShape {
     ReadonlyArray<{ tag: string; label?: string; count?: number }>,
     SourceFailed | NotFound | ServerError
   >
+  readonly suggestions: (
+    user: User,
+    sourceId: string,
+    kind: "tags" | "creators",
+    prefix: string,
+    page: string | null
+  ) => Effect.Effect<SourceSuggestions, SourceFailed | NotFound | ServerError>
   readonly card: (
     user: User,
     sourceId: string,
@@ -327,12 +336,13 @@ const make = (options: CardSourcesOptions = {}) =>
     const httpFor = (user: User, adapter: CardSourceAdapter, prefs: SourcePrefs) =>
       Effect.gen(function* () {
         yield* refreshBypass
-        return makeSourceHttp(adapter, yield* apiKey(user, adapter, prefs), {
+        const http = makeSourceHttp(adapter, yield* apiKey(user, adapter, prefs), {
           network,
           limiter,
           bypassEntries: () => bypass.entries,
           ...(options.onRequest ? { onRequest: options.onRequest } : {})
         })
+        return withConditionalGets(http, cache, user.id, adapter.id)
       })
 
     /** Asks the source once for everyone waiting on the same thing (two tabs, home and the sidebar). */
@@ -381,15 +391,16 @@ const make = (options: CardSourcesOptions = {}) =>
       sourceId: string,
       kind: "page" | "caps" | "tags",
       id: string,
-      run: (http: SourceHttp) => Effect.Effect<A, SourceFailed>
+      run: (http: SourceHttp) => Effect.Effect<A, SourceFailed>,
+      keep: (value: A) => boolean = () => true
     ) =>
       Effect.gen(function* () {
         yield* usable(user, sourceId)
         const key = cacheKey(user, sourceId, kind, id)
         const hit = yield* cache.get(key)
-        if (hit) return hit.value as A
+        if (hit && keep(hit.value as A)) return hit.value as A
         const value = yield* ask(user, sourceId, `${kind}:${id}`, run)
-        yield* cache.put(key, { value })
+        if (keep(value)) yield* cache.put(key, { value })
         return value
       })
 
@@ -426,6 +437,26 @@ const make = (options: CardSourcesOptions = {}) =>
       Effect.gen(function* () {
         const { bytes, ...file } = yield* cardBytes(user, sourceId, remoteId)
         const parsed = yield* formats.parse(bytes, file.fileName).pipe(Effect.catch(storage("reading the card")))
+        // JSON downloads (notably CHARX originals) have no embedded portrait. Fetch it
+        // while opening the card, through the same guarded image cache the browser uses,
+        // so adding the already-opened card retains its face without another request.
+        const image = file.summary.image
+        if (parsed.library?.kind === "card" && !parsed.media.some((m) => m.role === "avatar") && image) {
+          const portrait = yield* service
+            .image(user, sourceId, issue(user, sourceId, image)!, null)
+            .pipe(Effect.catch(() => Effect.succeed(null)))
+          if (portrait) {
+            const media = {
+              role: "avatar" as const,
+              uri: "ccdefault:",
+              bytes: portrait.bytes,
+              sha256: createHash("sha256").update(portrait.bytes).digest("hex"),
+              byteSize: portrait.bytes.byteLength,
+              ...describeImage(portrait.bytes)
+            }
+            return { ...file, parsed: { ...parsed, media: [...parsed.media, media] } }
+          }
+        }
         return { ...file, parsed }
       })
 
@@ -603,8 +634,14 @@ const make = (options: CardSourcesOptions = {}) =>
         Effect.gen(function* () {
           const adapter = yield* known(sourceId)
           let reported = false
-          const result = yield* cached(user, sourceId, "page", queryKey(query, page), (http) =>
-            adapter.search(http, query, page).pipe(Effect.tap(() => Effect.sync(() => void (reported = true))))
+          const result = yield* cached(
+            user,
+            sourceId,
+            "page",
+            queryKey(query, page),
+            (http) =>
+              adapter.search(http, query, page).pipe(Effect.tap(() => Effect.sync(() => void (reported = true)))),
+            (result) => result.notice === undefined
           )
           return {
             ...result,
@@ -623,6 +660,25 @@ const make = (options: CardSourcesOptions = {}) =>
           if (!suggest) return []
           return yield* cached(user, sourceId, "tags", prefix.trim().toLowerCase(), (http) =>
             suggest(http, prefix.trim())
+          )
+        }),
+      suggestions: (user, sourceId, kind, prefix, page) =>
+        Effect.gen(function* () {
+          const { adapter } = yield* usable(user, sourceId)
+          const suggest = adapter.suggestions
+          if (!suggest) {
+            const tags = kind === "tags" && page === null ? yield* service.tags(user, sourceId, prefix) : []
+            return {
+              items: tags.map((tag) => ({
+                value: tag.tag,
+                label: tag.label ?? tag.tag,
+                ...(tag.count === undefined ? {} : { count: tag.count })
+              })),
+              next: null
+            }
+          }
+          return yield* cached(user, sourceId, "tags", JSON.stringify([kind, prefix.trim(), page]), (http) =>
+            suggest(http, kind, prefix.trim(), page)
           )
         }),
       card: (user, sourceId, remoteId) =>

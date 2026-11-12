@@ -1,6 +1,7 @@
 // Library logic shared by the writer and the readers: ref rows, documents, and merge
 // planning (DATA-MODEL §3.2). Merge planning is pure given the three documents, so the
 // reader's preview and the writer's merge always agree.
+import { bookSourceName } from "@rp/shared/lorebookLink.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import {
@@ -56,6 +57,7 @@ export interface RefRow {
   readonly card_nickname: unknown
   /** A lorebook's entry count, from its head revision; null for other kinds. */
   readonly lorebook_entries?: number | null
+  readonly lorebook_source_path?: string | null
 }
 
 export const toLibraryRef = (row: RefRow) =>
@@ -76,6 +78,9 @@ export const toLibraryRef = (row: RefRow) =>
       : {}),
     ...(row.kind === "lorebook" && typeof row.lorebook_entries === "number"
       ? { lorebookEntries: row.lorebook_entries }
+      : {}),
+    ...(row.kind === "lorebook" && bookSourceName(row.lorebook_source_path)
+      ? { lorebookSource: bookSourceName(row.lorebook_source_path)! }
       : {}),
     headRevisionId: row.head_revision_id as RevisionId,
     hasImport: row.import_head !== null,
@@ -100,6 +105,14 @@ export const toLibraryRef = (row: RefRow) =>
 // parent's head, its base the parent revision it was forked from or last merged.
 const importHead = `(SELECT i.id FROM entity_revisions i WHERE i.entity_id = r.entity_id AND i.origin = 'import'
   ORDER BY i.seq DESC LIMIT 1)`
+/** The file a ref was imported from: its own, else the nearest fork ancestor's (alias `r` is the ref, `e` its entity). */
+export const refSourcePathSql = `coalesce(r.source_path, (
+          WITH RECURSIVE up(id, depth) AS (
+            SELECT e.forked_from_entity_id, 1 WHERE e.forked_from_entity_id IS NOT NULL
+            UNION SELECT a.forked_from_entity_id, up.depth + 1 FROM entities a JOIN up ON a.id = up.id
+              WHERE a.forked_from_entity_id IS NOT NULL)
+          SELECT u.source_path FROM up JOIN entity_refs u ON u.entity_id = up.id
+          WHERE u.source_path IS NOT NULL ORDER BY up.depth LIMIT 1))`
 const refSelect = `
   SELECT r.id, r.entity_id, e.kind, e.forked_from_entity_id AS parent_entity_id, r.label, r.subtitle, r.head_revision_id,
     coalesce(r.merge_base_revision_id, e.forked_from_revision_id) AS merge_base_revision_id, r.row_version, r.created_at, r.updated_at, e.archived_at, r.last_used_at,
@@ -113,6 +126,7 @@ const refSelect = `
     CASE WHEN e.kind = 'lorebook' THEN
       (SELECT json_array_length(h.doc_json, '$.entries') FROM entity_revisions h WHERE h.id = r.head_revision_id)
       ELSE NULL END AS lorebook_entries,
+    CASE WHEN e.kind = 'lorebook' THEN ${refSourcePathSql} ELSE NULL END AS lorebook_source_path,
     CASE WHEN e.kind = 'card' THEN
       (SELECT o.seen_version IS NOT NULL AND o.seen_version <> o.remote_version FROM card_origins o
         WHERE o.entity_id = r.entity_id)

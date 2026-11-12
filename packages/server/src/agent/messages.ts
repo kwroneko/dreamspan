@@ -1,0 +1,35 @@
+// Custom transcript messages are shared by the live loop and the pure resume/step helpers.
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
+import type { Message } from "@earendil-works/pi-ai"
+
+declare module "@earendil-works/pi-agent-core" {
+  interface CustomAgentMessages {
+    /** Stands for the frozen assembled request: everything the model is sent before its own turns. */
+    rpRequest: { readonly role: "rpRequest"; readonly timestamp: number }
+    rpUser: {
+      readonly role: "rpUser"
+      readonly message: import("../assembler/types.ts").RequestMessage
+      readonly timestamp: number
+    }
+    /** A message the app adds (the turn cap's "write now"), sent as the user's and labelled as the app's. */
+    rpHarness: { readonly role: "rpHarness"; readonly content: string; readonly timestamp: number }
+  }
+}
+
+/** The messages the model sees after the frozen request: its turns, tool results and the app's notes. */
+export const liveSuffix = (messages: ReadonlyArray<AgentMessage | Message>): Array<Message> => {
+  const start = messages.findIndex((m) => m.role === "rpRequest")
+  return messages.slice(start + 1).flatMap((m): Array<Message> => {
+    if (m.role === "rpUser")
+      return [
+        {
+          role: "user",
+          content: m.message.content + (m.message.images?.length ? " [image]" : ""),
+          timestamp: m.timestamp
+        }
+      ]
+    if (m.role === "rpHarness") return [{ role: "user", content: m.content, timestamp: m.timestamp }]
+    if (m.role === "assistant" || m.role === "toolResult" || m.role === "user") return [m]
+    return []
+  })
+}

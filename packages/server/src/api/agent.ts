@@ -1,3 +1,7 @@
+import { outsideEffect } from "../agent/effects.ts"
+import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
+type RetryModel = { readonly connection: ConnectionId; readonly model: ModelId }
+import type { ContextSnapshot, Generation } from "../assembler/types.ts"
 // The agent RPCs (@rp/shared/agentApi.ts). Storage checks the version or chat is the caller's.
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { foldState, permissionKey } from "@rp/shared/state.ts"
@@ -8,7 +12,7 @@ import type { EntityId, ForkId, VersionId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect, Option } from "effect"
-import { planResume, planStepResume, type ResumePlan, StepNotResumable } from "../agent/resume.ts"
+import { planResume, planStepResume, planMessageResume, type ResumePlan, StepNotResumable } from "../agent/resume.ts"
 import { countSteps } from "../agent/steps.ts"
 import { notesAt } from "../agent/tools/notes.ts"
 import type { FrozenTool } from "../agent/tools.ts"
@@ -22,21 +26,21 @@ import { internal } from "./internal.ts"
 /** What a resume needs of the stopped run's frozen snapshot. */
 interface Frozen {
   readonly inputs?: { readonly model?: { readonly prefill?: string } | null }
-  readonly agent?: { readonly tools?: ReadonlyArray<FrozenTool> }
+  readonly continuity?: { readonly historical?: number }
+  readonly agent?: { readonly tools?: ReadonlyArray<FrozenTool>; readonly contract?: string }
 }
 
-export const makeAgentHandlers = Effect.gen(function* () {
+const agentVersionResumer = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
   const hub = yield* ChatHub
   const generations = yield* Generations
   const generator = yield* Generator
-
   /**
    * A new version that carries on `versionId`'s run as `plan` keeps it (spec/AGENTIC.md §4.2):
    * written with its rollout in one transaction, then generated from the kept transcript.
    */
-  const resume = (
+  return (
     versionId: VersionId,
     forkId: ForkId | null,
     expectedRowVersion: number,
@@ -44,7 +48,8 @@ export const makeAgentHandlers = Effect.gen(function* () {
       material: { readonly status: string; readonly transcript: string | null },
       frozen: Frozen
     ) => ResumePlan | StepNotResumable,
-    reason: "resume" | "edit"
+    reason: "resume" | "edit",
+    options?: { readonly model?: RetryModel; readonly direction?: string }
   ) =>
     Effect.gen(function* () {
       if (Option.isNone(generator))
@@ -55,9 +60,52 @@ export const makeAgentHandlers = Effect.gen(function* () {
       if (material.mode === null) return yield* refuse("It wasn't written with tools.")
       if (material.versionStatus === "generating" || material.status === "running")
         return yield* refuse("It's still being written.")
-      const planned = plan(material, JSON.parse(material.snapshot) as Frozen)
+      let planned = plan(material, JSON.parse(material.snapshot) as Frozen)
       if (planned instanceof StepNotResumable) return yield* refuse(planned.message)
       const source = yield* reader.GetVersion({ userId, versionId })
+      let snapshot = material.snapshot
+      let chosen:
+        | {
+            connection: import("@rp/shared/providers.ts").ConnectionId
+            model: import("@rp/shared/providers.ts").ModelId
+          }
+        | undefined
+      if (options?.model) {
+        const assembled = yield* reader
+          .AssembleContext({
+            userId,
+            chatId: (yield* reader.GetSlot({ userId, slotId: source.slotId, forkId })).chatId,
+            slotId: source.slotId,
+            versionId: source.id,
+            forkId,
+            now: Date.now(),
+            timeZone: "UTC",
+            frozen: null,
+            model: options.model
+          })
+          .pipe(
+            Effect.catchTag("AssemblyFailed", (error) =>
+              Effect.fail(new GenerationUnavailable({ message: error.message }))
+            )
+          )
+        const model = (JSON.parse(assembled.generation) as Generation).model
+        if (!model) return yield* new GenerationUnavailable({ message: "The chosen model is unavailable." })
+        const frozen = JSON.parse(snapshot) as ContextSnapshot
+        snapshot = JSON.stringify({ ...frozen, inputs: { ...frozen.inputs, model } })
+        chosen = { connection: model.connectionId as never, model: model.modelId as never }
+      }
+      if (options?.direction !== undefined)
+        planned = {
+          ...planned,
+          transcript: [
+            ...planned.transcript,
+            {
+              role: "rpHarness",
+              content: `Direction for the next message (replaces the earlier direction): ${options.direction.trim() || "None."}`,
+              timestamp: Date.now()
+            }
+          ]
+        }
       const rolloutId = uuidv7()
       const added = yield* writer.StartResumedVersion({
         userId,
@@ -65,6 +113,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
         forkId,
         expectedRowVersion,
         rolloutId,
+        ...(chosen ? { model: chosen, snapshot } : {}),
         version: {
           speakerEntityId: source.speakerEntityId,
           writer: "model",
@@ -73,7 +122,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
           macroMode: "verbatim",
           origin: "resumed",
           sourceVersionId: source.id,
-          ...(source.direction ? { direction: source.direction } : {})
+          ...((options?.direction ?? source.direction) ? { direction: options?.direction ?? source.direction! } : {})
         },
         transcript: JSON.stringify(planned.transcript),
         steps: countSteps(planned.transcript),
@@ -91,13 +140,19 @@ export const makeAgentHandlers = Effect.gen(function* () {
         ...(planned.continuation === undefined ? {} : { initial: { text: planned.continuation, reasoning: "" } }),
         resume: {
           rolloutId,
-          snapshot: material.snapshot,
+          snapshot,
           transcript: planned.transcript,
           ...(planned.continuation === undefined ? {} : { continuation: planned.continuation })
         }
       })
       return entry
     }).pipe(Effect.uninterruptible)
+})
+
+export const makeAgentHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+
+  const resume = yield* agentVersionResumer
 
   const registry = yield* ExecutionRegistry
   return {
@@ -114,7 +169,10 @@ export const makeAgentHandlers = Effect.gen(function* () {
         (material, frozen) =>
           material.status === "completed"
             ? new StepNotResumable("It finished. Carry on from one of its steps instead.")
-            : planResume(material.transcript, { prefill: frozen.inputs?.model?.prefill === "assistant" }),
+            : planResume(material.transcript, {
+                prefill: frozen.inputs?.model?.prefill === "assistant",
+                historical: frozen.continuity?.historical ?? 0
+              }),
         "resume"
       ).pipe(internal("ResumeVersion")),
 
@@ -124,7 +182,15 @@ export const makeAgentHandlers = Effect.gen(function* () {
         forkId ?? null,
         expectedRowVersion,
         (material, frozen) =>
-          planStepResume(material.transcript, frozen.agent?.tools ?? [], step, edit as StepEdit | undefined, uuidv7()),
+          planStepResume(
+            material.transcript,
+            frozen.agent?.tools ?? [],
+            step,
+            edit as StepEdit | undefined,
+            uuidv7(),
+            versionId,
+            frozen.continuity?.historical ?? 0
+          ),
         "edit"
       ).pipe(internal("ResumeFromStep")),
     GetRunTranscript: ({ versionId }) =>
@@ -183,10 +249,11 @@ export const makeAgentHandlers = Effect.gen(function* () {
     // External tools are never offered in an RP reply.
     ListReplyTools: () =>
       Effect.sync(() => {
-        const tools = registry.rolloutTools.list().filter((tool) => tool.effect !== "external")
+        const tools = registry.rolloutTools.list().filter((tool) => !outsideEffect(tool.effect))
         const registered = new Set(tools.map((tool) => tool.id))
         const plan = registry.orchestrationModes.get("default")?.plan({
-          state: foldState([{ scope: null, data: { key: "agent.enabled", value: { on: true } } }])
+          state: foldState([{ scope: null, data: { key: "agent.enabled", value: { on: true } } }]),
+          kind: "rp"
         })
         return {
           defaultTools: (plan?.tools ?? []).filter((id) => registered.has(id)),
@@ -208,4 +275,28 @@ export const makeAgentHandlers = Effect.gen(function* () {
         })
       ).pipe(internal("ListActivity"))
   } satisfies Parameters<typeof AgentApi.of>[0]
+})
+
+/** Used by the existing Regenerate/swipe action. Other contracts keep fresh generation. */
+export const regenerateSeveral = Effect.fnUntraced(function* (input: {
+  readonly versionId: VersionId
+  readonly forkId: ForkId | null
+  readonly expectedRowVersion: number
+  readonly model?: RetryModel
+  readonly direction?: string
+}) {
+  const userId = (yield* CurrentUser).id
+  const reader = yield* Reader
+  const material = yield* reader.RolloutMaterial({ userId, versionId: input.versionId }).pipe(Effect.option)
+  if (material._tag === "None" || (JSON.parse(material.value.snapshot) as Frozen).agent?.contract !== "several")
+    return null
+  const resume = yield* agentVersionResumer
+  return yield* resume(
+    input.versionId,
+    input.forkId,
+    input.expectedRowVersion,
+    (stored, frozen) => planMessageResume(stored.transcript, input.versionId, frozen.continuity?.historical ?? 0),
+    "edit",
+    input
+  ).pipe(Effect.catchTag("NotResumable", (error) => Effect.fail(new GenerationUnavailable({ message: error.message }))))
 })

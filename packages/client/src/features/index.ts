@@ -31,6 +31,7 @@ import * as settings from "./settings/index.tsx"
 import * as shell from "./shell.tsx"
 import * as status from "./status.tsx"
 import * as workbench from "./workbench/index.tsx"
+import * as workshop from "./workshop/index.tsx"
 
 export const registerFeatures = () => {
   cardForks.register()
@@ -50,6 +51,7 @@ export const registerFeatures = () => {
   library.register()
   editor.register()
   chat.register()
+  workshop.register()
   noteOverrides.register()
   pickers.register()
   insertMessage.register()

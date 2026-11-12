@@ -1,15 +1,24 @@
+import { continuityEffectsReason, toRolloutEffect } from "./workshopEffects.ts"
+import { budgetTokens } from "@rp/shared/imageTokens.ts"
+import { WorkerAssembler } from "../assembler/assembler.ts"
+import { prepareTextTokens } from "../assembler/textTokens.ts"
+import { providerRequest } from "../assembler/wire.ts"
+import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
+import { liveSuffix } from "../agent/messages.ts"
+import { rolloutRequest } from "../agent/wire.ts"
+import type { Tool } from "@earendil-works/pi-ai"
 // Agent rollouts' reads (spec/AGENTIC.md §5): a version's steps, projected from its stored
 // transcript with the tools its snapshot froze, as the live display projects the running one;
 // the same transcript verbatim for the run inspector; and a chat's Activity, its model work
 // that made no message, from the usage ledger.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import type { ActivityCursor, ActivityRow, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
+import type { ActivityCursor, ActivityRow, CutSpan, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { stepsOf } from "../agent/steps.ts"
+import { type PlacedStep, placedSteps, stepsOf } from "../agent/steps.ts"
 import type { FrozenTool } from "../agent/tools.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { placedInsertions } from "./displayPath.ts"
@@ -33,41 +42,96 @@ const textOf = (content: unknown) =>
           .join("")
       : ""
 
-/** What the loop added after the frozen request, as the model saw it; the request's own marker left out. */
+/**
+ * What the loop added after the frozen request, as the model saw it; the request's own marker left
+ * out. `steps`: each step's place (`placedSteps`), so a part or result says which step it is
+ * (none for a cut span, whose steps aren't the version's). `requests`: the requests before these.
+ */
 const transcriptEntries = (
   messages: ReadonlyArray<AgentMessage>,
   tools: number,
-  turnCap: number
+  turnCap: number,
+  steps: ReadonlyArray<PlacedStep> = [],
+  requests = 0
 ): Array<TranscriptEntry> => {
-  let request = 0
-  return messages.flatMap((m): Array<TranscriptEntry> => {
-    if (m.role === "assistant")
+  let request = requests
+  const stepAt = new Map(steps.map((s, i) => [`${s.message}:${s.part}`, i]))
+  const callStep = new Map(
+    steps.flatMap((s, i) => (s.step.kind === "tool" ? [[`${s.message}:${s.step.id}`, i] as const] : []))
+  )
+  let assistantAt = -1
+  const index = (step: number | undefined) => (step === undefined ? {} : { step })
+  return messages.flatMap((m, at): Array<TranscriptEntry> => {
+    if (m.role === "assistant") {
+      assistantAt = at
       return [
         {
           role: "assistant",
-          parts: m.content.flatMap((p): Array<TurnPart> =>
-            p.type === "thinking"
-              ? [{ type: "thinking", text: p.thinking }]
+          parts: m.content.flatMap((p, part): Array<TurnPart> => {
+            const step = index(stepAt.get(`${at}:${part}`))
+            return p.type === "thinking"
+              ? [{ type: "thinking", text: p.thinking, ...step }]
               : p.type === "text"
-                ? [{ type: "text", text: p.text }]
+                ? [{ type: "text", text: p.text, ...step }]
                 : p.type === "toolCall"
-                  ? [{ type: "toolCall", id: p.id, name: p.name, args: p.arguments }]
+                  ? [{ type: "toolCall", id: p.id, name: p.name, args: p.arguments, ...step }]
                   : []
-          ),
+          }),
           stopReason: m.stopReason,
           toolsOffered: ++request < turnCap && tools > 0,
           ...(m.errorMessage ? { error: m.errorMessage } : {})
         }
       ]
+    }
     if (m.role === "toolResult")
       return [
-        { role: "toolResult", toolCallId: m.toolCallId, tool: m.toolName, text: textOf(m.content), isError: m.isError }
+        {
+          role: "toolResult",
+          toolCallId: m.toolCallId,
+          tool: m.toolName,
+          text: textOf(m.content),
+          isError: m.isError,
+          ...index(callStep.get(`${assistantAt}:${m.toolCallId}`))
+        }
       ]
+    if (m.role === "rpUser") {
+      request = 0
+      return [{ role: "app", text: m.message.content + (m.message.images?.length ? " [image]" : "") }]
+    }
     const other = m as { readonly role: string; readonly content?: unknown }
     if (other.role === "rpHarness" || other.role === "user") return [{ role: "app", text: textOf(other.content) }]
     return []
   })
 }
+
+/**
+ * The spans resuming dropped (`rollout_branches`), each placed where the kept transcript ends
+ * (`fork_index`, a message index) as an index into the entries.
+ */
+const cutSpans = (
+  messages: ReadonlyArray<AgentMessage>,
+  branches: ReadonlyArray<{ readonly reason: string; readonly fork_index: number; readonly messages_json: string }>,
+  tools: number,
+  turnCap: number
+): Array<CutSpan> =>
+  branches.flatMap((b) => {
+    if (b.reason !== "resume" && b.reason !== "edit") return []
+    const before = messages.slice(0, b.fork_index)
+    const requests = before.filter((m) => m.role === "assistant").length
+    return [
+      {
+        reason: b.reason,
+        at: transcriptEntries(before, tools, turnCap).length,
+        entries: transcriptEntries(
+          JSON.parse(b.messages_json) as ReadonlyArray<AgentMessage>,
+          tools,
+          turnCap,
+          [],
+          requests
+        )
+      }
+    ]
+  })
 
 /** A sum, or null when any row's count is unknown: unknown is never zero. */
 const known = (column: string) => `CASE WHEN count(${column}) = count(*) THEN sum(${column}) END`
@@ -111,7 +175,7 @@ const listActivity = (
         max(q.cost_currency) AS currency, max(q.usage_source = 'estimated') AS estimated,
         max(q.version_id) AS version_id
       FROM llm_requests q
-      WHERE q.chat_id = ? AND q.owner_user_id = ? AND q.purpose NOT IN ('generation', 'test')
+      WHERE q.chat_id = ? AND q.owner_user_id = ? AND q.purpose NOT IN ('generation', 'workshop', 'test')
       GROUP BY gid, q.purpose
       HAVING (min(q.started_at), gid, q.purpose) < (?, ?, ?)
       ORDER BY started DESC, gid DESC, kind DESC
@@ -165,6 +229,7 @@ const activityRow = (row: ActivitySqlRow): ActivityRow => ({
 export const makeAgentReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const lib = makeLibraryQueries(sql)
+  const assembler = yield* WorkerAssembler
   return {
     AgentCards: ({ userId, chatId, entityIds, bindings }) =>
       Effect.gen(function* () {
@@ -210,7 +275,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })
         if (!row.transcript) return []
         const tools = row.tools ? (JSON.parse(row.tools) as ReadonlyArray<FrozenTool>) : []
-        return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0)
+        return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0, versionId)
       }).pipe(query("RolloutSteps")),
 
     SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit, viewers }) =>
@@ -355,6 +420,32 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("LookupLore")),
 
+    ListRolloutEffects: ({ userId, chatId, before, limit }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{
+          id: string
+        }>`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const rows = yield* sql<
+          Parameters<typeof toRolloutEffect>[0]
+        >`SELECT e.* FROM rollout_effects e JOIN rollouts r ON r.id = e.rollout_id
+        WHERE r.chat_id = ${chatId} AND ${before ? sql`(e.created_at, e.rollout_id, e.tool_call_id, e.seq) < (${before.createdAt}, ${before.rolloutId}, ${before.toolCallId}, ${before.seq})` : sql`1`}
+        ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC LIMIT ${Math.max(1, Math.min(200, limit ?? 50))}`
+        return rows.map(toRolloutEffect)
+      }).pipe(query("ListRolloutEffects")),
+    RolloutToolReceipt: ({ userId, rolloutId, toolCallId }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{
+          result_json: string | null
+          is_error: number | null
+        }>`SELECT receipt.result_json, receipt.is_error
+        FROM rollouts r JOIN chats c ON c.id = r.chat_id LEFT JOIN rollout_receipts receipt ON receipt.rollout_id = r.id AND receipt.tool_call_id = ${toolCallId}
+        WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        if (!row) return yield* new NotFound({ entity: "rollout", id: rolloutId })
+        return row.result_json === null
+          ? null
+          : { text: JSON.parse(row.result_json) as string, isError: row.is_error === 1 }
+      }).pipe(query("RolloutToolReceipt")),
     RolloutReceipt: ({ userId, rolloutId, toolCallId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{ readonly result: string | null }>`
@@ -365,27 +456,67 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return row.result === null ? null : (JSON.parse(row.result) as string)
       }).pipe(query("RolloutReceipt")),
 
+    CountRolloutContext: ({ model, request, transcript, tools }) =>
+      Effect.gen(function* () {
+        const target = JSON.parse(model) as ModelInput
+        const count = yield* prepareTextTokens(assembler.textCounters.list(), target)
+        const definitions = JSON.parse(tools) as ReadonlyArray<FrozenTool>
+        const assembled = JSON.parse(request) as AssembledRequest
+        const history = JSON.parse(transcript) as Array<AgentMessage>
+        const images = [
+          ...assembled.messages.flatMap((m) => m.images ?? []),
+          ...history.flatMap((m) => (m.role === "rpUser" ? (m.message.images ?? []) : []))
+        ]
+        const imageTokens = images.reduce((n, image) => n + budgetTokens(image.estimate), 0)
+        const wire = rolloutRequest(
+          providerRequest(assembled, target),
+          target.api,
+          liveSuffix(history),
+          definitions as ReadonlyArray<Tool>,
+          { replayReasoning: true, reasoningTarget: target }
+        )
+        const messages =
+          target.api === "openai-completions"
+            ? wire.payload.messages
+            : wire.context.messages.map((m) => ({
+                role: m.role,
+                content: m.content,
+                ...(m.role === "toolResult" ? { toolCallId: m.toolCallId, isError: m.isError } : {})
+              }))
+        return (
+          imageTokens +
+          count(JSON.stringify(messages)) +
+          count(wire.context.systemPrompt ?? "") +
+          count(JSON.stringify(definitions))
+        )
+      }).pipe(query("CountRolloutContext")),
     RolloutMaterial: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{
           readonly rollout_id: string
           readonly status: string
           readonly version_status: string
+          readonly resumed: number
           readonly mode: string | null
           readonly snapshot: string | null
           readonly transcript: string | null
         }>`
           SELECT r.id AS rollout_id, r.status, v.status AS version_status, r.mode,
+            EXISTS (SELECT 1 FROM versions child WHERE child.rollout_id = r.id AND child.origin = 'resumed') AS resumed,
             p.context_snapshot_json AS snapshot, p.transcript_json AS transcript
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
-          WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind = 'generation'
+          WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind IN ('generation', 'workshop')
             AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!row || row.snapshot === null) return yield* new NotFound({ entity: "rollout", id: versionId })
         return {
           rolloutId: row.rollout_id,
           status: row.status,
           versionStatus: row.version_status,
+          resumed: !!row.resumed,
+          effectsReason: JSON.parse(row.snapshot).continuity
+            ? yield* continuityEffectsReason(sql, userId, row.rollout_id)
+            : null,
           mode: row.mode,
           snapshot: row.snapshot,
           transcript: row.transcript
@@ -397,30 +528,35 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly transcript: string | null
           readonly tools: string | null
           readonly turn_cap: number | null
+          readonly rollout_id: string
         }>`
           SELECT p.transcript_json AS transcript, json_extract(p.context_snapshot_json, '$.agent.tools') AS tools,
-            json_extract(p.context_snapshot_json, '$.agent.turnCap') AS turn_cap
+            json_extract(p.context_snapshot_json, '$.agent.turnCap') AS turn_cap, r.id AS rollout_id
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
             AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })
         const tools = row.tools ? (JSON.parse(row.tools) as ReadonlyArray<FrozenTool>) : []
+        const messages = row.transcript ? (JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>) : []
+        const turnCap = row.turn_cap ?? Number.MAX_SAFE_INTEGER
+        const branches = row.transcript
+          ? yield* sql<{ readonly reason: string; readonly fork_index: number; readonly messages_json: string }>`
+              SELECT reason, fork_index, messages_json FROM rollout_branches
+              WHERE rollout_id = ${row.rollout_id} ORDER BY branch_no`
+          : []
         return {
           tools: tools.map((t) => ({
             name: t.name,
             label: t.label,
             description: t.description,
             parameters: t.parameters,
+            ...(t.capability ? { capability: t.capability } : {}),
+            ...(t.titleField ? { titleField: t.titleField } : {}),
             effect: t.effect
           })),
-          entries: row.transcript
-            ? transcriptEntries(
-                JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>,
-                tools.length,
-                row.turn_cap ?? Number.MAX_SAFE_INTEGER
-              )
-            : []
+          entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true, versionId)),
+          cut: cutSpans(messages, branches, tools.length, turnCap)
         }
       }).pipe(query("RolloutTranscript")),
     ListActivity: ({ userId, chatId, before, limit }) =>

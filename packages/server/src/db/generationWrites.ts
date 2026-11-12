@@ -1,3 +1,5 @@
+import { makeExternalMediaWriteHandlers } from "./externalMedia.ts"
+import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { putUserSetting, writeSetting } from "./settings.ts"
 import { nextSeq, eventApplies } from "./forkState.ts"
 // Generation's writes: rollouts and the user's defaults (ARCHITECTURE §15).
@@ -89,6 +91,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
 
   const handlers = {
     ...(yield* makeDisplayPrefsWriteHandlers),
+    ...(yield* makeExternalMediaWriteHandlers),
     ...(yield* makeSourcePrefsWriteHandlers),
     ...(yield* makeTokenCountingWriteHandlers),
     StartRollout: ({
@@ -105,7 +108,9 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       mode,
       issues,
       variables,
-      frozenMessages
+      frozenMessages,
+      parentRolloutId,
+      transcript
     }) =>
       Effect.gen(function* () {
         const [version] = yield* sql<{ status: string; writer: string }>`
@@ -122,7 +127,8 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         // leaf, as a send's does.
         const [chat] = yield* sql<{
           current_fork_id: string | null
-        }>`SELECT current_fork_id FROM chats WHERE id = ${chatId}`
+          kind: string
+        }>`SELECT kind, current_fork_id FROM chats WHERE id = ${chatId}`
         const [named] =
           forkId == null
             ? []
@@ -131,15 +137,18 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         const fork =
           named ??
           (leafSlotId === null ? null : yield* forkThrough(sql, chatId, leafSlotId, chat?.current_fork_id ?? null))
+        const profile = chatKinds.get(chat!.kind)
+        if (!profile) return yield* new NotFound({ entity: "chat kind", id: chat!.kind })
         yield* sql`INSERT INTO rollouts ${sql.insert({
           id: rolloutId,
           chat_id: chatId,
           fork_id: fork?.id ?? chat?.current_fork_id ?? null,
-          kind: "generation",
+          kind: profile.rolloutKind,
           status: "running",
           slot_id: slotId,
           leaf_slot_id: leafSlotId,
           role: "narrator",
+          ...(parentRolloutId ? { parent_rollout_id: parentRolloutId } : {}),
           mode: mode ?? null,
           connection_id: connectionId,
           model_id: modelId,
@@ -149,7 +158,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           started_at: now,
           updated_at: now
         })}`
-        yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
+        yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot, ...(transcript ? { transcript_json: transcript } : {}) })}`
         yield* sql`INSERT INTO lore_activations (rollout_id, entries_json, message_offset)
           SELECT ${rolloutId}, coalesce(json_extract(${snapshot}, '$.loreTiming'), '[]'),
             CASE WHEN json_extract(${snapshot}, '$.inputs.type') = 'continue' THEN 1 ELSE 0 END`
@@ -248,7 +257,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
 
     InterruptRollouts: () =>
       sql`UPDATE rollouts SET status = 'interrupted', updated_at = ${Date.now()}
-          WHERE status IN ('created', 'running') AND kind IN ('generation', 'decision') RETURNING id`.pipe(
+          WHERE status IN ('created', 'running') AND kind IN ('generation', 'workshop', 'decision') RETURNING id`.pipe(
         Effect.map((rows) => ({ interrupted: rows.length })),
         transaction(sql, "InterruptRollouts")
       ),

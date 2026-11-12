@@ -28,7 +28,15 @@ import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
-import { branchOwned, type ChatState, foldState, noteSwitches, swappedCard } from "@rp/shared/state.ts"
+import {
+  branchOwned,
+  type ChatState,
+  DEFAULT_HTML_DEPTH,
+  foldState,
+  noteSwitches,
+  swappedCard
+} from "@rp/shared/state.ts"
+import { htmlDepthForm } from "./htmlDepth.ts"
 import { anyOf, noteCondition } from "@rp/shared/docs/note.ts"
 import { AWAY_ACTS_AS_MUTED, awayAt } from "@rp/shared/knowledge.ts"
 import { Effect, type Scope } from "effect"
@@ -400,7 +408,8 @@ const noteGateStage = sync("note-gate", (assembly) => {
 const modeOf = (state: ChatState): Mode => ({
   projection: state.rolesProjection ?? "by_writer",
   loreBelowHistory: state.loreBelowHistory ?? true,
-  cardsRotation: state.cardsRotation ?? false
+  cardsRotation: state.cardsRotation ?? false,
+  htmlDepth: state.htmlDepth ?? DEFAULT_HTML_DEPTH
 })
 
 const modeStage = sync("mode", (assembly) => {
@@ -964,7 +973,12 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
   for (const entry of presetOrder(doc.prompts, doc.order)) {
     const prompt = prompts.get(entry.identifier)
     // The end-of-request texts are sent by their own stage, never from the order (DESIGN §2.2).
-    if (!prompt || endOfRequestText(prompt.identifier)) continue
+    if (
+      !prompt ||
+      endOfRequestText(prompt.identifier) ||
+      (assembly.request.agent?.workshop && prompt.identifier === "workshopTurn")
+    )
+      continue
     const condition = conditionOf(prompt)
     const allowed = entry.enabled && triggersFor(prompt, type) && conditionHolds(assembly, condition)
     if (entry.identifier === "chatHistory") afterHistory = true
@@ -2519,7 +2533,7 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
       return text.text.trim() === "" ? [] : [text]
     })
     // An agent reply's instructions come last, so the prefix is the plain reply's (spec/AGENTIC.md §6).
-    const instructions = assembly.request.agent?.instructions.trim()
+    const instructions = assembly.request.agent?.workshop ? "" : assembly.request.agent?.instructions.trim()
     if (instructions)
       parts.push({
         text: instructions,
@@ -2534,6 +2548,27 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
       role: "user",
       content: parts.map((t) => t.text).join("\n"),
       pieces: parts.map((t) => t.piece),
+      kind: "volatile"
+    }
+  }
+})
+
+/** Workshop text has its own registered stage and inspector piece, after end-of-request. */
+const workshopInstructionsStage = sync("workshop-instructions", (assembly) => {
+  if (!assembly.request.agent?.workshop || assembly.request.summarizing) return
+  const previous = assembly.renderEndOfRequest
+  assembly.renderEndOfRequest = () => {
+    const end = previous?.()
+    const override = need(assembly, "preset").doc.prompts.find((p) => p.identifier === "workshopTurn")
+    const raw = override?.content ?? assembly.request.agent!.instructions
+    const env = need(assembly, "macros")
+    const piece = env.piece("workshop:instructions", { kind: "assembler", what: "Workshop instructions" }, raw)
+    const text = env.text(piece)
+    if (!text.trim()) return end
+    return {
+      role: "user",
+      content: [end?.content, text].filter(Boolean).join("\n"),
+      pieces: [...(end?.pieces ?? []), piece],
       kind: "volatile"
     }
   }
@@ -2739,6 +2774,40 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
     })
 })
 
+/**
+ * "HTML in older messages sent to the model" (`context.htmlDepth`, spec/HTML-MESSAGES.md §3.6):
+ * from depth N on, a message's text after its prompt scripts loses its HTML (`htmlDepthForm`).
+ * Its prefix stays cacheable as the scripts' does: a message that will change when it reaches
+ * depth N is volatile until then. As written (the default) changes nothing; nor does a summary
+ * request, which reads the messages as the scripts leave them.
+ */
+const htmlDepthStage = sync("context.htmlDepth", (assembly) => {
+  const { mode, n } = need(assembly, "mode").htmlDepth
+  if (mode === "as_written" || assembly.request.summaryJob) return
+  const projected = need(assembly, "projected")
+  const scripted = new Map(need(assembly, "scripted"))
+  const depthOf = (i: number) => projected.length - 1 - i
+  // Templates the history stage didn't run the scripts on run here, as lore scanning does.
+  const rest = projected.flatMap((p, i) => (scripted.get(p.entry.versionId)?.depth === depthOf(i) ? [] : [i]))
+  const ran = applyScripts(
+    assembly,
+    need(assembly, "scripts"),
+    rest.map((i) => ({
+      text: need(assembly, "macros").text(projected[i]!.piece),
+      placement: placementOf(projected[i]!.entry, need(assembly, "cast")),
+      depth: depthOf(i)
+    }))
+  )
+  rest.forEach((index, i) => scripted.set(projected[index]!.entry.versionId, { ...ran[i]!, depth: depthOf(index) }))
+  projected.forEach((p, i) => {
+    const read = scripted.get(p.entry.versionId)!
+    const form = htmlDepthForm(read.text, mode)
+    if (form === read.text) return
+    scripted.set(p.entry.versionId, depthOf(i) >= n ? { ...read, text: form } : { ...read, volatile: true })
+  })
+  assembly.scripted = scripted
+})
+
 const builtinStages: ReadonlyArray<AssemblerStage> = [
   pathStage,
   stateStage,
@@ -2766,6 +2835,31 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   historyStage,
   replySectionsStage,
   resolveStage,
+  sync("workshop-step-summaries", (assembly) => {
+    const summaries = assembly.request.agent?.stepSummaries
+    if (!summaries) return
+    const env = need(assembly, "macros")
+    const scripted = new Map(need(assembly, "scripted"))
+    assembly.resolved = need(assembly, "resolved").map(({ entry, piece }) => {
+      const line = summaries[entry.versionId]
+      if (!line) return { entry, piece }
+      const previous = scripted.get(entry.versionId)
+      if (previous) scripted.set(entry.versionId, { ...previous, text: `${previous.text}\n${line}` })
+      return {
+        entry,
+        piece: env.verbatim(
+          `workshop-steps:${entry.versionId}`,
+          {
+            kind: "message",
+            slot: entry.slotId,
+            version: entry.versionId
+          },
+          `${env.text(piece)}\n${line}`
+        )
+      }
+    })
+    assembly.scripted = scripted
+  }),
   imageTokensStage,
   rolesStage,
   mergeLayoutStage,
@@ -2774,7 +2868,9 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   replacementsStage,
   loreScanStage,
   loreActivationStage,
+  htmlDepthStage,
   endOfRequestStage,
+  workshopInstructionsStage,
   composeStage,
   messagesStage,
   breakpointsStage,

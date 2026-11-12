@@ -4,7 +4,12 @@ import { runInNewContext } from "node:vm"
 import { HistoryRejected, type HistorySearch } from "@rp/shared/historyApi.ts"
 import { Effect } from "effect"
 
-export const scanHistory = (texts: ReadonlyArray<string>, search: HistorySearch) =>
+/** `timeout`: milliseconds the scan of `texts` may take before it's refused. */
+export const scanHistory = (
+  texts: ReadonlyArray<string>,
+  search: Pick<HistorySearch, "pairs" | "matchCase" | "wholeWord" | "regex" | "preserveCase">,
+  timeout = 150
+) =>
   Effect.try({
     try: () =>
       runInNewContext(
@@ -73,7 +78,7 @@ export const scanHistory = (texts: ReadonlyArray<string>, search: HistorySearch)
     results
   `,
         { texts, search },
-        { timeout: 150 }
+        { timeout }
       ),
     catch: (error) => new HistoryRejected({ message: error instanceof Error ? error.message : String(error) })
   }) as Effect.Effect<

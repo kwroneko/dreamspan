@@ -59,20 +59,47 @@ export const separateContextOf = (sql: SqlClient.SqlClient, snapshot: ContextSna
       }
     }
     const who = (entity: string | null) => (entity === null ? null : (names.get(entity) ?? null))
-    const ids = unknownVersions(snapshot)
-    const rows = ids.length
-      ? yield* sql<{ readonly slot_id: string; readonly depth: number; readonly speaker_entity_id: string | null }>`
-          SELECT v.slot_id, s.depth, v.speaker_entity_id FROM versions v JOIN slots s ON s.id = v.slot_id
-          WHERE v.id IN ${sql.in(ids)} ORDER BY s.depth`
+    const entries = (snapshot.sources?.history ?? []).flatMap((pin) => pin.entries)
+    const byVersion = new Map(entries.map((entry) => [entry.versionId, entry]))
+    const merges = snapshot.inputs.viewer
+      ? [...new Map(entries.filter((entry) => entry.merge).map((entry) => [entry.merge!.id, entry])).values()]
       : []
+    const mergeVersions = new Set(merges.map((entry) => entry.versionId))
+    const ids = unknownVersions(snapshot).filter((id) => !mergeVersions.has(id))
+    const rows = ids.length
+      ? yield* sql<{
+          readonly id: string
+          readonly slot_id: string
+          readonly depth: number
+          readonly speaker_entity_id: string | null
+        }>`
+          SELECT v.id, v.slot_id, s.depth, v.speaker_entity_id FROM json_each(${JSON.stringify(ids)}) requested CROSS JOIN versions v ON v.id=requested.value CROSS JOIN slots s ON s.id = v.slot_id ORDER BY s.depth`
+      : []
+    const leftOut: Array<SeparateContext["leftOut"][number]> = rows.map((row) => ({
+      slotId: row.slot_id as SlotId,
+      number: (byVersion.get(row.id)?.depth ?? row.depth) + 1,
+      speaker: who(row.speaker_entity_id)
+    }))
+    const identities = snapshot.inputs.viewerAliases ?? (snapshot.inputs.viewer ? [snapshot.inputs.viewer] : [])
+    for (const entry of merges) {
+      const missed = yield* sql<{ ordinal: number; speaker_name: string }>`
+        SELECT mm.ordinal,mm.speaker_name FROM chat_merge_messages mm JOIN chat_merges m ON m.id=mm.merge_id
+        WHERE mm.merge_id=${entry.merge!.id} AND mm.included IN ('verbatim','left_out') AND NOT EXISTS (
+          SELECT 1 FROM json_each(coalesce(mm.knowers_json,(SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c WHERE c.value ->> 'from'<>'destination'))) k
+          WHERE k.value IN (SELECT value FROM json_each(${JSON.stringify(identities)}))) ORDER BY mm.ordinal`
+      for (const row of missed)
+        leftOut.push({
+          slotId: entry.slotId as SlotId,
+          number: entry.depth + 1,
+          speaker: row.speaker_name,
+          merged: { title: entry.merge!.title, ordinal: row.ordinal + 1 }
+        })
+    }
+    leftOut.sort((a, b) => a.number - b.number || (a.merged?.ordinal ?? 0) - (b.merged?.ordinal ?? 0))
     return {
       viewer: who(view.viewer) ?? "",
       narrator: view.narrator,
-      leftOut: rows.slice(0, LISTED).map((row) => ({
-        slotId: row.slot_id as SlotId,
-        number: row.depth + 1,
-        speaker: who(row.speaker_entity_id)
-      })),
-      more: Math.max(0, rows.length - LISTED)
+      leftOut: leftOut.slice(0, LISTED),
+      more: Math.max(0, leftOut.length - LISTED)
     } satisfies SeparateContext
   })

@@ -22,7 +22,7 @@ import { executionRegistry } from "../execution.ts"
 import { OUT_OF_TIME } from "@rp/shared/regexScripts.ts"
 import type { LiveRewrite } from "./liveRewrites.ts"
 import { Notices } from "./Notices.ts"
-import { type GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
+import { GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
 
 /** How often a generating version's text so far is saved. */
 const SAVE_EVERY_MS = 2000
@@ -33,7 +33,8 @@ const LIVE_PAUSE_MS = 100
 const LIVE_RETRIES = 5
 
 interface Running {
-  readonly request: GenerationRequest
+  request: GenerationRequest
+  several: boolean
   text: string
   /** The reasoning streamed so far (DESIGN §7.4), kept apart from the text. */
   reasoning: string
@@ -158,7 +159,7 @@ export class Generations extends Context.Service<
 
       const finish = (entry: Running, exit: Exit.Exit<void, GenerationFailed>) =>
         Effect.gen(function* () {
-          const { request } = entry
+          let { request } = entry
           let status: Version["status"] = "complete"
           let error: Version["error"] = null
           if (Exit.isFailure(exit)) {
@@ -223,6 +224,7 @@ export class Generations extends Context.Service<
               ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
               status,
               error,
+              ...(entry.several ? { discardEmpty: true } : {}),
               ...(written.rewrite ? { rewrite: written.rewrite } : {})
             })
           )
@@ -231,7 +233,10 @@ export class Generations extends Context.Service<
             return yield* Effect.logError(`saving generation ${request.versionId} failed`, saved.cause)
           const finished = saved.value
           entry.final = finished.version
-          hub.publish(request.chatId, { _tag: "Version", version: finished.version })
+          if (finished.removedSlotId)
+            request = { ...request, slotId: finished.version.slotId, versionId: finished.version.id }
+          if (finished.removedSlotId) hub.publish(request.chatId, { _tag: "Reload" })
+          else hub.publish(request.chatId, { _tag: "Version", version: finished.version })
           // A reply that ended on its own is news wherever the user is (DESIGN §10.1).
           if (status === "complete" || status === "failed") {
             notices.publish(request.userId, {
@@ -268,7 +273,7 @@ export class Generations extends Context.Service<
               userId: request.userId,
               chatId: request.chatId,
               leafSlotId: request.slotId,
-              ...(request.forkId === undefined ? {} : { forkId: request.forkId }),
+              ...(request.forkId === undefined ? {} : { forkId: request.forkId ?? null }),
               triggerVersionId: request.versionId
             })
           yield* continueQueue(request.userId, finished)
@@ -450,6 +455,74 @@ export class Generations extends Context.Service<
           .pipe(
             Stream.runForEach((chunk) =>
               Effect.suspend(() => {
+                if (typeof chunk === "object" && "several" in chunk) {
+                  entry.several = true
+                  return Effect.void
+                }
+                if (typeof chunk === "object" && "post" in chunk)
+                  return Effect.gen(function* () {
+                    // A live rewrite owns the old message until it finishes. No chunks of the
+                    // next message can arrive while send_message awaits this boundary.
+                    while (entry.pumping) yield* Effect.sleep(5)
+                    const { request } = entry
+                    const { content, replySections } = settled(entry)
+                    const written = yield* rewriteText(reader, {
+                      userId: request.userId,
+                      chatId: request.chatId,
+                      forkId: request.forkId,
+                      at: { slotId: request.slotId, versionId: request.versionId },
+                      edit: false,
+                      content,
+                      reasoning: entry.reasoning || undefined,
+                      sections: replySections
+                    })
+                    const next = yield* writer.PostRolloutMessage({
+                      userId: request.userId,
+                      rolloutId: chunk.post.rolloutId,
+                      versionId: request.versionId,
+                      toolCallId: chunk.post.toolCallId,
+                      content: written.content,
+                      ...(written.reasoning ? { reasoning: written.reasoning } : {}),
+                      ...(written.sections ? { replySections: written.sections } : {}),
+                      ...(written.rewrite ? { rewrite: written.rewrite } : {})
+                    })
+                    running.delete(request.versionId)
+                    entry.request = { ...request, slotId: next.slotId, versionId: next.versionId }
+                    running.set(next.versionId, entry)
+                    entry.text = ""
+                    entry.reasoning = ""
+                    entry.reasoned = false
+                    entry.sections = null
+                    entry.sectionsText = ""
+                    entry.held = null
+                    entry.steps = null
+                    entry.shown = { text: "", reasoning: "", sections: "" }
+                    entry.mode = liveRewrites.list().length > 0 ? "pending" : "direct"
+                    entry.dirty = false
+                    entry.savedAt = Date.now()
+                    const previous = yield* reader.GetSlot({
+                      userId: request.userId,
+                      slotId: request.slotId,
+                      forkId: request.forkId ?? null
+                    })
+                    hub.publish(request.chatId, { _tag: "Slot", entry: previous.entry })
+                    const working = yield* reader.GetSlot({
+                      userId: request.userId,
+                      slotId: next.slotId,
+                      forkId: request.forkId ?? null
+                    })
+                    hub.publish(request.chatId, { _tag: "Slot", entry: working.entry })
+                    const chat = yield* reader.GetChat({ userId: request.userId, chatId: request.chatId })
+                    hub.publish(request.chatId, { _tag: "Chat", chat })
+                    chunk.post.resolve(next)
+                  }).pipe(
+                    // Once the post commits, Stop must observe its new working version.
+                    Effect.uninterruptible,
+                    Effect.mapError(
+                      () => new GenerationFailed({ class: "server", message: "The server couldn't post the message." })
+                    ),
+                    Effect.tapCause((cause) => Effect.sync(() => chunk.post.reject(cause)))
+                  )
                 if (typeof chunk === "string") {
                   entry.text += chunk
                 } else if ("sections" in chunk) {
@@ -460,9 +533,16 @@ export class Generations extends Context.Service<
                   return Effect.void
                 } else if ("steps" in chunk) {
                   // Steps go to subscribers as they stand; the transcript is what keeps them.
-                  const { chatId, versionId } = entry.request
-                  entry.steps = chunk.steps
+                  const { chatId } = entry.request
+                  const versionId = chunk.versionId ?? entry.request.versionId
+                  if (versionId === entry.request.versionId) entry.steps = chunk.steps
                   hub.publish(chatId, { _tag: "Steps", versionId, steps: chunk.steps })
+                  if (versionId !== entry.request.versionId)
+                    return reader.GetVersion({ userId: entry.request.userId, versionId }).pipe(
+                      Effect.tap((version) => Effect.sync(() => hub.publish(chatId, { _tag: "Version", version }))),
+                      Effect.catch(() => Effect.void),
+                      Effect.asVoid
+                    )
                   return Effect.void
                 } else if ("restart" in chunk) {
                   // Back to where it began (a continuation's source text stays).
@@ -515,6 +595,7 @@ export class Generations extends Context.Service<
           if (Option.isNone(generator)) return yield* Effect.die(new Error("no generator: refuse before writing"))
           const entry: Running = {
             request,
+            several: false,
             // Continue starts from the text it continues: deltas go on from its end.
             text: request.initial?.text ?? "",
             reasoning: request.initial?.reasoning ?? "",

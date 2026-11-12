@@ -172,6 +172,11 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
   }) =>
     Effect.gen(function* () {
       const id = uuidv7()
+      const [chat] =
+        item.chatId === null
+          ? []
+          : yield* sql<{ kind: string }>`
+        SELECT kind FROM chats WHERE id = ${item.chatId} AND owner_user_id = ${item.userId}`
       yield* sql`INSERT INTO bin_items ${sql.insert({
         id,
         user_id: item.userId,
@@ -180,7 +185,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         chat_id: item.chatId,
         title: item.title,
         excerpt: excerpt(item.excerpt, 200),
-        origin_json: JSON.stringify(item.origin),
+        origin_json: JSON.stringify({ ...item.origin, ...(chat ? { chatKind: chat.kind } : {}) }),
         byte_size: item.byteSize,
         deleted_at: Date.now()
       })}`

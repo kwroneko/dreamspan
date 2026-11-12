@@ -155,6 +155,7 @@ for (const width of [1440, 390])
         .click()
       await expect.poll(async () => (await read()).contextPerSpeaker).toBe("separate")
       await expect(settings.getByText(/^Costs more: once a character misses part of the chat/)).toBeVisible()
+      await expect(settings.getByText(/Summaries also run once for each character/)).toBeVisible()
       await expectLayout(page, info, `contexts-setting-separate-${width}-${theme}`, {
         scope: '[role="tabpanel"][aria-label="This chat"]'
       })
@@ -438,6 +439,55 @@ for (const width of [1440, 390])
           )
         )
         .toBe("[{{char}} missed {{absentCount}} messages.]")
+    })
+  }
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`the inspector lists missed merged rows and keeps its branch at ${width} ${theme}`, async ({ page }, info) => {
+      await look(page, width, theme)
+      const destination = await threeCharacters(),
+        source = await threeCharacters(),
+        ids = await castIds()
+      await admin((api) =>
+        api.ChangeCast({
+          chatId: destination.chatId,
+          slotId: destination.slotId,
+          change: { _tag: "ContextPerSpeaker", view: "separate" }
+        })
+      )
+      await admin((api) =>
+        api.ChangeCast({
+          chatId: source.chatId,
+          slotId: source.slotId,
+          change: { _tag: "Away", entityId: ids.wren, away: true }
+        })
+      )
+      await reply(source.chatId, source.forkId!, ids.mira)
+      const request = {
+        chatId: destination.chatId,
+        forkId: destination.forkId!,
+        at: null,
+        source: { chatId: source.chatId, forkId: source.forkId! },
+        includeLeftOut: true
+      }
+      const preview = await admin((api) => api.PreviewChatMerge(request))
+      const merged = await admin((api) =>
+        api.MergeChat({ ...request, title: preview.sourceTitle, framing: null, digest: preview.digest })
+      )
+      const written = await reply(destination.chatId, destination.forkId!, ids.wren)
+      await page.goto(
+        `${server().url}/chats/${destination.chatId}/context/${written.version}?fork=${destination.forkId}`
+      )
+      const section = page.getByRole("region", { name: "Whose context" })
+      const missed = section.getByRole("link", { name: /^Merged message 2 from/ })
+      await expect(missed).toBeVisible()
+      await expect(missed).toHaveAttribute("href", new RegExp(`slot=${merged.entry.slotId}`))
+      await expect(missed).toHaveAttribute("href", new RegExp(`fork=${destination.forkId}`))
+      await expect(section.getByRole("link", { name: /^Merged message 1 from/ })).toHaveCount(0)
+      await expectLayout(page, info, `contexts-merged-inspector-${width}-${theme}`, {
+        scope: '[aria-label="Whose context"]'
+      })
     })
   }
 

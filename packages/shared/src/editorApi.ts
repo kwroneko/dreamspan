@@ -104,7 +104,11 @@ export class SharedNote extends Schema.Class<SharedNote>("SharedNote")({
 }) {}
 
 /** A label as the library shows it: one line, trimmed, not empty. */
-const Label = Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(200), Schema.isPattern(/^\P{Cc}*$/u))
+export const LibraryLabel = Schema.Trimmed.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(200),
+  Schema.isPattern(/^\P{Cc}*$/u)
+)
 const Subtitle = Schema.String.check(Schema.isMaxLength(200), Schema.isPattern(/^\P{Cc}*$/u))
 
 const Errors = [NotFound, ServerError] as const
@@ -195,20 +199,20 @@ export class EditorApi extends RpcGroup.make(
   }),
   /** An ordered prompt preset using the built-in document and safe override defaults. */
   Rpc.make("CreatePreset", {
-    payload: { label: Label },
+    payload: { label: LibraryLabel },
     success: LibraryRef,
-    error: Schema.Union([InvalidDocument, ServerError])
+    error: Schema.Union([NotFound, InvalidDocument, ServerError])
   }),
   /** An empty, named library lorebook. */
   Rpc.make("CreateLorebook", {
-    payload: { label: Label },
+    payload: { label: LibraryLabel },
     success: LibraryRef,
-    error: Schema.Union([InvalidDocument, ServerError])
+    error: Schema.Union([NotFound, InvalidDocument, ServerError])
   }),
   /** A card from scratch: an upstream with every field empty but its name. */
   Rpc.make("CreateCard", {
     payload: {
-      label: Label,
+      label: LibraryLabel,
       name: Schema.String,
       nickname: Schema.optionalKey(Schema.String),
       version: Schema.optionalKey(Schema.String),
@@ -216,7 +220,7 @@ export class EditorApi extends RpcGroup.make(
       persona: Schema.optionalKey(Schema.Boolean)
     },
     success: LibraryRef,
-    error: Schema.Union([InvalidDocument, ServerError])
+    error: Schema.Union([NotFound, InvalidDocument, ServerError])
   }),
   // --- Drafts. `field` is a path in the document (editing.ts).
   /**
@@ -326,7 +330,7 @@ export class EditorApi extends RpcGroup.make(
    * changes only by an explicit merge (spec/LIBRARY-FORKS.md), optionally taking its unsaved drafts along.
    */
   Rpc.make("ForkVariant", {
-    payload: { refId: RefId, label: Label, subtitle: Subtitle, moveDrafts: Schema.Boolean },
+    payload: { refId: RefId, label: LibraryLabel, subtitle: Subtitle, moveDrafts: Schema.Boolean },
     success: LibraryRef,
     error: Schema.Union([...Writes])
   }),
@@ -370,7 +374,7 @@ export class EditorApi extends RpcGroup.make(
     error: Schema.Union([...Writes])
   }),
   Rpc.make("RenameRef", {
-    payload: { refId: RefId, label: Label, subtitle: Subtitle, expectedRowVersion: Schema.Int },
+    payload: { refId: RefId, label: LibraryLabel, subtitle: Subtitle, expectedRowVersion: Schema.Int },
     success: LibraryRef,
     error: Schema.Union([...Writes])
   }),

@@ -28,6 +28,8 @@ import { type Write } from "./LcmFields.tsx"
 import { useShowPanel } from "./panels.tsx"
 import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import type { ChatSession } from "./session.ts"
+import { summarizes, useChatKindLook } from "./kindLooks.ts"
+import { KindBadge } from "./KindBadge.tsx"
 
 const link = "text-accent hover:underline"
 
@@ -181,7 +183,7 @@ export function ChatIdentity({ session }: { session: ChatSession }) {
         title={chatDisplayName(view)}
         className="line-clamp-2 text-lg leading-snug font-semibold [overflow-wrap:anywhere]"
       >
-        {chatDisplayName(view)}
+        {chatDisplayName(view)} <KindBadge kind={view.chat?.kind} />
       </h2>
       <div
         role="group"
@@ -216,6 +218,8 @@ export function SummariesSwitch({ session }: { session: ChatSession }) {
   const { view, settings, error, setError, reread } = useLcmSettings(session)
   const [enabling, setEnabling] = useState(false)
   const enabled = settings?.resolved.enabled ?? view.lcm?.enabled ?? false
+  // A kind whose summaries stay off (a workshop) has no switch to offer.
+  if (!summarizes(view.chat)) return null
   return (
     <section aria-label="Summaries" className="flex flex-col gap-2">
       <Switch
@@ -366,9 +370,12 @@ export function MergeLayoutSetting({ session }: { session: ChatSession }) {
 }
 
 export function ThisChatTab({ session }: { session: ChatSession; active: boolean }) {
+  // A kind leaves out the sections it doesn't use (kindLooks.ts): a workshop's tools aren't the story's.
+  const kind = useSyncExternalStore(session.subscribe, () => session.snapshot().chat?.kind)
+  const look = useChatKindLook(kind)
   return (
     <div className="flex flex-col gap-6">
-      <SlotOutlet slot={chatSettingSections} props={{ session }} />
+      <SlotOutlet slot={chatSettingSections} props={{ session }} except={look?.hides ?? []} />
     </div>
   )
 }

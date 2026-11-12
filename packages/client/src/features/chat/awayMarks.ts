@@ -95,6 +95,8 @@ class AwayRowsStore {
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener)
     if (this.listeners.size === 1) {
+      // State may have changed while no timeline was listening, without moving its leaf.
+      this.generation++
       this.unsubscribe = [
         this.session.subscribe(() => this.check()),
         // A state change (an Undo, a scene check's answer, the Cast tab) forgets positions.

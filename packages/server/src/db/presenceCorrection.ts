@@ -14,6 +14,10 @@ import { historyFork } from "./historyShared.ts"
 import { presenceJson } from "./participation.ts"
 import { stateEventRowsThrough } from "./stateRead.ts"
 
+/** Chat metadata drives point probes of recorded presence, without reading swipe prose. */
+export const presenceCandidatesFrom = `slots s CROSS JOIN versions v ON v.slot_id = s.id
+  CROSS JOIN version_texts t INDEXED BY version_texts_presence ON t.version_seq = v.seq`
+
 /** [P] Open owner question: correct every branch, or only the branch requesting Undo. */
 const UNDO_CORRECTS_EVERY_BRANCH: boolean = true
 
@@ -80,7 +84,7 @@ export const correctPresence =
       }>`
         SELECT v.id, v.seq, v.slot_id, s.chain_id, s.depth, v.source_version_id, v.fork_id,
           v.authoring_fork_id AS written_in, t.presence_json
-        FROM slots s JOIN versions v ON v.slot_id = s.id JOIN version_texts t ON t.version_seq = v.seq
+        FROM ${sql.literal(presenceCandidatesFrom)}
         WHERE s.chat_id = ${chatId} AND t.presence_json IS NOT NULL AND v.purged_at IS NULL
           AND (${UNDO_CORRECTS_EVERY_BRANCH ? 1 : 0} = 1 OR v.id = ${replacedIn(sql, forkId, originalSql("v"))})`
       const byFork = new Map<string, Array<(typeof candidates)[number]>>()

@@ -1,3 +1,4 @@
+import { ExternalMediaProvider } from "./externalMedia.tsx"
 import { Navigate } from "@tanstack/react-router"
 import { routes } from "../../routes.tsx"
 import { lazy } from "react"
@@ -59,6 +60,7 @@ export const registerDisplay = () => [
   displayTransforms.register({ id: "display.regex", order: 20, transform: regexDisplay }),
   ...builtinDisplayScriptLists.map((list) => displayScriptLists.register(list)),
   chatSurfaceProviders.register({ id: "display.context", order: 15, component: DisplayProvider }),
+  chatSurfaceProviders.register({ id: "display.external-media", order: 17, component: ExternalMediaProvider }),
   chatSurfaceProviders.register({ id: "display.html", order: 16, component: HtmlProvider }),
   chatPanels.register({
     id: "interface",

@@ -3,8 +3,16 @@ import { Link } from "@tanstack/react-router"
 import { lazy, Suspense } from "react"
 import { continueUnavailable, ContinueView, runContinue } from "./ContinueAction.tsx"
 import { copy } from "./copy.ts"
-import { invokeMessageAction, type MessageActionProps, messageActions, viewOf } from "./messageActions.tsx"
+import {
+  MessageActionDialog,
+  invokeMessageAction,
+  type MessageActionProps,
+  messageActions,
+  viewOf
+} from "./messageActions.tsx"
+import { chatOverlays } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
+import { mergesInto } from "./kindLooks.ts"
 
 /**
  * The fork the message is viewed in, for the inspector's links back into the chat. It isn't
@@ -31,6 +39,7 @@ const EDIT_KEYS = "Or double-click the message; ↑ in the empty composer edits 
  * came from, copy, delete. Pinned by default: Edit, Continue, Branch from here and Delete.
  */
 export const registerMessageActions = () => [
+  chatOverlays.register({ id: "chat.message-action-dialog", order: 10, component: MessageActionDialog }),
   messageActions.register({
     id: "message.edit",
     order: 10,
@@ -102,7 +111,8 @@ export const registerMessageActions = () => [
     id: "message.merge",
     order: 75,
     group: "place",
-    available: ({ entry }) => entry.version.origin !== "merge",
+    // Not in a kind that takes no merges (a workshop): the server refuses them there.
+    available: ({ entry, session }) => entry.version.origin !== "merge" && mergesInto(session.snapshot().chat),
     describe: viewOf(({ openDialog }) => ({
       label: "Merge a chat here…",
       icon: "merge",

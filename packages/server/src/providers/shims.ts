@@ -175,6 +175,46 @@ const withoutBreakpoints = (payload: Record<string, unknown>) => {
 /** The built-in shims, for what the live provider suite found (liveapi, 2026-11-07), and documented limits. */
 export const builtinShims: ReadonlyArray<CompatShim> = [
   {
+    // https://ai.google.dev/gemini-api/docs/thinking?generate-content=true
+    id: "google-gemini-2.5-pro-thinking-on",
+    label: "Thinking stays on: this model can’t turn it off.",
+    models: "Gemini 2.5 Pro",
+    providers: ["google"],
+    apis: ["google-generative-ai"],
+    model: /^(?:models\/)?gemini-2\.5-pro(?:-|$)/i,
+    capabilities: { thinkingLevels: { off: null } },
+    payload: (payload) => {
+      const thinking = object(object(payload.config)?.thinkingConfig)
+      if (thinking?.thinkingBudget === 0) thinking.thinkingBudget = 128
+      return payload
+    }
+  },
+  {
+    // These models are absent from pi-ai 1.0.3's catalog; never infer their prices.
+    id: "google-gemini-4-thinking-levels",
+    label: "Thinking stays on, with low, medium or high effort.",
+    models: "Gemini 4 Carbon and Argon",
+    providers: ["google"],
+    apis: ["google-generative-ai"],
+    model: /^(?:models\/)?gemini-4-(?:argon|carbon)(?:-|$)/i,
+    capabilities: {
+      reasoning: true,
+      vision: true,
+      thinkingLevels: { off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: null, max: null }
+    },
+    fixed: ["reasoning", "thinkingLevels"],
+    payload: (payload) => {
+      const thinking = object(object(payload.config)?.thinkingConfig)
+      // A saved raw override must not send Google's mutually exclusive controls.
+      if (thinking?.thinkingLevel !== undefined) delete thinking.thinkingBudget
+      else if (thinking?.thinkingBudget === 0) {
+        delete thinking.thinkingBudget
+        thinking.thinkingLevel = "LOW"
+      }
+      return payload
+    }
+  },
+  {
     // F7: "`top_p` is deprecated for this model."
     id: "claude-haiku-5-no-top-p",
     label: "Top P isn’t sent: this model refuses it.",

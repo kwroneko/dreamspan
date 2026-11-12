@@ -1,3 +1,4 @@
+import { useMediaPermit } from "./externalMedia.tsx"
 import { messageEditorTools, messageTextEditor } from "./editorHistory.tsx"
 // One message: who wrote it (avatar and name, with the registered message details: time and
 // model in the header, number, generation time and tokens under the portrait;
@@ -96,12 +97,19 @@ function BodyText({
   const fromTip = leafDepth === null ? null : Math.max(0, leafDepth - depth)
   // Its panels run their scripts once its sources allowed them (panelPermits.ts).
   const permit = usePanelPermit(version.speakerEntityId, placement)
+  const media = useMediaPermit(version.speakerEntityId, placement)
   // The permit is about the current sources: text a previous preset or card wrote, shown
   // while the display worker prepares the current text, runs no scripts under it.
   const current = shown.current
   const html = useMemo(
-    () => ({ key: version.slotId, streaming, fromTip, ...(permit ? { permit: current ? permit : OFF } : {}) }),
-    [version.slotId, streaming, fromTip, permit, current]
+    () => ({
+      key: version.slotId,
+      streaming,
+      fromTip,
+      media: current ? media : { ...media, scope: null, actions: [] },
+      ...(permit ? { permit: current ? permit : OFF } : {})
+    }),
+    [version.slotId, streaming, fromTip, media, permit, current]
   )
   return (
     <HtmlMessageContext value={html}>
@@ -425,6 +433,7 @@ function Branches({ entry, onBranch }: { entry: PathEntry; onBranch: (entry: Pat
       className="flex shrink-0 items-center rounded-md border border-border"
       role="group"
       aria-label={`Branches: ${entry.branchIndex + 1} of ${entry.branchCount}`}
+      data-layout-audit-ignore="inset: Joined branch controls share a single outer border"
     >
       <IconButton
         label="Previous branch"

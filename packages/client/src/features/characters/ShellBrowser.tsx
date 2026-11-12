@@ -1,4 +1,5 @@
 import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
+import { sidebarMessageResults, sidebarSearchTools, useMessageSearch } from "./MessageSearch.tsx"
 import { useSplitChats } from "../chat/splitChats.ts"
 import { requestSplitReveal, useSplitReveal } from "../chat/splitReveal.ts"
 import type { ChatBrowse } from "@rp/shared/chatBrowse.ts"
@@ -44,6 +45,8 @@ import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { WindowedList } from "../../ui/WindowedList.tsx"
+import { KindBadge } from "../chat/KindBadge.tsx"
+import { useChatKindLook } from "../chat/kindLooks.ts"
 import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
 import {
   CharacterGrid,
@@ -398,6 +401,7 @@ export function ForkRow({
   const besideHref = useRouter().buildLocation(forkLink(fork)).href
   const canBeside = useCanOpenBeside()
   const [menu, setMenu] = useState(false)
+  const kindBadge = useChatKindLook(fork.chat.kind)?.badge
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
@@ -429,7 +433,7 @@ export function ForkRow({
               {...forkLink(fork)}
               onClick={openOnPlainClick(open)}
               onDragStart={carryChat}
-              aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}`}
+              aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}${kindBadge ? `, ${kindBadge.label}` : ""}`}
               aria-current={here ? "page" : undefined}
               data-chat-id={fork.chat.id}
               data-fork-id={fork.forkId}
@@ -465,6 +469,8 @@ export function ForkRow({
                   className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]"
                 >
                   <span className="font-medium">{title}</span>
+                  {/* A workshop says so where it's named (spec/WORKSHOP.md §2.5). */}{" "}
+                  <KindBadge kind={fork.chat.kind} inLink />
                   {opensHere && (
                     <>
                       {" "}
@@ -820,6 +826,9 @@ function Browser({ data }: { data: ShellLibrary }) {
   const cardLabel = card ? card.card.label : "Character not found"
   const needle = search.trim().toLowerCase()
   const kind = scope.chat ? "chat" : scope.entity ? "character" : "all"
+  // The search looks through message text (MessageSearch.tsx): only in the list of all chats.
+  const [inMessages] = useMessageSearch()
+  const messages = inMessages && !grid && kind === "all"
   const sections = SECTIONS[kind]
   // Each list's length, by scope and search: another scope or search starts from its first page.
   const listKey = `${scope.entity}/${scope.chat}/${needle}/${JSON.stringify(chatBrowse)}`
@@ -836,7 +845,7 @@ function Browser({ data }: { data: ShellLibrary }) {
   const forks = useShellForks({
     entity: scope.entity,
     chat: scope.chat as ChatId | null,
-    search: needle,
+    search: messages ? "" : needle,
     sort: "recent",
     ...(!grid && kind !== "chat" ? { browse: chatBrowse } : {}),
     sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
@@ -893,13 +902,16 @@ function Browser({ data }: { data: ShellLibrary }) {
               onChange={(e) => sources.change({ text: e.currentTarget.value })}
             />
           ) : (
-            <Input
-              aria-label={grid ? "Find a character" : "Find a chat"}
-              placeholder="Find by name"
-              className="min-w-0"
-              value={search}
-              onChange={(e) => setSearch(e.currentTarget.value)}
-            />
+            <div className="flex min-w-0 items-center gap-1">
+              <Input
+                aria-label={grid ? "Find a character" : messages ? "Find in messages" : "Find a chat"}
+                placeholder={messages ? "Find in messages" : "Find by name"}
+                className="min-w-0 flex-1"
+                value={search}
+                onChange={(e) => setSearch(e.currentTarget.value)}
+              />
+              {kind === "all" && <SlotOutlet slot={sidebarSearchTools} props={{ grid }} />}
+            </div>
           )}
         </div>
       </div>
@@ -948,7 +960,7 @@ function Browser({ data }: { data: ShellLibrary }) {
           )}
         </nav>
       )}
-      {!grid && kind !== "chat" && (
+      {!grid && kind !== "chat" && !messages && (
         <SlotOutlet
           slot={sidebarChatBrowse}
           props={{ browse: chatBrowse, counts: forks.filterCounts, onChange: setChatBrowse }}
@@ -1011,6 +1023,10 @@ function Browser({ data }: { data: ShellLibrary }) {
               />
             </>
           )
+        ) : messages ? (
+          <div className="max-w-controls pt-2 pb-2">
+            <SlotOutlet slot={sidebarMessageResults} props={{ text: search }} />
+          </div>
         ) : (
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
           <div className="max-w-controls">

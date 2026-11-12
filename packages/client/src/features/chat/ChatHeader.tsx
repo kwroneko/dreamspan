@@ -1,4 +1,5 @@
 import { useSplitChats } from "./splitChats.ts"
+import { kindTitle } from "./kindLooks.ts"
 import { CenterHeader } from "../../ui/CenterHeader.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { chatBranchControls, chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
@@ -280,7 +281,7 @@ export function ChatHeader({
   const baseName = view.chat ? chatName(importState(view.chat.title).title, characters, view.chat.createdAt) : null
   const name =
     baseName && split && split.group.id !== split.group.chatId ? { ...baseName, name: split.group.title } : baseName
-  useTitle(name?.name ?? "Chat")
+  useTitle(kindTitle(name?.name ?? "Chat", view.chat?.kind))
   const loading = view.chat === null
   return (
     <ChatHeaderFrame

@@ -1,3 +1,5 @@
+import { makeExternalMediaReadHandlers } from "./externalMedia.ts"
+import type { ContinuousSnapshot } from "../agent/continuity.ts"
 import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { tokensOf } from "../assembler/st.ts"
 import { textDisplay } from "./textDisplay.ts"
@@ -57,6 +59,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const live = new Map<string, { readonly prepared: PreparedRewrite; used: number }>()
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
+    ...(yield* makeExternalMediaReadHandlers),
     ...(yield* makeSourcePrefsReadHandlers),
     ...(yield* makeCardOriginReadHandlers),
     ...(yield* makeTokenCountingReadHandlers),
@@ -121,7 +124,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
 
     RebuildContext: ({ userId, snapshot: json }) =>
       Effect.gen(function* () {
-        const taken = JSON.parse(json) as ContextSnapshot
+        const stored = JSON.parse(json) as ContinuousSnapshot
+        const taken = stored.continuity?.prefix ?? stored
         if ((taken.assemblerVersion ?? 0) !== ASSEMBLER_VERSION) {
           return {
             _tag: "EarlierAssemblerVersion" as const,
@@ -170,6 +174,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           _tag: "Rebuilt" as const,
           snapshot: JSON.stringify({
             ...rebuilt,
+            ...(stored.continuity?.prefix ? { ...stored, request: rebuilt.request } : {}),
             // Earlier snapshots predate frozen transform inputs; retain their original shape.
             ...(!taken.summaryAssembly && rebuilt.summaryAssembly ? { summaryAssembly: undefined } : {}),
             sources: sources.pins(),

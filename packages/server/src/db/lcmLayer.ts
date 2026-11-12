@@ -4,8 +4,9 @@ import type { Summary } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { readSummary, SummaryReads } from "./lcmReads.ts"
-import { audienceScope, firstUnknownDepth, inputsKnown } from "./lcmAudience.ts"
+import { audienceScope, firstUnknownPosition, inputsKnown } from "./lcmAudience.ts"
 import { viewAt } from "./forkState.ts"
+
 import {
   followsInDisplay,
   insertedOnPath,
@@ -232,7 +233,7 @@ export const selectSummaryLayer = (
     const found: Array<Summary> = []
     // A view (db/lcmAudience.ts): the shared summaries end before its first message it didn't know.
     const unknownFrom =
-      view === undefined || leaf === null ? null : yield* firstUnknownDepth(sql, chatId, leaf, view.identities)
+      view === undefined || leaf === null ? null : yield* firstUnknownPosition(sql, chatId, leaf, view.identities)
     const sharedEnds =
       unknownFrom === null
         ? null
@@ -240,9 +241,17 @@ export const selectSummaryLayer = (
             (yield* sql<{
               id: string
               depth: number
-            }>`SELECT s.id, b.depth FROM json_each(${JSON.stringify(candidates.map((c) => c.id))}) c
+              chain_id: string
+              slot: string
+            }>`SELECT s.id, b.depth, b.chain_id, b.id AS slot FROM json_each(${JSON.stringify(candidates.map((c) => c.id))}) c
               JOIN summaries s ON s.id = c.value JOIN slots b ON b.id = s.last_slot_id WHERE s.audience_json IS NULL`).map(
-              (row) => [row.id, row.depth] as const
+              (row) =>
+                [
+                  row.id,
+                  shown
+                    ? (positionIn(shown.pieces, { id: row.slot, chainId: row.chain_id, depth: row.depth }) ?? -1)
+                    : row.depth
+                ] as const
             )
           )
     for (const candidate of candidates) {

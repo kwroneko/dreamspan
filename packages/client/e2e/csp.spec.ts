@@ -132,6 +132,28 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   expect(violations).toEqual([])
 })
 
+// Every form of the app's handles its own submit; one that slipped past sanitizing (or a script's)
+// is refused by the browser before any request.
+test("no form submits natively", async ({ page }) => {
+  const violations = await watchViolations(page)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const response = await page.goto(`${server().url}/chats`)
+  expect(response!.headers()["content-security-policy"]).toContain("form-action 'none'")
+  const posts: string[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST") posts.push(request.url())
+  })
+  await page.evaluate(() => {
+    const form = document.createElement("form")
+    form.method = "post"
+    form.action = "/auth/logout"
+    document.body.append(form)
+    form.submit()
+  })
+  await expect.poll(() => violations.some((text) => text.includes("form-action"))).toBe(true)
+  expect(posts).toEqual([])
+})
+
 test("a message's panel runs in a frame with an opaque origin, under its own policy", async ({ page }) => {
   const violations = await watchViolations(page)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)

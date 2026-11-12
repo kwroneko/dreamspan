@@ -1,3 +1,5 @@
+import { ExternalMediaApi } from "./externalMedia.ts"
+import { WorkshopApi } from "./workshopApi.ts"
 import { SplitChatApi } from "./splitChat.ts"
 import { ChatContextsApi } from "./contextsApi.ts"
 import { ChatThreadsApi } from "./threadsApi.ts"
@@ -13,7 +15,7 @@ import { LcmApi, LcmSettingsInvalid, SummaryRequestApi } from "./lcm.ts"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 import { BinItem } from "./bin.ts"
-import { ChatApi, ChatEventsApi } from "./chatApi.ts"
+import { ChatApi, ChatEventsApi, MessageVersionApi } from "./chatApi.ts"
 import { AgentApi } from "./agentApi.ts"
 import { DecisionApi } from "./decisionApi.ts"
 import { ProviderListApi } from "./providerApi.ts"
@@ -24,6 +26,7 @@ import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
+import { TextSearchApi } from "./textSearchApi.ts"
 import { EditorApi, ForkMergeApi, GalleryApi, CardArchiveApi, PanelApprovalApi } from "./editorApi.ts"
 import { CardSourcesApi } from "./cardSources.ts"
 import {
@@ -413,6 +416,7 @@ export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authenticat
 export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authentication)
 
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
+export const AuthenticatedExternalMediaApi = ExternalMediaApi.middleware(Authentication)
 export const AuthenticatedPanelApprovalApi = PanelApprovalApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
@@ -431,29 +435,40 @@ export class AuthenticatedChatMergeApi extends ChatMergeApi.middleware(Authentic
 export class AuthenticatedChatEventsApi extends ChatEventsApi.middleware(Authentication) {}
 
 /** The agent RPCs (agentApi.ts). */
+export class AuthenticatedWorkshopApi extends WorkshopApi.middleware(Authentication) {}
+
 export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {}
 
 /** The decision-model settings RPCs (decisionApi.ts). */
 export class AuthenticatedDecisionApi extends DecisionApi.middleware(Authentication) {}
 
+/** Text search across chats (textSearchApi.ts). */
+export class AuthenticatedTextSearchApi extends TextSearchApi.middleware(Authentication) {}
+
 /** The providers a new connection starts from (providerApi.ts). */
 export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Authentication) {}
 
-export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
+export const AuthenticatedMessageVersionApi = MessageVersionApi.middleware(Authentication)
+
+export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
+  .merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedChatEventsApi)
   .merge(AuthenticatedAgentApi)
+  .merge(AuthenticatedWorkshopApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedCardArchiveApi)
   .merge(AuthenticatedCardSourcesApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedPanelApprovalApi)
+  .merge(AuthenticatedExternalMediaApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi)
   .merge(AuthenticatedChatContextsApi)
   .merge(AuthenticatedChatThreadsApi)
   .merge(AuthenticatedShellUpdatesApi)
-  .merge(AuthenticatedProviderListApi) {}
+  .merge(AuthenticatedProviderListApi)
+  .merge(AuthenticatedTextSearchApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

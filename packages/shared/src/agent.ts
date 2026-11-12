@@ -2,7 +2,7 @@
 // and afterwards from its transcript.
 import { Schema } from "effect"
 
-const EffectClass = Schema.Literals(["read", "chat_state", "external"])
+const EffectClass = Schema.Literals(["read", "chat_state", "external", "library", "setup", "outside"])
 
 /**
  * A step: thinking or intermediate text from a turn that went on to call a tool, or one tool
@@ -22,7 +22,10 @@ export const RolloutStep = Schema.Union([
     args: Schema.Unknown,
     status: Schema.Literals(["running", "done", "error"]),
     result: Schema.optionalKey(Schema.String),
-    effect: EffectClass
+    /** Existing steps render these three display classes. */
+    effect: Schema.Literals(["read", "chat_state", "external"]),
+    /** The refined execution class, when it differs from the display class. */
+    effectClass: Schema.optionalKey(EffectClass)
   })
 ])
 
@@ -53,6 +56,8 @@ export const StepEdit = Schema.Union([
 export type StepEdit = typeof StepEdit.Type
 /** One tool the run was offered, as frozen into its snapshot: exactly what the model saw. */
 export const OfferedTool = Schema.Struct({
+  capability: Schema.optionalKey(Schema.String),
+  titleField: Schema.optionalKey(Schema.String),
   name: Schema.String,
   label: Schema.String,
   description: Schema.String,
@@ -61,10 +66,22 @@ export const OfferedTool = Schema.Struct({
 })
 export type OfferedTool = typeof OfferedTool.Type
 
+/**
+ * The step a part of the transcript is, as `ResumeFromStep` names it: its index in the version's
+ * steps (`GetRolloutSteps`). Absent for what isn't a step (the message's own turn, `send_message`).
+ */
+const StepIndex = { step: Schema.optionalKey(Schema.Int) }
+
 /** A part of the model's turn, verbatim. */
 export const TurnPart = Schema.Union([
-  Schema.Struct({ type: Schema.Literals(["thinking", "text"]), text: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("toolCall"), id: Schema.String, name: Schema.String, args: Schema.Unknown })
+  Schema.Struct({ type: Schema.Literals(["thinking", "text"]), text: Schema.String, ...StepIndex }),
+  Schema.Struct({
+    type: Schema.Literal("toolCall"),
+    id: Schema.String,
+    name: Schema.String,
+    args: Schema.Unknown,
+    ...StepIndex
+  })
 ])
 export type TurnPart = typeof TurnPart.Type
 
@@ -87,17 +104,33 @@ export const TranscriptEntry = Schema.Union([
     toolCallId: Schema.String,
     tool: Schema.String,
     text: Schema.String,
-    isError: Schema.Boolean
+    isError: Schema.Boolean,
+    /** Its call's step, whose result it is. */
+    ...StepIndex
   }),
   /** A message the app sent the model (a nudge to send the reply, the turn cap's last word). */
   Schema.Struct({ role: Schema.Literal("app"), text: Schema.String })
 ])
 export type TranscriptEntry = typeof TranscriptEntry.Type
 
+/**
+ * What a resume or a step edit dropped from the run it carried on (`rollout_branches`): the
+ * stopped run's entries from there, shown folded before `entries[at]` (at the end when `at` is
+ * past them).
+ */
+export const CutSpan = Schema.Struct({
+  reason: Schema.Literals(["resume", "edit"]),
+  at: Schema.Int,
+  entries: Schema.Array(TranscriptEntry)
+})
+export type CutSpan = typeof CutSpan.Type
+
 /** An agent run as the inspector shows it: the tools offered and every turn after the request. */
 export const RunTranscript = Schema.Struct({
   tools: Schema.Array(OfferedTool),
-  entries: Schema.Array(TranscriptEntry)
+  entries: Schema.Array(TranscriptEntry),
+  /** What resuming dropped of the run it carried on, oldest first. */
+  cut: Schema.Array(CutSpan)
 })
 export type RunTranscript = typeof RunTranscript.Type
 

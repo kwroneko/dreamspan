@@ -34,8 +34,19 @@ export const takeSummaryPrefix = (snapshot: ContextSnapshot): SummaryPrefix => {
 export const applySummaryPrefix = (snapshot: ContextSnapshot, prefix?: SummaryPrefix): ContextSnapshot => {
   if (
     !prefix ||
+    // A frozen prefix can contain message macros or own-turn notes. It belongs to
+    // the view that assembled it, even when the model and preset are the same.
+    (prefix.inputs.viewer ?? null) !== (snapshot.inputs.viewer ?? null) ||
     JSON.stringify(prefix.inputs.model) !== JSON.stringify(snapshot.inputs.model) ||
     JSON.stringify(prefix.inputs.preset) !== JSON.stringify(snapshot.inputs.preset)
+  )
+    return snapshot
+  // Even the same character can have its presence corrected since the trigger. Reuse
+  // a private prefix only when its current pieces still agree; a changed history macro
+  // or a note no longer sent must not be restored from the frozen trigger.
+  if (
+    snapshot.inputs.viewer &&
+    prefix.pieces.some((old) => !snapshot.pieces.some((current) => current.id === old.id && current.text === old.text))
   )
     return snapshot
   const end = boundary(snapshot),

@@ -1,3 +1,4 @@
+import { ExternalMediaPrefs } from "@rp/shared/externalMedia.ts"
 // All settings use this registry and writer; feature handlers keep their ownership checks.
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -29,10 +30,12 @@ const definitions: ReadonlyArray<SettingDefinition> = [
       forceProxy: Schema.optionalKey(Schema.Boolean)
     })
   },
+  { id: "media.external", scope: "user", schema: ExternalMediaPrefs },
   { id: "display", scope: "user", schema: DisplayPrefs },
   { id: "notices", scope: "user", schema: Schema.Record(Schema.String, Schema.Array(Schema.String)) },
   { id: "shell.pinsCollapsed", scope: "user", schema: Schema.Boolean },
   { id: "cost", scope: "user", schema: CostRules },
+  { id: "workshop.defaults", scope: "user", schema: Schema.Struct({ card: Schema.String, preset: Schema.String }) },
   { id: "chat.persona", scope: "user", schema: Schema.NullOr(Schema.String) },
   { id: "generation.model", scope: "user", schema: Schema.NullOr(ModelChoice) },
   { id: "generation.preset", scope: "user", schema: Schema.NullOr(Schema.String) },

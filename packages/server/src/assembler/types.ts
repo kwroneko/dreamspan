@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 60
+export const ASSEMBLER_VERSION = 63
 
 export type Role = "system" | "user" | "assistant"
 
@@ -306,6 +306,8 @@ export interface AgentAssembly {
   readonly instructions: string
   /** Card-swap: the preset's card places hold only the speaker's card (DESIGN §5.2). */
   readonly speakerCardOnly: boolean
+  readonly workshop?: boolean
+  readonly stepSummaries?: Readonly<Record<string, string>>
 }
 
 /** What decision models decided for this context (spec/AGENTIC.md §7): the lorebook entries admitted. */

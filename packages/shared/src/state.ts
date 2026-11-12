@@ -14,6 +14,19 @@ const event = <K extends string, V extends Schema.Top>(key: K, value: V) =>
   Schema.Struct({ key: Schema.Literal(key), value })
 
 /**
+ * "HTML in older messages sent to the model" (`context.html_depth`, spec/HTML-MESSAGES.md §3.6):
+ * as written, as ST sends it; or from `n` messages back, text only (tags removed, text kept), or
+ * that without document blocks ("panels").
+ */
+export const HtmlDepth = Schema.Struct({
+  mode: Schema.Literals(["as_written", "text", "panels"]),
+  n: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
+})
+export type HtmlDepth = typeof HtmlDepth.Type
+/** Without an event: as written (owner, 2026-11-07), with 4 ready for the other choices. */
+export const DEFAULT_HTML_DEPTH: HtmlDepth = { mode: "as_written", n: 4 }
+
+/**
  * The core's typed state-event keys (DATA-MODEL §5.3). Ids use the id schemas, never a
  * plain string, so `stateKeyProblems` can find them. A plugin's keys (`<plugin>/<key>`)
  * are registered through the same API as these built-ins.
@@ -75,7 +88,7 @@ export const StateEventData = Schema.Union([
   event("reply.order", Schema.String),
   /** On: one reply per user action, where ST replies with the reply order's whole round (DESIGN §2.3). */
   event("reply.single", Schema.Struct({ on: Schema.Boolean })),
-  event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
+  event("output.contract", Schema.Literals(["final_text", "send_message", "both", "several"])),
   /**
    * Card-swap (DESIGN §5.2; spec/CHARACTER-CONTEXT.md §4.1): on, the preset's card places hold only
    * the speaking character's card. A card-layout setting, with or without tools; absent is off.
@@ -109,6 +122,8 @@ export const StateEventData = Schema.Union([
   event("lorebook.embedded", Schema.Struct({ entity: EntityId, on: Schema.Boolean })),
   /** Lorebook entries only below the history, whatever their position; absent is on (DESIGN §1.3). */
   event("lorebook.below_history", Schema.Struct({ on: Schema.Boolean })),
+  /** HTML in older messages sent to the model; absent is as written. */
+  event("context.html_depth", HtmlDepth),
   event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown }))
 ])
 export type StateEventData = typeof StateEventData.Type
@@ -206,6 +221,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.remove": { ids: { ref: { table: "ref", kind: "lorebook" } }, removes: true },
   "lorebook.embedded": { ids: { entity: { table: "entity", kind: "card" } } },
   "lorebook.below_history": { ids: {} },
+  "context.html_depth": { ids: {} },
   "var.set": { ids: {} }
 }
 
@@ -417,7 +433,7 @@ export interface ChatState {
   readonly replyOrder: string | null
   /** One reply per user action instead of a round; null (no event) is off, as in ST. */
   readonly replySingle: boolean | null
-  readonly outputContract: "final_text" | "send_message" | "both" | null
+  readonly outputContract: "final_text" | "send_message" | "both" | "several" | null
   /** `cards.rotation`: only the speaker's card where the preset puts cards; null (no event) is off. */
   readonly cardsRotation: boolean | null
   /** `agent.tools`: offered tools; null: the default list. */
@@ -434,6 +450,8 @@ export interface ChatState {
   readonly embeddedLorebooks: Readonly<Record<string, boolean>>
   /** Whether lorebook entries go only below the history; null (no event) is on. */
   readonly loreBelowHistory: boolean | null
+  /** HTML in older messages sent to the model; null (no event) is as written. */
+  readonly htmlDepth: HtmlDepth | null
   readonly vars: Readonly<Record<string, unknown>>
   /** Plugin keys' values by key id (`<plugin>/<key>`); absent until a registered key has an event. */
   readonly plugin?: Readonly<Record<string, unknown>>
@@ -470,6 +488,7 @@ const emptyChatState: ChatState = {
   listedLorebooks: [],
   embeddedLorebooks: {},
   loreBelowHistory: null,
+  htmlDepth: null,
   vars: {}
 }
 
@@ -639,6 +658,8 @@ const applyCore = (
       return { ...state, embeddedLorebooks: { ...state.embeddedLorebooks, [data.value.entity]: data.value.on } }
     case "lorebook.below_history":
       return { ...state, loreBelowHistory: data.value.on }
+    case "context.html_depth":
+      return { ...state, htmlDepth: data.value }
     case "var.set":
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
   }

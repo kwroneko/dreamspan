@@ -470,6 +470,10 @@ describe("content security policy", () => {
         assert.strictEqual(directives.get("img-src"), "'self' blob: data:")
         assert.strictEqual(directives.get("connect-src"), `'self' ws://127.0.0.1:${port} wss://127.0.0.1:${port}`)
         assert.strictEqual(directives.get("frame-ancestors"), "'none'")
+        // Markup that slipped past sanitizing can't submit a form, embed a plugin or rebase links.
+        assert.strictEqual(directives.get("form-action"), "'none'")
+        assert.strictEqual(directives.get("object-src"), "'none'")
+        assert.strictEqual(directives.get("base-uri"), "'none'")
       }
       const refused = yield* cspOf("/healthz", { Origin: "https://evil.example" })
       assert.strictEqual(refused.status, 403)

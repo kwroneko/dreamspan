@@ -19,7 +19,7 @@ import type { ContextSnapshot, ModelInput, NoteInput } from "../src/assembler/ty
 import { matchLorebooks } from "../src/assembler/lorebook.ts"
 import { makeAssembler } from "../src/assembler/assembler.ts"
 import { makeScriptRunner, makeRegexDeadline, REGEX_MS, REGEX_OUTPUT } from "../src/assembler/regex.ts"
-import { chatCompletionsFields, providerRequest } from "../src/assembler/wire.ts"
+import { chatCompletionsFields, providerRequest, wireContext } from "../src/assembler/wire.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { forbidCardOverrides, importStPreset } from "../src/formats/preset.ts"
 import { placeBreakpoints } from "../src/assembler/breakpoints.ts"
@@ -1294,6 +1294,109 @@ describe("the context assembler", () => {
     const settled = await depthBound({ maxDepth: 1 })
     expect(contents(settled)[settled.request.breakpoints[0]!.message]).toBe("user: six")
   })
+
+  it("keeps HTML-depth request bytes deterministic, inspectable and the source history unchanged", async () => {
+    const messages: FixtureMessage[] = [
+      { side: "assistant", content: "<script>const secret = `HIDDEN_SCRIPT`;</script><p>Kept.</p>" },
+      { side: "user", content: "Next" }
+    ]
+    const original = JSON.stringify(messages)
+    const event = { scope: null, data: { key: "context.html_depth", value: { mode: "text", n: 1 } } } as const
+    const fixture = chat({ messages, events: [{ depth: null, event }] })
+    const first = await assembled(fixture)
+    const second = await assembled(fixture)
+    expect(JSON.stringify(first.request)).toBe(JSON.stringify(second.request))
+    expect(contents(first)).toContain("assistant: Kept.")
+    expect(JSON.stringify(first.request)).not.toContain("HIDDEN_SCRIPT")
+    expect(JSON.stringify(messages)).toBe(original)
+    const inspected = wireContext(first.request, model())
+    expect(inspected.messages.map(({ role, content }) => ({ role, content }))).toEqual(
+      first.request.messages.map(({ role, content }) => ({ role, content }))
+    )
+    const extended = await assembled(chat({ ...fixture, messages: [...messages, { side: "user", content: "Later" }] }))
+    expect(extended.request.messages.find((message) => message.content === "Kept.")).toEqual(
+      first.request.messages.find((message) => message.content === "Kept.")
+    )
+  })
+
+  it("applies HTML depth after prompt scripts and permits replacing or disabling the stage", async () => {
+    const fixture = chat({
+      messages: [
+        { side: "assistant", content: "<status>Board</status>" },
+        { side: "user", content: "Next" }
+      ],
+      events: [
+        { depth: null, event: { scope: null, data: { key: "context.html_depth", value: { mode: "text", n: 1 } } } }
+      ],
+      preset: {
+        ...preset({
+          extensions: {
+            regex_scripts: [
+              regexScript("panel", { findRegex: "/<status>(.*?)<\\/status>/g", replaceString: "<b>$1</b>" })
+            ]
+          }
+        }),
+        regex_approved: true
+      }
+    })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const assembler = yield* makeAssembler
+        const builtin = yield* assembleFixture(fixture, { assembler })
+        expect(contents(builtin)).toContain("assistant: Board")
+        yield* assembler.stages.disable("context.htmlDepth")
+        const disabled = yield* assembleFixture(fixture, { assembler })
+        expect(contents(disabled)).toContain("assistant: <b>Board</b>")
+      }).pipe(Effect.scoped)
+    )
+  })
+
+  it("sends older messages' HTML as the chat chose (context.htmlDepth), keeping the cache layout", async () => {
+    const panel = ["```html", '<html><body><div class="hp">HP <b>12</b>/20</div></body></html>', "```"].join("\n")
+    const withDepth = (value: StateEventData["value"] | null) =>
+      assembled(
+        chat({
+          messages: [
+            { side: "assistant", content: `Mira pours the tea. <span class="mood">calm</span>\n\n${panel}` },
+            { side: "user", content: "two" },
+            { side: "assistant", content: "<b>three</b> <status>HP 9</status>" },
+            { side: "user", content: "four" },
+            { side: "assistant", content: "Five, with <i>no</i> change yet." },
+            { side: "user", content: "six" }
+          ],
+          ...(value === null
+            ? {}
+            : {
+                events: [
+                  { depth: null, event: { scope: null, data: { key: "context.html_depth", value } as StateEventData } }
+                ]
+              })
+        })
+      )
+    // As written (no event, the default): nothing changes, and the history's breakpoint is the last message.
+    const written = await withDepth(null)
+    expect(contents(written)).toContain(`assistant: Mira pours the tea. <span class="mood">calm</span>\n\n${panel}`)
+    expect(contents(written)[written.request.breakpoints[0]!.message]).toBe("user: six")
+
+    // Text only after 2: the tags go, their text stays, a tag that isn't HTML's stays.
+    const text = await withDepth({ mode: "text", n: 2 })
+    expect(contents(text)).toContain("assistant: Mira pours the tea. calm\n\nHP 12/20")
+    expect(contents(text)).toContain("assistant: three <status>HP 9</status>")
+    // Within the 2, as written. The one that will change at depth 2 is volatile: the
+    // breakpoint goes before it, as for a depth-bound script.
+    expect(contents(text)).toContain("assistant: Five, with <i>no</i> change yet.")
+    expect(contents(text)[text.request.breakpoints[0]!.message]).toBe("user: four")
+
+    // Leave out panels after 2: the document block goes whole.
+    const panels = await withDepth({ mode: "panels", n: 2 })
+    expect(contents(panels)).toContain("assistant: Mira pours the tea. calm")
+    expect(contents(panels).join("\n")).not.toContain("HP 12/20")
+
+    // Past N for good, or nothing to change: the breakpoint stays on the last message.
+    const settled = await withDepth({ mode: "text", n: 1 })
+    expect(contents(settled)).toContain("assistant: Five, with no change yet.")
+    expect(contents(settled)[settled.request.breakpoints[0]!.message]).toBe("user: six")
+  })
 })
 
 describe("several characters (DESIGN §5.0–§5.4)", () => {
@@ -1748,6 +1851,59 @@ describe("lorebook assembly", () => {
       events: [...off.events, at(null, { key: "lorebook.embedded", value: { entity: "mira" as never, on: true } })]
     }
     expect(contents(await assembled(backOn)).join("\n")).toContain("CARD_LORE")
+  })
+  it.each([
+    [undefined, false],
+    ["book", false],
+    [null, true],
+    ["missing", true]
+  ] as const)("resolves primary lore with stored binding %s before the world name", async (binding, ownSent) => {
+    const doc = loreBook([loreEntry({ constant: true, content: "OWN_LORE" })]).document
+    const f = fixture({
+      lorebooks: [{ ...attached, sourceName: "Primary world" }],
+      cards: [{ entity: "mira", doc: { ...mira, character_book: doc, extensions: { world: "Primary world" } } }],
+      events: [
+        ...fixture().events!,
+        ...(binding === undefined
+          ? []
+          : [at(null, { key: "lorebook.binding", value: { entity: "mira" as never, ref: binding as never } })])
+      ]
+    })
+    expect(
+      contents(await assembled(f))
+        .join("\n")
+        .includes("OWN_LORE")
+    ).toBe(ownSent)
+  })
+  it("resolves each group card's exact world independently, including a swapped card fork", async () => {
+    const own = (name: string, world: string) => ({
+      ...card(name),
+      extensions: { world },
+      character_book: loreBook([loreEntry({ constant: true, content: `OWN_${name}` })]).document
+    })
+    const f = fixture({
+      participants: ["mira", "oren", "case", "space"],
+      cards: [
+        { entity: "mira", doc: own("Mira", "Primary world") },
+        { entity: "mira-fork", doc: own("MiraFork", "Primary world") },
+        { entity: "oren", doc: own("Oren", "Primary world") },
+        { entity: "case", doc: own("Case", "primary world") },
+        { entity: "space", doc: own("Space", " Primary world ") }
+      ],
+      lorebooks: [{ ...attached, sourceName: "Primary world" }],
+      events: [
+        ...fixture().events!,
+        at(null, { key: "card.swap", value: { entity: "mira-fork" as EntityId, replaces: "mira" as EntityId } })
+      ]
+    })
+    const text = contents(await assembled(f)).join("\n")
+    expect(text).not.toContain("OWN_Mira")
+    expect(text).not.toContain("OWN_Oren")
+    expect(text).toContain("OWN_Case")
+    expect(text).toContain("OWN_Space")
+    const fallback = contents(await assembled({ ...f, lorebooks: [] })).join("\n")
+    expect(fallback).toContain("OWN_MiraFork")
+    expect(fallback).toContain("OWN_Oren")
   })
   it("counts message delays across the path independently of the scan window", async () => {
     const doc = loreBook([loreEntry({ constant: true, delay: 1100, content: "DELAY_LORE" })]).document
@@ -2931,7 +3087,7 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
           at(null, { key: "agent.enabled", value: { on: tools } }),
           at(null, { key: "cards.rotation", value: { on: rotation } })
         ]
-        const plan = defaultMode.plan({ state: foldState(events.map((e) => e.event)) })
+        const plan = defaultMode.plan({ state: foldState(events.map((e) => e.event)), kind: "rp" })
         const agent = plan.assembly
           ? {
               instructions: plan.assembly.instructions(plan.tools, plan.contract),

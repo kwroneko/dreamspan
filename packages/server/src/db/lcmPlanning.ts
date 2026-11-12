@@ -1,3 +1,4 @@
+import { chatAllows } from "./chatKindPolicy.ts"
 import { inJobFork } from "./lcmFork.ts"
 import { viewAt } from "./forkState.ts"
 import { slotCost } from "../lcm/planning.ts"
@@ -58,7 +59,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           refresh: [],
           condensations: [],
           flagged: [],
-          enabled: state.lcm?.enabled === true,
+          enabled: state.lcm?.enabled === true && (yield* chatAllows(sql, chatId, "allowsSummaries")),
           over: false,
           partialBatch: false,
           windowMax: 0,
@@ -69,7 +70,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           liveJobs: 0,
           backfill: null as { armed: boolean; held: boolean; drive: boolean; settled: boolean } | null
         }
-        if (!state.lcm?.enabled) return empty
+        if (!state.lcm?.enabled || !empty.enabled) return empty
         // The chat's backfill (spec/LCM.md §2.11): begun by a reply, held at its cap.
         const row = yield* backfillOf(sql, chatId)
         const live = row?.status === "processing" ? row : null
@@ -206,7 +207,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const covered = yield* completedCoverage(sql, userId, chatId, path, shown, audience)
         // The shared plan ends a chunk before each view's first message it didn't know.
         const cuts = new Set(
-          audience === null ? path.filter((s) => views.some((v) => v.unknownFrom === s.depth)).map((s) => s.id) : []
+          audience === null ? path.filter((s) => views.some((v) => v.unknownFrom === s.position)).map((s) => s.id) : []
         )
         const chunks = [
           ...leafPlanner.plan({
@@ -318,7 +319,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             reason: "invalid_document",
             message: "Summary style selection is unavailable."
           })
-        const style = selector.select(state.lcm.style)
+        const style = selector.select(resolveLcm(state.lcm, defaults.lcm).style)
         const outputInstruction = instructions === undefined ? undefined : instructions[style]
         if (instructions !== undefined && (!Object.hasOwn(instructions, style) || outputInstruction === undefined))
           return yield* new AssemblyFailed({
