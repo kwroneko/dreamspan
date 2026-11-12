@@ -210,11 +210,21 @@ export function workshopChatTests() {
             ["library.write", "Create and edit library items"],
             ["chats.setup", "Set up chats"]
           ]) {
-            await expect(popover.locator(`[data-capability="${id}"]`)).toContainText(label!)
-            await expect(popover.locator(`[data-capability="${id}"]`)).toContainText("Always allowed")
+            const row = popover.locator(`[data-capability="${id}"]`)
+            await expect(row).toContainText(label!)
+            // Off, Ask first and Allowed, with Allowed the default (WORKSHOP §10 Q1, still Open).
+            await expect(row.getByRole("button", { name: "Allowed", exact: true })).toHaveAttribute(
+              "aria-pressed",
+              "true"
+            )
+            await expect(row.getByRole("button", { name: "Ask first", exact: true })).toHaveAttribute(
+              "aria-pressed",
+              "false"
+            )
+            await expect(row.getByRole("button", { name: "Off", exact: true })).toBeVisible()
           }
           await expect(popover.locator("[data-capability]")).toHaveCount(3)
-          await expect(popover.getByText("You can’t change these yet.")).toBeVisible()
+          await expect(popover.getByText("These hold for this workshop only.")).toBeVisible()
           await shot("capabilities")
           await expectLayout(page, info, `workshop-capabilities-${width}-${theme}`, { scope: '[role="dialog"]' })
           await page.keyboard.press("Escape")
@@ -276,7 +286,9 @@ export function workshopChatTests() {
             await expect(message.locator('[data-step="tool"]')).toContainText(label!)
           }
           await expect(rows.nth(1)).toContainText("Created the card Mara Quill")
-          await expect(rows.nth(1).getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
+          // The change it made, with Undo and Open under its step (W4).
+          await expect(rows.nth(1).getByRole("button", { name: "Undo", exact: true })).toHaveCount(1)
+          await expect(rows.nth(1).getByRole("link", { name: "Open", exact: true })).toHaveCount(1)
           const created = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
             api.ListRolloutEffects({ chatId: workshopId })
           )
@@ -350,6 +362,10 @@ export function workshopChatTests() {
           )
           const beforeEdit = provider.bodies.length
           await result.getByRole("button", { name: "Resume", exact: true }).click()
+          // The card it created still stands: carrying on from an earlier step warns first.
+          const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
+          await expect(warning).toContainText("Created the card Mara Quill")
+          await warning.getByRole("button", { name: "Keep them and make a new version", exact: true }).click()
           await expect(page).toHaveURL(new RegExp(`/chats/${workshopId}\\?`))
           await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeEdit)
           await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()).toBeVisible()

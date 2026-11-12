@@ -1,6 +1,4 @@
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
-import { EffectKey, EffectList, RolloutEffect, RolloutEffectRecord, EffectUndoRefused } from "@rp/shared/workshopApi.ts"
-
 import { MessageCursor, MessageQuery, MessageSearchPage } from "@rp/shared/messageSearch.ts"
 import {
   LibraryChoice,
@@ -12,6 +10,17 @@ import {
   LibrarySkipped,
   LibraryUndoResult
 } from "@rp/shared/libraryReplace.ts"
+import {
+  ApprovalAnswer,
+  ApprovalRefused,
+  CapabilityMode,
+  EffectKey,
+  EffectList,
+  RolloutEffect,
+  RolloutEffectRecord,
+  EffectUndoRefused
+} from "@rp/shared/workshopApi.ts"
+import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
 import { EditRefused, LibraryLabel } from "@rp/shared/editorApi.ts"
@@ -1831,6 +1840,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       kind: EntityKind,
       label: LibraryLabel,
       doc: Doc,
@@ -1844,6 +1855,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       refId: RefId,
       expectedRowVersion: Schema.Int,
       doc: Doc
@@ -1856,6 +1869,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       refId: RefId,
       name: Schema.String.check(Schema.isMinLength(1)),
       nickname: Schema.String,
@@ -1880,6 +1895,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       cards: StartChatFields.cards,
       persona: StartChatFields.persona,
       greeters: StartChatFields.greeters,
@@ -1894,6 +1911,54 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, ...EffectKey },
     success: RolloutEffect,
     error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  // --- Workshop grants and approvals (workshopGrants.ts; spec/WORKSHOP.md §3.4). Never reached
+  // by a tool: the session gives tools a writer without these (agent/tools.ts).
+  /** The owner's choice for a capability in a workshop; null removes it (the default holds). */
+  Rpc.make("SetWorkshopGrant", {
+    payload: { userId: UserId, chatId: ChatId, capability: Schema.String, mode: Schema.NullOr(CapabilityMode) },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A tool call starts waiting for the user: its approval row, pending. */
+  Rpc.make("RequestToolApproval", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      digest: Schema.String,
+      capability: Schema.String,
+      prompt: ApprovalPrompt
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ApprovalRefused, StorageError])
+  }),
+  /**
+   * The user's answer, only for a pending approval of that exact call (rollout, id, digest) in
+   * the user's own chat. `allow_chat` writes the workshop's grant for the capability with it.
+   */
+  Rpc.make("AnswerToolApproval", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      digest: Schema.String,
+      answer: ApprovalAnswer,
+      note: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ApprovalRefused, StorageError])
+  }),
+  /** An approval ends without an answer (`cancelled`, a stop) or an allowed call starts (`used`). */
+  Rpc.make("SettleToolApproval", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      status: Schema.Literals(["cancelled", "used"])
+    },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("CreateWorkshop", {
     payload: { userId: UserId, title: Schema.optionalKey(Schema.String) },
@@ -3920,6 +3985,33 @@ export class ReadOps extends RpcGroup.make(
   /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
   Rpc.make("ListRolloutEffects", {
     payload: { userId: UserId, ...EffectList },
+    success: Schema.Array(RolloutEffect),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A workshop's grants (workshopGrants.ts): capability → mode, expired ones left out. */
+  Rpc.make("WorkshopGrants", {
+    payload: { userId: UserId, chatId: ChatId, now: Schema.Number },
+    success: Schema.Array(Schema.Struct({ capability: Schema.String, mode: CapabilityMode })),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The approval of a call, in its rollout or the runs it was resumed from, with the same
+   * arguments: what a resume needs to know whether the call can have run.
+   */
+  Rpc.make("ToolApprovalFor", {
+    payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String, digest: Schema.String },
+    success: Schema.NullOr(
+      Schema.Struct({
+        rolloutId: Schema.String,
+        status: Schema.Literals(["pending", "allowed", "denied", "cancelled", "used"]),
+        note: Schema.NullOr(Schema.String)
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The effects a version's run made: its own calls, kept calls of the runs it resumed included. */
+  Rpc.make("VersionEffects", {
+    payload: { userId: UserId, versionId: Schema.String },
     success: Schema.Array(RolloutEffect),
     error: Schema.Union([NotFound, StorageError])
   }),

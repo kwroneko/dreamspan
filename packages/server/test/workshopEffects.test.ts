@@ -47,6 +47,30 @@ const watch = (api: Api, chat: Chat) =>
     yield* eventually(() => events.length > 0)
     return events
   })
+/** The waiting step of a version, once its call asks the user first. */
+const waitingStep = (events: ReadonlyArray<ChatEvent>, versionId: string) =>
+  events
+    .flatMap((e) => (e._tag === "Steps" && e.versionId === versionId ? e.steps : []))
+    .findLast((step) => step.kind === "tool" && step.status === "waiting")
+/** Waits for a version's call to ask, answers it, and returns what it asked. */
+const answerWaiting = (
+  api: Api,
+  events: ReadonlyArray<ChatEvent>,
+  versionId: string,
+  answer: "allow" | "allow_chat" | "deny"
+) =>
+  Effect.gen(function* () {
+    yield* eventually(() => waitingStep(events, versionId) !== undefined)
+    const asked = waitingStep(events, versionId)
+    if (asked?.kind !== "tool" || !asked.approval) return assert.fail("no approval")
+    yield* api.AnswerToolApproval({
+      rolloutId: asked.approval.rolloutId,
+      toolCallId: asked.approval.toolCallId,
+      digest: asked.approval.digest,
+      answer
+    })
+    return asked.approval
+  })
 const edit = (api: Api, refId: RefId, content: string, key = "description") =>
   Effect.gen(function* () {
     const field = textField([key])
@@ -100,6 +124,80 @@ const fixture = (dataDir: string, api: Api) =>
   })
 
 describe("workshop setup effects", () => {
+  it.live("consumes an approval once, and refuses consumption after Off wins the transaction", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const key = { userId: f.user.id, rolloutId: f.rolloutId, toolCallId: "consume" }
+      const prompt = {
+        rolloutId: f.rolloutId,
+        toolCallId: "consume",
+        digest: "digest",
+        capability: "library.write",
+        capabilityLabel: "Create and edit library items",
+        title: "Create a card",
+        rows: [],
+        uncertain: false
+      }
+      const request = { ...key, digest: "digest", capability: "library.write", prompt }
+      yield* f.writer.RequestToolApproval(request)
+      assert.strictEqual(yield* outcome(f.writer.RequestToolApproval(request)), "ApprovalRefused")
+      yield* f.writer.AnswerToolApproval({ ...key, digest: "digest", answer: "allow", note: null })
+      yield* f.writer.SetWorkshopGrant({
+        userId: f.user.id,
+        chatId: f.chat.id,
+        capability: "library.write",
+        mode: "off"
+      })
+      assert.isFalse(yield* f.writer.SettleToolApproval({ ...key, status: "used" }))
+      yield* f.writer.SetWorkshopGrant({
+        userId: f.user.id,
+        chatId: f.chat.id,
+        capability: "library.write",
+        mode: "ask"
+      })
+      assert.isFalse(yield* f.writer.SettleToolApproval({ ...key, status: "used" }))
+      const fresh = { ...key, toolCallId: "consume-fresh" }
+      yield* f.writer.RequestToolApproval({ ...request, ...fresh, prompt: { ...prompt, toolCallId: fresh.toolCallId } })
+      yield* f.writer.AnswerToolApproval({ ...fresh, digest: "digest", answer: "allow", note: null })
+      assert.isTrue(yield* f.writer.SettleToolApproval({ ...fresh, status: "used" }))
+      assert.isFalse(yield* f.writer.SettleToolApproval({ ...fresh, status: "used" }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  for (const mode of ["off", "ask"] as const)
+    it.live(`the writer refuses a change when permission becomes ${mode} after the call was admitted`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const api = yield* client()
+        const f = yield* fixture(config.dataDir, api)
+        // Same tool/context, but a second tab changes permission before its write transaction.
+        yield* api.SetWorkshopGrant({ chatId: f.chat.id, capability: "library.write", mode })
+        const result = yield* f.run("create_card", { name: "Must not commit" }, "raced")
+        assert.isTrue(result.isError)
+        assert.isEmpty((yield* api.ListLibrary({ kind: "card" })).filter((r) => r.label === "Must not commit"))
+        assert.isEmpty(yield* api.ListRolloutEffects({ chatId: f.chat.id }))
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+
+  it.live("a described copy stays bound to its original target and refuses if that target changes", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const source = yield* api.CreateCard({ label: "Source", name: "Source", description: "Originally shown" })
+      const registry = yield* ExecutionRegistry
+      const tool = toolForKind(registry, "workshop", "clone_card")!
+      const args = { card: "Source", name: "Approved copy" }
+      yield* tool.describe!({ ...f.context, toolCallId: "copy" }, args as never)
+      yield* edit(api, source.id, "Changed after approval")
+      const result = yield* f.run("clone_card", args, "copy")
+      assert.isTrue(result.isError)
+      assert.isEmpty((yield* api.ListLibrary({ kind: "card" })).filter((r) => r.label === "Approved copy"))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("reads registered capabilities for the owned chat kind and its offered tools", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -110,15 +208,17 @@ describe("workshop setup effects", () => {
         capabilities.map((c) => c.id),
         ["library.read", "library.write", "chats.setup"]
       )
-      assert.isTrue(capabilities.every((c) => c.mode === "allow" && c.always))
+      assert.isTrue(capabilities.every((c) => c.mode === "allow"))
+      assert.deepStrictEqual(
+        capabilities.map((c) => c.modes),
+        [["allow"], ["off", "ask", "allow"], ["off", "ask", "allow"]]
+      )
       const registry = yield* ExecutionRegistry
       yield* registry.workshopCapabilities.register({
         id: "library.write",
         order: 5,
         label: "Synthetic library changes",
-        explanation: "A registered replacement.",
-        mode: "allow",
-        always: true
+        explanation: "A registered replacement."
       })
       assert.strictEqual(
         (yield* api.ListWorkshopCapabilities({ chatId: f.chat.id }))[0]!.label,
@@ -152,8 +252,8 @@ describe("workshop setup effects", () => {
               if (!JSON.stringify(messages).includes("Build a synthetic keeper"))
                 return sse(res, completionChunks(["Ready."], {}))
               if (
-                String(JSON.stringify(messages.filter((m) => m.role === "tool").at(-1))).includes(
-                  "may already have happened"
+                String(JSON.stringify(messages.filter((m) => m.role === "tool").at(-1))).match(
+                  /may already have happened|declined/
                 )
               )
                 return sse(res, completionChunks(["That call needs checking first."], {}))
@@ -240,10 +340,11 @@ describe("workshop setup effects", () => {
           edit: { kind: "arguments", arguments: { name: "Needs checking" } },
           expectedRowVersion: beforeArguments.entry.rowVersion
         })
+        assert.isTrue((yield* answerWaiting(api, events, argumentsEdit.version.id, "deny")).uncertain)
         yield* eventually(() => finished(events, argumentsEdit.version.id) !== undefined)
         assert.isTrue(
           (yield* api.GetRunTranscript({ versionId: argumentsEdit.version.id })).entries.some(
-            (e) => e.role === "toolResult" && e.isError && e.text.includes("may already have happened")
+            (e) => e.role === "toolResult" && e.isError && e.text.includes("declined")
           )
         )
         assert.deepStrictEqual(
@@ -633,7 +734,7 @@ describe("workshop setup effects", () => {
                 return sse(res, completionChunks(["Ready."], {}))
               const toolResults = messages.filter((m) => m.role === "tool")
               const last = toolResults.at(-1)?.tool_call_id
-              if (String(toolResults.at(-1)?.content).includes("may already have happened"))
+              if (/may already have happened|declined/.test(String(toolResults.at(-1)?.content)))
                 return sse(res, completionChunks(["That call needs checking first."], {}))
               sse(
                 res,
@@ -765,10 +866,13 @@ describe("workshop setup effects", () => {
           edit: { kind: "arguments", arguments: { cards: ["Mara Quill"], title: "Should not run" } },
           expectedRowVersion: currentSlot.entry.rowVersion
         })
+        // A call re-run without a receipt may already have happened: it asks first, with that
+        // warning, even though chat setup is allowed.
+        assert.isTrue((yield* answerWaiting(api, events, uncertain.version.id, "deny")).uncertain)
         yield* eventually(() => finished(events, uncertain.version.id) !== undefined)
         assert.isTrue(
           (yield* api.GetRunTranscript({ versionId: uncertain.version.id })).entries.some(
-            (e) => e.role === "toolResult" && e.isError && e.text.includes("may already have happened")
+            (e) => e.role === "toolResult" && e.isError && e.text.includes("declined")
           )
         )
         assert.lengthOf(yield* api.ListRolloutEffects({ chatId: chat.id }), 2)

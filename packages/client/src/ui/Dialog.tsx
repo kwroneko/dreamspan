@@ -98,7 +98,7 @@ export function Dialog({
 
 /** The row of buttons at the bottom of a dialog: stacked on phones, right-aligned otherwise. */
 export function DialogActions({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">{children}</div>
+  return <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end">{children}</div>
 }
 
 /** Asks before something that can't be taken back in one click, such as a deletion. */

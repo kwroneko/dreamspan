@@ -854,6 +854,12 @@
     },
     {
       "type": "index",
+      "name": "tool_approvals_call",
+      "tbl_name": "tool_approvals",
+      "sql": "CREATE INDEX tool_approvals_call ON tool_approvals(tool_call_id, rollout_id)"
+    },
+    {
+      "type": "index",
       "name": "version_history_version",
       "tbl_name": "version_history",
       "sql": "CREATE INDEX version_history_version ON version_history(version_id, id)"
@@ -899,6 +905,12 @@
       "name": "versions_source",
       "tbl_name": "versions",
       "sql": "CREATE INDEX versions_source ON versions(source_version_id) WHERE source_version_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "workshop_grants_owner",
+      "tbl_name": "workshop_grants",
+      "sql": "CREATE INDEX workshop_grants_owner ON workshop_grants(owner_user_id)"
     },
     {
       "type": "table",
@@ -1340,6 +1352,12 @@
     },
     {
       "type": "table",
+      "name": "tool_approvals",
+      "tbl_name": "tool_approvals",
+      "sql": "CREATE TABLE tool_approvals ( rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE, tool_call_id TEXT NOT NULL, digest TEXT NOT NULL, capability TEXT NOT NULL, prompt_json TEXT NOT NULL CHECK (json_valid(prompt_json) AND json_type(prompt_json) = 'object'), status TEXT NOT NULL CHECK (status IN ('pending', 'allowed', 'denied', 'cancelled', 'used')), answer TEXT CHECK (answer IS NULL OR answer IN ('allow', 'allow_chat', 'deny')), note TEXT, created_at INTEGER NOT NULL, answered_at INTEGER, CHECK ((answer IS NULL) = (answered_at IS NULL)), CHECK (status NOT IN ('allowed', 'denied', 'used') OR answer IS NOT NULL), PRIMARY KEY (rollout_id, tool_call_id) ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
       "name": "users",
       "tbl_name": "users",
       "sql": "CREATE TABLE users ( id TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('admin', 'user')), created_at INTEGER NOT NULL, disabled_at INTEGER , password_hash TEXT) STRICT"
@@ -1403,6 +1421,12 @@
       "name": "versions_fts_idx",
       "tbl_name": "versions_fts_idx",
       "sql": "CREATE TABLE 'versions_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "workshop_grants",
+      "tbl_name": "workshop_grants",
+      "sql": "CREATE TABLE workshop_grants ( chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, capability TEXT NOT NULL CHECK (length(capability) BETWEEN 1 AND 200), target TEXT NOT NULL DEFAULT '' CHECK (length(target) <= 200), owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, mode TEXT NOT NULL CHECK (mode IN ('off', 'ask', 'allow')), expires_at INTEGER, updated_at INTEGER NOT NULL, CHECK (expires_at IS NULL OR expires_at > updated_at), PRIMARY KEY (chat_id, capability, target) ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "trigger",
@@ -2810,6 +2834,12 @@
     },
     {
       "type": "trigger",
+      "name": "tool_approvals_identity",
+      "tbl_name": "tool_approvals",
+      "sql": "CREATE TRIGGER tool_approvals_identity BEFORE UPDATE ON tool_approvals BEGIN SELECT RAISE(ABORT, 'approval identity is immutable') WHERE NEW.rollout_id <> OLD.rollout_id OR NEW.tool_call_id <> OLD.tool_call_id OR NEW.digest <> OLD.digest OR NEW.capability <> OLD.capability OR NEW.created_at <> OLD.created_at; SELECT RAISE(ABORT, 'an answered approval is final') WHERE OLD.answer IS NOT NULL AND (NEW.answer IS NOT OLD.answer OR NEW.answered_at IS NOT OLD.answered_at OR NEW.note IS NOT OLD.note OR NOT (NEW.status = OLD.status OR (OLD.status = 'allowed' AND NEW.status = 'used'))); END"
+    },
+    {
+      "type": "trigger",
       "name": "version_participants_cast",
       "tbl_name": "version_texts",
       "sql": "CREATE TRIGGER version_participants_cast AFTER UPDATE OF cast_json ON version_texts WHEN NEW.cast_json IS NOT OLD.cast_json BEGIN DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq); INSERT OR IGNORE INTO version_participants(version_id, entity_id) SELECT v.id, j.value FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq UNION SELECT id, speaker_entity_id FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL; END"
@@ -3011,6 +3041,18 @@
       "name": "versions_source_same_slot",
       "tbl_name": "versions",
       "sql": "CREATE TRIGGER versions_source_same_slot BEFORE INSERT ON versions WHEN NEW.source_version_id IS NOT NULL AND (SELECT slot_id FROM versions WHERE id = NEW.source_version_id) IS NOT NEW.slot_id BEGIN SELECT RAISE(ABORT, 'a version''s source must be another version of its slot'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "workshop_grants_identity",
+      "tbl_name": "workshop_grants",
+      "sql": "CREATE TRIGGER workshop_grants_identity BEFORE UPDATE ON workshop_grants BEGIN SELECT RAISE(ABORT, 'grant identity is immutable') WHERE NEW.chat_id <> OLD.chat_id OR NEW.capability <> OLD.capability OR NEW.target <> OLD.target OR NEW.owner_user_id <> OLD.owner_user_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "workshop_grants_owner",
+      "tbl_name": "workshop_grants",
+      "sql": "CREATE TRIGGER workshop_grants_owner BEFORE INSERT ON workshop_grants BEGIN SELECT RAISE(ABORT, 'grant must belong to the workshop owner') WHERE NOT EXISTS ( SELECT 1 FROM chats c WHERE c.id = NEW.chat_id AND c.owner_user_id = NEW.owner_user_id ); END"
     },
     {
       "type": "view",

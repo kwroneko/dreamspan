@@ -1,5 +1,6 @@
 import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
 import { workshopChatTests } from "./support/workshopChat.ts"
+import { workshopApprovalTests } from "./support/workshopApprovals.ts"
 import { googleConnectionTests } from "./support/googleConnection.ts"
 import { agentResumeTests } from "./support/agentResumeFlows.ts"
 import { cardexCriteriaTests } from "./support/cardexCriteria.ts"
@@ -43,6 +44,7 @@ if (process.env.LAYOUT_AUDIT_NEWFLOWS_ONLY === "1") newflowTests()
 if (process.env.LAYOUT_AUDIT_WORKSHOP_ONLY === "1") {
   workshopBoundaryTests()
   workshopChatTests()
+  workshopApprovalTests()
 }
 if (process.env.LAYOUT_AUDIT_RESUME_ONLY === "1") agentResumeTests()
 

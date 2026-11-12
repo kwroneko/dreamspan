@@ -5,6 +5,31 @@ import { Schema } from "effect"
 const EffectClass = Schema.Literals(["read", "chat_state", "external", "library", "setup", "outside"])
 
 /**
+ * What a tool call waiting for the user will do, as the server describes it from the call's real
+ * arguments and the items they name (spec/WORKSHOP.md §3.4): never the model's own wording of it.
+ */
+export const ApprovalPrompt = Schema.Struct({
+  rolloutId: Schema.String,
+  toolCallId: Schema.String,
+  /** The arguments' digest: an answer names it, so it holds only for this exact call. */
+  digest: Schema.String,
+  capability: Schema.String,
+  /** The capability's own label: "Create and edit library items". */
+  capabilityLabel: Schema.String,
+  /** What it will do, in a line: "Create the card “Mara Quill”". */
+  title: Schema.String,
+  /** The values it will write, as the arguments give them. */
+  rows: Schema.Array(Schema.Struct({ label: Schema.String, value: Schema.String })),
+  /** An edit's fields as they are and as they would be. */
+  changes: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ field: Schema.String, before: Schema.String, after: Schema.String }))
+  ),
+  /** The app stopped while it may have been running: it may already have happened. */
+  uncertain: Schema.Boolean
+})
+export type ApprovalPrompt = typeof ApprovalPrompt.Type
+
+/**
  * A step: thinking or intermediate text from a turn that went on to call a tool, or one tool
  * call with its result. The final turn's reasoning and text are the version's own.
  */
@@ -20,8 +45,10 @@ export const RolloutStep = Schema.Union([
     /** What it was called with, in a line: “lighthouse”. */
     title: Schema.String,
     args: Schema.Unknown,
-    status: Schema.Literals(["running", "done", "error"]),
+    /** `waiting`: the call asks the user first (`approval` says what it will do). */
+    status: Schema.Literals(["running", "waiting", "done", "error"]),
     result: Schema.optionalKey(Schema.String),
+    approval: Schema.optionalKey(ApprovalPrompt),
     /** Existing steps render these three display classes. */
     effect: Schema.Literals(["read", "chat_state", "external"]),
     /** The refined execution class, when it differs from the display class. */

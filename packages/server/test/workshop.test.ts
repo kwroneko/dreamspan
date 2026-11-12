@@ -6,7 +6,7 @@ import { Type } from "@earendil-works/pi-ai"
 import type { Chat, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { Deferred, Effect, Stream } from "effect"
+import { Deferred, Effect, Fiber, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { libraryTools } from "../src/agent/tools/library.ts"
@@ -91,6 +91,7 @@ const outside: RolloutTool<Record<string, never>> = {
   id: "outside_test",
   label: "Read a test source",
   effect: "external",
+  capability: "network",
   description: "A synthetic outside tool.",
   parameters: Type.Object({}),
   execute: () => Effect.succeed({ text: "Outside result." })
@@ -404,7 +405,23 @@ describe("workshop", () => {
       assert.strictEqual(ran, 0, "An unoffered outside call must be refused before a resumed version is created.")
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
-      const version = yield* answer(api, chat, events)
+      // Its registered capability asks first; the class only marks it as outside the reply.
+      const replying = yield* Effect.forkScoped(answer(api, chat, events))
+      yield* eventually(() =>
+        events.some((e) => e._tag === "Steps" && e.steps.some((s) => s.kind === "tool" && s.status === "waiting"))
+      )
+      assert.strictEqual(ran, 0)
+      const asked = events
+        .flatMap((e) => (e._tag === "Steps" ? e.steps : []))
+        .find((s) => s.kind === "tool" && s.status === "waiting")
+      if (asked?.kind === "tool" && asked.approval)
+        yield* api.AnswerToolApproval({
+          rolloutId: asked.approval.rolloutId,
+          toolCallId: asked.approval.toolCallId,
+          digest: asked.approval.digest,
+          answer: "allow"
+        })
+      const version = yield* Fiber.join(replying)
       assert.strictEqual(version.content, "Done.")
       assert.strictEqual(ran, 1)
       assert.include(
