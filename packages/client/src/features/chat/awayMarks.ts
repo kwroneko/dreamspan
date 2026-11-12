@@ -123,7 +123,12 @@ class AwayRowsStore {
     const view = this.session.snapshot()
     if (view.forkId === null || view.loading) return
     const key: Key = { forkId: view.forkId, leaf: view.leafSlotId, generation: this.generation }
-    if (this.key && this.key.forkId === key.forkId && this.key.leaf === key.leaf && this.key.generation === key.generation)
+    if (
+      this.key &&
+      this.key.forkId === key.forkId &&
+      this.key.leaf === key.leaf &&
+      this.key.generation === key.generation
+    )
       return
     this.key = key
     void this.read(key)

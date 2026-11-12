@@ -40,7 +40,10 @@ function Row({ row, session }: { row: AwayRow; session: ChatSession }) {
       <div className="flex w-full items-center gap-3">
         <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-border" />
         <Tooltip label={awayExplanation(row, name)}>
-          <span tabIndex={0} className="flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-xs text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus">
+          <span
+            tabIndex={0}
+            className="flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-xs text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
             <Avatar
               id={row.entityId}
               name={who}

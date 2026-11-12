@@ -4,7 +4,7 @@
 import type { Cast } from "@rp/shared/chatSetupApi.ts"
 
 /** The built-in default (`assembler/knowledge.ts`): absent state is one shared context. */
-export const SHARED_VIEW = "shared"
+const SHARED_VIEW = "shared"
 
 export interface ContextChoice {
   readonly value: string
