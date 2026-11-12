@@ -1,6 +1,6 @@
 // Untrusted message URLs never use the admin's private-host exceptions. Network checks each
 // hop with this policy and pins its checked literals on the wire (also through proxies).
-import { lookup } from "node:dns/promises"
+import { Resolver } from "node:dns/promises"
 import { BlockList, isIP } from "node:net"
 import { fileTypeFromBuffer } from "file-type"
 import type { NetworkShape } from "./Network.ts"
@@ -89,29 +89,52 @@ const mediaSample = (bytes: Buffer) => {
   if (!media) throw new ExternalMediaRefused("Not a supported media signature")
   return sample.subarray(0, 4100)
 }
+/**
+ * A and AAAA answers from c-ares, never getaddrinfo (`dns.lookup`): that runs on libuv's
+ * shared pool of four threads (file reads, zlib, scrypt logins) and can't be cancelled, so a
+ * message naming hosts whose DNS never answers would hold the pool past the media deadline.
+ * Each request has its own resolver, cancelled when the request ends.
+ */
+const resolveOffPool =
+  (servers?: ReadonlyArray<string>) =>
+  async (hostname: string, signal: AbortSignal): Promise<ReadonlyArray<string>> => {
+    const resolver = new Resolver({ timeout: 2_000, tries: 2 })
+    if (servers) resolver.setServers([...servers])
+    const cancel = () => resolver.cancel()
+    signal.addEventListener("abort", cancel, { once: true })
+    if (signal.aborted) cancel()
+    try {
+      const answers = await Promise.allSettled([resolver.resolve4(hostname), resolver.resolve6(hostname)])
+      return answers.flatMap((answer) => (answer.status === "fulfilled" ? answer.value : []))
+    } finally {
+      signal.removeEventListener("abort", cancel)
+    }
+  }
 interface Limits {
-  readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>
+  readonly resolve?: (hostname: string, signal: AbortSignal) => Promise<ReadonlyArray<string>>
+  /** DNS servers for the default resolver; the system's otherwise. */
+  readonly dnsServers?: ReadonlyArray<string>
   readonly maxBytes?: number
   readonly timeoutMs?: number
 }
 
 /** Fixed headers only: never cookies, authorization, referrers, ranges or upstream cache validators. */
 export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, limits: Limits = {}) => {
-  const resolve =
-    limits.resolve ?? (async (hostname: string) => (await lookup(hostname, { all: true })).map((a) => a.address))
+  const resolve = limits.resolve ?? resolveOffPool(limits.dnsServers)
   const maxBytes = limits.maxBytes ?? 16 * 1024 * 1024
   const timeoutMs = limits.timeoutMs ?? 15_000
-  const fetch = network.fetchFor({ mode: "inherit" }, undefined, async (url) => {
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.href.length > 8192)
-      throw new ExternalMediaRefused("Only public HTTP and HTTPS media addresses without credentials are allowed")
-    const hostname = url.hostname.replace(/^\[(.*)\]$/, "$1")
-    const addresses = isIP(hostname) ? [hostname] : await resolve(hostname)
-    if (addresses.length === 0 || addresses.some((ip) => !isPublicMediaAddress(ip)))
-      throw new ExternalMediaRefused("This media address is not public")
-    return addresses
-  })
   return async (url: string, signal: AbortSignal): Promise<ExternalMediaFile> => {
     const controller = new AbortController()
+    const fetch = network.fetchFor({ mode: "inherit" }, undefined, async (target) => {
+      const bad = !["http:", "https:"].includes(target.protocol) || target.username || target.password
+      if (bad || target.href.length > 8192)
+        throw new ExternalMediaRefused("Only public HTTP and HTTPS media addresses without credentials are allowed")
+      const hostname = target.hostname.replace(/^\[(.*)\]$/, "$1")
+      const addresses = isIP(hostname) ? [hostname] : await resolve(hostname, controller.signal)
+      if (addresses.length === 0 || addresses.some((ip) => !isPublicMediaAddress(ip)))
+        throw new ExternalMediaRefused("This media address is not public")
+      return addresses
+    })
     const abort = () => controller.abort()
     signal.addEventListener("abort", abort, { once: true })
     if (signal.aborted) abort()
