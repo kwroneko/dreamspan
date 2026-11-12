@@ -1,3 +1,4 @@
+import { requireSummaries } from "./chatKindPolicy.ts"
 import { eventApplies, forkAt } from "./forkState.ts"
 // Enabling LCM on a chat and holding its backfill to what the user approved (spec/LCM.md §2.7,
 // §2.11). Bounded preparation precedes one publication transaction: the imported summary becomes the first level over the run
@@ -64,6 +65,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
       StageLcmEnable: ({ userId, chatId, leafSlotId, forkId, choice, approved, imported, runId }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId, leafSlotId)
+          yield* requireSummaries(sql, chatId)
           if (!runId) {
             if (choice === "adopt" && !imported)
               return yield* reject("StageLcmEnable", "This chat has no imported summary to adopt.")
@@ -208,6 +210,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
       EnableLcm: ({ userId, chatId, leafSlotId, forkId, choice, approved, runId, switchOff }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId, leafSlotId)
+          yield* requireSummaries(sql, chatId)
           let unhidden = 0
           let summaryId: string | null = null
           if (runId) {

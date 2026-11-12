@@ -119,7 +119,7 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
     ListModelUse: ({ userId }) =>
       sql<{ connection_id: string; model_id: string; at: number }>`
         SELECT connection_id, model_id, max(started_at) AS at FROM llm_requests INDEXED BY llm_requests_owner
-        WHERE owner_user_id = ${userId} AND purpose = 'generation' AND model_id IS NOT NULL
+        WHERE owner_user_id = ${userId} AND purpose IN ('generation', 'workshop') AND model_id IS NOT NULL
         GROUP BY connection_id, model_id`.pipe(
         Effect.map((rows) =>
           rows.map(

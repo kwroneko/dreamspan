@@ -286,6 +286,12 @@ export type SeparateContext = typeof SeparateContext.Type
 
 /** One generation's request as it was sent, and what the provider reported for it. */
 export class RunContext extends Schema.Class<RunContext>("RunContext")({
+  continuity: Schema.optionalKey(
+    Schema.Struct({
+      parentVersionId: Schema.optionalKey(VersionId),
+      reason: Schema.optionalKey(Schema.String)
+    })
+  ),
   chatId: ChatId,
   slotId: SlotId,
   versionId: VersionId,

@@ -88,7 +88,7 @@ export const StateEventData = Schema.Union([
   event("reply.order", Schema.String),
   /** On: one reply per user action, where ST replies with the reply order's whole round (DESIGN §2.3). */
   event("reply.single", Schema.Struct({ on: Schema.Boolean })),
-  event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
+  event("output.contract", Schema.Literals(["final_text", "send_message", "both", "several"])),
   /**
    * Card-swap (DESIGN §5.2; spec/CHARACTER-CONTEXT.md §4.1): on, the preset's card places hold only
    * the speaking character's card. A card-layout setting, with or without tools; absent is off.
@@ -433,7 +433,7 @@ export interface ChatState {
   readonly replyOrder: string | null
   /** One reply per user action instead of a round; null (no event) is off, as in ST. */
   readonly replySingle: boolean | null
-  readonly outputContract: "final_text" | "send_message" | "both" | null
+  readonly outputContract: "final_text" | "send_message" | "both" | "several" | null
   /** `cards.rotation`: only the speaker's card where the preset puts cards; null (no event) is off. */
   readonly cardsRotation: boolean | null
   /** `agent.tools`: offered tools; null: the default list. */

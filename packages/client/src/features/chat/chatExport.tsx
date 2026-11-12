@@ -11,7 +11,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import type { ChatCommandDialogProps } from "./commands.tsx"
 import { chatDisplayName } from "./chatTitle.ts"
-import { type ExportFormat, exportText } from "./chatExportText.ts"
+import { type ExportFormat, exportFormats, exportText } from "./chatExportText.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 type Format = ExportFormat
@@ -45,7 +45,8 @@ const download = (text: string, name: string, type: string) => {
 
 export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
   const { session, view } = context
-  const [format, setFormat] = useState<Format>("jsonl")
+  const formats = exportFormats(view)
+  const [format, setFormat] = useState<Format>(formats[0] ?? "txt")
   const [read, setRead] = useState<number | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const run = async () => {
@@ -76,14 +77,15 @@ export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
         label="Format"
         value={format}
         onValueChange={setFormat}
-        options={[
-          {
-            value: "jsonl",
-            label: "SillyTavern (.jsonl)",
-            description: "A chat file that SillyTavern, and this app's import, can open."
-          },
-          { value: "txt", label: "Plain text (.txt)", description: "Easy to read: each message as “Name: text”." }
-        ]}
+        options={formats.map((value) => ({
+          value,
+          ...(value === "jsonl"
+            ? {
+                label: "SillyTavern (.jsonl)",
+                description: "A chat file that SillyTavern, and this app's import, can open."
+              }
+            : { label: "Plain text (.txt)", description: "Easy to read: each message as “Name: text”." })
+        }))}
       />
       <ErrorAlert error={error} />
       {read !== null && (
@@ -98,6 +100,7 @@ export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
         <Button
           hint="Exports the chat with the selected options."
           variant="primary"
+          disabled={!formats.includes(format)}
           pending={read !== null}
           onClick={() => void run()}
         >

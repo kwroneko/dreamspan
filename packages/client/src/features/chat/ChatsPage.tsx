@@ -3,33 +3,65 @@ import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 // The chats as a page (DESIGN §2.1): the sidebar's list, full width, for phones, where the
 // sidebar is folded away. Chats with characters start from the character grid; this page
-// also starts one without any.
+// also starts one without any, and whatever else is registered (a workshop).
 import type { Chat } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
+import type { Effect } from "effect"
 import { type FormEvent, useEffect } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
+import type { AppClient } from "../../rpc.ts"
+import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { ChatList, useRefreshChats } from "./ChatList.tsx"
+import { KindBadge } from "./KindBadge.tsx"
 
-/** The badges a chat's title gets: an import still unfinished (ARCHITECTURE §13). */
-export function ChatBadges({ chat }: { chat: Pick<Chat, "title"> }) {
-  return importState(chat.title).unfinished ? <Badge tone="warning">import unfinished</Badge> : null
+/** The badges a chat's title gets: its kind's, and an import still unfinished (ARCHITECTURE §13). */
+export function ChatBadges({ chat }: { chat: Pick<Chat, "title" | "kind"> }) {
+  return (
+    <>
+      <KindBadge kind={chat.kind} />
+      {importState(chat.title).unfinished && <Badge tone="warning">import unfinished</Badge>}
+    </>
+  )
 }
 
-/** A chat with nobody in it yet: for notes, or trying a model. Characters join from the composer. */
-function EmptyChat() {
+/**
+ * The Chats page's cards for starting a chat that isn't with a character, under the list
+ * (spec/WORKSHOP.md §2.2): a chat without characters, and what features add (the workshop's).
+ */
+export const chatStartSections = defineSlot<object>("chats.start-sections")
+
+/**
+ * A start card's form: an optional title and its button, the title kept as a draft until the
+ * chat is made, which then opens.
+ */
+export function StartChatForm({
+  draft,
+  label,
+  button,
+  hint,
+  create
+}: {
+  /** The user draft the title is kept under. */
+  draft: string
+  /** The title field's accessible name. */
+  label: string
+  button: string
+  hint: string
+  create: (client: AppClient["Service"], title: string) => Effect.Effect<Chat, unknown>
+}) {
   const action = useAction()
   const navigate = useNavigate()
-  const durable = useUserDraft("chat:new", "Title", "")
+  const durable = useUserDraft(draft, "Title", "")
   const { text: title, setText: setTitle } = durable
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     await durable.commit(title, async () => {
-      const result = await action.run((client) => client("CreateChat", { title }), ["chats"])
+      const result = await action.run((client) => create(client, title), ["chats"])
       if (result.ok) void navigate({ to: "/chats/$chatId", params: { chatId: result.value.id } })
       return result.ok
     })
@@ -39,17 +71,33 @@ function EmptyChat() {
       <UserDraftStatus draft={durable} />
       <div className="flex gap-2">
         <Input
-          aria-label="Title of the new chat"
+          aria-label={label}
           placeholder="Title (optional)"
           value={title}
           onChange={(event) => setTitle(event.currentTarget.value)}
         />
-        <Button hint="Opens a new chat." type="submit" pending={action.pending}>
-          New chat
+        <Button hint={hint} type="submit" pending={action.pending}>
+          {button}
         </Button>
       </div>
       <ErrorAlert error={action.error} />
     </form>
+  )
+}
+
+/** A chat with nobody in it yet: for notes, or trying a model. Characters join from the composer. */
+export function EmptyChatCard() {
+  return (
+    <Card>
+      <CardHeader title="A chat without characters" about="Characters can join later, from the composer." />
+      <StartChatForm
+        draft="chat:new"
+        label="Title of the new chat"
+        button="New chat"
+        hint="Opens a new chat."
+        create={(client, title) => client("CreateChat", { title })}
+      />
+    </Card>
   )
 }
 
@@ -71,10 +119,7 @@ export function ChatsPage() {
         </div>
       </CenterHeaderContent>
       <ChatList />
-      <Card>
-        <CardHeader title="A chat without characters" about="Characters can join later, from the composer." />
-        <EmptyChat />
-      </Card>
+      <SlotOutlet slot={chatStartSections} props={{}} />
     </div>
   )
 }

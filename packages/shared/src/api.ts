@@ -1,4 +1,5 @@
 import { ExternalMediaApi } from "./externalMedia.ts"
+import { WorkshopApi } from "./workshopApi.ts"
 import { SplitChatApi } from "./splitChat.ts"
 import { ChatContextsApi } from "./contextsApi.ts"
 import { ChatMergeApi } from "./mergeApi.ts"
@@ -24,6 +25,7 @@ import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
 import { InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
+import { TextSearchApi } from "./textSearchApi.ts"
 import { EditorApi, ForkMergeApi, GalleryApi, CardArchiveApi, PanelApprovalApi } from "./editorApi.ts"
 import { CardSourcesApi } from "./cardSources.ts"
 import {
@@ -430,10 +432,15 @@ export class AuthenticatedChatMergeApi extends ChatMergeApi.middleware(Authentic
 export class AuthenticatedChatEventsApi extends ChatEventsApi.middleware(Authentication) {}
 
 /** The agent RPCs (agentApi.ts). */
+export class AuthenticatedWorkshopApi extends WorkshopApi.middleware(Authentication) {}
+
 export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {}
 
 /** The decision-model settings RPCs (decisionApi.ts). */
 export class AuthenticatedDecisionApi extends DecisionApi.middleware(Authentication) {}
+
+/** Text search across chats (textSearchApi.ts). */
+export class AuthenticatedTextSearchApi extends TextSearchApi.middleware(Authentication) {}
 
 /** The providers a new connection starts from (providerApi.ts). */
 export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Authentication) {}
@@ -444,6 +451,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedChatEventsApi)
   .merge(AuthenticatedAgentApi)
+  .merge(AuthenticatedWorkshopApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedCardArchiveApi)
   .merge(AuthenticatedCardSourcesApi)
@@ -455,7 +463,8 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedChatMergeApi)
   .merge(AuthenticatedChatContextsApi)
   .merge(AuthenticatedShellUpdatesApi)
-  .merge(AuthenticatedProviderListApi) {}
+  .merge(AuthenticatedProviderListApi)
+  .merge(AuthenticatedTextSearchApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

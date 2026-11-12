@@ -15,6 +15,8 @@ export const sidebarSearch = [
   "sideReverse",
   "sidePersonas",
   "sideQ",
+  // The chat search looks through message text (MessageSearch.tsx).
+  "sideIn",
   "sidePinsSort",
   // A card source's query (spec/CARD-SOURCES.md §3.2).
   "sideSq",

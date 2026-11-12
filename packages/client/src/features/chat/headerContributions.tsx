@@ -11,6 +11,7 @@ import type { ChatHeaderActionProps, PendingHeaderActionProps } from "./ChatHead
 import { castCharacters } from "./chatTitle.ts"
 import { type ChatCommandDialogProps, chatCommands } from "./commands.tsx"
 import { requestBranches } from "./forks.ts"
+import { mergesInto } from "./kindLooks.ts"
 import { chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
 
 function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
@@ -86,7 +87,7 @@ export const registerChatHeader = () => [
     description: "Brings another chat's messages into this one, after the newest message.",
     order: 2.6,
     icon: "merge",
-    available: ({ view }) => view.chat !== null && view.entries.length > 0,
+    available: ({ view }) => view.chat !== null && view.entries.length > 0 && mergesInto(view.chat),
     dialog: MergeChatCommandDialog
   }),
   chatCommands.register({

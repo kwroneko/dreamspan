@@ -310,6 +310,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         created_at: number
         title: string
         current_fork_id: string | null
+        kind: string
         chat_created_at: number
         chat_added_at: number
         shell_stamp: number
@@ -327,7 +328,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         lists: string | null
       }>`
           SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, f.parent_fork_id, f.base_slot_id,
-            c.title, c.current_fork_id, c.created_at AS chat_created_at, coalesce(c.added_at, c.created_at) AS chat_added_at,
+            c.title, c.kind, c.current_fork_id, c.created_at AS chat_created_at, coalesce(c.added_at, c.created_at) AS chat_added_at,
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
             s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
             CASE WHEN s.fork_id IS NOT NULL
@@ -340,6 +341,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           r.chat_id,
           {
             id: r.chat_id,
+            kind: r.kind,
             title: r.title,
             current_fork_id: r.current_fork_id,
             created_at: r.chat_created_at,
@@ -486,7 +488,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           sourceChatId: record.chat_id as ChatId,
           preview: s.preview,
           messages: s.messages,
-          chat: { id: row.id as ChatId, title: row.title, createdAt: row.created_at },
+          chat: { id: row.id as ChatId, kind: row.kind, title: row.title, createdAt: row.created_at },
           leaf: s.leaf as SlotId | null,
           name: record.name ?? chatName(importState(row.title).title, cast).name,
           chatName: titles.get(groupId)!,

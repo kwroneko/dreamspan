@@ -243,7 +243,7 @@ This ranks the regressions found in the tasks above, not every optional ST exten
 
 20. **Chat/sidebar widths cannot be adjusted.** Add remembered resize handles and reset controls. **Addressed by r4e.**
 
-21. **Chat-list search cannot find message-body phrases.** Add body search returning chats and, ideally, links to the matching messages. **Not addressed by R4.**
+21. **Chat-list search cannot find message-body phrases.** Add body search returning chats and, ideally, links to the matching messages. **Not addressed by R4. Built 2026-11-12 (search):** the left panel's chat search can look through message text, with links to the messages (ARCHITECTURE §12 "Finding a message").
 
 22. **No attachment/embed control on a message or composer.** Add a picker plus paste/drop, with capability feedback. **Not addressed by R4.**
 

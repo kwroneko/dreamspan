@@ -17,7 +17,8 @@ export type ForkId = typeof ForkId.Type
 export const EntityId = idSchema("EntityId", "entity")
 export type EntityId = typeof EntityId.Type
 
-export const ChatKind = Schema.Literals(["rp", "workshop"])
+// Membership is validated by the writer's scoped storageKinds registry.
+export const ChatKind = Schema.String
 const ChatStatus = Schema.Literals(["pending", "active", "archived"])
 export const VersionStatus = Schema.Literals(["generating", "complete", "stopped", "failed", "interrupted"])
 export type VersionStatus = typeof VersionStatus.Type

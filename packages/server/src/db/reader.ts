@@ -25,6 +25,8 @@ import { makeEditorReadHandlers } from "./editorReads.ts"
 import { makeImportReadHandlers } from "./importReads.ts"
 import { makeInspectorReadHandlers } from "./inspectorReads.ts"
 import { makeAgentReadHandlers } from "./agentReads.ts"
+import { makeMessageSearchHandlers } from "./messageSearch.ts"
+import { makeLibraryReplaceReadHandlers } from "./libraryReplace.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
 import { makeReadHandlers } from "./reads.ts"
@@ -58,7 +60,9 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               makeLcmUiReadHandlers,
               makeLcmEnableReadHandlers,
               makeMergeReadHandlers,
-              makeAgentReadHandlers
+              makeAgentReadHandlers,
+              makeMessageSearchHandlers,
+              makeLibraryReplaceReadHandlers
             ]),
             ([
               history,
@@ -76,7 +80,9 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               lcmUi,
               lcmEnable,
               merges,
-              agent
+              agent,
+              messageSearch,
+              libraryReplace
             ]) =>
               ReadOps.of(
                 stateModuleHandlers(
@@ -97,7 +103,9 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                       ...lcmUi,
                       ...lcmEnable,
                       ...merges,
-                      ...agent
+                      ...agent,
+                      ...messageSearch,
+                      ...libraryReplace
                     })
                   )
                 )

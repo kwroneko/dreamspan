@@ -618,9 +618,68 @@ export const baseline: ReadonlyArray<string> = [
     rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,
     tool_call_id TEXT NOT NULL,
     result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+    is_error INTEGER NOT NULL DEFAULT 0 CHECK (is_error IN (0, 1)),
     created_at INTEGER NOT NULL,
     PRIMARY KEY (rollout_id, tool_call_id)
   ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE rollout_effects (
+    rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,
+    tool_call_id TEXT NOT NULL,
+    seq INTEGER NOT NULL CHECK (seq >= 0),
+    kind TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    undo_json TEXT CHECK (undo_json IS NULL OR (json_valid(undo_json) AND json_type(undo_json) = 'object')),
+    undo_result_json TEXT CHECK (undo_result_json IS NULL OR (json_valid(undo_result_json) AND json_type(undo_result_json) = 'object')),
+    undone_at INTEGER CHECK (undone_at IS NULL OR undone_at >= created_at),
+    created_at INTEGER NOT NULL,
+    CHECK ((undone_at IS NULL) = (undo_result_json IS NULL)),
+    PRIMARY KEY (rollout_id, tool_call_id, seq),
+    FOREIGN KEY (rollout_id, tool_call_id) REFERENCES rollout_receipts(rollout_id, tool_call_id) ON DELETE CASCADE
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX rollout_effects_target ON rollout_effects(target_kind, target_id)`,
+  `CREATE INDEX rollout_effects_call ON rollout_effects(tool_call_id, rollout_id)`,
+  `CREATE TRIGGER rollout_effects_owner BEFORE INSERT ON rollout_effects BEGIN
+    SELECT RAISE(ABORT, 'effect target must belong to the workshop owner') WHERE NOT EXISTS (
+      SELECT 1 FROM rollouts r JOIN chats c ON c.id = r.chat_id
+      WHERE r.id = NEW.rollout_id AND r.kind = 'workshop'
+        AND (NEW.target_kind NOT IN ('entity', 'chat')
+          OR (NEW.target_kind = 'entity' AND EXISTS (SELECT 1 FROM entities e WHERE e.id = NEW.target_id AND e.owner_user_id = c.owner_user_id))
+          OR (NEW.target_kind = 'chat' AND EXISTS (SELECT 1 FROM chats t WHERE t.id = NEW.target_id AND t.owner_user_id = c.owner_user_id)))
+    );
+    SELECT RAISE(ABORT, 'library effect must target an entity') WHERE NEW.kind IN ('library.create', 'library.revise') AND NEW.target_kind <> 'entity';
+    SELECT RAISE(ABORT, 'chat effect must target a chat') WHERE NEW.kind = 'chat.create' AND NEW.target_kind <> 'chat';
+    SELECT RAISE(ABORT, 'library recipe must name its target ref and row version') WHERE NEW.kind IN ('library.create', 'library.revise') AND (
+      NOT EXISTS (SELECT 1 FROM entity_refs f WHERE f.id = json_extract(NEW.undo_json, '$.refId') AND f.entity_id = NEW.target_id)
+      OR json_type(NEW.undo_json, '$.rowVersion') IS NOT 'integer' OR json_extract(NEW.undo_json, '$.rowVersion') < 0
+    );
+    SELECT RAISE(ABORT, 'revision recipe must retain its previous row version') WHERE NEW.kind = 'library.revise' AND (
+      json_type(NEW.undo_json, '$.beforeRowVersion') IS NOT 'integer' OR json_extract(NEW.undo_json, '$.beforeRowVersion') < 0
+    );
+    SELECT RAISE(ABORT, 'chat creation recipe must retain its state stamp') WHERE NEW.kind = 'chat.create'
+      AND json_type(NEW.undo_json, '$.stamp') IS NOT 'text';
+    SELECT RAISE(ABORT, 'creation recipe must name target ref and revision') WHERE NEW.kind = 'library.create' AND (
+      NOT EXISTS (SELECT 1 FROM entity_refs f WHERE f.id = json_extract(NEW.undo_json, '$.refId') AND f.entity_id = NEW.target_id)
+      OR NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = json_extract(NEW.undo_json, '$.head') AND v.entity_id = NEW.target_id)
+    );
+    SELECT RAISE(ABORT, 'revision recipe must name target revisions') WHERE NEW.kind = 'library.revise' AND (
+      NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = json_extract(NEW.undo_json, '$.before') AND v.entity_id = NEW.target_id)
+      OR NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = json_extract(NEW.undo_json, '$.head') AND v.entity_id = NEW.target_id)
+    );
+  END`,
+  `CREATE TRIGGER rollout_effects_identity BEFORE UPDATE ON rollout_effects BEGIN
+    SELECT RAISE(ABORT, 'effect identity is immutable') WHERE NEW.rollout_id <> OLD.rollout_id OR NEW.tool_call_id <> OLD.tool_call_id
+      OR NEW.seq <> OLD.seq OR NEW.kind <> OLD.kind OR NEW.target_kind <> OLD.target_kind OR NEW.target_id <> OLD.target_id
+      OR NEW.title <> OLD.title OR NEW.created_at <> OLD.created_at;
+    SELECT RAISE(ABORT, 'effect cannot be undone twice') WHERE OLD.undone_at IS NOT NULL;
+    SELECT RAISE(ABORT, 'effect updates must record undo') WHERE NEW.undone_at IS NULL;
+    SELECT RAISE(ABORT, 'undo recipe is retained') WHERE NEW.undo_json IS NOT OLD.undo_json;
+    SELECT RAISE(ABORT, 'revision undo must name a restored target revision and row version') WHERE NEW.kind = 'library.revise' AND (
+      NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = json_extract(NEW.undo_result_json, '$.restoredHead') AND v.entity_id = NEW.target_id)
+      OR json_type(NEW.undo_result_json, '$.restoredRowVersion') IS NOT 'integer' OR json_extract(NEW.undo_result_json, '$.restoredRowVersion') < 0
+    );
+  END`,
   `CREATE TABLE rollout_branches (
     rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,
     branch_no INTEGER NOT NULL CHECK (branch_no >= 1),
@@ -1792,7 +1851,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE INDEX fork_overrides_chat ON fork_overrides(chat_id, kind)`,
   `CREATE INDEX fork_overrides_point ON fork_overrides(fork_id, kind, target_id, seq)`,
   `CREATE INDEX fork_overrides_window ON fork_overrides(fork_id, slot_depth, seq)`,
-  `CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind)`,
+  `CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind, value_id)`,
   `CREATE INDEX fork_overrides_bin_item ON fork_overrides(bin_item_id) WHERE bin_item_id IS NOT NULL`,
   `CREATE INDEX fork_overrides_changeset ON fork_overrides(changeset_id) WHERE changeset_id IS NOT NULL`,
   `CREATE TRIGGER fork_overrides_same_chat BEFORE INSERT ON fork_overrides
@@ -2007,6 +2066,45 @@ export const baseline: ReadonlyArray<string> = [
   ) STRICT, WITHOUT ROWID`,
   `CREATE TRIGGER chat_merge_messages_frozen BEFORE UPDATE ON chat_merge_messages
     BEGIN SELECT RAISE(ABORT, 'a merged message never changes'); END`,
+  // Search and replace across the library (db/libraryReplace.ts): one changeset group per
+  // replace, and here each entry it changed, the revision before and the one it wrote, so the
+  // whole replace is undone at once where nothing changed the entry since.
+  `CREATE TABLE library_edit_items (
+    id INTEGER PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES changeset_groups(id) ON DELETE CASCADE,
+    ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE,
+    before_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    after_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    matches INTEGER NOT NULL CHECK (matches > 0),
+    undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
+    UNIQUE (group_id, ref_id),
+    CHECK (before_revision_id <> after_revision_id)
+  ) STRICT`,
+  `CREATE INDEX library_edit_items_group ON library_edit_items(group_id)`,
+  `CREATE INDEX library_edit_items_ref ON library_edit_items(ref_id)`,
+  `CREATE INDEX library_edit_items_before ON library_edit_items(before_revision_id)`,
+  `CREATE INDEX library_edit_items_after ON library_edit_items(after_revision_id)`,
+  `CREATE INDEX library_edit_items_undone ON library_edit_items(undone_by_revision_id) WHERE undone_by_revision_id IS NOT NULL`,
+  `CREATE TRIGGER library_edit_items_valid BEFORE INSERT ON library_edit_items WHEN NOT EXISTS (
+    SELECT 1 FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+      JOIN changeset_groups g ON g.id = NEW.group_id
+      JOIN entity_revisions b ON b.id = NEW.before_revision_id AND b.entity_id = e.id
+      JOIN entity_revisions a ON a.id = NEW.after_revision_id AND a.entity_id = e.id
+    WHERE r.id = NEW.ref_id AND g.owner_user_id = e.owner_user_id)
+    BEGIN ${raise("library edit revisions and group must belong to the entry's owner")}; END`,
+  `CREATE TRIGGER library_edit_items_frozen BEFORE UPDATE OF id, group_id, ref_id, before_revision_id, after_revision_id, matches ON library_edit_items
+    BEGIN ${raise("a library edit's membership never changes")}; END`,
+  ...["INSERT", "UPDATE OF undone_by_revision_id"].map(
+    (event, i) =>
+      `CREATE TRIGGER library_edit_items_undo_${i} BEFORE ${event} ON library_edit_items
+      WHEN NEW.undone_by_revision_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM entity_refs r JOIN entity_revisions v ON v.entity_id = r.entity_id
+        WHERE r.id = NEW.ref_id AND v.id = NEW.undone_by_revision_id)
+      BEGIN ${raise("a library edit's undo revision must belong to its entry")}; END`
+  ),
+  `CREATE TRIGGER library_edit_groups_owner_fixed BEFORE UPDATE OF owner_user_id ON changeset_groups
+    WHEN NEW.owner_user_id IS NOT OLD.owner_user_id AND EXISTS (SELECT 1 FROM library_edit_items WHERE group_id = OLD.id)
+    BEGIN ${raise("a library edit's owner never changes")}; END`,
   ...forkLabelSchema,
   ...shellSummaries
 ]

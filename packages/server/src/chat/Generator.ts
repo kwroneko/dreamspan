@@ -52,6 +52,20 @@ export interface GenerationRequest {
  */
 export type GenerationChunk =
   | string
+  | { readonly several: true }
+  /** Finish this message through the ordinary parse/rewrite pipeline before the tool returns. */
+  | {
+      readonly post: {
+        readonly rolloutId: string
+        readonly toolCallId: string
+        readonly resolve: (next: {
+          readonly slotId: SlotId
+          readonly versionId: VersionId
+          readonly postedVersionId: VersionId
+        }) => void
+        readonly reject: (error: unknown) => void
+      }
+    }
   | { readonly reasoning: string }
   /**
    * The reply's leading tagged sections as parsed so far (a reply parser's, replySections.ts),
@@ -70,7 +84,7 @@ export type GenerationChunk =
    */
   | { readonly restart: true }
   /** An agent reply's steps so far, all of them (spec/AGENTIC.md §5.1). */
-  | { readonly steps: ReadonlyArray<RolloutStep> }
+  | { readonly steps: ReadonlyArray<RolloutStep>; readonly versionId?: VersionId }
 
 /** Why a generation failed, as its failed version records it (DESIGN §3.1). */
 export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("GenerationFailed", {

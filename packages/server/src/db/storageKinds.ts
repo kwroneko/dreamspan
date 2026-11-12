@@ -11,6 +11,21 @@ interface StorageKind {
 
 /** Replace an entry to extend its values, or disable it, using a scoped registration. */
 export const storageKinds = makeRegistry<StorageKind>([
+  {
+    id: "rollout_effects.kind",
+    values: [
+      "library.create",
+      "library.revise",
+      "chat.create",
+      "chat.change",
+      "setting.set",
+      "changeset.apply",
+      "plugin.create",
+      "plugin.commit",
+      "plugin.enable",
+      "reply.generate"
+    ]
+  },
   { id: "changeset_groups.origin", values: ["user", "agent"] },
   { id: "bin_items.kind", values: ["chat", "message", "branch", "version", "entity", "connection", "card_asset"] },
   {

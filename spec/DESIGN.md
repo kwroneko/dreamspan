@@ -782,7 +782,7 @@ Design: [CHAT-MERGE.md](CHAT-MERGE.md).
 - **[P]** Placement is per piece, not only per card. The card's fixed definition stays where the layout puts it. Card modules and card-owned notes each have their own placement (top section, depth N or tail), so the parts that change during a chat can sit late in the context (§4.1a). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §15). Arbitrary agent-editable card fields remain Phase 4 work.
 
 ### 5.3 `{{user}}`, `{{char}}` and the speaker
-- **[D]** In ST these rebind every turn (to the current speaker and the current persona). That breaks the cache and fights instructions like "don't write for `{{user}}`". Users need to control and pin these bindings, and to edit presets and cards to stop relying on them, which requires search and replace. **Binding controls built** (U09, 2026-10-28; ARCHITECTURE.md §15); cross-entry search and replace remains separate.
+- **[D]** In ST these rebind every turn (to the current speaker and the current persona). That breaks the cache and fights instructions like "don't write for `{{user}}`". Users need to control and pin these bindings, and to edit presets and cards to stop relying on them, which requires search and replace. **Binding controls built** (U09, 2026-10-28; ARCHITECTURE.md §15); cross-entry search and replace remains separate. **Cross-entry search and replace built** (search, 2026-11-12; ARCHITECTURE §14.6 "Across the library").
 - **[D]** In preset text, `{{char}}` is every character in the chat except your persona, comma-joined, so the start of the request is the same whoever speaks; a card's own text uses that card's name, and the chat can pin other text in its place (owner, 2026-10-29). In a one-on-one chat it's the one name, as in ST; in a group ST uses the current speaker, which rebuilds the cache on most turns, and the ST fidelity gate lists this as a documented difference. `{{user}}` is in §2.2. The speaker for this turn is named by the end-of-request instruction (§2.2), which realises the earlier proposed "tail directive".
 
 ### 5.4 Role projection [P]
@@ -901,7 +901,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - **[P]** A prompt added behind the bar can be typed into at once; its text is kept as live drafts, but nothing sends it until the bar's Save, and a reply's checkpoint leaves it out, so Revert takes it away entirely. Deleting a prompt that was only added behind the bar removes it at once (it was never saved or sent).
 - **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12, §14).
 - **[P]** Every write carries the revision it was based on, so a stale tab can never silently overwrite newer state. **Built optimistic bases** (ARCHITECTURE §3.10, §14); compound forms retain documented snapshots and setting-save/draft-end operations are separate. This is not universal live field collaboration.
-- **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats.
+- **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats. **Built:** message text across all chats, from the left panel's chat search (search, 2026-11-12; ARCHITECTURE §12 "Finding a message"). **Built:** search and replace through every library entry at once, from the library's Search and replace button (search, 2026-11-12; ARCHITECTURE §14.6 "Across the library").
 - **[D]** Text boxes work like a code editor (owner, 2026-10-16), and almost every text box needs it:
   - the left edge marks new, modified and unchanged lines
   - a diff view of the current changes against the last revision
@@ -1057,13 +1057,14 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 - **[P]** (phase4decide) `lore` asks only about entries that carry a question for the decision model (the entry's `decision_hint`, set in its Matching settings), at most 32 per reply, over the last six messages; a yes includes the entry as if its keys had matched.
 
 ### 7.7 Agent use ("workshop")
+- **Design (proposed, 2026-11-12):** [WORKSHOP.md](WORKSHOP.md) designs everything in this section, the Phase 6 parts of §7.3 and §10.3, and the plugin loader, as deltas from the build and reference-harness, with build units in its §9 and open questions in its §10. It promotes nothing here.
 - **[D]** Agentic work outside the RP itself: creating cards with tools, editing and cloning them, changing settings, setting up chat modes, eventually writing plugins.
 - **[D]** It needs a **clear UX distinction** within one shared UI, and it must be hard to slip into "Claude Code mode" from RP by accident. It ships preconfigured with an agent preset and a default assistant card the user can swap for any of their own.
 - **[P]** Technically it's a chat configuration made of: **Unbuilt workshop configuration (Phase 6)**; registry/state groundwork is not a running workshop.
   - an output contract that allows several messages
   - **rollout continuity**: fork fresh per turn, or **resume the previous rollout** **[D]** (the timeline stays separate either way)
   - the meta toolset
-- **[P]** The chat kind (RP or Workshop) is chosen at creation and can't be toggled afterwards. Workshops have a distinct accent, a badge and a capability strip. **Unbuilt Phase 6 proposal.**
+- **[P]** The chat kind (RP or Workshop) is chosen at creation and can't be toggled afterwards. Workshops have a distinct accent, a badge and a capability strip. **Built (workshop1, workshop2; ARCHITECTURE §16, “Workshop chats”): the kind is set by the Chats page’s Workshop card and never changes; the accent, the badge and a read-only capability chip. Choosing what the assistant may do is unbuilt (WORKSHOP W4).**
 - **[P]** An out-of-character side channel attached to an RP chat: a small workshop docked in a panel that can read the story but writes to its own timeline. **Unbuilt Phase 6 proposal.**
 - **[P]** Permissions: **Unbuilt tool/plugin consent UX (Phase 6)**; imported data already cannot grant executable capabilities.
   - tools with external effects need approval

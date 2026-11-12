@@ -39,7 +39,9 @@ for (const theme of ["light", "dark"] as const)
           const input = page
             .getByRole("textbox", { name: view === "Chats" ? "Find a chat" : "Find a character", exact: true })
             .filter({ visible: true })
-          const before = { switcher: await box(switcher), input: await box(input) }
+          // The chats' field shares its row with the message-text toggle: the row is the field's place.
+          const field = view === "Chats" ? input.locator("xpath=..") : input
+          const before = { switcher: await box(switcher), input: await box(field) }
           if (!process.env.LEFTSEARCH_BEFORE) {
             const host = await box(switcher.locator("../.."))
             const oneRow = host.width >= 416
@@ -55,7 +57,7 @@ for (const theme of ["light", "dark"] as const)
               await control.hover()
               await control.focus()
               expect(await box(switcher)).toEqual(before.switcher)
-              expect(await box(input)).toEqual(before.input)
+              expect(await box(field)).toEqual(before.input)
             }
             await input.fill("Synthetic name")
             await expect(input).toHaveValue("Synthetic name")

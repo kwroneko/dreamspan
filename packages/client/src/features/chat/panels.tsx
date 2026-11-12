@@ -5,6 +5,7 @@ import type { AvatarCrop } from "@rp/shared/media.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { Component, lazy, Suspense, useCallback, useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
+import { kindHides } from "./kindLooks.ts"
 import { Button } from "../../ui/Button.tsx"
 import type { IconName } from "../../ui/Icon.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -98,7 +99,7 @@ export const isPanelTab = (value: unknown, view?: ChatView, snapshot = chatPanel
 export const panelTabs = (view: ChatView, selected: string | null, snapshot = chatPanels.snapshot()) =>
   [...snapshot.entries]
     .sort((a, b) => a.order - b.order)
-    .filter((entry) => entry.available?.(view) !== false)
+    .filter((entry) => !kindHides(view.chat?.kind, entry.id) && entry.available?.(view) !== false)
     .flatMap((descriptor) =>
       (descriptor.tabs?.(view, selected) ?? [{ value: descriptor.id, label: descriptor.label }])
         .filter((tab) => resolvePanel(tab.value, snapshot) === descriptor)

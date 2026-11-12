@@ -1,3 +1,6 @@
+import { stepsOf } from "../agent/steps.ts"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
+import type { FrozenTool } from "../agent/tools.ts"
 import type { StepsSummary } from "@rp/shared/agent.ts"
 // Row shapes and their mapping to domain types, shared by the writer and readers.
 import type { StoredRewrite, VersionRewrite } from "@rp/shared/regexScripts.ts"
@@ -60,7 +63,7 @@ export const toUser = (row: UserRow) =>
 
 export interface ChatRow {
   readonly id: string
-  readonly kind: "rp" | "workshop"
+  readonly kind: string
   readonly status: "pending" | "active" | "archived"
   readonly title: string
   readonly active_leaf_slot_id: string | null
@@ -164,7 +167,8 @@ export interface VersionRow {
   readonly model_label?: string | null
   /** Its model's connection kind and key, as JSON (`versionExtras`); absent on a row just inserted. */
   readonly model_ref_json?: string | null
-  /** Its agent rollout's tool calls and run time, as JSON (`versionExtras`); null for a plain reply's. */
+  /** Its agent rollout's tool calls and run time, as JSON (`versionExtras`); null without steps. */
+  readonly steps_material?: string | null
   readonly steps_json?: string | null
   /** What an imported version's app recorded about its model and generation (`StoredGeneration`). */
   readonly recorded_model_json?: string | null
@@ -184,14 +188,10 @@ export const versionExtras = (alias: string) =>
   (SELECT json_object('provider', c.kind, 'model', m.model_key) FROM models m JOIN connections c ON c.id = m.connection_id
     WHERE m.id = ${alias}.model_id) AS model_ref_json,
   (SELECT json_object('count', r.step_count, 'ms', r.completed_at - r.started_at) FROM rollouts r
-    WHERE r.id = ${alias}.rollout_id AND (r.step_count > 0 OR r.mode IS NOT NULL)) AS steps_json`
-
-/** An agent reply's steps (only when it made tool calls) and that it was one (spec/AGENTIC.md §5.1, §5.2). */
-const agentOf = (json: string | null | undefined): { steps?: StepsSummary; agent?: boolean } => {
-  if (!json) return {}
-  const steps = JSON.parse(json) as StepsSummary
-  return steps.count > 0 ? { steps, agent: true } : { agent: true }
-}
+    WHERE r.id = ${alias}.rollout_id AND (r.step_count > 0 OR r.mode IS NOT NULL)) AS steps_json,
+  (SELECT json_object('transcript', json(p.transcript_json), 'tools', json_extract(p.context_snapshot_json, '$.agent.tools'),
+    'final', r.status NOT IN ('created', 'running')) FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id
+    WHERE p.rollout_id = ${alias}.rollout_id AND json_extract(p.context_snapshot_json, '$.agent.contract') = 'several') AS steps_material`
 
 const toVersionError = (json: string | null) => {
   if (json === null) return null
@@ -258,6 +258,24 @@ const modelOf = (row: VersionRow) => {
   }
 }
 
+const versionSteps = (row: VersionRow): { readonly steps?: StepsSummary; readonly agent?: boolean } => {
+  if (!row.steps_material) {
+    if (!row.steps_json) return {}
+    const steps = JSON.parse(row.steps_json) as StepsSummary
+    return steps.count > 0 ? { steps, agent: true } : { agent: true }
+  }
+  const material = JSON.parse(row.steps_material) as {
+    transcript: ReadonlyArray<AgentMessage> | null
+    tools: ReadonlyArray<FrozenTool>
+    final: boolean
+  }
+  const count = material.transcript
+    ? stepsOf(material.transcript, material.tools, !!material.final, row.id).filter((s) => s.kind === "tool").length
+    : 0
+  const summary = row.steps_json ? (JSON.parse(row.steps_json) as StepsSummary) : { ms: null }
+  return count ? { steps: { count, ms: summary.ms }, agent: true } : { agent: true }
+}
+
 export const toVersion = (row: VersionRow) =>
   new Version({
     id: row.id as VersionId,
@@ -290,7 +308,7 @@ export const toVersion = (row: VersionRow) =>
             ? (JSON.parse(row.context_issues) as Array<ContextIssue>).filter((issue) => !UNSHOWN.has(issue.kind))
             : []
         },
-    ...agentOf(row.steps_json),
+    ...versionSteps(row),
     rowVersion: 1 + (row.amend_count ?? 0)
   })
 

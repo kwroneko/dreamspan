@@ -32,7 +32,7 @@ import { PRESET_VIEWS, type PresetView, presetDetail, presetsInView } from "../p
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { LISTED, libraryAtom } from "./data.ts"
 import { itemName, LibraryItemActions } from "./itemActions.tsx"
-import { libraryActions } from "./slots.ts"
+import { libraryActions, libraryPanels } from "./slots.ts"
 
 type Kind = (typeof LISTED)[number]["kind"]
 type Show = "all" | "characters" | "personas"
@@ -562,6 +562,7 @@ export function LibraryPage() {
           </Link>
         </Tooltip>
       </div>
+      <SlotOutlet slot={libraryPanels} props={{ kind: prefs.kind }} />
       <AsyncView atom={libraryAtom} loading="Loading the library…">
         {(lists) => {
           const cards = new Map(lists.castCards.map((card) => [card.entityId, card]))

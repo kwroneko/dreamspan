@@ -35,7 +35,7 @@ Session notes are not kept in the repository.
 - **Differential test harness**: stock ST in a container plus a mock endpoint that records requests, and synthetic fixtures. This is the fidelity gate for the assembler.
 
 ## Phase 2: Non-agentic chat that can replace ST (first milestone)
-**Status (2026-10-30): built, awaiting the owner's daily-use trial (the exit criterion).** Everything listed below is built, except where owner decisions overtook it: the Members/Personas/All cards speaker panel became the cast speaker with a separate persona choice, and the preset scope chain and overlays became global model/preset selection with three-way re-import. Not complete: general library-text search, a multi-swipe composition scratchpad, and inserting messages anywhere (spec/MESSAGE-INSERT.md, units in progress).
+**Status (2026-10-30): built, awaiting the owner's daily-use trial (the exit criterion).** Everything listed below is built, except where owner decisions overtook it: the Members/Personas/All cards speaker panel became the cast speaker with a separate persona choice, and the preset scope chain and overlays became global model/preset selection with three-way re-import. Not complete: a multi-swipe composition scratchpad, and inserting messages anywhere (spec/MESSAGE-INSERT.md, units in progress). General library-text search, with replace, was built 2026-11-12 (ARCHITECTURE §14.6 "Across the library").
 
 - The context assembler in ST-compatible mode, passing the differential tests. Card layout modes. Role projection strategies. Cache breakpoints.
 - Chat UI:
@@ -83,6 +83,7 @@ Session notes are not kept in the repository.
 - Composition scratchpad.
 
 ## Phase 6: Workshop and meta tools
+**Status (2026-11-12): designed** in [WORKSHOP.md](WORKSHOP.md) (workshop chats, setup tools, the side chat, the plugin loader and the agent writing plugins, as deltas from the build and reference-harness `latest`; fourteen build units in its §9, open questions in its §10).
 - Workshop chat kind, with its template, permissions and capability strip.
 - Meta tools: create, edit and clone cards; settings; chat setup. Agentic chat editing through changesets.
 - The out-of-character side channel docked in RP chats.

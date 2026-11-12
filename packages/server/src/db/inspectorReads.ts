@@ -1,3 +1,4 @@
+import type { ContinuousSnapshot } from "../agent/continuity.ts"
 import { WorkerAssembler } from "../assembler/assembler.ts"
 import { textDisplay } from "./textDisplay.ts"
 import { eventApplies, inFork, viewAt } from "./forkState.ts"
@@ -316,7 +317,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND p.context_snapshot_json IS NOT NULL
           AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!row) return yield* new NotFound({ entity: "context", id: versionId })
-        const snapshot = JSON.parse(row.snapshot) as ContextSnapshot
+        const snapshot = JSON.parse(row.snapshot) as ContinuousSnapshot
         const chatId = row.chat_id as ChatId
         const requests = yield* rolloutUsage(sql, userId, row.rollout_id)
         const wire = row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null
@@ -346,6 +347,16 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         }).pipe(inFork(sql, chatId, row.fork_id, snapshot.inputs.leafSlotId))
         const separateContext = yield* separateContextOf(sql, snapshot)
         return new RunContext({
+          ...(snapshot.continuity
+            ? {
+                continuity: {
+                  ...(snapshot.continuity.parent
+                    ? { parentVersionId: snapshot.continuity.parent.versionId as VersionId }
+                    : {}),
+                  ...(snapshot.continuity.reason ? { reason: snapshot.continuity.reason } : {})
+                }
+              }
+            : {}),
           chatId,
           slotId: row.slot_id as SlotId,
           versionId,
@@ -431,14 +442,14 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             SELECT v.id, v.id FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
             WHERE v.id IN ${sql.in(ids)} AND c.owner_user_id = ${userId}
               AND EXISTS (SELECT 1 FROM llm_requests q INDEXED BY llm_requests_version
-                WHERE q.version_id = v.id AND q.purpose = 'generation' AND q.owner_user_id = ${userId})
+                WHERE q.version_id = v.id AND q.purpose IN ('generation', 'workshop') AND q.owner_user_id = ${userId})
             UNION
             SELECT chain.root, v.source_version_id FROM chain JOIN versions v ON v.id = chain.id
             WHERE v.source_version_id IS NOT NULL
           )
           SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source
           FROM chain JOIN llm_requests q INDEXED BY llm_requests_version ON q.version_id = chain.id
-          WHERE q.purpose = 'generation' AND q.owner_user_id = ${userId}
+          WHERE q.purpose IN ('generation', 'workshop') AND q.owner_user_id = ${userId}
           ORDER BY chain.root, q.started_at, q.id`
         const byVersion = new Map<string, Array<RequestFigures>>()
         for (const row of rows) {
