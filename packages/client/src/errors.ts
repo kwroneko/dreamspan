@@ -17,6 +17,7 @@ import { ForkNotesChanged, GenerationUnavailable, NotAmendable } from "@rp/share
 import { EditConflict, EditRefused, InvalidDocument } from "@rp/shared/editorApi.ts"
 import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
 import { MergeChanged, MergeRefused } from "@rp/shared/mergeApi.ts"
+import { NotResumable } from "@rp/shared/agent.ts"
 import { Cause } from "effect"
 import { RpcClientError } from "effect/rpc"
 
@@ -36,6 +37,9 @@ const sentence = (text: string) => {
   const capital = trimmed[0]!.toUpperCase() + trimmed.slice(1)
   return /[.!?]$/.test(capital) ? capital : `${capital}.`
 }
+
+/** "It's already being resumed." → "it's already being resumed.", to follow a colon. */
+const lowerFirst = (text: string) => (text === "" ? text : text[0]!.toLowerCase() + text.slice(1))
 
 const make = (tag: string, message: string, reason: string | null = null, problems: ReadonlyArray<string> = []) => ({
   tag,
@@ -89,6 +93,8 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof GenerationUnavailable) return make("GenerationUnavailable", sentence(error.message))
   if (error instanceof NotAmendable)
     return make("NotAmendable", "Only a finished message you wrote can be changed in place.")
+  if (error instanceof NotResumable)
+    return make("NotResumable", `This reply can't be carried on: ${lowerFirst(sentence(error.message))}`)
   if (error instanceof MergeRefused) return make("MergeRefused", sentence(error.message))
   if (error instanceof MergeChanged)
     return make("MergeChanged", "One of the chats changed while this was open. Check what merging brings now.")

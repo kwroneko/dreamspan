@@ -201,6 +201,7 @@ export const LcmSettingsView = Schema.Struct({
     layerTarget: Schema.Int,
     layerMax: Schema.Int,
     when: LcmWhen,
+    style: Schema.String,
     leafInput: Schema.NullOr(Schema.Int),
     leafTarget: Schema.Int,
     from: Schema.Record(Schema.String, Source)

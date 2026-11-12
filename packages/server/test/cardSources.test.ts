@@ -31,7 +31,11 @@ const bob = { "Remote-User": "src-bob" }
 const config = testConfig({ authMode: "proxy" })
 // The real cardex adapter against the fake, with a key it may take: cardex itself takes none,
 // but this is where the key's write-only path is tested.
-const sources = CardSources.layerWith({ adapters: [{ ...fakeCardexAdapter(archive), key: "optional" }] })
+// Functional RPC tests use Effect's virtual clock. Keep the synthetic archive's burst
+// above this suite's request count; the real rate and waiting/backoff are tested below.
+const sources = CardSources.layerWith({
+  adapters: [{ ...fakeCardexAdapter(archive), key: "optional", rate: { perSecond: 10, burst: 1000 } }]
+})
 const testServer = serverLayer(config, undefined, undefined, sources)
 const base = Effect.map(serverPort, (port) => `http://127.0.0.1:${port}`)
 
@@ -166,6 +170,92 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       assert.isUndefined(list.cache)
       assert.strictEqual(yield* outcome(b.SetSourceCacheCap({ bytes: 64 * 1024 * 1024 })), "Forbidden")
       assert.strictEqual(yield* outcome(b.SourceCard({ sourceId: "nowhere", remoteId: "x" })), "NotFound")
+    })
+  )
+
+  it.effect("a reload retries the requested sort instead of reusing a cached substitute", () =>
+    Effect.gen(function* () {
+      const api = yield* client({ "Remote-User": "reactive-sort-reader" })
+      const query = { ...emptySourceQuery, text: "synthetic", sort: "name" }
+      archive.failSort("name", 500)
+      const first = yield* api.SourceSearch({ sourceId: "cardex", query, page: null })
+      assert.include(first.notice!, "just now")
+      const next = yield* api.SourceSearch({ sourceId: "cardex", query, page: first.next })
+      assert.strictEqual(next.notice, first.notice)
+      const reloaded = yield* api.SourceSearch({ sourceId: "cardex", query, page: null })
+      assert.isUndefined(reloaded.notice)
+      assert.isTrue(
+        reloaded.items.every(
+          (item, index) => index === 0 || item.name.localeCompare(reloaded.items[index - 1]!.name) >= 0
+        )
+      )
+    })
+  )
+
+  it.effect("suggestion cursors stay behind consent, guards, the per-user cache and retry", () =>
+    Effect.gen(function* () {
+      const api = yield* client({ "Remote-User": "suggestion-reader" })
+      yield* api.SetCardSourceEnabled({ sourceId: "cardex", enabled: false })
+      const before = archive.hits()
+      assert.strictEqual(
+        yield* outcome(api.SourceSuggestions({ sourceId: "cardex", kind: "creators", prefix: "", page: null })),
+        "SourceFailed:disabled"
+      )
+      assert.strictEqual(archive.hits(), before)
+      yield* api.SetCardSourceEnabled({ sourceId: "cardex", enabled: true })
+      const first = yield* api.SourceSuggestions({ sourceId: "cardex", kind: "creators", prefix: "", page: null })
+      assert.isString(first.next)
+      const second = yield* api.SourceSuggestions({
+        sourceId: "cardex",
+        kind: "creators",
+        prefix: "",
+        page: first.next
+      })
+      assert.isFalse(second.items.some((item) => first.items.some((old) => old.value === item.value)))
+      const hits = archive.hits()
+      yield* api.SourceSuggestions({ sourceId: "cardex", kind: "creators", prefix: "", page: first.next })
+      assert.strictEqual(archive.hits(), hits)
+      archive.failNext(503)
+      assert.strictEqual(
+        yield* outcome(api.SourceSuggestions({ sourceId: "cardex", kind: "tags", prefix: "f", page: null })),
+        "SourceFailed:unreachable"
+      )
+      const retried = yield* api.SourceSuggestions({ sourceId: "cardex", kind: "tags", prefix: "f", page: null })
+      assert.isAbove(retried.items.length, 0)
+    })
+  )
+
+  it.effect("a regional file restriction is a plain regional state and can be retried", () =>
+    Effect.gen(function* () {
+      const api = yield* client({ "Remote-User": "regional-reader" })
+      // Only the card file fails; the batch lookup still works.
+      yield* Effect.promise(() =>
+        fetch(`${archive.origin}/__fake/fail?status=451&path=/api/v1/download/${archive.cards[0]!.sha256}`)
+      )
+      assert.strictEqual(
+        yield* outcome(api.SourceCard({ sourceId: "cardex", remoteId: archive.cards[0]!.slug })),
+        "SourceFailed:region_unavailable"
+      )
+      const retried = yield* api.SourceCard({ sourceId: "cardex", remoteId: archive.cards[0]!.slug })
+      assert.isString(retried.docJson)
+    })
+  )
+
+  it.effect("a JSON-only card keeps its full portrait when added, including with the archive now offline", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards.find((c) => c.originalOnly)!
+      yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })
+      const hits = archive.hits()
+      archive.failNext(503, 10)
+      try {
+        const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+        const opened = yield* api.OpenEditor({ refId: added.refId as RefId })
+        assert.isString((opened.doc as { avatar_media_id?: string }).avatar_media_id)
+        assert.strictEqual(archive.hits(), hits)
+      } finally {
+        archive.reset()
+      }
     })
   )
 
@@ -920,6 +1010,9 @@ describe("the guards (§6.2)", () => {
       assert.strictEqual(plain.reason, "bad_response")
       assert.isUndefined(plain.code)
       // A source with no key that answers 403 refused the request, not a key.
+      status = 451
+      const regional = yield* Effect.flip(http.get(new URL("https://archive.example/api"), "card"))
+      assert.strictEqual(regional.reason, "region_unavailable")
       status = 403
       const refused = yield* Effect.flip(http.get(new URL("https://archive.example/api"), "json"))
       assert.strictEqual(refused.reason, "refused")

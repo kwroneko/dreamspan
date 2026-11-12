@@ -1,7 +1,7 @@
 // A fake card archive (spec/CARD-SOURCES.md §10): an in-process HTTP server serving our own
 // synthetic cards in the shape of cardex's public API v1 (https://cardex.zip/docs/api), so the
 // real cardex adapter (`src/sources/cardex.ts`) runs against it unchanged, pointed at its
-// origin: v1's capabilities descriptors (names, types, allowed values; no labels); search with
+// origin: v1's capabilities descriptors (names, types, allowed values and labels); search with
 // `nsfw` include/exclude/only, `kind`, tags, tokens, sites, `author` as site/handle, v1's sorts,
 // `limit` 1–100 (else 400), a cursor in text mode (refused for another query with 400
 // `invalid_cursor`) and page numbers
@@ -108,7 +108,12 @@ interface FakeCard {
   readonly tokens: number
   readonly popularity: number
   readonly addedAt: number
+  readonly hasCover: boolean
   readonly hasLorebook: boolean
+  readonly createdAt: number
+  readonly deleted: boolean
+  readonly verified: boolean
+  readonly recommended: boolean
   /** Made from another card on its source (`exclude_forks` leaves these out). */
   readonly fork: boolean
   /** Its original is a CHARX, as some on cardex are: no mirrored or self-contained file, only its JSON. */
@@ -193,7 +198,12 @@ const syntheticCards = (count = 240): ReadonlyArray<FakeCard> => {
       tokens: 400 + Math.floor(random() * 3600),
       popularity: Math.floor(random() * 10_000),
       addedAt: Date.UTC(2026, 0, 1) + n * 3_600_000,
+      hasCover: true,
       hasLorebook,
+      createdAt: Date.UTC(2025, 0, 1) + (count - n) * 86_400_000,
+      deleted: n % 11 === 0,
+      verified: n % 3 === 0,
+      recommended: n % 4 === 0,
       fork,
       originalOnly: n % 40 === 7,
       json,
@@ -308,9 +318,22 @@ const V1_SITES = [
   "aicc",
   "backyard",
   "wyvern",
-  "pephop"
+  "pephop",
+  "caveduck",
+  "crushon"
 ]
-const V1_SORTS = ["relevance", "newest", "oldest", "popular", "name", "tokens_asc", "tokens_desc"]
+const V1_SORTS = [
+  "relevance",
+  "newest",
+  "oldest",
+  "created_desc",
+  "created_asc",
+  "popular",
+  "name",
+  "name_desc",
+  "tokens_asc",
+  "tokens_desc"
+]
 /** cardex v1's search caps: in text mode a total past 10,000 is an estimate; semantic mode finds 240 at most. */
 const MAX_RESULTS = 10_000
 const SEMANTIC_MAX = 240
@@ -320,16 +343,37 @@ const capabilitiesBody = {
   version: "v1",
   filters: [
     field("q", "string", { max: 500 }),
+    field("fields", "list", {
+      label: "Search in",
+      allowed_values: ["name", "description", "character", "lorebook"],
+      allowed_value_labels: [
+        { value: "name", label: "Name" },
+        { value: "description", label: "Tagline and description" },
+        { value: "character", label: "Character definition" },
+        { value: "lorebook", label: "Lorebook, creator and tags" }
+      ],
+      default: []
+    }),
     field("nsfw", "enum", { allowed_values: ["include", "exclude", "only"], default: "include" }),
-    field("kind", "enum", { allowed_values: ["character", "lorebook", "both"], default: "both" }),
+    field("kind", "enum", { allowed_values: ["character", "lorebook", "both", "character_lorebook"], default: "both" }),
     field("source", "list", { allowed_values: V1_SITES, default: [] }),
+    field("not_source", "list", { allowed_values: V1_SITES, default: [] }),
+    field("any_tags", "groups", { default: [], max: 20 }),
     field("tags", "list", { default: [], max: 20 }),
     field("not_tags", "list", { default: [], max: 20 }),
-    field("min_tokens", "integer", { default: 30, min: 0, max: 10_000_000 }),
+    field("min_tokens", "integer", { default: 300, min: 0, max: 10_000_000 }),
     field("max_tokens", "integer", { min: 0, max: 10_000_000 }),
     flag("has_cover", true),
     field("author", "identity"),
-    flag("exclude_forks")
+    field("any_author", "identities", { default: [], max: 20 }),
+    field("not_author", "identities", { default: [], max: 20 }),
+    field("picture", "sha256"),
+    ...["added_after", "added_before", "created_after", "created_before"].map((name) => field(name, "date")),
+    flag("exclude_forks"),
+    flag("deleted_from_source"),
+    flag("deleted_from_any_source"),
+    flag("chub_verified"),
+    flag("chub_recommended")
   ],
   sorts: V1_SORTS,
   default_sort: "relevance with q; newest without q",
@@ -349,6 +393,11 @@ export interface FakeArchiveOptions {
   readonly cards?: number
   /** Report the total as an estimate, as an archive with a large index may. */
   readonly estimate?: boolean
+  /** Live v1 omits the expensive count on cursor searches. */
+  readonly countCap?: number
+  readonly unknownTotal?: boolean
+  /** Include some characters without cover images. */
+  readonly coverless?: boolean
   /** Leave `download_modes` out, as a response cached from before cardex listed them. */
   readonly omitDownloadModes?: boolean
 }
@@ -358,10 +407,13 @@ export interface FakeArchive {
   readonly host: string
   readonly cards: ReadonlyArray<FakeCard>
   /** Requests received, by path, and all together. */
+  readonly conditionalHits: () => number
+  readonly notModified: () => number
   readonly hits: () => number
   readonly paths: () => ReadonlyArray<string>
   readonly reset: () => void
   /** The next `times` requests get this status (and `Retry-After`), as a failing archive would answer. */
+  readonly failSort: (sort: string, status: number, times?: number, retryAfterSeconds?: number) => void
   readonly failNext: (status: number, times?: number, retryAfterSeconds?: number) => void
   /** The card's author publishes a newer version: a changed description, the next `character_version`. */
   readonly publish: (slug: string) => FakeCard
@@ -377,7 +429,12 @@ export const fakeCardexAdapter = (archive: Pick<FakeArchive, "origin">): CardSou
 const error = (code: string, message: string) => ({ error: code, message })
 
 export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promise<FakeArchive> => {
-  const cards = [...syntheticCards(options.cards ?? 240)]
+  const cards = syntheticCards(options.cards ?? 240).map((card, n) => ({
+    ...card,
+    hasCover: options.coverless ? n % 3 !== 0 : true
+  }))
+  let countCap = options.countCap ?? 100_000
+  let cursorEpoch = 0
   const bySlug = new Map(cards.map((c) => [c.slug, c]))
   const bySha = new Map(cards.map((c) => [c.sha256, c]))
   // The full image is a PNG; the thumbnails, as cardex's, WebP at 512 and 64 px wide.
@@ -415,12 +472,25 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     return next
   }
   const seen: Array<string> = []
-  let failure: { status: number; times: number; retryAfter?: number; path?: string } | null = null
+  let failure: { status: number; times: number; retryAfter?: number; path?: string; sort?: string } | null = null
 
-  const json = (res: ServerResponse, status: number, body: unknown) => {
-    res.writeHead(status, { "content-type": "application/json; charset=utf-8" })
-    res.end(JSON.stringify(body))
+  let conditionalHits = 0
+  let notModified = 0
+  const send = (res: ServerResponse, status: number, bytes: string | Uint8Array, headers: Record<string, string>) => {
+    if (status === 200 && !res.req.url?.startsWith("/__fake/")) {
+      const etag = `"${createHash("sha256").update(bytes).digest("hex")}"`
+      headers.etag = etag
+      if (res.req.headers["if-none-match"] === etag) {
+        notModified++
+        res.writeHead(304, { etag })
+        return res.end()
+      }
+    }
+    res.writeHead(status, headers)
+    res.end(bytes)
   }
+  const json = (res: ServerResponse, status: number, body: unknown) =>
+    send(res, status, JSON.stringify(body), { "content-type": "application/json; charset=utf-8" })
   // v1's CardSummary; its URLs are paths on the archive.
   const summary = (c: FakeCard) => ({
     slug: c.slug,
@@ -433,8 +503,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     kind: "character",
     token_count: c.tokens,
     stats: { popularity: c.popularity, rating_avg: 4, rating_count: 10 },
-    thumbnail_url: `/t/${c.sha256}.512.webp?v=1`,
-    image_url: `/i/${c.sha256}.png`,
+    thumbnail_url: c.hasCover ? `/t/${c.sha256}.512.webp?v=1` : null,
+    image_url: c.hasCover ? `/i/${c.sha256}.png` : null,
     version: c.sha256,
     updated_at: new Date(c.addedAt).toISOString(),
     superseded_by: c.supersededBy ?? null,
@@ -465,10 +535,15 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     if (!["include", "exclude", "only"].includes(nsfw))
       return { status: 400, body: error("bad_request", "unknown nsfw") }
     const kind = params.get("kind") ?? "both"
-    if (!["character", "lorebook", "both"].includes(kind))
+    if (!["character", "lorebook", "both", "character_lorebook"].includes(kind))
       return { status: 400, body: error("bad_request", "unknown kind") }
     const sites = list(params.get("source"))
     if (sites.some((s) => !V1_SITES.includes(s))) return { status: 400, body: error("bad_request", "unknown source") }
+    const notSites = list(params.get("not_source"))
+    const verified = truthy(params.get("chub_verified"))
+    const recommended = truthy(params.get("chub_recommended"))
+    if ((verified || recommended) && (sites.length !== 1 || sites[0] !== "chub"))
+      return { status: 400, body: error("bad_request", "Chub must be the only included source") }
     const q = (params.get("q") ?? "").trim().toLowerCase()
     const sort = params.get("sort") ?? (q ? "relevance" : "newest")
     if (!V1_SORTS.includes(sort)) return { status: 400, body: error("bad_request", "unknown sort") }
@@ -480,7 +555,10 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     const normalized = [...params]
       .filter(([k]) => k !== "cursor" && k !== "page")
       .sort(([a], [b]) => a.localeCompare(b))
-    const queryHash = createHash("sha256").update(JSON.stringify(normalized)).digest("hex").slice(0, 12)
+    const queryHash = createHash("sha256")
+      .update(JSON.stringify([cursorEpoch, normalized]))
+      .digest("hex")
+      .slice(0, 12)
     let offset = 0
     if (params.has("cursor")) {
       const cursor = /^(\d+)\.([0-9a-f]{12})$/.exec(Buffer.from(params.get("cursor")!, "base64url").toString("utf8"))
@@ -493,16 +571,49 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       offset = (page - 1) * limit
     }
     const author = (params.get("author") ?? "").toLowerCase()
-    const min = Number(params.get("min_tokens") ?? "30")
+    const min = Number(params.get("min_tokens") ?? "300")
     const max = Number(params.get("max_tokens") ?? "Infinity")
     const noForks = truthy(params.get("exclude_forks"))
     const semantic = mode === "semantic"
-    const words = (c: FakeCard) => c.name.toLowerCase().includes(q) || c.tagline.toLowerCase().includes(q)
+    const fields = list(params.get("fields"))
+    const words = (c: FakeCard) =>
+      [
+        ...(!fields.length || fields.includes("name") ? [c.name] : []),
+        ...(!fields.length || fields.includes("description") ? [c.tagline] : []),
+        ...(!fields.length || fields.includes("character") ? [c.json] : []),
+        ...(!fields.length || fields.includes("lorebook") ? [c.creator, ...c.tags] : [])
+      ].some((text) => text.toLowerCase().includes(q))
+    const groups = list(params.get("any_tags")).map((group) => group.split("|"))
+    const identities = (name: string) =>
+      (params.get(name) ?? "")
+        .split(/(?<!\\),/)
+        .map((v) => v.replace(/\\(.)/g, "$1").toLowerCase())
+        .filter(Boolean)
+    const anyAuthors = identities("any_author")
+    const notAuthors = identities("not_author")
+    const dateMatches = (c: FakeCard, kind: "added" | "created") => {
+      const value = kind === "added" ? c.addedAt : c.createdAt
+      const after = params.get(`${kind}_after`)
+      const before = params.get(`${kind}_before`)
+      return (!after || value >= Date.parse(after)) && (!before || value < Date.parse(before))
+    }
     const matching = cards.filter(
       (c) =>
         // Meaning search finds something for any words; text search needs them.
         (semantic || !q || words(c)) &&
         kind !== "lorebook" &&
+        (!truthy(params.get("has_cover") ?? "true") || c.hasCover) &&
+        (kind !== "character_lorebook" || c.hasLorebook) &&
+        !notSites.includes(c.site) &&
+        groups.every((group) => group.some((tag) => c.tags.includes(tag))) &&
+        (!anyAuthors.length || anyAuthors.includes(`${c.site}/${c.creator}`.toLowerCase())) &&
+        !notAuthors.includes(`${c.site}/${c.creator}`.toLowerCase()) &&
+        (!params.get("picture") || params.get("picture") === c.sha256) &&
+        dateMatches(c, "added") &&
+        dateMatches(c, "created") &&
+        (!(truthy(params.get("deleted_from_source")) || truthy(params.get("deleted_from_any_source"))) || c.deleted) &&
+        (!verified || c.verified) &&
+        (!recommended || c.recommended) &&
         (sites.length === 0 || sites.includes(c.site)) &&
         include.every((t) => c.tags.includes(t)) &&
         !exclude.some((t) => c.tags.includes(t)) &&
@@ -522,6 +633,9 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       oldest: (a, b) => a.addedAt - b.addedAt,
       popular: (a, b) => b.popularity - a.popularity,
       name: (a, b) => a.name.localeCompare(b.name),
+      name_desc: (a, b) => b.name.localeCompare(a.name),
+      created_desc: (a, b) => b.createdAt - a.createdAt,
+      created_asc: (a, b) => a.createdAt - b.createdAt,
       tokens_asc: (a, b) => a.tokens - b.tokens,
       tokens_desc: (a, b) => b.tokens - a.tokens
     }
@@ -539,12 +653,14 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     return {
       status: 200,
       body: {
+        exact_count: sorted.length,
         query: Object.fromEntries(params),
         author: null,
         author_error: null,
         results: items,
         items,
-        total,
+        total: options.unknownTotal && !semantic ? null : total,
+        has_more: more,
         total_capped: sorted.length > reachable.length,
         total_is_estimate: estimated,
         page: Math.floor(offset / limit) + 1,
@@ -554,7 +670,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         not_tags: exclude,
         unknown_tags: [],
         semantic: semantic ? { max_results: SEMANTIC_MAX } : null,
-        defaults: { nsfw: "include", kind: "both", min_tokens: 30, has_cover: true },
+        defaults: { nsfw: "include", kind: "both", min_tokens: 300, has_cover: true },
         next_cursor:
           !semantic && more ? Buffer.from(`${offset + limit}.${queryHash}`, "utf8").toString("base64url") : null
       }
@@ -568,19 +684,28 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     if (refused.has(c.slug)) return json(res, 403, error("download_refused", "this card can't be downloaded"))
     if (!downloadModes(c).includes(mode)) return json(res, 404, error("no_derived_download", "not in this form"))
     if (mode === "json" || mode === "original") {
-      res.writeHead(200, {
+      return send(res, 200, c.json, {
         "content-type": "application/json; charset=utf-8",
         "content-disposition": `attachment; filename="${c.slug}.json"`
       })
-      return res.end(c.json)
     }
-    res.writeHead(200, { "content-type": "image/png", "content-disposition": `attachment; filename="${c.slug}.png"` })
-    return res.end(cardPng(c))
+    return send(res, 200, cardPng(c), {
+      "content-type": "image/png",
+      "content-disposition": `attachment; filename="${c.slug}.png"`
+    })
   }
 
   const handle = (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://fake")
     const path = url.pathname
+    if (path === "/__fake/count-cap") {
+      countCap = Number(url.searchParams.get("value") ?? 100_000)
+      return json(res, 200, { ok: true })
+    }
+    if (path === "/__fake/expire-cursors") {
+      cursorEpoch++
+      return json(res, 200, { ok: true })
+    }
     if (path === "/__fake/hits") return json(res, 200, { hits: seen.length, paths: seen })
     if (path === "/__fake/reset") {
       seen.length = 0
@@ -593,7 +718,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         times: Number(url.searchParams.get("times") ?? "1"),
         ...(url.searchParams.has("retryAfter") ? { retryAfter: Number(url.searchParams.get("retryAfter")) } : {}),
         // Only requests to this path fail, so a picture loading meanwhile doesn't use the failure up.
-        ...(url.searchParams.has("path") ? { path: url.searchParams.get("path")! } : {})
+        ...(url.searchParams.has("path") ? { path: url.searchParams.get("path")! } : {}),
+        ...(url.searchParams.has("sort") ? { sort: url.searchParams.get("sort")! } : {})
       }
       return json(res, 200, { ok: true })
     }
@@ -604,7 +730,13 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       return json(res, 200, { slug, version: next.sha256 })
     }
     seen.push(`${path}${url.search}`)
-    if (failure && failure.times > 0 && (failure.path === undefined || failure.path === path)) {
+    if (req.headers["if-none-match"]) conditionalHits++
+    if (
+      failure &&
+      failure.times > 0 &&
+      (failure.path === undefined || failure.path === path) &&
+      (failure.sort === undefined || failure.sort === url.searchParams.get("sort"))
+    ) {
       failure.times -= 1
       const { status, retryAfter } = failure
       if (failure.times === 0) failure = null
@@ -615,21 +747,67 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       return res.end(JSON.stringify(error(status === 429 ? "rate_limited" : "failed", "a failure the test asked for")))
     }
     if (path === "/api/v1/capabilities") return json(res, 200, capabilitiesBody)
+    if (path === "/api/v1/search/count") {
+      const params = new URLSearchParams(url.searchParams)
+      params.set("limit", "1")
+      const result = search(params)
+      if (result.status !== 200) return json(res, result.status, result.body)
+      const body = result.body as { exact_count: number }
+      const cap = countCap
+      return json(res, 200, {
+        total: Math.min(body.exact_count, cap),
+        capped: body.exact_count >= cap,
+        cap,
+        timed_out: false
+      })
+    }
     if (path === "/api/v1/search") {
       const { status, body } = search(url.searchParams)
       return json(res, status, body)
     }
-    if (path === "/api/v1/tags") {
-      // A page of 200 by card count; `limit` isn't a v1 parameter here.
+    if (path === "/api/v1/tags" || path === "/api/v1/search/authors") {
+      const tags = path.endsWith("/tags")
       const prefix = (url.searchParams.get("q") ?? "").toLowerCase()
       const counts = new Map<string, number>()
-      for (const c of cards) for (const t of c.tags) if (t.startsWith(prefix)) counts.set(t, (counts.get(t) ?? 0) + 1)
-      const all = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      for (const c of cards)
+        for (const value of tags ? c.tags : [`${c.site}/${c.creator}`])
+          if (tags ? value.toLowerCase().startsWith(prefix) : value.toLowerCase().includes(prefix))
+            counts.set(value, (counts.get(value) ?? 0) + 1)
+      const all = [...counts].sort(([a], [b]) => a.localeCompare(b))
+      const cursor = url.searchParams.get("cursor")
+      let after = ""
+      if (cursor) {
+        try {
+          const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString()) as {
+            prefix: string
+            after: string
+            tags: boolean
+          }
+          if (decoded.prefix !== prefix || decoded.tags !== tags || typeof decoded.after !== "string") throw new Error()
+          after = decoded.after
+        } catch {
+          return json(res, 400, error("invalid_cursor", "suggestion cursor expired"))
+        }
+      }
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 10)))
+      const rest = all.filter(([value]) => value.localeCompare(after) > 0)
+      const items = rest.slice(0, limit)
+      const next =
+        rest.length > limit
+          ? Buffer.from(JSON.stringify({ prefix, tags, after: items.at(-1)![0] })).toString("base64url")
+          : null
       return json(res, 200, {
-        q: prefix,
-        tags: all.slice(0, 200).map(([slug, card_count]) => ({ slug, label: slug, card_count })),
-        page: 1,
-        pages: Math.max(1, Math.ceil(all.length / 200)),
+        [tags ? "tags" : "authors"]: items.map(([value, card_count]) =>
+          tags
+            ? { slug: value, label: value, card_count }
+            : {
+                source: value.split("/")[0],
+                handle: value.split("/")[1],
+                display_name: value.split("/")[1],
+                card_count
+              }
+        ),
+        next,
         total: all.length
       })
     }
@@ -664,7 +842,15 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
           nsfw: c.nsfw,
           tags: c.tags,
           path: `/c/${c.slug}`,
-          content_hash: c.sha256
+          content_hash: c.sha256,
+          token_counts: {
+            model: "o200k_base",
+            fields: { description: 40, personality: 9, scenario: 12, creator_notes: 7 },
+            mes_example: 0,
+            greetings: [18, 15],
+            permanent: 61,
+            total_budget_estimate: c.tokens
+          }
         },
         creator: summary(c).creator,
         files: [
@@ -678,7 +864,25 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         ],
         origins: [origin],
         main_origin: origin,
-        earlier_origins: [],
+        earlier_origins: [
+          {
+            listing: {
+              source: c.site,
+              source_label: "Synthetic site",
+              external_id: `previous-${c.slug}`,
+              path: `/o/${c.site}/previous-${c.slug}`,
+              source_url: "https://synthetic.example/previous"
+            },
+            origin: {
+              source: c.site,
+              external_id: `previous-${c.slug}`,
+              path: `/o/${c.site}/previous-${c.slug}`,
+              card_slug: c.slug
+            },
+            active_from: "2025-01-01T00:00:00Z",
+            active_to: "2026-01-01T00:00:00Z"
+          }
+        ],
         related: [],
         variants: []
       })
@@ -696,11 +900,10 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       const c = bySha.get((picture[1] ?? picture[3])!)
       if (!c) return json(res, 404, error("not_found", "no such picture"))
       void image(c, thumb ? (picture[2] as "512" | "64") : "full").then((bytes) => {
-        res.writeHead(200, {
+        send(res, 200, bytes, {
           "content-type": thumb ? "image/webp" : "image/png",
           "cache-control": "public, max-age=31536000, immutable"
         })
-        res.end(bytes)
       })
       return
     }
@@ -715,11 +918,22 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     origin,
     host: `127.0.0.1:${port}`,
     cards,
+    conditionalHits: () => conditionalHits,
+    notModified: () => notModified,
     hits: () => seen.length,
     paths: () => [...seen],
     reset: () => {
       seen.length = 0
       failure = null
+    },
+    failSort: (sort, status, times = 1, retryAfterSeconds) => {
+      failure = {
+        status,
+        times,
+        sort,
+        path: "/api/v1/search",
+        ...(retryAfterSeconds === undefined ? {} : { retryAfter: retryAfterSeconds })
+      }
     },
     failNext: (status, times = 1, retryAfterSeconds) => {
       failure = { status, times, ...(retryAfterSeconds === undefined ? {} : { retryAfter: retryAfterSeconds }) }

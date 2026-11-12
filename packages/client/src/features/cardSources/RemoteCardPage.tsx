@@ -46,12 +46,32 @@ const FIELDS = [
   ["first_mes", "First message"]
 ] as const
 
-function Folded({ label, text }: { label: string; text: string }) {
+function Folded({
+  label,
+  text,
+  tokens,
+  model
+}: {
+  label: string
+  text: string
+  tokens?: number | undefined
+  model?: string | undefined
+}) {
   const [open, setOpen] = useState(false)
   const long = text.length > 400 || text.split("\n").length > 4
   return (
     <section className="flex min-w-0 flex-col gap-1">
-      <h3 className="text-sm font-medium">{label}</h3>
+      <h3 className="text-sm font-medium">
+        {label}
+        {tokens !== undefined && (
+          <>
+            {" "}
+            <Tooltip label={`Estimated by the archive with ${model ?? "its tokenizer"}.`}>
+              <span className="font-normal text-muted">· {tokens.toLocaleString()} tokens</span>
+            </Tooltip>
+          </>
+        )}
+      </h3>
       <p className={`text-sm break-words whitespace-pre-wrap text-muted ${open || !long ? "" : "line-clamp-4"}`}>
         {text}
       </p>
@@ -207,9 +227,24 @@ export function RemoteCardPage() {
               </Tooltip>
             </div>
           )}
+          {summary.earlierOrigins?.map((entry) => (
+            <Tooltip key={entry.url} label="Opens the earlier listing on the archive, in a new tab.">
+              <a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-sm text-accent">
+                {entry.label}
+              </a>
+            </Tooltip>
+          ))}
           {FIELDS.map(([field, label]) => {
             const text = doc[field]
-            return text ? <Folded key={field} label={label} text={text} /> : null
+            return text ? (
+              <Folded
+                key={field}
+                label={label}
+                text={text}
+                tokens={field === "first_mes" ? summary.tokenCounts?.greetings[0] : summary.tokenCounts?.fields[field]}
+                model={summary.tokenCounts?.model}
+              />
+            ) : null
           })}
           {(greetings > 0 || entries > 0) && (
             <p className="text-sm text-muted">

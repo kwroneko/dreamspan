@@ -162,7 +162,7 @@ export interface VersionRow {
   readonly model_label?: string | null
   /** Its model's connection kind and key, as JSON (`versionExtras`); absent on a row just inserted. */
   readonly model_ref_json?: string | null
-  /** Its agent rollout's tool calls and run time, as JSON (`versionExtras`); null without steps. */
+  /** Its agent rollout's tool calls and run time, as JSON (`versionExtras`); null for a plain reply's. */
   readonly steps_json?: string | null
   /** What an imported version's app recorded about its model and generation (`StoredGeneration`). */
   readonly recorded_model_json?: string | null
@@ -182,7 +182,14 @@ export const versionExtras = (alias: string) =>
   (SELECT json_object('provider', c.kind, 'model', m.model_key) FROM models m JOIN connections c ON c.id = m.connection_id
     WHERE m.id = ${alias}.model_id) AS model_ref_json,
   (SELECT json_object('count', r.step_count, 'ms', r.completed_at - r.started_at) FROM rollouts r
-    WHERE r.id = ${alias}.rollout_id AND r.step_count > 0) AS steps_json`
+    WHERE r.id = ${alias}.rollout_id AND (r.step_count > 0 OR r.mode IS NOT NULL)) AS steps_json`
+
+/** An agent reply's steps (only when it made tool calls) and that it was one (spec/AGENTIC.md §5.1, §5.2). */
+const agentOf = (json: string | null | undefined): { steps?: StepsSummary; agent?: boolean } => {
+  if (!json) return {}
+  const steps = JSON.parse(json) as StepsSummary
+  return steps.count > 0 ? { steps, agent: true } : { agent: true }
+}
 
 const toVersionError = (json: string | null) => {
   if (json === null) return null
@@ -281,7 +288,7 @@ export const toVersion = (row: VersionRow) =>
             ? (JSON.parse(row.context_issues) as Array<ContextIssue>).filter((issue) => !UNSHOWN.has(issue.kind))
             : []
         },
-    ...(row.steps_json ? { steps: JSON.parse(row.steps_json) as StepsSummary } : {}),
+    ...agentOf(row.steps_json),
     rowVersion: 1 + (row.amend_count ?? 0)
   })
 

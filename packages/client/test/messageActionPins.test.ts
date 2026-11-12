@@ -22,6 +22,12 @@ import { registerMessageActions } from "../src/features/chat/registerMessageActi
 import { registerRewrites } from "../src/features/chat/rewrites.tsx"
 import { TooltipProvider } from "../src/ui/Tooltip.tsx"
 
+// These static toolbar tests isolate navigation; real URL transitions are covered in browser tests.
+vi.mock("../src/usePlaceParam.ts", async (original) => ({
+  ...(await original<typeof import("../src/usePlaceParam.ts")>()),
+  usePlaceParam: (_key: string, fallback: string) => [fallback, () => {}]
+}))
+
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1", origin: "http://127.0.0.1" })
 })

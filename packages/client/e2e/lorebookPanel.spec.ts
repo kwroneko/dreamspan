@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
+import { expectTextBox } from "./support/textbox.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -324,11 +325,11 @@ test("the large editor: Look in, the pencil rename, text and keys first, Revert"
   for (const scope of ["Content", "Keys", "Both", "Everything"])
     await expect(search.getByRole("button", { name: scope, exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Open Harbour", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Entry content" })).toHaveValue("Boats rock at the quay.")
+  await expectTextBox(page.getByRole("textbox", { name: "Entry content" }), "Boats rock at the quay.")
   await expect(page.getByRole("textbox", { name: "Primary keys" })).toHaveValue("harbour\nquay")
   await expect(page.getByRole("combobox", { name: "Logic" })).toHaveCount(0)
   await page.getByRole("textbox", { name: "Entry content" }).fill("Boats knock at the quay.")
   await page.getByRole("button", { name: "Revert", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Entry content" })).toHaveValue("Boats rock at the quay.")
+  await expectTextBox(page.getByRole("textbox", { name: "Entry content" }), "Boats rock at the quay.")
   await page.screenshot({ path: join(shots, "large-1440-dark.png"), fullPage: false })
 })
