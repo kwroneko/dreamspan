@@ -200,6 +200,8 @@ export interface SnapshotInputs {
   readonly mode: "st" | "layouts"
   readonly preset: { readonly ref: string | null; readonly revision: string | null; readonly scope: PresetScope }
   readonly cards: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
+  /** Who of `cards` was away or a narrator (spec/CHARACTER-CONTEXT.md §9.1); absent when neither. */
+  readonly presence?: import("@rp/shared/knowledge.ts").VersionPresence
   readonly model: ModelInput | null
 }
 

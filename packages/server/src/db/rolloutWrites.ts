@@ -82,7 +82,8 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
           yield* sql`INSERT INTO lore_activations (rollout_id, entries_json, message_offset)
             SELECT ${rolloutId}, entries_json, message_offset FROM lore_activations WHERE rollout_id = ${source.rollout_id}`
           yield* sql`UPDATE version_records SET rollout_id = ${rolloutId},
-              cast_json = (SELECT cast_json FROM version_records WHERE id = ${versionId}), updated_at = ${now}
+              cast_json = (SELECT cast_json FROM version_records WHERE id = ${versionId}),
+              presence_json = (SELECT presence_json FROM version_records WHERE id = ${versionId}), updated_at = ${now}
             WHERE id = ${added.version.id}`
           // The stopped version's own events (its variables), and the effects of the tool calls
           // kept, so they apply while the new version is shown; the cut calls' stay behind.

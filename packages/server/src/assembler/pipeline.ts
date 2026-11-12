@@ -2,6 +2,7 @@ import type { LoreReceipt, LoreTimingState } from "./loreTiming.ts"
 // The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §15).
 import type { SourceActivation } from "@rp/shared/inspectorApi.ts"
 import type { FoldableEvent, ChatState } from "@rp/shared/state.ts"
+import { presenceOf } from "@rp/shared/knowledge.ts"
 import type { FrozenValues, MacroLookup } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
@@ -407,6 +408,14 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
     const historyStart = need(assembly, "historyStart")
     const sources = yield* AssemblySources
     const revision = yield* sources.historyRevision(historyLeafOf(target), historyStart.depth)
+    const cards = [...cast.characters, ...cast.personas].map(({ entity, ref, revision }) => ({ entity, ref, revision }))
+    // Who of the cast was away or narrated, recorded with the version (spec/CHARACTER-CONTEXT.md §9.1).
+    const presence = assembly.state
+      ? presenceOf(
+          assembly.state,
+          cards.map((c) => c.entity)
+        )
+      : null
     let snapshot: ContextSnapshot = {
       schema: 1,
       ...(assembly.contextBudget ? { contextBudget: assembly.contextBudget } : {}),
@@ -435,7 +444,8 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
         speaker: cast.speaker?.entity ?? null,
         mode: "layouts",
         preset: { ref: preset.ref, revision: preset.revision, scope: preset.scope },
-        cards: [...cast.characters, ...cast.personas].map(({ entity, ref, revision }) => ({ entity, ref, revision })),
+        cards,
+        ...(presence ? { presence } : {}),
         model: assembly.model ?? null
       },
       ...(request.summaryJob

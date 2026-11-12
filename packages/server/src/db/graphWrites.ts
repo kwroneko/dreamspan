@@ -15,7 +15,7 @@ import { makeDraftCarry } from "./carryDrafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
 import { forkThrough, onForkPath } from "./forks.ts"
 import { displayEndOf, hiddenAtFork, pathPieces, slotPlace } from "./displayPath.ts"
-import { castAt } from "./participation.ts"
+import { type PositionalCast, presenceAt, presenceJson } from "./participation.ts"
 import {
   forkAt,
   nextSeq,
@@ -108,7 +108,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     version: NewVersion,
     at: number,
     owner?: string,
-    cast: ReadonlyArray<string> = []
+    { cast, presence }: PositionalCast = { cast: [], presence: null }
   ) =>
     Effect.gen(function* () {
       yield* checkSource(slotId, version.sourceVersionId)
@@ -121,6 +121,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         speaker_entity_id: version.speakerEntityId,
         speaker_pick_json: version.speakerPick ? JSON.stringify(version.speakerPick) : null,
         cast_json: JSON.stringify(cast),
+        presence_json: presenceJson(presence),
         writer: version.writer,
         content: version.content,
         macro_mode: version.macroMode,
@@ -191,7 +192,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         !inserted && view?.tip_slot_id === (parent?.id ?? null)
           ? yield* displayEndOf(sql, chatId, view)
           : (parent?.id ?? null)
-      const cast = yield* castAt(sql, chatId, leaf, fork)
+      const cast = yield* presenceAt(sql, chatId, leaf, fork)
       const rows = [yield* insertVersion(slotId, 0, version, at, owner!.id, cast)]
       for (const [i, next] of more.entries()) rows.push(yield* insertVersion(slotId, i + 1, next, at, owner!.id, cast))
       yield* sql`INSERT INTO slots ${sql.insert({
