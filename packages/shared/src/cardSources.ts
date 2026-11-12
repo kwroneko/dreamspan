@@ -35,6 +35,10 @@ const SourceFilter = Schema.Union([
     id: Schema.String,
     label: Schema.String,
     kind: Schema.Literal("toggle"),
+    /** An archive accepts this switch only with this exact choice in another filter. */
+    requires: Schema.optionalKey(
+      Schema.Struct({ filterId: Schema.String, values: Schema.Array(Schema.String), about: Schema.String })
+    ),
     about: Schema.optionalKey(Schema.String)
   }),
   Schema.Struct({
@@ -126,6 +130,8 @@ export const RemoteSummary = Schema.Struct({
 export type RemoteSummary = typeof RemoteSummary.Type
 
 export const SourcePage = Schema.Struct({
+  /** Replace earlier pages: the source restarted after refusing a cursor. */
+  reset: Schema.optionalKey(Schema.Boolean),
   items: Schema.Array(RemoteSummary),
   next: Schema.NullOr(Schema.String),
   total: Schema.optionalKey(Schema.Number),

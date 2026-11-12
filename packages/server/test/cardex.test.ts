@@ -100,7 +100,23 @@ describe("v1 as card sources", () => {
           ["tokens", "Tokens"],
           ["exclude_forks", "Leave out forks"],
           ["source", "Site"],
-          ["author", "Creator"]
+          ["author", "Creator"],
+          ["fields", "Search in"],
+          ["kind", "Kind"],
+          ["not_source", "Exclude sites"],
+          ["any_tags", "Any of these tags"],
+          ["has_cover", "Cover"],
+          ["any_author", "Any of these creators"],
+          ["not_author", "Exclude creators"],
+          ["picture", "Picture"],
+          ["added_after", "Added after"],
+          ["added_before", "Added before"],
+          ["created_after", "Created after"],
+          ["created_before", "Created before"],
+          ["deleted_from_source", "Deleted from all sites"],
+          ["deleted_from_any_source", "Deleted from a site"],
+          ["chub_verified", "Chub verified"],
+          ["chub_recommended", "Chub recommended"]
         ]
       )
       const rating = caps.filters.find((f) => f.id === "nsfw")!
@@ -115,7 +131,8 @@ describe("v1 as card sources", () => {
         [
           ["popular", false],
           ["newest", true],
-          ["name", false],
+          ["created", true],
+          ["name", true],
           ["tokens", true],
           ["relevance", false]
         ]
@@ -180,6 +197,111 @@ describe("v1 as card sources", () => {
     assert.isFalse(searchParams(emptySourceQuery, null).has("sort"))
     assert.isFalse(searchParams(emptySourceQuery, null).has("nsfw"))
   })
+
+  it.effect("every live card criterion is available and reaches the fake with v1 names and encodings", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      const caps = yield* adapter.capabilities(direct())
+      assert.include(caps.filters.find((f) => f.id === "tokens")?.about ?? "", "300")
+      const fields = caps.filters.find((f) => f.id === "fields")!
+      assert.isTrue(fields.kind === "choice" && fields.multi)
+      const kind = caps.filters.find((f) => f.id === "kind")!
+      assert.deepStrictEqual(kind.kind === "choice" ? kind.options.map((o) => o.value) : [], [
+        "character",
+        "character_lorebook"
+      ])
+      const c = archive.cards[0]!
+      const identity = `${c.site}/${c.creator}`
+      const cases: ReadonlyArray<
+        readonly [Record<string, import("@rp/shared/cardSources.ts").SourceFilterValue>, (slug: string) => boolean]
+      > = [
+        [{ fields: ["name"] }, () => true],
+        [{ kind: "character_lorebook" }, (slug) => archive.cards.find((x) => x.slug === slug)!.hasLorebook],
+        [{ not_source: [c.site] }, (slug) => archive.cards.find((x) => x.slug === slug)!.site !== c.site],
+        [
+          { any_tags: `${c.tags[0]}|${c.tags[1]}` },
+          (slug) => archive.cards.find((x) => x.slug === slug)!.tags.some((t) => c.tags.slice(0, 2).includes(t))
+        ],
+        [{ any_author: identity }, (slug) => archive.cards.find((x) => x.slug === slug)!.creator === c.creator],
+        [{ not_author: identity }, (slug) => slug !== c.slug],
+        [{ picture: c.sha256 }, (slug) => slug === c.slug],
+        [
+          { added_after: "2026-01-02", added_before: "2026-01-04" },
+          (slug) => {
+            const at = archive.cards.find((x) => x.slug === slug)!.addedAt
+            return at >= Date.parse("2026-01-02") && at < Date.parse("2026-01-04")
+          }
+        ],
+        [
+          { created_after: "2025-01-02", created_before: "2025-04-01" },
+          (slug) => {
+            const at = archive.cards.find((x) => x.slug === slug)!.createdAt
+            return at >= Date.parse("2025-01-02") && at < Date.parse("2025-04-01")
+          }
+        ],
+        [{ deleted_from_source: true }, (slug) => archive.cards.find((x) => x.slug === slug)!.deleted],
+        [{ deleted_from_any_source: true }, (slug) => archive.cards.find((x) => x.slug === slug)!.deleted],
+        [{ source: ["chub"], chub_verified: true }, (slug) => archive.cards.find((x) => x.slug === slug)!.verified],
+        [
+          { source: ["chub"], chub_recommended: true },
+          (slug) => archive.cards.find((x) => x.slug === slug)!.recommended
+        ],
+        [{ has_cover: "false" }, () => true]
+      ]
+      for (const [filters, matches] of cases) {
+        const seen: Array<string> = []
+        const page = yield* adapter.search(direct(seen), { ...emptySourceQuery, filters }, null)
+        assert.isAbove(page.items.length, 0, JSON.stringify(filters))
+        assert.isTrue(
+          page.items.every((x) => matches(x.remoteId)),
+          JSON.stringify(filters)
+        )
+        const params = new URL(`http://fake${seen[0]}`).searchParams
+        for (const id of Object.keys(filters)) assert.isTrue(params.has(id), id)
+      }
+      for (const sort of caps.sorts)
+        for (const reverse of sort.reversible ? [false, true] : [false]) {
+          const page = yield* adapter.search(
+            direct(),
+            { ...emptySourceQuery, text: "lantern", sort: sort.id, reverse },
+            null
+          )
+          assert.isAbove(page.items.length, 0)
+        }
+      const badFlags = yield* Effect.flip(
+        adapter.search(direct(), { ...emptySourceQuery, filters: { chub_verified: true } }, null)
+      )
+      assert.strictEqual(badFlags.code, "bad_request")
+    })
+  )
+
+  it.effect("a live cursor reply can have no total; paging still follows next_cursor", () =>
+    Effect.gen(function* () {
+      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120, unknownTotal: true }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
+      const adapter = fakeCardexAdapter(fake)
+      const first = yield* adapter.search(direct(), emptySourceQuery, null)
+      assert.isUndefined(first.total)
+      assert.isString(first.next)
+      const second = yield* adapter.search(direct(), emptySourceQuery, first.next)
+      assert.lengthOf(second.items, 48)
+      assert.notStrictEqual(first.items[0]!.remoteId, second.items[0]!.remoteId)
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("Cover: Any includes characters hidden by the archive's default cover filter", () =>
+    Effect.gen(function* () {
+      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 60, coverless: true }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
+      const adapter = fakeCardexAdapter(fake)
+      const covered = yield* adapter.search(direct(), emptySourceQuery, null)
+      assert.strictEqual(covered.total, 40)
+      assert.isTrue(covered.items.every((c) => typeof c.thumb === "string"))
+      const all = yield* adapter.search(direct(), { ...emptySourceQuery, filters: { has_cover: "false" } }, null)
+      assert.strictEqual(all.total, 60)
+      assert.isTrue(all.items.some((c) => c.thumb === undefined && c.image === undefined))
+    }).pipe(Effect.scoped)
+  )
 
   it("a batch URL is in v1's canonical form: sorted, without duplicates, joined by %2C", () => {
     assert.strictEqual(batchUrl(["b-2", "a-1", "b-2"]).href, `${CARDEX_ORIGIN}/api/v1/cards/batch?ids=a-1%2Cb-2`)
@@ -246,6 +368,7 @@ describe("the adapter against the fake archive", () => {
       const seen: Array<string> = []
       const page = yield* adapter.search(direct(seen), emptySourceQuery, "c:not-a-cursor")
       assert.lengthOf(page.items, 48)
+      assert.isTrue(page.reset)
       assert.lengthOf(seen, 2)
       assert.include(seen[0]!, "cursor=not-a-cursor")
       assert.notInclude(seen[1]!, "cursor=")

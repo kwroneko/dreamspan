@@ -43,6 +43,8 @@ interface RemoteCardFile {
 }
 
 interface AdapterPage {
+  /** The source restarted from the first page after refusing a cursor. */
+  readonly reset?: boolean
   readonly items: ReadonlyArray<AdapterSummary>
   readonly next: string | null
   readonly total?: number

@@ -426,6 +426,26 @@ const make = (options: CardSourcesOptions = {}) =>
       Effect.gen(function* () {
         const { bytes, ...file } = yield* cardBytes(user, sourceId, remoteId)
         const parsed = yield* formats.parse(bytes, file.fileName).pipe(Effect.catch(storage("reading the card")))
+        // JSON downloads (notably CHARX originals) have no embedded portrait. Fetch it
+        // while opening the card, through the same guarded image cache the browser uses,
+        // so adding the already-opened card retains its face without another request.
+        const image = file.summary.image
+        if (parsed.library?.kind === "card" && !parsed.media.some((m) => m.role === "avatar") && image) {
+          const portrait = yield* service
+            .image(user, sourceId, issue(user, sourceId, image)!, null)
+            .pipe(Effect.catch(() => Effect.succeed(null)))
+          if (portrait) {
+            const media = {
+              role: "avatar" as const,
+              uri: "ccdefault:",
+              bytes: portrait.bytes,
+              sha256: createHash("sha256").update(portrait.bytes).digest("hex"),
+              byteSize: portrait.bytes.byteLength,
+              ...describeImage(portrait.bytes)
+            }
+            return { ...file, parsed: { ...parsed, media: [...parsed.media, media] } }
+          }
+        }
         return { ...file, parsed }
       })
 

@@ -169,6 +169,24 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("a JSON-only card keeps its full portrait when added, including with the archive now offline", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards.find((c) => c.originalOnly)!
+      yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })
+      const hits = archive.hits()
+      archive.failNext(503, 10)
+      try {
+        const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+        const opened = yield* api.OpenEditor({ refId: added.refId as RefId })
+        assert.isString((opened.doc as { avatar_media_id?: string }).avatar_media_id)
+        assert.strictEqual(archive.hits(), hits)
+      } finally {
+        archive.reset()
+      }
+    })
+  )
+
   it.effect("Add to my cards stores the card as an import with its origin, once; results show it as held", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)

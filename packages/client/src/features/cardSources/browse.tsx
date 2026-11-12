@@ -185,10 +185,11 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
       setResults((r) => {
         if (r === null || r.key !== current.key) return r
         if (!out.ok) return { ...r, status: "more-failed", problem: out.problem }
-        const seen = new Set(r.items.map((i) => i.remoteId))
+        const previous = out.value.reset ? [] : r.items
+        const seen = new Set(previous.map((i) => i.remoteId))
         return {
           ...r,
-          items: [...r.items, ...out.value.items.filter((i) => !seen.has(i.remoteId))],
+          items: [...previous, ...out.value.items.filter((i) => !seen.has(i.remoteId))],
           next: out.value.next,
           total: out.value.total ?? r.total,
           estimated: out.value.totalEstimated ?? r.estimated,
@@ -217,8 +218,21 @@ const totalLabel = (results: Results | null) =>
   results?.total === undefined ? null : `${results.estimated ? "~" : ""}${numberFormat.format(results.total)}`
 
 /** How many filters are set, for the Filters button: tags, and the filters away from their default. */
-const filterCount = (remote: RemoteBrowse) =>
-  remote.tags.length + remote.excludeTags.length + Object.keys(remote.filters).length
+const filterCount = (query: SourceQuery | null, caps: SourceCapabilities | undefined) =>
+  query === null
+    ? 0
+    : query.tags.length +
+      query.excludeTags.length +
+      Object.entries(query.filters).filter(
+        ([id, value]) => value !== false && !(caps?.ratings?.filterId === id && value === caps.ratings.default)
+      ).length
+
+const requirementMet = (filter: SourceFilter, filters: SourceQuery["filters"]) => {
+  if (filter.kind !== "toggle" || !filter.requires) return true
+  const chosen = filters[filter.requires.filterId]
+  const values = Array.isArray(chosen) ? chosen : typeof chosen === "string" ? [chosen] : []
+  return values.length === filter.requires.values.length && filter.requires.values.every((v) => values.includes(v))
+}
 
 /**
  * Everything a place (home, the sidebar) needs while a source may be shown: the sources Show
@@ -235,6 +249,11 @@ export function useSourceBrowse(source: string | null, remote: RemoteBrowse, onR
   const action = useAction()
   const change = (next: Partial<RemoteBrowse>) => {
     const merged = { ...remote, ...next }
+    if (next.filters) {
+      const filters = { ...next.filters }
+      for (const filter of caps?.filters ?? []) if (!requirementMet(filter, filters)) delete filters[filter.id]
+      merged.filters = filters
+    }
     onRemote(merged)
     // The content rating is remembered on the account (§5.3).
     const ratingId = caps?.ratings?.filterId
@@ -263,7 +282,7 @@ export function useSourceBrowse(source: string | null, remote: RemoteBrowse, onR
     waitMs,
     filtersOpen,
     setFiltersOpen,
-    filterCount: filterCount(remote)
+    filterCount: filterCount(query, caps)
   }
 }
 
@@ -533,7 +552,11 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
                       label={filter.label}
                       value={Array.isArray(value) ? value : []}
                       onValueChange={(chosen) => set(filter.id, chosen.length ? chosen : undefined)}
-                      options={filter.options.map((o) => ({ value: o.value, label: o.label }))}
+                      options={filter.options.map((o) => ({
+                        value: o.value,
+                        label: o.label,
+                        description: `Filters by ${filter.label.toLowerCase()}: ${o.label.toLowerCase()}.`
+                      }))}
                     />
                   ) : (
                     <Segmented
@@ -541,7 +564,11 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
                       label={filter.label}
                       value={typeof value === "string" ? value : null}
                       onValueChange={(chosen) => set(filter.id, chosen)}
-                      options={filter.options.map((o) => ({ value: o.value, label: o.label }))}
+                      options={filter.options.map((o) => ({
+                        value: o.value,
+                        label: o.label,
+                        description: `Filters by ${filter.label.toLowerCase()}: ${o.label.toLowerCase()}.`
+                      }))}
                     />
                   )}
                 </div>
@@ -560,11 +587,14 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
                 <Switch
                   key={filter.id}
                   checked={value === true}
+                  disabled={!requirementMet(filter, filters)}
                   onCheckedChange={(on) => set(filter.id, on ? true : undefined)}
                   hint={
-                    value === true
-                      ? `Click to stop filtering by ${filter.label.toLowerCase()}`
-                      : `Click to show only cards that ${filter.label.toLowerCase().replace(/^has /, "have ")}`
+                    !requirementMet(filter, filters)
+                      ? filter.requires!.about
+                      : value === true
+                        ? `Click to stop filtering by ${filter.label.toLowerCase()}`
+                        : `Click to show only cards that ${filter.label.toLowerCase().replace(/^has /, "have ")}`
                   }
                   {...(filter.about ? { about: filter.about } : {})}
                 >
@@ -588,7 +618,7 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
 }
 
 const chipClass =
-  "inline-flex h-7 min-w-0 items-center gap-1 rounded-full border border-border bg-surface pr-0.5 pl-2.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus"
+  "inline-flex h-7 min-w-0 max-w-full items-center gap-1 rounded-full border border-border bg-surface pr-0.5 pl-2.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus"
 
 function Chip({
   children,
@@ -610,13 +640,19 @@ function Chip({
       {onClick ? (
         <Tooltip label={hint ?? ""}>
           <button type="button" className="inline-flex min-w-0 items-center gap-1 outline-none" onClick={onClick}>
-            {children}
+            <span className="truncate">{children}</span>
           </button>
         </Tooltip>
       ) : (
-        <span className="inline-flex min-w-0 items-center gap-1">{children}</span>
+        <span className="min-w-0 truncate">{children}</span>
       )}
-      <IconButton label="Remove" hint="Removes this filter." icon="close" className="size-6!" onClick={onRemove} />
+      <IconButton
+        label="Remove"
+        hint="Removes this filter."
+        icon="close"
+        className="size-6! shrink-0"
+        onClick={onRemove}
+      />
     </span>
   )
 }

@@ -1,7 +1,7 @@
 // A fake card archive (spec/CARD-SOURCES.md §10): an in-process HTTP server serving our own
 // synthetic cards in the shape of cardex's public API v1 (https://cardex.zip/docs/api), so the
 // real cardex adapter (`src/sources/cardex.ts`) runs against it unchanged, pointed at its
-// origin: v1's capabilities descriptors (names, types, allowed values; no labels); search with
+// origin: v1's capabilities descriptors (names, types, allowed values and labels); search with
 // `nsfw` include/exclude/only, `kind`, tags, tokens, sites, `author` as site/handle, v1's sorts,
 // `limit` 1–100 (else 400), a cursor in text mode (refused for another query with 400
 // `invalid_cursor`) and page numbers
@@ -108,7 +108,12 @@ interface FakeCard {
   readonly tokens: number
   readonly popularity: number
   readonly addedAt: number
+  readonly hasCover: boolean
   readonly hasLorebook: boolean
+  readonly createdAt: number
+  readonly deleted: boolean
+  readonly verified: boolean
+  readonly recommended: boolean
   /** Made from another card on its source (`exclude_forks` leaves these out). */
   readonly fork: boolean
   /** Its original is a CHARX, as some on cardex are: no mirrored or self-contained file, only its JSON. */
@@ -193,7 +198,12 @@ const syntheticCards = (count = 240): ReadonlyArray<FakeCard> => {
       tokens: 400 + Math.floor(random() * 3600),
       popularity: Math.floor(random() * 10_000),
       addedAt: Date.UTC(2026, 0, 1) + n * 3_600_000,
+      hasCover: true,
       hasLorebook,
+      createdAt: Date.UTC(2025, 0, 1) + (count - n) * 86_400_000,
+      deleted: n % 11 === 0,
+      verified: n % 3 === 0,
+      recommended: n % 4 === 0,
       fork,
       originalOnly: n % 40 === 7,
       json,
@@ -308,9 +318,22 @@ const V1_SITES = [
   "aicc",
   "backyard",
   "wyvern",
-  "pephop"
+  "pephop",
+  "caveduck",
+  "crushon"
 ]
-const V1_SORTS = ["relevance", "newest", "oldest", "popular", "name", "tokens_asc", "tokens_desc"]
+const V1_SORTS = [
+  "relevance",
+  "newest",
+  "oldest",
+  "created_desc",
+  "created_asc",
+  "popular",
+  "name",
+  "name_desc",
+  "tokens_asc",
+  "tokens_desc"
+]
 /** cardex v1's search caps: in text mode a total past 10,000 is an estimate; semantic mode finds 240 at most. */
 const MAX_RESULTS = 10_000
 const SEMANTIC_MAX = 240
@@ -320,16 +343,37 @@ const capabilitiesBody = {
   version: "v1",
   filters: [
     field("q", "string", { max: 500 }),
+    field("fields", "list", {
+      label: "Search in",
+      allowed_values: ["name", "description", "character", "lorebook"],
+      allowed_value_labels: [
+        { value: "name", label: "Name" },
+        { value: "description", label: "Tagline and description" },
+        { value: "character", label: "Character definition" },
+        { value: "lorebook", label: "Lorebook, creator and tags" }
+      ],
+      default: []
+    }),
     field("nsfw", "enum", { allowed_values: ["include", "exclude", "only"], default: "include" }),
-    field("kind", "enum", { allowed_values: ["character", "lorebook", "both"], default: "both" }),
+    field("kind", "enum", { allowed_values: ["character", "lorebook", "both", "character_lorebook"], default: "both" }),
     field("source", "list", { allowed_values: V1_SITES, default: [] }),
+    field("not_source", "list", { allowed_values: V1_SITES, default: [] }),
+    field("any_tags", "groups", { default: [], max: 20 }),
     field("tags", "list", { default: [], max: 20 }),
     field("not_tags", "list", { default: [], max: 20 }),
-    field("min_tokens", "integer", { default: 30, min: 0, max: 10_000_000 }),
+    field("min_tokens", "integer", { default: 300, min: 0, max: 10_000_000 }),
     field("max_tokens", "integer", { min: 0, max: 10_000_000 }),
     flag("has_cover", true),
     field("author", "identity"),
-    flag("exclude_forks")
+    field("any_author", "identities", { default: [], max: 20 }),
+    field("not_author", "identities", { default: [], max: 20 }),
+    field("picture", "sha256"),
+    ...["added_after", "added_before", "created_after", "created_before"].map((name) => field(name, "date")),
+    flag("exclude_forks"),
+    flag("deleted_from_source"),
+    flag("deleted_from_any_source"),
+    flag("chub_verified"),
+    flag("chub_recommended")
   ],
   sorts: V1_SORTS,
   default_sort: "relevance with q; newest without q",
@@ -349,6 +393,10 @@ export interface FakeArchiveOptions {
   readonly cards?: number
   /** Report the total as an estimate, as an archive with a large index may. */
   readonly estimate?: boolean
+  /** Live v1 omits the expensive count on cursor searches. */
+  readonly unknownTotal?: boolean
+  /** Include some characters without cover images. */
+  readonly coverless?: boolean
   /** Leave `download_modes` out, as a response cached from before cardex listed them. */
   readonly omitDownloadModes?: boolean
 }
@@ -377,7 +425,10 @@ export const fakeCardexAdapter = (archive: Pick<FakeArchive, "origin">): CardSou
 const error = (code: string, message: string) => ({ error: code, message })
 
 export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promise<FakeArchive> => {
-  const cards = [...syntheticCards(options.cards ?? 240)]
+  const cards = syntheticCards(options.cards ?? 240).map((card, n) => ({
+    ...card,
+    hasCover: options.coverless ? n % 3 !== 0 : true
+  }))
   const bySlug = new Map(cards.map((c) => [c.slug, c]))
   const bySha = new Map(cards.map((c) => [c.sha256, c]))
   // The full image is a PNG; the thumbnails, as cardex's, WebP at 512 and 64 px wide.
@@ -433,8 +484,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     kind: "character",
     token_count: c.tokens,
     stats: { popularity: c.popularity, rating_avg: 4, rating_count: 10 },
-    thumbnail_url: `/t/${c.sha256}.512.webp?v=1`,
-    image_url: `/i/${c.sha256}.png`,
+    thumbnail_url: c.hasCover ? `/t/${c.sha256}.512.webp?v=1` : null,
+    image_url: c.hasCover ? `/i/${c.sha256}.png` : null,
     version: c.sha256,
     updated_at: new Date(c.addedAt).toISOString(),
     superseded_by: c.supersededBy ?? null,
@@ -465,10 +516,15 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     if (!["include", "exclude", "only"].includes(nsfw))
       return { status: 400, body: error("bad_request", "unknown nsfw") }
     const kind = params.get("kind") ?? "both"
-    if (!["character", "lorebook", "both"].includes(kind))
+    if (!["character", "lorebook", "both", "character_lorebook"].includes(kind))
       return { status: 400, body: error("bad_request", "unknown kind") }
     const sites = list(params.get("source"))
     if (sites.some((s) => !V1_SITES.includes(s))) return { status: 400, body: error("bad_request", "unknown source") }
+    const notSites = list(params.get("not_source"))
+    const verified = truthy(params.get("chub_verified"))
+    const recommended = truthy(params.get("chub_recommended"))
+    if ((verified || recommended) && (sites.length !== 1 || sites[0] !== "chub"))
+      return { status: 400, body: error("bad_request", "Chub must be the only included source") }
     const q = (params.get("q") ?? "").trim().toLowerCase()
     const sort = params.get("sort") ?? (q ? "relevance" : "newest")
     if (!V1_SORTS.includes(sort)) return { status: 400, body: error("bad_request", "unknown sort") }
@@ -493,16 +549,49 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       offset = (page - 1) * limit
     }
     const author = (params.get("author") ?? "").toLowerCase()
-    const min = Number(params.get("min_tokens") ?? "30")
+    const min = Number(params.get("min_tokens") ?? "300")
     const max = Number(params.get("max_tokens") ?? "Infinity")
     const noForks = truthy(params.get("exclude_forks"))
     const semantic = mode === "semantic"
-    const words = (c: FakeCard) => c.name.toLowerCase().includes(q) || c.tagline.toLowerCase().includes(q)
+    const fields = list(params.get("fields"))
+    const words = (c: FakeCard) =>
+      [
+        ...(!fields.length || fields.includes("name") ? [c.name] : []),
+        ...(!fields.length || fields.includes("description") ? [c.tagline] : []),
+        ...(!fields.length || fields.includes("character") ? [c.json] : []),
+        ...(!fields.length || fields.includes("lorebook") ? [c.creator, ...c.tags] : [])
+      ].some((text) => text.toLowerCase().includes(q))
+    const groups = list(params.get("any_tags")).map((group) => group.split("|"))
+    const identities = (name: string) =>
+      (params.get(name) ?? "")
+        .split(/(?<!\\),/)
+        .map((v) => v.replace(/\\(.)/g, "$1").toLowerCase())
+        .filter(Boolean)
+    const anyAuthors = identities("any_author")
+    const notAuthors = identities("not_author")
+    const dateMatches = (c: FakeCard, kind: "added" | "created") => {
+      const value = kind === "added" ? c.addedAt : c.createdAt
+      const after = params.get(`${kind}_after`)
+      const before = params.get(`${kind}_before`)
+      return (!after || value >= Date.parse(after)) && (!before || value < Date.parse(before))
+    }
     const matching = cards.filter(
       (c) =>
         // Meaning search finds something for any words; text search needs them.
         (semantic || !q || words(c)) &&
         kind !== "lorebook" &&
+        (!truthy(params.get("has_cover") ?? "true") || c.hasCover) &&
+        (kind !== "character_lorebook" || c.hasLorebook) &&
+        !notSites.includes(c.site) &&
+        groups.every((group) => group.some((tag) => c.tags.includes(tag))) &&
+        (!anyAuthors.length || anyAuthors.includes(`${c.site}/${c.creator}`.toLowerCase())) &&
+        !notAuthors.includes(`${c.site}/${c.creator}`.toLowerCase()) &&
+        (!params.get("picture") || params.get("picture") === c.sha256) &&
+        dateMatches(c, "added") &&
+        dateMatches(c, "created") &&
+        (!(truthy(params.get("deleted_from_source")) || truthy(params.get("deleted_from_any_source"))) || c.deleted) &&
+        (!verified || c.verified) &&
+        (!recommended || c.recommended) &&
         (sites.length === 0 || sites.includes(c.site)) &&
         include.every((t) => c.tags.includes(t)) &&
         !exclude.some((t) => c.tags.includes(t)) &&
@@ -522,6 +611,9 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       oldest: (a, b) => a.addedAt - b.addedAt,
       popular: (a, b) => b.popularity - a.popularity,
       name: (a, b) => a.name.localeCompare(b.name),
+      name_desc: (a, b) => b.name.localeCompare(a.name),
+      created_desc: (a, b) => b.createdAt - a.createdAt,
+      created_asc: (a, b) => a.createdAt - b.createdAt,
       tokens_asc: (a, b) => a.tokens - b.tokens,
       tokens_desc: (a, b) => b.tokens - a.tokens
     }
@@ -544,7 +636,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         author_error: null,
         results: items,
         items,
-        total,
+        total: options.unknownTotal && !semantic ? null : total,
+        has_more: more,
         total_capped: sorted.length > reachable.length,
         total_is_estimate: estimated,
         page: Math.floor(offset / limit) + 1,
@@ -554,7 +647,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         not_tags: exclude,
         unknown_tags: [],
         semantic: semantic ? { max_results: SEMANTIC_MAX } : null,
-        defaults: { nsfw: "include", kind: "both", min_tokens: 30, has_cover: true },
+        defaults: { nsfw: "include", kind: "both", min_tokens: 300, has_cover: true },
         next_cursor:
           !semantic && more ? Buffer.from(`${offset + limit}.${queryHash}`, "utf8").toString("base64url") : null
       }
