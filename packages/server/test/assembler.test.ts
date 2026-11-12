@@ -1295,6 +1295,38 @@ describe("the context assembler", () => {
     expect(contents(settled)[settled.request.breakpoints[0]!.message]).toBe("user: six")
   })
 
+  it("applies HTML depth after prompt scripts and permits replacing or disabling the stage", async () => {
+    const fixture = chat({
+      messages: [
+        { side: "assistant", content: "<status>Board</status>" },
+        { side: "user", content: "Next" }
+      ],
+      events: [
+        { depth: null, event: { scope: null, data: { key: "context.html_depth", value: { mode: "text", n: 1 } } } }
+      ],
+      preset: {
+        ...preset({
+          extensions: {
+            regex_scripts: [
+              regexScript("panel", { findRegex: "/<status>(.*?)<\\/status>/g", replaceString: "<b>$1</b>" })
+            ]
+          }
+        }),
+        regex_approved: true
+      }
+    })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const assembler = yield* makeAssembler
+        const builtin = yield* assembleFixture(fixture, { assembler })
+        expect(contents(builtin)).toContain("assistant: Board")
+        yield* assembler.stages.disable("context.htmlDepth")
+        const disabled = yield* assembleFixture(fixture, { assembler })
+        expect(contents(disabled)).toContain("assistant: <b>Board</b>")
+      }).pipe(Effect.scoped)
+    )
+  })
+
   it("sends older messages' HTML as the chat chose (context.htmlDepth), keeping the cache layout", async () => {
     const panel = ["```html", '<html><body><div class="hp">HP <b>12</b>/20</div></body></html>', "```"].join("\n")
     const withDepth = (value: StateEventData["value"] | null) =>
