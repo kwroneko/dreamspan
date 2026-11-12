@@ -1,3 +1,6 @@
+import { useQueuedMediaProps } from "./useQueuedMedia.ts"
+import { HtmlMessageContext } from "./messageHtml.ts"
+import { Button } from "../Button.tsx"
 // The React side of message HTML (spec/HTML-MESSAGES.md §3.2): parsed elements render as
 // themselves, not as Streamdown's Markdown components; form controls stay the user's to change
 // (CSS-only games toggle checkboxes); a document block goes to the registered frame renderer;
@@ -5,7 +8,7 @@
 import { createContext, createElement, useContext, useEffect, type ComponentType, type ReactNode } from "react"
 import { defaultComponents } from "streamdown"
 import { Icon } from "../Icon.tsx"
-import { effectiveDocumentRenderer } from "./parts.ts"
+import { effectiveDocumentRenderer, effectiveSchema } from "./parts.ts"
 import { FRAME_ELEMENT, MEDIA_MARKER } from "./rehypeHtml.ts"
 
 interface HastNode {
@@ -30,12 +33,19 @@ function Plain({ node, ...props }: Props) {
 /** Each Markdown component, or the plain element when the HTML wrote it (a card's own `<table>`). */
 function htmlAware(markdown: ComponentType<Props> | string): ComponentType<Props> {
   return function HtmlAware(props: Props) {
-    return parsed(props.node) ? <Plain {...props} /> : createElement(markdown, props)
+    const queued = useQueuedMediaProps(props, props.node?.tagName ?? "")
+    const { node: _node, ...dom } = queued
+    return parsed(props.node) ? (
+      <Plain {...queued} />
+    ) : (
+      createElement(markdown, typeof markdown === "string" ? dom : queued)
+    )
   }
 }
 
 /** Uncontrolled, so a click toggles a checkbox or radio, and typing changes a field. */
-function Input({ node, checked, value, ...props }: Props) {
+function Input({ node, checked, value, ...raw }: Props) {
+  const props = useQueuedMediaProps(raw, "input")
   if (!parsed(node)) return <input {...props} checked={checked as boolean} value={value as string} />
   const type = String(props.type ?? "").toLowerCase()
   return type === "checkbox" || type === "radio" ? (
@@ -44,10 +54,12 @@ function Input({ node, checked, value, ...props }: Props) {
     <input {...props} defaultValue={value as string} />
   )
 }
-function Textarea({ node, children: _children, value, ...props }: Props) {
+function Textarea({ node, children: _children, value, ...raw }: Props) {
+  const props = useQueuedMediaProps(raw, "textarea")
   return <textarea {...props} defaultValue={(value as string | undefined) ?? (node ? textOf(node) : "")} />
 }
-function Select({ node, value, ...props }: Props) {
+function Select({ node, value, ...raw }: Props) {
+  const props = useQueuedMediaProps(raw, "select")
   const options = (function* walk(at: HastNode | undefined): Generator<HastNode> {
     for (const child of at?.children ?? []) {
       if (child.tagName === "option") yield child
@@ -60,7 +72,8 @@ function Select({ node, value, ...props }: Props) {
   const initial = (value as string | undefined) ?? (props.multiple ? selected : selected[0])
   return <select {...props} defaultValue={initial} />
 }
-function Option({ node: _node, selected: _selected, ...props }: Props) {
+function Option({ node: _node, selected: _selected, ...raw }: Props) {
+  const props = useQueuedMediaProps(raw, "option")
   return <option {...props} />
 }
 
@@ -74,11 +87,29 @@ function MediaMarker() {
 
 /** The note under a message whose media was left out. */
 export function BlockedMediaNote() {
+  const media = useContext(HtmlMessageContext)?.media
   return (
-    <p role="note" className="mt-2 flex items-center gap-1.5 text-xs text-muted select-none">
+    <div role="note" className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted select-none">
       <Icon name="image" className="size-3.5 shrink-0" />
-      Images from other sites are blocked.
-    </p>
+      <span>Images from other sites are blocked.</span>
+      {media?.actions.map((action) => (
+        <Button
+          key={action.label}
+
+          variant="ghost"
+          hint={action.about}
+          disabled={media.pending}
+          onClick={() => void action.allow()}
+        >
+          {action.label}
+        </Button>
+      ))}
+      {media?.error && (
+        <span role="alert" className="text-danger">
+          {media.error}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -105,9 +136,17 @@ export function htmlComponents(markdown: object | undefined): Record<string, Com
     ...(defaultComponents as unknown as Record<string, ComponentType<Props>>),
     ...(markdown as Record<string, ComponentType<Props>> | undefined)
   }
+  for (const tag of effectiveSchema()?.schema("").tagNames ?? []) all[tag] ??= tag
   return {
     ...Object.fromEntries(
-      Object.entries(all).map(([tag, component]) => [tag, tag === "a" ? component : htmlAware(component)])
+      Object.entries(all).map(([tag, component]) => [
+        tag,
+        tag === "a"
+          ? function QueuedLink(props: Props) {
+              return createElement(component, useQueuedMediaProps(props, "a"))
+            }
+          : htmlAware(component)
+      ])
     ),
     input: Input,
     textarea: Textarea,

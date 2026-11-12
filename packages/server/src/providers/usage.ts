@@ -69,8 +69,30 @@ export const usageObservers: Record<string, (data: unknown, capture: Capture) =>
     if (stop && Predicate.isString(stop.category) && stop.category.length > 0) capture.refusalCategory = stop.category
   },
   "google-generative-ai": (data, capture) => {
-    const usage = record(record(data)?.usageMetadata)
+    const event = record(data)
+    const usage = record(event?.usageMetadata)
     if (usage) capture.rawUsage = usage
+    // A blocked prompt has no candidate/finish reason. Keep this provider-specific
+    // feedback in the observer, so the common error path records a refusal, not EOF.
+    const blocked = record(event?.promptFeedback)?.blockReason
+    if (typeof blocked === "string" && blocked !== "BLOCK_REASON_UNSPECIFIED" && blocked.length > 0)
+      capture.refusalCategory = blocked
+    const candidates = event?.candidates
+    const finish = Array.isArray(candidates) ? record(candidates[0])?.finishReason : undefined
+    if (
+      typeof finish === "string" &&
+      [
+        "SAFETY",
+        "RECITATION",
+        "BLOCKLIST",
+        "PROHIBITED_CONTENT",
+        "SPII",
+        "IMAGE_SAFETY",
+        "IMAGE_PROHIBITED_CONTENT",
+        "IMAGE_RECITATION"
+      ].includes(finish)
+    )
+      capture.refusalCategory = finish
   }
 }
 

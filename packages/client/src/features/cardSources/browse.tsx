@@ -40,7 +40,8 @@ import {
   sourcesAtom,
   type SourceProblem,
   useAdoptRemote,
-  useSourceCall
+  useSourceCall,
+  problemText
 } from "./remote.ts"
 
 /** The sources this user has on, in the registry's order: what Show offers after the filters. */
@@ -108,7 +109,9 @@ interface Results {
   readonly key: string
   readonly items: ReadonlyArray<RemoteSummary>
   readonly next: string | null
+  readonly capped?: boolean | undefined
   readonly total?: number | undefined
+  readonly notice?: string | undefined
   readonly estimated?: boolean | undefined
   readonly status: Status
   readonly problem?: SourceProblem | undefined
@@ -152,7 +155,9 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
                 items: out.value.items,
                 next: out.value.next,
                 total: out.value.total,
+                capped: out.value.totalCapped,
                 estimated: out.value.totalEstimated,
+                notice: out.value.notice,
                 status: "ready"
               }
             : { key, items: [], next: null, status: "failed", problem: out.problem }
@@ -185,13 +190,16 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
       setResults((r) => {
         if (r === null || r.key !== current.key) return r
         if (!out.ok) return { ...r, status: "more-failed", problem: out.problem }
-        const seen = new Set(r.items.map((i) => i.remoteId))
+        const previous = out.value.reset ? [] : r.items
+        const seen = new Set(previous.map((i) => i.remoteId))
         return {
           ...r,
-          items: [...r.items, ...out.value.items.filter((i) => !seen.has(i.remoteId))],
+          items: [...previous, ...out.value.items.filter((i) => !seen.has(i.remoteId))],
           next: out.value.next,
-          total: out.value.total ?? r.total,
+          total: out.value.reset ? out.value.total : (out.value.total ?? r.total),
+          capped: out.value.reset ? out.value.totalCapped : (out.value.totalCapped ?? r.capped),
           estimated: out.value.totalEstimated ?? r.estimated,
+          notice: out.value.notice,
           status: "ready"
         }
       })
@@ -214,11 +222,26 @@ const isRange = (value: SourceFilterValue | undefined): value is { readonly min?
 
 /** What a source option shows once open: its reported total, "~" when it's an estimate. */
 const totalLabel = (results: Results | null) =>
-  results?.total === undefined ? null : `${results.estimated ? "~" : ""}${numberFormat.format(results.total)}`
+  results?.total === undefined
+    ? null
+    : `${results.estimated ? "~" : ""}${numberFormat.format(results.total)}${results.capped ? "+" : ""}`
 
 /** How many filters are set, for the Filters button: tags, and the filters away from their default. */
-const filterCount = (remote: RemoteBrowse) =>
-  remote.tags.length + remote.excludeTags.length + Object.keys(remote.filters).length
+const filterCount = (query: SourceQuery | null, caps: SourceCapabilities | undefined) =>
+  query === null
+    ? 0
+    : query.tags.length +
+      query.excludeTags.length +
+      Object.entries(query.filters).filter(
+        ([id, value]) => value !== false && !(caps?.ratings?.filterId === id && value === caps.ratings.default)
+      ).length
+
+const requirementMet = (filter: SourceFilter, filters: SourceQuery["filters"]) => {
+  if (filter.kind !== "toggle" || !filter.requires) return true
+  const chosen = filters[filter.requires.filterId]
+  const values = Array.isArray(chosen) ? chosen : typeof chosen === "string" ? [chosen] : []
+  return values.length === filter.requires.values.length && filter.requires.values.every((v) => values.includes(v))
+}
 
 /**
  * Everything a place (home, the sidebar) needs while a source may be shown: the sources Show
@@ -235,6 +258,11 @@ export function useSourceBrowse(source: string | null, remote: RemoteBrowse, onR
   const action = useAction()
   const change = (next: Partial<RemoteBrowse>) => {
     const merged = { ...remote, ...next }
+    if (next.filters) {
+      const filters = { ...next.filters }
+      for (const filter of caps?.filters ?? []) if (!requirementMet(filter, filters)) delete filters[filter.id]
+      merged.filters = filters
+    }
     onRemote(merged)
     // The content rating is remembered on the account (§5.3).
     const ratingId = caps?.ratings?.filterId
@@ -263,7 +291,7 @@ export function useSourceBrowse(source: string | null, remote: RemoteBrowse, onR
     waitMs,
     filtersOpen,
     setFiltersOpen,
-    filterCount: filterCount(remote)
+    filterCount: filterCount(query, caps)
   }
 }
 
@@ -433,28 +461,139 @@ function RangeFilter({
   )
 }
 
-/** The tag field: typing suggests the source's tags with their counts; Enter adds what's typed. */
-function TagField({ browse }: { browse: SourceBrowse }) {
+/** Suggestions share the existing inline buttons for tags and capability-declared text fields. */
+function useSuggestions(browse: SourceBrowse, kind: "tags" | "creators", prefix: string, enabled = true) {
   const call = useSourceCall()
-  const [text, setText] = useState("")
-  const [suggestions, setSuggestions] = useState<ReadonlyArray<{ tag: string; label?: string; count?: number }>>([])
-  const suggest = browse.caps?.tags.suggest === true
   const sourceId = browse.info?.id ?? null
-  const prefix = text.trim()
-  useEffect(() => {
-    if (!suggest || sourceId === null || prefix === "") return
+  const key = `${sourceId}:${kind}:${prefix}`
+  const [state, setState] = useState<{
+    key: string
+    items: ReadonlyArray<{ value: string; label: string; count?: number }>
+    next: string | null
+    problem?: SourceProblem
+    loading?: boolean
+  }>({ key: "", items: [], next: null })
+  const [attempt, setAttempt] = useState(0)
+  const active = useRef<AbortController | null>(null)
+  const request = (page: string | null) => {
+    active.current?.abort()
     const controller = new AbortController()
-    const timer = setTimeout(() => {
-      void call((client) => client("SourceTags", { sourceId, prefix }), controller.signal).then((out) => {
-        if (out?.ok) setSuggestions(out.value.slice(0, 12))
+    active.current = controller
+    setState((old) => ({ key, items: old.key === key ? old.items : [], next: page, loading: true }))
+    void call(
+      (client) => client("SourceSuggestions", { sourceId: sourceId!, kind, prefix, page }),
+      controller.signal
+    ).then((out) => {
+      if (!out || controller.signal.aborted) return
+      setState((old) => {
+        if (!out.ok) return { ...old, loading: false, problem: out.problem }
+        const previous = page && !out.value.reset && old.key === key ? old.items : []
+        const seen = new Set(previous.map((item) => item.value))
+        return {
+          key,
+          items: [...previous, ...out.value.items.filter((item) => !seen.has(item.value))],
+          next: out.value.next
+        }
       })
-    }, 200)
+    })
+  }
+  useEffect(() => {
+    if (sourceId === null || !enabled) return
+    const timer = setTimeout(() => request(null), 200)
     return () => {
       clearTimeout(timer)
-      controller.abort()
+      active.current?.abort()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `call` is a fresh closure each render
-  }, [suggest, sourceId, prefix])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the key identifies the request; call is a fresh closure
+  }, [key, enabled, attempt])
+  const current = enabled && state.key === key ? state : { items: [], next: null, problem: undefined, loading: false }
+  return {
+    ...current,
+    more: () => request(current.next),
+    retry: () => (current.next ? request(current.next) : setAttempt((n) => n + 1))
+  }
+}
+
+function SuggestedValues({
+  suggestions,
+  kind,
+  onChoose
+}: {
+  suggestions: ReturnType<typeof useSuggestions>
+  kind: "tags" | "creators"
+  onChoose: (value: string) => void
+}) {
+  return (
+    <div aria-label={`Suggested ${kind}`} className="flex min-w-0 flex-wrap gap-1">
+      {suggestions.items.map((item) => (
+        <Button
+          key={item.value}
+          variant="ghost"
+          className="h-auto min-h-7 max-w-full px-2 text-left text-xs whitespace-normal break-words"
+          hint={`Uses ${item.value} in this filter.`}
+          onClick={() => onChoose(item.value)}
+        >
+          {kind === "creators" ? `${item.label} (${item.value})` : item.label}
+          {item.count !== undefined && (
+            <span className="text-muted tabular-nums">{numberFormat.format(item.count)}</span>
+          )}
+        </Button>
+      ))}
+      {suggestions.problem ? (
+        <div className="w-full text-sm text-muted">
+          {problemText("the archive", suggestions.problem)}{" "}
+          <Button variant="ghost" hint="Asks for these suggestions again." onClick={suggestions.retry}>
+            Retry
+          </Button>
+        </div>
+      ) : suggestions.next ? (
+        <Button
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          hint={`Shows more ${kind} matching what you typed.`}
+          disabled={suggestions.loading}
+          onClick={suggestions.more}
+        >
+          More {kind}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+function TextFilter({
+  filter,
+  value,
+  onChange,
+  browse
+}: {
+  filter: Extract<SourceFilter, { kind: "text" }>
+  value: string
+  onChange: (value: string | undefined) => void
+  browse: SourceBrowse
+}) {
+  const parts = filter.suggestions?.multiple ? value.split(/(?<!\\),/) : [value]
+  const prefix = (parts.at(-1) ?? "").trim().replace(/\\(.)/g, "$1")
+  const suggestions = useSuggestions(browse, "creators", prefix, !!filter.suggestions && !!prefix)
+  const choose = (chosen: string) => {
+    if (!filter.suggestions?.multiple) return onChange(chosen)
+    const escaped = chosen.replace(/\\/g, "\\\\").replace(/,/g, "\\,")
+    onChange([...parts.slice(0, -1), escaped].join(","))
+  }
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <Field label={filter.label} about={filter.about}>
+        <Input value={value} onChange={(event) => onChange(event.currentTarget.value || undefined)} />
+      </Field>
+      {filter.suggestions && <SuggestedValues suggestions={suggestions} kind="creators" onChoose={choose} />}
+    </div>
+  )
+}
+
+/** The tag field: typing suggests the source's tags with their counts; Enter adds what's typed. */
+function TagField({ browse }: { browse: SourceBrowse }) {
+  const [text, setText] = useState("")
+  const suggestions = useSuggestions(browse, "tags", text.trim(), browse.caps?.tags.suggest === true)
   const add = (tag: string) => {
     const clean = tag.trim()
     if (clean === "" || browse.remote.tags.includes(clean)) return
@@ -463,9 +602,7 @@ function TagField({ browse }: { browse: SourceBrowse }) {
       excludeTags: browse.remote.excludeTags.filter((t) => t !== clean)
     })
     setText("")
-    setSuggestions([])
   }
-  const shown = prefix === "" ? [] : suggestions.filter((s) => s.tag.toLowerCase().startsWith(prefix.toLowerCase()))
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <Field
@@ -484,22 +621,7 @@ function TagField({ browse }: { browse: SourceBrowse }) {
           }}
         />
       </Field>
-      {shown.length > 0 && (
-        <div aria-label="Suggested tags" className="flex flex-wrap gap-1">
-          {shown.map((s) => (
-            <Button
-              key={s.tag}
-              variant="ghost"
-              className="h-7 px-2 text-xs"
-              hint={`Adds the ${s.tag} tag.`}
-              onClick={() => add(s.tag)}
-            >
-              {s.label ?? s.tag}
-              {s.count !== undefined && <span className="text-muted tabular-nums">{numberFormat.format(s.count)}</span>}
-            </Button>
-          ))}
-        </div>
-      )}
+      <SuggestedValues suggestions={suggestions} kind="tags" onChoose={add} />
     </div>
   )
 }
@@ -533,7 +655,11 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
                       label={filter.label}
                       value={Array.isArray(value) ? value : []}
                       onValueChange={(chosen) => set(filter.id, chosen.length ? chosen : undefined)}
-                      options={filter.options.map((o) => ({ value: o.value, label: o.label }))}
+                      options={filter.options.map((o) => ({
+                        value: o.value,
+                        label: o.label,
+                        description: `Filters by ${filter.label.toLowerCase()}: ${o.label.toLowerCase()}.`
+                      }))}
                     />
                   ) : (
                     <Segmented
@@ -541,7 +667,11 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
                       label={filter.label}
                       value={typeof value === "string" ? value : null}
                       onValueChange={(chosen) => set(filter.id, chosen)}
-                      options={filter.options.map((o) => ({ value: o.value, label: o.label }))}
+                      options={filter.options.map((o) => ({
+                        value: o.value,
+                        label: o.label,
+                        description: `Filters by ${filter.label.toLowerCase()}: ${o.label.toLowerCase()}.`
+                      }))}
                     />
                   )}
                 </div>
@@ -560,11 +690,14 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
                 <Switch
                   key={filter.id}
                   checked={value === true}
+                  disabled={!requirementMet(filter, filters)}
                   onCheckedChange={(on) => set(filter.id, on ? true : undefined)}
                   hint={
-                    value === true
-                      ? `Click to stop filtering by ${filter.label.toLowerCase()}`
-                      : `Click to show only cards that ${filter.label.toLowerCase().replace(/^has /, "have ")}`
+                    !requirementMet(filter, filters)
+                      ? filter.requires!.about
+                      : value === true
+                        ? `Click to stop filtering by ${filter.label.toLowerCase()}`
+                        : `Click to show only cards that ${filter.label.toLowerCase().replace(/^has /, "have ")}`
                   }
                   {...(filter.about ? { about: filter.about } : {})}
                 >
@@ -573,12 +706,13 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
               )
             case "text":
               return (
-                <Field key={filter.id} label={filter.label} about={filter.about}>
-                  <Input
-                    value={typeof value === "string" ? value : ""}
-                    onChange={(event) => set(filter.id, event.currentTarget.value || undefined)}
-                  />
-                </Field>
+                <TextFilter
+                  key={filter.id}
+                  filter={filter}
+                  browse={browse}
+                  value={typeof value === "string" ? value : ""}
+                  onChange={(next) => set(filter.id, next)}
+                />
               )
           }
         })}
@@ -588,7 +722,7 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
 }
 
 const chipClass =
-  "inline-flex h-7 min-w-0 items-center gap-1 rounded-full border border-border bg-surface pr-0.5 pl-2.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus"
+  "inline-flex h-7 min-w-0 max-w-full items-center gap-1 rounded-full border border-border bg-surface pr-0.5 pl-2.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus"
 
 function Chip({
   children,
@@ -610,13 +744,19 @@ function Chip({
       {onClick ? (
         <Tooltip label={hint ?? ""}>
           <button type="button" className="inline-flex min-w-0 items-center gap-1 outline-none" onClick={onClick}>
-            {children}
+            <span className="truncate">{children}</span>
           </button>
         </Tooltip>
       ) : (
-        <span className="inline-flex min-w-0 items-center gap-1">{children}</span>
+        <span className="min-w-0 truncate">{children}</span>
       )}
-      <IconButton label="Remove" hint="Removes this filter." icon="close" className="size-6!" onClick={onRemove} />
+      <IconButton
+        label="Remove"
+        hint="Removes this filter."
+        icon="close"
+        className="size-6! shrink-0"
+        onClick={onRemove}
+      />
     </span>
   )
 }
@@ -1001,8 +1141,18 @@ function ProblemAlert({
           {name} sent something this app can't read.
         </Alert>
       )
+    case "region_unavailable":
+      return (
+        <Alert tone="neutral" actions={retry}>
+          This card is not available in your region.
+        </Alert>
+      )
     case "refused":
-      return <Alert tone="neutral">{name} refused this request.</Alert>
+      return (
+        <Alert tone="neutral" actions={retry}>
+          {name} refused this request.
+        </Alert>
+      )
     case "not_found":
       return (
         <Alert tone="neutral" actions={retry}>
@@ -1111,6 +1261,7 @@ export function SourceResults({ browse, className }: { browse: SourceBrowse; cla
       className="flex min-w-0 flex-col gap-3"
     >
       <RecentRow browse={browse} />
+      {results?.notice && <Alert tone="neutral">{results.notice}</Alert>}
       {failed && problem ? (
         <ProblemAlert browse={browse} problem={problem} />
       ) : loading ? (

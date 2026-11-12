@@ -9,6 +9,7 @@ import type { LcmSummary } from "@rp/shared/lcm.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { editHistory, messageMenu } from "./support/message.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
 import { level1 } from "./support/summaries.ts"
 
@@ -227,6 +228,9 @@ for (const width of [1440, 390])
       const saved = page.getByRole("dialog", { name: "Saved amendment history", exact: true })
       await expect(saved.getByRole("button", { name: "Restore saved text" })).toHaveCount(2)
       await expect(saved.locator(".cm-editor")).toHaveCount(0)
+      // A reload reopens the amendments dialog; closing it clears the address.
+      await page.reload()
+      await expect(saved.getByRole("button", { name: "Restore saved text" })).toHaveCount(2)
       await saved.getByText("Compare with saved text", { exact: true }).first().click()
       await expectTextBox(
         saved.getByRole("textbox", { name: width > 639 ? "After" : "Changes", exact: true }).first(),
@@ -263,3 +267,60 @@ for (const width of [1440, 390])
       await page.screenshot({ animations: "disabled", path: `${screens}/summary-revisions-${width}-${theme}.png` })
     })
   }
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`saved history URL reopens with its message far off screen ${width} ${theme}`, async ({ page }, info) => {
+      test.setTimeout(120_000)
+      await page.setViewportSize({ width, height: 960 })
+      await page.emulateMedia({ colorScheme: theme })
+      const fixture = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.CreateChat({ title: "Long synthetic dialog history" })
+          yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
+          const first = yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "Before the edit."
+          })
+          if (first._tag !== "Posted") throw new Error("queued fixture")
+          yield* api.AmendVersion({
+            versionId: first.entry.version.id,
+            content: "After the edit.",
+            expectedRowVersion: 1
+          })
+          let parent = first.entry.slotId
+          for (let n = 0; n < 240; n++) {
+            const sent = yield* api.SendMessage({
+              chatId: chat.id,
+              parentSlotId: parent,
+              branch: false,
+              content: `Later message ${n}. ` + "Rain on the harbor. ".repeat(12)
+            })
+            if (sent._tag !== "Posted") throw new Error("queued fixture")
+            parent = sent.entry.slotId
+          }
+          return { chat, first: first.entry }
+        })
+      )
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const base = `${server().url}/chats/${fixture.chat.id}?fork=${fixture.chat.currentForkId}`
+      await page.goto(base)
+      await expect(page.locator("article[data-slot]").last()).toContainText("Later message 239")
+      const original = page.locator(`article[data-slot="${fixture.first.slotId}"]`)
+      await expect(original).toHaveCount(0)
+      const destination = `${base}&messageDialog=message.amendments:${fixture.first.version.id}`
+      await page.goto(destination)
+      await page.reload()
+      const dialog = page.getByRole("dialog", { name: "Saved amendment history", exact: true })
+      await expect(dialog.getByRole("button", { name: "Restore saved text" })).toHaveCount(1)
+      await expect(original).toHaveCount(0)
+      await expectLayout(page, info, "offscreen-amendments", { scope: '[role="dialog"]' })
+      await dialog.getByRole("button", { name: "Close", exact: true }).click()
+      await expect.poll(() => new URL(page.url()).searchParams.has("messageDialog")).toBe(false)
+      await page.goBack()
+      await expect(dialog).toBeVisible()
+      await page.goForward()
+      await expect(dialog).toBeHidden()
+    })

@@ -1326,6 +1326,24 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       )
   },
+  GetExternalMediaPrefs: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetExternalMediaPrefs({})
+        yield* owner.api.SetExternalMedia({ target: { _tag: "Default" }, allow: !before.default })
+        assert.deepStrictEqual(yield* actor.api.GetExternalMediaPrefs({}), before)
+      })
+  },
+  SetExternalMedia: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(actor.api.SetExternalMedia({ target: { _tag: "Card", id: owner.cardId }, allow: true }), "NotFound"),
+        refused(
+          actor.api.SetExternalMedia({ target: { _tag: "Chat", id: owner.chat.chatId }, allow: true }),
+          "NotFound"
+        )
+      ])
+  },
   GetDisplayPrefs: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -1504,6 +1522,35 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
             forkId: owner.chat.forkId,
             content: "planted",
             expectedRowVersion: 1
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  ReadMessageVersion: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.ReadMessageVersion({
+            chatId: owner.chat.chatId,
+            forkId: owner.chat.forkId,
+            versionId: owner.chat.versionId
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.ReadMessageVersion({
+            chatId: actor.chat.chatId,
+            forkId: actor.chat.forkId,
+            versionId: owner.chat.versionId
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.ReadMessageVersion({
+            chatId: actor.chat.chatId,
+            forkId: owner.chat.forkId,
+            versionId: actor.chat.versionId
           }),
           "NotFound"
         )
@@ -1978,7 +2025,8 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         yield* refused(actor.api.GetRunTranscript({ versionId: owner.chat.generatingId }), "NotFound")
         assert.deepStrictEqual(yield* owner.api.GetRunTranscript({ versionId: owner.chat.generatingId }), {
           tools: [],
-          entries: []
+          entries: [],
+          cut: []
         })
       })
   },
@@ -2719,6 +2767,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  SourceSuggestions: {
+    probe: (actor) =>
+      refused(
+        actor.api.SourceSuggestions({ sourceId: "cardex", kind: "creators", prefix: "f", page: null }),
+        "NotFound"
+      )
+  },
   SourceTags: { probe: (actor) => refused(actor.api.SourceTags({ sourceId: "cardex", prefix: "f" }), "NotFound") },
   SourceCard: { probe: (actor) => refused(actor.api.SourceCard({ sourceId: "cardex", remoteId: "x" }), "NotFound") },
   SourceCardForChat: {
@@ -3264,6 +3319,19 @@ const httpGet = (party: Party, path: string) =>
 
 /** The HTTP routes that act on a user's data (ARCHITECTURE.md §11.4), probed the same way. */
 const routes: Record<string, Probe> = {
+  "GET /media/external": (actor, owner) =>
+    Effect.gen(function* () {
+      const port = actor.port
+      for (const scope of [{ chat: owner.chat.chatId }, { card: owner.cardId }]) {
+        const response = yield* Effect.promise(() =>
+          fetch(
+            `http://127.0.0.1:${port}/media/external?${new URLSearchParams({ url: "https://media.invalid/a.png", ...scope })}`,
+            { headers: { cookie: actor.cookie, "sec-fetch-site": "same-origin" } }
+          )
+        )
+        assert.strictEqual(response.status, 404)
+      }
+    }),
   "POST /library/import": (actor, owner) =>
     Effect.gen(function* () {
       const into = yield* http(
@@ -3803,6 +3871,14 @@ const storage: Record<
   string,
   (reader: Reader["Service"], actor: Party, owner: Party, writer: Writer["Service"]) => Effect.Effect<void, unknown>
 > = {
+  CheckExternalMedia: (reader, actor, owner) =>
+    Effect.all([
+      refused(
+        reader.CheckExternalMedia({ userId: actor.user.id, chatId: owner.chat.chatId, cardId: null }),
+        "NotFound"
+      ),
+      refused(reader.CheckExternalMedia({ userId: actor.user.id, chatId: null, cardId: owner.cardId }), "NotFound")
+    ]).pipe(Effect.asVoid),
   AddCardAsset: (_reader, actor, owner, writer) =>
     refused(
       writer.AddCardAsset({

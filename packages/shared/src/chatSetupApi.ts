@@ -5,6 +5,7 @@ import { ChatBrowse, ChatFilterCounts } from "./chatBrowse.ts"
 // anything else is NotFound.
 import { Schema } from "effect"
 import { AvatarCrop } from "./media.ts"
+import { HtmlDepth } from "./state.ts"
 import { REPLACEABLE_CARD_FIELDS, ReplaceTarget } from "./docs/note.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import {
@@ -319,6 +320,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   lorebooks: Schema.Array(RefId),
   /** Cards whose own lorebook this chat has turned off. */
   cardLorebooksOff: Schema.Array(EntityId),
+  /** A card's own book is replaced by this world file while the file is read (ST's link between a card and its world). */
+  cardLorebookBindings: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
   /** Every lorebook attached to the chat and not removed, on or off, in the order first attached. */
   listedLorebooks: Schema.Array(Schema.Struct({ ref: RefId, on: Schema.Boolean })),
   /** Lorebook entries only below the history (DESIGN §1.3); on unless the chat turned it off. */
@@ -345,6 +348,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   agentEnabled: Schema.optionalKey(Schema.Boolean),
   /** True: card-swap, only the speaker's card where the preset puts cards (`cards.rotation`); absent is off. */
   cardsRotation: Schema.optionalKey(Schema.Boolean),
+  /** HTML in older messages sent to the model (`context.html_depth`); absent: as written. */
+  htmlDepth: Schema.optionalKey(HtmlDepth),
   /** The tools agent replies offer (`agent.tools`); absent: the default list. */
   agentTools: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Active and departed cards, including former personas, to retain historical names and portraits. */
@@ -399,6 +404,8 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("RemoveLorebook", { ref: RefId }),
   /** Lorebook entries only below the history, or where their positions say (`lorebook.below_history`). */
   Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
+  /** HTML in older messages sent to the model from here on (`context.html_depth`). */
+  Schema.TaggedStruct("HtmlDepth", { depth: HtmlDepth }),
   /** Who replies when nobody is picked (`reply.order`): a reply policy's id. */
   Schema.TaggedStruct("ReplyOrder", { order: Schema.String.check(Schema.isMaxLength(200)) }),
   /** One reply per user action, or the reply order's whole round as in ST (`reply.single`). */

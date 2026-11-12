@@ -61,10 +61,22 @@ export const OfferedTool = Schema.Struct({
 })
 export type OfferedTool = typeof OfferedTool.Type
 
+/**
+ * The step a part of the transcript is, as `ResumeFromStep` names it: its index in the version's
+ * steps (`GetRolloutSteps`). Absent for what isn't a step (the message's own turn, `send_message`).
+ */
+const StepIndex = { step: Schema.optionalKey(Schema.Int) }
+
 /** A part of the model's turn, verbatim. */
 export const TurnPart = Schema.Union([
-  Schema.Struct({ type: Schema.Literals(["thinking", "text"]), text: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("toolCall"), id: Schema.String, name: Schema.String, args: Schema.Unknown })
+  Schema.Struct({ type: Schema.Literals(["thinking", "text"]), text: Schema.String, ...StepIndex }),
+  Schema.Struct({
+    type: Schema.Literal("toolCall"),
+    id: Schema.String,
+    name: Schema.String,
+    args: Schema.Unknown,
+    ...StepIndex
+  })
 ])
 export type TurnPart = typeof TurnPart.Type
 
@@ -87,17 +99,33 @@ export const TranscriptEntry = Schema.Union([
     toolCallId: Schema.String,
     tool: Schema.String,
     text: Schema.String,
-    isError: Schema.Boolean
+    isError: Schema.Boolean,
+    /** Its call's step, whose result it is. */
+    ...StepIndex
   }),
   /** A message the app sent the model (a nudge to send the reply, the turn cap's last word). */
   Schema.Struct({ role: Schema.Literal("app"), text: Schema.String })
 ])
 export type TranscriptEntry = typeof TranscriptEntry.Type
 
+/**
+ * What a resume or a step edit dropped from the run it carried on (`rollout_branches`): the
+ * stopped run's entries from there, shown folded before `entries[at]` (at the end when `at` is
+ * past them).
+ */
+export const CutSpan = Schema.Struct({
+  reason: Schema.Literals(["resume", "edit"]),
+  at: Schema.Int,
+  entries: Schema.Array(TranscriptEntry)
+})
+export type CutSpan = typeof CutSpan.Type
+
 /** An agent run as the inspector shows it: the tools offered and every turn after the request. */
 export const RunTranscript = Schema.Struct({
   tools: Schema.Array(OfferedTool),
-  entries: Schema.Array(TranscriptEntry)
+  entries: Schema.Array(TranscriptEntry),
+  /** What resuming dropped of the run it carried on, oldest first. */
+  cut: Schema.Array(CutSpan)
 })
 export type RunTranscript = typeof RunTranscript.Type
 

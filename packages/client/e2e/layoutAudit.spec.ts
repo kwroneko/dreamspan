@@ -1,3 +1,6 @@
+import { googleConnectionTests } from "./support/googleConnection.ts"
+import { agentResumeTests } from "./support/agentResumeFlows.ts"
+import { cardexCriteriaTests } from "./support/cardexCriteria.ts"
 import { exercisePhoneFooters } from "./support/phoneFooters.ts"
 import { newflowTests } from "./support/newflows.ts"
 import { seedSplitChats } from "./support/splitChats.ts"
@@ -31,7 +34,9 @@ import { modelCatalog } from "./support/modelCatalog.ts"
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
+if (process.env.LAYOUT_AUDIT_CARDEX_ONLY === "1") cardexCriteriaTests()
 if (process.env.LAYOUT_AUDIT_NEWFLOWS_ONLY === "1") newflowTests()
+if (process.env.LAYOUT_AUDIT_RESUME_ONLY === "1") agentResumeTests()
 
 test.describe("model picker catalog layout", () => {
   let server: TestServer
@@ -863,6 +868,20 @@ test.describe("synthetic library and every app surface", () => {
             await audit(`dialog-picture-${tab.toLowerCase()}`, '[role="dialog"]')
             await dialog.screenshot({ path: join(work, `${width}-${theme}-${tab.toLowerCase()}.png`) })
           }
+          return
+        }
+        if (process.env.LAYOUT_AUDIT_HTML_MESSAGES_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          await openPanel(page, "This chat")
+          await audit("html-chat-settings", '[role="tabpanel"][aria-label="This chat"]')
+          await openPanel(page, "Interface")
+          await audit("html-interface", '[role="tabpanel"][aria-label="Interface"]')
+          await openPanel(page, cardName)
+          await page.getByRole("tab", { name: "Extra", exact: true }).click()
+          await audit("html-card-panel", '[data-card-tabs] [role="tabpanel"]')
+          await page.goto(`${server.url}/library/${cardRef}`)
+          await page.getByRole("tab", { name: "Extra", exact: true }).click()
+          await audit("html-card-editor")
           return
         }
         if (process.env.LAYOUT_AUDIT_INTERFACE_ONLY === "1") {
@@ -2733,3 +2752,6 @@ for (const width of [1440, 390])
         await local.stop()
       }
     })
+
+// Focus with --grep "Google connection"; the same surfaces as the provider gate.
+test.describe("Google connection layout", googleConnectionTests)

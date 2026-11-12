@@ -1686,6 +1686,22 @@ export class ChatSession {
     )
   }
 
+  /**
+   * Resume (DESIGN §7.5): an agent reply that stopped or failed, carried on from where it
+   * stopped as a new version of the slot, selected, that streams like any reply. The model is
+   * sent nothing new: the run goes on from its frozen request, so no guidance goes with it and
+   * nothing waits for live edits (`beforeReply`).
+   */
+  resumeVersion(entry: PathEntry): Promise<Outcome<PathEntry>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("ResumeVersion", {
+        versionId: entry.version.id,
+        forkId: this.view.forkId,
+        expectedRowVersion: entry.rowVersion
+      })
+    )
+  }
+
   /** "Show as reply text": the reply's leading sections back in its text, as a new version (spec/REPLY-SECTIONS.md). */
   async showSectionsAsText(entry: PathEntry): Promise<Outcome<unknown>> {
     return this.slotWrite(entry.slotId, (client) =>

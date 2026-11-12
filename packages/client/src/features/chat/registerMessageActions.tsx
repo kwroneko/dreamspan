@@ -3,7 +3,14 @@ import { Link } from "@tanstack/react-router"
 import { lazy, Suspense } from "react"
 import { continueUnavailable, ContinueView, runContinue } from "./ContinueAction.tsx"
 import { copy } from "./copy.ts"
-import { invokeMessageAction, type MessageActionProps, messageActions, viewOf } from "./messageActions.tsx"
+import {
+  MessageActionDialog,
+  invokeMessageAction,
+  type MessageActionProps,
+  messageActions,
+  viewOf
+} from "./messageActions.tsx"
+import { chatOverlays } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 
 /**
@@ -31,6 +38,7 @@ const EDIT_KEYS = "Or double-click the message; ↑ in the empty composer edits 
  * came from, copy, delete. Pinned by default: Edit, Continue, Branch from here and Delete.
  */
 export const registerMessageActions = () => [
+  chatOverlays.register({ id: "chat.message-action-dialog", order: 10, component: MessageActionDialog }),
   messageActions.register({
     id: "message.edit",
     order: 10,

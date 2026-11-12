@@ -20,6 +20,7 @@ afterAll(() => disposers.forEach((dispose) => dispose()))
 const render = (
   text: string,
   {
+    mediaScope = null as string | null,
     html = true,
     streaming = false,
     panelDepth = null as number | null,
@@ -33,7 +34,15 @@ const render = (
       { value: { html, panelDepth } },
       createElement(
         HtmlMessageContext,
-        { value: { key: "slot", streaming, fromTip, ...(permit ? { permit } : {}) } },
+        {
+          value: {
+            key: "slot",
+            streaming,
+            fromTip,
+            media: { scope: mediaScope, actions: [], pending: false, error: null },
+            ...(permit ? { permit } : {})
+          }
+        },
         createElement(StMarkdown, { text, streaming })
       )
     )
@@ -94,7 +103,7 @@ describe("inline HTML", () => {
       '<svg viewBox="0 0 10 10"><defs><linearGradient id="g"></linearGradient></defs><rect fill="url(#g)"/></svg>'
     )
     expect(out).toContain('id="user-content-g"')
-    expect(out).toContain('fill="url(#user-content-g)"')
+    expect(out).toContain('fill="url(&quot;#user-content-g&quot;)"')
   })
 
   it("reads SVG links as the browser does: padded fragments renamed, xlink-only links in a new tab", () => {
@@ -153,6 +162,19 @@ describe("inline HTML", () => {
     )
   })
 
+  it("shows HTML as text when the parser's tree can't be converted, keeping the Markdown", () => {
+    // parse5 gives an SVG <template> no template contents; the conversion used to throw on it.
+    expect(render("<b>before</b>")).toBe("<p><b>before</b></p>")
+    for (const markup of [
+      '<svg class="x"><template id="t">kept</template></svg>',
+      "<math><template>m</template></math>"
+    ])
+      expect(render(`**lit** ${markup}`)).toBe(
+        `<p><strong>lit</strong> ${markup.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")}</p>`
+      )
+    expect(render("<b>after</b>")).toBe("<p><b>after</b></p>")
+  })
+
   it("shows HTML as text with the schema part disabled", () => {
     disposers.forEach((dispose) => dispose())
     try {
@@ -174,7 +196,7 @@ describe("styles", () => {
 
   it("scopes each style on its own, so a broken one leaves the rest", () => {
     expect(scopeStyles(extractStyles('<style>.a { color: red }</style><style><a id="</style>')).css).toBe(
-      ".message-html .custom-a { color: red }"
+      ".message-html .custom-a{color: red;}"
     )
   })
 })
@@ -232,5 +254,36 @@ describe("document blocks", () => {
       partial.forEach((dispose) => dispose())
       disposers = registerHtmlParts()
     }
+  })
+})
+
+describe("external media consent", () => {
+  it("rewrites HTML, Markdown, srcset, audio and SVG image URLs through the scoped proxy", () => {
+    const scope = "chat=synthetic&card=card"
+    for (const source of [
+      '<img src="https://media.invalid/p.png">',
+      "![Map](https://media.invalid/p.png)",
+      '<img srcset="https://media.invalid/p.png 1x, https://media.invalid/q.png 2x">',
+      '<audio src="https://media.invalid/a.ogg" autoplay></audio>',
+      '<svg><image href="https://media.invalid/p.png" /></svg>'
+    ]) {
+      const blocked = render(source)
+      expect(blocked).not.toContain("/media/external?")
+      const allowed = render(source, { mediaScope: scope })
+      expect(allowed).toContain("/media/external?chat=synthetic&amp;card=card&amp;url=")
+      expect(allowed).not.toMatch(/(?:src|href|srcSet)="https:/)
+      expect(allowed).not.toContain("autoPlay")
+    }
+  })
+  it("rewrites CSS URLs after consent, leaving other loading constructs blocked", () => {
+    const scoped = scopeStyles(['.a { background: url("https://media.invalid/Case.PNG"); }'], "chat=synthetic")
+    expect(scoped.css).toContain("/media/external?chat=synthetic&url=https%3A%2F%2Fmedia.invalid%2FCase.PNG")
+    expect(scoped.blocked).toBe(false)
+    const blocked = scopeStyles(['.a { background: url("https://media.invalid/Case.PNG"); }'])
+    expect(blocked.css).not.toContain("/media/external")
+    expect(blocked.blocked).toBe(true)
+    expect(
+      scopeStyles(['.a { background: image-set("https://media.invalid/a.png" 1x); }'], "chat=synthetic").css
+    ).not.toContain("image-set")
   })
 })

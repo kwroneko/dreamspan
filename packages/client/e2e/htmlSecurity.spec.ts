@@ -1,12 +1,17 @@
 // Adversarial synthetic cards, exercised through the real message renderer and frame CSP.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
+import { cleanStyle, scopeCss } from "../src/ui/html/css.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
 
 test("card selectors cannot style the app or remove message containment", async ({ page }) => {
+  const probes: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("css-variable-probe")) probes.push(request.url())
+  })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
@@ -19,6 +24,8 @@ test("card selectors cannot style the app or remove message containment", async 
         reply: false,
         content: [
           "<style>",
+          '.box { --address: "/css-variable-probe"; background-image: image-set(var(--address)) }',
+          String.raw`.box { font-family: x\7d html\7b background\3a blue }`,
           String.raw`@font-face { font-family: "\49 nter"; src: local("FreeMono") }`,
           ".box { color: rgb(1, 2, 3); & > span { color: rgb(4, 5, 6) }",
           ":is(&, body) [data-security-probe] { color: rgb(11, 22, 33) !important }",
@@ -45,6 +52,63 @@ test("card selectors cannot style the app or remove message containment", async 
   await expect(page.locator("[data-security-probe]")).toHaveCSS("color", "rgb(7, 8, 9)")
   await expect(page.locator(".message-html")).toHaveCSS("contain", "layout paint")
   expect(await page.evaluate(() => Array.from(document.fonts, (font) => font.family))).not.toContain("Inter")
+  expect(probes).toEqual([])
+  await expect(box).toHaveCSS("background-image", "none")
+})
+
+// Each style reads differently to a lenient CSS parser and to the browser (bad strings, escaped
+// braces, unclosed blocks): before the CSS Syntax tokenizer, the first three became global rules.
+test("CSS that parsers read differently stays inside the message", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const hostile = [
+    '.a[title="x\n]{}[data-security-probe]{color:rgb(11, 22, 33)!important}body{background:rgb(1, 1, 1)!important}/*"]{color:blue}',
+    '@media x"\n{}[data-security-probe]{color:rgb(11, 22, 33)!important}/*"{.a{color:blue}}',
+    '.a{color:red}\n.b"\n{}body{background:rgb(1, 1, 1)!important}/*"{color:blue}',
+    String.raw`.a { color: red\7d [data-security-probe]\7b color\3a rgb(11, 22, 33) }`,
+    ".a{color:red;}<!--}[data-security-probe]{color:rgb(11, 22, 33)!important}-->",
+    "@media all{.a{color:red}}}[data-security-probe]{color:rgb(11, 22, 33)!important}"
+  ]
+  const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "CSS differentials" })
+      yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        reply: false,
+        content: [
+          ...hostile.map((css) => `<style>${css}</style>`),
+          "<style>.legit { color: rgb(4, 5, 6) }</style>",
+          '<div class="legit">Card</div>'
+        ].join("\n")
+      })
+      return chat
+    })
+  )
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  // The message's own legitimate style applies, so the sheet is in place.
+  await expect(page.locator(".custom-legit")).toHaveCSS("color", "rgb(4, 5, 6)")
+  await page.evaluate(() => {
+    const app = document.createElement("div")
+    app.dataset.securityProbe = ""
+    app.style.color = "rgb(7, 8, 9)"
+    app.textContent = "App outside the message"
+    document.querySelector(".message-html")!.after(app)
+  })
+  await expect(page.locator("[data-security-probe]")).toHaveCSS("color", "rgb(7, 8, 9)")
+  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).not.toBe("rgb(1, 1, 1)")
+  // Every top-level rule the browser read from message styles is scoped, or a renamed global.
+  const topLevel = await page.evaluate(() =>
+    document.adoptedStyleSheets.flatMap((sheet) =>
+      Array.from(sheet.cssRules, (rule) => (rule instanceof CSSStyleRule ? rule.selectorText : rule.constructor.name))
+    )
+  )
+  expect(topLevel.length).toBeGreaterThan(0)
+  for (const rule of topLevel)
+    expect(
+      ["CSSScopeRule", "CSSKeyframesRule", "CSSFontFaceRule"].includes(rule) || rule.startsWith(".message-html ")
+    ).toBe(true)
 })
 
 test("SVG panel links cannot navigate into an attacker document", async ({ page }) => {
@@ -159,3 +223,106 @@ test("SVG panel links cannot navigate into an attacker document", async ({ page 
   await expect(panel.locator("p")).toHaveText("Private synthetic expanded content")
   expect(requests).toEqual([])
 })
+
+// A message whose markup the HTML step can't turn into a tree (an SVG `<template>`, which has no
+// template contents) shows that markup as text; it doesn't take the chat down with it.
+test("markup the HTML step can't convert shows as text, and the chat stays", async ({ page }) => {
+  const errors: string[] = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Unconvertible markup" })
+      yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        reply: false,
+        content: 'Lantern **lit** <svg class="x"><template id="t">kept</template></svg>'
+      })
+      return chat
+    })
+  )
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  await expect(page.getByRole("heading", { level: 1, name: "Unconvertible markup" })).toBeVisible()
+  const message = page.getByRole("article", { name: "Your message" })
+  await expect(message.locator("strong")).toHaveText("lit")
+  await expect(message).toContainText('<svg class="x"><template id="t">')
+  await expect(message.locator("svg.x, template")).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+// Exercise each containment layer by itself. The scope-only variant deliberately removes
+// our selector prefixes; the prefix variant emits no @scope at all.
+for (const layer of ["scope", "prefix", "scope-only"] as const)
+  test(`CSS parser edge cases and painting stay contained with ${layer}`, async ({ page }) => {
+    const payloads = [
+      '.a[title="x\n]{}[data-outside]{color:red!important}/*"]{color:blue}',
+      '@media x"\r\n{}[data-outside]{color:red!important}/*"{.a{color:blue}}',
+      String.raw`.a[title="x\"]{}[data-outside]{color:red!important}/*"]{color:blue}`,
+      String.raw`.a\7d [data-outside]\7b color\3a red {color:blue}`,
+      ".a\0 {color:red} [data-outside]{color:red!important}",
+      ".a\ud800 {color:red} [data-outside]{color:red!important}",
+      String.raw`.a\0 {color:red} .a\d800 {color:red}`,
+      '.a{background:url("bad\n")} [data-outside]{color:red!important}',
+      '.a{background:url(bad"url)} [data-outside]{color:red!important}',
+      "<!-- [data-outside]{color:red!important} -->",
+      ".a/**/,[data-outside]{color:red!important}",
+      ".a{color:red; /*",
+      ".a{color:rgb(1,2,3)",
+      "@media all{.a{color:red}",
+      '@import "https://media.invalid/forbidden";',
+      "@namespace x url(https://media.invalid/forbidden);",
+      '@charset "utf-8"; [data-outside]{color:red!important}',
+      '@property --x {syntax:"<color>";inherits:true;initial-value:red}',
+      "@font-face{font-family:Inter;src:url(https://media.invalid/forbidden);unicode-range:U+0-10FFFF}",
+      "@layer attack{[data-outside]{color:red!important}}",
+      "@container (min-width:0px){[data-outside]{color:red!important}}",
+      "@supports (display:block){[data-outside]{color:red!important}}",
+      "@scope (body){[data-outside]{color:red!important}}",
+      ":root,:host,:scope,:is(body,[data-outside]),:where([data-outside]),:has(.a){color:red!important}",
+      "+ [data-outside],~ [data-outside]{color:red!important}",
+      ".a{ & + [data-outside]{color:red!important} :is(&,body) [data-outside]{color:red!important}}",
+      '.a{--x:"https://media.invalid/forbidden";background:image-set(var(--x));content:attr(data-x);background-image:env(--x,url(https://media.invalid/forbidden))}',
+      '.a{--x:url(https://media.invalid/forbidden);background:var(--x);background:image-set("https://media.invalid/forbidden");background:u\\72l(https://media.invalid/forbidden)}',
+      ".a{position:fixed;inset:-10000px;z-index:2147483647;background:red!important;transform:scale(100);box-shadow:0 0 0 10000px red}"
+    ]
+    const mode = layer === "prefix" ? "prefix" : "scope"
+    const css =
+      payloads.map((input) => scopeCss(input, null, mode).css).join("\n") +
+      scopeCss(".ok{color:rgb(4,5,6)}", null, mode).css
+    const output = layer === "scope-only" ? css.replaceAll(":scope ", "") : css
+    const style = cleanStyle(
+      'color:rgb(9,8,7)!important;--x:"https://media.invalid/forbidden";background:image-set(var(--x));background:url(https://media.invalid/forbidden)'
+    ).style
+    const requests: string[] = []
+    page.on("request", (request) => requests.push(request.url()))
+    await page.setContent(
+      '<div data-outside>Before</div><section class="message-html"><div class="custom-a"></div><div class="custom-ok">Inside</div><div id="inline">Inline</div></section><div data-outside>After</div>'
+    )
+    await page.evaluate(
+      ({ output, style }) => {
+        document.body.style.margin = "0"
+        document.body.style.color = "rgb(7, 8, 9)"
+        document.body.style.background = "rgb(10, 11, 12)"
+        document.body.dataset.outside = ""
+        for (const element of document.querySelectorAll<HTMLElement>("[data-outside]"))
+          element.style.color = "rgb(7, 8, 9)"
+        const message = document.querySelector<HTMLElement>(".message-html")!
+        Object.assign(message.style, { contain: "layout paint", isolation: "isolate", width: "200px", height: "100px" })
+        Object.assign(document.querySelector<HTMLElement>("#inline")!.style, style)
+        const sheet = new CSSStyleSheet()
+        sheet.replaceSync(output)
+        document.adoptedStyleSheets = [sheet]
+      },
+      { output, style }
+    )
+    await expect(page.locator(".custom-ok")).toHaveCSS("color", "rgb(4, 5, 6)")
+    await expect(page.locator("#inline")).toHaveCSS("color", "rgb(9, 8, 7)")
+    for (const element of await page.locator("[data-outside]").all())
+      await expect(element).toHaveCSS("color", "rgb(7, 8, 9)")
+    await expect(page.locator("body")).toHaveCSS("background-color", "rgb(10, 11, 12)")
+    expect(await page.evaluate(() => document.elementFromPoint(300, 50)?.closest(".message-html") !== null)).toBe(false)
+    expect(requests).toEqual([])
+  })

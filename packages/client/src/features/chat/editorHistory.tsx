@@ -281,6 +281,7 @@ export const registerEditorHistory = () => [
       hint: "The texts this message had before each saved edit changed it in place.",
       onSelect: () => openDialog("message.amendments")
     })),
-    dialog: Amendments
+    dialog: Amendments,
+    dialogInUrl: true
   })
 ]

@@ -7,6 +7,30 @@ import { client, outcome, posted, serverLayer, testConfig } from "./support/conf
 import { completeFixture } from "./support/lcmFixtures.ts"
 import { slowIt } from "./support/slow.ts"
 
+it.live("a dialog reads its exact version outside the path window and rejects unrelated chats and forks", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const chat = yield* api.CreateChat({ title: "Synthetic dialog versions" })
+    const sent = yield* posted(
+      api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Original version" })
+    )
+    const second = yield* api.WriteVersion({
+      slotId: sent.entry.slotId,
+      forkId: chat.currentForkId!,
+      content: "Selected version",
+      expectedRowVersion: sent.entry.rowVersion
+    })
+    const read = { chatId: chat.id, forkId: chat.currentForkId!, versionId: sent.entry.version.id }
+    const entry = yield* api.ReadMessageVersion(read)
+    assert.strictEqual(entry.version.content, "Original version")
+    assert.strictEqual(entry.slotId, sent.entry.slotId)
+    assert.notStrictEqual(entry.version.id, second.version.id)
+    const other = yield* api.CreateChat({ title: "Unrelated chat" })
+    assert.strictEqual(yield* outcome(api.ReadMessageVersion({ ...read, chatId: other.id })), "NotFound")
+    assert.strictEqual(yield* outcome(api.ReadMessageVersion({ ...read, forkId: other.currentForkId! })), "NotFound")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
 it.live("saved amendments restore optimistically in one fork and retain both histories", () =>
   Effect.gen(function* () {
     const api = yield* client()

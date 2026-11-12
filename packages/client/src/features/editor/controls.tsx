@@ -182,8 +182,9 @@ export function TextField({
   }, [match])
   const value = useText(store, path)
   const kind = useEditorKind(store)
-  // Card, preset and note text goes in the code editor box, with its macros marked.
-  const card = kind === "card" || kind === "preset" || kind === "note"
+  // Prompt text shares the code editor's macro colours and revision line markers.
+  const card =
+    kind === "card" || kind === "preset" || kind === "note" || (kind === "lorebook" && path.at(-1) === "content")
   const field = textField(path)
   const props = {
     value,

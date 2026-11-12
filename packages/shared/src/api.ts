@@ -1,3 +1,4 @@
+import { ExternalMediaApi } from "./externalMedia.ts"
 import { SplitChatApi } from "./splitChat.ts"
 import { ChatContextsApi } from "./contextsApi.ts"
 import { ChatMergeApi } from "./mergeApi.ts"
@@ -12,7 +13,7 @@ import { LcmApi, LcmSettingsInvalid, SummaryRequestApi } from "./lcm.ts"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 import { BinItem } from "./bin.ts"
-import { ChatApi, ChatEventsApi } from "./chatApi.ts"
+import { ChatApi, ChatEventsApi, MessageVersionApi } from "./chatApi.ts"
 import { AgentApi } from "./agentApi.ts"
 import { DecisionApi } from "./decisionApi.ts"
 import { ProviderListApi } from "./providerApi.ts"
@@ -412,6 +413,7 @@ export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authenticat
 export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authentication)
 
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
+export const AuthenticatedExternalMediaApi = ExternalMediaApi.middleware(Authentication)
 export const AuthenticatedPanelApprovalApi = PanelApprovalApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
@@ -436,7 +438,10 @@ export class AuthenticatedDecisionApi extends DecisionApi.middleware(Authenticat
 /** The providers a new connection starts from (providerApi.ts). */
 export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Authentication) {}
 
-export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
+export const AuthenticatedMessageVersionApi = MessageVersionApi.middleware(Authentication)
+
+export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
+  .merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedChatEventsApi)
   .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedDecisionApi)
@@ -444,6 +449,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedCardSourcesApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedPanelApprovalApi)
+  .merge(AuthenticatedExternalMediaApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi)

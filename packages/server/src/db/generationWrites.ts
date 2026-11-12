@@ -1,3 +1,4 @@
+import { makeExternalMediaWriteHandlers } from "./externalMedia.ts"
 import { putUserSetting, writeSetting } from "./settings.ts"
 import { nextSeq, eventApplies } from "./forkState.ts"
 // Generation's writes: rollouts and the user's defaults (ARCHITECTURE §15).
@@ -89,6 +90,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
 
   const handlers = {
     ...(yield* makeDisplayPrefsWriteHandlers),
+    ...(yield* makeExternalMediaWriteHandlers),
     ...(yield* makeSourcePrefsWriteHandlers),
     ...(yield* makeTokenCountingWriteHandlers),
     StartRollout: ({

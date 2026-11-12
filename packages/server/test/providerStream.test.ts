@@ -4,7 +4,7 @@
 import type { AssistantMessage, Context as PiContext } from "@earendil-works/pi-ai"
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
-import type { ConnectionSettings, ModelId, ProviderKind } from "@rp/shared/providers.ts"
+import { resolveModel, type ConnectionSettings, type ModelId, type ProviderKind } from "@rp/shared/providers.ts"
 import { Effect, Exit, Fiber, Layer, Scope, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
@@ -2076,3 +2076,160 @@ it.live("user pricing persists, snapshots in-flight requests and never reprices 
     assert.equal(after[0]!.cost!.formula, "reported")
   }).pipe(Effect.scoped, Effect.provide(layer()))
 )
+
+it.live("Google lists pages with its key, merges catalog modalities and prices, and tests without generating", () =>
+  Effect.gen(function* () {
+    let refused = false
+    const server = yield* mock((request, res) => {
+      assert.equal(request.headers["x-goog-api-key"], "synthetic-google-key")
+      assert.isUndefined(request.headers.authorization)
+      const url = new URL(request.path, "http://example.invalid")
+      assert.equal(url.pathname, "/v1beta/models")
+      assert.equal(url.searchParams.get("pageSize"), "1000")
+      if (refused) return json(res, 403, { error: { message: "Synthetic key denied" } })
+      if (url.searchParams.get("pageToken")) {
+        assert.equal(url.searchParams.get("pageToken"), "next +/page")
+        return json(res, 200, {
+          models: [{ name: "models/synthetic-new", inputTokenLimit: 32000, outputTokenLimit: 2000, thinking: false }]
+        })
+      }
+      json(res, 200, {
+        models: [
+          {
+            name: "models/gemini-2.5-flash",
+            displayName: "Listed Flash",
+            inputTokenLimit: 900000,
+            outputTokenLimit: 32000,
+            thinking: true,
+            supportedGenerationMethods: ["generateContent", "countTokens"]
+          },
+          { name: "models/text-embedding-synthetic", supportedGenerationMethods: ["embedContent"] }
+        ],
+        nextPageToken: "next +/page"
+      })
+    })
+    const { userId, connection, providers, reader } = yield* connect(
+      "google",
+      `${server.url}/v1beta`,
+      "synthetic-google-key",
+      "gemini-2.5-flash"
+    )
+    assert.equal(connection.provider, "google")
+    assert.equal(connection.api, "google-generative-ai")
+    const tested = yield* providers.testConnection(userId, connection.id)
+    assert.isTrue(tested.ok)
+    assert.equal(tested.models, 2)
+    assert.include(tested.route!, "direct")
+    const models = yield* reader.ListModels({ userId, connectionId: connection.id, includeHidden: true })
+    const known = models.find((m) => m.key === "gemini-2.5-flash")!
+    const resolved = resolveModel(known.key, known.upstream, known.overrides)
+    assert.equal(resolved.context.value, 900000)
+    assert.equal(resolved.maxOutput.value, 32000)
+    assert.isTrue(resolved.vision.value)
+    assert.isTrue(resolved.reasoning.value)
+    assert.isAbove(known.upstream.price!.input, 0)
+    const unknown = models.find((m) => m.key === "synthetic-new")!
+    assert.equal(resolveModel(unknown.key, unknown.upstream, unknown.overrides).vision.source, "unknown")
+    assert.isUndefined(unknown.upstream.price)
+    refused = true
+    const bad = yield* providers.testConnection(userId, connection.id)
+    assert.isFalse(bad.ok)
+    assert.include(bad.detail, "auth")
+    assert.notInclude(JSON.stringify(bad), "synthetic-google-key")
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)
+
+for (const [name, response] of [
+  ["blocked prompt", { promptFeedback: { blockReason: "OTHER" } }],
+  ["blocked candidate", { candidates: [{ finishReason: "IMAGE_SAFETY" }] }]
+] as const)
+  it.live(`Google ${name} is a refusal and sends one attempt`, () =>
+    Effect.gen(function* () {
+      const server = yield* mock((_req, res) => sse(res, [response], { done: false }))
+      const writer = yield* Database.Writer
+      const providers = yield* Providers.Providers
+      const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+      const connection = yield* providers.createConnection({
+        userId,
+        kind: "google",
+        settings: settings(server.url),
+        apiKey: "synthetic-key"
+      })
+      const model = yield* writer.AddUserModel({
+        userId,
+        connectionId: connection.id,
+        key: "synthetic-model",
+        overrides: {}
+      })
+      const error = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId: model.id,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      ).pipe(Effect.flip, Effect.map(asProviderError))
+      assert.equal(error.reason, "refused")
+      assert.equal(server.requests().length, 1)
+      const reader = yield* Database.Reader
+      assert.equal((yield* reader.ListLlmRequests({ userId, limit: 5, before: null }))[0]!.status, "failed")
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+
+for (const afterTokens of [false, true])
+  it.live(`Google retries a transient stream error ${afterTokens ? "never after" : "before"} output`, () =>
+    Effect.gen(function* () {
+      let attempts = 0
+      const server = yield* mock((_req, res) => {
+        attempts++
+        sse(
+          res,
+          attempts === 1
+            ? [
+                ...(afterTokens ? [{ candidates: [{ content: { parts: [{ text: "Partial" }] } }] }] : []),
+                { error: { code: 503, status: "UNAVAILABLE", message: "Synthetic overloaded model" } }
+              ]
+            : [{ candidates: [{ content: { parts: [{ text: "Recovered" }] }, finishReason: "STOP" }] }],
+          { done: false }
+        )
+      })
+      const writer = yield* Database.Writer
+      const providers = yield* Providers.Providers
+      const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+      const connection = yield* providers.createConnection({
+        userId,
+        kind: "google",
+        settings: settings(server.url),
+        apiKey: "synthetic-key"
+      })
+      const model = yield* writer.AddUserModel({
+        userId,
+        connectionId: connection.id,
+        key: "synthetic-model",
+        overrides: {}
+      })
+      const send = collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId: model.id,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      )
+      if (afterTokens) {
+        const error = yield* send.pipe(Effect.flip, Effect.map(asProviderError))
+        assert.isTrue(error.afterTokens)
+      } else {
+        const events = yield* send
+        assert.equal(events.at(-1)!.type, "done")
+        assert.isTrue(events.some((e) => e.type === "retrying"))
+      }
+      assert.equal(attempts, afterTokens ? 1 : 2)
+      const reader = yield* Database.Reader
+      const rows = yield* reader.ListLlmRequests({ userId, limit: 5, before: null })
+      assert.lengthOf(rows, attempts)
+      assert.isTrue(rows.some((r) => r.status === "failed"))
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )

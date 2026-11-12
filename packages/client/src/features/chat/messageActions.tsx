@@ -5,7 +5,7 @@
 // by action id with the account's display preferences, over each action's own default, so a
 // plugin's action can be pinned like a built-in one.
 import type { BinItem } from "@rp/shared/bin.ts"
-import type { ForkId, PathEntry } from "@rp/shared/chat.ts"
+import type { ForkId, PathEntry, VersionId } from "@rp/shared/chat.ts"
 import {
   cloneElement,
   Fragment,
@@ -18,10 +18,13 @@ import {
   type ReactNode
 } from "react"
 import { makeRegistry } from "../../registry.ts"
+import { usePlaceNotice, usePlaceParam } from "../../usePlaceParam.ts"
+import { showToast } from "../../ui/Toast.tsx"
+import { useDeletedToast } from "../bin/deleted.ts"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Menu, MenuItemWithCheckbox, MenuSeparator } from "../../ui/Menu.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
-import type { ChatSession, Outcome } from "./session.ts"
+import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
 export interface MessageActionContext {
   readonly entry: PathEntry
@@ -88,6 +91,8 @@ export interface MessageAction {
    */
   readonly describe: ComponentType<MessageActionDescribeProps>
   readonly dialog?: ComponentType<MessageActionProps>
+  /** Keeps its dialog open across a reload: the URL names the action and the message version. */
+  readonly dialogInUrl?: boolean
 }
 
 /** A `describe` from a function of the message: for the actions whose view needs no state. */
@@ -244,6 +249,8 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
   const pinned = actions.filter((action) => isPinned(action, pins.choices))
   const { root, fit } = useFit(pinned.map((action) => action.id).join(" "))
   const [dialog, setDialog] = useState<MessageAction | null>(null)
+  const [, setPlace] = usePlaceParam("messageDialog", "")
+  const versionId = context.entry.version.id
   const activeDialog = dialog !== null && actions.includes(dialog) ? dialog : null
   if (dialog !== null && activeDialog === null) setDialog(null)
   const explain = (action: MessageAction, view: MessageActionView): MessageActionView => {
@@ -252,7 +259,11 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
   }
   const props: MessageActionProps = {
     ...context,
-    openDialog: (id: string) => setDialog(messageActions.get(id) ?? null),
+    openDialog: (id: string) => {
+      const action = messageActions.get(id) ?? null
+      if (action?.dialogInUrl === true) setPlace(`${id}:${versionId}`)
+      else setDialog(action)
+    },
     closeDialog: () => setDialog(null)
   }
   return (
@@ -321,5 +332,82 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
       )}
       {activeDialog?.dialog && <activeDialog.dialog {...props} />}
     </div>
+  )
+}
+
+/** One host outside the virtualized rows: the URL selects its action and exact version. */
+export function MessageActionDialog({ session, view }: { session: ChatSession; view: ChatView }) {
+  const snapshot = useSyncExternalStore(messageActions.subscribe, messageActions.snapshot, messageActions.snapshot)
+  const [place, setPlace] = usePlaceParam("messageDialog", "")
+  const split = place.lastIndexOf(":")
+  const id = split > 0 ? place.slice(0, split) : ""
+  const versionId = split > 0 ? place.slice(split + 1) : ""
+  const action = snapshot.entries.find((entry) => entry.dialogInUrl === true && entry.id === id)
+  usePlaceNotice(place !== "" && (!action?.dialog || !versionId) ? "This message dialog is no longer available." : null)
+  if (!action?.dialog || !versionId) return null
+  return (
+    <LoadedMessageDialog
+      key={`${session.id}/${view.forkId}/${place}`}
+      session={session}
+      action={action}
+      versionId={versionId as VersionId}
+      setPlace={setPlace}
+    />
+  )
+}
+
+function LoadedMessageDialog({
+  session,
+  action,
+  versionId,
+  setPlace
+}: {
+  session: ChatSession
+  action: MessageAction
+  versionId: VersionId
+  setPlace: (place: string) => void
+}) {
+  const view = useSyncExternalStore(session.subscribe, session.snapshot)
+  const [loaded, setLoaded] = useState<Outcome<PathEntry> | null>(null)
+  const deleted = useDeletedToast()
+  const forkId = view.forkId
+  useEffect(() => {
+    if (forkId === null) return
+    let active = true
+    void session
+      .call((client) => client("ReadMessageVersion", { chatId: session.id, forkId, versionId }))
+      .then((result) => {
+        if (active) setLoaded(result)
+      })
+    return () => {
+      active = false
+    }
+  }, [session, forkId, versionId])
+  usePlaceNotice(loaded?.ok === false ? loaded.error.message : null)
+  const entry = view.entries.find((entry) => entry.version.id === versionId) ?? (loaded?.ok ? loaded.value : null)
+  const report = (outcome: Outcome<unknown>) => {
+    if (!outcome.ok) showToast({ title: outcome.error.message })
+  }
+  const context: MessageActionContext | null =
+    entry === null
+      ? null
+      : {
+          entry,
+          session,
+          branchFork: forkId,
+          generated: entry.version.writer === "model",
+          generating: entry.version.status === "generating",
+          hidden: entry.contextExcluded,
+          report,
+          toast: (outcome) => {
+            if (outcome.ok) deleted(outcome.value)
+            else report(outcome)
+          }
+        }
+  const available = context !== null && availableMessageActions(context).includes(action)
+  usePlaceNotice(context !== null && !available ? "This message dialog is no longer available." : null)
+  if (context === null || !available || !action.dialog) return null
+  return (
+    <action.dialog {...context} openDialog={(id) => setPlace(`${id}:${versionId}`)} closeDialog={() => setPlace("")} />
   )
 }

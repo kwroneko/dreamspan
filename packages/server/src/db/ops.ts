@@ -1,3 +1,4 @@
+import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
@@ -2740,6 +2741,11 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's display choices, merged in one writer transaction. */
+  Rpc.make("SetExternalMedia", {
+    payload: { userId: UserId, target: ExternalMediaTarget, allow: Schema.NullOr(Schema.Boolean) },
+    success: ExternalMediaPrefs,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("SetDisplayPrefs", {
     payload: { userId: UserId, prefs: DisplayPrefsChange },
     success: DisplayPrefs,
@@ -3961,6 +3967,12 @@ export class ReadOps extends RpcGroup.make(
   /** What the preset the user's chats use does with a card's own prompts (DESIGN §5.0). */
   Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
   /** The user's display choices; the defaults where none are stored. */
+  Rpc.make("GetExternalMediaPrefs", { payload: { userId: UserId }, success: ExternalMediaPrefs, error: StorageError }),
+  Rpc.make("CheckExternalMedia", {
+    payload: { userId: UserId, chatId: Schema.NullOr(ChatId), cardId: Schema.NullOr(EntityId) },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("GetDisplayPrefs", { payload: { userId: UserId }, success: DisplayPrefs, error: StorageError }),
   /** The account's card-source choices and recently viewed cards; the defaults where none are stored. */
   Rpc.make("GetSourcePrefs", { payload: { userId: UserId }, success: SourcePrefs, error: StorageError }),

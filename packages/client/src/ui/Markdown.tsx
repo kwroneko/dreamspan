@@ -1,6 +1,6 @@
 // The message renderer is an effective registration, including in previews and dialogs.
 // Plugins can replace its id, wrap the current component, or add a higher-priority renderer.
-import { Suspense, useSyncExternalStore, type ComponentType } from "react"
+import { Component, Suspense, useSyncExternalStore, type ComponentType, type ReactNode } from "react"
 import { makeRegistry } from "../registry.ts"
 
 export interface MessageTextProps {
@@ -13,6 +13,33 @@ export const messageRenderers = makeRegistry<{
   order: number
   component: ComponentType<MessageTextProps>
 }>()
+
+/** A renderer failure belongs to this body; text and registry changes give it another try. */
+class MessageRenderBoundary extends Component<{
+  children: ReactNode
+  plain: ReactNode
+  text: string
+  sourceText: string | undefined
+  renderer: ComponentType<MessageTextProps>
+}> {
+  override state = {
+    failed: false,
+    text: this.props.text,
+    sourceText: this.props.sourceText,
+    renderer: this.props.renderer
+  }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  static getDerivedStateFromProps(props: MessageRenderBoundary["props"], state: MessageRenderBoundary["state"]) {
+    if (props.text !== state.text || props.sourceText !== state.sourceText || props.renderer !== state.renderer)
+      return { failed: false, text: props.text, sourceText: props.sourceText, renderer: props.renderer }
+    return null
+  }
+  override render() {
+    return this.state.failed ? this.props.plain : this.props.children
+  }
+}
 
 export function Markdown(props: MessageTextProps) {
   const snapshot = useSyncExternalStore(
@@ -34,9 +61,11 @@ export function Markdown(props: MessageTextProps) {
     </div>
   )
   return renderer ? (
-    <Suspense fallback={plain}>
-      <renderer.component {...props} />
-    </Suspense>
+    <MessageRenderBoundary plain={plain} text={props.text} sourceText={props.sourceText} renderer={renderer.component}>
+      <Suspense fallback={plain}>
+        <renderer.component {...props} />
+      </Suspense>
+    </MessageRenderBoundary>
   ) : (
     plain
   )

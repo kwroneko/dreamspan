@@ -2,7 +2,14 @@
 // Adapters never fetch on their own: every request goes through the `SourceHttp` they're
 // given, which keeps them on their declared hosts, under the response caps and timeouts, and
 // behind the source's rate limit (guard.ts, limiter.ts).
-import type { RemoteSummary, SourceCapabilities, SourceFailed, SourceQuery, SourceTag } from "@rp/shared/cardSources.ts"
+import type {
+  RemoteSummary,
+  SourceCapabilities,
+  SourceFailed,
+  SourceQuery,
+  SourceTag,
+  SourceSuggestions
+} from "@rp/shared/cardSources.ts"
 import type { Effect } from "effect"
 
 /** A response, read whole under its cap. */
@@ -18,9 +25,10 @@ export type ResponseKind = "json" | "card" | "image"
 
 export interface SourceHttp {
   /**
-   * A GET on one of the adapter's hosts. A non-2xx status fails: 401/403 `unauthorized` (for
-   * a source with no key, `refused`), 404
-   * `not_found`, 429 `rate_limited` (with its Retry-After), 5xx `unreachable`, any other
+   * A GET on one of the adapter's hosts. Conditional requests may return 304 without a
+   * body; other non-2xx statuses fail: 401/403 `unauthorized` (for a source with no key,
+   * `refused`), 404 `not_found`, 451 `region_unavailable`, 429 or 503 with Retry-After `rate_limited`
+   * (with its Retry-After and status), other 5xx `unreachable` (with status), any other
    * (a 400 among them) `bad_response`, with the error code a refusal's body named.
    */
   readonly get: (
@@ -43,8 +51,12 @@ interface RemoteCardFile {
 }
 
 interface AdapterPage {
+  /** The source restarted from the first page after refusing a cursor. */
+  readonly reset?: boolean
+  readonly notice?: string
   readonly items: ReadonlyArray<AdapterSummary>
   readonly next: string | null
+  readonly totalCapped?: boolean
   readonly total?: number
   readonly totalEstimated?: boolean
 }
@@ -78,6 +90,12 @@ export interface CardSourceAdapter {
     http: SourceHttp,
     prefix: string
   ) => Effect.Effect<ReadonlyArray<typeof SourceTag.Type>, SourceFailed>
+  readonly suggestions?: (
+    http: SourceHttp,
+    kind: "tags" | "creators",
+    prefix: string,
+    page: string | null
+  ) => Effect.Effect<SourceSuggestions, SourceFailed>
   readonly card: (http: SourceHttp, remoteId: string) => Effect.Effect<RemoteCardFile, SourceFailed>
   /** An image a summary referenced (`thumb` or `image`), as bytes. */
   readonly image: (http: SourceHttp, ref: string) => Effect.Effect<Uint8Array, SourceFailed>

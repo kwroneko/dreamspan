@@ -32,7 +32,7 @@ import { EditorStore, useEditorState, useLeaveGuard, useValue } from "../editor/
 import { useSession } from "../../session.ts"
 import { useCast } from "./cast.ts"
 import { useChatPreset } from "./chatPreset.ts"
-import { type BookRow, lorebookRows } from "./lorebookRows.ts"
+import { type BookRow, lorebookRows, replacedBy } from "./lorebookRows.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 const entries = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
@@ -88,6 +88,7 @@ interface Shown {
   readonly name: string
   readonly from: string
   readonly switchHint: string
+  readonly explanation?: string
   /** "From the preset X": a link into the preset. */
   readonly presetLink?: { readonly label: string; readonly open: () => void }
   /** The store and the book's place in it, for the editor below the list. */
@@ -119,7 +120,7 @@ function Book({
       aria-busy={row.pending || undefined}
     >
       {/* Its explanation on hover and focus; on a phone it's under the book's name. */}
-      <Tooltip label={shown.switchHint}>
+      <Tooltip label={shown.switchHint + (shown.explanation ? ` ${shown.explanation}` : "")}>
         <span className="shrink-0 pt-1.5">
           <Switch labelHidden checked={row.on} onCheckedChange={onSwitch} describedBy={hintId}>
             <span className="sr-only">{shown.name}</span>
@@ -129,9 +130,10 @@ function Book({
       <div className="min-w-0 flex-1">
         <Tooltip
           label={
-            selected
+            (selected
               ? "Click to close the lorebook editor below the list."
-              : "Click to open the lorebook editor below the list."
+              : "Click to open the lorebook editor below the list.") +
+            (shown.explanation ? ` ${shown.explanation}` : "")
           }
         >
           <button
@@ -189,7 +191,7 @@ function usePresetBooks(store: EditorStore | null) {
 
 export function LorebooksTab({ session, view, active }: { session: ChatSession; view: ChatView; active: boolean }) {
   const { cast, cards } = useCast()
-  const library = useLibraryLorebooks()
+  const library = useLibraryLorebooks(true)
   const cardRefs = useCardRefs()
   const workspace = usePresetWorkspace()
   const navigate = useNavigate()
@@ -248,19 +250,40 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
   const openPreset = () => preset.ref && workspace?.open(preset.ref, PRESET_LOREBOOKS_FOCUS)
   const presetLabel = presetName ? `From the preset ${presetName}` : "From the preset"
 
-  const ownOn = own.filter((card) => !(cast?.cardLorebooksOff ?? []).includes(card.entityId))
+  const listed = rows.filter((row) => row.source === "chat").map((row) => ({ ref: row.id, on: row.on }))
+  const replacements = new Map(
+    own.map((card) => [
+      card.entityId as string,
+      replacedBy(
+        { entity: card.entityId, world: card.lorebookWorld },
+        cast?.cardLorebookBindings,
+        listed.filter((book) => byId.has(book.ref)),
+        presetBooks.filter((book) => byId.has(book.id)),
+        (id) => byId.get(id)?.lorebookSource
+      )
+    ])
+  )
+  const ownOn = own.filter(
+    (card) => !(cast?.cardLorebooksOff ?? []).includes(card.entityId) && !replacements.get(card.entityId)
+  )
   const shownOf = (row: BookRow): Shown => {
     if (row.source === "card") {
       const card = cards.get(row.id)!
       const name = card.lorebookName ?? `${card.name}'s lorebook`
       const ref = cardRefs?.get(row.id)
+      const replacement = replacements.get(row.id)
+      const explanation = replacement
+        ? `This chat reads ${nameOf(replacement)} instead of ${card.name}’s own lorebook. Turn the linked book off to use the card’s own book when enabled.`
+        : undefined
       return {
         name,
         from: [
           row.on ? `${card.name}'s own lorebook` : `${card.name}'s own lorebook, off in this chat`,
+          ...(replacement ? [`replaced by ${nameOf(replacement)}, linked to ${card.name}`] : []),
           ...(card.lorebookEntries === undefined ? [] : [entries(card.lorebookEntries)])
         ].join(" · "),
         switchHint: `Click to ${row.on ? "disable" : "enable"} ${card.name}’s lorebook for this chat.`,
+        ...(explanation ? { explanation } : {}),
         edit: ref ? { ref: ref.id, root: ["character_book"] } : null,
         focus: CARD_LOREBOOK_FOCUS,
         menu: []
@@ -354,7 +377,9 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
         search: shown.focus ? { focus: shown.focus } : {}
       })
   }
-  const addable = (library ?? []).filter((ref) => !(cast?.listedLorebooks ?? []).some((book) => book.ref === ref.id))
+  const addable = (library ?? []).filter(
+    (ref) => ref.archivedAt === null && !(cast?.listedLorebooks ?? []).some((book) => book.ref === ref.id)
+  )
   void active
 
   return (

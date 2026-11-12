@@ -182,6 +182,10 @@ for (const width of [1440, 390])
     await expect(section).toContainText("the account default is the current preset.")
     await section.getByRole("radio", { name: "With the next reply" }).click()
     await expect(section).toContainText("the account default is right after a reply.")
+    // How a summary is written: the reply (default) or through tools.
+    await expect(section.getByRole("button", { name: "A reply" })).toHaveAttribute("aria-pressed", "true")
+    await section.getByRole("button", { name: "With tools" }).click()
+    await expect(section).toContainText("the account default is a reply.")
     // Advanced: closed, then the chunk size and the summary length.
     await expect(section.getByLabel("Chunk size", { exact: true })).toBeHidden()
     await section.getByText("Advanced", { exact: true }).click()
@@ -198,6 +202,7 @@ for (const width of [1440, 390])
       "true"
     )
     await expect(section.getByRole("radio", { name: "With the next reply" })).toBeChecked()
+    await expect(section.getByRole("button", { name: "With tools" })).toHaveAttribute("aria-pressed", "true")
     await expect(section.getByRole("switch", { name: "Include notes in summary requests" })).toBeChecked()
     await section.getByText("Advanced", { exact: true }).click()
     await expect(section.getByLabel("Chunk size", { exact: true })).toHaveValue("3000")
@@ -211,6 +216,7 @@ for (const width of [1440, 390])
     expect(settings.resolved.leafInput).toBeNull()
     expect(settings.resolved.withPreset).toBe("current")
     expect(settings.resolved.withNotes).toBe(false)
+    expect(settings.resolved.style).toBe("direct")
     await closePanel(page)
   })
 
@@ -235,6 +241,47 @@ test("Settings → Chats sets the defaults a new chat copies", async ({ page }) 
   const again = await summaries(page)
   await expect(pair(again, "Recent messages kept as written").getByLabel("Maximum")).toHaveValue("25000")
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`Written as defaults survive reload and a new chat keeps its choice ${width} ${theme}`, async ({ page }) => {
+      await open(page, width, theme)
+      await page.goto(`${server().url}/settings/chats`)
+      const defaults = page.getByRole("region", { name: "Summary defaults for new chats" })
+      await defaults.getByRole("button", { name: "With tools", exact: true }).click()
+      await expect(defaults.getByRole("button", { name: "With tools", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      await page.reload()
+      await expect(defaults.getByRole("button", { name: "With tools", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      const made = await admin((api) => api.CreateChat({ title: "Written with tools" }))
+      await defaults.getByRole("button", { name: "A reply", exact: true }).click()
+      await expect(defaults.getByRole("button", { name: "A reply", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      await page.goto(`${server().url}/chats/${made.id}`)
+      let section = await summaries(page)
+      await expect(section.getByRole("button", { name: "With tools", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      await section.getByRole("button", { name: "Reset to account default", exact: true }).click()
+      await expect(section.getByRole("button", { name: "A reply", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+      await page.reload()
+      section = await summaries(page)
+      await expect(section.getByRole("button", { name: "A reply", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      )
+    })
 
 // The phone first: the desktop run turns summaries on.
 for (const width of [390, 1440])

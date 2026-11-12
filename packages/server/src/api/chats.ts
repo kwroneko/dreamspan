@@ -3,7 +3,7 @@
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { originalReply } from "@rp/shared/replySections.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, EntityId, ForkId, NewVersion, PathEntry, SlotId } from "@rp/shared/chat.ts"
+import { PathEntry, type ChatId, type EntityId, type ForkId, type NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import { NotFound } from "@rp/shared/errors.ts"
@@ -909,4 +909,20 @@ export const makeChatEventHandlers = Effect.gen(function* () {
         }).pipe(internal("SubscribeChat"))
       )
   }
+})
+
+/** Reads for URL-selected dialogs, served separately to keep core handler inference bounded. */
+export const makeMessageVersionHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const userId = Effect.map(CurrentUser, (user) => user.id)
+  return {
+    ReadMessageVersion: ({ chatId, forkId, versionId }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const version = yield* reader.GetVersion({ userId: id, versionId })
+        const slot = yield* reader.GetSlot({ userId: id, slotId: version.slotId, forkId })
+        if (slot.chatId !== chatId) return yield* new NotFound({ entity: "version", id: versionId })
+        return new PathEntry({ ...slot.entry, version })
+      }).pipe(internal("ReadMessageVersion"))
+  } satisfies Pick<Parameters<typeof AppApi.of>[0], "ReadMessageVersion">
 })
