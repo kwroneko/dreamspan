@@ -216,6 +216,18 @@ describe("0023 lineage and retention triggers", () => {
     expect(() => run(insert, "again", c.chatId, s.slotId, s.slotId, s.slotId, '["wren"]')).toThrow(/UNIQUE/)
     expect(() => run(insert, "twice", c.chatId, s.slotId, s.slotId, s.slotId, null)).toThrow(/UNIQUE/)
     expect(() => run(insert, "object", c.chatId, s.slotId, s.slotId, s.slotId, '{"wren":1}')).toThrow(/CHECK/)
+    // One canonical form, so the same view can't hold the range twice under another spelling.
+    for (const [id, audience] of [
+      ["reordered", '["tobin","mira"]'],
+      ["spaced", '["mira", "tobin"]'],
+      ["repeated", '["wren","wren"]'],
+      ["empty", "[]"],
+      ["number", "[1]"]
+    ])
+      expect(() => run(insert, id, c.chatId, s.slotId, s.slotId, s.slotId, audience)).toThrow(/sorted, distinct/)
+    expect(() => run(`UPDATE summarization_jobs SET audience_json='["wren","mira"]' WHERE id='others'`)).toThrow(
+      /sorted, distinct/
+    )
   })
   for (const table of ["summaries", "summary_revisions", "summary_inputs", "summary_parents"])
     it(`${table} refuses INSERT OR REPLACE with recursive triggers off`, () => {

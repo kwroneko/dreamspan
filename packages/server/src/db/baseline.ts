@@ -1310,6 +1310,21 @@ export const baseline: ReadonlyArray<string> = [
   // Two separate contexts can summarize the same range at once, each its own view.
   `CREATE UNIQUE INDEX summarization_jobs_live_segment ON summarization_jobs(chat_id, fork_id, first_slot_id, last_slot_id, level, coalesce(audience_json, ''))
     WHERE status IN ('pending', 'processing')`,
+  // A view's audience in one canonical form (sorted, distinct card ids, compact JSON), so the
+  // live-job index and audience matching compare like with like (spec/CHARACTER-CONTEXT.md C7).
+  ...["summaries", "summarization_jobs"].flatMap((table) =>
+    ["INSERT", "UPDATE OF audience_json"].map(
+      (
+        when
+      ) => `CREATE TRIGGER ${table}_audience_canonical_${when === "INSERT" ? "insert" : "update"} BEFORE ${when} ON ${table}
+    WHEN NEW.audience_json IS NOT NULL AND json_valid(NEW.audience_json) AND json_type(NEW.audience_json) = 'array'
+      AND (json_array_length(NEW.audience_json) = 0
+      OR EXISTS (SELECT 1 FROM json_each(NEW.audience_json) WHERE type <> 'text')
+      OR NEW.audience_json IS NOT (SELECT json_group_array(value) FROM
+        (SELECT DISTINCT value FROM json_each(NEW.audience_json) ORDER BY value)))
+    BEGIN SELECT RAISE(ABORT, 'an audience is its sorted, distinct card ids'); END`
+    )
+  ),
   `CREATE INDEX summary_inputs_version ON summary_inputs(version_id)`,
   `CREATE INDEX summaries_first_slot ON summaries(first_slot_id)`,
   `CREATE INDEX summarization_jobs_fork ON summarization_jobs(fork_id)`,
