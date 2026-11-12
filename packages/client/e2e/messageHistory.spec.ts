@@ -227,6 +227,9 @@ for (const width of [1440, 390])
       const saved = page.getByRole("dialog", { name: "Saved amendment history", exact: true })
       await expect(saved.getByRole("button", { name: "Restore saved text" })).toHaveCount(2)
       await expect(saved.locator(".cm-editor")).toHaveCount(0)
+      // A reload reopens the amendments dialog; closing it clears the address.
+      await page.reload()
+      await expect(saved.getByRole("button", { name: "Restore saved text" })).toHaveCount(2)
       await saved.getByText("Compare with saved text", { exact: true }).first().click()
       await expectTextBox(
         saved.getByRole("textbox", { name: width > 639 ? "After" : "Changes", exact: true }).first(),

@@ -18,6 +18,7 @@ import {
   type ReactNode
 } from "react"
 import { makeRegistry } from "../../registry.ts"
+import { usePlaceParam } from "../../usePlaceParam.ts"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Menu, MenuItemWithCheckbox, MenuSeparator } from "../../ui/Menu.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
@@ -88,6 +89,8 @@ export interface MessageAction {
    */
   readonly describe: ComponentType<MessageActionDescribeProps>
   readonly dialog?: ComponentType<MessageActionProps>
+  /** Keeps its dialog open across a reload: the URL names the action and the message version. */
+  readonly dialogInUrl?: boolean
 }
 
 /** A `describe` from a function of the message: for the actions whose view needs no state. */
@@ -244,6 +247,8 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
   const pinned = actions.filter((action) => isPinned(action, pins.choices))
   const { root, fit } = useFit(pinned.map((action) => action.id).join(" "))
   const [dialog, setDialog] = useState<MessageAction | null>(null)
+  const [, setPlace] = usePlaceParam("messageDialog", "")
+  const versionId = context.entry.version.id
   const activeDialog = dialog !== null && actions.includes(dialog) ? dialog : null
   if (dialog !== null && activeDialog === null) setDialog(null)
   const explain = (action: MessageAction, view: MessageActionView): MessageActionView => {
@@ -252,7 +257,11 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
   }
   const props: MessageActionProps = {
     ...context,
-    openDialog: (id: string) => setDialog(messageActions.get(id) ?? null),
+    openDialog: (id: string) => {
+      const action = messageActions.get(id) ?? null
+      if (action?.dialogInUrl === true) setPlace(`${id}:${versionId}`)
+      else setDialog(action)
+    },
     closeDialog: () => setDialog(null)
   }
   return (
@@ -322,4 +331,27 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
       {activeDialog?.dialog && <activeDialog.dialog {...props} />}
     </div>
   )
+}
+
+/**
+ * The dialogs a reload keeps open (`dialogInUrl`): the URL's `messageDialog` names the action and
+ * the message version as "<action id>:<version id>". One per message, whichever of its action
+ * rows is on screen, so it stays up when the buttons hide.
+ */
+export function MessageActionDialog({ context }: { context: MessageActionContext }) {
+  const snapshot = useSyncExternalStore(messageActions.subscribe, messageActions.snapshot, messageActions.snapshot)
+  const [place, setPlace] = usePlaceParam("messageDialog", "")
+  const versionId = context.entry.version.id
+  if (!place.endsWith(`:${versionId}`)) return null
+  const id = place.slice(0, -versionId.length - 1)
+  const action = availableMessageActions(context, snapshot).find(
+    (entry) => entry.dialogInUrl === true && entry.id === id
+  )
+  if (!action?.dialog) return null
+  const props: MessageActionProps = {
+    ...context,
+    openDialog: (next: string) => setPlace(`${next}:${versionId}`),
+    closeDialog: () => setPlace("")
+  }
+  return <action.dialog {...props} />
 }
