@@ -176,6 +176,13 @@ describe("workshop", () => {
           model: {}
         })
         const chat = yield* api.CreateWorkshop({})
+        // Story-only settings can still arrive through RPC or imported state. Hiding their
+        // controls must not let them replace the tools the workshop's chip promises.
+        yield* api.ChangeCast({
+          chatId: chat.id,
+          slotId: chat.activeLeafSlotId,
+          change: { _tag: "AgentTools", tools: ["write_note"] }
+        })
         const events = yield* watch(api, chat)
         const before = mock.requests().length
         const version = yield* answer(api, chat, events)

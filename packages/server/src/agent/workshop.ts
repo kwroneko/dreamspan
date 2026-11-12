@@ -10,7 +10,9 @@ export const workshopMode: OrchestrationMode = {
   description: "Work with an assistant on the app outside a story.",
   plan: ({ state }) => ({
     strategy: "agent",
-    tools: state.agentTools ?? ["list_library", "read_card", "read_preset", "read_lorebook"],
+    // Story tool preferences aren't workshop capabilities. The registered planner owns
+    // this toolset until capability grants are implemented.
+    tools: ["list_library", "read_card", "read_preset", "read_lorebook"],
     contract: state.outputContract ?? "both",
     turnCap: 40,
     assembly: { instructions: () => workshopInstructions, speakerCardOnly: false, workshop: true }
