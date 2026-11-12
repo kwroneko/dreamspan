@@ -252,6 +252,11 @@ export class Version extends Schema.Class<Version>("Version")({
   /** An agent rollout's tool calls and run time (spec/AGENTIC.md §5.1); absent without steps. */
   steps: Schema.optionalKey(StepsSummary),
   /**
+   * Written by an agent run (a reply with tools), with or without steps: one that stopped or
+   * failed can be resumed (spec/AGENTIC.md §5.2). Absent otherwise.
+   */
+  agent: Schema.optionalKey(Schema.Boolean),
+  /**
    * Optimistic concurrency for amending a user-written version: one more than the number
    * of times it was amended, counted from its kept history (version_history).
    */

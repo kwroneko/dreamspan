@@ -1963,7 +1963,8 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         yield* refused(actor.api.GetRunTranscript({ versionId: owner.chat.generatingId }), "NotFound")
         assert.deepStrictEqual(yield* owner.api.GetRunTranscript({ versionId: owner.chat.generatingId }), {
           tools: [],
-          entries: []
+          entries: [],
+          cut: []
         })
       })
   },

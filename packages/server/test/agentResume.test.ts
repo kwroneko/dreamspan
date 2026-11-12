@@ -11,6 +11,7 @@ import { foldState } from "@rp/shared/state.ts"
 import { Deferred, Effect } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import type { ServerResponse } from "node:http"
+import type { RunTranscript } from "@rp/shared/agent.ts"
 import { planResume, planStepResume, StepNotResumable } from "../src/agent/resume.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
 import { databaseFile } from "../src/db/connection.ts"
@@ -577,6 +578,26 @@ describe("resuming agent replies", () => {
         (e) => foldState(e).absent
       )
       assert.deepStrictEqual(yield* absent, [mira.entityId])
+      // The version says it's an agent reply; the inspector names each step as ResumeFromStep does.
+      const shown = (yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })).entry.version
+      assert.strictEqual(shown.agent, true)
+      assert.strictEqual(shown.steps?.count, 2)
+      const callSteps = (run: RunTranscript) =>
+        run.entries.flatMap((e) =>
+          e.role === "assistant"
+            ? e.parts.flatMap((p) => (p.type === "toolCall" ? [[p.id, p.step]] : []))
+            : e.role === "toolResult"
+              ? [[`${e.toolCallId} result`, e.step]]
+              : []
+        )
+      const first = yield* api.GetRunTranscript({ versionId: version.id })
+      assert.deepStrictEqual(callSteps(first), [
+        ["call_1", 0],
+        ["call_1 result", 0],
+        ["call_2", 1],
+        ["call_2 result", 1]
+      ])
+      assert.deepStrictEqual(first.cut, [])
       const resumeFrom = (step: number, edit?: Parameters<typeof api.ResumeFromStep>[0]["edit"]) =>
         Effect.gen(function* () {
           const slot = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
@@ -606,6 +627,18 @@ describe("resuming agent replies", () => {
         cut.map((r) => r.reason),
         ["edit"]
       )
+      // The inspector shows what the edit cut, folded where the kept run ends: after the new result.
+      const editedRun = yield* api.GetRunTranscript({ versionId: edited.id })
+      assert.strictEqual(editedRun.cut.length, 1)
+      const [span] = editedRun.cut
+      assert.strictEqual(span!.reason, "edit")
+      assert.deepInclude(editedRun.entries[span!.at - 1], { role: "toolResult", text: "The keeper is called Brann." })
+      assert.deepStrictEqual(
+        span!.entries.map((e) => e.role),
+        ["assistant", "toolResult", "assistant"]
+      )
+      assert.deepInclude(span!.entries[1], { text: "The lighthouse keeper is called Ansel.", toolCallId: "call_2" })
+      assert.isUndefined((span!.entries[1] as { step?: number }).step, "a cut span's steps aren't the version's")
 
       // New arguments for the first call: it runs again under a new id, and her going away goes.
       const rerun = yield* resumeFrom(0, { kind: "arguments", arguments: { character: "Mira", present: true } })
