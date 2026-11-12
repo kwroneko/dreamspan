@@ -14,6 +14,7 @@ import type { LibrarySkipped } from "@rp/shared/libraryReplace.ts"
 import { Effect } from "effect"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { NotFound, type LibraryReplaceEntry } from "./ops.ts"
+import { replacementConflict } from "./noteReplacementWrites.ts"
 import { transaction } from "./tx.ts"
 
 const CHANGED = "It changed since the search. Find again to include it."
@@ -98,6 +99,29 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
           if (rows.length !== entry.drafts.length || active!.n !== rows.length) {
             skip(CHANGED)
             continue
+          }
+          // Drafts can hold invalid references until Save; the bulk checkpoint follows
+          // the same ownership and replacing-note checks as CommitEditorDrafts.
+          if (ref.kind === "note") {
+            const valid = yield* steps.checkReferences(userId, entry.doc).pipe(
+              Effect.as(true),
+              Effect.catchTag("NotFound", () => Effect.succeed(false))
+            )
+            const head = yield* lib.loadDoc(ref.head_revision_id)
+            const conflict = valid
+              ? yield* replacementConflict(sql, userId, ref.entity_id, entry.doc, undefined, head).pipe(
+                  Effect.catchTag("NotFound", () =>
+                    Effect.succeed("Its unsaved changes can no longer be saved. Open its editor to resolve them.")
+                  )
+                )
+              : null
+            if (!valid || conflict !== null) {
+              skip(
+                conflict ??
+                  "Its unsaved changes name something outside your library. Save or revert them in its editor."
+              )
+              continue
+            }
           }
           if (changed === 0)
             yield* sql`INSERT INTO changeset_groups (id, owner_user_id, title, origin, created_at)

@@ -181,6 +181,32 @@ describe("library search and replace", () => {
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 
+  it.effect("does not save a note draft naming a card outside the user's library", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const opened = yield* f.api.OpenEditor({ refId: f.note })
+      yield* f.api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
+        refId: f.note,
+        field: valueField(["condition"]),
+        content: JSON.stringify({ when: "turn", cards: ["0190a000-0000-7000-8000-000000000099"] }),
+        expectedRowVersion: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      const asked = search("tide", "waves", { kinds: ["note"] })
+      const result = yield* f.api.ApplyLibraryReplace({
+        search: asked,
+        choices: f.all(yield* f.api.PreviewLibraryReplace({ search: asked }))
+      })
+      assert.strictEqual(result.entries, 0)
+      assert.strictEqual(result.skipped[0]!.refId, f.note)
+      const after = yield* f.api.OpenEditor({ refId: f.note })
+      assert.strictEqual(after.ref.headRevisionId, opened.ref.headRevisionId)
+      assert.isTrue(after.drafts.some((d) => d.status === "active"))
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
   it.effect("finds text in every kind, with counts per kind and the match in its context", () =>
     Effect.gen(function* () {
       const f = yield* setup

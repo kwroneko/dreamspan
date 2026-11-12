@@ -2947,3 +2947,5 @@ Message query review (2026-11-12): words are NFC-normalized Unicode letter/digit
 Library replace registry (2026-11-12): libraryReplaceKinds in shared/libraryText.ts supplies searchable kinds, their labels, fields, ordering and document validation to the reader and panel. A shared plugin registers its storage kind in each runtime; disabling a kind refuses direct RPC searches too. Plugin fields registered only in the client editorTextFields UI registry still need a shared registration for server-wide search. This extends the existing closed EntityKind storage model, without defining a new document kind or schema.
 
 Library replace no-ops (2026-11-12): planning removes fields whose replacement text is unchanged before checkpointing drafts or creating a changeset group. Identity replacements leave drafts and saved heads untouched and report the entries skipped.
+
+Library replace note checks (2026-11-12): the writer validates note draft references against the caller and checks replacing-note target conflicts before checkpointing or changing an entry, just as the editor Save does. Invalid entries are skipped with their drafts intact.
