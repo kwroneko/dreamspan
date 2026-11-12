@@ -31,10 +31,10 @@ it.live(
           yield* sql([
             {
               sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < ${n})
-                INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
+                INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
                 SELECT ?||'-v'||x, ?||'-s'||x, 0, 'complete', NULL, CASE WHEN x % 2 = 0 THEN 'human' ELSE 'model' END,
                   'The lantern road goes on, ' || ? || ' line '||x||'.', 'verbatim',
-                  CASE WHEN x % 2 = 0 THEN 'user_written' ELSE 'generated' END, x, x FROM n`,
+                  CASE WHEN x % 2 = 0 THEN 'user_written' ELSE 'generated' END, x, x , '${forkId}' FROM n`,
               params: [tag, tag, tag]
             },
             {
@@ -57,9 +57,9 @@ it.live(
         {
           sql: `WITH RECURSIVE n(x) AS (SELECT 3 UNION ALL SELECT x+3 FROM n WHERE x < 2997),
               k(j) AS (SELECT 1 UNION ALL SELECT j+1 FROM k WHERE j < 49)
-            INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
+            INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
             SELECT 'main-v'||x||'-'||j, 'main-s'||x, j, 'complete', NULL, 'model', 'Another telling of line '||x||', take '||j||'.',
-              'verbatim', 'generated', x, x FROM n JOIN k ON j < 20 + (x % 31)`
+              'verbatim', 'generated', x, x , '${main}' FROM n JOIN k ON j < 20 + (x % 31)`
         }
       ])
       // 200 branches, each with a message of its own.

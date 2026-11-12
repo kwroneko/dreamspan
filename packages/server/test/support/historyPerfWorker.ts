@@ -25,8 +25,8 @@ try {
   {
     db.exec("PRAGMA foreign_keys = ON; BEGIN")
     const version =
-      db.prepare(`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-      VALUES (?, ?, 0, ?, 'model', ?, 'verbatim', 'generated', 1, 1)`)
+      db.prepare(`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+      VALUES (?, ?, 0, ?, 'model', ?, 'verbatim', 'generated', 1, 1, '${chatId}' )`)
     const slot = db.prepare(
       `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, 1)`
     )
@@ -48,8 +48,8 @@ try {
       (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
       VALUES (?, ?, ?, ?, ?, 1)`)
     const version = db.prepare(`INSERT INTO version_records
-      (id, slot_id, ordinal, status, writer, content, macro_mode, origin, rollout_id, created_at, updated_at)
-      VALUES (?, ?, ?, 'complete', 'model', 'Synthetic reply', 'verbatim', 'generated', ?, 1, 1)`)
+      (id, slot_id, ordinal, status, writer, content, macro_mode, origin, rollout_id, created_at, updated_at, authoring_fork_id)
+      VALUES (?, ?, ?, 'complete', 'model', 'Synthetic reply', 'verbatim', 'generated', ?, 1, 1, '${chatId}' )`)
     const rollout = db.prepare(`INSERT INTO rollouts
       (id, chat_id, kind, status, slot_id, leaf_slot_id, role, request_class, created_at, updated_at,
        history_start_slot_id, history_start_depth, history_depth)

@@ -55,9 +55,9 @@ export const insertStMessageBatch = Effect.fnUntraced(function* (
 ) {
   if (batch.slotIds.length === 0) return
   yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, speaker_entity_id, writer, content,
-    macro_mode, origin, reasoning, reply_sections, recorded_model_json, recorded_generation_json, created_at, updated_at)
+    macro_mode, origin, authoring_fork_id, reasoning, reply_sections, recorded_model_json, recorded_generation_json, created_at, updated_at)
     SELECT value ->> '$.id', value ->> '$.slot_id', value ->> '$.ordinal', 'complete',
-      value ->> '$.speaker_entity_id', value ->> '$.writer', value ->> '$.content', 'verbatim', 'imported',
+      value ->> '$.speaker_entity_id', value ->> '$.writer', value ->> '$.content', 'verbatim', 'imported', ${position.forkId},
       value ->> '$.reasoning', value ->> '$.reply_sections', value ->> '$.recorded_model_json',
       value ->> '$.recorded_generation_json', value ->> '$.created_at', value ->> '$.updated_at'
     FROM json_each(${batch.versionsJson}) ORDER BY key`

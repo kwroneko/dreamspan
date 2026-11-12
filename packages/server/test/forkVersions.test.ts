@@ -507,10 +507,10 @@ describe("the database keeps versions and their flags the message's", () => {
             db
               .prepare(
                 `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id,
-                  fork_id, created_at, updated_at)
-                VALUES ('stray', ?, 99, 'complete', 'human', 'x', 'verbatim', 'edited', ?, ?, 0, 0)`
+                  fork_id, created_at, updated_at, authoring_fork_id)
+                VALUES ('stray', ?, 99, 'complete', 'human', 'x', 'verbatim', 'edited', ?, ?, 0, 0, ? )`
               )
-              .run(m0.slotId, copy.id, main),
+              .run(m0.slotId, copy.id, main, main),
           "a fork's own version is in its chat and stands in for one of its message's own"
         )
       } finally {

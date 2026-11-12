@@ -135,8 +135,8 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
               })
             slotId = uuidv7()
             versionId = uuidv7()
-            yield* sql`INSERT INTO version_records (id, slot_id, ordinal, origin, created_at, updated_at, ${sql.literal(copied)})
-              SELECT ${versionId}, ${slotId}, 0, 'duplicate', ${at}, ${at}, ${sql.literal(copied)}
+            yield* sql`INSERT INTO version_records (id, slot_id, ordinal, origin, authoring_fork_id, created_at, updated_at, ${sql.literal(copied)})
+              SELECT ${versionId}, ${slotId}, 0, 'duplicate', ${fork.id}, ${at}, ${at}, ${sql.literal(copied)}
               FROM version_records WHERE id = ${source.id}`
             yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
               SELECT ${versionId}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${source.id}`

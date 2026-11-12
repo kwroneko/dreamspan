@@ -62,6 +62,7 @@ describe("generation", () => {
       assert.strictEqual(version.content, "The ledger says otherwise.")
 
       const db = recorded(config.dataDir, version.id)
+      assert.strictEqual(db.version.authoring_fork_id, db.rollout.fork_id)
       const body = mock.requests().find((r) => r.path === "/v1/chat/completions")!.body!
       // Exactly the assembled messages and ST's samplers, through pi-ai; its own additions
       // (the model, streaming and usage) around them.

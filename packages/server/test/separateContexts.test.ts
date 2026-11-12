@@ -1349,3 +1349,66 @@ describe("Undo of a scene check's away mark (unit C9)", () => {
     )
   )
 })
+
+it.live("peer-authored handwritten swipes retain their later independent away mark", () =>
+  run(
+    Effect.gen(function* () {
+      const t = yield* story("separate")
+      const base = (yield* t.contextFor(t.wren)).inputs.leafSlotId as SlotId
+      const mark = yield* t.event({
+        key: "away.set",
+        value: { entity: t.wren, away: true, source: "decision" }
+      })
+      const original = yield* t.say(t.mira, "Wrong-scene-check version.")
+      const { fork: peer } = yield* t.writer.CreateFork({
+        userId: t.userId,
+        chatId: t.chatId,
+        fromForkId: t.fork(),
+        atSlotId: original.slotId
+      })
+      yield* t.writer.AddStateEvent({
+        userId: t.userId,
+        chatId: t.chatId,
+        forkId: peer.id,
+        slotId: base,
+        versionId: null,
+        scope: null,
+        data: { key: "away.set", value: { entity: t.wren, away: true } }
+      })
+      const own = yield* t.writer.AddVersion({
+        userId: t.userId,
+        slotId: original.slotId,
+        forkId: peer.id,
+        select: false,
+        commitDraft: null,
+        version: new NewVersion({
+          speakerEntityId: t.mira,
+          writer: "human",
+          content: "Peer-only private alternative.",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        })
+      })
+      const before = yield* t.reader.KnowersOf({
+        userId: t.userId,
+        chatId: t.chatId,
+        versionIds: [own.id]
+      })
+      assert.notInclude(before[0]!.knowers!, t.wren)
+      yield* t.writer.CorrectPresence({
+        userId: t.userId,
+        chatId: t.chatId,
+        forkId: t.fork(),
+        eventId: mark.id
+      })
+      const after = yield* t.reader.KnowersOf({
+        userId: t.userId,
+        chatId: t.chatId,
+        versionIds: [original.version.id, own.id]
+      })
+      assert.include(after[0]!.knowers!, t.wren)
+      assert.notInclude(after[1]!.knowers!, t.wren, "the peer swipe was written under the user's independent away mark")
+    })
+  )
+)

@@ -41,17 +41,17 @@ describe("search_chat at scale", () => {
         yield* fixtureSql(config.dataDir, [
           // The path: every 50th message names the lighthouse; every 10th has a swipe that does.
           {
-            sql: `${n} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
+            sql: `${n} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
               SELECT ?||'-v'||x,?||'-s'||x,0,'complete',NULL,'human',
                 CASE WHEN x%50=0 THEN 'The lighthouse burns at '||x||'.' ELSE 'The tide turns at '||x||'.' END,
-                'verbatim','user_written',1,1 FROM n`,
-            params: [c, c]
+                'verbatim','user_written',1,1 , ? FROM n`,
+            params: [c, c, main]
           },
           {
-            sql: `${n} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
+            sql: `${n} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
               SELECT ?||'-w'||x,?||'-s'||x,1,'complete',NULL,'model','A lighthouse swipe at '||x||'.','verbatim','generated',1,1
-              FROM n WHERE x%10=0`,
-            params: [c, c]
+              , ? FROM n WHERE x%10=0`,
+            params: [c, c, main]
           },
           {
             sql: `${n} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
@@ -60,9 +60,9 @@ describe("search_chat at scale", () => {
           },
           // A side reply at each fork's base, off the main path, naming the lighthouse too.
           {
-            sql: `${k} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
-              SELECT ?||'-sv'||x,?||'-side'||x,0,'complete',NULL,'human','A lighthouse off the path.','verbatim','user_written',1,1 FROM k`,
-            params: [c, c]
+            sql: `${k} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
+              SELECT ?||'-sv'||x,?||'-side'||x,0,'complete',NULL,'human','A lighthouse off the path.','verbatim','user_written',1,1 , ? FROM k`,
+            params: [c, c, main]
           },
           {
             sql: `${k} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)

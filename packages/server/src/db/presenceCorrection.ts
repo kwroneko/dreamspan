@@ -79,9 +79,8 @@ export const correctPresence =
         presence_json: string
       }>`
         SELECT v.id, v.seq, v.slot_id, s.chain_id, s.depth, v.source_version_id, v.fork_id,
-          coalesce(v.fork_id, r.fork_id, s.fork_id) AS written_in, t.presence_json
+          v.authoring_fork_id AS written_in, t.presence_json
         FROM slots s JOIN versions v ON v.slot_id = s.id JOIN version_texts t ON t.version_seq = v.seq
-          LEFT JOIN rollouts r ON r.id = v.rollout_id
         WHERE s.chat_id = ${chatId} AND t.presence_json IS NOT NULL AND v.purged_at IS NULL
           AND (${UNDO_CORRECTS_EVERY_BRANCH ? 1 : 0} = 1 OR v.id = ${replacedIn(sql, forkId, originalSql("v"))})`
       const byFork = new Map<string, Array<(typeof candidates)[number]>>()
@@ -179,7 +178,15 @@ export const correctPresence =
           FROM json_each(${JSON.stringify([...versions.values()].map(({ seq, after }) => ({ seq, after })))}) patch
           WHERE version_texts.version_seq = patch.value ->> 'seq'`
       } else {
-        const fresh = new Set(["seq", "id", "ordinal", "source_version_id", "fork_id", "presence_json"])
+        const fresh = new Set([
+          "seq",
+          "id",
+          "ordinal",
+          "source_version_id",
+          "fork_id",
+          "authoring_fork_id",
+          "presence_json"
+        ])
         const columns = (yield* sql<{ name: string }>`SELECT name FROM pragma_table_info('version_records')`)
           .map((c) => c.name)
           .filter((c) => !fresh.has(c))
@@ -189,9 +196,9 @@ export const correctPresence =
             value_id: string | null
           }>`SELECT value_id FROM fork_overrides WHERE id = ${effectiveOverride(sql, "replace", forkId, `'${row.original.replaceAll("'", "''")}'`)}`
           yield* sql.unsafe(
-            `INSERT INTO version_records(id, ordinal, source_version_id, fork_id, presence_json, ${columns.join(",")})
-            SELECT ?, (SELECT max(ordinal)+1 FROM versions WHERE slot_id = v.slot_id), ?, ?, ?, ${columns.map((c) => `v.${c}`).join(",")} FROM version_records v WHERE id = ?`,
-            [copy, row.original, forkId, row.after, row.id]
+            `INSERT INTO version_records(id, ordinal, source_version_id, fork_id, authoring_fork_id, presence_json, ${columns.join(",")})
+            SELECT ?, (SELECT max(ordinal)+1 FROM versions WHERE slot_id = v.slot_id), ?, ?, ?, ?, ${columns.map((c) => `v.${c}`).join(",")} FROM version_records v WHERE id = ?`,
+            [copy, row.original, forkId, forkId, row.after, row.id]
           )
           yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text) SELECT ${copy}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${row.id}`
           yield* writeOverride(

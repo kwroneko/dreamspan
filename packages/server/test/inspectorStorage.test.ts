@@ -37,7 +37,7 @@ it.effect("a legacy version with a rollout but no snapshot has no Context link",
       yield* sql`INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES('r','c','generation','completed','narrator','interactive',1,1)`
       yield* sql.withTransaction(
         Effect.gen(function* () {
-          yield* sql`INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,rollout_id,created_at,updated_at) VALUES('v','s',0,'complete','model','Synthetic reply','verbatim','generated',NULL,1,1)`
+          yield* sql`INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,rollout_id,created_at,updated_at, authoring_fork_id) VALUES('v','s',0,'complete','model','Synthetic reply','verbatim','generated',NULL,1,1, 'c' )`
           yield* sql`INSERT INTO slots(id,chat_id,depth,selected_version_id,created_at) VALUES('s','c',0,'v',1)`
           yield* sql`UPDATE versions SET rollout_id = 'r' WHERE id = 'v'`
         })

@@ -41,8 +41,8 @@ const htmlAt = (depth: number) => depth % 997 === 0
 
 const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => {
   const insertVersion = db.prepare(
-    `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, error_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?, ?)`
+    `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, error_json, created_at, updated_at, authoring_fork_id)
+     VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?, ?, ?)`
   )
   const insertSlot = db.prepare(
     `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
@@ -75,7 +75,8 @@ const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => 
         model ? "generated" : "user_written",
         failed ? JSON.stringify({ class: "network", message: "connection reset" }) : null,
         at,
-        at
+        at,
+        chatId
       )
       if (!failed) selected = id
     }

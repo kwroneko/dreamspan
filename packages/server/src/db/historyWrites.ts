@@ -124,6 +124,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                   "origin",
                   "source_version_id",
                   "fork_id",
+                  "authoring_fork_id",
                   "fork_seq",
                   "changeset_id",
                   "created_at",
@@ -133,10 +134,10 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                   .map((c) => c.name)
                   .filter((c) => !excluded.has(c))
                 yield* sql.unsafe(
-                  `INSERT INTO version_records (id, ordinal, content, origin, source_version_id, fork_id, changeset_id, created_at, updated_at, ${columns.join(",")})
-                SELECT ?, (SELECT max(ordinal)+1 FROM versions WHERE slot_id=v.slot_id), ?, 'changeset', ?, ?, ?, ?, ?, ${columns.map((c) => `v.${c}`).join(",")}
+                  `INSERT INTO version_records (id, ordinal, content, origin, source_version_id, fork_id, authoring_fork_id, changeset_id, created_at, updated_at, ${columns.join(",")})
+                SELECT ?, (SELECT max(ordinal)+1 FROM versions WHERE slot_id=v.slot_id), ?, 'changeset', ?, ?, ?, ?, ?, ?, ${columns.map((c) => `v.${c}`).join(",")}
                 FROM version_records v WHERE id=?`,
-                  [afterId, edit.after, edit.targetId, forkId, record.id, Date.now(), Date.now(), current.id]
+                  [afterId, edit.after, edit.targetId, forkId, forkId, record.id, Date.now(), Date.now(), current.id]
                 )
                 yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text)
                 SELECT ${afterId}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id=${current.id}`

@@ -9,7 +9,7 @@ type Row = Record<string, string | number | null>
 /** Copy one recorded position under a new parent without moving or erasing the old path.
  * Called only inside StImportMessages' writer transaction. Work stays bounded by its batch.
  */
-export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent: string | null) =>
+export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent: string | null, forkId: string) =>
   Effect.gen(function* () {
     // The copy is inserted with the selection the chat's current fork shows (forkState.ts).
     const [slot] =
@@ -41,6 +41,7 @@ export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent:
         status: version.status === "generating" ? "interrupted" : version.status,
         id: versionId,
         slot_id: id,
+        authoring_fork_id: forkId,
         source_version_id: ids.get(version.source_version_id) ?? version.source_version_id
       })}`
       yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
@@ -54,6 +55,7 @@ export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent:
       ...position,
       context_excluded: shown_excluded,
       id,
+      fork_id: forkId,
       parent_slot_id: parent,
       selected_version_id: ids.get(shown_version_id!)!
     })}`
