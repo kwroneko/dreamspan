@@ -12,6 +12,7 @@ import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
 import { historyTools } from "../src/agent/tools/history.ts"
 import { editNote, listNotes, switchNote } from "../src/agent/tools/notes.ts"
+import { setPresence } from "../src/agent/tools/presence.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -675,7 +676,7 @@ const tools = (t: Effect.Success<ReturnType<typeof story>>, snapshot: ContextSna
   }
   return (id: string, args: object) =>
     Effect.map(
-      [...historyTools, listNotes, editNote, switchNote]
+      [...historyTools, listNotes, setPresence, editNote, switchNote]
         .find((tool) => tool.id === id)!
         .execute(context, args as never),
       (out) => out.text
@@ -942,6 +943,18 @@ describe("merged chats per viewer (unit C6)", () => {
 })
 
 describe("the agent's read tools in a separate context", () => {
+  it.live("set_presence refuses a narrator in either direction", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        yield* t.event({ key: "cast.role", value: { entity: t.wren, role: "narrator" } })
+        const tool = tools(t, yield* t.contextFor(t.wren))
+        for (const present of [true, false])
+          assert.include(yield* tool("set_presence", { character: "Wren", present }), "is the narrator")
+      })
+    )
+  )
+
   it.live("search_chat never finds what the viewer missed; read_messages skips it, numbering kept", () =>
     run(
       Effect.gen(function* () {

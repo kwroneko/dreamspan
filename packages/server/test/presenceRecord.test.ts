@@ -5,6 +5,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { AWAY_ACTS_AS_MUTED } from "@rp/shared/knowledge.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { DatabaseSync } from "node:sqlite"
@@ -166,7 +167,8 @@ describe("away for turn picking and notes (unit C8)", () => {
       assert.notProperty(plain.cast, "roles")
 
       const away = yield* withNote((wren) => [{ key: "away.set", value: { entity: wren, away: true } }])
-      assert.notInclude(away.request, "Wren carries the lantern.", "AWAY_ACTS_AS_MUTED")
+      if (AWAY_ACTS_AS_MUTED) assert.notInclude(away.request, "Wren carries the lantern.", "AWAY_ACTS_AS_MUTED")
+      else assert.include(away.request, "Wren carries the lantern.", "AWAY_ACTS_AS_MUTED")
       assert.deepStrictEqual(away.cast.away, [away.wren])
       assert.deepStrictEqual(away.cast.absent, [], "away isn't Mute")
 
