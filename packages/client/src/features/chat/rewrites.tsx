@@ -140,6 +140,7 @@ export const registerRewrites = () => [
       hint: "Shows the original reply before scripts changed the text.",
       onSelect: () => openDialog("message.original-text")
     })),
-    dialog: OriginalText
+    dialog: OriginalText,
+    dialogInUrl: true
   })
 ]

@@ -1749,6 +1749,59 @@ describe("lorebook assembly", () => {
     }
     expect(contents(await assembled(backOn)).join("\n")).toContain("CARD_LORE")
   })
+  it.each([
+    [undefined, false],
+    ["book", false],
+    [null, true],
+    ["missing", true]
+  ] as const)("resolves primary lore with stored binding %s before the world name", async (binding, ownSent) => {
+    const doc = loreBook([loreEntry({ constant: true, content: "OWN_LORE" })]).document
+    const f = fixture({
+      lorebooks: [{ ...attached, sourceName: "Primary world" }],
+      cards: [{ entity: "mira", doc: { ...mira, character_book: doc, extensions: { world: "Primary world" } } }],
+      events: [
+        ...fixture().events!,
+        ...(binding === undefined
+          ? []
+          : [at(null, { key: "lorebook.binding", value: { entity: "mira" as never, ref: binding as never } })])
+      ]
+    })
+    expect(
+      contents(await assembled(f))
+        .join("\n")
+        .includes("OWN_LORE")
+    ).toBe(ownSent)
+  })
+  it("resolves each group card's exact world independently, including a swapped card fork", async () => {
+    const own = (name: string, world: string) => ({
+      ...card(name),
+      extensions: { world },
+      character_book: loreBook([loreEntry({ constant: true, content: `OWN_${name}` })]).document
+    })
+    const f = fixture({
+      participants: ["mira", "oren", "case", "space"],
+      cards: [
+        { entity: "mira", doc: own("Mira", "Primary world") },
+        { entity: "mira-fork", doc: own("MiraFork", "Primary world") },
+        { entity: "oren", doc: own("Oren", "Primary world") },
+        { entity: "case", doc: own("Case", "primary world") },
+        { entity: "space", doc: own("Space", " Primary world ") }
+      ],
+      lorebooks: [{ ...attached, sourceName: "Primary world" }],
+      events: [
+        ...fixture().events!,
+        at(null, { key: "card.swap", value: { entity: "mira-fork" as EntityId, replaces: "mira" as EntityId } })
+      ]
+    })
+    const text = contents(await assembled(f)).join("\n")
+    expect(text).not.toContain("OWN_Mira")
+    expect(text).not.toContain("OWN_Oren")
+    expect(text).toContain("OWN_Case")
+    expect(text).toContain("OWN_Space")
+    const fallback = contents(await assembled({ ...f, lorebooks: [] })).join("\n")
+    expect(fallback).toContain("OWN_MiraFork")
+    expect(fallback).toContain("OWN_Oren")
+  })
   it("counts message delays across the path independently of the scan window", async () => {
     const doc = loreBook([loreEntry({ constant: true, delay: 1100, content: "DELAY_LORE" })]).document
     const f = fixture({

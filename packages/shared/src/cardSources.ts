@@ -35,12 +35,17 @@ const SourceFilter = Schema.Union([
     id: Schema.String,
     label: Schema.String,
     kind: Schema.Literal("toggle"),
+    /** An archive accepts this switch only with this exact choice in another filter. */
+    requires: Schema.optionalKey(
+      Schema.Struct({ filterId: Schema.String, values: Schema.Array(Schema.String), about: Schema.String })
+    ),
     about: Schema.optionalKey(Schema.String)
   }),
   Schema.Struct({
     id: Schema.String,
     label: Schema.String,
     kind: Schema.Literal("text"),
+    suggestions: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("creators"), multiple: Schema.Boolean })),
     about: Schema.optionalKey(Schema.String)
   })
 ])
@@ -107,6 +112,15 @@ export const RemoteSummary = Schema.Struct({
   /** Its content rating, as the source words it; only when it isn't the source's default (safe) one. */
   rating: Schema.optionalKey(Schema.String),
   tokens: Schema.optionalKey(Schema.Number),
+  /** Archive estimates, labelled by tokenizer; separate from locally computed counts. */
+  tokenCounts: Schema.optionalKey(
+    Schema.Struct({
+      model: Schema.String,
+      fields: Schema.Record(Schema.String, Schema.Number),
+      greetings: Schema.Array(Schema.Number)
+    })
+  ),
+  earlierOrigins: Schema.optionalKey(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String }))),
   thumb: Schema.optionalKey(Schema.String),
   image: Schema.optionalKey(Schema.String),
   version: RemoteVersion,
@@ -126,9 +140,14 @@ export const RemoteSummary = Schema.Struct({
 export type RemoteSummary = typeof RemoteSummary.Type
 
 export const SourcePage = Schema.Struct({
+  /** Replace earlier pages: the source restarted after refusing a cursor. */
+  reset: Schema.optionalKey(Schema.Boolean),
+  notice: Schema.optionalKey(Schema.String),
   items: Schema.Array(RemoteSummary),
   next: Schema.NullOr(Schema.String),
   total: Schema.optionalKey(Schema.Number),
+  /** A lower bound: the archive stopped counting at its cap or deadline. */
+  totalCapped: Schema.optionalKey(Schema.Boolean),
   /** The total is the source's estimate, not an exact count. */
   totalEstimated: Schema.optionalKey(Schema.Boolean)
 })
@@ -140,6 +159,16 @@ export const SourceTag = Schema.Struct({
   count: Schema.optionalKey(Schema.Number)
 })
 
+/** Paged values for the existing filter fields; the archive owns the opaque cursor. */
+export const SourceSuggestions = Schema.Struct({
+  items: Schema.Array(
+    Schema.Struct({ value: Schema.String, label: Schema.String, count: Schema.optionalKey(Schema.Number) })
+  ),
+  next: Schema.NullOr(Schema.String),
+  reset: Schema.optionalKey(Schema.Boolean)
+})
+export type SourceSuggestions = typeof SourceSuggestions.Type
+
 /** Why a request to a source failed, so the UI can word each case (§5.4). */
 export const SourceFailure = Schema.Literals([
   "unreachable",
@@ -149,13 +178,16 @@ export const SourceFailure = Schema.Literals([
   "bad_response",
   "disabled",
   /** The source won't give this card: cardex lists no download for it, or an anonymous source answered 401/403. */
-  "refused"
+  "refused",
+  "region_unavailable"
 ])
 export type SourceFailure = typeof SourceFailure.Type
 
 export class SourceFailed extends Schema.TaggedError<SourceFailed>()("SourceFailed", {
   sourceId: Schema.String,
   reason: SourceFailure,
+  /** The upstream HTTP status, absent for connection failures. */
+  status: Schema.optionalKey(Schema.Number),
   /** For `rate_limited`: when to try again. */
   retryAfterMs: Schema.optionalKey(Schema.Number),
   /** For a refused request (`bad_response` from a 400): the source's own error code, when its answer named one. */
@@ -350,6 +382,16 @@ export class CardSourcesApi extends RpcGroup.make(
   Rpc.make("SourceTags", {
     payload: { sourceId: SourceId, prefix: Schema.String.check(Schema.isMaxLength(100)) },
     success: Schema.Array(SourceTag),
+    error: sourceErrors
+  }),
+  Rpc.make("SourceSuggestions", {
+    payload: {
+      sourceId: SourceId,
+      kind: Schema.Literals(["tags", "creators"]),
+      prefix: Schema.String.check(Schema.isMaxLength(100)),
+      page: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000)))
+    },
+    success: SourceSuggestions,
     error: sourceErrors
   }),
   /** Opens a remote card: fetched (or read from the cache) and parsed; recorded as recently viewed. */

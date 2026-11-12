@@ -186,7 +186,7 @@ export const versionExtras = (alias: string) =>
   (SELECT json_object('provider', c.kind, 'model', m.model_key) FROM models m JOIN connections c ON c.id = m.connection_id
     WHERE m.id = ${alias}.model_id) AS model_ref_json,
   (SELECT json_object('count', r.step_count, 'ms', r.completed_at - r.started_at) FROM rollouts r
-    WHERE r.id = ${alias}.rollout_id AND r.step_count > 0) AS steps_json,
+    WHERE r.id = ${alias}.rollout_id AND (r.step_count > 0 OR r.mode IS NOT NULL)) AS steps_json,
   (SELECT json_object('transcript', json(p.transcript_json), 'tools', json_extract(p.context_snapshot_json, '$.agent.tools'),
     'final', r.status NOT IN ('created', 'running')) FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id
     WHERE p.rollout_id = ${alias}.rollout_id AND json_extract(p.context_snapshot_json, '$.agent.contract') = 'several') AS steps_material`
@@ -256,8 +256,12 @@ const modelOf = (row: VersionRow) => {
   }
 }
 
-const versionSteps = (row: VersionRow): { readonly steps?: StepsSummary } => {
-  if (!row.steps_material) return row.steps_json ? { steps: JSON.parse(row.steps_json) as StepsSummary } : {}
+const versionSteps = (row: VersionRow): { readonly steps?: StepsSummary; readonly agent?: boolean } => {
+  if (!row.steps_material) {
+    if (!row.steps_json) return {}
+    const steps = JSON.parse(row.steps_json) as StepsSummary
+    return steps.count > 0 ? { steps, agent: true } : { agent: true }
+  }
   const material = JSON.parse(row.steps_material) as {
     transcript: ReadonlyArray<AgentMessage> | null
     tools: ReadonlyArray<FrozenTool>
@@ -267,7 +271,7 @@ const versionSteps = (row: VersionRow): { readonly steps?: StepsSummary } => {
     ? stepsOf(material.transcript, material.tools, !!material.final, row.id).filter((s) => s.kind === "tool").length
     : 0
   const summary = row.steps_json ? (JSON.parse(row.steps_json) as StepsSummary) : { ms: null }
-  return count ? { steps: { count, ms: summary.ms } } : {}
+  return count ? { steps: { count, ms: summary.ms }, agent: true } : { agent: true }
 }
 
 export const toVersion = (row: VersionRow) =>

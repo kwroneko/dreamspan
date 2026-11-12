@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { documentedCachePolicy } from "../src/providers/cachePolicy.ts"
+import { documentedCacheMinimum, documentedCachePolicy } from "../src/providers/cachePolicy.ts"
 
 const hour = { system: [{ cache_control: { type: "ephemeral", ttl: "1h" } }] }
 const chatHour = { messages: [{ content: [{ cache_control: { type: "ephemeral", ttl: "1h" } }] }] }
@@ -144,3 +144,20 @@ it("Qwen only opts into caching through shaped content-block markers", () => {
     assert.isNull(documentedCachePolicy(target, payload))
   assert.equal(documentedCachePolicy(target, explicit)?.ttlS, 300)
 })
+
+for (const [model, minimum] of [
+  ["gemini-2.5-flash", 2048],
+  ["gemini-2.5-pro", 2048],
+  ["gemini-2.5-flash-lite", null],
+  ["gemini-3.1-pro-preview", 4096],
+  ["gemini-3.6-flash", 4096],
+  ["gemini-3.8-flash", 4096],
+  ["gemini-4-carbon", 4096],
+  ["gemini-4-argon", 4096],
+  ["gemini-future", null]
+] as const)
+  it(`Google ${model} has its documented implicit minimum and no lifetime promise`, () => {
+    const target = { provider: "google", api: "google-generative-ai", model }
+    assert.equal(documentedCacheMinimum(target), minimum)
+    assert.isNull(documentedCachePolicy(target))
+  })

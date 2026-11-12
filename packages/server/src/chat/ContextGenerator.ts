@@ -139,9 +139,13 @@ export const layer = Layer.effect(
             readonly contract: OutputContract
             readonly turnCap: number
             readonly tools: ReadonlyArray<FrozenTool>
+            readonly inspection?: Generation["inspection"]
           }
         }
-        const generation = generationOf(snapshot)
+        const generation = {
+          ...generationOf(snapshot),
+          ...(snapshot.agent?.inspection ? { inspection: snapshot.agent.inspection } : {})
+        }
         const { model } = generation
         const frozen = snapshot.agent
         if (model === null || frozen === undefined)
@@ -495,6 +499,7 @@ export const layer = Layer.effect(
                       mode: planned.mode,
                       contract: plan.contract,
                       turnCap: plan.turnCap,
+                      inspection: generation.inspection,
                       tools: [
                         ...tools.map(frozenTool),
                         ...(plan.contract === "final_text"

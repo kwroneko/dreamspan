@@ -39,6 +39,7 @@ lcmTest("a new chat copies the account default, its fields fall back to it, and 
       layerTarget: 14_000,
       layerMax: 18_000,
       when: "after-reply",
+      style: "direct",
       leafTarget: 600
     })
     assert.strictEqual(copied.resolved.from.recentMax, "chat")
@@ -351,5 +352,28 @@ it.effect("the estimate prices requests without the preset: only continuity is c
     const cold = estimateBackfill({ ...input, cached: false, withPreset: false })
     const coldPreset = estimateBackfill({ ...input, cached: false })
     assert.strictEqual(coldPreset.uncachedInput - cold.uncachedInput, 6_000 * coldPreset.requests)
+  })
+)
+
+lcmTest("summary style defaults are copied, reset and used by request assembly", (server) =>
+  Effect.gen(function* () {
+    const h = yield* lcmHarness(server, { messages: 3 })
+    yield* h.api.ChangeGenerationDefaults({ change: { lcm: { style: "tool" } } })
+    const chat = yield* h.api.CreateChat({ title: "Copies summary style" })
+    assert.strictEqual((yield* h.api.GetLcmSettings({ chatId: chat.id, leafSlotId: null })).stored!.style, "tool")
+    yield* h.api.ChangeGenerationDefaults({ change: { lcm: { style: "direct" } } })
+    assert.strictEqual((yield* h.api.GetLcmSettings({ chatId: chat.id, leafSlotId: null })).resolved.style, "tool")
+    yield* h.api.ChangeLcmSettings({ chatId: chat.id, change: { style: null } })
+    assert.strictEqual((yield* h.api.GetLcmSettings({ chatId: chat.id, leafSlotId: null })).resolved.style, "direct")
+    // The fixture chat predates the setting: the account supplies tool, then the chat overrides it.
+    yield* h.api.ChangeGenerationDefaults({ change: { lcm: { style: "tool" } } })
+    yield* h.enqueue(0, 2)
+    const job = yield* h.writer.ClaimSummaryJob({ userId: h.userId })
+    assert.isNotNull(job)
+    for (const [n, style] of ["tool", "direct", "tool"].entries()) {
+      if (n > 0) yield* h.api.ChangeLcmSettings({ chatId: h.chat.id, change: { style: n === 1 ? "direct" : null } })
+      const built = yield* h.reader.AssembleSummary({ userId: h.userId, jobId: job!.id, attempt: job!.epoch })
+      assert.strictEqual((JSON.parse(built.snapshot) as ContextSnapshot).summaryJob!.style, style)
+    }
   })
 )

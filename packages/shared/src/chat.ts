@@ -253,6 +253,11 @@ export class Version extends Schema.Class<Version>("Version")({
   /** An agent rollout's tool calls and run time (spec/AGENTIC.md §5.1); absent without steps. */
   steps: Schema.optionalKey(StepsSummary),
   /**
+   * Written by an agent run (a reply with tools), with or without steps: one that stopped or
+   * failed can be resumed (spec/AGENTIC.md §5.2). Absent otherwise.
+   */
+  agent: Schema.optionalKey(Schema.Boolean),
+  /**
    * Optimistic concurrency for amending a user-written version: one more than the number
    * of times it was amended, counted from its kept history (version_history).
    */
@@ -381,6 +386,8 @@ export class CastCard extends Schema.Class<CastCard>("CastCard")({
   lorebookName: Schema.optionalKey(Schema.String),
   /** How many entries that lorebook has. */
   lorebookEntries: Schema.optionalKey(Schema.Int),
+  /** The world file it names (`extensions.world`), which replaces that lorebook when a chat reads a file of that name. */
+  lorebookWorld: Schema.optionalKey(Schema.String),
   /** Its avatar, served at `/library/media?id=`; null without one. */
   avatarMediaId: Schema.NullOr(Schema.String),
   /** The avatar's chosen cutout (ARCHITECTURE.md §14.5c); absent: the default. */

@@ -3,7 +3,7 @@
 // No request ever goes to cardex.zip: the adapter is pointed at the fake's origin, and the
 // pure checks make none.
 import { afterAll, assert, describe, it } from "@effect/vitest"
-import { emptySourceQuery, SourceFailed } from "@rp/shared/cardSources.ts"
+import { emptySourceQuery, SourceFailed, type SourceSuggestions } from "@rp/shared/cardSources.ts"
 import { Effect } from "effect"
 import type { SourceHttp } from "../src/sources/adapter.ts"
 import {
@@ -14,9 +14,12 @@ import {
   cardSourceSetup,
   cursorRefused,
   downloadModeOf,
+  detailMetadata,
   searchParams,
   summaryOf
 } from "../src/sources/cardex.ts"
+import { makeSourceHttp } from "../src/sources/guard.ts"
+import { makeLimiter } from "../src/sources/limiter.ts"
 import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
 
 const archive = await startFakeArchive({ cards: 120 })
@@ -55,6 +58,10 @@ const direct = (seen: Array<string> = []): SourceHttp => ({
         return yield* new SourceFailed({
           sourceId: "cardex",
           reason,
+          status: response.status,
+          ...(response.headers.has("retry-after")
+            ? { retryAfterMs: Number(response.headers.get("retry-after")) * 1000 }
+            : {}),
           message: String(response.status),
           ...(typeof code === "string" ? { code } : {})
         })
@@ -100,7 +107,23 @@ describe("v1 as card sources", () => {
           ["tokens", "Tokens"],
           ["exclude_forks", "Leave out forks"],
           ["source", "Site"],
-          ["author", "Creator"]
+          ["author", "Creator"],
+          ["fields", "Search in"],
+          ["kind", "Kind"],
+          ["not_source", "Exclude sites"],
+          ["any_tags", "Any of these tags"],
+          ["has_cover", "Cover"],
+          ["any_author", "Any of these creators"],
+          ["not_author", "Exclude creators"],
+          ["picture", "Picture"],
+          ["added_after", "Added after"],
+          ["added_before", "Added before"],
+          ["created_after", "Created after"],
+          ["created_before", "Created before"],
+          ["deleted_from_source", "Deleted from all sites"],
+          ["deleted_from_any_source", "Deleted from a site"],
+          ["chub_verified", "Chub verified"],
+          ["chub_recommended", "Chub recommended"]
         ]
       )
       const rating = caps.filters.find((f) => f.id === "nsfw")!
@@ -115,7 +138,8 @@ describe("v1 as card sources", () => {
         [
           ["popular", false],
           ["newest", true],
-          ["name", false],
+          ["created", true],
+          ["name", true],
           ["tokens", true],
           ["relevance", false]
         ]
@@ -180,6 +204,364 @@ describe("v1 as card sources", () => {
     assert.isFalse(searchParams(emptySourceQuery, null).has("sort"))
     assert.isFalse(searchParams(emptySourceQuery, null).has("nsfw"))
   })
+
+  it.effect("every live card criterion is available and reaches the fake with v1 names and encodings", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      const caps = yield* adapter.capabilities(direct())
+      assert.include(caps.filters.find((f) => f.id === "tokens")?.about ?? "", "300")
+      const fields = caps.filters.find((f) => f.id === "fields")!
+      assert.isTrue(fields.kind === "choice" && fields.multi)
+      const kind = caps.filters.find((f) => f.id === "kind")!
+      assert.deepStrictEqual(kind.kind === "choice" ? kind.options.map((o) => o.value) : [], [
+        "character",
+        "character_lorebook"
+      ])
+      const c = archive.cards[0]!
+      const identity = `${c.site}/${c.creator}`
+      const cases: ReadonlyArray<
+        readonly [Record<string, import("@rp/shared/cardSources.ts").SourceFilterValue>, (slug: string) => boolean]
+      > = [
+        [{ fields: ["name"] }, () => true],
+        [{ kind: "character_lorebook" }, (slug) => archive.cards.find((x) => x.slug === slug)!.hasLorebook],
+        [{ not_source: [c.site] }, (slug) => archive.cards.find((x) => x.slug === slug)!.site !== c.site],
+        [
+          { any_tags: `${c.tags[0]}|${c.tags[1]}` },
+          (slug) => archive.cards.find((x) => x.slug === slug)!.tags.some((t) => c.tags.slice(0, 2).includes(t))
+        ],
+        [{ any_author: identity }, (slug) => archive.cards.find((x) => x.slug === slug)!.creator === c.creator],
+        [{ not_author: identity }, (slug) => slug !== c.slug],
+        [{ picture: c.sha256 }, (slug) => slug === c.slug],
+        [
+          { added_after: "2026-01-02", added_before: "2026-01-04" },
+          (slug) => {
+            const at = archive.cards.find((x) => x.slug === slug)!.addedAt
+            return at >= Date.parse("2026-01-02") && at < Date.parse("2026-01-04")
+          }
+        ],
+        [
+          { created_after: "2025-01-02", created_before: "2025-04-01" },
+          (slug) => {
+            const at = archive.cards.find((x) => x.slug === slug)!.createdAt
+            return at >= Date.parse("2025-01-02") && at < Date.parse("2025-04-01")
+          }
+        ],
+        [{ deleted_from_source: true }, (slug) => archive.cards.find((x) => x.slug === slug)!.deleted],
+        [{ deleted_from_any_source: true }, (slug) => archive.cards.find((x) => x.slug === slug)!.deleted],
+        [{ source: ["chub"], chub_verified: true }, (slug) => archive.cards.find((x) => x.slug === slug)!.verified],
+        [
+          { source: ["chub"], chub_recommended: true },
+          (slug) => archive.cards.find((x) => x.slug === slug)!.recommended
+        ],
+        [{ has_cover: "false" }, () => true]
+      ]
+      for (const [filters, matches] of cases) {
+        const seen: Array<string> = []
+        const page = yield* adapter.search(direct(seen), { ...emptySourceQuery, filters }, null)
+        assert.isAbove(page.items.length, 0, JSON.stringify(filters))
+        assert.isTrue(
+          page.items.every((x) => matches(x.remoteId)),
+          JSON.stringify(filters)
+        )
+        const params = new URL(`http://fake${seen[0]}`).searchParams
+        for (const id of Object.keys(filters)) assert.isTrue(params.has(id), id)
+      }
+      for (const sort of caps.sorts)
+        for (const reverse of sort.reversible ? [false, true] : [false]) {
+          const page = yield* adapter.search(
+            direct(),
+            { ...emptySourceQuery, text: "lantern", sort: sort.id, reverse },
+            null
+          )
+          assert.isAbove(page.items.length, 0)
+        }
+      const badFlags = yield* Effect.flip(
+        adapter.search(direct(), { ...emptySourceQuery, filters: { chub_verified: true } }, null)
+      )
+      assert.strictEqual(badFlags.code, "bad_request")
+    })
+  )
+
+  it.effect("a nullable search total is filled by the exact count endpoint; paging still follows next_cursor", () =>
+    Effect.gen(function* () {
+      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120, unknownTotal: true }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
+      const adapter = fakeCardexAdapter(fake)
+      const first = yield* adapter.search(direct(), emptySourceQuery, null)
+      assert.strictEqual(first.total, 120)
+      assert.isFalse(first.totalCapped)
+      assert.isString(first.next)
+      const second = yield* adapter.search(direct(), emptySourceQuery, first.next)
+      assert.lengthOf(second.items, 48)
+      assert.notStrictEqual(first.items[0]!.remoteId, second.items[0]!.remoteId)
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("Cover: Any includes characters hidden by the archive's default cover filter", () =>
+    Effect.gen(function* () {
+      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 60, coverless: true }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
+      const adapter = fakeCardexAdapter(fake)
+      const covered = yield* adapter.search(direct(), emptySourceQuery, null)
+      assert.strictEqual(covered.total, 40)
+      assert.isTrue(covered.items.every((c) => typeof c.thumb === "string"))
+      const all = yield* adapter.search(direct(), { ...emptySourceQuery, filters: { has_cover: "false" } }, null)
+      assert.strictEqual(all.total, 60)
+      assert.isTrue(all.items.some((c) => c.thumb === undefined && c.image === undefined))
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("healthy name-with-text and fewest-token searches use the requested order without a notice", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      for (const query of [
+        { ...emptySourceQuery, text: "synthetic", sort: "name" },
+        { ...emptySourceQuery, text: "synthetic", sort: "tokens", reverse: true },
+        { ...emptySourceQuery, sort: "tokens", reverse: true }
+      ]) {
+        const seen: Array<string> = []
+        const page = yield* adapter.search(direct(seen), query, null)
+        assert.isUndefined(page.notice)
+        assert.strictEqual(
+          new URL(`http://fake${seen[0]}`).searchParams.get("sort"),
+          query.sort === "name" ? "name" : "tokens_asc"
+        )
+        assert.isTrue(
+          page.items.every(
+            (item, index) =>
+              index === 0 ||
+              (query.sort === "name"
+                ? item.name.localeCompare(page.items[index - 1]!.name) >= 0
+                : item.tokens! >= page.items[index - 1]!.tokens!)
+          )
+        )
+      }
+    })
+  )
+
+  it.effect("any failed nondefault first-page order can substitute once, and all later pages retain that order", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      for (const [sort, reverse, requested, substitute, status] of [
+        ["name", false, "name", "relevance", 500],
+        ["tokens", true, "tokens_asc", "tokens_desc", 502],
+        ["newest", false, "newest", "relevance", 503],
+        ["created", true, "created_asc", "created_desc", 504]
+      ] as const) {
+        archive.failSort(requested, status)
+        const seen: Array<string> = []
+        const http = direct(seen)
+        const query = { ...emptySourceQuery, text: "synthetic", sort, reverse }
+        const first = yield* adapter.search(http, query, null)
+        assert.include(first.notice!, "just now")
+        assert.match(first.next!, /^s:/)
+        const second = yield* adapter.search(http, query, first.next)
+        assert.strictEqual(second.notice, first.notice)
+        assert.isFalse(second.reset === true)
+        assert.isFalse(second.items.some((item) => first.items.some((old) => old.remoteId === item.remoteId)))
+        const used = seen
+          .filter((path) => path.startsWith("/api/v1/search?"))
+          .map((path) => new URL(`http://fake${path}`).searchParams.get("sort"))
+        assert.deepStrictEqual(used, [requested, substitute, substitute])
+        const reloaded = yield* adapter.search(http, query, null)
+        assert.isUndefined(reloaded.notice)
+        assert.match(reloaded.next!, /^c:/)
+        // An expired substitute cursor restarts the same order, never the requested one.
+        yield* Effect.promise(() => fetch(`${archive.origin}/__fake/expire-cursors`))
+        const restarted = yield* adapter.search(http, query, first.next)
+        assert.isTrue(restarted.reset)
+        assert.deepStrictEqual(restarted.items, first.items)
+      }
+    })
+  )
+
+  it.effect(
+    "later pages, default-order failures, nonserver errors and failed substitutes do not enter a fallback loop",
+    () =>
+      Effect.gen(function* () {
+        const adapter = fakeCardexAdapter(archive)
+        const query = { ...emptySourceQuery, text: "synthetic", sort: "name" }
+        const first = yield* adapter.search(direct(), query, null)
+        for (const [sort, token, status] of [
+          ["name", first.next, 500],
+          ["relevance", null, 500],
+          ["name", null, 501],
+          ["name", null, 400]
+        ] as const) {
+          const seen: Array<string> = []
+          archive.failSort(sort, status)
+          const error = yield* Effect.flip(adapter.search(direct(seen), { ...query, sort }, token))
+          assert.strictEqual(error.status, status)
+          assert.lengthOf(seen, 1)
+        }
+        const seen: Array<string> = []
+        archive.failNext(500, 2)
+        const failed = yield* Effect.flip(adapter.search(direct(seen), query, null))
+        assert.strictEqual(failed.status, 500)
+        assert.lengthOf(seen, 2)
+        const disconnected: SourceHttp = {
+          apiKey: null,
+          get: () => Effect.fail(new SourceFailed({ sourceId: "cardex", reason: "unreachable", message: "offline" }))
+        }
+        const offline = yield* Effect.flip(adapter.search(disconnected, query, null))
+        assert.isUndefined(offline.status)
+      })
+  )
+
+  it.live("503 and 429 Retry-After retry the requested order before considering a substitute", () =>
+    Effect.gen(function* () {
+      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120 }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
+      const adapter = fakeCardexAdapter(fake)
+      const seen: Array<string> = []
+      const http = makeSourceHttp(adapter, null, {
+        network: { fetchFor: () => fetch },
+        limiter: makeLimiter(),
+        bypassEntries: () => [],
+        onRequest: (_id, url) => seen.push(url.pathname + url.search)
+      })
+      const query = { ...emptySourceQuery, text: "synthetic", sort: "name" }
+      for (const status of [503, 429]) {
+        seen.length = 0
+        fake.failSort("name", status, 1, 0.01)
+        const started = Date.now()
+        const page = yield* adapter.search(http, query, null)
+        assert.isAtLeast(Date.now() - started, 900)
+        assert.isUndefined(page.notice)
+        assert.deepStrictEqual(
+          seen
+            .filter((path) => path.startsWith("/api/v1/search?"))
+            .map((path) => new URL(`http://fake${path}`).searchParams.get("sort")),
+          ["name", "name"]
+        )
+      }
+      seen.length = 0
+      fake.failSort("name", 503, 2, 0.01)
+      const substituted = yield* adapter.search(http, query, null)
+      assert.include(substituted.notice!, "just now")
+      assert.deepStrictEqual(
+        seen
+          .filter((path) => path.startsWith("/api/v1/search?"))
+          .map((path) => new URL(`http://fake${path}`).searchParams.get("sort")),
+        ["name", "name", "relevance"]
+      )
+      seen.length = 0
+      fake.failSort("name", 429, 2, 0.01)
+      const limited = yield* Effect.flip(adapter.search(http, query, null))
+      assert.strictEqual(limited.reason, "rate_limited")
+      assert.strictEqual(limited.status, 429)
+      assert.deepStrictEqual(
+        seen
+          .filter((path) => path.startsWith("/api/v1/search?"))
+          .map((path) => new URL(`http://fake${path}`).searchParams.get("sort")),
+        ["name", "name"]
+      )
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("counts share the search filters and distinguish a capped lower bound", () =>
+    Effect.gen(function* () {
+      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120, unknownTotal: true, countCap: 50 }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
+      const adapter = fakeCardexAdapter(fake)
+      const all = yield* adapter.search(direct(), emptySourceQuery, null)
+      assert.strictEqual(all.total, 50)
+      assert.isTrue(all.totalCapped)
+      const filtered = yield* adapter.search(
+        direct(),
+        { ...emptySourceQuery, text: "Amber", filters: { nsfw: "exclude" } },
+        null
+      )
+      assert.strictEqual(filtered.total, filtered.items.length)
+      assert.isFalse(filtered.totalCapped)
+      assert.isTrue(
+        fake
+          .paths()
+          .some(
+            (path) =>
+              path.startsWith("/api/v1/search/count?") && path.includes("q=Amber") && path.includes("nsfw=exclude")
+          )
+      )
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("tag and creator suggestions traverse keyset pages and replace an expired cursor", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      for (const kind of ["tags", "creators"] as const) {
+        const seen = new Set<string>()
+        let page: string | null = null
+        let pages = 0
+        do {
+          const result: SourceSuggestions = yield* adapter.suggestions!(direct(), kind, "", page)
+          assert.isFalse(result.reset === true)
+          for (const item of result.items) {
+            assert.isFalse(seen.has(item.value))
+            seen.add(item.value)
+            assert.isNumber(item.count)
+          }
+          pages++
+          page = result.next
+        } while (page !== null)
+        assert.isAbove(pages, 1)
+        assert.strictEqual(
+          seen.size,
+          kind === "tags"
+            ? new Set(archive.cards.flatMap((card) => card.tags)).size
+            : new Set(archive.cards.map((card) => `${card.site}/${card.creator}`)).size
+        )
+        const expired = yield* adapter.suggestions!(direct(), kind, "", "expired")
+        const first = yield* adapter.suggestions!(direct(), kind, "", null)
+        assert.isTrue(expired.reset)
+        assert.deepStrictEqual(expired.items, first.items)
+      }
+    })
+  )
+
+  it.effect("opened cards retain the archive's per-field counts, labelled by its tokenizer", () =>
+    Effect.gen(function* () {
+      const card = yield* fakeCardexAdapter(archive).card(direct(), archive.cards[0]!.slug)
+      assert.strictEqual(card.summary.tokenCounts?.model, "o200k_base")
+      assert.deepStrictEqual(card.summary.tokenCounts?.fields, {
+        description: 40,
+        personality: 9,
+        scenario: 12,
+        creator_notes: 7,
+        mes_example: 0
+      })
+      assert.deepStrictEqual(card.summary.tokenCounts?.greetings, [18, 15])
+      assert.deepStrictEqual(
+        detailMetadata({
+          card: {
+            token_counts: {
+              model: "o200k_base",
+              fields: { name: -1, description: "text", scenario: 12 },
+              greetings: [0, -1, "text"]
+            }
+          }
+        }).tokenCounts?.fields,
+        { scenario: 12 }
+      )
+    })
+  )
+
+  it.effect("earlier origins use their nested listing, with archive-only links", () =>
+    Effect.gen(function* () {
+      const card = yield* fakeCardexAdapter(archive).card(direct(), archive.cards[0]!.slug)
+      assert.deepStrictEqual(card.summary.earlierOrigins, [
+        {
+          label: "Earlier listing on Synthetic site",
+          url: `${archive.origin}/o/${archive.cards[0]!.site}/previous-${archive.cards[0]!.slug}`
+        }
+      ])
+      assert.deepStrictEqual(
+        detailMetadata({
+          earlier_origins: [{ listing: { path: "https://elsewhere.example/x", source: "chub" } }, { listing: null }]
+        }),
+        {}
+      )
+    })
+  )
 
   it("a batch URL is in v1's canonical form: sorted, without duplicates, joined by %2C", () => {
     assert.strictEqual(batchUrl(["b-2", "a-1", "b-2"]).href, `${CARDEX_ORIGIN}/api/v1/cards/batch?ids=a-1%2Cb-2`)
@@ -246,7 +628,8 @@ describe("the adapter against the fake archive", () => {
       const seen: Array<string> = []
       const page = yield* adapter.search(direct(seen), emptySourceQuery, "c:not-a-cursor")
       assert.lengthOf(page.items, 48)
-      assert.lengthOf(seen, 2)
+      assert.isTrue(page.reset)
+      assert.lengthOf(seen, 3)
       assert.include(seen[0]!, "cursor=not-a-cursor")
       assert.notInclude(seen[1]!, "cursor=")
       assert.notInclude(seen[1]!, "page=")
@@ -308,7 +691,7 @@ describe("the adapter against the fake archive", () => {
       assert.strictEqual(json.fileName, `${charx.slug}.json`)
       assert.deepStrictEqual(
         seen.map((p) => new URLSearchParams(p.split("?")[1]).get("mode")),
-        [null, "mirrored", "json"]
+        [null, "mirrored", "json", null]
       )
       const missing = yield* Effect.flip(old.card(http, "no-such-card"))
       assert.strictEqual(missing.reason, "not_found")

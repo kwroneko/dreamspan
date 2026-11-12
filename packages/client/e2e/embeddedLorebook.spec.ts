@@ -224,6 +224,7 @@ for (const width of [1440, 390]) {
         const section = page
           .locator("section")
           .filter({ has: page.getByRole("heading", { name: "Embedded lorebook", exact: true }) })
+          .last()
         await section.evaluate((element) => {
           element.scrollIntoView({ block: "start" })
           for (let parent = element.parentElement; parent; parent = parent.parentElement) {

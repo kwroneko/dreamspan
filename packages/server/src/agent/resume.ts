@@ -4,7 +4,14 @@
 // failed tail, plus the interruption policies and editing a step first. Pure: the API reads the
 // transcript and writes the new version; the agent session runs what this keeps.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai"
+import {
+  validateToolArguments,
+  type AssistantMessage,
+  type Tool,
+  type ToolCall,
+  type ToolResultMessage
+} from "@earendil-works/pi-ai"
+import { isDeepStrictEqual } from "node:util"
 import { placedSteps } from "./steps.ts"
 import type { FrozenTool } from "./tools.ts"
 
@@ -163,6 +170,7 @@ export const planStepResume = (
       .filter((m): m is ToolResultMessage => m.role === "toolResult" && upTo(m.toolCallId))
   const calls = turn.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : []))
   let kept: Array<AgentMessage>
+  let replayedCalls: ReadonlySet<string> = new Set()
   if (placed.step.kind !== "tool") {
     if (edit !== undefined && edit.kind !== "text") return new StepNotResumable("Only text can replace this step.")
     const content = turn.content.map((p, i) => {
@@ -182,6 +190,19 @@ export const planStepResume = (
     const index = calls.indexOf(part.id)
     const before = new Set(calls.slice(0, index))
     if (edit?.kind === "arguments") {
+      const tool = tools.find((t) => t.name === part.name)
+      if (tool === undefined) return new StepNotResumable("That tool wasn't offered to this reply.")
+      try {
+        const validated: unknown = validateToolArguments(
+          { name: tool.name, description: tool.description, parameters: tool.parameters as Tool["parameters"] },
+          { ...part, arguments: edit.arguments as ToolCall["arguments"] }
+        )
+        // Human edits must fit as written; provider argument coercion must not silently change them.
+        if (!isDeepStrictEqual(validated, edit.arguments))
+          return new StepNotResumable("The arguments don't fit this tool's parameters.")
+      } catch {
+        return new StepNotResumable("The arguments don't fit this tool's parameters.")
+      }
       // The call runs again with the new arguments, under a new id; later calls of the turn go.
       const content = turn.content
         .slice(0, placed.part + 1)
@@ -200,13 +221,16 @@ export const planStepResume = (
       if (!results.some((m) => m.toolCallId === part.id))
         return new StepNotResumable("That tool call has no result to carry on from.")
       kept = [...messages.slice(0, at), turn, ...results]
+      // Later calls remain in the assistant turn to be run again. Their old results,
+      // receipts and effects belong to the cut tail, even though their call ids are retained.
+      replayedCalls = new Set(calls.slice(index + 1))
     } else return new StepNotResumable("A tool call takes new arguments or a new result.")
   }
   return {
     policy: danglingCalls(kept).length > 0 ? "rerun" : "continue",
     transcript: kept,
     cut: messages.slice(at),
-    keptCalls: callsOf(kept.slice(historical)).filter((id) => id !== newCallId)
+    keptCalls: callsOf(kept.slice(historical)).filter((id) => id !== newCallId && !replayedCalls.has(id))
   }
 }
 

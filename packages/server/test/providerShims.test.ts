@@ -384,3 +384,31 @@ describe("route rules: shims for one OpenRouter upstream (liveapi2)", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
+
+it("Google thinking rules stay provider-local and prevent forbidden off/budget combinations", () => {
+  const off = { config: { thinkingConfig: { thinkingBudget: 0 } } }
+  const pro = shim("google", "google-generative-ai", "gemini-2.5-pro", off).payload
+  assert.deepEqual(pro, { config: { thinkingConfig: { thinkingBudget: 128 } } })
+  assert.deepEqual(shim("google", "google-generative-ai", "gemini-2.5-flash", off).payload, off)
+  assert.deepEqual(shim("openai-compatible", "google-generative-ai", "gemini-2.5-pro", off).payload, off)
+  const mixed = { config: { thinkingConfig: { thinkingBudget: 2048, thinkingLevel: "MEDIUM" } } }
+  assert.deepEqual(shim("google", "google-generative-ai", "gemini-4-argon", mixed).payload, {
+    config: { thinkingConfig: { thinkingLevel: "MEDIUM" } }
+  })
+  const upstream = shimmedUpstream(
+    builtinShims,
+    { provider: "google", api: "google-generative-ai" },
+    "gemini-4-carbon",
+    {}
+  )
+  assert.deepEqual(upstream.thinkingLevels, {
+    off: null,
+    minimal: null,
+    low: "low",
+    medium: "medium",
+    high: "high",
+    xhigh: null,
+    max: null
+  })
+  assert.include(upstream.fixed!, "thinkingLevels")
+})
