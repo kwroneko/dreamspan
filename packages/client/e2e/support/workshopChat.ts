@@ -51,7 +51,11 @@ export function workshopChatTests() {
               presetOverrideRefId: null
             }
           })
-          const model = yield* api.AddUserModel({ connectionId: connection.id, key: "workshop-small", overrides: {} })
+          const model = yield* api.AddUserModel({
+            connectionId: connection.id,
+            key: "workshop-small",
+            overrides: { context: 32768, settings: { samplers: { openai_max_context: 32768 } } }
+          })
           yield* api.SetGenerationDefaults({
             defaults: { model: { connection: connection.id, model: model.id }, preset: null }
           })
@@ -197,7 +201,7 @@ export function workshopChatTests() {
             await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"))
           }
           const chip = nextReply(page).getByRole("button", { name: /^What the assistant may do: / })
-          await expect(chip).toHaveText(/Can: 3/)
+          await expect(chip).toHaveText(/Can: 5 · Asks: 2/)
           await expect(
             nextReply(page).getByRole("button", { name: /replies now$|^Reply now$|^No one to reply$/ })
           ).toHaveCount(0)
@@ -208,7 +212,9 @@ export function workshopChatTests() {
           await expect(popover.locator('[data-capability="library.read"]')).toContainText("Always allowed")
           for (const [id, label] of [
             ["library.write", "Create and edit library items"],
-            ["chats.setup", "Set up chats"]
+            ["chats.setup", "Set up chats"],
+            ["chats.rewrite", "Rewrite chats"],
+            ["settings", "Change your settings"]
           ]) {
             const row = popover.locator(`[data-capability="${id}"]`)
             await expect(row).toContainText(label!)
@@ -223,7 +229,12 @@ export function workshopChatTests() {
             )
             await expect(row.getByRole("button", { name: "Off", exact: true })).toBeVisible()
           }
-          await expect(popover.locator("[data-capability]")).toHaveCount(3)
+          for (const id of ["chats.read", "generate"]) {
+            await expect(
+              popover.locator(`[data-capability="${id}"]`).getByRole("button", { name: "Ask first", exact: true })
+            ).toHaveAttribute("aria-pressed", "true")
+          }
+          await expect(popover.locator("[data-capability]")).toHaveCount(7)
           await expect(popover.getByText("These hold for this workshop only.")).toBeVisible()
           await shot("capabilities")
           await expectLayout(page, info, `workshop-capabilities-${width}-${theme}`, { scope: '[role="dialog"]' })
@@ -371,6 +382,18 @@ export function workshopChatTests() {
           await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()).toBeVisible()
           expect(provider.bodies[beforeEdit]!.messages.at(-1)?.content).toBe(edited)
           expect(provider.bodies[beforeEdit]!.tools).toEqual(provider.bodies[offeredAt]!.tools)
+          // The earlier answer can remain visible while the resumed run is still making its
+          // change. Wait for that committed effect before asserting its receipt.
+          await expect
+            .poll(
+              async () =>
+                (
+                  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+                    api.ListRolloutEffects({ chatId: workshopId })
+                  )
+                ).length
+            )
+            .toBe(beforeEditEffects.length + 1)
           const afterEdit = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
             api.ListRolloutEffects({ chatId: workshopId })
           )

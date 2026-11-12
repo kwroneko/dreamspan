@@ -1,3 +1,4 @@
+import { ToolInputRefused } from "./tools.ts"
 // Asking first (spec/WORKSHOP.md §3.4). Before a tool runs, its capability's standing in the
 // workshop decides: Off refuses with a plain message the model also receives; Allowed runs it;
 // Ask first records a pending approval (bound to the rollout, the call id and the arguments'
@@ -127,9 +128,13 @@ export const makePermit =
       // A missing target cannot become a different target after the user approves.
       const described = tool.describe
         ? yield* Effect.suspend(() => tool.describe!(context, args as never)).pipe(
+            Effect.catch((error) =>
+              Effect.succeed(error instanceof ToolInputRefused ? { refused: error.message } : undefined)
+            ),
             Effect.catchCause(() => Effect.succeed(undefined))
           )
         : undefined
+      if (described && "refused" in described) return { run: false, text: described.refused } as const
       if (tool.describe && !described)
         return {
           run: false,

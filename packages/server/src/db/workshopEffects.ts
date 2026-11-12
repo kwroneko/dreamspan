@@ -1,3 +1,8 @@
+import { pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
+import { isDeepStrictEqual } from "node:util"
+import { operationPolicies, operationInfo, refuseOperation, type OperationHandlers } from "./operationPolicies.ts"
+import { settingsRegistry, writeSetting } from "./settings.ts"
+import { Schema } from "effect"
 // Setup tools compose the same typed user operations in one outer writer transaction.
 // The receipt and all undo recipes commit with them. No external work occurs here.
 import { EffectUndoRefused, type RolloutEffect } from "@rp/shared/workshopApi.ts"
@@ -12,7 +17,7 @@ import { SqlClient } from "effect/sql"
 import { makeRegistry } from "@rp/shared/registry.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import type { Bin } from "./bin.ts"
-import { NotFound, type WriteOps } from "./ops.ts"
+import { NotFound, WriteOps } from "./ops.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
@@ -20,7 +25,24 @@ import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type OperationName =
-  "CreateEntity" | "EditRef" | "ForkCard" | "RestoreRevision" | "StartGreetingChat" | "AddStateEvents"
+  | "CreateEntity"
+  | "EditRef"
+  | "ForkCard"
+  | "RestoreRevision"
+  | "StartGreetingChat"
+  | "AddStateEvents"
+  | "RenameChats"
+  | "RenameRef"
+  | "SetRefArchived"
+  | "SetCardFavourite"
+  | "SetChatPin"
+  | "ChangeGenerationDefaults"
+  | "AddStateEvent"
+  | "ForkWithDrafts"
+  | "ApplyHistoryEdits"
+  | "UndoHistoryEdit"
+  | "SendOrQueue"
+  | "DeleteMessage"
 type OperationRpc<K> = Extract<RpcGroup.Rpcs<typeof WriteOps>, { readonly _tag: K }>
 type Operations = {
   [K in OperationName]: (
@@ -268,7 +290,53 @@ const chatUndoer: Undoer = {
       return {}
     })
 }
-export const rolloutUndoers = makeRegistry<Undoer>([createUndoer, reviseUndoer, chatUndoer])
+const operationUndo: Undoer = {
+  id: "chat.change",
+  unchanged: (sql, userId, effect) =>
+    Effect.gen(function* () {
+      const recipe = effect.undo!
+      const policy = operationPolicies.get(String(recipe.operation))
+      if (!policy) return false
+      const current = yield* policy.before(sql, userId, recipe.input as never)
+      return JSON.stringify(current) === JSON.stringify(recipe.next)
+    }).pipe(Effect.orElseSucceed(() => false)),
+  run: (ctx, effect) =>
+    Effect.gen(function* () {
+      const recipe = effect.undo!
+      const policy = operationPolicies.get(String(recipe.operation))
+      if (!policy) return yield* refuse("This operation no longer has an undo policy.")
+      const current = yield* policy.before(ctx.sql, ctx.userId, recipe.input as never)
+      if (JSON.stringify(current) !== JSON.stringify(recipe.next)) return yield* refuse()
+      return (yield* policy.undo(
+        ctx.sql,
+        ctx.ops as OperationHandlers,
+        ctx.userId,
+        recipe.input as never,
+        recipe.prior as never,
+        recipe.next as never
+      )) as Record<string, unknown>
+    }).pipe(
+      Effect.mapError((error) =>
+        refuse(error instanceof Error ? error.message : "This change cannot be undone safely.")
+      )
+    )
+}
+export const rolloutUndoers = makeRegistry<Undoer>([
+  createUndoer,
+  {
+    ...reviseUndoer,
+    unchanged: (sql, userId, effect, effects) =>
+      effect.undo?.operation
+        ? operationUndo.unchanged!(sql, userId, effect, effects)
+        : libraryUnchanged(sql, userId, effect, effects),
+    run: (ctx, effect) => (effect.undo?.operation ? operationUndo.run(ctx, effect) : reviseUndoer.run(ctx, effect))
+  },
+  chatUndoer,
+  operationUndo,
+  { ...operationUndo, id: "setting.set" },
+  { ...operationUndo, id: "reply.generate" },
+  { ...operationUndo, id: "changeset.apply" }
+])
 
 /** A carried transcript includes all ancestors' successful changes. Revalidate their final
  * saved state in the reader worker; never replay a success after its undo or a user edit. */
@@ -424,6 +492,142 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         }
       })
     return {
+      RunWorkshopOperation: (input) =>
+        Effect.gen(function* () {
+          const policy = operationPolicies.get(input.operation)
+          const creates = ["CreateEntity", "ForkWithDrafts"].includes(input.operation)
+          if ((!policy && !creates) || input.capability !== (policy?.capability ?? "library.write"))
+            return yield* refuseOperation("This operation has no safe undo recipe, so it wasn't done.")
+          const value = input.payload as Record<string, unknown>
+          const rpc = WriteOps.requests.get(input.operation as never)
+          if ((!rpc && input.operation !== "SetAgentSetting") || !value || value.userId !== input.userId)
+            return yield* refuseOperation("Invalid operation owner.")
+          const payload = yield* Schema.decodeUnknownEffect(
+            rpc?.payloadSchema ??
+              Schema.Struct({
+                userId: Schema.String,
+                key: Schema.String,
+                value: Schema.Unknown,
+                expectedRevision: Schema.Int
+              })
+          )(value).pipe(Effect.mapError(() => refuseOperation("Invalid operation arguments.")))
+          const handler = (ops as unknown as Record<string, (input: unknown) => Effect.Effect<unknown, unknown>>)[
+            input.operation
+          ]
+          return unwrapOperationResult(
+            yield* receipted(
+              input,
+              input.capability,
+              Effect.gen(function* () {
+                const expected = input.expected as { payload?: Record<string, unknown>; proof?: unknown }
+                if (expected?.proof) {
+                  const proof = expected.proof as {
+                    chat?: { id: import("@rp/shared/chat.ts").ChatId }
+                    refs?: Array<{ refId: string; rowVersion: number }>
+                  }
+                  for (const expectedRef of proof.refs ?? []) {
+                    const current = yield* lib.ownedRef(input.userId, expectedRef.refId)
+                    if (current.row_version !== expectedRef.rowVersion)
+                      return yield* refuseOperation("The saved library item changed while waiting. Read it again.")
+                  }
+                  const current = proof.chat
+                    ? yield* operationInfo(sql, { userId: input.userId, chatId: proof.chat.id })
+                    : null
+                  if (proof.chat && JSON.stringify(current!.proof) !== JSON.stringify(proof.chat))
+                    return yield* refuseOperation("The saved chat changed while waiting. Read it again and ask again.")
+                }
+                if (creates) {
+                  if (input.operation === "ForkWithDrafts" && value.moveDrafts !== false)
+                    return yield* refuseOperation(
+                      "Moving unsaved drafts cannot be undone by this tool. Set moveDrafts to false."
+                    )
+                  const result = yield* handler!({
+                    ...(payload as object),
+                    ...(input.operation === "CreateEntity"
+                      ? { origin: "agent", originRef: `${input.rolloutId}:${input.toolCallId}` }
+                      : {})
+                  })
+                  const ref = (input.operation === "CreateEntity" ? (result as { ref: unknown }).ref : result) as {
+                    id: RefId
+                  }
+                  return { result: pendingOperationResult(input.operation, result), effects: [yield* creation(ref.id)] }
+                }
+                if (input.operation === "SendOrQueue") {
+                  const running = yield* sql`SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id
+              WHERE s.chat_id = ${String(value.chatId)} AND v.status = 'generating' AND v.deleted_at IS NULL`
+                  if (running.length)
+                    return yield* refuseOperation("That chat is writing a reply. Wait until it finishes.")
+                }
+                if (input.operation === "RestoreRevision") {
+                  const ref = yield* lib.ownedRef(input.userId, String(value.refId))
+                  const old = yield* lib.loadDoc(ref.head_revision_id)
+                  const [revision] =
+                    yield* sql`SELECT 1 FROM entity_revisions WHERE id = ${String(value.revisionId)} AND entity_id = ${ref.entity_id}`
+                  if (!revision) return yield* new NotFound({ entity: "revision", id: String(value.revisionId) })
+                  const next = yield* lib.loadDoc(String(value.revisionId))
+                  if (
+                    !isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, old, next), next) ||
+                    !isDeepStrictEqual(withHtmlApprovals(old, next), next) ||
+                    (next.regex_approved === true && old.regex_approved !== true)
+                  )
+                    return yield* refuseOperation(
+                      "Restoring this revision would change permissions. Restore it yourself from History."
+                    )
+                }
+                const before = yield* policy!.before(sql, input.userId, value as never)
+                let result: unknown
+                if (input.operation === "SetAgentSetting") {
+                  const entry = settingsRegistry.get(String(value.key))
+                  if (!entry?.agent || entry.scope !== "user" || !entry.accepts(value.value))
+                    return yield* refuseOperation("This setting is not agent-changeable, or its value is invalid.")
+                  result = yield* writeSetting(
+                    sql,
+                    "user",
+                    input.userId,
+                    entry.id,
+                    value.value,
+                    Number(value.expectedRevision)
+                  )
+                } else result = yield* handler!(payload)
+                const after = yield* policy!.before(sql, input.userId, value as never)
+                const priorRef = before as { ref?: { id: string; head_revision_id: string; row_version: number } }
+                const nextRef = after as { ref?: { id: string; head_revision_id: string; row_version: number } }
+                return {
+                  result: pendingOperationResult(input.operation, result ?? null),
+                  effects: [
+                    {
+                      kind: policy!.kind,
+                      targetKind: policy!.targetKind,
+                      targetId: policy!.target(value as never, after as never),
+                      title: policy!.label,
+                      undo: {
+                        operation: input.operation,
+                        input: value,
+                        prior: before,
+                        next: after,
+                        ...(policy!.kind === "library.revise"
+                          ? {
+                              refId: nextRef.ref!.id,
+                              head: nextRef.ref!.head_revision_id,
+                              rowVersion: nextRef.ref!.row_version,
+                              before: priorRef.ref!.head_revision_id,
+                              beforeRowVersion: priorRef.ref!.row_version
+                            }
+                          : {})
+                      }
+                    }
+                  ]
+                }
+              })
+            )
+          ) as unknown
+        }).pipe(
+          Effect.mapError((error) =>
+            error instanceof EffectUndoRefused || error instanceof NotFound || error instanceof InvalidDocument
+              ? error
+              : refuse(error instanceof Error ? error.message : "This operation could not be saved.")
+          )
+        ),
       AgentCreateEntity: (input) =>
         receipted(
           input,
@@ -638,6 +842,11 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         }).pipe(transaction(sql, "UndoRolloutEffect"))
     } satisfies Pick<
       Handlers,
-      "AgentCreateEntity" | "AgentReviseEntity" | "AgentCloneCard" | "AgentStartChat" | "UndoRolloutEffect"
+      | "RunWorkshopOperation"
+      | "AgentCreateEntity"
+      | "AgentReviseEntity"
+      | "AgentCloneCard"
+      | "AgentStartChat"
+      | "UndoRolloutEffect"
     >
   })

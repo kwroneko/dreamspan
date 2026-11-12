@@ -106,7 +106,11 @@ it.live("keeps setup effects canonical across multi-message regeneration and mes
       (m) => Effect.promise(() => m.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: {},
+      preset: { openai_max_context: 32768 }
+    })
     const chat = yield* api.CreateWorkshop({})
     const events = yield* watch(api, chat)
     yield* send(api, chat, "Build three cards.")
@@ -195,7 +199,11 @@ for (const change of ["undo", "edit", "ancestor-undo", "ancestor-edit", "unchang
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
-      yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+      yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        preset: { openai_max_context: 32768 }
+      })
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
       const first = yield* send(api, chat, "Make a keeper")
@@ -254,7 +262,11 @@ it.live("resumes stopped multi-message setup work without repeating committed ca
       (m) => Effect.promise(() => m.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: {},
+      preset: { openai_max_context: 32768 }
+    })
     const chat = yield* api.CreateWorkshop({})
     const events = yield* watch(api, chat)
     yield* send(api, chat, "Make two cards.")

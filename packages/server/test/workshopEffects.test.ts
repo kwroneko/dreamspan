@@ -1,3 +1,4 @@
+import { builtinOperationExposures } from "../src/agent/exposures/builtins.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
 import type { Chat, SlotId, VersionId } from "@rp/shared/chat.ts"
@@ -206,12 +207,15 @@ describe("workshop setup effects", () => {
       const capabilities = yield* api.ListWorkshopCapabilities({ chatId: f.chat.id })
       assert.deepStrictEqual(
         capabilities.map((c) => c.id),
-        ["library.read", "library.write", "chats.setup"]
+        ["library.read", "chats.read", "library.write", "chats.setup", "chats.rewrite", "settings", "generate"]
       )
-      assert.isTrue(capabilities.every((c) => c.mode === "allow"))
+      assert.deepStrictEqual(
+        capabilities.map((c) => c.mode),
+        ["allow", "ask", "allow", "allow", "allow", "allow", "ask"]
+      )
       assert.deepStrictEqual(
         capabilities.map((c) => c.modes),
-        [["allow"], ["off", "ask", "allow"], ["off", "ask", "allow"]]
+        [["allow"], ...Array.from({ length: 6 }, () => ["off", "ask", "allow"] as const)]
       )
       const registry = yield* ExecutionRegistry
       yield* registry.workshopCapabilities.register({
@@ -318,7 +322,15 @@ describe("workshop setup effects", () => {
         const offered = (yield* api.GetRunTranscript({ versionId: resumed.version.id })).tools
         assert.sameMembers(
           offered.filter((t) => t.capability === "library.write" || t.capability === "chats.setup").map((t) => t.name),
-          ["create_card", "edit_card", "clone_card", "start_chat"]
+          [
+            "create_card",
+            "edit_card",
+            "clone_card",
+            "start_chat",
+            ...builtinOperationExposures
+              .filter((e) => e.capability === "library.write" || e.capability === "chats.setup")
+              .map((e) => e.id)
+          ]
         )
         const steps = yield* api.GetRolloutSteps({ versionId: resumed.version.id })
         const createStep = steps.findIndex((s) => s.kind === "tool" && s.tool === "create_card")
@@ -455,7 +467,20 @@ describe("workshop setup effects", () => {
         model: {},
         state: [
           { key: "agent.enabled", value: { on: true } },
-          { key: "agent.tools", value: { tools: ["create_card", "edit_card", "clone_card", "start_chat"] } }
+          {
+            key: "agent.tools",
+            value: {
+              tools: [
+                "create_card",
+                "edit_card",
+                "clone_card",
+                "start_chat",
+                ...builtinOperationExposures
+                  .filter((e) => e.capability === "library.write" || e.capability === "chats.setup")
+                  .map((e) => e.id)
+              ]
+            }
+          }
         ]
       })
       const transcript = yield* api.GetRunTranscript({ versionId: rp.version.id })

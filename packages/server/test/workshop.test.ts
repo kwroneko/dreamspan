@@ -1,3 +1,4 @@
+import { builtinOperationExposures } from "../src/agent/exposures/builtins.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { mainPrompt } from "@rp/shared/presetOrder.ts"
 import { textField } from "@rp/shared/editing.ts"
@@ -218,6 +219,7 @@ describe("workshop", () => {
           "edit_card",
           "clone_card",
           "start_chat",
+          ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
           "send_message"
         ])
         assert.deepStrictEqual(bodies[1]!.tools, first.tools)
@@ -495,6 +497,7 @@ describe("workshop", () => {
           "edit_card",
           "clone_card",
           "start_chat",
+          ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
           "send_message"
         ]
       )

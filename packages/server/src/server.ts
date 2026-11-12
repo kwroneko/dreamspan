@@ -1,3 +1,4 @@
+import { operationWriter, installOperationRuntime } from "./agent/operations.ts"
 import { makeWorkshopHandlers } from "./api/workshop.ts"
 import {
   AuthenticatedAgentApi,
@@ -164,7 +165,7 @@ const CoreHandlers = AppCoreApi.toLayer(
   })
 )
 
-const Handlers = Layer.mergeAll(
+const HandlerLayers = Layer.mergeAll(
   CoreHandlers,
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
   AuthenticatedShellUpdatesApi.toLayer(
@@ -186,6 +187,17 @@ const Handlers = Layer.mergeAll(
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),
   AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
+)
+
+const Handlers = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const execution = yield* ExecutionRegistry
+    yield* installOperationRuntime(execution.operationRuntime, yield* Commands)
+  })
+).pipe(
+  Layer.provideMerge(
+    HandlerLayers.pipe(Layer.provide(Layer.effect(Database.Writer, Effect.map(Database.Writer, operationWriter))))
+  )
 )
 
 /**

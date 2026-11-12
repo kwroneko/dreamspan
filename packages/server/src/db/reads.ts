@@ -1,3 +1,4 @@
+import { operationInfo } from "./operationPolicies.ts"
 import { archiveCandidates } from "./cardArchive.ts"
 import { LibraryRef } from "@rp/shared/library.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
@@ -435,6 +436,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
+    WorkshopOperationInfo: (input) => operationInfo(sql, input).pipe(query("WorkshopOperationInfo")),
     GetBinLimits: ({ userId }) => readBinLimits(sql, userId, binLimits).pipe(query("GetBinLimits")),
     FindUserByHandle: ({ handle }) =>
       sql<UserRow>`SELECT * FROM users WHERE handle = ${handle}`.pipe(

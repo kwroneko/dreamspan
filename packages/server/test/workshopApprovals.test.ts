@@ -760,3 +760,74 @@ describe("workshop approvals", () => {
     }).pipe(Effect.scoped)
   })
 })
+
+it.live(
+  "generate_reply asks before sending the other chat to its chosen provider, then returns its reply and an undo record",
+  () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const steps: Step[] = []
+      const f = yield* workshop(scripted(steps).handler)
+      const target = yield* f.api.CreateWorkshop({ title: "Target workshop" })
+      steps.push({ name: "generate_reply", args: { chat: target.id }, id: "generate-other" })
+      const before = f.mock.requests().filter((r) => r.path === "/v1/chat/completions").length
+      const versionId = yield* task(f.api, f.chat, "try the other chat")
+      const prompt = yield* awaitApproval(f.events, versionId, "generate-other")
+      assert.strictEqual(prompt.capability, "generate")
+      assert.isTrue(prompt.rows.some((r) => r.label === "chat" && r.value === "Target workshop"))
+      assert.isTrue(prompt.rows.some((r) => r.label === "provider" && r.value.includes("Mock")))
+      assert.strictEqual(f.mock.requests().filter((r) => r.path === "/v1/chat/completions").length, before + 1)
+      yield* answer(f.api, prompt, "allow")
+      yield* eventually(() => finished(f.events, versionId as VersionId) !== undefined)
+      assert.isTrue(JSON.stringify(toolMessages(f.mock.requests())).includes("Ready."))
+      const user = yield* f.api.Whoami()
+      const receipt = yield* (yield* Reader).RolloutToolReceipt({
+        userId: user.id,
+        rolloutId: prompt.rolloutId,
+        toolCallId: "generate-other"
+      })
+      assert.strictEqual(receipt!.text, "Ready.")
+      const effects = yield* f.api.ListRolloutEffects({ chatId: f.chat.id })
+      const generated = effects.find((e) => e.kind === "reply.generate")!
+      assert.isDefined(generated)
+      assert.isNotNull(generated.undo)
+      yield* f.api.UndoRolloutEffect(generated)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  }
+)
+
+it.live("generate_reply refuses a changed chosen provider after the user approved the displayed target", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const steps: Step[] = []
+    const f = yield* workshop(scripted(steps).handler)
+    const target = yield* f.api.CreateWorkshop({ title: "Pinned target" })
+    steps.push({ name: "generate_reply", args: { chat: target.id }, id: "changed-provider" })
+    const versionId = yield* task(f.api, f.chat, "try it")
+    const prompt = yield* awaitApproval(f.events, versionId, "changed-provider")
+    const count = f.mock.requests().filter((r) => r.path === "/v1/chat/completions").length
+    const connection = yield* f.api.CreateConnection({
+      kind: "openai-chat",
+      settings: {
+        name: "Other chosen connection",
+        baseUrl: `${f.mock.url}/v1`,
+        compat: {},
+        cacheTtlS: null,
+        maxConcurrent: null,
+        presetOverrideRefId: null
+      }
+    })
+    const model = yield* f.api.AddUserModel({ connectionId: connection.id, key: "other-model", overrides: {} })
+    yield* f.api.ChangeCast({
+      chatId: target.id,
+      forkId: target.currentForkId,
+      slotId: target.activeLeafSlotId,
+      change: { _tag: "Model", connection: connection.id, model: model.id }
+    })
+    yield* answer(f.api, prompt, "allow")
+    yield* eventually(() => finished(f.events, versionId as VersionId) !== undefined)
+    assert.include(JSON.stringify(toolMessages(f.mock.requests())), "changed while waiting")
+    assert.strictEqual(f.mock.requests().filter((r) => r.path === "/v1/chat/completions").length, count + 1)
+    assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})

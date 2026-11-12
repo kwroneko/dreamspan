@@ -1,3 +1,4 @@
+import { pendingOperationReceipt } from "./operationReceipts.ts"
 // A rollout's chat-state effects (spec/AGENTIC.md §4.3): a tool call's notes and state events,
 // attached to the version being generated so they hold only while it's shown (a swipe reverses
 // them), written with the call's receipt in one transaction. A call already receipted writes
@@ -23,7 +24,7 @@ export const makeRolloutEffectHandlers = (steps: LibrarySteps) => {
   return {
     // Fallback for registered non-read tools whose work is not a single storage write.
     // Atomic built-ins already wrote their receipt and the first result wins here too.
-    RecordRolloutEffects: ({ userId, rolloutId, toolCallId, result, isError, effects }) =>
+    RecordRolloutEffects: ({ userId, rolloutId, toolCallId, result, isError, effects, completeOperation }) =>
       Effect.gen(function* () {
         const [owned] = yield* sql<{ id: string }>`SELECT r.id FROM rollouts r JOIN chats c ON c.id = r.chat_id
         WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
@@ -31,7 +32,15 @@ export const makeRolloutEffectHandlers = (steps: LibrarySteps) => {
         const [prior] = yield* sql<{
           result_json: string
         }>`SELECT result_json FROM rollout_receipts WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
-        if (prior) return JSON.parse(prior.result_json) as string
+        if (prior) {
+          const text = JSON.parse(prior.result_json) as string
+          if (completeOperation && pendingOperationReceipt(text)) {
+            yield* sql`UPDATE rollout_receipts SET result_json = ${JSON.stringify(result)}, is_error = ${isError ? 1 : 0}
+              WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
+            return result
+          }
+          return text
+        }
         yield* sql`INSERT OR IGNORE INTO rollout_receipts ${sql.insert({ rollout_id: rolloutId, tool_call_id: toolCallId, result_json: JSON.stringify(result), is_error: isError ? 1 : 0, created_at: Date.now() })}`
         for (const [seq, effect] of (effects ?? []).entries()) {
           yield* sql`INSERT INTO rollout_effects ${sql.insert({

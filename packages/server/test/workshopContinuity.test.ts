@@ -92,7 +92,11 @@ describe("workshop messages and continuity", () => {
         (mock) => Effect.promise(() => mock.close())
       )
       const api = yield* client()
-      yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+      yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        preset: { openai_max_context: 32768 }
+      })
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
       const start = yield* send(api, chat, "Do the work.")
@@ -272,7 +276,8 @@ for (const [kind, cacheMode] of [
           baseUrl: kind === "anthropic" ? mock.url : `${mock.url}/v1`,
           ...(kind === "anthropic" ? { apiKey: "synthetic-key" } : {})
         },
-        model: { cacheBreakpoints: cacheMode }
+        model: { cacheBreakpoints: cacheMode },
+        preset: { openai_max_context: 32768 }
       })
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
@@ -349,7 +354,11 @@ it.live("removes the empty working slot after a final empty answer, with no bin 
       (mock) => Effect.promise(() => mock.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: {},
+      preset: { openai_max_context: 32768 }
+    })
     const chat = yield* api.CreateWorkshop({})
     const events = yield* watch(api, chat)
     const first = yield* send(api, chat, "One message please.")
@@ -401,7 +410,11 @@ for (const ending of ["stop", "failure"] as const)
         (mock) => Effect.promise(() => mock.close())
       )
       const api = yield* client()
-      yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+      yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        preset: { openai_max_context: 32768 }
+      })
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
       const start = yield* send(api, chat, "Work then wait.")
@@ -734,7 +747,11 @@ it.live("each posted message starts a fresh parser and passes through the final 
       (mock) => Effect.promise(() => mock.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: {},
+      preset: { openai_max_context: 32768 }
+    })
     const before = yield* api.GetGlobalRegex()
     yield* api.SetGlobalRegex({
       expectedRevision: before.revision,
@@ -801,7 +818,11 @@ it.live("a queued user message posts below the last send without leaving an empt
       (mock) => Effect.promise(() => mock.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: {},
+      preset: { openai_max_context: 32768 }
+    })
     const chat = yield* api.CreateWorkshop({})
     const events = yield* watch(api, chat)
     const first = yield* send(api, chat, "Please work.")
@@ -870,7 +891,11 @@ it.live("Stop during the posting transaction's acknowledgement leaves the next m
       (mock) => Effect.promise(() => mock.close())
     )
     const api = yield* client()
-    yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+    yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: {},
+      preset: { openai_max_context: 32768 }
+    })
     const chat = yield* api.CreateWorkshop({})
     const events = yield* watch(api, chat)
     const first = yield* send(api, chat, "Post and wait.")
