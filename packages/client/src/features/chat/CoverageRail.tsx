@@ -61,6 +61,23 @@ interface Bar {
   readonly className: string
   readonly label: string
   readonly open: string | null
+  /** The summary drawn; absent for a job. */
+  readonly summary?: string
+}
+
+/**
+ * The summaries the rail draws, matched by id. With a character's summaries shown (separate
+ * contexts), the coverage holds the shared summaries as well as the character's own, and a shared
+ * one can cover exactly the messages an own one does: a shared summary the character doesn't read,
+ * over messages its own summaries cover, isn't drawn, so the bar there is the character's.
+ */
+export const railRows = (rows: ReadonlyArray<LcmSummary>, layer: ReadonlyArray<Pick<LcmSummary, "id">>) => {
+  const inUse = new Set(layer.map((s) => s.id))
+  const own = rows.filter((r) => (r.audience?.length ?? 0) > 0)
+  if (own.length === 0) return rows
+  return rows.filter(
+    (r) => (r.audience?.length ?? 0) > 0 || inUse.has(r.id) || !own.some((o) => o.from <= r.to && o.to >= r.from)
+  )
 }
 
 const barClass = (summary: LcmSummary, inUse: boolean) => {
@@ -98,13 +115,14 @@ export function CoverageRail({
     const b = position(hi)
     return a && b ? { top: a.start, height: Math.max(4, b.end - a.start) } : null
   }
-  for (const summary of rows) {
+  for (const summary of railRows(rows, lcm.layer)) {
     const at = place(summary.from, summary.to)
     if (!at) continue
     const health = healthOf(summary)
     bars.push({
       key: summary.id,
       level: summary.level,
+      summary: summary.id,
       ...at,
       className: barClass(summary, inUse.has(summary.id)),
       label: `Level ${summary.level}, ${rangeText(summary.from, summary.to).toLowerCase()}${health === "fresh" ? "" : `, ${health}`}${inUse.has(summary.id) ? ", sent to the model" : ", condensed into a higher level"}`,
@@ -142,6 +160,7 @@ export function CoverageRail({
           <button
             type="button"
             data-level={bar.level}
+            data-summary={bar.summary}
             aria-label={`${bar.label}. Open the summaries.`}
             onClick={() => onOpen(bar.open)}
             className="pointer-events-auto absolute rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-focus"

@@ -10,6 +10,7 @@ import { Segmented } from "../../ui/Segmented.tsx"
 import { revealAdded, revealIfHidden } from "../../ui/reveal.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
+import { SummaryViewer, summaryViewers } from "./SummaryViewer.tsx"
 
 type Record = typeof HistoryRecord.Type
 const keyOf = (hit: HistoryHit) => `${hit.kind}:${hit.targetId}`
@@ -115,6 +116,10 @@ export function HistoryPanel({
           }}
         />
       </div>
+      <SummaryViewer
+        session={session}
+        about="Whose summaries the searches look in and replace in. Shared: the summaries every character reads up to where it missed something. A character: the shared ones it read and its own, so its own can be found and changed. Example: pick Wren to replace a name in the summaries written for her alone."
+      />
       {pairs.map((id, index) => (
         <section
           key={id}
@@ -268,7 +273,12 @@ function HistorySearchPair({
   const searched = useRef<typeof search | null>(null)
   const forkId = view.forkId ?? view.chat?.currentForkId
   const target = forkId ? { chatId: session.id, forkId } : null
-  const searchKey = JSON.stringify([search, refresh])
+  // With separate contexts, whose summaries are searched (the Summaries of choice above the searches).
+  const viewer = view.lcmViewer
+  const searchKey = JSON.stringify([search, refresh, viewer])
+  // A replacement that covered the summaries keeps them in use, but with separate contexts one search
+  // reaches one reader's summaries: the others over the same messages must be written again.
+  const separate = summaryViewers(view.cast).length > 0
   const idle = search.pairs.some((p) => !p.find)
   useEffect(() => {
     const request = ++revision.current
@@ -289,7 +299,13 @@ function HistorySearchPair({
       const all: HistoryHit[] = []
       do {
         const result = await session.call((c) =>
-          c("PreviewHistory", { chatId: session.id, forkId, search, ...(cursor ? { cursor } : {}) })
+          c("PreviewHistory", {
+            chatId: session.id,
+            forkId,
+            search,
+            ...(cursor ? { cursor } : {}),
+            ...(viewer ? { viewer } : {})
+          })
         )
         if (revision.current !== request) return
         if (!result.ok) {
@@ -333,7 +349,7 @@ function HistorySearchPair({
       clearTimeout(timer)
       if (revision.current === request) revision.current = request + 1
     }
-  }, [search, session, forkId, view.lcm, view.history, refresh, searchKey])
+  }, [search, session, forkId, viewer, view.lcm, view.history, refresh, searchKey])
   const included = useMemo(
     () =>
       hits
@@ -372,7 +388,7 @@ function HistorySearchPair({
         applications: [
           {
             ...target,
-            summariesIncluded: !one && search.summaries && skipped.size === 0,
+            summariesIncluded: !one && search.summaries && skipped.size === 0 && !separate,
             edits: edits.map(({ kind, targetId, beforeId, before, after }) => ({
               kind,
               targetId,

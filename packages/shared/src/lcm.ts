@@ -91,7 +91,9 @@ export const LcmJob = Schema.Struct({
   status: Schema.Literals(["pending", "processing", "failed"]),
   error: Schema.NullOr(Schema.String),
   /** Asked to be tried again with the next reply (SetSummaryRerun). */
-  rerun: Schema.Boolean
+  rerun: Schema.Boolean,
+  /** A separate context's own work: its character's identities, as `LcmSummary.audience`. Absent: shared. */
+  audience: Schema.optionalKey(Schema.Array(Schema.String))
 })
 export type LcmJob = typeof LcmJob.Type
 

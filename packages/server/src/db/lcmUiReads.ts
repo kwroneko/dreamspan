@@ -14,7 +14,7 @@ import { toLlmRequest, type LlmRequestRow } from "./providers.ts"
 import { readingOnce, readSummary } from "./lcmReads.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
-import { audienceScope, viewerAudience } from "./lcmAudience.ts"
+import { audienceIds, audienceScope, viewerAudience } from "./lcmAudience.ts"
 
 /** Most summaries one coverage read returns: far more than a window of 500 messages needs. */
 const MAX_COVERAGE = 600
@@ -264,7 +264,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           first_chain: string
           last_chain: string
           updated_at: number
-        }>`SELECT j.updated_at,j.id, j.level, j.first_slot_id, j.last_slot_id, j.status, j.error, a.depth AS first_depth, b.depth AS last_depth,
+          audience_json: string | null
+        }>`SELECT j.updated_at,j.audience_json,j.id, j.level, j.first_slot_id, j.last_slot_id, j.status, j.error, a.depth AS first_depth, b.depth AS last_depth,
             a.chain_id AS first_chain, b.chain_id AS last_chain
           FROM summarization_jobs j JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
           WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id=${fork}) AND j.status IN ('pending', 'processing', 'failed')
@@ -336,7 +337,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
             firstSlotId: j.first_slot_id as never,
             status: j.status,
             error: j.error,
-            rerun: reruns.has(j.id)
+            rerun: reruns.has(j.id),
+            ...(j.audience_json === null ? {} : { audience: audienceIds(j.audience_json) })
           })),
           cursorDepth:
             shown && layer.cursor !== null

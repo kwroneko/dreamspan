@@ -639,4 +639,34 @@ describe("summaries kept per view (unit C7)", () => {
       }),
     { timeout: 180_000 }
   )
+
+  lcmTest(
+    "the summary UI tells a character's own work from the shared work over the same messages",
+    (server) =>
+      Effect.gen(function* () {
+        const { h, wren } = yield* chat(server, "separate")
+        yield* h.settle
+        // A failed shared job and a failed one of Wren's over exactly the same messages, after
+        // everything that covers them (so neither reads as resolved).
+        const job = (id: string, audience: string | null) => ({
+          sql: `INSERT INTO summarization_jobs(id,chat_id,level,first_slot_id,last_slot_id,status,target_token_count,error,created_at,updated_at,audience_json)
+            VALUES(?,?,1,?,?,'failed',100,'refused',?,?,?)`,
+          params: [id, h.chat.id, h.rows[25]!.slotId, h.rows[26]!.slotId, 9e15, 9e15, audience]
+        })
+        yield* fixtureSql(h.dataDir, [job("job-shared", null), job("job-wren", JSON.stringify([wren]))])
+        const leafSlotId = h.rows.at(-1)!.slotId
+        const view = yield* h.reader.GetLcmState({ userId: h.userId, chatId: h.chat.id, leafSlotId, viewer: wren })
+        const ours = view.jobs.filter((j) => j.id === "job-shared" || j.id === "job-wren")
+        assert.deepStrictEqual(ours.map((j) => [j.id, j.from, j.to, j.audience ?? null]).sort(), [
+          ["job-shared", 26, 27, null],
+          ["job-wren", 26, 27, [wren]]
+        ])
+        const shared = yield* h.reader.GetLcmState({ userId: h.userId, chatId: h.chat.id, leafSlotId })
+        assert.deepStrictEqual(
+          shared.jobs.filter((j) => j.id.startsWith("job-")).map((j) => [j.id, "audience" in j]),
+          [["job-shared", false]]
+        )
+      }),
+    { timeout: 120_000 }
+  )
 })

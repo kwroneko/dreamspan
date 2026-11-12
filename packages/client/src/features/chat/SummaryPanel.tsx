@@ -18,7 +18,18 @@ import { RevisionComparison } from "../../ui/RevisionDiff.tsx"
 import { Alert, Disclosure } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { EstimateList } from "./EnableLcmDialog.tsx"
-import { boundaryText, countText, failureText, healthOf, moneyText, originText, rangeText, tokensText } from "./lcm.ts"
+import {
+  boundaryText,
+  countText,
+  failureText,
+  healthOf,
+  moneyText,
+  originText,
+  rangeText,
+  sameAudience,
+  sameWork,
+  tokensText
+} from "./lcm.ts"
 import { ClampedText, HintBadge, LevelBadge, SummaryBadges } from "./summaryParts.tsx"
 import type { ChatSession } from "./session.ts"
 import { TimelineToggle } from "./TimelineToggle.tsx"
@@ -737,7 +748,7 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
       </div>
       {jobs > 0 && (
         <Disclosure title="Estimate for what is left">
-          <EstimateList estimate={backfill.remaining} title="What is left" />
+          <EstimateList estimate={backfill.remaining} title="What is left" cast={session.snapshot().cast} />
         </Disclosure>
       )}
       <Problem error={error} />
@@ -797,16 +808,13 @@ export function SummaryPanel({
       (parent) =>
         parent.id !== s.id &&
         parent.origin !== "generated" &&
+        sameAudience(parent, s) &&
         parent.from <= s.from &&
         parent.to >= s.to &&
         (parent.level > s.level || parent.from !== s.from || parent.to !== s.to)
     )
   const extra = wanted !== null && fetched?.id === wanted ? fetched : null
-  const unfinished = lcm.jobs.filter(
-    (job) =>
-      job.status !== "failed" ||
-      !lcm.failed.some((s) => s.level === job.level && s.from === job.from && s.to === job.to)
-  )
+  const unfinished = lcm.jobs.filter((job) => job.status !== "failed" || !lcm.failed.some((s) => sameWork(s, job)))
   const heading = (label: string, hint: string) => (
     <Tooltip label={hint}>
       <h3

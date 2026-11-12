@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
 import type { LcmState } from "@rp/shared/lcm.ts"
-import { countsOf, failureText, healthOf, userTextKept } from "../src/features/chat/lcm.ts"
+import { countsOf, failureText, healthOf, sameWork, userTextKept } from "../src/features/chat/lcm.ts"
 
 test("a terminal summary and its failed job count as one failed range", () => {
   const state = {
@@ -30,6 +30,32 @@ test("a failed redo of a summary the user edited isn't counted on the divider: t
     [{ ...state.layer[0]!, to: 8 }]
   ])
     expect(countsOf({ ...state, layer } as unknown as LcmState).failed).toBe(1)
+})
+
+test("a shared summary and a character's own over the same messages are two pieces of work", () => {
+  // With separate contexts Wren reads her own summary of 1–4 where the shared one of 1–4 also exists.
+  const wren = ["wren-old", "wren"]
+  const state = {
+    layer: [{ level: 1, from: 1, to: 4, origin: "user", rerun: false, fresh: true, status: "complete" }],
+    failed: [
+      { level: 1, from: 1, to: 4, rerun: false },
+      { level: 1, from: 1, to: 4, rerun: false, audience: wren }
+    ],
+    jobs: [
+      { id: "shared-redo", level: 1, from: 1, to: 4, status: "failed", rerun: false },
+      { id: "wren-redo", level: 1, from: 1, to: 4, status: "failed", rerun: false, audience: [...wren].reverse() }
+    ]
+  } as unknown as LcmState
+  // The user's shared text keeps the shared redo off the divider, not Wren's.
+  expect(userTextKept(state, state.failed[0]!)).toBe(true)
+  expect(userTextKept(state, state.failed[1]!)).toBe(false)
+  expect(countsOf(state).failed).toBe(1)
+  // A job is the same work as a failed summary only when both are for the same reader.
+  expect(sameWork(state.failed[1]!, state.jobs[1]!)).toBe(true)
+  expect(sameWork(state.failed[0]!, state.jobs[1]!)).toBe(false)
+  expect(sameWork(state.failed[1]!, state.jobs[0]!)).toBe(false)
+  // Without the user's text, both count.
+  expect(countsOf({ ...state, layer: [] } as unknown as LcmState).failed).toBe(2)
 })
 
 test("retained failed lineage is shown as resolved after successful coverage", () => {

@@ -9,6 +9,7 @@ import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
 import { level1 } from "./support/summaries.ts"
+import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { choices, nextChip } from "./support/strip.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
@@ -440,33 +441,43 @@ for (const width of [1440, 390])
     })
   }
 
+/**
+ * A separate-contexts chat where Wren missed message 2: the shared summaries of 1 and of 2–3,
+ * and Wren's own of 2–3, written without the message she missed. Her own and the shared one
+ * cover exactly the same messages.
+ */
+const summarizedChat = async () => {
+  const { chatId, slotId, forkId } = await threeCharacters()
+  const ids = await castIds()
+  const cast = (at: SlotId, c: object) => admin((api) => api.ChangeCast({ chatId, slotId: at, change: c as never }))
+  await cast(slotId, { _tag: "ContextPerSpeaker", view: "separate" })
+  await cast(slotId, { _tag: "Away", entityId: ids.wren, away: true })
+  // Mira answers while Wren is away; Wren is back for Mira's next lines.
+  const missed = await reply(chatId, forkId!, ids.mira)
+  await cast(missed.slotId, { _tag: "Away", entityId: ids.wren, away: false })
+  await reply(chatId, forkId!, ids.mira)
+  // The newest message is never summarized.
+  await reply(chatId, forkId!, ids.mira)
+  await admin((api) => api.SetLcmEnabled({ chatId, enabled: true }))
+  const path = await admin((api) =>
+    api.ReadPath({ chatId, forkId: forkId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+  )
+  const [first, second, third] = path.entries
+  const dataDir = server().dataDir
+  const opening = await level1(dataDir, chatId, [first!], "The inn's door opened.")
+  const shared = await level1(dataDir, chatId, [second!, third!], "Mira nodded, then spoke of the lantern.")
+  const own = await level1(dataDir, chatId, [second!, third!], "Wren came back as Mira spoke of the lantern.", {
+    audience: [ids.wren],
+    missed: [second!]
+  })
+  return { chatId, forkId: forkId as never, ids, opening, shared, own }
+}
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`the Summaries panel shows a character's own summaries at ${width} ${theme}`, async ({ page }, info) => {
       await look(page, width, theme)
-      const { chatId, slotId, forkId } = await threeCharacters()
-      const ids = await castIds()
-      const cast = (at: SlotId, c: object) => admin((api) => api.ChangeCast({ chatId, slotId: at, change: c as never }))
-      await cast(slotId, { _tag: "ContextPerSpeaker", view: "separate" })
-      await cast(slotId, { _tag: "Away", entityId: ids.wren, away: true })
-      // Mira answers while Wren is away; Wren is back for Mira's next lines.
-      const missed = await reply(chatId, forkId!, ids.mira)
-      await cast(missed.slotId, { _tag: "Away", entityId: ids.wren, away: false })
-      await reply(chatId, forkId!, ids.mira)
-      // The newest message is never summarized.
-      await reply(chatId, forkId!, ids.mira)
-      await admin((api) => api.SetLcmEnabled({ chatId, enabled: true }))
-      const path = await admin((api) =>
-        api.ReadPath({ chatId, forkId: forkId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
-      )
-      const [first, second, third] = path.entries
-      // The shared summaries; and Wren's own of messages 2–3, written without the one she missed.
-      await level1(server().dataDir, chatId, [first!], "The inn's door opened.")
-      await level1(server().dataDir, chatId, [second!, third!], "Mira nodded, then spoke of the lantern.")
-      await level1(server().dataDir, chatId, [second!, third!], "Wren came back as Mira spoke of the lantern.", {
-        audience: [ids.wren],
-        missed: [second!]
-      })
+      const { chatId } = await summarizedChat()
       await page.goto(`${server().url}/chats/${chatId}`)
       const panel = await openPanel(page, "Summaries")
       const inUse = panel.getByRole("list", { name: "Summaries in use" })
@@ -489,5 +500,190 @@ for (const width of [1440, 390])
       await page.getByRole("option", { name: /^Shared/ }).click()
       await expect(inUse.getByText("Wren's own", { exact: true })).toHaveCount(0)
       await expect(inUse.getByRole("listitem")).toHaveCount(2)
+    })
+  }
+
+/** The coverage rail on or off: an account setting, so each test that turns it on turns it off. */
+const railSwitch = async (page: Page, on: boolean) => {
+  const toggle = (await openPanel(page, "Summaries")).getByRole("switch", { name: /Coverage rail/ })
+  if ((await toggle.getAttribute("aria-checked")) !== String(on)) await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-checked", String(on))
+}
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`whose summaries are shown is the tab's URL, and the rail draws them by id at ${width} ${theme}`, async ({
+      page
+    }, info) => {
+      await look(page, width, theme)
+      const { chatId, ids, opening, shared, own } = await summarizedChat()
+      await page.goto(`${server().url}/chats/${chatId}`)
+      let panel = await openPanel(page, "Summaries")
+      const picker = () => panel.getByRole("combobox", { name: /^Summaries of/ })
+      await picker().click()
+      await page.getByRole("option", { name: /^Wren/ }).click()
+      await expect(page).toHaveURL(new RegExp(`summariesOf=${ids.wren}`))
+      await railSwitch(page, true)
+      try {
+        // Wren's view: the shared summary of 1 and her own of 2–3; the shared one of 2–3, over
+        // exactly the same messages, isn't hers, so the rail draws hers there.
+        const rail = page.getByTestId("coverage-rail")
+        await expect(rail.locator(`[data-summary="${opening.id}"]`)).toHaveCount(1)
+        await expect(rail.locator(`[data-summary="${own.id}"]`)).toHaveCount(1)
+        await expect(rail.locator(`[data-summary="${shared.id}"]`)).toHaveCount(0)
+        if (width === 390) await page.keyboard.press("Escape")
+        await rail.locator(`[data-summary="${own.id}"]`).click()
+        panel = await openPanel(page, "Summaries")
+        await expect(panel.locator(`[data-summary="${own.id}"]`)).toBeVisible()
+        await expect(panel.locator(`[data-summary="${shared.id}"]`)).toHaveCount(0)
+
+        // A reload and a second tab with the same URL show Wren's summaries.
+        await page.reload()
+        panel = await openPanel(page, "Summaries")
+        await expect(picker()).toHaveText(/Wren/)
+        await expect(panel.getByText("Wren's own", { exact: true }).first()).toBeVisible()
+        const second = await page.context().newPage()
+        await second.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        await second.goto(page.url())
+        const other = await openPanel(second, "Summaries")
+        await expect(other.getByRole("combobox", { name: /^Summaries of/ })).toHaveText(/Wren/)
+        await expect(other.locator(`[data-summary="${own.id}"]`)).toBeVisible()
+        await second.close()
+        await page.mouse.move(0, 0)
+        await expectLayout(page, info, `contexts-summaries-url-${width}-${theme}`, {
+          scope: '[role="tabpanel"][aria-label="Summaries"]'
+        })
+
+        // Shared: the shared summary of 2–3 is drawn, Wren's isn't, and the URL says nothing.
+        await picker().click()
+        await page.getByRole("option", { name: /^Shared/ }).click()
+        await expect(page).not.toHaveURL(/summariesOf=/)
+        if (width === 390) await page.keyboard.press("Escape")
+        await expect(rail.locator(`[data-summary="${shared.id}"]`)).toHaveCount(1)
+        await expect(rail.locator(`[data-summary="${own.id}"]`)).toHaveCount(0)
+
+        // A character no longer offered (or never one) falls back to Shared, quietly.
+        await page.goto(`${server().url}/chats/${chatId}?summariesOf=${ids.tobin}0`)
+        panel = await openPanel(page, "Summaries")
+        await expect(picker()).toHaveText(/Shared/)
+        await expect(page).not.toHaveURL(/summariesOf=/)
+        await expect(page.getByText("This view is no longer available", { exact: false })).toHaveCount(0)
+        await expect(panel.getByRole("alert")).toHaveCount(0)
+      } finally {
+        await railSwitch(page, false)
+      }
+    })
+  }
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`history search finds and replaces in a character's own summaries at ${width} ${theme}`, async ({
+      page
+    }, info) => {
+      await look(page, width, theme)
+      const { chatId, forkId, opening, shared, own } = await summarizedChat()
+      await page.goto(`${server().url}/chats/${chatId}?panel=history`)
+      await expect(page.getByRole("heading", { name: "Searches", exact: true })).toBeVisible()
+      const history = page.locator("[data-history-panel]")
+      // Only the summaries, so the counts are theirs.
+      await history.getByRole("button", { name: "Messages", exact: true }).click()
+      await history.getByRole("button", { name: "Swipes", exact: true }).click()
+      await page.getByRole("textbox", { name: "Find", exact: true }).fill("lantern")
+      await page.getByRole("textbox", { name: "Replace with", exact: true }).fill("lamp")
+      const status = page.getByRole("status").filter({ hasText: "in summaries" })
+      // Shared: the shared summary of 2–3.
+      await expect(status).toHaveText("0 in messages, 0 in swipes, 1 in summaries")
+      await expect(history.getByText("Mira nodded", { exact: false })).toBeVisible()
+      await expect(history.getByText("Wren came back", { exact: false })).toHaveCount(0)
+      const picker = history.getByRole("combobox", { name: /^Summaries of/ })
+      await picker.click()
+      await page.getByRole("option", { name: /^Wren/ }).click()
+      // Wren's: her own of 2–3 (the shared one of 2–3 holds the message she missed).
+      await expect(history.getByText("Wren came back", { exact: false })).toBeVisible()
+      await expect(history.getByText("Mira nodded", { exact: false })).toHaveCount(0)
+      await expect(status).toHaveText("0 in messages, 0 in swipes, 1 in summaries")
+      await page.mouse.move(0, 0)
+      await expectLayout(page, info, `contexts-history-${width}-${theme}`, { scope: "[data-history-panel]" })
+      await page.getByRole("button", { name: "Replace all", exact: true }).click()
+      await expect(page.getByText("History replaced", { exact: true })).toBeVisible()
+      const text = (id: string) =>
+        admin((api) => Effect.map(api.GetSummary({ forkId, summaryId: id as never }), (s) => s.content))
+      await expect.poll(() => text(own.id)).toBe("Wren came back as Mira spoke of the lamp.")
+      expect(await text(shared.id)).toBe("Mira nodded, then spoke of the lantern.")
+      expect(await text(opening.id)).toBe("The inn's door opened.")
+    })
+  }
+
+/**
+ * A separate-contexts chat long enough to summarize, with Wren away for messages 10–19: the
+ * estimate has a pass of her own.
+ */
+const longChat = async () => {
+  const { chatId, slotId } = await threeCharacters()
+  const ids = await castIds()
+  await admin((api) =>
+    Effect.gen(function* () {
+      yield* api.ChangeCast({ chatId, slotId, change: { _tag: "ContextPerSpeaker", view: "separate" } })
+      let parent = slotId
+      for (let n = 2; n <= 40; n++) {
+        const sent = yield* api.SendMessage({
+          chatId,
+          parentSlotId: parent,
+          branch: false,
+          content: `Message ${n}. ` + "The road ran on past the inn and the river. ".repeat(12)
+        })
+        if (sent._tag !== "Posted") return yield* Effect.die(new Error("the message was queued"))
+        parent = sent.entry.slotId
+      }
+      // A new chat summarizes by default; turned off, enabling it shows the estimate first.
+      yield* api.SetLcmEnabled({ chatId, enabled: false })
+      yield* api.ChangeLcmSettings({
+        chatId,
+        change: { recentTarget: 600, recentMax: 1600, leafInput: 400, leafTarget: 60 }
+      })
+    })
+  )
+  const path = await admin((api) => api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 }))
+  await Effect.runPromise(
+    fixtureSql(server().dataDir, [
+      {
+        sql: "UPDATE version_records SET cast_json = ? WHERE slot_id IN (SELECT id FROM slots WHERE chat_id = ?)",
+        params: [JSON.stringify([ids.mira, ids.tobin, ids.wren].sort()), chatId]
+      },
+      ...path.entries.slice(9, 19).map((entry) => ({
+        sql: "UPDATE version_records SET presence_json = ? WHERE id = ?",
+        params: [JSON.stringify({ away: [ids.wren] }), entry.version.id]
+      }))
+    ])
+  )
+  return { chatId }
+}
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`the catch-up estimate shows each character's own pass at ${width} ${theme}`, async ({ page }, info) => {
+      await look(page, width, theme)
+      const { chatId } = await longChat()
+      await page.goto(`${server().url}/chats/${chatId}`)
+      const panel = await openPanel(page, "Summaries")
+      await panel.getByRole("button", { name: "Enable summaries", exact: true }).click()
+      const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
+      const estimate = dialog.getByRole("group", { name: "Estimate" })
+      const own = estimate.getByRole("list", { name: "Each character's own summaries" })
+      await expect(own.getByRole("listitem")).toHaveCount(1)
+      await expect(own).toContainText(/^Of these, for Wren alone: \d+ summar/)
+      await expectLayout(page, info, `contexts-estimate-${width}-${theme}`, { scope: '[role="dialog"]' })
+      await dialog.getByRole("button", { name: "Enable summaries", exact: true }).click()
+      await expect(dialog).toHaveCount(0)
+      // The catch-up's estimate for what is left names her pass too.
+      const catching = (await openPanel(page, "Summaries")).getByRole("region", { name: "Catching up" })
+      await catching.getByText("Estimate for what is left", { exact: true }).click()
+      await expect(
+        catching.getByRole("list", { name: "Each character's own summaries" }).getByRole("listitem")
+      ).toContainText("for Wren alone")
+      await page.mouse.move(0, 0)
+      await expectLayout(page, info, `contexts-catching-up-${width}-${theme}`, {
+        scope: '[aria-label="Catching up"]'
+      })
     })
   }
