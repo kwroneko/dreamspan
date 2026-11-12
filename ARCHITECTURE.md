@@ -2949,3 +2949,5 @@ Library replace registry (2026-11-12): libraryReplaceKinds in shared/libraryText
 Library replace no-ops (2026-11-12): planning removes fields whose replacement text is unchanged before checkpointing drafts or creating a changeset group. Identity replacements leave drafts and saved heads untouched and report the entries skipped.
 
 Library replace note checks (2026-11-12): the writer validates note draft references against the caller and checks replacing-note target conflicts before checkpointing or changing an entry, just as the editor Save does. Invalid entries are skipped with their drafts intact.
+
+Message search paging review (2026-11-12): loaded query pages are fixed until the text changes or the results are reopened; chat/generation invalidations do not replace a page above retained older cursors. This keeps a reply arriving during pagination from dropping the first page’s former last row. searchReview.spec.ts checks this race and opens message 751 of a 1,500-message virtualized chat through a result and reload, at both widths and themes.

@@ -113,10 +113,9 @@ function Page({
   last: boolean
   onMore: (next: MessageCursor) => void
 }) {
-  const atom = useMemo(
-    () => AppClient.query("SearchMessages", { text, cursor }, { reactivityKeys: ["chats", "chat-lists"] }),
-    [text, cursor]
-  )
+  // Keep loaded pages fixed. Refreshing the first page while retaining older cursors
+  // would drop its former last row whenever a new reply arrives.
+  const atom = useMemo(() => AppClient.query("SearchMessages", { text, cursor }), [text, cursor])
   const result = useAtomValue(atom)
   if (AsyncResult.isFailure(result))
     return <li className="p-2 text-sm text-danger">The search couldn't be finished. Try again in a moment.</li>
