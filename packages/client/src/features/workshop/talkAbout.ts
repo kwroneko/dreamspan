@@ -2,7 +2,7 @@
 // newest workshop beside the story, starting one when there's none yet.
 import type { ChatCommandContext } from "../chat/commands.tsx"
 import { showToast } from "../../ui/Toast.tsx"
-import { SIDE_CHAT_PARAM, SIDE_CHAT_TAB } from "./sideChat.ts"
+import { sideChatSearch, SIDE_CHAT_TAB } from "./sideChat.ts"
 
 export async function talkAbout({ session, navigate }: ChatCommandContext) {
   const listed = await session.call((client) => client("ListAttachedWorkshops", { chatId: session.id }))
@@ -17,7 +17,7 @@ export async function talkAbout({ session, navigate }: ChatCommandContext) {
   const id = target.id
   void navigate?.({
     to: ".",
-    search: (prev: Record<string, unknown>) => ({ ...prev, panel: SIDE_CHAT_TAB, [SIDE_CHAT_PARAM]: id }),
+    search: (prev: Record<string, unknown>) => ({ ...sideChatSearch(prev, id), panel: SIDE_CHAT_TAB }),
     state: (prev) => ({ ...prev, chatPanel: true }),
     resetScroll: false
   })

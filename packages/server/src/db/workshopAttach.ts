@@ -14,12 +14,13 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
     AttachedWorkshops: ({ userId, chatId }) =>
       Effect.gen(function* () {
         const [story] = yield* sql<{ id: string }>`SELECT id FROM chats
-          WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+          WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL AND status = 'active'`
         if (!story) return yield* new NotFound({ entity: "chat", id: chatId })
         // Only the owner's own live workshops: the event's writer checked the story is theirs too.
         const rows = yield* sql<ChatRow>`SELECT c.* FROM state_events e JOIN chats c ON c.id = e.chat_id
           WHERE json_extract(e.value_json, '$.chat') = ${chatId} AND e.key = 'workshop.attached'
             AND e.slot_id IS NULL AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+            AND c.kind = 'workshop' AND c.status = 'active'
           GROUP BY c.id ORDER BY c.created_at DESC, c.id DESC LIMIT 200`
         return rows.map(toChat)
       }).pipe(query("AttachedWorkshops"))

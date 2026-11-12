@@ -5,12 +5,16 @@ import { assert, describe, it } from "@effect/vitest"
 import type { Chat, EntityId, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { ApprovalPrompt } from "@rp/shared/agent.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import { writeFileSync } from "node:fs"
 import { Effect, Stream } from "effect"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { storyTools } from "../src/agent/tools/history.ts"
+import { type ToolContext, type RolloutTool, toolWriter } from "../src/agent/tools.ts"
+import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import { client, login, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
-import { fixtureSql } from "./support/lcmFixtures.ts"
+import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
 type Body = Record<string, unknown>
@@ -58,10 +62,11 @@ const text = (body: Body) =>
  * One provider for both chats: a story request gets a plain reply; a side chat's turn reads the
  * story (read_story, then search_story for "flooded"), then answers.
  */
-const provider = () =>
+const provider = (hold: () => boolean = () => false) =>
   startMockProvider((request, res) => {
     const body = request.body as Body
     if (!toolNames(body).includes("read_story")) return sse(res, completionChunks(["Story reply."], {}))
+    if (hold()) return // Keep this workshop request open while the story generates.
     const done = results(body).length
     sse(
       res,
@@ -74,6 +79,24 @@ const provider = () =>
   })
 
 type Api = Effect.Success<ReturnType<typeof client>>
+
+const contextFor = (userId: UserId, workshop: Chat) =>
+  Effect.gen(function* () {
+    return {
+      userId,
+      chatId: workshop.id,
+      forkId: workshop.currentForkId,
+      leafSlotId: null,
+      slotId: "unused" as ToolContext["slotId"],
+      versionId: "unused" as VersionId,
+      rolloutId: "unused",
+      toolCallId: "unused",
+      reader: yield* Reader,
+      writer: toolWriter(yield* Writer),
+      cache: new Map<string, unknown>()
+    } satisfies ToolContext
+  })
+const storyTool = (id: string) => storyTools.find((t) => t.id === id)! as RolloutTool<Record<string, unknown>>
 
 /**
  * One workshop turn: the user's message, then the reply, waited for to its end. With `prompts`,
@@ -115,6 +138,222 @@ const turn = (api: Api, workshop: Chat, content: string, prompts?: Array<Approva
   }).pipe(Effect.scoped)
 
 describe("side chat", () => {
+  it.effect("cannot offer a side-chat tool in a story through a crafted tool selection", () =>
+    Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      for (const tool of storyTools) {
+        assert.isUndefined(toolForKind(registry, "rp", tool.id))
+        assert.strictEqual(toolForKind(registry, "workshop", tool.id), tool)
+      }
+      assert.isDefined(toolForKind(registry, "rp", "read_messages"))
+    }).pipe(Effect.provide(ExecutionRegistry.layer), Effect.scoped)
+  )
+
+  it.live("shows just the attached story in its one revocable reading permission", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const story = yield* api.CreateChat({ title: "Only this story" })
+      const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+      const capabilities = yield* api.ListWorkshopCapabilities({ chatId: workshop.id })
+      const read = capabilities.filter((c) => c.id === "chats.read")
+      assert.lengthOf(read, 1)
+      assert.strictEqual(read[0]!.label, "Read this story")
+      assert.include(read[0]!.explanation, story.title!)
+      assert.strictEqual(read[0]!.defaultMode, "ask")
+      assert.strictEqual(read[0]!.mode, "allow")
+      for (const mode of ["ask", "off", null] as const) {
+        const next = yield* api.SetWorkshopGrant({ chatId: workshop.id, capability: "chats.read", mode })
+        assert.strictEqual(next.find((c) => c.id === "chats.read")!.mode, mode ?? "ask")
+      }
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("refuses archived stories, and preserves separate lifetimes through restore and purge", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const userId = (yield* api.Whoami()).id
+      const story = yield* api.CreateChat({ title: "Lifecycle story" })
+      yield* posted(api.SendMessage({ chatId: story.id, parentSlotId: null, branch: false, content: "Visible story." }))
+      const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+      const context = yield* contextFor(userId, workshop)
+      const read = () => storyTool("read_story").execute(context, {})
+      assert.include((yield* read()).text, "Visible story.")
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE chats SET status = 'archived' WHERE id = ?", params: [story.id] }
+      ])
+      assert.include((yield* read()).text, "isn't available any more")
+      assert.strictEqual(yield* outcome(api.CreateWorkshop({ attachTo: story.id })), "NotFound")
+      assert.strictEqual(yield* outcome(api.ListAttachedWorkshops({ chatId: story.id })), "NotFound")
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE chats SET status = 'active' WHERE id = ?", params: [story.id] }
+      ])
+      assert.include((yield* read()).text, "Visible story.")
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE chats SET status = 'archived' WHERE id = ?", params: [workshop.id] }
+      ])
+      assert.lengthOf(yield* api.ListAttachedWorkshops({ chatId: story.id }), 0)
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE chats SET status = 'active' WHERE id = ?", params: [workshop.id] }
+      ])
+      const removedWorkshop = yield* api.DeleteChat({ chatId: workshop.id })
+      assert.lengthOf(yield* api.ListAttachedWorkshops({ chatId: story.id }), 0)
+      assert.strictEqual((yield* api.GetChat({ chatId: story.id })).id, story.id)
+      yield* writer.RestoreBinItem({ userId, itemId: removedWorkshop.id })
+      assert.lengthOf(yield* api.ListAttachedWorkshops({ chatId: story.id }), 1)
+      const removedStory = yield* api.DeleteChat({ chatId: story.id })
+      assert.include((yield* read()).text, "isn't available any more")
+      assert.strictEqual((yield* api.GetChat({ chatId: workshop.id })).id, workshop.id)
+      yield* writer.RestoreBinItem({ userId, itemId: removedStory.id })
+      assert.include((yield* read()).text, "Visible story.")
+      const purgedStory = yield* api.DeleteChat({ chatId: story.id })
+      yield* writer.PurgeBinItem({ userId, itemId: purgedStory.id })
+      assert.include((yield* read()).text, "isn't available any more")
+      // A dangling attachment fails closed; it doesn't erase the workshop or its grant.
+      assert.strictEqual((yield* api.GetChat({ chatId: workshop.id })).id, workshop.id)
+      const purgedWorkshop = yield* api.DeleteChat({ chatId: workshop.id })
+      yield* writer.PurgeBinItem({ userId, itemId: purgedWorkshop.id })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("reads edits and shared summary revisions at an unchanged tip", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const userId = (yield* api.Whoami()).id
+      const story = yield* api.CreateChat({ title: "Shared summaries" })
+      const first = (yield* posted(
+        api.SendMessage({ chatId: story.id, parentSlotId: null, branch: false, content: "Before edit." })
+      )).entry
+      const second = (yield* posted(
+        api.SendMessage({ chatId: story.id, parentSlotId: first.slotId, branch: false, content: "Second message." })
+      )).entry
+      const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+      const context = yield* contextFor(userId, workshop)
+      const read = () => storyTool("read_story").execute(context, {})
+      assert.include((yield* read()).text, "Before edit.")
+      yield* api.AmendVersion({
+        versionId: second.version.id,
+        expectedRowVersion: second.version.rowVersion,
+        content: "After edit."
+      })
+      assert.include((yield* read()).text, "After edit.")
+      const summary = yield* completeFixture(
+        config.dataDir,
+        writer,
+        userId,
+        story.id,
+        [{ slotId: first.slotId, versionId: first.version.id, amendCount: 0 }],
+        [],
+        " public keyword"
+      )
+      const shared = yield* api.GetLcmState({ chatId: story.id, leafSlotId: second.slotId })
+      assert.strictEqual(shared.layer[0]?.id, summary.id)
+      const search = () => storyTool("search_story_summaries").execute(context, { query: "keyword" })
+      assert.include((yield* search()).text, "public keyword")
+      // A shared edit replaces the selected revision; no new story message is required.
+      yield* api.EditSummary({
+        summaryId: summary.id,
+        content: "revised keyword",
+        expectedRowVersion: summary.rowVersion,
+        commitDraft: null
+      })
+      assert.include((yield* search()).text, "revised keyword")
+      assert.notInclude((yield* search()).text, "public keyword")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("keeps the original attachment immutable through both state writers", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const userId = (yield* api.Whoami()).id
+      const writer = yield* Writer
+      const story = yield* api.CreateChat({ title: "Original" })
+      const other = yield* api.CreateChat({ title: "Private other story" })
+      const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+      for (const chatId of [workshop.id, story.id]) {
+        const data = { key: "workshop.attached", value: { chat: other.id } } as const
+        assert.strictEqual(
+          yield* outcome(writer.AddStateEvent({ userId, chatId, slotId: null, versionId: null, scope: null, data })),
+          "NotFound"
+        )
+        assert.strictEqual(
+          yield* outcome(writer.AddStateEvents({ userId, chatId, slotId: null, data: [data] })),
+          "NotFound"
+        )
+      }
+      assert.lengthOf(yield* api.ListAttachedWorkshops({ chatId: other.id }), 0)
+      const capabilities = yield* api.ListWorkshopCapabilities({ chatId: workshop.id })
+      const read = capabilities.filter((c) => c.id === "chats.read")
+      assert.lengthOf(read, 1)
+      assert.strictEqual(read[0]!.label, "Read this story")
+      assert.include(read[0]!.explanation, "Original")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("pages long story reads without losing text, and refuses archived stories", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const reader = yield* Reader
+      const userId = (yield* api.Whoami()).id
+      const story = yield* api.CreateChat({ title: "Long story" })
+      const content = "Long synthetic passage. ".repeat(2500) + "END OF PASSAGE"
+      const first = (yield* posted(api.SendMessage({ chatId: story.id, parentSlotId: null, branch: false, content })))
+        .entry
+      const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+      const context: ToolContext = {
+        userId,
+        chatId: workshop.id,
+        forkId: workshop.currentForkId,
+        leafSlotId: null,
+        slotId: "unused" as ToolContext["slotId"],
+        versionId: "unused" as VersionId,
+        rolloutId: "unused",
+        toolCallId: "unused",
+        reader,
+        writer: toolWriter(writer),
+        cache: new Map()
+      }
+      const read = storyTools.find((t) => t.id === "read_story")! as RolloutTool<Record<string, unknown>>
+      let offset = 0
+      let joined = ""
+      for (let page = 0; page < 10; page++) {
+        // Forged target arguments cannot change which story is read.
+        const output = yield* read.execute(context, { offset, chatId: workshop.id, forkId: workshop.currentForkId })
+        assert.isAtMost(output.text.length, 16_000)
+        const next = /\n\[More: repeat with offset=(\d+)\.\]$/.exec(output.text)
+        joined += next ? output.text.slice(0, next.index) : output.text
+        if (!next) break
+        offset = Number(next[1])
+      }
+      assert.include(joined, content)
+      yield* completeFixture(config.dataDir, writer, userId, story.id, [
+        { slotId: first.slotId, versionId: first.version.id, amendCount: 0 }
+      ])
+      const expanded = yield* storyTool("open_story_summary").execute(context, { messages: "1–1", max_tokens: 200 })
+      assert.isAtMost(expanded.text.length, 1000)
+      assert.match(expanded.text, /More: repeat with offset=800/)
+      const continued = yield* storyTool("open_story_summary").execute(context, {
+        messages: "1–1",
+        max_tokens: 200,
+        offset: 800
+      })
+      assert.strictEqual(continued.text.slice(0, 800), joined.slice(800, 1600))
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE chats SET status = 'archived' WHERE id = ?", params: [story.id] }
+      ])
+      assert.isTrue((yield* read.execute(context, {})).isError)
+      assert.strictEqual(yield* outcome(api.CreateWorkshop({ attachTo: story.id })), "NotFound")
+      assert.strictEqual(yield* outcome(api.ListAttachedWorkshops({ chatId: story.id })), "NotFound")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("reads only the story's current branch at its position, and only the owner's", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -264,11 +503,15 @@ describe("side chat", () => {
   const storyRun = (sideChat: boolean) => {
     const config = testConfig()
     return Effect.gen(function* () {
+      const runScope = yield* Effect.scope
+      let holding = false
       const mock = yield* Effect.acquireRelease(
-        Effect.promise(() => provider()),
+        Effect.promise(() => provider(() => holding)),
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
+      // Built-in workshop library seeds exist in both runs; only the attached chats differ.
+      yield* api.CreateWorkshop({})
       let workshopRequests = 0
       const result = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
@@ -280,18 +523,75 @@ describe("side chat", () => {
                   const workshop = yield* api.CreateWorkshop({ attachTo: chat.id })
                   const done = yield* turn(api, workshop, "What happened so far?")
                   assert.strictEqual(done.content, "You took the other road.")
+                  // Several workshops, with an approval waiting and a model request still open.
+                  const waiting = yield* api.CreateWorkshop({ attachTo: chat.id })
+                  yield* api.SetWorkshopGrant({ chatId: waiting.id, capability: "chats.read", mode: "ask" })
+                  const waitingEvents: Array<ChatEvent> = []
+                  yield* api.SubscribeChat({ chatId: waiting.id }).pipe(
+                    Stream.runForEach((batch) =>
+                      Effect.sync(() => {
+                        waitingEvents.push(...batch)
+                      })
+                    ),
+                    Effect.forkIn(runScope)
+                  )
+                  yield* eventually(() => waitingEvents.length > 0)
+                  const waitingMessage = yield* posted(
+                    api.SendMessage({
+                      chatId: waiting.id,
+                      parentSlotId: waiting.activeLeafSlotId,
+                      branch: false,
+                      content: "Side approval waiting."
+                    })
+                  )
+                  yield* posted(
+                    api.Generate({ chatId: waiting.id, parentSlotId: waitingMessage.entry.slotId, branch: false })
+                  )
+                  yield* eventually(() =>
+                    waitingEvents.some(
+                      (e) => e._tag === "Steps" && e.steps.some((s) => s.kind === "tool" && s.approval !== undefined)
+                    )
+                  )
+                  const running = yield* api.CreateWorkshop({ attachTo: chat.id })
+                  const runningMessage = yield* posted(
+                    api.SendMessage({
+                      chatId: running.id,
+                      parentSlotId: running.activeLeafSlotId,
+                      branch: false,
+                      content: "Side run in progress."
+                    })
+                  )
+                  holding = true
+                  yield* posted(
+                    api.Generate({ chatId: running.id, parentSlotId: runningMessage.entry.slotId, branch: false })
+                  )
+                  yield* eventually(() => mock.requests().length === 5)
+                  assert.lengthOf(yield* api.ListAttachedWorkshops({ chatId: chat.id }), 3)
                   workshopRequests = mock.requests().length
                 })
             }
           : {})
       })
-      assert.strictEqual(workshopRequests, sideChat ? 3 : 0)
+      assert.strictEqual(workshopRequests, sideChat ? 5 : 0)
       const story = mock
         .requests()
         .slice(workshopRequests)
         .map((r) => r.body as Body)
       assert.lengthOf(story, 1)
       const id = result.chat.id
+      const shell = yield* api.ListChatSummaries({ chatIds: [id] })
+      const nextContext = yield* api.GetNextContext({ chatId: id, leafSlotId: null })
+      const current = yield* api.GetChat({ chatId: id })
+      const search = yield* (yield* Reader).SearchChat({
+        userId: (yield* api.Whoami()).id,
+        chatId: id,
+        forkId: current.currentForkId,
+        leafSlotId: current.activeLeafSlotId!,
+        tokens: ["Side"],
+        before: null,
+        limit: 200
+      })
+      assert.isFalse((search ?? []).some((hit) => hit.content.includes("Side")))
       const rows = yield* fixtureSql(
         config.dataDir,
         [
@@ -306,16 +606,27 @@ describe("side chat", () => {
             params: [id]
           },
           { sql: "SELECT * FROM rollouts WHERE chat_id = ? ORDER BY created_at, id", params: [id] },
+          { sql: "SELECT * FROM llm_requests WHERE chat_id = ? ORDER BY started_at, id", params: [id] },
           {
             sql: "SELECT p.* FROM rollout_payloads p JOIN rollouts r ON r.id = p.rollout_id WHERE r.chat_id = ? ORDER BY r.created_at, r.id",
             params: [id]
           },
           { sql: "SELECT * FROM state_events WHERE chat_id = ? ORDER BY seq", params: [id] },
-          { sql: "SELECT * FROM forks WHERE chat_id = ? ORDER BY created_at, id", params: [id] }
+          { sql: "SELECT * FROM forks WHERE chat_id = ? ORDER BY created_at, id", params: [id] },
+          { sql: "SELECT * FROM summaries WHERE chat_id = ? ORDER BY id", params: [id] },
+          { sql: "SELECT * FROM summarization_jobs WHERE chat_id = ? ORDER BY id", params: [id] },
+          {
+            sql: "SELECT f.* FROM fork_summaries f JOIN forks b ON b.id = f.fork_id WHERE b.chat_id = ? ORDER BY f.fork_id",
+            params: [id]
+          },
+          {
+            sql: "SELECT f.* FROM versions_fts f JOIN versions v ON v.seq = f.rowid JOIN slots s ON s.id = v.slot_id WHERE s.chat_id = ? ORDER BY f.rowid",
+            params: [id]
+          }
         ],
         { readOnly: true }
       )
-      return normalize({ request: story[0], rows })
+      return normalize({ request: story[0], shell, nextContext, search, rows })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   }
 

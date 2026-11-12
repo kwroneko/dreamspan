@@ -425,11 +425,10 @@ const storyContext = (context: ToolContext) =>
     const chat = yield* context.reader
       .GetChat({ userId: context.userId, chatId: story as ChatId })
       .pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
-    if (chat === null) return { error: STORY_GONE } as const
-    // The reads of one position are kept for the run; the story moving on reads it again.
-    const key = `story:${chat.currentForkId}:${chat.activeLeafSlotId}`
-    const cache = (context.cache.get(key) as Map<string, unknown> | undefined) ?? new Map<string, unknown>()
-    context.cache.set(key, cache)
+    if (chat === null || chat.status !== "active") return { error: STORY_GONE } as const
+    // A fresh view for every call: edits, visibility and shared summary revisions can change
+    // without moving the tip. Never keep reading the pre-edit text from a rollout cache.
+    const cache = new Map<string, unknown>()
     return {
       title: chat.title?.trim() || null,
       context: {
@@ -449,15 +448,25 @@ const overStory = <A>(
     Partial<Pick<RolloutTool<A>, "parameters" | "summarize">> & {
       /** What it asks to do, for its approval while reading the story asks first: "Read the story". */
       readonly ask: string
+      readonly pageTokens?: number
     },
   execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput, unknown> = tool.execute
-): RolloutTool<A> => ({
+): RolloutTool<A & { readonly offset?: number }> => ({
   ...tool,
   id: definition.id,
   label: definition.label,
   ...(definition.explanation === undefined ? {} : { explanation: definition.explanation }),
   description: definition.description,
-  ...(definition.parameters ? { parameters: definition.parameters } : {}),
+  parameters: Type.Object({
+    ...((definition.parameters ?? tool.parameters) as ReturnType<typeof Type.Object>).properties,
+    offset: Type.Optional(
+      Type.Integer({
+        minimum: 0,
+        description:
+          "Character offset from the previous page's More marker; otherwise 0. Keep the other arguments unchanged."
+      })
+    )
+  }),
   ...(definition.summarize ? { summarize: definition.summarize } : {}),
   effect: "read",
   capability: "chats.read",
@@ -476,7 +485,16 @@ const overStory = <A>(
       Effect.gen(function* () {
         const story = yield* storyContext(context)
         if ("error" in story) return { text: story.error, isError: true }
-        return yield* execute(story.context, args)
+        const output = yield* execute(story.context, args)
+        const offset = Math.max(0, Math.trunc(args.offset ?? 0))
+        const maxTokens = (args as { readonly max_tokens?: number }).max_tokens ?? definition.pageTokens
+        const pageChars = Math.min(15_000, maxTokens === undefined ? 15_000 : maxTokens * 4)
+        const end = Math.min(output.text.length, offset + pageChars)
+        return {
+          ...output,
+          text:
+            output.text.slice(offset, end) + (end < output.text.length ? `\n[More: repeat with offset=${end}.]` : "")
+        }
       })
     )
 })
@@ -525,14 +543,19 @@ const readStory = overStory<{ readonly from?: number; readonly count?: number }>
     })
 )
 
-const openStorySummary = overStory(expandSummary, {
-  id: "open_story_summary",
-  ask: "Open a summary of the story",
-  label: "Opened a story summary",
-  explanation: "Open one of the story's summaries for more detail",
-  description:
-    "Opens one of the story's summaries, named by the messages it covers (its from and to): a first-level summary gives its messages, a higher one the summaries it condenses. Use it when a summary leaves out a detail you need."
-})
+const openStorySummary = overStory(
+  expandSummary,
+  {
+    id: "open_story_summary",
+    ask: "Open a summary of the story",
+    pageTokens: 2000,
+    label: "Opened a story summary",
+    explanation: "Open one of the story's summaries for more detail",
+    description:
+      "Opens one of the story's summaries, named by the messages it covers (its from and to): a first-level summary gives its messages, a higher one the summaries it condenses. Use it when a summary leaves out a detail you need. Follow the More marker to page through a long result."
+  },
+  (context, args) => expandSummary.execute(context, { ...args, max_tokens: Number.MAX_SAFE_INTEGER })
+)
 
 const searchStorySummaries = overStory(searchSummaries, {
   id: "search_story_summaries",

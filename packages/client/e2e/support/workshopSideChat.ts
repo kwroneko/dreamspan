@@ -10,6 +10,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { expectLayout } from "./layoutAudit.ts"
+import { showActions } from "./message.ts"
 import { asUser } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { startWorkshopProvider, STORY_REPLY } from "./workshopProvider.ts"
@@ -25,10 +26,13 @@ const shots = process.env.SCREENSHOT_DIR
 export const sidePanel = (page: Page) => page.getByRole("tabpanel", { name: "Workshop" })
 
 /** Sets up the scripted provider as the account's default model. */
-export const useSideChatProvider = (server: () => Parameters<typeof asUser>[0]) => {
+export const useSideChatProvider = (
+  server: () => Parameters<typeof asUser>[0],
+  options: Parameters<typeof startWorkshopProvider>[0] = {}
+) => {
   const state: { provider: Awaited<ReturnType<typeof startWorkshopProvider>> | null } = { provider: null }
   test.beforeAll(async () => {
-    const provider = await startWorkshopProvider({ calls: SIDE_CALLS, perTask: true, answer: SIDE_ANSWER })
+    const provider = await startWorkshopProvider({ calls: SIDE_CALLS, perTask: true, answer: SIDE_ANSWER, ...options })
     state.provider = provider
     await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       Effect.gen(function* () {
@@ -55,6 +59,74 @@ export const useSideChatProvider = (server: () => Parameters<typeof asUser>[0]) 
     await state.provider?.stop()
   })
   return () => state.provider!
+}
+
+export function workshopSideChatEffectsTests() {
+  test.describe("workshop side-chat changes", () => {
+    const server = serverPerFile(withAdmin)
+    const opening = "I'll make a synthetic keeper."
+    const provider = useSideChatProvider(server, {
+      calls: [
+        { name: "send_message", arguments: { message: opening } },
+        { name: "create_card", arguments: { name: "Side keeper", description: "A synthetic keeper." } }
+      ]
+    })
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const)
+        test(`approval, regenerate warning and undo at ${width} ${theme}`, async ({ page }, info) => {
+          test.setTimeout(120_000)
+          const story = await makeStory(server, `Side changes ${width} ${theme}`)
+          const workshop = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            Effect.gen(function* () {
+              const chat = yield* api.CreateWorkshop({ attachTo: story.id })
+              yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "library.write", mode: "ask" })
+              return chat
+            })
+          )
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+          await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+          await page.goto(`${server().url}/chats/${story.id}?panel=workshop&workshop=${workshop.id}`)
+          const side = sidePanel(page).locator(`[data-side-chat="${workshop.id}"]`)
+          await side.getByLabel("Message", { exact: true }).fill("Make a synthetic keeper.")
+          await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          const approval = side.locator("[data-approval]")
+          await expect(approval).toContainText("Side keeper", { timeout: 30_000 })
+          await expectLayout(page, info, `side-change-approval-${width}-${theme}`, { scope: "[data-approval]" })
+          await approval.getByRole("button", { name: "Allow", exact: true }).click()
+          const answer = side.getByRole("article").filter({ hasText: SIDE_ANSWER })
+          await expect(answer).toHaveCount(1)
+          const badge = answer.locator("[data-steps-badge]")
+          if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+          const changed = side.locator('[data-effect-kind="library.create"]')
+          await expect(changed.getByRole("button", { name: "Undo", exact: true })).toBeVisible()
+          await expectLayout(page, info, `side-change-undo-${width}-${theme}`, { scope: "[data-side-chat]" })
+          const first = side.getByRole("article").filter({ hasText: opening })
+          await showActions(first)
+          await first.getByRole("button", { name: "Generate another version", exact: true }).click()
+          const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
+          await expect(warning).toContainText("Side keeper")
+          await expectLayout(page, info, `side-change-warning-${width}-${theme}`, { scope: '[role="dialog"]' })
+          const before = provider().bodies.length
+          await warning.getByRole("button", { name: "Cancel", exact: true }).click()
+          expect(provider().bodies.length).toBe(before)
+          await changed.getByRole("button", { name: "Undo", exact: true }).click()
+          await expect(changed).toContainText("Undone")
+          const effects = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            api.ListRolloutEffects({ chatId: workshop.id })
+          )
+          expect(effects).toHaveLength(1)
+          expect(effects[0]!.undoneAt).not.toBeNull()
+          const other = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            api.CreateWorkshop({ attachTo: story.id })
+          )
+          const permissions = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            api.ListWorkshopCapabilities({ chatId: other.id })
+          )
+          expect(permissions.find((c) => c.id === "library.write")!.mode).toBe("allow")
+        })
+  })
 }
 
 /** A story with one user message and the model's reply. */
@@ -103,6 +175,7 @@ export function workshopSideChatTests() {
 
           await page.goto(`${server().url}/chats/${story.id}`)
           await expect(page.getByRole("article").filter({ hasText: STORY_REPLY })).toHaveCount(1, { timeout: 30_000 })
+          await expectLayout(page, info, `story-messages-${width}-${theme}`, { scope: '[data-testid="messages"]' })
           const storyArticles = await page.getByTestId("messages").getByRole("article").count()
 
           // The ⋯ menu's way in, explained beside it.
@@ -149,6 +222,40 @@ export function workshopSideChatTests() {
           await shot("answered")
           await expectLayout(page, info, `side-chat-answered-${width}-${theme}`, { scope: panelScope })
 
+          // One visible permission, naming only this story. Both revocations take effect
+          // through the chip rather than relying on a direct test RPC to set the grant.
+          const permissions = side.getByRole("button", { name: /^What the assistant may do:/ })
+          await permissions.click()
+          const row = page.locator('[data-capability="chats.read"]:visible')
+          await expect(row).toHaveCount(1)
+          await expect(row).toContainText("Read this story")
+          await expect(row).toContainText(title)
+          await expect(row).toHaveAttribute("data-mode", "allow")
+          await expectLayout(page, info, `side-chat-permission-${width}-${theme}`, { scope: "[data-capabilities]" })
+          await row.getByRole("button", { name: "Ask first", exact: true }).click()
+          await expect(row).toHaveAttribute("data-mode", "ask")
+          await page.keyboard.press("Escape")
+          await side.getByLabel("Message", { exact: true }).fill("Read again, asking me first.")
+          await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          const allow = side.getByRole("button", { name: "Allow", exact: true })
+          await expect(allow).toBeVisible({ timeout: 30_000 })
+          await expectLayout(page, info, `side-chat-approval-${width}-${theme}`, { scope: panelScope })
+          await allow.click()
+          await expect(side.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(2)
+          await permissions.click()
+          await row.getByRole("button", { name: "Off", exact: true }).click()
+          await expect(row).toHaveAttribute("data-mode", "off")
+          await page.keyboard.press("Escape")
+          const offStart = provider().bodies.length
+          await side.getByLabel("Message", { exact: true }).fill("Answer without reading the story.")
+          await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          await expect(side.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(3)
+          expect(
+            provider()
+              .bodies.slice(offStart)
+              .every((body) => !body.tools?.some((tool) => tool.function.name === "read_story"))
+          ).toBe(true)
+
           // The story is as it was: nothing of the side chat in it.
           if (width === 390) await page.keyboard.press("Escape")
           await expect(page.getByTestId("messages").getByRole("article")).toHaveCount(storyArticles)
@@ -160,7 +267,7 @@ export function workshopSideChatTests() {
 
           // The URL brings the same workshop back, in a reload and in a second tab.
           await page.goto(`${server().url}/chats/${story.id}?panel=workshop&workshop=${workshopId}`)
-          await expect(sidePanel(page).getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(1)
+          await expect(sidePanel(page).getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(3)
           if (width === 1440 && theme === "light") {
             const second = await context.newPage()
             await second.setViewportSize({ width, height: 900 })
@@ -169,7 +276,7 @@ export function workshopSideChatTests() {
               sidePanel(second).locator(`[data-side-chat="${workshopId}"]`).getByRole("article").filter({
                 hasText: SIDE_ANSWER
               })
-            ).toHaveCount(1)
+            ).toHaveCount(3)
             await second.close()
           }
 
@@ -193,10 +300,13 @@ export function workshopSideChatTests() {
           )
           await shot("empty")
           await expectLayout(page, info, `side-chat-empty-${width}-${theme}`, { scope: panelScope })
+          // Stale choices of the removed workshop must not leak into the replacement.
+          await page.goto(`${page.url()}&side.fork=${story.currentForkId}&side.messageDialog=old&side.stepEdit=old`)
           await startButton.click()
           await expect(sidePanel(page).locator("[data-side-chat]")).toBeVisible()
           await expect(page).toHaveURL(/[?&]workshop=[^&]+/)
           expect(new URL(page.url()).searchParams.get("workshop")).not.toBe(workshopId)
+          await expect(page).not.toHaveURL(/side\.(fork|messageDialog|stepEdit)=/)
         })
   })
 }

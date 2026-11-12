@@ -5,7 +5,7 @@
 // through its story tools; nothing said here is in the story's context.
 import type { Chat, ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
 import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult, Atom } from "effect/reactivity"
 import {
   type CSSProperties,
@@ -40,7 +40,7 @@ import { ChatSession, type ChatView } from "../chat/session.ts"
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
 import { useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { chooseSideChat, SIDE_CHAT_PARAM, SIDE_CHAT_SCOPE, SIDE_CHATS_KEY } from "./sideChat.ts"
+import { chooseSideChat, sideChatSearch, SIDE_CHAT_PARAM, SIDE_CHAT_SCOPE, SIDE_CHATS_KEY } from "./sideChat.ts"
 
 const attachedTo = Atom.family((chatId: ChatId) =>
   AppClient.query("ListAttachedWorkshops", { chatId }, { reactivityKeys: [SIDE_CHATS_KEY, chatId] })
@@ -66,11 +66,29 @@ function useOpenOwn() {
   )
 }
 
-export function WorkshopSidePanel({ session }: PanelProps) {
+export function WorkshopSidePanel(props: PanelProps) {
+  return props.active ? <ActiveWorkshopSidePanel {...props} /> : null
+}
+
+function ActiveWorkshopSidePanel({ session }: PanelProps) {
   const atom = attachedTo(session.id)
   const result = useAtomValue(atom)
   const refresh = useAtomRefresh(atom)
-  const [wanted, setWanted] = usePlaceParam(SIDE_CHAT_PARAM, "")
+  const navigate = useNavigate()
+  const search = useSearch({ strict: false }) as Record<string, unknown>
+  const wanted = typeof search[SIDE_CHAT_PARAM] === "string" ? (search[SIDE_CHAT_PARAM] as string) : ""
+  const setWanted = useCallback(
+    (id: string, replace = false) => {
+      void navigate({
+        to: ".",
+        search: (previous: Record<string, unknown>) => sideChatSearch(previous, id),
+        state: (previous) => ({ ...previous }),
+        replace,
+        resetScroll: false
+      })
+    },
+    [navigate]
+  )
   const action = useAction()
   const list = AsyncResult.isSuccess(result) ? result.value : null
   const choice = list === null ? null : chooseSideChat(list, wanted || null)

@@ -2,15 +2,18 @@
 // shows and how an unknown one falls back, where the Workshop tab and "Talk about this chat" are
 // offered, and the URL keys a chat shown inside another's panel uses. Synthetic chats only.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import type { Chat } from "@rp/shared/chat.ts"
 import { chatPlaceKey } from "../src/features/chat/chatPlace.ts"
 import { availableCommands, type ChatCommandContext } from "../src/features/chat/commands.tsx"
 import { takesSideChat } from "../src/features/chat/kindLooks.ts"
-import { panelHere, panelTabs } from "../src/features/chat/panels.tsx"
+import { panelHere, panelTabs, type PanelProps } from "../src/features/chat/panels.tsx"
 import { registerPanels } from "../src/features/chat/registerPanels.tsx"
 import type { ChatView } from "../src/features/chat/session.ts"
 import { register as registerWorkshop } from "../src/features/workshop/index.tsx"
-import { chooseSideChat, SIDE_CHAT_SCOPE, SIDE_CHAT_TAB } from "../src/features/workshop/sideChat.ts"
+import { chooseSideChat, sideChatSearch, SIDE_CHAT_SCOPE, SIDE_CHAT_TAB } from "../src/features/workshop/sideChat.ts"
+import { WorkshopSidePanel } from "../src/features/workshop/SidePanel.tsx"
 
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
@@ -30,6 +33,10 @@ const contextOf = (kind: string | null) =>
 describe("the workshop shown beside a story", () => {
   const newest = workshop("newest")
   const older = workshop("older")
+
+  it("unmounts the session when its panel tab is no longer active", () => {
+    expect(renderToStaticMarkup(createElement(WorkshopSidePanel, { active: false } as PanelProps))).toBe("")
+  })
 
   it("shows the one the URL names", () => {
     expect(chooseSideChat([newest, older], "older")).toEqual({ shown: older, missing: false })
@@ -92,6 +99,24 @@ describe("where the workshop beside a story is offered", () => {
 })
 
 describe("URL keys of a chat inside another's panel", () => {
+  it("drops only the previous workshop's choices when switching workshops", () => {
+    const previous = {
+      workshop: "one",
+      "side.fork": "old-fork",
+      "side.messageDialog": "old-message",
+      "side.stepEdit": "old-step",
+      fork: "story-fork",
+      messageDialog: "story-message",
+      panel: "workshop"
+    }
+    expect(sideChatSearch(previous, "two")).toEqual({
+      workshop: "two",
+      fork: "story-fork",
+      messageDialog: "story-message",
+      panel: "workshop"
+    })
+    expect(sideChatSearch(previous, "one")).toEqual(previous)
+  })
   it("keeps the page's chat's keys plain and scopes the other's", () => {
     expect(chatPlaceKey("", "messageDialog")).toBe("messageDialog")
     expect(chatPlaceKey(SIDE_CHAT_SCOPE, "messageDialog")).toBe("side.messageDialog")

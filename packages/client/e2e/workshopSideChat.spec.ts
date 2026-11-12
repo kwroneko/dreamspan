@@ -3,6 +3,7 @@
 // and heap/DOM samples (as splitRefresh.spec.ts). Run browsers in a memory-capped scope. All
 // fixtures are synthetic.
 import { expect, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
 import { showActions } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -11,18 +12,25 @@ import {
   SIDE_ANSWER,
   sidePanel,
   useSideChatProvider,
+  workshopSideChatEffectsTests,
   workshopSideChatTests
 } from "./support/workshopSideChat.ts"
 import { STORY_REPLY } from "./support/workshopProvider.ts"
 
 workshopSideChatTests()
+workshopSideChatEffectsTests()
 
 /** Stop forwarding at the bound even if the renderer is too busy to run an assertion. */
 const readFuse = async (page: Page) => {
-  const stats = { armed: false, reads: 0, tripped: false, slotFrames: 0 }
+  const stats = { armed: false, reads: 0, tripped: false, slotFrames: 0, replay: false }
   await page.routeWebSocket("**/rpc", (socket) => {
     const upstream = socket.connectToServer()
+    let closed = false
+    socket.onClose(() => {
+      closed = true
+    })
     socket.onMessage((message) => {
+      const pathRead = /"tag"\s*:\s*"ReadPath"/.test(message.toString())
       if (stats.armed) {
         // One WebSocket frame can batch several RPC requests.
         stats.reads += message.toString().match(/"tag"\s*:\s*"ReadPath"/g)?.length ?? 0
@@ -31,11 +39,18 @@ const readFuse = async (page: Page) => {
       if (stats.tripped) {
         socket.close({ code: 1008, reason: "ReadPath regression bound" })
         upstream.close()
+      } else if (stats.armed && stats.replay && pathRead) {
+        // Let another event arrive while a path read is outstanding, deterministically.
+        setTimeout(() => {
+          if (!closed && !stats.tripped) upstream.send(message)
+        }, 250)
       } else upstream.send(message)
     })
     upstream.onMessage((message) => {
       if (stats.armed && message.toString().includes('"_tag":"Slot"')) stats.slotFrames++
       socket.send(message)
+      // Reconnects may deliver an event again. Both deliveries must have finite replays.
+      if (stats.armed && stats.replay && message.toString().includes('"_tag":"Slot"')) socket.send(message)
     })
   })
   return stats
@@ -117,5 +132,53 @@ test.describe("two chats on one page", () => {
     await expect(storyList.getByRole("article")).toHaveCount(storyCount)
     await expect(storyList.getByText(SIDE_ANSWER)).toHaveCount(0)
     expect(stats.tripped).toBe(false)
+
+    // The former replay loop needs shared messages shown on another branch, and an event
+    // during an outstanding read. A last-message swipe on the same fork never exercised it.
+    stats.armed = false
+    const forks = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const child = (chatId: typeof story.id) =>
+          Effect.gen(function* () {
+            const chat = yield* api.GetChat({ chatId })
+            return yield* api.CreateFork({ chatId, fromForkId: chat.currentForkId, atSlotId: chat.activeLeafSlotId })
+          })
+        return [yield* child(story.id), yield* child(workshop.id)] as const
+      })
+    )
+    await page.goto(
+      `${server().url}/chats/${story.id}?fork=${story.currentForkId}&panel=workshop&workshop=${workshop.id}&side.fork=${workshop.currentForkId}`
+    )
+    await expect(storyList.getByRole("article").filter({ hasText: STORY_REPLY })).toHaveCount(1)
+    await expect(side.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(1)
+    stats.replay = true
+    for (const [index, chat] of [story, workshop].entries()) {
+      stats.reads = 0
+      stats.slotFrames = 0
+      stats.armed = true
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const path = yield* api.ReadPath({
+            chatId: chat.id,
+            forkId: forks[index]!.fork.id,
+            leafSlotId: null,
+            range: { _tag: "Bottom" },
+            limit: 1
+          })
+          const entry = path.entries.at(-1)!
+          yield* api.Regenerate({
+            slotId: entry.slotId,
+            forkId: forks[index]!.fork.id,
+            expectedRowVersion: entry.rowVersion
+          })
+        })
+      )
+      await expect.poll(() => stats.reads).toBeGreaterThan(0)
+      await page.waitForTimeout(1500)
+      await steady(page, stats, index === 0 ? "story-other-branch" : "workshop-other-branch")
+      await expect(storyList.getByRole("article")).toHaveCount(storyCount)
+      await expect(side.getByRole("article")).toHaveCount(sideCount)
+      stats.armed = false
+    }
   })
 })

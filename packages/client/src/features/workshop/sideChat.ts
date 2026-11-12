@@ -13,6 +13,14 @@ export const SIDE_CHATS_KEY = "side-chats"
 /** What the workshop beside a story is called in the ⋯ menu. */
 export const TALK_ABOUT = "Talk about this chat"
 
+/** A different workshop cannot inherit the previous one's branch or open dialogs. */
+export const sideChatSearch = (previous: Record<string, unknown>, id: string) => {
+  const search: Record<string, unknown> = { ...previous, [SIDE_CHAT_PARAM]: id || undefined }
+  if (previous[SIDE_CHAT_PARAM] !== id)
+    for (const key of Object.keys(search)) if (key.startsWith(`${SIDE_CHAT_SCOPE}.`)) delete search[key]
+  return search
+}
+
 export interface SideChatChoice {
   /** The workshop shown, or none when the story has none. */
   readonly shown: Chat | null

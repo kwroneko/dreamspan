@@ -40,6 +40,7 @@ interface Expected {
   readonly removes?: true
   /** Fields that must belong to another field: a ref or revision of its entity, a model of its connection. */
   readonly belongs?: ReadonlyArray<string>
+  readonly creationOnly?: true
 }
 
 const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
@@ -65,7 +66,7 @@ const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
   "lorebook.remove": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
   "lorebook.embedded": { value: (t) => ({ entity: t.card.entity, on: false }) },
   "agent.permission": { value: (t) => ({ note: t.note.entity, card: t.card.entity, field: "description", on: true }) },
-  "workshop.attached": { value: (t) => ({ chat: t.chat }) }
+  "workshop.attached": { value: (t) => ({ chat: t.chat }), creationOnly: true }
 }
 
 const kinds: ReadonlyArray<EntityKind> = ["card", "preset", "lorebook", "note", "preset_overlay"]
@@ -227,7 +228,9 @@ layer(fixture, { excludeTestServices: true, timeout: "60 seconds" })("state key 
       [field]: expected.value(from)[field]
     })
 
-    it.effect(`${key}: the user's own things`, () => outcome((f) => expected.value(f.own), "ok"))
+    it.effect(`${key}: the user's own things${expected.creationOnly ? " require creation" : ""}`, () =>
+      outcome((f) => expected.value(f.own), expected.creationOnly ? "NotFound" : "ok")
+    )
     it.effect(`${key}: things in the bin ${expected.removes ? "can be taken out" : "are NotFound"}`, () =>
       outcome((f) => expected.value(f.deleted), expected.removes ? "ok" : "NotFound")
     )

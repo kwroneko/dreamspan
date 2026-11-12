@@ -14,6 +14,7 @@ import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { writeGrant } from "./workshopGrants.ts"
+import { SIDE_STORY_READ_MODE } from "../agent/capabilities.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { putUserSetting, readSetting } from "./settings.ts"
 import { transaction } from "./tx.ts"
@@ -46,7 +47,7 @@ const preset: PresetDoc = {
 
 export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   const { sql } = steps
-  const graph = makeGraphWrites(sql, bin.drafts)
+  const graph = makeGraphWrites(sql, bin.drafts, true)
   return {
     CreateWorkshop: ({ userId, title, attachTo }) =>
       Effect.gen(function* () {
@@ -55,7 +56,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           attachTo === undefined
             ? []
             : yield* sql<{ title: string | null; kind: string }>`SELECT title, kind FROM chats
-                WHERE id = ${attachTo} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+                WHERE id = ${attachTo} AND owner_user_id = ${userId} AND deleted_at IS NULL AND status = 'active'`
         if (attachTo !== undefined && (!story || chatKinds.get(story.kind)?.allowsSideChat !== true))
           return yield* new NotFound({ entity: "chat", id: attachTo })
         const stored = (yield* readSetting(sql, "user", userId, "workshop.defaults")).value as {
@@ -100,7 +101,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
             value: { chat: attachTo }
           })
           // §4: reading the story it's beside is allowed in this workshop; the strip can change it.
-          yield* writeGrant(sql, userId, chatId, "chats.read", "allow")
+          yield* writeGrant(sql, userId, chatId, "chats.read", SIDE_STORY_READ_MODE)
         }
         yield* graph.insertStateEvent(userId, chatId, null, null, null, {
           key: "lcm.settings",

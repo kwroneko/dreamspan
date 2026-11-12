@@ -142,6 +142,7 @@ export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string
   const common = registry.rolloutTools.get(name)
   const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
   const tool = common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)
+  if (tool?.replyTool === false && registry.chatKinds.get(kind)?.allowsOutside !== true) return undefined
   if (!tool || registry.chatKinds.get(kind)?.allowsOutside || !tool.capability) return tool
   // Capability grants are workshop metadata. Preserve the frozen story definition shape.
   const storyTool = { ...tool }
