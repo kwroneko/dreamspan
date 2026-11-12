@@ -106,6 +106,9 @@ export function workshopChatTests() {
           await expect(page.getByTestId("composer")).toBeVisible()
           const workshopAccent = await accentOf(page)
           expect(workshopAccent).toBe(
+          await expect(page.getByRole("button", { name: "New workshop", exact: true })).toHaveAccessibleDescription(
+            "Opens a workshop. The assistant can read your library."
+          )
             await page.evaluate(() =>
               getComputedStyle(document.documentElement).getPropertyValue("--accent-workshop").trim()
             )

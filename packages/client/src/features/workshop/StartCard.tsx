@@ -8,13 +8,13 @@ export function WorkshopStartCard() {
     <Card>
       <CardHeader
         title="Workshop"
-        about="Work with an assistant on your cards, chats and settings, outside any story."
+        about="Ask an assistant about your cards, presets and lorebooks, outside any story."
       />
       <StartChatForm
         draft="workshop:new"
         label="Title of the new workshop"
         button="New workshop"
-        hint="Opens a workshop chat. It can change your library and settings; you choose what it may do."
+        hint="Opens a workshop. The assistant can read your library."
         create={(client, title) => client("CreateWorkshop", title.trim() === "" ? {} : { title })}
       />
     </Card>
