@@ -54,7 +54,7 @@ const unit = { include: ["test/**/*.test.ts"], environment: "node", tags, testTi
 
 const server = {
   root: "packages/server",
-  environment: "node",
+  environment: join(import.meta.dirname, "packages/server/test/support/testEnvironment.ts"),
   tags,
   setupFiles: [join(import.meta.dirname, "packages/server/test/support/environment.ts")],
   testTimeout: 30_000,
