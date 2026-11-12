@@ -13,6 +13,7 @@ import { closePanel, openPanel } from "./panel.ts"
 import { asUser } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { nextReply } from "./strip.ts"
+import { messageMenu, showActions } from "./message.ts"
 import { startWorkshopProvider, STORY_REPLY, WORKSHOP_ANSWER } from "./workshopProvider.ts"
 
 const shots = process.env.SCREENSHOT_DIR
@@ -210,8 +211,26 @@ export function workshopChatTests() {
           await page.evaluate(() =>
             Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
           )
+          provider.hold(1)
+          const offeredAt = provider.bodies.length
           await page.getByLabel("Message", { exact: true }).fill("What cards do I have?")
           await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          const stopped = page.getByRole("article").last()
+          await expect(stopped.locator('[data-step-status="done"]')).toHaveCount(1)
+          await expect.poll(() => provider.heldCount()).toBeGreaterThan(0)
+          await stopped.getByRole("button", { name: "Stop", exact: true }).click()
+          await expect(stopped.getByText("stopped", { exact: true })).toBeVisible()
+          await expectLayout(page, info, `workshop-stopped-${width}-${theme}`, { scope: "article:last-of-type" })
+          if (width === 390) await stopped.getByText("stopped", { exact: true }).click()
+          else await showActions(stopped)
+          const beforeResume = provider.bodies.length
+          const resume = stopped.getByRole("button", { name: "Resume", exact: true })
+          if (await resume.isVisible()) await resume.click()
+          else await messageMenu(stopped, /^Resume/)
+          await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeResume)
+          expect(provider.bodies[beforeResume]!.tools).toEqual(provider.bodies[offeredAt]!.tools)
+          expect(provider.bodies[beforeResume]!.messages.at(-1)?.role).toBe("tool")
+          provider.release()
           const reply = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })
           await expect(reply).toBeVisible({ timeout: 30_000 })
           await expect
@@ -240,7 +259,18 @@ export function workshopChatTests() {
           // The run's request names the workshop's instructions.
           await steps.getByRole("link", { name: "Open the run" }).click()
           await expect(page.getByText("Workshop instructions").first()).toBeVisible()
-          await page.goBack()
+          const result = page.getByRole("region", { name: "Result of read_card", exact: true }).first()
+          await result.getByRole("button", { name: "Edit", exact: true }).click()
+          const edited = "Synthetic edited card result."
+          await result.locator('.cm-content[aria-label="Edit Result of read_card"]').fill(edited)
+          await expectLayout(page, info, `workshop-step-edit-${width}-${theme}`, { scope: '[aria-label="Steps"]' })
+          const beforeEdit = provider.bodies.length
+          await result.getByRole("button", { name: "Resume", exact: true }).click()
+          await expect(page).toHaveURL(new RegExp(`/chats/${workshopId}\\?`))
+          await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeEdit)
+          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toBeVisible()
+          expect(provider.bodies[beforeEdit]!.messages.at(-1)?.content).toBe(edited)
+          expect(provider.bodies[beforeEdit]!.tools).toEqual(provider.bodies[offeredAt]!.tools)
 
           // This chat leaves out the story's settings; the URL alone brings the workshop back.
           const settings = await openPanel(page, "This chat")

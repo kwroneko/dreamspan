@@ -478,6 +478,11 @@ describe("workshop", () => {
       yield* eventually(() => finished(events, resumed.version.id) !== undefined)
       assert.strictEqual(finished(events, resumed.version.id)!.status, "complete")
       assert.strictEqual(runs, 2)
+      const inspected = yield* api.GetRunContext({ versionId: resumed.version.id })
+      assert.strictEqual(inspected.capture, "captured")
+      assert.isTrue(
+        inspected.messages.some((message) => message.sources.some((source) => source.label === "Workshop instructions"))
+      )
       assert.strictEqual(
         (yield* reader.RolloutMaterial({ userId: user.id, versionId: resumed.version.id })).snapshot,
         material.snapshot

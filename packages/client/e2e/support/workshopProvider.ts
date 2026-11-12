@@ -20,6 +20,8 @@ interface Body {
 
 export const startWorkshopProvider = async () => {
   const bodies: Array<Body> = []
+  let holding: number | null = null
+  const held: Array<() => void> = []
   const chunk = (delta: object, finish: string | null = null, usage?: object) =>
     `data: ${JSON.stringify({
       id: "workshop",
@@ -59,29 +61,40 @@ export const startWorkshopProvider = async () => {
       if (!library) return stream(res, [...words(STORY_REPLY), chunk({}, "stop"), chunk({}, null, usage)])
       const done = body.messages.filter((m) => m.role === "tool").length
       const call = CALLS[done]
-      if (call)
-        return stream(res, [
-          chunk({
-            role: "assistant",
-            tool_calls: [
-              {
-                index: 0,
-                id: `call_${done + 1}`,
-                type: "function",
-                function: { name: call.name, arguments: JSON.stringify(call.arguments) }
-              }
-            ]
-          }),
-          chunk({}, "tool_calls"),
-          chunk({}, null, usage)
-        ])
-      stream(res, [...words(WORKSHOP_ANSWER), chunk({}, "stop"), chunk({}, null, usage)])
+      const answer = () =>
+        call
+          ? stream(res, [
+              chunk({
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `call_${done + 1}`,
+                    type: "function",
+                    function: { name: call.name, arguments: JSON.stringify(call.arguments) }
+                  }
+                ]
+              }),
+              chunk({}, "tool_calls"),
+              chunk({}, null, usage)
+            ])
+          : stream(res, [...words(WORKSHOP_ANSWER), chunk({}, "stop"), chunk({}, null, usage)])
+      if (holding === done) held.push(answer)
+      else answer()
     })
   })
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done))
   return {
     baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
     bodies,
+    hold: (at: number) => {
+      holding = at
+    },
+    heldCount: () => held.length,
+    release: () => {
+      holding = null
+      for (const answer of held.splice(0)) answer()
+    },
     /** The tool results the workshop's requests carried back, in order. */
     toolResults: () =>
       (bodies.at(-1)?.messages ?? []).filter((m) => m.role === "tool").map((m) => JSON.stringify(m.content)),
