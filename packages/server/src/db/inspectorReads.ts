@@ -11,6 +11,7 @@ import type { ChatId, SlotId, SpeakerPick, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { type ContextSource, type RequestFigures, RunContext, versionMetricsOf } from "@rp/shared/inspectorApi.ts"
+import { separateContextOf } from "./inspectorContexts.ts"
 import type { Assembler } from "../assembler/assembler.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"
 import { fallbackDescription } from "../assembler/sourceDescriptors.ts"
@@ -343,6 +344,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
                 current.set(summary.id, summary)
           }
         }).pipe(inFork(sql, chatId, row.fork_id, snapshot.inputs.leafSlotId))
+        const separateContext = yield* separateContextOf(sql, snapshot)
         return new RunContext({
           chatId,
           slotId: row.slot_id as SlotId,
@@ -354,6 +356,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           capture: display ? "captured" : "unavailable",
           tokenizer: textCounts.tokenizer,
           ...speakerPickOf(row.speaker_pick_json),
+          ...(separateContext ? { separateContext } : {}),
           messages: display
             ? wire!.messages.map((message, at) => ({
                 role: message.role,

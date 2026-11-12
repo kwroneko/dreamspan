@@ -39,7 +39,9 @@ test.beforeAll(async () => {
         })
       )
       response.writeHead(200, { "content-type": "application/json" })
-      response.end(JSON.stringify({ model: "typesafe/jev-1.13-20260917", answers, usage: { input_tokens: 320, output_tokens: 1 } }))
+      response.end(
+        JSON.stringify({ model: "typesafe/jev-1.13-20260917", answers, usage: { input_tokens: 320, output_tokens: 1 } })
+      )
     })
   })
   await new Promise<void>((resolve) => decide.listen(0, "127.0.0.1", resolve))
@@ -253,9 +255,7 @@ for (const width of [1440, 390])
       try {
         const { chatId, forkId, slotId } = await threeCharacters()
         const ids = await castIds()
-        await admin((api) =>
-          api.Generate({ chatId, parentSlotId: slotId, branch: false, speakerEntityId: ids.mira })
-        )
+        await admin((api) => api.Generate({ chatId, parentSlotId: slotId, branch: false, speakerEntityId: ids.mira }))
         // The branch's tip, the reply, once it's there.
         let leaf: SlotId | null = null
         await expect
@@ -294,12 +294,16 @@ for (const width of [1440, 390])
         ).toBeVisible()
         const undo = left.getByRole("button", { name: "Undo", exact: true })
         await undo.hover()
-        await expect(page.getByText("Wren was there after all", { exact: false }).filter({ visible: true })).toBeVisible()
+        await expect(
+          page.getByText("Wren was there after all", { exact: false }).filter({ visible: true })
+        ).toBeVisible()
         await page.mouse.move(0, 0)
         await expectLayout(page, info, `contexts-away-row-${width}-${theme}`, { scope: "[data-away-row]" })
         await undo.click()
         await expect(left).toHaveCount(0)
-        await expect.poll(async () => (await admin((api) => api.GetCast({ chatId, slotId: leaf }))).away).toBeUndefined()
+        await expect
+          .poll(async () => (await admin((api) => api.GetCast({ chatId, slotId: leaf }))).away)
+          .toBeUndefined()
         // The user's own mark: a row with no Undo (the Cast tab takes it back).
         castPanel = await openPanel(page, "Cast")
         await expect(wrenRow.getByText("Away", { exact: true })).toHaveCount(0)
@@ -323,6 +327,89 @@ for (const width of [1440, 390])
     })
   }
 
+/** Asks for a reply by `speaker` after the branch's tip and waits until it's written; its version. */
+const reply = async (chatId: ChatId, forkId: string, speaker: EntityId) => {
+  const before = await admin((api) =>
+    api.ReadPath({ chatId, forkId: forkId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
+  )
+  await admin((api) =>
+    api.Generate({
+      chatId,
+      forkId: forkId as never,
+      parentSlotId: before.leafSlotId,
+      branch: false,
+      speakerEntityId: speaker
+    })
+  )
+  let version = ""
+  await expect
+    .poll(async () => {
+      const path = await admin((api) =>
+        api.ReadPath({ chatId, forkId: forkId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
+      )
+      const last = path.entries.at(-1)!
+      version = last.version.id
+      return path.entries.length > before.entries.length && last.version.status
+    })
+    .toBe("complete")
+  return {
+    version,
+    slotId: (
+      await admin((api) =>
+        api.ReadPath({ chatId, forkId: forkId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 })
+      )
+    ).leafSlotId!
+  }
+}
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`the inspector shows whose context and what it left out at ${width} ${theme}`, async ({ page }, info) => {
+      await look(page, width, theme)
+      const { chatId, slotId, forkId } = await threeCharacters()
+      const ids = await castIds()
+      const cast = (at: SlotId, c: object) => admin((api) => api.ChangeCast({ chatId, slotId: at, change: c as never }))
+      await cast(slotId, { _tag: "ContextPerSpeaker", view: "separate" })
+      // Wren steps out after the user's line; Mira answers; Wren is back and replies.
+      await cast(slotId, { _tag: "Away", entityId: ids.wren, away: true })
+      const mira = await reply(chatId, forkId!, ids.mira)
+      await cast(mira.slotId, { _tag: "Away", entityId: ids.wren, away: false })
+      const wren = await reply(chatId, forkId!, ids.wren)
+      await page.goto(`${server().url}/chats/${chatId}/context/${wren.version}`)
+      const section = page.getByRole("region", { name: "Whose context" })
+      await expect(section.getByText("Separate contexts: written from Wren's view.", { exact: false })).toBeVisible()
+      const left = section.getByRole("list", { name: "Left out of Wren's context" })
+      await expect(left.getByRole("listitem")).toHaveCount(1)
+      await expect(left.getByRole("link", { name: "Message 2 (Mira)", exact: true })).toBeVisible()
+      await expect(left.getByText("Wren wasn't present", { exact: true })).toBeVisible()
+      // The gap line that stands in for it is labelled among the request's parts.
+      await expect(page.getByText(/^Gap line: message 2 left out/).first()).toBeAttached()
+      await page.mouse.move(0, 0)
+      await expectLayout(page, info, `contexts-inspector-${width}-${theme}`, { scope: '[aria-label="Whose context"]' })
+      // Mira's own reply saw everything: nothing was left out of her context.
+      await page.goto(`${server().url}/chats/${chatId}/context/${mira.version}`)
+      await expect(
+        page.getByRole("region", { name: "Whose context" }).getByText("Mira was present for every message it read.", {
+          exact: false
+        })
+      ).toBeVisible()
+      // A narrator's reply: the whole chat.
+      const last = await admin((api) =>
+        api.ReadPath({ chatId, forkId: forkId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 })
+      )
+      await cast(last.leafSlotId!, { _tag: "Role", entityId: ids.tobin, role: "narrator" })
+      const tobin = await reply(chatId, forkId!, ids.tobin)
+      await page.goto(`${server().url}/chats/${chatId}/context/${tobin.version}`)
+      await expect(
+        page
+          .getByRole("region", { name: "Whose context" })
+          .getByText("Tobin is the narrator: this reply saw the whole chat", {
+            exact: false
+          })
+      ).toBeVisible()
+    })
+  }
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`the preset's gap line and join line at ${width} ${theme}`, async ({ page }, info) => {
@@ -335,7 +422,9 @@ for (const width of [1440, 390])
       await expect(gap).toBeVisible()
       await expect(join).toBeVisible()
       // Each shows its default while unset: the gap line's text, the join line's nothing.
-      await expect(page.getByText(/^Default: "\[\{\{char\}\} wasn't present for \{\{absentCount\}\} messages/)).toBeVisible()
+      await expect(
+        page.getByText(/^Default: "\[\{\{char\}\} wasn't present for \{\{absentCount\}\} messages/)
+      ).toBeVisible()
       await expect(page.getByText("Default: nothing", { exact: true })).toBeVisible()
       await expectLayout(page, info, `contexts-preset-${width}-${theme}`, { scope: "details[open]" })
       await gap.fill("[{{char}} missed {{absentCount}} messages.]")

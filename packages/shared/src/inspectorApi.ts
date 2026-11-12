@@ -268,6 +268,22 @@ export const ContextDisplay = Schema.Struct({
 })
 export type ContextDisplay = typeof ContextDisplay.Type
 
+/**
+ * Whose view a reply's context was written from (spec/CHARACTER-CONTEXT.md §9.2 unit CU5): in a
+ * separate context, the speaker's name and the messages left out because it wasn't present for
+ * them, by message number (at most 200 listed, `more` counts the rest); a narrator's reply saw
+ * the whole chat. From the reply's own snapshot.
+ */
+export const SeparateContext = Schema.Struct({
+  viewer: Schema.String,
+  narrator: Schema.Boolean,
+  leftOut: Schema.Array(
+    Schema.Struct({ slotId: SlotId, number: Schema.Number, speaker: Schema.NullOr(Schema.String) })
+  ),
+  more: Schema.Number
+})
+export type SeparateContext = typeof SeparateContext.Type
+
 /** One generation's request as it was sent, and what the provider reported for it. */
 export class RunContext extends Schema.Class<RunContext>("RunContext")({
   chatId: ChatId,
@@ -282,6 +298,8 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   tokenizer: Schema.optionalKey(TokenizerInfo),
   /** The decision model chose who wrote this reply (DESIGN §2.3): by the name it was asked about, how sure. */
   speakerPick: Schema.optionalKey(Schema.Struct({ name: Schema.String, confidence: Schema.Number })),
+  /** Absent: one shared context, or a reply from before separate contexts. */
+  separateContext: Schema.optionalKey(SeparateContext),
   ...ContextDisplay.fields,
   /** Every attempt, retries included, oldest first. */
   requests: Schema.Array(InspectorUsage)

@@ -86,7 +86,11 @@ function AbsentTemplate({ store, which }: { store: EditorStore; which: "absent_g
           : "With separate contexts, where a merged chat joins and the character replying wasn't in it. {{mergedNames}} names the merged chat's characters. Example: [Mira and Tobin were elsewhere until now.] Empty, the default, adds nothing."
       }
       description={
-        stored === undefined ? (fallback === "" ? "Default: nothing" : `Default: ${JSON.stringify(fallback)}`) : undefined
+        stored === undefined
+          ? fallback === ""
+            ? "Default: nothing"
+            : `Default: ${JSON.stringify(fallback)}`
+          : undefined
       }
     />
   )

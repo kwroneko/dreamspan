@@ -7,6 +7,7 @@ import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
+import { unknownVersions, viewOf } from "../src/db/inspectorContexts.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 
@@ -148,4 +149,39 @@ describe("separate contexts in the client's reads", () => {
       assert.deepStrictEqual((yield* api.GetCast({ chatId, forkId, slotId: reply.slotId })).away, [mira])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
+})
+
+describe("the inspector's separate context", () => {
+  const inputs = (more: object) => ({ speaker: "wren", cards: [], ...more })
+  const knowers = [
+    {
+      key: "path",
+      found: [
+        { versionId: "v1", knowers: ["mira", "wren"] },
+        { versionId: "v2", knowers: ["mira", "tobin"] },
+        { versionId: "v3", knowers: null },
+        { versionId: "v4", knowers: ["old-wren"] },
+        { versionId: "v2", knowers: ["mira", "tobin"] }
+      ]
+    }
+  ]
+  it("is the viewer's, or a narrator's whole chat, or none in a shared context", () => {
+    assert.deepStrictEqual(viewOf({ inputs: inputs({ viewer: "wren" }) }), { viewer: "wren", narrator: false })
+    assert.deepStrictEqual(viewOf({ inputs: inputs({ presence: { narrators: ["wren"] } }) as never }), {
+      viewer: "wren",
+      narrator: true
+    })
+    assert.isNull(viewOf({ inputs: inputs({}) }))
+  })
+  it("lists what the viewer didn't know, by any of its identities, once each", () => {
+    assert.deepStrictEqual(unknownVersions({ inputs: inputs({ viewer: "wren" }), sources: { knowers } }), ["v2", "v4"])
+    assert.deepStrictEqual(
+      unknownVersions({
+        inputs: inputs({ viewer: "wren", viewerAliases: ["old-wren", "wren"] }),
+        sources: { knowers }
+      }),
+      ["v2"]
+    )
+    assert.deepStrictEqual(unknownVersions({ inputs: inputs({}), sources: { knowers } }), [])
+  })
 })

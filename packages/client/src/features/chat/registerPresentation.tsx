@@ -1,6 +1,7 @@
 import { SplitChatDivider } from "./SplitChatDivider.tsx"
 import { AwayRows } from "./AwayRows.tsx"
-import { messageStream } from "./presentation.tsx"
+import { ContextViewSection } from "./ContextViewSection.tsx"
+import { messageStream, runInspectorSections } from "./presentation.tsx"
 import { MacroBindings } from "./MacroBindings.tsx"
 import { registerImages } from "./images.tsx"
 import { registerTimelineTransforms } from "./timelineContributions.tsx"
@@ -110,6 +111,8 @@ export const registerPresentation = () => [
   messageStream.register({ id: "chat.split-divider", order: 30, component: SplitChatDivider }),
   // Where a character left the scene or came back, with Undo for the scene check's (CU3).
   messageStream.register({ id: "chat.away-rows", order: 20, component: AwayRows }),
+  // In the request inspector: whose view a separate context was written from, and what it left out (CU5).
+  runInspectorSections.register({ id: "inspector.context-view", order: 5, component: ContextViewSection }),
   ...registerTimelineTransforms(),
   chatBranchControls.register({ id: "chat.branches", order: 10, component: BranchControl }),
   messagePreviews.register({ id: "history.message-preview", order: 10, component: HistoryMessagePreview }),
