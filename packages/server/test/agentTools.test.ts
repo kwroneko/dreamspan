@@ -139,7 +139,7 @@ describe("agent read tools", () => {
       const me = yield* api.Whoami()
       const absentAt = Effect.map(
         reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId }),
-        (e) => foldState(e).absent
+        (e) => foldState(e).away
       )
       assert.deepStrictEqual(yield* absentAt, [mira.entityId])
 
@@ -153,7 +153,7 @@ describe("agent read tools", () => {
       })
       const peerAbsent = Effect.map(
         reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId, forkId: peer.id }),
-        (e) => foldState(e).absent
+        (e) => foldState(e).away
       )
       assert.deepStrictEqual(yield* peerAbsent, [mira.entityId])
 
@@ -168,7 +168,7 @@ describe("agent read tools", () => {
         userId: me.id,
         rolloutId: rollout_id,
         toolCallId: "call_0",
-        events: [{ key: "presence.set", value: { entity: mira.entityId, present: true } }],
+        events: [{ key: "away.set", value: { entity: mira.entityId, away: false } }],
         result: "other"
       })
       assert.deepStrictEqual(again, { result: "Mira is away from the next message on.", replayed: true })
@@ -185,7 +185,7 @@ describe("agent read tools", () => {
       yield* eventually(() => finished(events, swipe.version.id) !== undefined)
       const sourceAbsent = reader
         .StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId, forkId: sourceFork })
-        .pipe(Effect.map((e) => foldState(e).absent))
+        .pipe(Effect.map((e) => foldState(e).away))
       assert.deepStrictEqual(yield* sourceAbsent, [])
       assert.deepStrictEqual(yield* peerAbsent, [mira.entityId])
       // Selecting the effected swipe again restores the effect, then deleting the

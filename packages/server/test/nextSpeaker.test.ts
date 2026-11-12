@@ -146,7 +146,7 @@ describe("who replies next", () => {
               slotId: null,
               versionId: null,
               scope: null,
-              data: { key: "presence.set", value: { entity: quill!, present: false, source: "decision" } }
+              data: { key: "away.set", value: { entity: quill!, away: true, source: "decision" } }
             })
           })
       })

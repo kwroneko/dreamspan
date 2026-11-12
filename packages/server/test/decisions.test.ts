@@ -9,7 +9,7 @@ import type { ServerResponse } from "node:http"
 import { DatabaseSync } from "node:sqlite"
 import { type EntityId, NewVersion } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { foldState } from "@rp/shared/state.ts"
+import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { DecisionEngine } from "../src/decision/engine.ts"
@@ -244,7 +244,7 @@ describe("decision models", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, capture.generator)))
   })
 
-  it.live("presence: a manual mute made while the model answers stays in force", () => {
+  it.live("presence: a user's away mark made while the model answers stays in force; a narrator isn't asked", () => {
     const config = testConfig()
     const capture = engineCapture()
     return Effect.gen(function* () {
@@ -262,7 +262,7 @@ describe("decision models", () => {
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
-      const { version, chat, characters } = yield* generateReply(api, {
+      const { version, chat, characters, mira } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
         characters: ["Wren"]
@@ -270,7 +270,7 @@ describe("decision models", () => {
       const userId = (yield* api.Whoami()).id
       const writer = yield* Writer
       const entity = characters[0]!.entityId
-      const mute = (source?: "decision") =>
+      const add = (data: StateEventData) =>
         writer.AddStateEvent({
           userId,
           chatId: chat.id,
@@ -278,9 +278,13 @@ describe("decision models", () => {
           forkId: chat.currentForkId,
           versionId: null,
           scope: null,
-          data: { key: "presence.set", value: { entity, present: false, ...(source ? { source } : {}) } }
+          data
         })
+      const mute = (source?: "decision") =>
+        add({ key: "away.set", value: { entity, away: true, ...(source ? { source } : {}) } })
       yield* mute("decision")
+      // Mira narrates: never in or out of the scene, so never asked about.
+      yield* add({ key: "cast.role", value: { entity: mira.entityId as EntityId, role: "narrator" } })
       yield* decisionConnection(api, mock.url, { presence: { on: true, threshold: 0.85 } })
       const engine = capture.get()
       const fiber = yield* engine
@@ -293,8 +297,15 @@ describe("decision models", () => {
         })
         .pipe(Effect.forkScoped)
       yield* eventually(() => pending !== undefined)
+      const asked = mock.requests().find((r) => r.path === "/decide")!.body as {
+        questions: Record<string, { instructions: string }>
+      }
+      assert.deepStrictEqual(
+        Object.values(asked.questions).map((q) => q.instructions.split(" ")[0]),
+        ["Wren"]
+      )
       yield* mute()
-      json(pending!, 200, { answers: { c0: { noul: 0.99 }, c1: { noul: 0.99 } } })
+      json(pending!, 200, { answers: { c0: { noul: 0.99 } } })
       yield* Fiber.join(fiber)
       const reader = yield* Reader
       const events = yield* reader.StateEventsAt({
@@ -303,7 +314,8 @@ describe("decision models", () => {
         slotId: version.slotId,
         forkId: chat.currentForkId
       })
-      assert.include(foldState(events).absent, entity)
+      assert.include(foldState(events).away, entity)
+      assert.deepStrictEqual(foldState(events).absent, [])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, capture.generator)))
   })
 
@@ -480,103 +492,111 @@ describe("decision models", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("presence: a character the model is sure left is away on the reply's version; a user's Mute stays", () => {
-    const config = testConfig()
-    return Effect.gen(function* () {
-      const mock = yield* mockWith((request) => {
-        const questions = (request.body?.questions ?? {}) as Record<string, { instructions: string }>
-        // Wren left; everyone else asked about is still there.
-        return {
-          answers: Object.fromEntries(
-            Object.entries(questions).map(([id, q]) => [id, { noul: q.instructions.startsWith("Wren") ? 0.04 : 0.95 }])
-          ),
-          usage: { input_tokens: 60, output_tokens: 2 }
-        }
-      }, "*Wren slips out to the stables.* Mira stays by the fire.")
-      const api = yield* client()
-      yield* decisionConnection(api, mock.url, { presence: { on: true, threshold: 0.85 } })
-      const { version, chat, characters } = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
-        model: {},
-        characters: ["Wren", "Ansel"],
-        muted: ["Ansel"]
-      })
-      const [wren, ansel] = [characters[0]!, characters[1]!]
-      const me = yield* api.Whoami()
-      const reader = yield* Reader
-      const absentAt = Effect.map(
-        reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId }),
-        (e) => foldState(e).absent
-      )
-      yield* eventually(() => mock.requests().some((r) => r.path === "/decide"))
-      const asked = mock.requests().find((r) => r.path === "/decide")!.body as {
-        state: { characters: Array<string>; recent: Array<{ from: string; text: string }> }
-        questions: Record<string, { instructions: string }>
-      }
-      assert.deepStrictEqual(asked.state.characters, ["Mira", "Wren", "Ansel"])
-      assert.strictEqual(asked.state.recent.length, 2)
-      assert.include(asked.state.recent[1]!.text, "Wren slips out")
-      // Ansel was muted by the user: not asked about, and still muted after.
-      assert.deepStrictEqual(
-        Object.values(asked.questions).map((q) => q.instructions.split(" ")[0]),
-        ["Mira", "Wren"]
-      )
-      let absent: ReadonlyArray<string> = []
-      for (let i = 0; i < 100 && absent.length < 2; i++) {
-        absent = yield* absentAt
-        if (absent.length < 2) yield* Effect.sleep(50)
-      }
-      assert.deepStrictEqual(absent, [ansel.entityId, wren.entityId])
-      const events = yield* reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId })
-      assert.deepInclude(
-        events.map((e) => e.data),
-        { key: "presence.set", value: { entity: wren.entityId as EntityId, present: false, source: "decision" } }
-      )
-      const [decision] = rows<{ status: string; slot_id: string }>(
-        config.dataDir,
-        "SELECT status, slot_id FROM rollouts WHERE kind = 'decision'"
-      )
-      assert.deepStrictEqual({ ...decision }, { status: "completed", slot_id: version.slotId })
-      const sourceFork = chat.currentForkId!
-      const { fork: peer } = yield* api.CreateFork({
-        chatId: chat.id,
-        fromForkId: sourceFork,
-        atSlotId: version.slotId
-      })
-      const writer = yield* Writer
-      const alternative = yield* writer.AddVersion({
-        userId: me.id,
-        slotId: version.slotId,
-        forkId: sourceFork,
-        select: true,
-        commitDraft: null,
-        version: new NewVersion({
-          content: "Everyone stays.",
-          speakerEntityId: null,
-          writer: "human",
-          status: "complete",
-          macroMode: "verbatim",
-          origin: "user_written"
+  it.live(
+    "presence: a character the model is sure left is away on the reply's version; a muted one stays muted",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* mockWith((request) => {
+          const questions = (request.body?.questions ?? {}) as Record<string, { instructions: string }>
+          // Wren left; everyone else asked about is still there.
+          return {
+            answers: Object.fromEntries(
+              Object.entries(questions).map(([id, q]) => [
+                id,
+                { noul: q.instructions.startsWith("Wren") ? 0.04 : 0.95 }
+              ])
+            ),
+            usage: { input_tokens: 60, output_tokens: 2 }
+          }
+        }, "*Wren slips out to the stables.* Mira stays by the fire.")
+        const api = yield* client()
+        yield* decisionConnection(api, mock.url, { presence: { on: true, threshold: 0.85 } })
+        const { version, chat, characters } = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          characters: ["Wren", "Ansel"],
+          muted: ["Ansel"]
         })
-      })
-      const absentIn = (forkId: typeof sourceFork) =>
-        reader
-          .StateEventsAt({
-            userId: me.id,
-            chatId: chat.id,
-            slotId: version.slotId,
-            forkId
+        const [wren, ansel] = [characters[0]!, characters[1]!]
+        const me = yield* api.Whoami()
+        const reader = yield* Reader
+        const stateAt = Effect.map(
+          reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId }),
+          (e) => foldState(e)
+        )
+        yield* eventually(() => mock.requests().some((r) => r.path === "/decide"))
+        const asked = mock.requests().find((r) => r.path === "/decide")!.body as {
+          state: { characters: Array<string>; recent: Array<{ from: string; text: string }> }
+          questions: Record<string, { instructions: string }>
+        }
+        assert.deepStrictEqual(asked.state.characters, ["Mira", "Wren", "Ansel"])
+        assert.strictEqual(asked.state.recent.length, 2)
+        assert.include(asked.state.recent[1]!.text, "Wren slips out")
+        // Ansel was muted by the user: muted isn't away (spec/CHARACTER-CONTEXT.md §2.1), so asked
+        // about too, and still muted after.
+        assert.deepStrictEqual(
+          Object.values(asked.questions).map((q) => q.instructions.split(" ")[0]),
+          ["Mira", "Wren", "Ansel"]
+        )
+        let away: ReadonlyArray<string> = []
+        for (let i = 0; i < 100 && away.length < 1; i++) {
+          away = (yield* stateAt).away
+          if (away.length < 1) yield* Effect.sleep(50)
+        }
+        assert.deepStrictEqual(away, [wren.entityId])
+        assert.deepStrictEqual((yield* stateAt).absent, [ansel.entityId])
+        const events = yield* reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId })
+        assert.deepInclude(
+          events.map((e) => e.data),
+          { key: "away.set", value: { entity: wren.entityId as EntityId, away: true, source: "decision" } }
+        )
+        const [decision] = rows<{ status: string; slot_id: string }>(
+          config.dataDir,
+          "SELECT status, slot_id FROM rollouts WHERE kind = 'decision'"
+        )
+        assert.deepStrictEqual({ ...decision }, { status: "completed", slot_id: version.slotId })
+        const sourceFork = chat.currentForkId!
+        const { fork: peer } = yield* api.CreateFork({
+          chatId: chat.id,
+          fromForkId: sourceFork,
+          atSlotId: version.slotId
+        })
+        const writer = yield* Writer
+        const alternative = yield* writer.AddVersion({
+          userId: me.id,
+          slotId: version.slotId,
+          forkId: sourceFork,
+          select: true,
+          commitDraft: null,
+          version: new NewVersion({
+            content: "Everyone stays.",
+            speakerEntityId: null,
+            writer: "human",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
           })
-          .pipe(Effect.map((events) => foldState(events).absent))
-      assert.deepStrictEqual(yield* absentIn(sourceFork), [ansel.entityId])
-      assert.deepStrictEqual(yield* absentIn(peer.id), [ansel.entityId, wren.entityId])
-      yield* api.SelectVersion({
-        slotId: version.slotId,
-        versionId: version.id,
-        expectedVersionId: alternative.id,
-        forkId: sourceFork
-      })
-      assert.deepStrictEqual(yield* absentIn(sourceFork), [ansel.entityId, wren.entityId])
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
-  })
+        })
+        const awayIn = (forkId: typeof sourceFork) =>
+          reader
+            .StateEventsAt({
+              userId: me.id,
+              chatId: chat.id,
+              slotId: version.slotId,
+              forkId
+            })
+            .pipe(Effect.map((events) => foldState(events).away))
+        assert.deepStrictEqual(yield* awayIn(sourceFork), [])
+        assert.deepStrictEqual(yield* awayIn(peer.id), [wren.entityId])
+        yield* api.SelectVersion({
+          slotId: version.slotId,
+          versionId: version.id,
+          expectedVersionId: alternative.id,
+          forkId: sourceFork
+        })
+        assert.deepStrictEqual(yield* awayIn(sourceFork), [wren.entityId])
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    }
+  )
 })

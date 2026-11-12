@@ -35,6 +35,21 @@ export const presenceOf = (
   }
 }
 
+/**
+ * Who is away at the position (`away.set`), less narrators (§6: never in or out of the scene):
+ * not picked to reply, by Auto or by Who replies next, as the muted aren't (§5).
+ */
+export const awayAt = (state: Pick<ChatState, "away" | "roles">): ReadonlyArray<string> =>
+  state.away.filter((id) => state.roles[id] !== "narrator")
+
+/**
+ * [P] default for an open question (spec/CHARACTER-CONTEXT.md §9.3): whether an away character
+ * counts as muted where a note's condition or a macro asks "not muted" (`{ when: "not_muted" }`,
+ * `{{groupNotMuted}}`). True keeps what the scene check did when it wrote Mute: a note "while
+ * Wren isn't muted" stops while she's away.
+ */
+export const AWAY_ACTS_AS_MUTED = true
+
 /** What a version records about who was there, as read back from its row. */
 export interface KnowledgeRecord {
   /** `cast_json`'s ids; null when the version has none recorded (known to everyone). */

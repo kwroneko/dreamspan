@@ -495,6 +495,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         characterVersion: "3"
       })
       yield* add(main, b.slotId, { key: "presence.set", value: { entity: parent.entityId, present: false } })
+      // Away follows the cast position through swaps and purges as Mute does (unit C8).
+      yield* add(main, b.slotId, { key: "away.set", value: { entity: parent.entityId, away: true } })
       yield* swap(main)
       yield* add(main, b.slotId, { key: "card.swap", value: { entity: next.entityId, replaces: card.entityId } })
       const later = yield* fork(main, b.slotId)
@@ -509,6 +511,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       yield* add(later, b.slotId, { key: "presence.set", value: { entity: next.entityId, present: true } })
       assert.notInclude((yield* state(later)).absent, next.entityId)
       assert.include((yield* state(main)).absent, next.entityId)
+      yield* add(later, b.slotId, { key: "away.set", value: { entity: next.entityId, away: false } })
+      assert.notInclude((yield* state(later)).away, next.entityId)
+      assert.include((yield* state(main)).away, next.entityId)
     })
   )
 

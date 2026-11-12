@@ -249,9 +249,15 @@ export const withoutPurged = <E extends FoldableEvent>(
         return keptSwaps.has(event) ? [event] : []
       }
       if (
-        ["participant.join", "participant.leave", "presence.set", "lorebook.binding", "lorebook.embedded"].includes(
-          data.key
-        ) &&
+        [
+          "participant.join",
+          "participant.leave",
+          "presence.set",
+          "away.set",
+          "cast.role",
+          "lorebook.binding",
+          "lorebook.embedded"
+        ].includes(data.key) &&
         references(data).every(
           (r) => !gone.has(r.id) || (r.table === "entity" && r.kind === "card" && routing.has(r.id))
         )

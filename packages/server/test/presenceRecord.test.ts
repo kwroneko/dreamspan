@@ -115,6 +115,73 @@ describe("presence recorded with each message", () => {
   })
 })
 
+describe("away for turn picking and notes (unit C8)", () => {
+  /** A reply with Wren in the cast and a note "while Wren isn't muted", after `about` Wren. */
+  const withNote = (about: (wren: EntityId) => ReadonlyArray<StateEventData>) =>
+    Effect.gen(function* () {
+      const mock = yield* mockProvider
+      const api = yield* client()
+      const userId = (yield* api.Whoami()).id as UserId
+      const made = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        characters: ["Wren"],
+        before: (chat, [wren]) =>
+          Effect.gen(function* () {
+            const writer = yield* Writer
+            const add = (data: StateEventData) =>
+              writer.AddStateEvent({ userId, chatId: chat.id, slotId: null, versionId: null, scope: null, data })
+            const note = yield* writer.CreateEntity({
+              userId,
+              kind: "note",
+              label: "Lantern",
+              subtitle: "",
+              doc: {
+                schema_version: 1,
+                title: "Lantern",
+                content: "Wren carries the lantern.",
+                owner: { chat: chat.id },
+                placement: { mode: "tail", role: "system" },
+                exportable: false,
+                condition: { when: "not_muted", cards: [wren!] }
+              } as never,
+              schemaVersion: 1,
+              origin: "user",
+              sourcePath: null
+            })
+            yield* add({ key: "note.activate", value: { note: note.entityId } })
+            for (const data of about(wren!)) yield* add(data)
+          })
+      })
+      const cast = yield* api.GetCast({ chatId: made.chat.id, slotId: null })
+      return { request: JSON.stringify(mock.requests().at(-1)!.body), cast, wren: made.characters[0]!.entityId }
+    })
+
+  it.live("GetCast carries who's away and the roles; away counts as muted for a note's condition", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const plain = yield* withNote(() => [])
+      assert.include(plain.request, "Wren carries the lantern.")
+      assert.notProperty(plain.cast, "away")
+      assert.notProperty(plain.cast, "roles")
+
+      const away = yield* withNote((wren) => [{ key: "away.set", value: { entity: wren, away: true } }])
+      assert.notInclude(away.request, "Wren carries the lantern.", "AWAY_ACTS_AS_MUTED")
+      assert.deepStrictEqual(away.cast.away, [away.wren])
+      assert.deepStrictEqual(away.cast.absent, [], "away isn't Mute")
+
+      // A narrator is never away: left out of `away`, its role carried.
+      const narrated = yield* withNote((wren) => [
+        { key: "cast.role", value: { entity: wren, role: "narrator" } },
+        { key: "away.set", value: { entity: wren, away: true } }
+      ])
+      assert.notProperty(narrated.cast, "away")
+      assert.deepStrictEqual(narrated.cast.roles, { [narrated.wren]: "narrator" })
+      assert.include(narrated.request, "Wren carries the lantern.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
 describe("presence on written messages, swipes, copies and merges", () => {
   const setup = Effect.gen(function* () {
     const api = yield* client()

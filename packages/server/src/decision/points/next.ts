@@ -7,6 +7,7 @@
 // under Next, No one, Generate and Speak now never come here: their versions aren't Auto's pick.
 import type { EntityId, Version } from "@rp/shared/chat.ts"
 import type { DecisionQuestion } from "@rp/shared/decisions.ts"
+import { awayAt } from "@rp/shared/knowledge.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { DecisionPoint } from "../engine.ts"
@@ -106,7 +107,10 @@ export const nextPoint: DecisionPoint<NextInput, NextPick> = {
       const last = window.entries.at(-1)
       const lastId = last?.version.speakerEntityId ?? null
       // Present (not away, not muted), and not who just spoke: no one answers themselves.
-      const present = characters.filter((entity) => !state.absent.includes(entity) && entity !== lastId)
+      const away = awayAt(state)
+      const present = characters.filter(
+        (entity) => !state.absent.includes(entity) && !away.includes(entity) && entity !== lastId
+      )
       if (present.length < 2) return false
       // Auto's pick first, so a cap never drops it.
       const candidates = [...new Set([...(present.includes(auto) ? [auto] : []), ...present])].slice(0, MAX_CANDIDATES)

@@ -306,6 +306,10 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   participants: Schema.Array(EntityId),
   /** Participants marked absent (DESIGN §3.5). */
   absent: Schema.Array(EntityId),
+  /** Away from the scene (`away.set`, spec/CHARACTER-CONTEXT.md §5), narrators left out: not picked to reply; absent: none. */
+  away: Schema.optionalKey(Schema.Array(EntityId)),
+  /** Cast members' roles (`cast.role`, §6): a narrator sees everything and is never away; absent: none. */
+  roles: Schema.optionalKey(Schema.Record(Schema.String, Schema.Literal("narrator"))),
   /** The "played by me" set: the composer's default speaker and `{{user}}` (DESIGN §2.2). */
   playedByMe: Schema.Array(EntityId),
   /** The chat-wide model and preset; the context assembler reads these. */

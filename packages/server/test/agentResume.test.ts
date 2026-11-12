@@ -574,7 +574,7 @@ describe("resuming agent replies", () => {
       const reader = yield* Reader
       const absent = Effect.map(
         reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId }),
-        (e) => foldState(e).absent
+        (e) => foldState(e).away
       )
       assert.deepStrictEqual(yield* absent, [mira.entityId])
       const resumeFrom = (step: number, edit?: Parameters<typeof api.ResumeFromStep>[0]["edit"]) =>
@@ -622,7 +622,7 @@ describe("resuming agent replies", () => {
       })
       const db = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
       const presence = db
-        .prepare("SELECT value_json FROM state_events WHERE version_id = ? AND key = 'presence.set'")
+        .prepare("SELECT value_json FROM state_events WHERE version_id = ? AND key = 'away.set'")
         .all(rerun.id)
       db.close()
       assert.strictEqual(presence.length, 1, "only the re-run call's effect")

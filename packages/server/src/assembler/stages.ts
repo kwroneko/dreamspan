@@ -30,6 +30,7 @@ import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { branchOwned, type ChatState, foldState, noteSwitches, swappedCard } from "@rp/shared/state.ts"
 import { anyOf, noteCondition } from "@rp/shared/docs/note.ts"
+import { AWAY_ACTS_AS_MUTED, awayAt } from "@rp/shared/knowledge.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
@@ -189,10 +190,15 @@ const castOf = (state: ChatState, speakerId: string | null, ordinal: number) =>
     const cards = new Map((yield* sources.cards(wanted, state.cardBindings)).map((c) => [c.entity, c]))
     const characters = wanted.filter((e) => !played.has(e)).flatMap((e) => cards.get(e) ?? [])
     const personas = selected.flatMap((e) => cards.get(e) ?? [])
-    const absent = new Set(state.absent)
-    // A muted character is never picked to speak (DESIGN §3.5); it speaks only when named.
+    const away = awayAt(state)
+    // Muted, and away where it counts as muted (spec/CHARACTER-CONTEXT.md §9.3, `AWAY_ACTS_AS_MUTED`).
+    const absent = new Set([...state.absent, ...(AWAY_ACTS_AS_MUTED ? away : [])])
+    // A muted or away character is never picked to speak (DESIGN §3.5; spec/CHARACTER-CONTEXT.md
+    // §5); it speaks only when named.
     const speaker =
-      (speakerId ? cards.get(speakerId) : undefined) ?? characters.find((c) => !absent.has(c.entity)) ?? null
+      (speakerId ? cards.get(speakerId) : undefined) ??
+      characters.find((c) => !absent.has(c.entity) && !away.includes(c.entity)) ??
+      null
     const type: GenerationType =
       speaker && played.has(speaker.entity) ? "impersonate" : ordinal > 0 ? "swipe" : "normal"
     const cast: Cast = { characters, personas, absent, speaker, type }
@@ -639,6 +645,7 @@ const positionKey = (state: ChatState, events: ReadonlyArray<PositionedEvent>) =
     state.participants,
     state.playedByMe,
     state.absent,
+    awayAt(state),
     state.cardBindings,
     state.macroBindings,
     state.layoutCards,

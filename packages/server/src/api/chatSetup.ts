@@ -10,6 +10,7 @@ import type { CastCard, ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { Cast, type CastChange, ChatNote, ShellCards, ShellForks, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { awayAt } from "@rp/shared/knowledge.ts"
 import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
 import { Effect, Option, Queue, Semaphore, Stream } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
@@ -240,6 +241,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       slotId,
       participants: state.participants as Cast["participants"],
       absent: state.absent as Cast["absent"],
+      ...(awayAt(state).length ? { away: awayAt(state) as Cast["absent"] } : {}),
+      ...(Object.keys(state.roles).length ? { roles: state.roles } : {}),
       playedByMe: state.playedByMe as Cast["playedByMe"],
       model: (state.modelBindings[""] ?? null) as Cast["model"],
       preset: (state.presetBindings[""]?.ref ?? null) as Cast["preset"],

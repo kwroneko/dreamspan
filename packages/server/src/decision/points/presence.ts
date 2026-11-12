@@ -1,12 +1,15 @@
 // The `presence` decision point (spec/AGENTIC.md §7): after a reply completes in a chat with two
 // or more characters, "is each character still in the scene?" over the last two messages. A
-// character the model is sure has left is marked away, which is Mute (DESIGN §3.5): Auto no
-// longer picks them to reply next, until they're back. One the model marked away comes back when
-// it's sure they returned. The changes attach to the reply's version, so a swipe takes them back.
-// Without a model nothing changes (today's behaviour). The user's own Mute, and the agent's
-// `set_presence`, are never overridden: only presence this point set itself is changed back.
+// character the model is sure has left is marked away (`away.set`, `source: "decision"`; spec/
+// CHARACTER-CONTEXT.md §5, apart from Mute): Auto no longer picks them to reply next until
+// they're back, and in a chat with separate contexts they don't see what's said meanwhile. One
+// the model marked away comes back when it's sure they returned. The changes attach to the
+// reply's version, so a swipe takes them back. Without a model nothing changes. The user's own
+// away mark, and the agent's `set_presence`, are never overridden: only presence this point set
+// itself is changed back. A narrator is never asked about (§6: never in or out of the scene).
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { DecisionQuestion } from "@rp/shared/decisions.ts"
+import { awayAt } from "@rp/shared/knowledge.ts"
 import { foldState, type StoredStateEventData } from "@rp/shared/state.ts"
 
 type StoredEvent = typeof StoredStateEventData.Type
@@ -42,7 +45,7 @@ export const presencePoint: DecisionPoint<PresenceInput, ReadonlyArray<PresenceC
   id: "presence",
   label: "Who is in the scene",
   description:
-    "After each reply in a chat with several characters, asks whether each character is still in the scene. A character who left isn't picked to reply until they're back. Without it, presence changes only when you mute someone.",
+    "After each reply in a chat with several characters, asks whether each character is still in the scene. A character who left isn't picked to reply until they're back. Without it, no one is marked away automatically.",
   defaultThreshold: 0.85,
   questions: ({ candidates }) =>
     Object.fromEntries(
@@ -85,16 +88,18 @@ export const presencePoint: DecisionPoint<PresenceInput, ReadonlyArray<PresenceC
       const state = foldState(events)
       const characters = state.participants.filter((entity) => !state.playedByMe.includes(entity))
       if (characters.length < 2) return false
-      // Who set each character's presence last: the user (or a tool), or this point.
+      // Who set each character's away mark last: the user (or a tool), or this point.
       const lastSource = new Map<string, "decision" | "other">()
       for (const event of events)
-        if (event.data.key === "presence.set")
+        if (event.data.key === "away.set")
           lastSource.set(event.data.value.entity, event.data.value.source === "decision" ? "decision" : "other")
       const cards = yield* reader.CastCards({ userId: reply.userId, entityIds: characters as Array<EntityId> })
       const names = new Map(cards.map((card) => [card.entityId as string, card.modelName ?? card.name]))
+      const away = awayAt(state)
       const candidates = characters.flatMap((entity): Array<PresenceCandidate> => {
-        const present = !state.absent.includes(entity)
-        // Away by the user's own Mute (or a tool): left as it is.
+        if (state.roles[entity] === "narrator") return []
+        const present = !away.includes(entity)
+        // Away by the user's own mark (or a tool): left as it is.
         if (!present && lastSource.get(entity) !== "decision") return []
         return [{ entity, name: names.get(entity) ?? "Unnamed", present }]
       })
@@ -142,8 +147,8 @@ export const presencePoint: DecisionPoint<PresenceInput, ReadonlyArray<PresenceC
       )
       if (outcome.source !== "model" || outcome.value.length === 0 || !outcome.rolloutId) return false
       const changes: Array<StoredEvent> = outcome.value.map((change) => ({
-        key: "presence.set",
-        value: { entity: change.entity as EntityId, present: change.present, source: "decision" }
+        key: "away.set",
+        value: { entity: change.entity as EntityId, away: !change.present, source: "decision" }
       }))
       return yield* writer.ApplyDecisionEffect({
         userId: reply.userId,

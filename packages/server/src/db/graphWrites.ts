@@ -260,6 +260,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
           "participant.join",
           "participant.leave",
           "presence.set",
+          "away.set",
+          "cast.role",
           "played_by_me.set",
           "lorebook.binding",
           "lorebook.embedded"
@@ -292,6 +294,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
           case "participant.join":
           case "participant.leave":
           case "presence.set":
+          case "away.set":
+          case "cast.role":
           case "lorebook.binding":
           case "lorebook.embedded":
             data = rekey(data)
