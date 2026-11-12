@@ -315,6 +315,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   lorebooks: Schema.Array(RefId),
   /** Cards whose own lorebook this chat has turned off. */
   cardLorebooksOff: Schema.Array(EntityId),
+  /** A card's own book is replaced by this world file while the file is read (ST's link between a card and its world). */
+  cardLorebookBindings: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
   /** Every lorebook attached to the chat and not removed, on or off, in the order first attached. */
   listedLorebooks: Schema.Array(Schema.Struct({ ref: RefId, on: Schema.Boolean })),
   /** Lorebook entries only below the history (DESIGN §1.3); on unless the chat turned it off. */
