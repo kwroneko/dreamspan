@@ -2731,6 +2731,17 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor) => Effect.map(actor.api.ListRecentRemote({ sourceId: "cardex" }), (list) => assert.lengthOf(list, 0))
   },
   ClearRecentRemote: { probe: (actor) => Effect.asVoid(actor.api.ClearRecentRemote({ sourceId: "cardex" })) },
+  SearchMessages: {
+    // Both quiet chats say "hi": each finds its own message, never the other's.
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const own = yield* owner.api.SearchMessages({ text: "hi", cursor: null })
+        assert.isTrue(own.hits.some((h) => h.chatId === owner.quiet.chatId))
+        const page = yield* actor.api.SearchMessages({ text: "hi", cursor: null })
+        assert.isTrue(page.hits.some((h) => h.chatId === actor.quiet.chatId))
+        assert.isFalse(page.hits.some((h) => h.chatId === owner.quiet.chatId || h.chatId === owner.chat.chatId))
+      })
+  },
   ListArchiveCandidates: {
     probe: (actor, owner) =>
       Effect.map(actor.api.ListArchiveCandidates({ criteria: { never: 1, inactive: 1 } }), (cards) =>

@@ -899,7 +899,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - **[P]** A prompt added behind the bar can be typed into at once; its text is kept as live drafts, but nothing sends it until the bar's Save, and a reply's checkpoint leaves it out, so Revert takes it away entirely. Deleting a prompt that was only added behind the bar removes it at once (it was never saved or sent).
 - **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12, §14).
 - **[P]** Every write carries the revision it was based on, so a stale tab can never silently overwrite newer state. **Built optimistic bases** (ARCHITECTURE §3.10, §14); compound forms retain documented snapshots and setting-save/draft-end operations are separate. This is not universal live field collaboration.
-- **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats.
+- **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats. **Built:** message text across all chats, from the left panel's chat search (search, 2026-11-12; ARCHITECTURE §12 "Finding a message").
 - **[D]** Text boxes work like a code editor (owner, 2026-10-16), and almost every text box needs it:
   - the left edge marks new, modified and unchanged lines
   - a diff view of the current changes against the last revision

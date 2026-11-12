@@ -1,3 +1,4 @@
+import { MessageCursor, MessageQuery, MessageSearchPage } from "@rp/shared/messageSearch.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
@@ -3623,6 +3624,16 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, versionId: VersionId },
     success: Schema.Array(RolloutStep),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Message text across all of the user's chats (messageSearch.ts, ARCHITECTURE §12 "Finding a
+   * message"): message versions whose text has a word starting with each word of `text`, newest
+   * first, each with the live branches that show it; `cursor` from the previous page.
+   */
+  Rpc.make("SearchMessages", {
+    payload: { userId: UserId, text: MessageQuery, cursor: Schema.NullOr(MessageCursor), limit: Schema.Int },
+    success: MessageSearchPage,
+    error: StorageError
   }),
   /**
    * The agent's `search_chat` over full-text search (agentReads.ts, spec/AGENTIC.md §4.5): the
