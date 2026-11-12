@@ -898,10 +898,13 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           presence_json: string | null
           speaker_entity_id: string | null
           merge_cast: string | null
-        }>`SELECT v.id, v.cast_json, v.presence_json, v.speaker_entity_id,
-            CASE WHEN v.origin = 'merge' THEN ${sql.literal(mergeKnowersSql("v.slot_id"))} END AS merge_cast
-          FROM version_records v JOIN slots s ON s.id = v.slot_id
-          WHERE s.chat_id = ${chatId} AND ${owned} AND v.id IN ${sql.in(versionIds)}`
+        }>`SELECT metadata.id, payload.cast_json, payload.presence_json, metadata.speaker_entity_id,
+            CASE WHEN metadata.origin = 'merge' THEN ${sql.literal(mergeKnowersSql("metadata.slot_id"))} END AS merge_cast
+          FROM json_each(${JSON.stringify(versionIds)}) requested
+          CROSS JOIN versions metadata ON metadata.id = requested.value
+          CROSS JOIN version_texts payload ON payload.version_seq = metadata.seq
+          CROSS JOIN slots s ON s.id = metadata.slot_id
+          WHERE s.chat_id = ${chatId} AND ${owned}`
         const byId = new Map(rows.map((row) => [row.id, row]))
         const found = versionIds.map((versionId) => {
           const row = byId.get(versionId)
