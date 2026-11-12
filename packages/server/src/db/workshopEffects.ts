@@ -1,6 +1,13 @@
+import { safeAgentDocument } from "./agentDocuments.ts"
 import { pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
 import { isDeepStrictEqual } from "node:util"
-import { operationPolicies, operationInfo, refuseOperation, type OperationHandlers } from "./operationPolicies.ts"
+import {
+  operationPolicies,
+  operationInfo,
+  previousLibraryDocument,
+  refuseOperation,
+  type OperationHandlers
+} from "./operationPolicies.ts"
 import { settingsRegistry, writeSetting } from "./settings.ts"
 import { Schema } from "effect"
 // Setup tools compose the same typed user operations in one outer writer transaction.
@@ -142,6 +149,7 @@ const checkedRef = (ctx: UndoContext, effect: RolloutEffect) =>
       head = String(edge!.restoredHead)
       version = Number(edge!.restoredRowVersion)
     }
+    if (undo.exactDocument === true && ref.archived_at !== undo.archivedAt) return yield* refuse()
     if (ref.entity_id !== effect.targetId || ref.head_revision_id !== head || ref.row_version !== version)
       return yield* refuse()
     return ref
@@ -251,12 +259,24 @@ const reviseUndoer: Undoer = {
   run: (ctx, effect) =>
     Effect.gen(function* () {
       const ref = yield* checkedRef(ctx, effect)
-      const change = yield* ctx.ops.RestoreRevision({
-        userId: ctx.userId,
-        refId: ref.id as RefId,
-        revisionId: String(effect.undo!.before) as RevisionId,
-        expectedRowVersion: ref.row_version
-      })
+      // Explicit user Undo restores the recorded document exactly, including its prior
+      // approvals, and leaves active drafts alone. This is never tool-reachable approval.
+      const change =
+        effect.undo!.exactDocument === true
+          ? yield* ctx.ops.EditRef({
+              userId: ctx.userId,
+              refId: ref.id as RefId,
+              expectedRowVersion: ref.row_version,
+              doc: yield* previousLibraryDocument(ctx.sql, ctx.userId, ref.id, String(effect.undo!.before)),
+              message: "Undid a workshop edit",
+              commitDraft: null
+            })
+          : yield* ctx.ops.RestoreRevision({
+              userId: ctx.userId,
+              refId: ref.id as RefId,
+              revisionId: String(effect.undo!.before) as RevisionId,
+              expectedRowVersion: ref.row_version
+            })
       return { restoredHead: change.ref.headRevisionId, restoredRowVersion: change.ref.rowVersion }
     })
 }
@@ -523,11 +543,14 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 if (expected?.proof) {
                   const proof = expected.proof as {
                     chat?: { id: import("@rp/shared/chat.ts").ChatId }
-                    refs?: Array<{ refId: string; rowVersion: number }>
+                    refs?: Array<{ refId: string; rowVersion: number; archivedAt?: number | null }>
                   }
                   for (const expectedRef of proof.refs ?? []) {
                     const current = yield* lib.ownedRef(input.userId, expectedRef.refId)
-                    if (current.row_version !== expectedRef.rowVersion)
+                    if (
+                      current.row_version !== expectedRef.rowVersion ||
+                      ("archivedAt" in expectedRef && current.archived_at !== expectedRef.archivedAt)
+                    )
                       return yield* refuseOperation("The saved library item changed while waiting. Read it again.")
                   }
                   const current = proof.chat
@@ -566,9 +589,11 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   if (!revision) return yield* new NotFound({ entity: "revision", id: String(value.revisionId) })
                   const next = yield* lib.loadDoc(String(value.revisionId))
                   if (
-                    !isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, old, next), next) ||
-                    !isDeepStrictEqual(withHtmlApprovals(old, next), next) ||
-                    (next.regex_approved === true && old.regex_approved !== true)
+                    ref.kind !== "preset" &&
+                    ref.kind !== "lorebook" &&
+                    (!isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, old, next), next) ||
+                      !isDeepStrictEqual(withHtmlApprovals(old, next), next) ||
+                      (next.regex_approved === true && old.regex_approved !== true))
                   )
                     return yield* refuseOperation(
                       "Restoring this revision would change permissions. Restore it yourself from History."
@@ -588,6 +613,25 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     value.value,
                     Number(value.expectedRevision)
                   )
+                } else if (input.operation === "RestoreRevision") {
+                  const ref = yield* lib.ownedRef(input.userId, String(value.refId))
+                  // Assistant restores are saved edits; unlike the user's History action,
+                  // they must never settle or replace active drafts.
+                  if (ref.kind === "preset" || ref.kind === "lorebook")
+                    result = yield* ops.EditRef({
+                      userId: input.userId,
+                      refId: ref.id as RefId,
+                      expectedRowVersion: Number(value.expectedRowVersion),
+                      doc: safeAgentDocument(
+                        ref.kind,
+                        yield* lib.loadDoc(ref.head_revision_id),
+                        yield* lib.loadDoc(String(value.revisionId))
+                      ),
+                      message: "Restored in the workshop",
+                      commitDraft: null,
+                      agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
+                    })
+                  else result = yield* handler!(payload)
                 } else result = yield* handler!(payload)
                 const after = yield* policy!.before(sql, input.userId, value as never)
                 const priorRef = before as { ref?: { id: string; head_revision_id: string; row_version: number } }
@@ -649,14 +693,15 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               )
             )
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
-            yield* checkDocument(valid.doc)
+            const doc = safeAgentDocument(input.kind, {}, valid.doc)
+            yield* checkDocument(doc)
             const { ref } = yield* ops.CreateEntity({
               userId: input.userId,
               kind: input.kind,
               label: input.label,
               subtitle: "",
               schemaVersion: Number(valid.doc.schema_version ?? 1),
-              doc: valid.doc,
+              doc,
               origin: "agent",
               originRef: `${input.rolloutId}:${input.toolCallId}`,
               sourcePath: null,
@@ -698,6 +743,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                         undo: {
                           refId: before.id,
                           before: before.head_revision_id,
+                          exactDocument: before.kind === "preset" || before.kind === "lorebook",
+                          archivedAt: before.archived_at,
                           beforeRowVersion: before.row_version,
                           head: change.ref.headRevisionId,
                           rowVersion: change.ref.rowVersion

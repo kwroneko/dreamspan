@@ -325,6 +325,8 @@ describe("workshop setup effects", () => {
           [
             "create_card",
             "edit_card",
+            "edit_preset",
+            "edit_lorebook",
             "clone_card",
             "start_chat",
             ...builtinOperationExposures

@@ -10,7 +10,7 @@ import { settingsRegistry, readSetting, writeSetting } from "./settings.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import type { Rpc, RpcGroup } from "effect/rpc"
-import type { RefId } from "@rp/shared/library.ts"
+import type { Doc, RefId } from "@rp/shared/library.ts"
 import type { StoredStateEventData } from "@rp/shared/state.ts"
 import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
 import { makeLibraryQueries } from "./library.ts"
@@ -103,6 +103,18 @@ const refSnapshot = (sql: SqlClient.SqlClient, userId: UserId, input: { refId: R
     }>`SELECT archived_at FROM entities WHERE id = ${ref.entity_id}`
     return { ref, archived: entity!.archived_at }
   })
+/** Undo may restore only an immutable revision of this owned entry, even if a
+ * stored recipe is malformed. The caller already checks the current saved head. */
+export const previousLibraryDocument = (sql: SqlClient.SqlClient, userId: UserId, refId: string, revisionId: string) =>
+  sql<{ doc_json: string }>`SELECT v.doc_json FROM entity_revisions v
+    JOIN entity_refs r ON r.entity_id = v.entity_id JOIN entities e ON e.id = r.entity_id
+    WHERE r.id = ${refId} AND v.id = ${revisionId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`.pipe(
+    Effect.flatMap(([row]) =>
+      row
+        ? Effect.succeed(JSON.parse(row.doc_json) as Doc)
+        : Effect.fail(refuseOperation("The previous document is unavailable for this entry."))
+    )
+  )
 const refPolicy = (id: string): OperationPolicy =>
   policy<{ refId: RefId }, Effect.Success<ReturnType<typeof refSnapshot>>>({
     id,
@@ -125,12 +137,22 @@ const refPolicy = (id: string): OperationPolicy =>
         if (JSON.stringify(now) !== JSON.stringify(after))
           return yield* refuseOperation("The library entry changed since. Open its history.")
         if (before.ref.head_revision_id !== after.ref.head_revision_id)
-          yield* ops.RestoreRevision!({
-            userId,
-            refId: input.refId,
-            revisionId: before.ref.head_revision_id as never,
-            expectedRowVersion: now.ref.row_version
-          })
+          if (before.ref.kind === "preset" || before.ref.kind === "lorebook")
+            yield* ops.EditRef!({
+              userId,
+              refId: input.refId,
+              expectedRowVersion: now.ref.row_version,
+              doc: yield* previousLibraryDocument(sql, userId, input.refId, before.ref.head_revision_id),
+              message: "Undid a workshop change",
+              commitDraft: null
+            })
+          else
+            yield* ops.RestoreRevision!({
+              userId,
+              refId: input.refId,
+              revisionId: before.ref.head_revision_id as never,
+              expectedRowVersion: now.ref.row_version
+            })
         yield* sql`UPDATE entity_refs SET label = ${before.ref.label}, subtitle = ${before.ref.subtitle},
       row_version = row_version + 1, updated_at = ${Date.now()} WHERE id = ${input.refId}`
         yield* sql`UPDATE entities SET archived_at = ${before.archived} WHERE id = ${before.ref.entity_id}`

@@ -20,7 +20,7 @@ const Json = Schema.Record(Schema.String, Schema.Unknown)
 /** ST injects at depths 0 to 10000 (`MAX_INJECTION_DEPTH`). */
 export const InjectionDepth = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 }))
 
-const PresetPrompt = Schema.Struct({
+export const PresetPrompt = Schema.Struct({
   identifier: Schema.NonEmptyString,
   name: Schema.String,
   role: PromptRole,

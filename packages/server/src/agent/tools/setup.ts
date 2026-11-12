@@ -1,3 +1,7 @@
+import { editDocument, presetEditArguments, lorebookEditArguments } from "./documents.ts"
+import { boundedArguments } from "../operations.ts"
+import { documentDiff, executableNotice } from "../../db/agentDocuments.ts"
+import { ToolInputRefused } from "../tools.ts"
 import { LibraryLabel } from "@rp/shared/editorApi.ts"
 import { offeredGreetings } from "@rp/shared/greetings.ts"
 import { freezeTemplate } from "../../chat/macros.ts"
@@ -19,11 +23,13 @@ const receiptFirst = <A>(tool: RolloutTool<A>): RolloutTool<A> => ({
         Effect.flatMap((receipt) =>
           receipt === null
             ? Effect.try({
-                try: () =>
-                  validateToolArguments(
+                try: () => {
+                  if (!boundedArguments(args)) throw new Error("Arguments exceed the size limits.")
+                  return validateToolArguments(
                     { name: tool.id, description: tool.description, parameters: tool.parameters },
                     { type: "toolCall", id: ctx.toolCallId, name: tool.id, arguments: args as ToolCall["arguments"] }
-                  ) as A,
+                  ) as A
+                },
                 catch: () => ({
                   message: "Invalid tool arguments. Use only the listed fields and stay within their size limits."
                 })
@@ -57,14 +63,14 @@ const safely = <E>(body: Effect.Effect<ToolOutput, E>) =>
         failure._tag === "StorageError" || failure._tag === "RpcClientError"
           ? "The change could not be saved. Try again."
           : failure._tag === "StaleWrite"
-            ? "The saved card changed. Read it again before editing."
+            ? "The saved item changed. Read it again before editing."
             : failure._tag === "NotFound"
               ? "That item is unavailable in your library."
               : (failure.problems?.join("; ") ?? failure.reason ?? failure.message ?? "The change could not be saved.")
       return Effect.succeed({ text, isError: true })
     })
   )
-const findRef = (ctx: ToolContext, kind: "card" | "preset", name: string) =>
+const findRef = (ctx: ToolContext, kind: "card" | "preset" | "lorebook", name: string) =>
   targets(ctx)?.has(`${kind}:${name}`)
     ? Effect.succeed(targets(ctx)!.get(`${kind}:${name}`)!)
     : resolveLibrary(ctx, kind, name).pipe(
@@ -81,7 +87,7 @@ const rowsOf = (args: object, skip: ReadonlyArray<string> = []) =>
     .filter(([key, value]) => !skip.includes(key) && value !== undefined && value !== "")
     .map(([label, value]) => ({ label: label.replaceAll("_", " "), value: shown(value) }))
 /** A name as the library has it, or the name asked for when nothing matches. */
-const realName = (ctx: ToolContext, kind: "card" | "preset", name: string) =>
+const realName = (ctx: ToolContext, kind: "card" | "preset" | "lorebook", name: string) =>
   resolveLibrary(ctx, kind, name).pipe(
     Effect.flatMap((found) =>
       "error" in found
@@ -399,9 +405,86 @@ const startChat: RolloutTool<{
       })
     )
 }
+/** Both tools keep the exact saved snapshot the server showed while asking. */
+const editLibraryDocument = (kind: "preset" | "lorebook", schema: Schema.Top): RolloutTool<Record<string, unknown>> => {
+  const json = Schema.toJsonSchemaDocument(schema)
+  const parameters = {
+    ...json.schema,
+    $defs: json.definitions,
+    additionalProperties: false
+  } as RolloutTool<never>["parameters"]
+  const prepare = (ctx: ToolContext, args: Record<string, unknown>) =>
+    Effect.gen(function* () {
+      if (!boundedArguments(args)) return yield* Effect.fail(new Error("Arguments exceed this tool's size limits."))
+      yield* Effect.try({
+        try: () =>
+          validateToolArguments(
+            { name: `edit_${kind}`, description: "Edit a document", parameters },
+            { type: "toolCall", id: ctx.toolCallId, name: `edit_${kind}`, arguments: args as never }
+          ),
+        catch: () => new Error("Invalid tool arguments. Use only the listed fields and stay within their size limits.")
+      })
+      yield* Schema.decodeUnknownEffect(schema as Schema.Codec<unknown, unknown>)(args, { onExcessProperty: "error" })
+      const ref = yield* findRef(ctx, kind, String(args[kind]))
+      const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id })
+      if (saved.ref.kind !== kind) return yield* Effect.fail(new Error("The saved item has another document type."))
+      const doc = yield* Effect.try({
+        try: () => editDocument(kind, saved.doc, args.changes as readonly Record<string, unknown>[]),
+        catch: (error) => error as Error
+      })
+      return { saved, doc }
+    })
+  return {
+    id: `edit_${kind}`,
+    label: `Edited the ${kind}`,
+    titleField: kind,
+    explanation: `Edit a saved ${kind}, keeping unsaved drafts and history.`,
+    effect: "library",
+    capability: "library.write",
+    description: `Edits one saved ${kind} by name or id, atomically. Read it first. ${kind === "preset" ? "Use prompt identifiers. text or find/replace edits content; enabled switches it; before moves it (null means last); set changes prompt fields; add adds a prompt; remove deletes one (never Main). settings changes document-owned settings, regex or attachments." : "Use entry uids. text or find/replace edits content; enabled switches it; before moves it (null means last); set changes any entry fields; add adds an entry with the editor defaults; remove deletes one. settings changes book settings."} A find must occur exactly once. Changed regex and HTML stays disabled/unapproved for the user. Drafts are never overwritten. Undo restores the previous saved document if untouched.`,
+    parameters,
+    summarize: (args) => String(args[kind]),
+    describe: (ctx, args) =>
+      prepare(ctx, args).pipe(
+        Effect.map(({ saved, doc }) => {
+          remember(ctx, kind, String(args[kind]), saved.ref)
+          ctx.cache.set(`approval:document:${ctx.toolCallId}`, { saved, doc })
+          return {
+            title: `Edit the ${kind} “${saved.ref.label}”`,
+            rows: [{ label: "Executable content", value: executableNotice }],
+            changes: documentDiff(saved.doc, doc)
+          }
+        }),
+        Effect.mapError(
+          (error) =>
+            new ToolInputRefused(
+              error instanceof Error ? error.message : "This document change is invalid. Read it again."
+            )
+        )
+      ),
+    execute: (ctx, args) =>
+      safely(
+        Effect.gen(function* () {
+          // Validate again on direct or resumed invocation; the write still uses the pinned snapshot.
+          const fresh = yield* prepare(ctx, args)
+          const cached = ctx.cache.get(`approval:document:${ctx.toolCallId}`) as typeof fresh | undefined
+          const { saved, doc } = cached ?? fresh
+          const text = yield* ctx.writer.AgentReviseEntity({
+            ...key(ctx),
+            refId: saved.ref.id,
+            expectedRowVersion: saved.ref.rowVersion,
+            doc
+          })
+          return { text }
+        })
+      )
+  }
+}
 export const libraryEditCard = receiptFirst(editCard)
 export const setupTools: ReadonlyArray<RolloutTool<never>> = [
   receiptFirst(createCard),
   receiptFirst(cloneCard),
-  receiptFirst(startChat)
+  receiptFirst(startChat),
+  receiptFirst(editLibraryDocument("preset", presetEditArguments)),
+  receiptFirst(editLibraryDocument("lorebook", lorebookEditArguments))
 ]

@@ -962,7 +962,10 @@ export const Message = memo(function Message({
           // The version's Stop (DESIGN §3.1: it belongs to the version), at the end of what's
           // being written and held at the bottom of the view while any of the reply shows, so a
           // reply longer than the screen never takes it out of reach.
-          <div className="pointer-events-none sticky bottom-2 z-10 flex justify-end">
+          <div
+            data-layout-overlay="Stop stays over the reply while the timeline scrolls"
+            className="pointer-events-none sticky bottom-2 z-10 flex justify-end"
+          >
             <Tooltip label="Stop writing this reply; what it wrote is kept. A round after it stops too: Continue round goes on with it.">
               <Button
                 variant="secondary"

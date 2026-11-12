@@ -1,3 +1,4 @@
+import { safeAgentDocument } from "./agentDocuments.ts"
 import { makeWorkshopWriteHandlers } from "./workshopWrites.ts"
 import { archiveCandidates } from "./cardArchive.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
@@ -695,7 +696,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             doc = yield* withoutGrants(ref, doc)
             const valid = validateDoc(ref.kind, doc)
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
-            doc = valid.doc
+            doc = safeAgentDocument(ref.kind, yield* lib.loadDoc(ref.head_revision_id), valid.doc)
             yield* checkReferences(userId, doc)
           }
           yield* drafts.commit(userId, commitDraft, {
