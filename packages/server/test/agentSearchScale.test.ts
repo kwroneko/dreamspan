@@ -9,6 +9,7 @@ import type { ForkId, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
+import { cardDoc } from "./support/docs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
 const LENGTH = 5000
@@ -140,6 +141,56 @@ describe("search_chat at scale", () => {
         )
         assert.isBelow(rare, 50)
         assert.isBelow(common, 50)
+
+        // A separate context (spec/CHARACTER-CONTEXT.md §9.2 C5): Wren and Mira are the cast of
+        // every message, Wren away for every hundredth from the 50th. Her search never finds
+        // those; Mira's finds them all; the same bound.
+        const card = (name: string) =>
+          Effect.map(
+            writer.CreateEntity({
+              userId,
+              kind: "card",
+              label: name,
+              subtitle: "",
+              doc: cardDoc(name),
+              schemaVersion: 1,
+              origin: "user",
+              sourcePath: null
+            }),
+            (made) => made.entityId as string
+          )
+        const wrenId = yield* card("Wren")
+        const miraId = yield* card("Mira")
+        yield* fixtureSql(config.dataDir, [
+          {
+            sql: `UPDATE version_records SET cast_json = ? WHERE slot_id IN (SELECT id FROM slots WHERE chat_id = ?)`,
+            params: [JSON.stringify([wrenId, miraId]), c]
+          },
+          {
+            sql: `${n} UPDATE version_records SET presence_json = ? WHERE id IN (SELECT ?||'-v'||x FROM n WHERE x%100=50)`,
+            params: [JSON.stringify({ away: [wrenId] }), c]
+          }
+        ])
+        const as = (viewer: string, tokens: ReadonlyArray<string>) =>
+          reader.SearchChat({
+            userId,
+            chatId: c,
+            forkId: target as ForkId,
+            leafSlotId: `${c}-s${LENGTH - 1}` as SlotId,
+            tokens,
+            before: null,
+            limit: 200,
+            viewer
+          })
+        const wren = (yield* as(wrenId, ["lighthouse"]))!
+        assert.strictEqual(wren.length, LENGTH / 100)
+        assert.isTrue(wren.every((h) => h.position % 100 === 0))
+        assert.strictEqual((yield* as(miraId, ["lighthouse"]))!.length, LENGTH / 50)
+        const wrenRare = yield* median(as(wrenId, ["lighthouse"]))
+        const wrenCommon = yield* median(as(wrenId, ["tide"]))
+        console.log(`search_chat as a viewer: rare ${wrenRare.toFixed(1)} ms, common ${wrenCommon.toFixed(1)} ms`)
+        assert.isBelow(wrenRare, 50)
+        assert.isBelow(wrenCommon, 50)
       }).pipe(Effect.provide(serverLayer(config))),
     300_000
   )

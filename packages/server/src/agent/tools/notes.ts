@@ -5,7 +5,7 @@
 // (`agent.permission`), never one the chat forbids.
 import { Type } from "@earendil-works/pi-ai"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
+import { NOTE_SCHEMA_VERSION, readNoteCondition } from "@rp/shared/docs/note.ts"
 import type { Doc, RevisionId } from "@rp/shared/library.ts"
 import { type ChatState, foldState, noteSwitches, permissionKey } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -141,7 +141,17 @@ export const listNotes: RolloutTool<Record<string, never>> = {
     safely(
       "list_notes",
       Effect.gen(function* () {
-        const { notes } = yield* notesAt(context)
+        const { notes: all } = yield* notesAt(context)
+        // A separate context's viewer doesn't see the notes for other characters' own turns
+        // (spec/CHARACTER-CONTEXT.md §9.2 C5): their text was never in its context.
+        const viewer = context.viewer
+        const notes =
+          viewer === null
+            ? all
+            : all.filter((n) => {
+                const condition = readNoteCondition(n.doc["condition"])
+                return condition.when !== "turn" || condition.cards.includes(viewer as EntityId)
+              })
         if (notes.length === 0) return { text: "The chat has no notes." }
         return {
           text: notes

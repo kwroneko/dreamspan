@@ -20,6 +20,7 @@ import { pathSegments } from "./pathSegments.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { query } from "./tx.ts"
+import { knowsSql, readKnowers } from "./knowers.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
 const FEW = 2000
@@ -212,7 +213,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0)
       }).pipe(query("RolloutSteps")),
 
-    SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit }) =>
+    SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit, viewer }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ readonly current_fork_id: string | null }>`
           SELECT current_fork_id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -231,7 +232,8 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }
         const shown = sql`(${before} IS NULL OR s.depth < ${before})
             AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
-            AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}`
+            AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
+            AND ${viewer == null ? sql`1` : knowsSql(sql, viewer)}`
         const onPath = sql`EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)`
         // Few matches in the whole chat (a rare word): start from them, each checked against the
         // path, with the path's template messages (matched once their names are filled in). Many
@@ -273,6 +275,14 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           content: r.content
         }))
       }).pipe(query("SearchChat")),
+
+    KnowersOf: ({ userId, chatId, versionIds }) =>
+      readKnowers(
+        sql,
+        chatId,
+        sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`,
+        versionIds
+      ).pipe(query("KnowersOf")),
 
     LookupLore: ({ userId, rolloutId, query: text, entry, limit }) =>
       Effect.gen(function* () {

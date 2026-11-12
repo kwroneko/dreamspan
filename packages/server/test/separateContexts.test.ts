@@ -4,11 +4,14 @@
 // reproduces it, summaries covering what it missed are withheld; a shared context (the setting
 // absent or "shared") is unchanged, byte for byte.
 import { assert, describe, it } from "@effect/vitest"
-import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
-import type { ContextSnapshot } from "../src/assembler/types.ts"
+import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
+import type { ToolContext } from "../src/agent/tools.ts"
+import { historyTools } from "../src/agent/tools/history.ts"
+import { listNotes } from "../src/agent/tools/notes.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -407,6 +410,105 @@ describe("gap lines", () => {
           absent_join_prompt: "[From here, {{char}}'s story continues together with {{mergedNames}}'s.]"
         })
         assert.include(joined, "[From here, Wren's story continues together with Kai's.]")
+      })
+    )
+  )
+})
+
+describe("the agent's read tools in a separate context", () => {
+  /** A tool run as the reply whose context `snapshot` is, reading as its viewer. */
+  const tools = (t: Effect.Success<ReturnType<typeof story>>, snapshot: ContextSnapshot) => {
+    const leaf = snapshot.inputs.leafSlotId as SlotId
+    const context: ToolContext = {
+      userId: t.userId,
+      chatId: t.chatId,
+      forkId: t.fork(),
+      slotId: leaf,
+      versionId: "unused" as VersionId,
+      leafSlotId: leaf,
+      viewer: generationOf(snapshot).viewer,
+      rolloutId: "test",
+      toolCallId: "test",
+      cache: new Map(),
+      reader: t.reader,
+      writer: t.writer
+    }
+    return (id: string, args: object) =>
+      Effect.map(
+        [...historyTools, listNotes].find((tool) => tool.id === id)!.execute(context, args as never),
+        (out) => out.text
+      )
+  }
+
+  it.live("search_chat never finds what the viewer missed; read_messages skips it, numbering kept", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const forWren = yield* t.contextFor(t.wren)
+        assert.strictEqual(forWren.inputs.viewer, t.wren)
+        const wren = tools(t, forWren)
+        const mira = tools(t, yield* t.contextFor(t.mira))
+
+        assert.include(yield* mira("search_chat", { query: "vault" }), "vault code")
+        assert.include(yield* wren("search_chat", { query: "vault" }), "No earlier messages match")
+        assert.include(yield* wren("search_chat", { query: "walks" }), "Wren walks back in.")
+
+        const numbers = (text: string) => [...text.matchAll(/^Message (\d+),/gm)].map((m) => Number(m[1]))
+        const read = yield* wren("read_messages", { from: 1, count: 20 })
+        assert.notInclude(read, "vault code")
+        assert.notInclude(read, "hides the key")
+        assert.include(read, "Wren walks back in.")
+        // What she missed is gone (Mira's greeting too: Wren joined after it, as her reply's
+        // context has it); every other message keeps its number.
+        assert.deepStrictEqual(numbers(yield* mira("read_messages", { from: 1, count: 20 })), [1, 2, 3, 4, 5, 6])
+        assert.deepStrictEqual(numbers(read), [2, 3, 6])
+        assert.notInclude(sentText(forWren), "Late again")
+        assert.include(yield* wren("read_messages", { from: 4, count: 1 }), "Wren walks back in.")
+      })
+    )
+  )
+
+  it.live("a shared context's tools read everything; list_notes leaves out other characters' own-turn notes", () =>
+    run(
+      Effect.gen(function* () {
+        const shared = yield* story("shared")
+        const forShared = yield* shared.contextFor(shared.wren)
+        assert.notProperty(forShared.inputs, "viewer")
+        assert.include(yield* tools(shared, forShared)("search_chat", { query: "vault" }), "vault code")
+
+        const t = yield* story("separate")
+        const note = (title: string, condition: object | null) =>
+          Effect.gen(function* () {
+            const made = yield* t.writer.CreateEntity({
+              userId: t.userId,
+              kind: "note",
+              label: title,
+              subtitle: "",
+              doc: {
+                schema_version: 1,
+                title,
+                content: `${title} text.`,
+                owner: { chat: t.chatId },
+                placement: { mode: "tail", role: "system" },
+                exportable: false,
+                ...(condition ? { condition } : {})
+              } as never,
+              schemaVersion: 1,
+              origin: "user",
+              sourcePath: null
+            })
+            yield* t.event({ key: "note.activate", value: { note: made.entityId } })
+          })
+        yield* note("Mira's secret", { when: "turn", cards: [t.mira] })
+        yield* note("Wren's secret", { when: "turn", cards: [t.wren] })
+        yield* note("While Mira is here", { when: "not_muted", cards: [t.mira] })
+        yield* note("Weather", null)
+        const forWren = yield* tools(t, yield* t.contextFor(t.wren))("list_notes", {})
+        assert.include(forWren, "Wren's secret")
+        assert.include(forWren, "While Mira is here")
+        assert.include(forWren, "Weather")
+        assert.notInclude(forWren, "Mira's secret")
+        assert.include(yield* tools(t, yield* t.contextFor(t.mira))("list_notes", {}), "Mira's secret")
       })
     )
   )

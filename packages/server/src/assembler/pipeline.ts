@@ -464,6 +464,8 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
         preset: { ref: preset.ref, revision: preset.revision, scope: preset.scope },
         cards,
         ...(presence ? { presence } : {}),
+        // A separate context's viewer, for the tools to read as the history did (C5).
+        ...(assembly.knowledge?.viewer ? { viewer: assembly.knowledge.viewer } : {}),
         model: assembly.model ?? null
       },
       ...(request.summaryJob

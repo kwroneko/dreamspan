@@ -25,13 +25,52 @@ const cached = <A, E>(context: ToolContext, key: string, make: Effect.Effect<A, 
       : make.pipe(Effect.tap((value) => Effect.sync(() => context.cache.set(key, value))))
   )
 
-/** The messages before the one being generated, oldest first; hidden ones left out. */
-const pathMessages = (context: ToolContext) =>
+/** The path as a separate context's viewer reads it: what it knew, and the numbers it missed. */
+interface PathRead {
+  readonly messages: ReadonlyArray<PathMessage>
+  /** Numbers of messages on the path the viewer wasn't present for (hidden ones too). */
+  readonly missed: ReadonlySet<number>
+}
+
+/** Versions asked about per `KnowersOf` read, to keep each query's parameters few. */
+const KNOWERS_BATCH = 500
+
+/**
+ * Of `entries`, the numbers of those the viewer didn't know (`KnowersOf`, the rule assembly's
+ * `knowledge` stage applies, spec/CHARACTER-CONTEXT.md §9.2 C5); none without a viewer.
+ */
+const missedBy = (context: ToolContext, entries: ReadonlyArray<PathEntry>) =>
+  Effect.gen(function* () {
+    const missed = new Set<number>()
+    const viewer = context.viewer
+    if (viewer === null) return missed
+    const numberOf = new Map(entries.map((e) => [e.version.id as string, (e.position ?? e.depth) + 1]))
+    const ids = [...numberOf.keys()]
+    for (let at = 0; at < ids.length; at += KNOWERS_BATCH) {
+      const known = yield* context.reader.KnowersOf({
+        userId: context.userId,
+        chatId: context.chatId,
+        versionIds: ids.slice(at, at + KNOWERS_BATCH)
+      })
+      for (const { versionId, knowers } of known)
+        if (knowers !== null && !knowers.includes(viewer)) missed.add(numberOf.get(versionId)!)
+    }
+    return missed
+  })
+
+/**
+ * The messages before the one being generated, oldest first; hidden ones left out, and, for a
+ * separate context's viewer, those it wasn't present for (their numbers kept, so a passage
+ * reads with a gap where they were).
+ */
+const pathMessages = (context: ToolContext) => Effect.map(pathRead(context), (read) => read.messages)
+
+const pathRead = (context: ToolContext) =>
   cached(
     context,
     "path",
     Effect.gen(function* () {
-      if (context.leafSlotId === null) return [] as ReadonlyArray<PathMessage>
+      if (context.leafSlotId === null) return { messages: [], missed: new Set<number>() } as PathRead
       const entries: Array<PathEntry> = []
       let older: SlotId | null = null
       let first = true
@@ -53,17 +92,21 @@ const pathMessages = (context: ToolContext) =>
         context,
         entries.flatMap((e) => (e.version.speakerEntityId ? [e.version.speakerEntityId] : []))
       )
-      return entries.flatMap((entry): Array<PathMessage> => {
+      const missed = yield* missedBy(context, entries)
+      const messages = entries.flatMap((entry): Array<PathMessage> => {
         const { version } = entry
+        const n = (entry.position ?? entry.depth) + 1
         if (
           entry.contextExcluded ||
           version.status === "generating" ||
           version.status === "failed" ||
-          !version.content.trim()
+          !version.content.trim() ||
+          missed.has(n)
         )
           return []
-        return [name({ ...version, n: (entry.position ?? entry.depth) + 1 })]
+        return [name({ ...version, n })]
       })
+      return { messages, missed } satisfies PathRead
     })
   )
 
@@ -119,7 +162,8 @@ const searched = (context: ToolContext, words: ReadonlyArray<string>, before: nu
       leafSlotId: context.leafSlotId,
       tokens: words.flatMap((w) => w.match(/[\p{L}\p{N}]+/gu) ?? []),
       before: before === undefined ? null : before - 1,
-      limit: 200
+      limit: 200,
+      viewer: context.viewer
     })
     if (rows === null) return null
     const name = yield* namer(
@@ -273,7 +317,11 @@ const summaryTree = (context: ToolContext) =>
             yield* context.reader.GetSummary({ userId: context.userId, forkId: context.forkId, summaryId: id })
           )
       }
-      return nodes
+      if (context.viewer === null) return nodes
+      // Summaries are written for everyone (until they're kept per view, C7): a separate
+      // context's viewer opens only those covering nothing it missed.
+      const missed = [...(yield* pathRead(context)).missed]
+      return nodes.filter((s) => !missed.some((n) => n >= s.from && n <= s.to))
     })
   )
 

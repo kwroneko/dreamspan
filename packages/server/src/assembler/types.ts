@@ -202,6 +202,8 @@ export interface SnapshotInputs {
   readonly cards: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
   /** Who of `cards` was away or a narrator (spec/CHARACTER-CONTEXT.md §9.1); absent when neither. */
   readonly presence?: import("@rp/shared/knowledge.ts").VersionPresence
+  /** A separate context's viewer (`knowledge` stage), whose knowledge the agent's read tools keep to; absent: none. */
+  readonly viewer?: string
   readonly model: ModelInput | null
 }
 
@@ -526,6 +528,8 @@ export interface Generation {
   /** Labels and source decisions read in the same transaction as assembly; scrubbed on the main thread. */
   readonly inspection?: InspectionInputs
   readonly leafSlotId: string | null
+  /** A separate context's viewer: the agent's read tools leave out what it didn't know (C5). */
+  readonly viewer: string | null
   readonly request: AssembledRequest
   readonly model: ModelInput | null
   /** How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md); absent: not at all. */
@@ -550,6 +554,7 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
   const written = new Map((snapshot.templateWrites ?? []).map((t) => [t.version, t.writes]))
   return {
     leafSlotId: snapshot.inputs.leafSlotId,
+    viewer: snapshot.inputs.viewer ?? null,
     request: snapshot.request,
     ...(snapshot.replySections ? { replySections: snapshot.replySections } : {}),
     model: snapshot.inputs.model,

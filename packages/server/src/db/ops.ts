@@ -3640,7 +3640,9 @@ export class ReadOps extends RpcGroup.make(
       leafSlotId: SlotId,
       tokens: Schema.Array(Schema.String),
       before: Schema.NullOr(Schema.Int),
-      limit: Schema.Int
+      limit: Schema.Int,
+      /** A separate context's viewer: only messages this card knew (spec/CHARACTER-CONTEXT.md §3, C5). */
+      viewer: Schema.optionalKey(Schema.NullOr(Schema.String))
     },
     success: Schema.NullOr(
       Schema.Array(
@@ -3654,6 +3656,17 @@ export class ReadOps extends RpcGroup.make(
       )
     ),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Who knew each of these versions of the chat (`db/knowers.ts`): card ids, or null for
+   * everyone. The agent's read tools leave out what a separate context's viewer didn't know.
+   */
+  Rpc.make("KnowersOf", {
+    payload: { userId: UserId, chatId: ChatId, versionIds: Schema.Array(Schema.String) },
+    success: Schema.Array(
+      Schema.Struct({ versionId: Schema.String, knowers: Schema.NullOr(Schema.Array(Schema.String)) })
+    ),
+    error: StorageError
   }),
   /**
    * The agent's `lookup_lore` (agentReads.ts, spec/AGENTIC.md §4.5): the enabled entries of the
