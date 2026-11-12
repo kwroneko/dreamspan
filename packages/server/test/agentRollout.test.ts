@@ -252,6 +252,9 @@ describe("agent rollouts", () => {
         model: {},
         state: [{ key: "agent.enabled", value: { on: true } }]
       })
+      // An agent reply without steps still says it is one, so it can be resumed.
+      assert.strictEqual(version.agent, true)
+      assert.notProperty(version, "steps")
       streaming = true
       const reader = yield* Reader
       const me = yield* api.Whoami()
@@ -647,8 +650,8 @@ describe("agent rollouts", () => {
           {
             role: "assistant",
             parts: [
-              { type: "text", text: "Let me check." },
-              { type: "toolCall", id: "call_1", name: "look_up", args: { topic: "lighthouse" } }
+              { type: "text", text: "Let me check.", step: 0 },
+              { type: "toolCall", id: "call_1", name: "look_up", args: { topic: "lighthouse" }, step: 1 }
             ]
           },
           {
@@ -656,7 +659,8 @@ describe("agent rollouts", () => {
             toolCallId: "call_1",
             tool: "look_up",
             text: "The lighthouse keeper is called Ansel.",
-            isError: false
+            isError: false,
+            step: 1
           },
           { role: "assistant", parts: [{ type: "text", text: "Ansel waves from the lighthouse." }] }
         ]
@@ -688,6 +692,7 @@ describe("agent rollouts", () => {
         model: {}
       })
       assert.strictEqual(version.content, "A plain reply.")
+      assert.notProperty(version, "agent", "a plain reply is no agent reply")
       assert.notProperty(mock.requests()[0]!.body!, "tools")
       const db = read(config.dataDir, version.id)
       assert.deepInclude(db.rollout, { mode: null, step_count: 0 })

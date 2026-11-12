@@ -1,7 +1,9 @@
 // A scripted, tool-calling OpenAI-compatible provider on loopback, for agent replies' browser
 // tests: a request offering tools gets a search_chat call, then a second one, then the reply.
-// `hold()` keeps the final answer back until `release()`, so a test sees a run mid-way. Synthetic
-// text only; no real provider or key is ever used.
+// `hold()` keeps the final answer back until `release()`, so a test sees a run mid-way; `hold(1)`
+// holds the request after the first call's result instead (a Stop there leaves a stopped run with
+// one step), and `fail(1)` answers that request once with an error. Synthetic text only; no real
+// provider or key is ever used.
 import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 
@@ -12,7 +14,9 @@ export const THINKING = "The traveler asked about the bridge; check what was sai
 const QUERIES = ["bridge", "lantern"]
 
 export const startAgentProvider = async () => {
-  let holding = false
+  /** The tool results a request has when it's held or failed: QUERIES.length is the final answer. */
+  let holding: number | null = null
+  let failing: number | null = null
   const held: Array<() => void> = []
   const bodies: Array<{ messages: Array<{ role: string }>; tools?: unknown }> = []
   const chunk = (delta: object, finish: string | null = null, usage?: object) =>
@@ -24,6 +28,8 @@ export const startAgentProvider = async () => {
       ...(usage ? { usage } : {})
     })}\n\n`
   const stream = (res: ServerResponse, parts: Array<string>, delay = 40) => {
+    // A held request the reply's Stop gave up on.
+    if (res.destroyed) return
     res.writeHead(200, { "content-type": "text/event-stream" })
     let i = 0
     const timer = setInterval(() => {
@@ -56,34 +62,39 @@ export const startAgentProvider = async () => {
         ])
       }
       const done = body.messages.filter((m) => m.role === "tool").length
-      if (done < QUERIES.length) {
-        const id = `call_${done + 1}`
-        return stream(res, [
-          chunk({
-            role: "assistant",
-            ...(done === 0 ? { reasoning_content: THINKING } : {}),
-            tool_calls: [
-              {
-                index: 0,
-                id,
-                type: "function",
-                function: { name: "search_chat", arguments: JSON.stringify({ query: QUERIES[done] }) }
-              }
-            ]
-          }),
-          chunk({}, "tool_calls"),
-          chunk({}, null, usage)
-        ])
+      if (failing === done) {
+        failing = null
+        res.writeHead(400, { "content-type": "application/json" })
+        return res.end(JSON.stringify({ error: { message: "The synthetic provider refused this request." } }))
       }
-      const answer = () =>
-        stream(res, [
-          ...AGENT_REPLY.match(/\S+\s*/g)!.map((t, i) =>
-            chunk(i === 0 ? { role: "assistant", content: t } : { content: t })
-          ),
-          chunk({}, "stop"),
-          chunk({}, null, usage)
-        ])
-      if (holding) held.push(answer)
+      const answer =
+        done < QUERIES.length
+          ? () =>
+              stream(res, [
+                chunk({
+                  role: "assistant",
+                  ...(done === 0 ? { reasoning_content: THINKING } : {}),
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: `call_${done + 1}`,
+                      type: "function",
+                      function: { name: "search_chat", arguments: JSON.stringify({ query: QUERIES[done] }) }
+                    }
+                  ]
+                }),
+                chunk({}, "tool_calls"),
+                chunk({}, null, usage)
+              ])
+          : () =>
+              stream(res, [
+                ...AGENT_REPLY.match(/\S+\s*/g)!.map((t, i) =>
+                  chunk(i === 0 ? { role: "assistant", content: t } : { content: t })
+                ),
+                chunk({}, "stop"),
+                chunk({}, null, usage)
+              ])
+      if (holding === done) held.push(answer)
       else answer()
     })
   })
@@ -91,11 +102,18 @@ export const startAgentProvider = async () => {
   return {
     baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
     bodies,
-    hold: () => {
-      holding = true
+    /** Holds requests with `at` tool results (by default the final answer) until `release()`. */
+    hold: (at = QUERIES.length) => {
+      holding = at
+    },
+    /** How many requests are being held. */
+    heldCount: () => held.length,
+    /** Answers the next request with `at` tool results with an error. */
+    fail: (at: number) => {
+      failing = at
     },
     release: () => {
-      holding = false
+      holding = null
       for (const go of held.splice(0)) go()
     },
     stop: () =>

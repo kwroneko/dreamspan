@@ -11,6 +11,7 @@ import { foldState } from "@rp/shared/state.ts"
 import { Deferred, Effect } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import type { ServerResponse } from "node:http"
+import type { RunTranscript } from "@rp/shared/agent.ts"
 import { planResume, planStepResume, StepNotResumable } from "../src/agent/resume.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
 import { databaseFile } from "../src/db/connection.ts"
@@ -144,13 +145,44 @@ describe("resume policies", () => {
     assert.deepStrictEqual(plan.keptCalls, [])
   })
 
+  it("refuses edited arguments outside the frozen schema before creating a resume", () => {
+    const constrained = [
+      {
+        ...tools[0]!,
+        parameters: Type.Object({ topic: Type.String({ minLength: 2 }) }, { additionalProperties: false })
+      }
+    ]
+    for (const args of [{}, { topic: 3 }, { topic: "x" }, { topic: "pier", extra: true }]) {
+      assert.instanceOf(
+        planStepResume(json(run), constrained, 1, { kind: "arguments", arguments: args }, "new"),
+        StepNotResumable
+      )
+    }
+    assert.notInstanceOf(
+      planStepResume(json(run), constrained, 1, { kind: "arguments", arguments: { topic: "pier" } }, "new"),
+      StepNotResumable
+    )
+  })
+
   it("editing a result replaces it; the turn's later calls run again", () => {
     const plan = planStepResume(json(run), tools, 1, { kind: "result", text: "Mott." }, "new")
     if (plan instanceof StepNotResumable) return assert.fail(plan.message)
     assert.strictEqual(plan.policy, "rerun")
     assert.deepStrictEqual(roles(plan.transcript), ["rpRequest", "assistant", "toolResult"])
     assert.deepInclude(plan.transcript[2], { toolCallId: "c1", content: [{ type: "text", text: "Mott." }] })
-    assert.deepStrictEqual(plan.keptCalls, ["c1", "c2"])
+    assert.deepStrictEqual(plan.keptCalls, ["c1"])
+  })
+
+  it("only copies receipts and effects through the chosen result in a multi-call turn", () => {
+    for (const edit of [undefined, { kind: "result" as const, text: "Edited." }]) {
+      const plan = planStepResume(json(run), tools, 1, edit, "new")
+      if (plan instanceof StepNotResumable) return assert.fail(plan.message)
+      assert.deepStrictEqual(plan.keptCalls, ["c1"])
+      assert.deepStrictEqual(
+        plan.transcript.filter((m) => m.role === "toolResult").map((m) => m.toolCallId),
+        ["c1"]
+      )
+    }
   })
 
   it("resuming from an unedited call cuts after its result; a step that isn't there is refused", () => {
@@ -387,7 +419,25 @@ describe("resuming agent replies", () => {
       assert.strictEqual(before.status, "stopped")
 
       const slot = yield* reader.GetSlot({ userId: me.id, slotId: stopped.slotId })
-      const entry = yield* api.ResumeVersion({ versionId: stopped.id, expectedRowVersion: slot.entry.rowVersion })
+      const otherTab = yield* client()
+      const raced = yield* Effect.all(
+        [api, otherTab].map((tab) =>
+          tab.ResumeVersion({ versionId: stopped.id, expectedRowVersion: slot.entry.rowVersion }).pipe(
+            Effect.match({
+              onSuccess: (entry) => ({ ok: true as const, entry }),
+              onFailure: (error) => ({ ok: false as const, error })
+            })
+          )
+        ),
+        { concurrency: 2 }
+      )
+      const accepted = raced.find((result) => result.ok)
+      const rejected = raced.find((result) => !result.ok)
+      assert.isDefined(accepted)
+      assert.isDefined(rejected)
+      if (!accepted?.ok || rejected?.ok !== false) return assert.fail("expected one accepted resume")
+      assert.strictEqual(rejected.error._tag, "NotResumable")
+      const entry = accepted.entry
       const resumedId = entry.version.id
       assert.notStrictEqual(resumedId, stopped.id)
       assert.strictEqual(entry.version.origin, "resumed")
@@ -398,6 +448,15 @@ describe("resuming agent replies", () => {
         api.ResumeVersion({ versionId: stopped.id, expectedRowVersion: again.entry.rowVersion })
       )
       assert.strictEqual(refused._tag, "NotResumable")
+      const liveEdit = yield* Effect.flip(
+        api.ResumeFromStep({
+          versionId: resumedId,
+          step: 0,
+          edit: { kind: "arguments", arguments: { topic: "harbour" } },
+          expectedRowVersion: again.entry.rowVersion
+        })
+      )
+      assert.strictEqual(liveEdit._tag, "NotResumable")
       release()
       yield* eventually(() => finished(generated.events, resumedId) !== undefined)
       const resumed = finished(generated.events, resumedId)!
@@ -544,6 +603,78 @@ describe("resuming agent replies", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("a later state call in the same turn runs again after editing an earlier result", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      let executions = 0
+      yield* registry.rolloutTools.register({
+        ...lookup(() => Effect.succeed("A detail.")),
+        effect: "chat_state",
+        execute: (context) =>
+          Effect.gen(function* () {
+            executions++
+            const { result } = yield* context.writer
+              .ApplyRolloutEffect({
+                userId: context.userId,
+                rolloutId: context.rolloutId,
+                toolCallId: context.toolCallId,
+                events: [],
+                result: `Execution ${executions}`
+              })
+              .pipe(Effect.orDie)
+            return { text: result }
+          })
+      } as RolloutTool<never>)
+      yield* narrator(["look_up"])
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            if (tools(request.body as unknown as Body) > 0)
+              return sse(res, completionChunks(["Done."], { prompt_tokens: 20, completion_tokens: 1 }))
+            const chunks = toolCall("look_up", { topic: "first" }, "c1")
+            const delta = chunks[0]!.choices[0]!.delta!
+            if (!("tool_calls" in delta)) throw new Error("missing fixture calls")
+            delta.tool_calls.push({
+              index: 1,
+              id: "c2",
+              type: "function",
+              function: { name: "look_up", arguments: '{"topic":"second"}' }
+            })
+            sse(res, chunks)
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: mode
+      })
+      assert.strictEqual(executions, 2)
+      const me = yield* api.Whoami()
+      const reader = yield* Reader
+      const slot = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      const resumed = yield* api.ResumeFromStep({
+        versionId: version.id,
+        step: 0,
+        edit: { kind: "result", text: "New first result." },
+        expectedRowVersion: slot.entry.rowVersion
+      })
+      yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+      assert.strictEqual(finished(events, resumed.version.id)!.status, "complete")
+      assert.strictEqual(executions, 3, "the kept call isn't executed; the later call is")
+      const sent = bodies(mock.requests())
+        .at(-1)!
+        .messages.filter((m) => m.role === "tool")
+      assert.deepStrictEqual(
+        sent.map((m) => m.content),
+        ["New first result.", "Execution 3"]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("editing a step resumes as a new version: kept calls' effects come along, cut ones' don't", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -577,6 +708,26 @@ describe("resuming agent replies", () => {
         (e) => foldState(e).absent
       )
       assert.deepStrictEqual(yield* absent, [mira.entityId])
+      // The version says it's an agent reply; the inspector names each step as ResumeFromStep does.
+      const shown = (yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })).entry.version
+      assert.strictEqual(shown.agent, true)
+      assert.strictEqual(shown.steps?.count, 2)
+      const callSteps = (run: RunTranscript) =>
+        run.entries.flatMap((e) =>
+          e.role === "assistant"
+            ? e.parts.flatMap((p) => (p.type === "toolCall" ? [[p.id, p.step]] : []))
+            : e.role === "toolResult"
+              ? [[`${e.toolCallId} result`, e.step]]
+              : []
+        )
+      const first = yield* api.GetRunTranscript({ versionId: version.id })
+      assert.deepStrictEqual(callSteps(first), [
+        ["call_1", 0],
+        ["call_1 result", 0],
+        ["call_2", 1],
+        ["call_2 result", 1]
+      ])
+      assert.deepStrictEqual(first.cut, [])
       const resumeFrom = (step: number, edit?: Parameters<typeof api.ResumeFromStep>[0]["edit"]) =>
         Effect.gen(function* () {
           const slot = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
@@ -589,6 +740,23 @@ describe("resuming agent replies", () => {
           yield* eventually(() => finished(events, entry.version.id) !== undefined)
           return finished(events, entry.version.id)!
         })
+
+      // Bypassing the browser cannot create a version or send a request with invalid arguments.
+      const requestsBefore = mock.requests().length
+      const slotBefore = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      const invalid = yield* Effect.flip(
+        api.ResumeFromStep({
+          versionId: version.id,
+          step: 1,
+          edit: { kind: "arguments", arguments: {} },
+          expectedRowVersion: slotBefore.entry.rowVersion
+        })
+      )
+      assert.strictEqual(invalid._tag, "NotResumable")
+      assert.strictEqual(mock.requests().length, requestsBefore)
+      const slotAfter = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      assert.strictEqual(slotAfter.entry.rowVersion, slotBefore.entry.rowVersion)
+      assert.strictEqual(slotAfter.entry.version.id, version.id)
 
       // A new result for the lookup: Mira's going away was before it, so it holds.
       const edited = yield* resumeFrom(1, { kind: "result", text: "The keeper is called Brann." })
@@ -606,6 +774,18 @@ describe("resuming agent replies", () => {
         cut.map((r) => r.reason),
         ["edit"]
       )
+      // The inspector shows what the edit cut, folded where the kept run ends: after the new result.
+      const editedRun = yield* api.GetRunTranscript({ versionId: edited.id })
+      assert.strictEqual(editedRun.cut.length, 1)
+      const [span] = editedRun.cut
+      assert.strictEqual(span!.reason, "edit")
+      assert.deepInclude(editedRun.entries[span!.at - 1], { role: "toolResult", text: "The keeper is called Brann." })
+      assert.deepStrictEqual(
+        span!.entries.map((e) => e.role),
+        ["assistant", "toolResult", "assistant"]
+      )
+      assert.deepInclude(span!.entries[1], { text: "The lighthouse keeper is called Ansel.", toolCallId: "call_2" })
+      assert.isUndefined((span!.entries[1] as { step?: number }).step, "a cut span's steps aren't the version's")
 
       // New arguments for the first call: it runs again under a new id, and her going away goes.
       const rerun = yield* resumeFrom(0, { kind: "arguments", arguments: { character: "Mira", present: true } })
