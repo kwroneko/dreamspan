@@ -1,3 +1,15 @@
+import { providerRequest } from "../assembler/wire.ts"
+import { liveSuffix } from "../agent/messages.ts"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
+import {
+  previousRun,
+  readContinuityPath,
+  pathStamp,
+  summarizeMessageSteps,
+  WORKSHOP_OVERFLOW_STEP_SUMMARIES,
+  type ContinuousSnapshot,
+  type ContinuityRecord
+} from "../agent/continuity.ts"
 import { AppConfig } from "../config.ts"
 import { hydrateMessageImages } from "./messageImages.ts"
 import { executionRegistry } from "../execution.ts"
@@ -16,7 +28,7 @@ import { ChatHub } from "./ChatHub.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { planTurn } from "../agent/modes.ts"
 import type { OutputContract } from "../agent/modes.ts"
-import { type FrozenTool, frozenTool, sendMessageDefinition } from "../agent/tools.ts"
+import { type FrozenTool, frozenTool, sendMessageDefinition, severalMessageDefinition } from "../agent/tools.ts"
 import { DecisionEngine } from "../decision/engine.ts"
 import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
 
@@ -167,6 +179,7 @@ export const layer = Layer.effect(
               turnCap: frozen.turnCap
             },
             mode: frozen.mode,
+            checkpoints: (snapshot as ContinuousSnapshot).continuity?.breakpoints ?? [],
             allowsOutside: profile.allowsOutside,
             tools,
             offered: frozen.tools,
@@ -175,6 +188,7 @@ export const layer = Layer.effect(
             onState: () => hub.publish(request.chatId, { _tag: "State" }),
             resume: {
               transcript: resume.transcript,
+              historical: (snapshot as ContinuousSnapshot).continuity?.historical ?? 0,
               ...(resume.continuation === undefined ? {} : { continuation: resume.continuation })
             }
           },
@@ -272,6 +286,7 @@ export const layer = Layer.effect(
             // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
             return tool && (profile.allowsOutside || tool.effect !== "external") ? [tool] : []
           })
+          let stepSummaries: Readonly<Record<string, string>> | undefined
           const assemblyNow = Date.now()
           const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>
             reader
@@ -296,7 +311,8 @@ export const layer = Layer.effect(
                             plan.contract
                           ) ?? "",
                         speakerCardOnly: plan.assembly?.speakerCardOnly ?? false,
-                        ...(plan.assembly?.workshop ? { workshop: true } : {})
+                        ...(plan.assembly?.workshop ? { workshop: true } : {}),
+                        ...(stepSummaries ? { stepSummaries } : {})
                       }
                     }
                   : {})
@@ -349,7 +365,107 @@ export const layer = Layer.effect(
             if (outcome.source === "model" && outcome.value.length > 0)
               assembled = yield* assembleWith({ stamp: assembled.loreDecision.stamp, lore: outcome.value })
           }
-          const generation = JSON.parse(assembled.generation) as Generation
+          let generation = JSON.parse(assembled.generation) as Generation
+          let snapshot = JSON.parse(assembled.snapshot) as ContinuousSnapshot
+          let continuity: ContinuityRecord | undefined
+          let seed: ReadonlyArray<AgentMessage> | undefined
+          if (agentic && plan.continuity === "resume_previous") {
+            const path = yield* readContinuityPath(reader, request, parent).pipe(
+              Effect.catch(serverFailure("ReadContinuityPath"))
+            )
+            const prior = yield* previousRun(reader, request, path, snapshot)
+            const baseline = path.map(pathStamp)
+            if ("reason" in prior)
+              continuity = {
+                path: baseline,
+                reason: prior.reason,
+                ...(generation.inspection ? { inspection: generation.inspection } : {})
+              }
+            else {
+              // New user turns use the same rendered history pieces as plain assembly. Images
+              // stay as references in storage, hydrated only when the request is dispatched.
+              const additions: Array<AgentMessage> = prior.after.map((entry) => {
+                const piece = snapshot.pieces.find(
+                  (p) => p.source.kind === "message" && p.source.version === entry.version.id
+                )
+                const rendered =
+                  piece?.messages.flatMap((i) =>
+                    snapshot.request.messages[i] ? [snapshot.request.messages[i]!] : []
+                  ) ?? []
+                const imageIds = new Set((entry.version.images ?? []).map((image) => image.mediaId))
+                const images = rendered
+                  .flatMap((message) => message.images ?? [])
+                  .filter((image) => imageIds.has(image.mediaId) && image.estimate?.sent !== false)
+                const message = {
+                  role: "user" as const,
+                  content: piece?.text ?? entry.version.content,
+                  ...(rendered[0]?.name ? { name: rendered[0].name } : {}),
+                  ...(images.length ? { images } : {})
+                }
+                if (imageIds.size && snapshot.inputs.model?.vision === false) message.content += " [image]"
+                return { role: "rpUser", message, timestamp: entry.version.createdAt }
+              })
+              seed = [...prior.transcript, ...additions]
+              const budget = snapshot.contextBudget
+              const count = yield* reader
+                .CountRolloutContext({
+                  model: JSON.stringify(snapshot.inputs.model),
+                  request: JSON.stringify(prior.snapshot.request),
+                  transcript: JSON.stringify(seed),
+                  tools: JSON.stringify([
+                    ...tools.map(frozenTool),
+                    ...(plan.contract === "final_text"
+                      ? []
+                      : [plan.contract === "several" ? severalMessageDefinition : sendMessageDefinition])
+                  ])
+                })
+                .pipe(Effect.catch(serverFailure("CountRolloutContext")))
+              if (budget && count > budget.maximum - budget.responseReserve) {
+                seed = undefined
+                continuity = {
+                  path: baseline,
+                  reason:
+                    "The previous run outgrew the context budget, so this request was put together again from the messages."
+                }
+                if (WORKSHOP_OVERFLOW_STEP_SUMMARIES) {
+                  stepSummaries = yield* summarizeMessageSteps(reader, request, path)
+                  assembled = yield* assembleWith()
+                  snapshot = JSON.parse(assembled.snapshot) as ContinuousSnapshot
+                  generation = JSON.parse(assembled.generation) as Generation
+                }
+              } else {
+                const lastRequest = prior.transcript.findLastIndex((m) => m.role === "assistant")
+                const lastTail =
+                  providerRequest(prior.snapshot.request, snapshot.inputs.model!).context.messages.length +
+                  liveSuffix(prior.transcript.slice(0, lastRequest)).length -
+                  1
+                continuity = {
+                  path: baseline,
+                  parent: { rolloutId: prior.material.rolloutId, versionId: prior.versionId },
+                  historical: prior.transcript.length,
+                  prefix:
+                    prior.snapshot.continuity?.prefix ??
+                    (() => {
+                      const { continuity: _continuity, ...prefix } = prior.snapshot
+                      return prefix
+                    })(),
+                  ...(prior.snapshot.continuity?.inspection
+                    ? { inspection: prior.snapshot.continuity.inspection }
+                    : {}),
+                  breakpoints: [
+                    ...(prior.snapshot.continuity?.breakpoints ?? []),
+                    ...(snapshot.inputs.model?.cacheBreakpoints === "explicit" ? [lastTail] : [])
+                  ]
+                }
+                snapshot = { ...snapshot, request: prior.snapshot.request }
+                generation = {
+                  ...generation,
+                  request: prior.snapshot.request,
+                  ...(continuity.inspection ? { inspection: continuity.inspection } : {})
+                }
+              }
+            }
+          }
           const { model } = generation
           if (model === null) {
             return yield* new GenerationFailed({
@@ -374,16 +490,22 @@ export const layer = Layer.effect(
               modelId: model.modelId as ModelId,
               // An agent turn's tools and contract are frozen with its context (spec/AGENTIC.md §3.3).
               snapshot: agentic
-                ? `${assembled.snapshot.trimEnd().slice(0, -1)},"agent":${JSON.stringify({
-                    mode: planned.mode,
-                    contract: plan.contract,
-                    turnCap: plan.turnCap,
-                    tools: [
-                      ...tools.map(frozenTool),
-                      ...(plan.contract === "final_text" ? [] : [sendMessageDefinition])
-                    ]
-                  })}}`
+                ? `${JSON.stringify({ ...snapshot, ...(continuity ? { continuity } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
+                    {
+                      mode: planned.mode,
+                      contract: plan.contract,
+                      turnCap: plan.turnCap,
+                      tools: [
+                        ...tools.map(frozenTool),
+                        ...(plan.contract === "final_text"
+                          ? []
+                          : [plan.contract === "several" ? severalMessageDefinition : sendMessageDefinition])
+                      ]
+                    }
+                  )}}`
                 : assembled.snapshot,
+              ...(continuity?.parent ? { parentRolloutId: continuity.parent.rolloutId } : {}),
+              ...(seed ? { transcript: JSON.stringify(seed) } : {}),
               ...(agentic ? { mode: planned.mode } : {}),
               issues: generation.issues,
               variables: generation.variables,
@@ -422,7 +544,9 @@ export const layer = Layer.effect(
               ? {
                   agent: {
                     plan,
+                    ...(seed ? { resume: { transcript: seed, historical: continuity?.historical ?? 0 } } : {}),
                     mode: planned.mode,
+                    checkpoints: continuity?.breakpoints ?? [],
                     allowsOutside: profile.allowsOutside,
                     tools,
                     reader,

@@ -2763,6 +2763,31 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   historyStage,
   replySectionsStage,
   resolveStage,
+  sync("workshop-step-summaries", (assembly) => {
+    const summaries = assembly.request.agent?.stepSummaries
+    if (!summaries) return
+    const env = need(assembly, "macros")
+    const scripted = new Map(need(assembly, "scripted"))
+    assembly.resolved = need(assembly, "resolved").map(({ entry, piece }) => {
+      const line = summaries[entry.versionId]
+      if (!line) return { entry, piece }
+      const previous = scripted.get(entry.versionId)
+      if (previous) scripted.set(entry.versionId, { ...previous, text: `${previous.text}\n${line}` })
+      return {
+        entry,
+        piece: env.verbatim(
+          `workshop-steps:${entry.versionId}`,
+          {
+            kind: "message",
+            slot: entry.slotId,
+            version: entry.versionId
+          },
+          `${env.text(piece)}\n${line}`
+        )
+      }
+    })
+    assembly.scripted = scripted
+  }),
   imageTokensStage,
   rolesStage,
   mergeLayoutStage,

@@ -4225,6 +4225,17 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  PostRolloutMessage: (_reader, actor, owner, writer) =>
+    refused(
+      writer.PostRolloutMessage({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        versionId: owner.chat.generatingId,
+        toolCallId: "foreign-send",
+        content: "Must not post."
+      }),
+      "NotFound"
+    ),
   SaveRolloutTranscript: (_reader, actor, owner, writer) =>
     refused(
       writer.SaveRolloutTranscript({

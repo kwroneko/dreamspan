@@ -13,7 +13,13 @@ import { closePanel, openPanel } from "./panel.ts"
 import { asUser } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { nextReply } from "./strip.ts"
-import { startWorkshopProvider, STORY_REPLY, WORKSHOP_ANSWER } from "./workshopProvider.ts"
+import {
+  startWorkshopProvider,
+  STORY_REPLY,
+  WORKSHOP_ANSWER,
+  WORKSHOP_FIRST,
+  WORKSHOP_SECOND
+} from "./workshopProvider.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 
@@ -212,7 +218,7 @@ export function workshopChatTests() {
           )
           await page.getByLabel("Message", { exact: true }).fill("What cards do I have?")
           await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
-          const reply = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })
+          const reply = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()
           await expect(reply).toBeVisible({ timeout: 30_000 })
           await expect
             .poll(() =>
@@ -226,13 +232,22 @@ export function workshopChatTests() {
           await page.evaluate(() => Reflect.deleteProperty(document, "visibilityState"))
           const steps = reply.locator("[data-steps-panel]")
           await expect(steps).toHaveAttribute("data-steps-panel", "done")
-          await expect(reply.locator("[data-steps-badge]")).toHaveText(/^2 steps/)
+          await expect(reply.locator("[data-steps-badge]")).toHaveText(/^1 step/)
           await reply.locator("[data-steps-badge]").click()
           const rows = steps.locator('[data-step="tool"]')
-          await expect(rows).toHaveCount(2)
-          await expect(rows.nth(0)).toContainText("Looked in your library")
-          await expect(rows.nth(1)).toContainText("Read a card")
-          await expect(rows.nth(1)).toContainText("Assistant")
+          await expect(rows).toHaveCount(1)
+          await expect(rows.nth(0)).toContainText("Read a preset")
+          for (const [text, label] of [
+            [WORKSHOP_FIRST, "Looked in your library"],
+            [WORKSHOP_SECOND, "Read a card"]
+          ]) {
+            const message = page.getByRole("article").filter({ hasText: text! }).last()
+            await expect(message).toBeVisible()
+            await expect(message.locator("[data-steps-badge]")).toHaveText(/^1 step/)
+            await message.locator("[data-steps-badge]").click()
+            await expect(message.locator('[data-step="tool"]')).toHaveCount(1)
+            await expect(message.locator('[data-step="tool"]')).toContainText(label!)
+          }
           expect(provider.toolResults().join("\n")).toContain("Assistant")
           await shot("reply")
           await expectLayout(page, info, `workshop-reply-${width}-${theme}`, { scope: "article:last-of-type" })
@@ -240,7 +255,30 @@ export function workshopChatTests() {
           // The run's request names the workshop's instructions.
           await steps.getByRole("link", { name: "Open the run" }).click()
           await expect(page.getByText("Workshop instructions").first()).toBeVisible()
+          await expect(page.getByText("First request", { exact: true })).toHaveCount(0)
+          await expectLayout(page, info, `workshop-run-${width}-${theme}`)
           await page.goBack()
+
+          // The next turn retains the whole run; its inspector links the previous one.
+          await page.getByLabel("Message", { exact: true }).fill("Carry on from that work.")
+          await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toHaveCount(2)
+          const secondVersion = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            Effect.gen(function* () {
+              const chat = yield* api.GetChat({ chatId: workshopId })
+              const path = yield* api.ReadPath({
+                chatId: workshopId,
+                leafSlotId: chat.activeLeafSlotId,
+                range: { _tag: "Bottom" },
+                limit: 100
+              })
+              return path.entries.at(-1)!.version.id
+            })
+          )
+          await page.goto(`${server().url}/chats/${workshopId}/context/${secondVersion}`)
+          await expect(page.getByRole("link", { name: "Carried on from the previous turn’s run" })).toBeVisible()
+          await expectLayout(page, info, `workshop-carried-request-${width}-${theme}`)
+          await page.goto(`${server().url}/chats/${workshopId}`)
 
           // This chat leaves out the story's settings; the URL alone brings the workshop back.
           const settings = await openPanel(page, "This chat")
@@ -257,7 +295,7 @@ export function workshopChatTests() {
           })
           await page.goto(`${server().url}/chats/${workshopId}`)
           await expect(page.locator('[data-chat-kind="workshop"]').first()).toBeVisible()
-          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toBeVisible()
+          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()).toBeVisible()
           await expect(main.locator('[data-kind-badge="workshop"]').first()).toBeVisible()
           await shot("reloaded")
           await expectLayout(page, info, `workshop-chat-${width}-${theme}`)

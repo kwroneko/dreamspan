@@ -57,10 +57,13 @@ const isFailedTurn = (m: AgentMessage) =>
 const isInterruptedResult = (m: AgentMessage) =>
   m.role === "toolResult" && (m.details as { interrupted?: unknown } | null | undefined)?.interrupted === true
 
-const callsOf = (messages: ReadonlyArray<AgentMessage>) =>
-  messages.flatMap((m) =>
-    m.role === "assistant" ? m.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])) : []
+const callsOf = (messages: ReadonlyArray<AgentMessage>) => [
+  ...new Set(
+    messages.flatMap((m) =>
+      m.role === "assistant" ? m.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])) : []
+    )
   )
+]
 
 /** The last assistant turn's tool calls that no result answers: what a resume runs first. */
 export const danglingCalls = (messages: ReadonlyArray<AgentMessage>) => {
@@ -82,7 +85,10 @@ const fresh = (cut: ReadonlyArray<AgentMessage>): ResumePlan => ({
  * Resume a stopped, failed or interrupted run (§4.2). `prefill`: the model takes the start of
  * its reply (`ModelInput.prefill` is `assistant`), so text cut off can be carried on.
  */
-export const planResume = (json: string | null, options: { readonly prefill: boolean }): ResumePlan => {
+export const planResume = (
+  json: string | null,
+  options: { readonly prefill: boolean; readonly historical?: number }
+): ResumePlan => {
   const messages = parse(json)
   if (messages === null) return fresh([])
   const kept = messages.slice()
@@ -116,7 +122,7 @@ export const planResume = (json: string | null, options: { readonly prefill: boo
     transcript: kept,
     ...(continuation === undefined ? {} : { continuation }),
     cut,
-    keptCalls: callsOf(kept)
+    keptCalls: callsOf(kept.slice(options.historical ?? 0))
   }
 }
 
@@ -139,17 +145,22 @@ export const planStepResume = (
   tools: ReadonlyArray<FrozenTool>,
   step: number,
   edit: StepEdit | undefined,
-  newCallId: string
+  newCallId: string,
+  versionId?: string,
+  historical = 0
 ): ResumePlan | StepNotResumable => {
   const messages = parse(json)
   if (messages === null) return new StepNotResumable("This reply has no steps to resume from.")
-  const placed = placedSteps(messages, tools, true)[step]
+  const placed = placedSteps(messages, tools, true, versionId)[step]
   if (placed === undefined) return new StepNotResumable("That step isn't in this reply.")
   const at = placed.message
   const turn = messages[at] as AssistantMessage
   const part = turn.content[placed.part]!
+  const nextTurn = messages.findIndex((m, i) => i > at && m.role === "assistant")
   const resultsAfter = (upTo: (id: string) => boolean) =>
-    messages.slice(at + 1).filter((m): m is ToolResultMessage => m.role === "toolResult" && upTo(m.toolCallId))
+    messages
+      .slice(at + 1, nextTurn < 0 ? undefined : nextTurn)
+      .filter((m): m is ToolResultMessage => m.role === "toolResult" && upTo(m.toolCallId))
   const calls = turn.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : []))
   let kept: Array<AgentMessage>
   if (placed.step.kind !== "tool") {
@@ -195,6 +206,41 @@ export const planStepResume = (
     policy: danglingCalls(kept).length > 0 ? "rerun" : "continue",
     transcript: kept,
     cut: messages.slice(at),
-    keptCalls: callsOf(kept).filter((id) => id !== newCallId)
+    keptCalls: callsOf(kept.slice(historical)).filter((id) => id !== newCallId)
   }
+}
+
+/** A several-message swipe replays the request that wrote this message, retaining all
+ * earlier sends. Final text has no send boundary, so only its last assistant turn is cut. */
+export const planMessageResume = (
+  json: string | null,
+  versionId: string,
+  historical = 0
+): ResumePlan | StepNotResumable => {
+  const messages = parse(json)
+  if (!messages) return new StepNotResumable("This message has no saved run to carry on.")
+  const resultIndex = messages.findIndex(
+    (m) => m.role === "toolResult" && (m.details as { versionId?: string } | null)?.versionId === versionId
+  )
+  const result = messages[resultIndex]
+  const callId = result?.role === "toolResult" ? result.toolCallId : undefined
+  const at = callId
+    ? messages
+        .slice(0, resultIndex)
+        .findLastIndex((m) => m.role === "assistant" && m.content.some((p) => p.type === "toolCall" && p.id === callId))
+    : messages.findLastIndex((m) => m.role === "assistant")
+  if (at < 0) return new StepNotResumable("This message has no saved turn to write again.")
+  const kept = messages.slice(0, at)
+  const turn = messages[at]
+  if (callId && turn?.role === "assistant") {
+    const part = turn.content.findIndex((p) => p.type === "toolCall" && p.id === callId)
+    const content = turn.content.slice(0, part)
+    const calls = new Set(content.flatMap((p) => (p.type === "toolCall" ? [p.id] : [])))
+    if (calls.size)
+      kept.push(
+        { ...turn, content },
+        ...messages.slice(at + 1, resultIndex).filter((m) => m.role === "toolResult" && calls.has(m.toolCallId))
+      )
+  }
+  return { policy: "continue", transcript: kept, cut: messages.slice(at), keptCalls: callsOf(kept.slice(historical)) }
 }

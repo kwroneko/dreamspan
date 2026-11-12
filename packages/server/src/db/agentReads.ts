@@ -1,3 +1,11 @@
+import { budgetTokens } from "@rp/shared/imageTokens.ts"
+import { WorkerAssembler } from "../assembler/assembler.ts"
+import { prepareTextTokens } from "../assembler/textTokens.ts"
+import { providerRequest } from "../assembler/wire.ts"
+import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
+import { liveSuffix } from "../agent/messages.ts"
+import { rolloutRequest } from "../agent/wire.ts"
+import type { Tool } from "@earendil-works/pi-ai"
 // Agent rollouts' reads (spec/AGENTIC.md §5): a version's steps, projected from its stored
 // transcript with the tools its snapshot froze, as the live display projects the running one;
 // the same transcript verbatim for the run inspector; and a chat's Activity, its model work
@@ -62,6 +70,10 @@ const transcriptEntries = (
       return [
         { role: "toolResult", toolCallId: m.toolCallId, tool: m.toolName, text: textOf(m.content), isError: m.isError }
       ]
+    if (m.role === "rpUser") {
+      request = 0
+      return [{ role: "app", text: m.message.content + (m.message.images?.length ? " [image]" : "") }]
+    }
     const other = m as { readonly role: string; readonly content?: unknown }
     if (other.role === "rpHarness" || other.role === "user") return [{ role: "app", text: textOf(other.content) }]
     return []
@@ -164,6 +176,7 @@ const activityRow = (row: ActivitySqlRow): ActivityRow => ({
 export const makeAgentReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const lib = makeLibraryQueries(sql)
+  const assembler = yield* WorkerAssembler
   return {
     AgentCards: ({ userId, chatId, entityIds, bindings }) =>
       Effect.gen(function* () {
@@ -209,7 +222,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })
         if (!row.transcript) return []
         const tools = row.tools ? (JSON.parse(row.tools) as ReadonlyArray<FrozenTool>) : []
-        return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0)
+        return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0, versionId)
       }).pipe(query("RolloutSteps")),
 
     SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit }) =>
@@ -340,6 +353,39 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return row.result === null ? null : (JSON.parse(row.result) as string)
       }).pipe(query("RolloutReceipt")),
 
+    CountRolloutContext: ({ model, request, transcript, tools }) =>
+      Effect.gen(function* () {
+        const target = JSON.parse(model) as ModelInput
+        const count = yield* prepareTextTokens(assembler.textCounters.list(), target)
+        const definitions = JSON.parse(tools) as ReadonlyArray<FrozenTool>
+        const assembled = JSON.parse(request) as AssembledRequest
+        const history = JSON.parse(transcript) as Array<AgentMessage>
+        const images = [
+          ...assembled.messages.flatMap((m) => m.images ?? []),
+          ...history.flatMap((m) => (m.role === "rpUser" ? (m.message.images ?? []) : []))
+        ]
+        const imageTokens = images.reduce((n, image) => n + budgetTokens(image.estimate), 0)
+        const wire = rolloutRequest(
+          providerRequest(assembled, target),
+          target.api,
+          liveSuffix(history),
+          definitions as ReadonlyArray<Tool>
+        )
+        const messages =
+          target.api === "openai-completions"
+            ? wire.payload.messages
+            : wire.context.messages.map((m) => ({
+                role: m.role,
+                content: m.content,
+                ...(m.role === "toolResult" ? { toolCallId: m.toolCallId, isError: m.isError } : {})
+              }))
+        return (
+          imageTokens +
+          count(JSON.stringify(messages)) +
+          count(wire.context.systemPrompt ?? "") +
+          count(JSON.stringify(definitions))
+        )
+      }).pipe(query("CountRolloutContext")),
     RolloutMaterial: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{

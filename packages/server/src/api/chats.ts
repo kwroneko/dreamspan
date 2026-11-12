@@ -1,3 +1,4 @@
+import { regenerateSeveral } from "./agent.ts"
 // Chat RPC handlers (@rp/shared/chatApi.ts). Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
 // to the chat's subscribers, from every tab of the user, after it's committed.
@@ -365,6 +366,20 @@ export const makeChatHandlers = Effect.gen(function* () {
         // A swipe keeps the speaker and the direction of the version it replaces (DESIGN §2.2,
         // guidance on swipes), unless a direction is given now: an empty one is none.
         const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
+        if (before.version.context) {
+          const resumed = yield* regenerateSeveral({
+            versionId: before.version.id,
+            forkId: forkId ?? null,
+            expectedRowVersion,
+            ...(model ? { model } : {}),
+            ...(direction !== undefined ? { direction } : {})
+          })
+          if (resumed) {
+            yield* publishChat(id, chatId)
+            hub.publish(chatId, { _tag: "Reload" })
+            return resumed
+          }
+        }
         const guidance = direction ?? before.version.direction
         const added = yield* writer.AddSelectedVersion({
           userId: id,

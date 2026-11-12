@@ -40,10 +40,17 @@ const completionsMessage = (m: Message): unknown => {
   if (m.role === "user") {
     return {
       role: "user",
+      ...((m as { name?: string }).name ? { name: (m as { name?: string }).name } : {}),
       content:
         typeof m.content === "string"
           ? m.content
-          : m.content.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("")
+          : m.content.some((p) => p.type === "image")
+            ? m.content.map((p) =>
+                p.type === "text"
+                  ? { type: "text", text: p.text }
+                  : { type: "image_url", image_url: { url: `data:${p.mimeType};base64,${p.data}` } }
+              )
+            : m.content.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("")
     }
   }
   return { role: "system", content: typeof m.content === "string" ? m.content : m.content.map((p) => p.text).join("") }

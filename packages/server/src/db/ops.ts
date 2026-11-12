@@ -1941,11 +1941,26 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("PostRolloutMessage", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      versionId: VersionId,
+      toolCallId: Schema.String,
+      content: Schema.String,
+      reasoning: Schema.optionalKey(Schema.String),
+      replySections: Schema.optionalKey(ReplySections),
+      rewrite: Schema.optionalKey(StoredRewrite)
+    },
+    success: Schema.Struct({ slotId: SlotId, versionId: VersionId, postedVersionId: VersionId }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("FinishGeneration", {
     payload: {
       userId: UserId,
       versionId: VersionId,
       content: Schema.String,
+      discardEmpty: Schema.optionalKey(Schema.Boolean),
       /** The reasoning streamed; left as it is when absent. */
       reasoning: Schema.optionalKey(Schema.String),
       /** The reply's leading tagged sections; left as they are when absent. */
@@ -1955,7 +1970,7 @@ export class WriteOps extends RpcGroup.make(
       /** What regex scripts did to `content` and `reasoning` as it finished, and the text before. */
       rewrite: Schema.optionalKey(StoredRewrite)
     },
-    success: Schema.Struct({ ...QueueOutcome.fields, version: Version }),
+    success: Schema.Struct({ ...QueueOutcome.fields, version: Version, removedSlotId: Schema.optionalKey(SlotId) }),
     error: Schema.Union([NotFound, StorageError])
   }),
   // --- ST data folder import (ARCHITECTURE.md §13). A chat goes in as a pending chat, its
@@ -2484,6 +2499,8 @@ export class WriteOps extends RpcGroup.make(
       connectionId: ConnectionId,
       modelId: ModelId,
       snapshot: Schema.String,
+      parentRolloutId: Schema.optionalKey(Schema.String),
+      transcript: Schema.optionalKey(Schema.String),
       /** The orchestration mode it ran in, when not plain (spec/AGENTIC.md §6). */
       mode: Schema.optionalKey(Schema.String),
       /** The snapshot's issues, kept on the rollout for its version to show. */
@@ -2588,6 +2605,8 @@ export class WriteOps extends RpcGroup.make(
       expectedRowVersion: Schema.Int,
       rolloutId: Schema.String,
       version: NewVersion,
+      model: Schema.optionalKey(ModelChoice),
+      snapshot: Schema.optionalKey(Schema.String),
       transcript: Schema.String,
       steps: Schema.Int,
       keptCalls: Schema.Array(Schema.String),
@@ -3576,7 +3595,8 @@ export class ReadOps extends RpcGroup.make(
         Schema.Struct({
           instructions: Schema.String,
           speakerCardOnly: Schema.Boolean,
-          workshop: Schema.optionalKey(Schema.Boolean)
+          workshop: Schema.optionalKey(Schema.Boolean),
+          stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
         })
       ),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
@@ -3726,6 +3746,11 @@ export class ReadOps extends RpcGroup.make(
    * What resuming an agent reply needs of its run (agentReads.ts): the rollout, its status and
    * mode, the frozen snapshot and the transcript as last saved, and the version's own status.
    */
+  Rpc.make("CountRolloutContext", {
+    payload: { model: Schema.String, request: Schema.String, transcript: Schema.String, tools: Schema.String },
+    success: Schema.Int,
+    error: StorageError
+  }),
   Rpc.make("RolloutMaterial", {
     payload: { userId: UserId, versionId: VersionId },
     success: Schema.Struct({

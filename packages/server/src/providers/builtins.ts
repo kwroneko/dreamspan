@@ -134,7 +134,13 @@ export const layer = Layer.effectDiscard(
       appliesTo: (target) => target.api === "anthropic-messages",
       transform: (payload, request) => {
         if (request.breakpoints.length > 0)
-          applyAnthropicBreakpoints(payload, request.messages, request.breakpoints, request.cacheLayout)
+          applyAnthropicBreakpoints(
+            payload,
+            request.messages,
+            request.breakpoints,
+            request.cacheLayout,
+            request.preserveBreakpoints
+          )
         return payload
       }
     })

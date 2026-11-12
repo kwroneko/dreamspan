@@ -64,6 +64,32 @@ describe("an agent reply's steps", () => {
     expect(excerpt("x".repeat(200), 10)).toBe(`${"x".repeat(9)}…`)
   })
 
+  it("keeps a multi-message run together in the inspector while each message has its own steps", () => {
+    const entries: Array<TranscriptEntry> = [
+      {
+        role: "assistant",
+        parts: [{ type: "toolCall", id: "send-1", name: "send_message", args: { message: "First." } }],
+        stopReason: "toolUse",
+        toolsOffered: true
+      },
+      { role: "toolResult", toolCallId: "send-1", tool: "send_message", text: "Sent.", isError: false },
+      {
+        role: "assistant",
+        parts: [{ type: "toolCall", id: "read-2", name: "read_card", args: { card: "Assistant" } }],
+        stopReason: "toolUse",
+        toolsOffered: true
+      },
+      { role: "toolResult", toolCallId: "read-2", tool: "read_card", text: "A synthetic card.", isError: false },
+      { role: "assistant", parts: [{ type: "text", text: "Last." }], stopReason: "stop", toolsOffered: true }
+    ]
+    const turns = turnsOf(entries)
+    expect(turns).toHaveLength(3)
+    expect(turns[1]!.added).toEqual([entries[1]])
+    expect(turns[2]!.added).toEqual([entries[3]])
+    expect(stepsView(null, { count: 1, ms: 500 }, false)?.count).toBe(1)
+    expect(stepsView([tool("read-2")], undefined, true)?.count).toBe(1)
+  })
+
   it("groups a transcript into requests: what each added, then the answer", () => {
     const call: TranscriptEntry = {
       role: "assistant",

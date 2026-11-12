@@ -237,7 +237,7 @@ describe("workshop", () => {
           (yield* api.ListModelUse()).map((use) => use.modelId),
           setup.model.id
         )
-        assert.strictEqual(snapshot.agent.contract, "both")
+        assert.strictEqual(snapshot.agent.contract, "several")
         assert.strictEqual(snapshot.agent.turnCap, 40)
         assert.deepStrictEqual(
           snapshot.agent.tools.map((t) => t.name),

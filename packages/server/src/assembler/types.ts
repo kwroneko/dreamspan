@@ -299,6 +299,7 @@ export interface AgentAssembly {
   /** Card-swap: the preset's card places hold only the speaker's card (DESIGN §5.2). */
   readonly speakerCardOnly: boolean
   readonly workshop?: boolean
+  readonly stepSummaries?: Readonly<Record<string, string>>
 }
 
 /** What decision models decided for this context (spec/AGENTIC.md §7): the lorebook entries admitted. */

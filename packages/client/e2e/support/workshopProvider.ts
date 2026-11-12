@@ -6,11 +6,16 @@ import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 
 export const WORKSHOP_ANSWER = "Your library has one card, the Assistant, and it reads as practical and brief."
+export const WORKSHOP_FIRST = "I’ll look through the library first."
+export const WORKSHOP_SECOND = "The Assistant card is practical and brief. I’ll check the preset too."
 export const STORY_REPLY = "The harbor bell rings twice."
 
 const CALLS = [
   { name: "list_library", arguments: { kind: "card" } },
-  { name: "read_card", arguments: { card: "Assistant", fields: ["description"] } }
+  { name: "send_message", arguments: { message: WORKSHOP_FIRST } },
+  { name: "read_card", arguments: { card: "Assistant", fields: ["description"] } },
+  { name: "send_message", arguments: { message: WORKSHOP_SECOND } },
+  { name: "read_preset", arguments: { preset: "Workshop" } }
 ]
 
 interface Body {
