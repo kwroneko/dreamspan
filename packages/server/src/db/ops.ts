@@ -1,6 +1,7 @@
+import { EffectKey, EffectList, RolloutEffect, RolloutEffectRecord, EffectUndoRefused } from "@rp/shared/workshopApi.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
-import { EditRefused } from "@rp/shared/editorApi.ts"
+import { EditRefused, LibraryLabel } from "@rp/shared/editorApi.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
@@ -1088,12 +1089,13 @@ export class WriteOps extends RpcGroup.make(
       subtitle: Schema.String,
       doc: Doc,
       schemaVersion: Schema.Int,
-      origin: Schema.Literals(["user", "import"]),
+      origin: Schema.Literals(["user", "import", "agent"]),
+      originRef: Schema.optionalKey(Schema.String),
       sourcePath: Schema.NullOr(Schema.String),
       tags: Schema.optionalKey(Schema.Array(Schema.String))
     },
     success: Schema.Struct({ entityId: EntityId, ref: LibraryRef }),
-    error: StorageError
+    error: Schema.Union([NotFound, StorageError])
   }),
   /**
    * Commits an edit to a ref: a new revision on top of its head (DATA-MODEL §3.2). Refs
@@ -1106,10 +1108,11 @@ export class WriteOps extends RpcGroup.make(
       doc: Doc,
       expectedRowVersion: Schema.Int,
       message: Schema.NullOr(Schema.String),
-      commitDraft: CommitDraft
+      commitDraft: CommitDraft,
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: RefChange,
-    error: Schema.Union([NotFound, StaleWrite, StorageError])
+    error: Schema.Union([NotFound, InvalidDocument, StaleWrite, StorageError])
   }),
   /**
    * Replaces an entity's tags. Tags are folders; the reserved tag "persona" is the
@@ -1776,6 +1779,87 @@ export class WriteOps extends RpcGroup.make(
    * start, the persona is played by the user, every greeting of the first card becomes a
    * version of the first message (`greeting` selected), then the first turn.
    */
+  Rpc.make("RecordRolloutEffects", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      result: Schema.String,
+      isError: Schema.optionalKey(Schema.Boolean),
+      effects: Schema.optionalKey(Schema.Array(RolloutEffectRecord))
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("AgentCreateEntity", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      kind: EntityKind,
+      label: LibraryLabel,
+      doc: Doc,
+      tags: Schema.Array(Schema.String)
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, InvalidDocument, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("AgentReviseEntity", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      refId: RefId,
+      expectedRowVersion: Schema.Int,
+      doc: Doc
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, InvalidDocument, StaleWrite, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("AgentCloneCard", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      refId: RefId,
+      name: Schema.String.check(Schema.isMinLength(1)),
+      nickname: Schema.String,
+      characterVersion: Schema.String
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, RefOperationRefused, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("StartGreetingChat", {
+    payload: {
+      userId: UserId,
+      cards: StartChatFields.cards,
+      persona: StartChatFields.persona,
+      greeters: StartChatFields.greeters,
+      title: StartChatFields.title
+    },
+    success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("AgentStartChat", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      cards: StartChatFields.cards,
+      persona: StartChatFields.persona,
+      greeters: StartChatFields.greeters,
+      title: StartChatFields.title,
+      preset: Schema.NullOr(RefId),
+      model: Schema.NullOr(ModelId)
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("UndoRolloutEffect", {
+    payload: { userId: UserId, ...EffectKey },
+    success: RolloutEffect,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
   Rpc.make("CreateWorkshop", {
     payload: { userId: UserId, title: Schema.optionalKey(Schema.String) },
     success: Chat,
@@ -3717,6 +3801,16 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
+  Rpc.make("ListRolloutEffects", {
+    payload: { userId: UserId, ...EffectList },
+    success: Schema.Array(RolloutEffect),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("RolloutToolReceipt", {
+    payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String },
+    success: Schema.NullOr(Schema.Struct({ text: Schema.String, isError: Schema.Boolean })),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("RolloutReceipt", {
     payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String },
     success: Schema.NullOr(Schema.String),

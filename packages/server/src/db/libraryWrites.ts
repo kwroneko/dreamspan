@@ -87,7 +87,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly schemaVersion: number
       readonly doc: EncodedDoc
       readonly parents: ReadonlyArray<string>
-      readonly origin: "import" | "user" | "merge" | "generation"
+      readonly origin: "import" | "user" | "merge" | "generation" | "agent"
       readonly originRef: string | null
       readonly message: string | null
       readonly modifiedAt?: number
@@ -270,7 +270,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly subtitle: string
       readonly doc: EncodedDoc
       readonly schemaVersion: number
-      readonly origin: "user" | "import" | "generation"
+      readonly origin: "user" | "import" | "generation" | "agent"
       readonly originRef: string | null
       readonly sourcePath: string | null
       readonly sourceHash: string | null
@@ -614,18 +614,21 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           return { entity: made.entity_id as EntityId, created: true }
         }).pipe(transaction(sql, "StImportCharacterNote")),
 
-      CreateEntity: ({ userId, kind, label, subtitle, doc, schemaVersion, origin, sourcePath, tags }) =>
-        createUpstream({
-          userId,
-          kind,
-          label,
-          subtitle,
-          doc: encode(doc),
-          schemaVersion,
-          origin,
-          originRef: sourcePath,
-          sourcePath,
-          sourceHash: null
+      CreateEntity: ({ userId, kind, label, subtitle, doc, schemaVersion, origin, originRef, sourcePath, tags }) =>
+        Effect.gen(function* () {
+          if (origin === "agent") yield* checkReferences(userId, doc)
+          return yield* createUpstream({
+            userId,
+            kind,
+            label,
+            subtitle,
+            doc: encode(doc),
+            schemaVersion,
+            origin,
+            originRef: originRef ?? sourcePath,
+            sourcePath,
+            sourceHash: null
+          })
         }).pipe(
           Effect.tap((ref) =>
             Effect.gen(function* () {
@@ -684,10 +687,17 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           return toLibraryRef(yield* reload(refId))
         }).pipe(transaction(sql, "SetRefArchived")),
 
-      EditRef: ({ userId, refId, doc, expectedRowVersion, message, commitDraft }) =>
+      EditRef: ({ userId, refId, doc, expectedRowVersion, message, commitDraft, agentOriginRef }) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
           yield* checkRowVersion(ref, expectedRowVersion)
+          if (agentOriginRef !== undefined) {
+            doc = yield* withoutGrants(ref, doc)
+            const valid = validateDoc(ref.kind, doc)
+            if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
+            doc = valid.doc
+            yield* checkReferences(userId, doc)
+          }
           yield* drafts.commit(userId, commitDraft, {
             targetKind: "entity_field",
             targetId: refId,
@@ -710,8 +720,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             schemaVersion: current.schema_version,
             doc: encode(doc),
             parents: [ref.head_revision_id],
-            origin: "user",
-            originRef: null,
+            origin: agentOriginRef === undefined ? "user" : "agent",
+            originRef: agentOriginRef ?? null,
             message
           })
           yield* moveHead(ref.id, edit, null)

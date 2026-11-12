@@ -1,3 +1,4 @@
+import { makeWorkshopEffectHandlers } from "./workshopEffects.ts"
 import { installStorageKindValidation } from "./storageKinds.ts"
 import { makeStImportPrefix, stImportPrefixHandlers } from "./stImportPrefix.ts"
 import { stateModuleHandlers } from "./stateModules.ts"
@@ -84,6 +85,7 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
                   ...providers,
                   ...accounts,
                   ...chatSetup,
+                  ...(yield* makeWorkshopEffectHandlers({ ...library, ...chatSetup, ...graph }, bin)),
                   ...stImport,
                   ...(yield* makeStImportJobWriteHandlers),
                   ...generation,

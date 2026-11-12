@@ -21,6 +21,36 @@ export const makeRolloutEffectHandlers = (steps: LibrarySteps) => {
   const { sql, drafts } = steps
   const graph = makeGraphWrites(sql, drafts)
   return {
+    // Fallback for registered non-read tools whose work is not a single storage write.
+    // Atomic built-ins already wrote their receipt and the first result wins here too.
+    RecordRolloutEffects: ({ userId, rolloutId, toolCallId, result, isError, effects }) =>
+      Effect.gen(function* () {
+        const [owned] = yield* sql<{ id: string }>`SELECT r.id FROM rollouts r JOIN chats c ON c.id = r.chat_id
+        WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        if (!owned) return yield* new NotFound({ entity: "rollout", id: rolloutId })
+        const [prior] = yield* sql<{
+          result_json: string
+        }>`SELECT result_json FROM rollout_receipts WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
+        if (prior) return JSON.parse(prior.result_json) as string
+        yield* sql`INSERT OR IGNORE INTO rollout_receipts ${sql.insert({ rollout_id: rolloutId, tool_call_id: toolCallId, result_json: JSON.stringify(result), is_error: isError ? 1 : 0, created_at: Date.now() })}`
+        for (const [seq, effect] of (effects ?? []).entries()) {
+          yield* sql`INSERT INTO rollout_effects ${sql.insert({
+            rollout_id: rolloutId,
+            tool_call_id: toolCallId,
+            seq,
+            kind: effect.kind,
+            target_kind: effect.targetKind,
+            target_id: effect.targetId,
+            title: effect.title,
+            undo_json: effect.undo === null ? null : JSON.stringify(effect.undo),
+            created_at: Date.now()
+          })}`
+        }
+        const [row] = yield* sql<{
+          result_json: string
+        }>`SELECT result_json FROM rollout_receipts WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
+        return JSON.parse(row!.result_json) as string
+      }).pipe(transaction(sql, "RecordRolloutEffects")),
     ApplyRolloutEffect: ({ userId, rolloutId, toolCallId, events, notes, result }) =>
       Effect.gen(function* () {
         const [rollout] = yield* sql<{

@@ -1,3 +1,5 @@
+import { outsideEffect } from "../agent/effects.ts"
+import { toolForKind } from "../execution.ts"
 import { AppConfig } from "../config.ts"
 import { hydrateMessageImages } from "./messageImages.ts"
 import { executionRegistry } from "../execution.ts"
@@ -149,8 +151,8 @@ export const layer = Layer.effect(
         if (!profile)
           return yield* new GenerationFailed({ class: "unavailable", message: "This chat kind is unavailable." })
         const tools = frozen.tools.flatMap((t) => {
-          const tool = execution.rolloutTools.get(t.name)
-          return tool && (profile.allowsOutside || tool.effect !== "external") ? [tool] : []
+          const tool = toolForKind(execution, chat.kind, t.name)
+          return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
         })
         const reply = strategy.run({
           purpose: profile.purpose,
@@ -268,9 +270,9 @@ export const layer = Layer.effect(
             : planned.plan
           const agentic = plan.strategy !== "reply"
           const tools = plan.tools.flatMap((id) => {
-            const tool = execution.rolloutTools.get(id)
+            const tool = toolForKind(execution, chat.kind, id)
             // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
-            return tool && (profile.allowsOutside || tool.effect !== "external") ? [tool] : []
+            return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
           })
           const assemblyNow = Date.now()
           const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>

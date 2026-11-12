@@ -12,7 +12,7 @@ const failRead = (error: unknown) =>
 const entries = (context: ToolContext, kind: EntityKind, archived = false) =>
   context.reader.ListLibrary({ userId: context.userId, kind, tag: null, archived, withFilterData: true })
 
-const resolve = (context: ToolContext, kind: EntityKind, name: string) =>
+export const resolveLibrary = (context: ToolContext, kind: EntityKind, name: string) =>
   Effect.gen(function* () {
     const refs = [...(yield* entries(context, kind)), ...(yield* entries(context, kind, true))]
     const id = refs.find((ref) => ref.id === name || ref.entityId === name)
@@ -44,6 +44,7 @@ const listLibrary: RolloutTool<{
   label: "Looked in your library",
   explanation: "Find cards, presets, lorebooks and notes in your library.",
   effect: "read",
+  capability: "library.read",
   description: "Lists your library entries with names, ids, subtitles and tags. Use an id when names are ambiguous.",
   parameters: Type.Object({
     kind: Type.Union([Type.Literal("card"), Type.Literal("preset"), Type.Literal("lorebook"), Type.Literal("note")]),
@@ -76,6 +77,7 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
   label: `Read a ${kind}`,
   explanation: `Read a ${kind} from your library.`,
   effect: "read",
+  capability: "library.read",
   description: `Reads the saved library head of a ${kind}, by name, library id or entity id. Returns its revision and document. Unsaved drafts are not included.`,
   parameters: Type.Object({
     [kind]: Type.String({ description: `The ${kind}'s name or id.` }),
@@ -84,7 +86,7 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
   summarize: (args) => String(args[kind]),
   execute: (context, args) =>
     Effect.gen(function* () {
-      const found = yield* resolve(context, kind, String(args[kind]))
+      const found = yield* resolveLibrary(context, kind, String(args[kind]))
       if ("error" in found) return { text: found.error, isError: true }
       const snapshot = yield* context.reader.OpenEditor({ userId: context.userId, refId: found.ref.id })
       const fields = args.fields as ReadonlyArray<string> | undefined

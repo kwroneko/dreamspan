@@ -1,3 +1,4 @@
+import { toRolloutEffect } from "./workshopEffects.ts"
 // Agent rollouts' reads (spec/AGENTIC.md §5): a version's steps, projected from its stored
 // transcript with the tools its snapshot froze, as the live display projects the running one;
 // the same transcript verbatim for the run inspector; and a chat's Activity, its model work
@@ -330,6 +331,32 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("LookupLore")),
 
+    ListRolloutEffects: ({ userId, chatId, before, limit }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{
+          id: string
+        }>`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const rows = yield* sql<
+          Parameters<typeof toRolloutEffect>[0]
+        >`SELECT e.* FROM rollout_effects e JOIN rollouts r ON r.id = e.rollout_id
+        WHERE r.chat_id = ${chatId} AND ${before ? sql`(e.created_at, e.rollout_id, e.tool_call_id, e.seq) < (${before.createdAt}, ${before.rolloutId}, ${before.toolCallId}, ${before.seq})` : sql`1`}
+        ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC LIMIT ${Math.max(1, Math.min(200, limit ?? 50))}`
+        return rows.map(toRolloutEffect)
+      }).pipe(query("ListRolloutEffects")),
+    RolloutToolReceipt: ({ userId, rolloutId, toolCallId }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{
+          result_json: string | null
+          is_error: number | null
+        }>`SELECT receipt.result_json, receipt.is_error
+        FROM rollouts r JOIN chats c ON c.id = r.chat_id LEFT JOIN rollout_receipts receipt ON receipt.rollout_id = r.id AND receipt.tool_call_id = ${toolCallId}
+        WHERE r.id = ${rolloutId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        if (!row) return yield* new NotFound({ entity: "rollout", id: rolloutId })
+        return row.result_json === null
+          ? null
+          : { text: JSON.parse(row.result_json) as string, isError: row.is_error === 1 }
+      }).pipe(query("RolloutToolReceipt")),
     RolloutReceipt: ({ userId, rolloutId, toolCallId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{ readonly result: string | null }>`
@@ -387,6 +414,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             label: t.label,
             description: t.description,
             parameters: t.parameters,
+            ...(t.capability ? { capability: t.capability } : {}),
             effect: t.effect
           })),
           entries: row.transcript

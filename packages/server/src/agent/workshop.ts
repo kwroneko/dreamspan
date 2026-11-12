@@ -10,7 +10,16 @@ export const workshopMode: OrchestrationMode = {
   description: "Work with an assistant on the app outside a story.",
   plan: ({ state }) => ({
     strategy: "agent",
-    tools: state.agentTools ?? ["list_library", "read_card", "read_preset", "read_lorebook"],
+    tools: state.agentTools ?? [
+      "list_library",
+      "read_card",
+      "read_preset",
+      "read_lorebook",
+      "create_card",
+      "edit_card",
+      "clone_card",
+      "start_chat"
+    ],
     contract: state.outputContract ?? "both",
     turnCap: 40,
     assembly: { instructions: () => workshopInstructions, speakerCardOnly: false, workshop: true }

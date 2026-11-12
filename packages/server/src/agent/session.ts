@@ -1,3 +1,4 @@
+import { outsideEffect, UNCERTAIN_EFFECT } from "./effects.ts"
 // The agent reply strategy (spec/AGENTIC.md §3): a pi-agent-core loop over the frozen request.
 // The assembler built the context once; each provider request is that prefix plus the
 // rollout's own transcript (wire.ts), sent through the provider layer so its ledger, retries,
@@ -346,7 +347,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         executionMode: "sequential",
         execute: async (toolCallId, params, signal) => {
           // Dangling calls on resume execute directly, without pi-agent's beforeToolCall hook.
-          if (tool.effect === "external" && run.allowsOutside !== true)
+          if (outsideEffect(tool.effect) && run.allowsOutside !== true)
             return {
               content: [{ type: "text", text: "This chat does not allow tools with outside effects." }],
               details: null,
@@ -355,14 +356,18 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           // A committed call's receipt takes precedence over validation against its own
           // changed state (a note may now exist, or its old passage may already be gone).
           const execute =
-            tool.effect === "chat_state"
+            tool.effect !== "read"
               ? run.reader
-                  .RolloutReceipt({ userId: request.userId, rolloutId, toolCallId })
+                  .RolloutToolReceipt({ userId: request.userId, rolloutId, toolCallId })
                   .pipe(
                     Effect.flatMap((receipt) =>
-                      receipt === null
-                        ? tool.execute(context(toolCallId), params as never)
-                        : Effect.succeed<ToolOutput>({ text: receipt })
+                      receipt !== null
+                        ? Effect.succeed<ToolOutput>(receipt)
+                        : outsideEffect(tool.effect) &&
+                            seed &&
+                            danglingCalls(seed).some((call) => call.id === toolCallId)
+                          ? Effect.succeed<ToolOutput>({ text: UNCERTAIN_EFFECT, isError: true })
+                          : tool.execute(context(toolCallId), params as never)
                     )
                   )
               : tool.execute(context(toolCallId), params as never)
@@ -377,6 +382,18 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               isError: true
             }
           const result = exit.value
+          if (tool.effect !== "read") {
+            await runPromise(
+              writer.RecordRolloutEffects({
+                userId: request.userId,
+                rolloutId,
+                toolCallId,
+                result: result.text,
+                isError: result.isError === true,
+                ...(result.effects ? { effects: result.effects } : {})
+              })
+            )
+          }
           if (tool.effect === "chat_state" && !result.isError) run.onState?.()
           return {
             content: [{ type: "text", text: budgetResult(result.text) }],
@@ -419,7 +436,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         toolExecution: "sequential",
         beforeToolCall: async ({ toolCall }) => {
           const tool = tools.find((entry) => entry.id === toolCall.name)
-          if (tool?.effect === "external" && run.allowsOutside !== true)
+          if (tool && outsideEffect(tool.effect) && run.allowsOutside !== true)
             return { block: true, reason: "This chat does not allow tools with outside effects." }
           if (requests >= plan.turnCap) return { block: true, reason: "The final turn cannot use tools." }
           if (sent !== undefined) return { block: true, reason: "The reply has already been sent." }

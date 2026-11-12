@@ -201,7 +201,17 @@ describe("workshop", () => {
         )
         assert.notInclude(text, "{{user}}")
         const names = (first.tools as Array<{ function: { name: string } }>).map((t) => t.function.name)
-        assert.deepStrictEqual(names, ["list_library", "read_card", "read_preset", "read_lorebook", "send_message"])
+        assert.deepStrictEqual(names, [
+          "list_library",
+          "read_card",
+          "read_preset",
+          "read_lorebook",
+          "create_card",
+          "edit_card",
+          "clone_card",
+          "start_chat",
+          "send_message"
+        ])
         assert.deepStrictEqual(bodies[1]!.tools, first.tools)
         assert.deepStrictEqual((bodies[1]!.messages as Array<unknown>).slice(0, messages.length), messages)
         const transcript = yield* api.GetRunTranscript({ versionId: version.id })

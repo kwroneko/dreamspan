@@ -1,3 +1,5 @@
+import { rolloutEffectClasses } from "./agent/effects.ts"
+import { libraryEditCard, setupTools } from "./agent/tools/setup.ts"
 import { chatKinds, type ChatKindProfile } from "@rp/shared/chatKinds.ts"
 import { workshopMode } from "./agent/workshop.ts"
 import { libraryTools } from "./agent/tools/library.ts"
@@ -43,7 +45,9 @@ export class ExecutionRegistry extends Context.Service<
     readonly chatKinds: Registry<ChatKindProfile>
     readonly orchestrationModes: Registry<OrchestrationMode>
     /** The tools an agent turn may offer, with their effect classes (spec/AGENTIC.md §4). */
+    readonly effectClasses: typeof rolloutEffectClasses
     readonly rolloutTools: Registry<RolloutTool<never>>
+    readonly kindTools: Registry<{ readonly id: string; readonly tool: RolloutTool<never> }>
   }
 >()("rp/ExecutionRegistry") {
   static readonly layer = Layer.effect(
@@ -55,17 +59,20 @@ export class ExecutionRegistry extends Context.Service<
       const orchestrationModes = makeRegistry<OrchestrationMode>()
       yield* orchestrationModes.register(defaultMode)
       yield* orchestrationModes.register(workshopMode)
+      const kindTools = makeRegistry<{ readonly id: string; readonly tool: RolloutTool<never> }>()
+      yield* kindTools.register({ id: "workshop:edit_card", tool: libraryEditCard })
       const rolloutTools = makeRegistry<RolloutTool<never>>()
       for (const tool of [
         ...historyTools,
         ...libraryTools,
+        ...setupTools,
         lookupLore,
         listNotes,
         writeNote,
         editNote,
         switchNote,
         setPresence,
-        editCard
+        { ...editCard, kindOverrides: ["workshop"] }
       ] as ReadonlyArray<RolloutTool<never>>)
         yield* rolloutTools.register(tool)
       const replies = makeRegistry<ReplyOutputStrategy>()
@@ -89,7 +96,9 @@ export class ExecutionRegistry extends Context.Service<
         summaryTools,
         orchestrationModes,
         chatKinds,
-        rolloutTools
+        rolloutTools,
+        effectClasses: rolloutEffectClasses,
+        kindTools
       }
     })
   )
@@ -102,3 +111,10 @@ export const executionRegistry = Effect.gen(function* () {
   const context = yield* Layer.build(ExecutionRegistry.layer)
   return Context.get(context, ExecutionRegistry)
 })
+
+/** A kind may replace an ambiguous public tool name without changing story semantics. */
+export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string, name: string) => {
+  const common = registry.rolloutTools.get(name)
+  const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
+  return common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)
+}

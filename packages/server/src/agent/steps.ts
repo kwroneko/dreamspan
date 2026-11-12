@@ -78,6 +78,8 @@ export const placedSteps = (
       else if (part.type === "toolCall" && part.name !== SEND_MESSAGE) {
         const result = results.get(part.id)
         const tool = meta.get(part.name)
+        const effect = tool?.effect ?? "read"
+        const displayEffect = effect === "read" || effect === "chat_state" ? effect : "external"
         place({
           kind: "tool",
           id: part.id,
@@ -87,7 +89,8 @@ export const placedSteps = (
           args: part.arguments,
           status: result ? (result.isError ? "error" : "done") : final ? "error" : "running",
           ...(result ? { result: result.text } : {}),
-          effect: tool?.effect ?? "read"
+          effect: displayEffect,
+          ...(effect === displayEffect ? {} : { effectClass: effect })
         })
       }
     })

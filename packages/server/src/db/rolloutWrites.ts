@@ -129,8 +129,8 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
             }
           }
           for (const id of keptCalls)
-            yield* sql`INSERT INTO rollout_receipts (rollout_id, tool_call_id, result_json, created_at)
-              SELECT ${rolloutId}, tool_call_id, result_json, ${now} FROM rollout_receipts
+            yield* sql`INSERT INTO rollout_receipts (rollout_id, tool_call_id, result_json, is_error, created_at)
+              SELECT ${rolloutId}, tool_call_id, result_json, is_error, ${now} FROM rollout_receipts
               WHERE rollout_id = ${source.rollout_id} AND tool_call_id = ${id}`
           if (branch)
             yield* sql`INSERT INTO rollout_branches ${sql.insert({

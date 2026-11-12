@@ -24,7 +24,7 @@ import { selectedIn, slotDeletedIn } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts"
-import { rewriteColumns, toVersion } from "./rows.ts"
+import { rewriteColumns, toVersion, toChat } from "./rows.ts"
 import type { StoredRewrite } from "@rp/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
@@ -334,84 +334,102 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         { discard: true }
       )
 
+    const greetingChat = ({
+      userId,
+      cards,
+      persona,
+      greeters,
+      title
+    }: Parameters<WriteHandlers["StartGreetingChat"]>[0]) =>
+      Effect.gen(function* () {
+        const ids = [...new Set([...cards, ...(persona === null ? [] : [persona])])]
+        const loaded = yield* loadCards(sql, userId, ids)
+        for (const id of ids) {
+          if (!loaded.some(({ card }) => card.entityId === id && !card.inBin)) {
+            return yield* new NotFound({ entity: "card", id })
+          }
+        }
+        const byId = new Map(loaded.map((card) => [card.card.entityId as string, card]))
+        for (const greeter of greeters) {
+          if (!cards.includes(greeter.entityId)) return yield* new NotFound({ entity: "card", id: greeter.entityId })
+        }
+        const at = Date.now()
+        const chatId = uuidv7() as ChatId
+        const names = ids.filter((id) => cards.includes(id)).map((id) => byId.get(id)!.card.name)
+        yield* sql`INSERT INTO chats ${sql.insert({
+          id: chatId,
+          owner_user_id: userId,
+          kind: "rp",
+          status: "active",
+          title: title?.trim() || titleFor(names, at),
+          created_at: at
+        })}`
+        yield* graph.insertStateEvent(userId, chatId, null, null, null, {
+          key: "lcm.settings",
+          value: yield* newChatLcmSettings(sql, userId)
+        })
+        for (const entity of ids) {
+          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
+            key: "participant.join",
+            value: { entity }
+          })
+        }
+        if (persona !== null) {
+          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
+            key: "played_by_me.set",
+            value: { entities: [persona] }
+          })
+        }
+        // Each greeter's greeting is a message of its own, in order, as ST starts a group
+        // chat; every greeting of its card is a version of it, its macros kept for display
+        // and assembly to resolve against the chat's state (DESIGN §5.6).
+        let root: SlotId | null = null
+        let depth = -1
+        for (const { entityId, greeting, options } of greeters) {
+          const greeter = byId.get(entityId)!
+          if (options.length === 0) continue
+          const greetingVersion = (i: number) => {
+            const option = options[i]!
+            const originalIndex = greeter.greetingIndexes[option.index]
+            return new NewVersion({
+              speakerEntityId: greeter.card.entityId,
+              writer: "model",
+              content: options[i]!.text,
+              status: "complete",
+              macroMode: "template",
+              origin: "greeting",
+              ...(originalIndex === undefined
+                ? {}
+                : { greetingRef: { entity: greeter.card.entityId, index: originalIndex } }),
+              ...(option.frozen && Object.keys(option.frozen).length > 0 ? { frozenMacros: option.frozen } : {})
+            })
+          }
+          const parent = root === null ? null : { id: root, depth }
+          const more = options.slice(1).map((_, i) => greetingVersion(i + 1))
+          const picked = Math.max(
+            0,
+            options.findIndex((option) => option.index === greeting)
+          )
+          const inserted = yield* graph.insertSlot(chatId, parent, greetingVersion(0), at, null, more, picked)
+          const slotId = inserted.slotId as SlotId
+          yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
+          root = slotId
+          depth++
+        }
+        return { chatId, root }
+      })
+
     const handlers = {
       ...(yield* makeShellWriteHandlers),
+      StartGreetingChat: (input) =>
+        Effect.gen(function* () {
+          const { chatId } = yield* greetingChat(input)
+          yield* graph.ownedFork(input.userId, chatId, null)
+          return toChat(yield* graph.ownedChat(input.userId, chatId))
+        }).pipe(transaction("StartGreetingChat")),
       StartChat: ({ guidance, userId, cards, persona, greeters, first, title }) =>
         Effect.gen(function* () {
-          const ids = [...new Set([...cards, ...(persona === null ? [] : [persona])])]
-          const loaded = yield* loadCards(sql, userId, ids)
-          for (const id of ids) {
-            if (!loaded.some(({ card }) => card.entityId === id && !card.inBin)) {
-              return yield* new NotFound({ entity: "card", id })
-            }
-          }
-          const byId = new Map(loaded.map((card) => [card.card.entityId as string, card]))
-          for (const greeter of greeters) {
-            if (!cards.includes(greeter.entityId)) return yield* new NotFound({ entity: "card", id: greeter.entityId })
-          }
-          const at = Date.now()
-          const chatId = uuidv7() as ChatId
-          const names = ids.filter((id) => cards.includes(id)).map((id) => byId.get(id)!.card.name)
-          yield* sql`INSERT INTO chats ${sql.insert({
-            id: chatId,
-            owner_user_id: userId,
-            kind: "rp",
-            status: "active",
-            title: title?.trim() || titleFor(names, at),
-            created_at: at
-          })}`
-          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
-            key: "lcm.settings",
-            value: yield* newChatLcmSettings(sql, userId)
-          })
-          for (const entity of ids) {
-            yield* graph.insertStateEvent(userId, chatId, null, null, null, {
-              key: "participant.join",
-              value: { entity }
-            })
-          }
-          if (persona !== null) {
-            yield* graph.insertStateEvent(userId, chatId, null, null, null, {
-              key: "played_by_me.set",
-              value: { entities: [persona] }
-            })
-          }
-          // Each greeter's greeting is a message of its own, in order, as ST starts a group
-          // chat; every greeting of its card is a version of it, its macros kept for display
-          // and assembly to resolve against the chat's state (DESIGN §5.6).
-          let root: SlotId | null = null
-          let depth = -1
-          for (const { entityId, greeting, options } of greeters) {
-            const greeter = byId.get(entityId)!
-            if (options.length === 0) continue
-            const greetingVersion = (i: number) => {
-              const option = options[i]!
-              const originalIndex = greeter.greetingIndexes[option.index]
-              return new NewVersion({
-                speakerEntityId: greeter.card.entityId,
-                writer: "model",
-                content: options[i]!.text,
-                status: "complete",
-                macroMode: "template",
-                origin: "greeting",
-                ...(originalIndex === undefined
-                  ? {}
-                  : { greetingRef: { entity: greeter.card.entityId, index: originalIndex } }),
-                ...(option.frozen && Object.keys(option.frozen).length > 0 ? { frozenMacros: option.frozen } : {})
-              })
-            }
-            const parent = root === null ? null : { id: root, depth }
-            const more = options.slice(1).map((_, i) => greetingVersion(i + 1))
-            const picked = Math.max(
-              0,
-              options.findIndex((option) => option.index === greeting)
-            )
-            const inserted = yield* graph.insertSlot(chatId, parent, greetingVersion(0), at, null, more, picked)
-            const slotId = inserted.slotId as SlotId
-            yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
-            root = slotId
-            depth++
-          }
+          const { chatId, root } = yield* greetingChat({ userId, cards, persona, greeters, title })
           const version =
             first._tag === "Send"
               ? userMessage(first.content, first.speakerEntityId, first.images)

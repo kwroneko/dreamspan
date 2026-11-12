@@ -1,3 +1,4 @@
+import { rolloutUndoers } from "./workshopEffects.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { settingsRegistry } from "./settings.ts"
 import { storageKinds } from "./storageKinds.ts"
@@ -19,7 +20,8 @@ export type InstallStateModule = (
   keys: typeof stateKeys,
   kinds: typeof storageKinds,
   settings: typeof settingsRegistry,
-  profiles: typeof chatKinds
+  profiles: typeof chatKinds,
+  undoers: typeof rolloutUndoers
 ) => Effect.Effect<void, StateKeyRegistrationError, Scope.Scope>
 
 const install = Effect.fnUntraced(function* (source: ModuleSource, validate: typeof Schema.is = Schema.is) {
@@ -36,7 +38,8 @@ const install = Effect.fnUntraced(function* (source: ModuleSource, validate: typ
       ...settingsRegistry,
       register: (entry) => settingsRegistry.register(entry, validate(entry.schema as Schema.Schema<unknown>))
     },
-    chatKinds
+    chatKinds,
+    rolloutUndoers
   )
 })
 

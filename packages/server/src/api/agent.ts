@@ -1,3 +1,4 @@
+import { outsideEffect } from "../agent/effects.ts"
 // The agent RPCs (@rp/shared/agentApi.ts). Storage checks the version or chat is the caller's.
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { foldState, permissionKey } from "@rp/shared/state.ts"
@@ -183,7 +184,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
     // External tools are never offered in an RP reply.
     ListReplyTools: () =>
       Effect.sync(() => {
-        const tools = registry.rolloutTools.list().filter((tool) => tool.effect !== "external")
+        const tools = registry.rolloutTools.list().filter((tool) => !outsideEffect(tool.effect))
         const registered = new Set(tools.map((tool) => tool.id))
         const plan = registry.orchestrationModes.get("default")?.plan({
           state: foldState([{ scope: null, data: { key: "agent.enabled", value: { on: true } } }]),
