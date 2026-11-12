@@ -882,6 +882,15 @@ describe("context assembly from the database", () => {
           .match(/PRIMARY_LORE/g)!,
         1
       )
+      yield* writer.DeleteEntity({ userId, entityId: child.entityId })
+      const fallback = yield* assemble()
+      assert.ok(
+        fallback.pieces.some(
+          (piece) => piece.source.kind === "lorebook" && piece.source.book === `card:${mira.entityId}`
+        )
+      )
+      const remaining = yield* reader.ListLibrary({ userId, kind: "lorebook", tag: null, archived: false })
+      assert.isFalse(remaining.some((ref) => ref.id === child.id))
       yield* writer.DeleteEntity({ userId, entityId: book.entityId })
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(first) })
       assert.ok(rebuilt._tag === "Rebuilt")

@@ -5,12 +5,16 @@ import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { card, encode, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { openPanel } from "./support/panel.ts"
-import { asUser, loginCookie } from "./support/rpc.ts"
+import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 
 const server = serverPerFile(withAdmin)
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let adminCookie: string
+test.beforeAll(async () => {
+  adminCookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+})
+const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => withCookie(server(), adminCookie, use)
 
 const world = (name: string) => ({
   name,
@@ -145,6 +149,61 @@ for (const width of [1440, 390]) {
       panel = await openPanel(page, "Lorebooks")
       rows = panel.getByRole("list", { name: "Lorebooks in this chat" })
       await expect(rows).toContainText(`replaced by ${named}, linked to Pip ${tag}`)
+      // A card fork keeps its world link; several group members resolve independently.
+      await admin((api) =>
+        Effect.gen(function* () {
+          const pip = (yield* api.ListCards()).find((c) => c.name === `Pip ${tag}`)!
+          return yield* api.ForkCardForChat({
+            chatId: chatId.chat.id,
+            slotId: null,
+            entityId: pip.entityId,
+            name: `Pip fork ${tag}`,
+            nickname: "",
+            characterVersion: ""
+          })
+        })
+      )
+      await expect(rows).toContainText(`replaced by ${named}, linked to Pip fork ${tag}`)
+      for (const [label, file] of [
+        ["Quill", named],
+        ["Case", named.toLowerCase()],
+        ["Space", ` ${named} `]
+      ]) {
+        await upload(page, `${label} ${tag}`, {
+          spec: "chara_card_v2",
+          spec_version: "2.0",
+          data: { name: `${label} ${tag}`, extensions: { world: file }, ...ownBook(`${label}'s notes ${tag}`) }
+        })
+        await admin((api) =>
+          Effect.gen(function* () {
+            const card = (yield* api.ListCards()).find((c) => c.name === `${label} ${tag}`)!
+            yield* api.ChangeCast({
+              chatId: chatId.chat.id,
+              slotId: null,
+              change: { _tag: "Join", entityId: card.entityId }
+            })
+          })
+        )
+      }
+      await expect(rows.getByRole("listitem").filter({ hasText: `Quill's notes ${tag}` })).toContainText("replaced by")
+      for (const label of ["Case", "Space"])
+        await expect(rows.getByRole("listitem").filter({ hasText: `${label}'s notes ${tag}` })).not.toContainText(
+          "replaced by"
+        )
+      // A display rename must not change a link resolved against the retained filename.
+      const renamed = `Renamed ${tag}`
+      await admin((api) =>
+        Effect.gen(function* () {
+          const { ref } = yield* api.OpenEditor({ refId: chatId.book.id })
+          yield* api.RenameRef({ refId: ref.id, label: renamed, subtitle: "", expectedRowVersion: ref.rowVersion })
+        })
+      )
+      // This write came from another RPC session; reload the tab's library metadata.
+      await page.reload()
+      panel = await openPanel(page, "Lorebooks")
+      rows = panel.getByRole("list", { name: "Lorebooks in this chat" })
+      await expect(rows).toContainText(`replaced by ${renamed}, linked to Pip fork ${tag}`)
+      await expect(rows).toContainText(`replaced by ${renamed}, linked to Quill ${tag}`)
       if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "lorebooks-replaced-named")
       await page.screenshot({ path: test.info().outputPath(`lorebooks-${width}-${scheme}.png`) })
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
