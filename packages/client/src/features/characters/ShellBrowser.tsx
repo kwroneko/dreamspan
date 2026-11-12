@@ -253,15 +253,17 @@ function SplitBranchButton({ fork, label }: { fork: ShellFork; label: string }) 
  * A row of the Threads group (spec/THREADS.md §13.6): its thread's name, else its characters'
  * names. Renamed where its threads are listed in the header, never as a branch here.
  */
-const shellThreadLabel = (fork: ShellFork, thread: NonNullable<ShellFork["thread"]>) =>
-  thread.name ??
-  (listNames(thread.cast.flatMap((id) => fork.cast.find((card) => card.entityId === id)?.name ?? [])) || "Thread")
+const shellThreadLabel = (thread: NonNullable<ShellFork["thread"]>) =>
+  thread.name ?? (listNames(thread.cast.map((card) => card.name)) || "Thread")
 
 function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; open: () => void }) {
   const action = useAction()
   const [renaming, setRenaming] = useState(false)
+  const [menu, setMenu] = useState(false)
+  const href = useRouter().buildLocation(forkLink(fork)).href
+  const canBeside = useCanOpenBeside()
   const thread = fork.thread
-  const label = thread ? shellThreadLabel(fork, thread) : shellBranchLabel(fork)
+  const label = thread ? shellThreadLabel(thread) : shellBranchLabel(fork)
   const kind = thread ? "thread" : "branch"
   const addedNames = `Added characters: ${fork.added.map((c) => c.name).join(", ")}`
   return (
@@ -270,7 +272,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
       onClick={(event) => {
         // A dialog opened from the row is portalled elsewhere; its clicks still bubble here.
         const target = event.target as HTMLElement
-        if (event.currentTarget.contains(target) && !target.closest("button, input, [data-added-portraits]")) open()
+        if (event.currentTarget.contains(target) && !target.closest("button, input, a, [data-added-portraits]")) open()
       }}
       className={`fork-row branch-list-row @container/fork-row relative grid w-full shrink-0 max-w-controls min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${here ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
     >
@@ -339,26 +341,68 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
             </span>
           )}
         </div>
-        <Tooltip
-          label={`Opens this ${kind}${here ? ", shown now" : ""}.${fork.current && fork.branches > 1 ? ` ${OPENS_HERE_HINT}` : ""}`}
+        <ContextMenu
+          label={`Actions for ${kind} ${label}`}
+          open={menu}
+          onOpenChange={setMenu}
+          trigger={
+            <Tooltip
+              label={`Opens this ${kind}${here ? ", shown now" : ""}.${fork.current && fork.branches > 1 ? ` ${OPENS_HERE_HINT}` : ""}`}
+            >
+              {thread ? (
+                <Link
+                  {...forkLink(fork)}
+                  onClick={openOnPlainClick(open)}
+                  aria-label={`Open ${kind} ${label}`}
+                  aria-current={here ? "page" : undefined}
+                  data-chat-id={fork.chat.id}
+                  data-fork-id={fork.forkId}
+                  className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
+                    {fork.preview || "No messages yet"}
+                  </span>
+                  <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
+                    Last message {formatMoment(fork.endAt ?? fork.createdAt)}
+                  </span>
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={open}
+                  aria-label={`Open ${kind} ${label}`}
+                  aria-current={here ? "page" : undefined}
+                  data-chat-id={fork.chat.id}
+                  data-fork-id={fork.forkId}
+                  className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
+                    {fork.preview || "No messages yet"}
+                  </span>
+                  <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
+                    Last message {formatMoment(fork.endAt ?? fork.createdAt)}
+                  </span>
+                </button>
+              )}
+            </Tooltip>
+          }
         >
-          <button
-            type="button"
-            onClick={open}
-            aria-label={`Open ${kind} ${label}`}
-            aria-current={here ? "page" : undefined}
-            data-chat-id={fork.chat.id}
-            data-fork-id={fork.forkId}
-            className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          <MenuItem icon={thread ? "threads" : "branch"} description="Opens it here, as a click does." onClick={open}>
+            Open
+          </MenuItem>
+          {canBeside && (
+            <MenuItem icon="split-right" description={OPEN_BESIDE_HINT} onClick={() => openBeside(href)}>
+              Open beside
+            </MenuItem>
+          )}
+          <MenuItem
+            icon="external"
+            description="Opens it in a new browser tab."
+            onClick={() => window.open(href, "_blank", "noopener")}
           >
-            <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
-              {fork.preview || "No messages yet"}
-            </span>
-            <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
-              Last message {formatMoment(fork.endAt ?? fork.createdAt)}
-            </span>
-          </button>
-        </Tooltip>
+            Open in a new browser tab
+          </MenuItem>
+        </ContextMenu>
       </div>
       {/* The corners of a chat row (owner, 2026-11-05): the pin at the top; at the bottom, where a
           chat row lists its branches, Split off, on the selected branch only. */}
@@ -414,12 +458,16 @@ export function ForkRow({
   const [menu, setMenu] = useState(false)
   const kindBadge = useChatKindLook(fork.chat.kind)?.badge
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
-  const label = shellBranchLabel(fork)
+  const label = fork.thread ? `Thread: ${shellThreadLabel(fork.thread)}` : shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
   // rows of several chats mix, the chat's name, with a named branch's name after it
   // and an unnamed one's label under it once the chat has more than one.
-  const title = branchOnly ? label : perFork && fork.named ? `${fork.chatName} › ${fork.name}` : fork.chatName
-  const branchLine = !branchOnly && perFork && !fork.named && fork.branches > 1 ? label : null
+  const title = branchOnly
+    ? label
+    : perFork && (fork.thread || fork.named)
+      ? `${fork.chatName} › ${label}`
+      : fork.chatName
+  const branchLine = !branchOnly && perFork && !fork.thread && !fork.named && fork.branches > 1 ? label : null
   const last = perFork ? (fork.endAt ?? fork.createdAt) : fork.chatRecentAt
   // The branch its chat opens on, among several, as the header's list marks it.
   const opensHere = perFork && fork.current && fork.branches > 1
@@ -436,7 +484,7 @@ export function ForkRow({
           <Tooltip
             label={`${title}. ${
               perFork
-                ? `Opens this branch${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
+                ? `Opens this ${fork.thread ? "thread" : "branch"}${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
                 : "Opens the chat on the branch you last used."
             }${canBeside ? " Right-click to open it beside." : ""}`}
           >

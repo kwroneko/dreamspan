@@ -1169,7 +1169,7 @@ export class WriteOps extends RpcGroup.make(
   Rpc.make("CopyNoteToBranch", {
     payload: { userId: UserId, chatId: ChatId, noteRefId: RefId, fromForkId: ForkId, toForkId: ForkId },
     success: Schema.Boolean,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, StorageError, EditRefused])
   }),
   /**
    * Deletes one swipe: the normal delete (owner, 2026-10-10). If it was showing, the

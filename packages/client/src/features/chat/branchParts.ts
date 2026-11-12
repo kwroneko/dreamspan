@@ -38,6 +38,8 @@ export const branchControlParts = makeRegistry<{
   readonly order: number
   /** The first part to answer names the trigger; null: not this part's. */
   readonly trigger?: (context: BranchControlContext) => BranchTrigger | null
+  /** A prefix identifying the viewed line in browser and workbench tabs. */
+  readonly tabTitle?: (view: ChatView) => string | null
   /** False leaves the fork out of the Branches list. */
   readonly listed?: (fork: Fork, context: BranchControlContext) => boolean
   /** Shown above the Branches list. */
@@ -66,3 +68,9 @@ export const useBranchParts = () => {
   useSyncExternalStore(subscribe, () => version)
   return [...parts.entries].sort((a, b) => a.order - b.order)
 }
+
+/** Tab identity uses the same registered parts as the branch control, without another fork read. */
+export const useBranchTabTitle = (view: ChatView) =>
+  useBranchParts()
+    .map((part) => part.tabTitle?.(view) ?? null)
+    .find((title) => title !== null) ?? null

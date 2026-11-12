@@ -17,6 +17,7 @@ type Sets = ReadonlyArray<ThreadSet>
 /** Reads by `${chatId}/${forkId}/${version}`; null while one is on its way. */
 const reads = new Map<string, Sets | null>()
 /** The last answer for each `${chatId}/${forkId}`, shown while a newer read is on its way. */
+const requested = new Map<string, string>()
 const latest = new Map<string, { readonly key: string; readonly sets: Sets }>()
 const listeners = new Set<() => void>()
 let revision = 0
@@ -38,13 +39,19 @@ export const loadThreadSets = (session: ChatSession, chatId: ChatId, forkId: For
   const key = keyOf(chatId, forkId, version)
   if (reads.has(key)) return
   reads.set(key, null)
+  const fork = `${chatId}/${forkId}`
+  requested.set(fork, key)
   void session
     .call((client) => client("ThreadsOf", { chatId, forkId }))
     .then((result) => {
+      // A slow answer from before a newer request must not replace its result or evict its key.
+      if (requested.get(fork) !== key) {
+        reads.delete(key)
+        return
+      }
       // A fork that's gone (an Undo) is in no set.
       const sets = result.ok ? result.value : []
       reads.set(key, sets)
-      const fork = `${chatId}/${forkId}`
       const previous = latest.get(fork)
       if (previous && previous.key !== key) reads.delete(previous.key)
       latest.set(fork, { key, sets })
@@ -97,5 +104,6 @@ export function useThreadSets(session: ChatSession, view: ChatView): Sets | null
 export const resetThreadSets = () => {
   reads.clear()
   latest.clear()
+  requested.clear()
   changed()
 }

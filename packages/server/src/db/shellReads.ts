@@ -42,6 +42,7 @@ type Activity = ShellFork["activity"][number]
 
 /** What every shell read is made of: the cards, each fork row newest first, and what it had to walk. */
 interface ShellState {
+  readonly people: ReadonlyMap<string, CastCard>
   readonly links: ReadonlyMap<string, SplitChatLink>
   readonly parents: ReadonlyMap<string, string>
   readonly splitChatIds: ReadonlySet<string>
@@ -659,6 +660,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         }
       }
       const state: ShellState = {
+        people: byCard,
         links,
         parents,
         splitChatIds: new Set(ancestry.filter((f) => markers.has(f.id)).map((f) => f.chat_id)),
@@ -727,16 +729,17 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           const rows = sectionRows(state, view, id)
           return { id, rows: rows.slice(0, limit), total: rows.length }
         })
-        // The Threads group's rows say which thread each is (§13.6 of spec/THREADS.md).
-        const threadRows = sections.flatMap((section) => (section.id === "threads" ? section.rows : []))
+        // Every appearance of a fork has the same metadata: deltas key rows by fork id.
+        const threadRows = sections.flatMap((section) => section.rows.filter((f) => f.threads !== undefined))
         const labels = yield* threadLabels(
           sql,
           threadRows.map((f) => ({ forkId: f.forkId, chatId: f.sourceChatId ?? f.chat.id, place: f.threads![0]! }))
         )
-        const labelled = (id: ShellSection, f: Fork) => {
-          const thread = id === "threads" ? labels.get(f.forkId) : undefined
+        const labelled = (f: Fork) => {
+          const thread = labels.get(f.forkId)
           return thread ? new ShellFork({ ...wire(f), thread }, trusted) : wire(f)
         }
+        const threadPeople = new Set([...labels.values()].flatMap((thread) => thread.cast))
         // Scope once without the search. Counts represent chats, even if many branches match.
         const chatIds = view.chats === undefined ? null : new Set<string>(view.chats)
         const scoped = perChat(
@@ -753,8 +756,15 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             if (inChatFilter(state.chatIndex.get(row.chat.id)!, filter, state.pinnedChats)) filterCounts[filter]++
         return {
           filterCounts,
-          sections: sections.map((section) => ({ ...section, rows: section.rows.map((f) => labelled(section.id, f)) })),
-          people: peopleOf(sections.flatMap((section) => section.rows)),
+          sections: sections.map((section) => ({ ...section, rows: section.rows.map(labelled) })),
+          people: [
+            ...new Map(
+              [
+                ...peopleOf(sections.flatMap((section) => section.rows)),
+                ...[...threadPeople].flatMap((id) => state.people.get(id) ?? [])
+              ].map((card) => [card.entityId, card])
+            ).values()
+          ],
           fresh: state.fresh
         }
       }).pipe(query("ShellForks"))

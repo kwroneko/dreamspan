@@ -44,6 +44,8 @@ export const otherSplits = (
 export interface StartCast {
   /** Characters the model writes, narrators left out. */
   readonly characters: ReadonlyArray<EntityId>
+  /** Cast characters, including any played by the user: these receive away marks. */
+  readonly members: ReadonlyArray<EntityId>
   /** The user's own cards. */
   readonly mine: ReadonlyArray<EntityId>
   /** Narrators: in every thread, never listed. */
@@ -58,6 +60,7 @@ export const startCast = (cast: {
   const narrators = cast.participants.filter((id) => cast.roles?.[id] === "narrator")
   return {
     narrators,
+    members: cast.participants.filter((id) => !narrators.includes(id)),
     mine: cast.playedByMe.filter((id) => !narrators.includes(id)),
     characters: cast.participants.filter((id) => !narrators.includes(id) && !cast.playedByMe.includes(id))
   }
@@ -85,7 +88,7 @@ export const defaultWritesAs = (thread: Pick<DraftThread, "cast">, cast: StartCa
 export const startProblem = (threads: ReadonlyArray<DraftThread>, cast: StartCast): string | null => {
   if (threads.length < 2) return "Start at least two threads."
   if (cast.narrators.length > 0) return null
-  const empty = threads.findIndex((thread) => !thread.cast.some((id) => cast.characters.includes(id)))
+  const empty = threads.findIndex((thread) => !thread.cast.some((id) => cast.members.includes(id)))
   return empty < 0 ? null : `${empty === 0 ? "This branch" : `Thread ${empty + 1}`} has no character in it.`
 }
 
@@ -111,7 +114,7 @@ export const playedLine = (at: number, last: number | null, moved: ReadonlyArray
         : `#${first}–#${last + 1} become`
   const who =
     moved.length === 0
-      ? "Nobody leaves this branch, so everyone stays there for them."
-      : `${listNames(moved)} ${moved.length === 1 ? "counts" : "count"} as not there for them, in this branch only.`
+      ? "Nobody is marked away for them. Who was there stays as recorded."
+      : `${listNames(moved)} ${moved.length === 1 ? "counts" : "count"} as not there for them, in this branch only. They still know their own messages.`
   return `${span} this branch’s thread. ${who}`
 }

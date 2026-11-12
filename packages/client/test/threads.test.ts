@@ -20,6 +20,7 @@ import {
   threadName
 } from "../src/features/threads/model.ts"
 import { offeredThreads, resetTicks, setTick, ticksOf } from "../src/features/threads/sendTargets.ts"
+import { UNDO_HINT } from "../src/features/threads/ThreadsSection.tsx"
 import { loadThreadSets, resetThreadSets, threadSetsNow } from "../src/features/threads/threadSets.ts"
 
 vi.hoisted(() => {
@@ -116,7 +117,12 @@ describe("what the threads' surfaces say", () => {
       playedByMe: [ash],
       roles: { narrator: "narrator" }
     })
-    expect(cast).toEqual({ narrators: [narrator], mine: [ash], characters: [mira, tobin, wren] })
+    expect(cast).toEqual({
+      narrators: [narrator],
+      members: [mira, tobin, wren],
+      mine: [ash],
+      characters: [mira, tobin, wren]
+    })
     const rows = initialThreads(cast)
     expect(rows.map((row) => row.cast)).toEqual([[mira, tobin, wren, ash], []])
     // With a narrator, an empty thread is still someone's: the narrator is in every thread.
@@ -139,15 +145,54 @@ describe("what the threads' surfaces say", () => {
     ])
   })
 
+  it("allows a thread whose only cast character is played by the user", () => {
+    const cast = startCast({ participants: [mira, ash], playedByMe: [ash] })
+    const rows = initialThreads(cast)
+    expect(
+      startProblem(
+        [
+          { ...rows[0]!, cast: [mira] },
+          { ...rows[1]!, cast: [ash] }
+        ],
+        cast
+      )
+    ).toBeNull()
+    // A persona outside the cast still needs a cast character, matching StartThreads.
+    const persona = startCast({ participants: [mira], playedByMe: [ash] })
+    expect(
+      startProblem(
+        [
+          { ...rows[0]!, cast: [mira] },
+          { ...rows[1]!, cast: [ash] }
+        ],
+        persona
+      )
+    ).not.toBeNull()
+  })
+
+  it("does not promise existing absences disappear when nobody moves", () => {
+    expect(playedLine(2, 5, [])).not.toContain("everyone stays there")
+  })
+
+  it("Undo tells players the continuing messages and descendant branches stay", () => {
+    expect(UNDO_HINT).toContain("keeps its messages")
+    expect(UNDO_HINT).toContain("Branches made from")
+    expect(UNDO_HINT).not.toContain("as it was before")
+  })
+
+  it("says the moved speaker still knows its own messages", () => {
+    expect(playedLine(2, 5, ["Wren"])).toContain("own messages")
+  })
+
   it("says what happens to the messages after an earlier message", () => {
     expect(playedLine(39, 53, ["Wren"])).toBe(
-      "#41–#54 become this branch’s thread. Wren counts as not there for them, in this branch only."
+      "#41–#54 become this branch’s thread. Wren counts as not there for them, in this branch only. They still know their own messages."
     )
     expect(playedLine(39, 40, ["Wren", "Tobin"])).toBe(
-      "#41 becomes this branch’s thread. Wren and Tobin count as not there for them, in this branch only."
+      "#41 becomes this branch’s thread. Wren and Tobin count as not there for them, in this branch only. They still know their own messages."
     )
     expect(playedLine(39, null, [])).toBe(
-      "The messages after #40 become this branch’s thread. Nobody leaves this branch, so everyone stays there for them."
+      "The messages after #40 become this branch’s thread. Nobody is marked away for them. Who was there stays as recorded."
     )
   })
 })
@@ -187,6 +232,23 @@ describe("a fork's sets, read once and shared", () => {
     loadThreadSets(s, chat, fork, "2/0")
     expect(threadSetsNow(chat, fork, "2/0")).toEqual([set])
     await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(2))
+  })
+
+  it("ignores older answers arriving after a newer version without reading that version again", async () => {
+    const finish: Array<(result: { ok: true; value: ReadonlyArray<ThreadSet> }) => void> = []
+    const call = vi.fn(() => new Promise((resolve) => finish.push(resolve)))
+    const s = { id: "chat-1", call } as unknown as ChatSession
+    const chat = "chat-1" as never
+    const fork = "fork-f" as ForkId
+    loadThreadSets(s, chat, fork, "1/0")
+    loadThreadSets(s, chat, fork, "2/0")
+    finish[1]!({ ok: true, value: [] }) // Undo's answer arrives first.
+    await Promise.resolve()
+    finish[0]!({ ok: true, value: [set] })
+    await Promise.resolve()
+    expect(threadSetsNow(chat, fork, "2/0")).toEqual([])
+    loadThreadSets(s, chat, fork, "2/0")
+    expect(call).toHaveBeenCalledTimes(2)
   })
 
   it("puts the threads' row after the message they part at, and names the header's trigger", async () => {

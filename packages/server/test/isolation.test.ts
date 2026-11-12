@@ -1922,6 +1922,29 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   CopyNoteToBranch: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
+        // Every independently supplied scope is checked, including foreign target/source forks.
+        for (const direction of [
+          { fromForkId: actor.chat.forkId, toForkId: owner.chat.forkId },
+          { fromForkId: owner.chat.forkId, toForkId: actor.chat.forkId }
+        ])
+          yield* refused(
+            actor.api.CopyNoteToBranch({
+              chatId: actor.chat.chatId,
+              noteRefId: actor.chat.noteRefId,
+              ...direction
+            }),
+            "NotFound"
+          )
+        const other = yield* actor.api.CreateChat({ title: "Synthetic other chat" })
+        yield* refused(
+          actor.api.CopyNoteToBranch({
+            chatId: actor.chat.chatId,
+            noteRefId: actor.chat.noteRefId,
+            fromForkId: actor.chat.forkId,
+            toForkId: other.currentForkId!
+          }),
+          "NotFound"
+        )
         // Their note in their chat, and their note into the actor's own branch: both NotFound.
         yield* refused(
           actor.api.CopyNoteToBranch({

@@ -73,6 +73,13 @@ export const register = () => [
         hint: `Thread “${name}”, one of ${set.threads.length} that run at the same time from ${splitNumber(set)}. Switch threads or branches, rename them, or undo starting the threads.`
       }
     },
+    tabTitle: (view) => {
+      const set = setsOf(view)[0]
+      const thread = set && ownThread(set)
+      return thread
+        ? `Thread: ${threadName(thread, (id) => view.cast?.cards.find((card) => card.entityId === id)?.name ?? null)}`
+        : null
+    },
     // Another thread's forks are listed as threads, never as branches (DESIGN §3.3 [D]).
     listed: (fork, { shown }) => listedAsBranch(fork, shown),
     Section: ThreadsSection
