@@ -569,7 +569,7 @@ export const searchParams = (query: SourceQuery, token: string | null) => {
  * The cardex cards a card names: `cardex:<slug>` entries and pages `<origin>/c/<slug>` (the
  * adapter's origin: cardex.zip, or the fake archive's in tests), each slug once.
  */
-export const recognizeCardex = (links: ReadonlyArray<string>, origin = CARDEX_ORIGIN): ReadonlyArray<string> => {
+const recognizeCardex = (links: ReadonlyArray<string>, origin = CARDEX_ORIGIN): ReadonlyArray<string> => {
   const slugs = new Set<string>()
   for (const link of links) {
     const id = /^cardex:(.+)$/.exec(link.trim())?.[1]?.trim()
@@ -656,7 +656,7 @@ const relativeOf = (
  * earlier listings (each now another card's), then `/versions` and `/forks` of each origin (the
  * first three). The card itself is left out, and each other card is listed once, in that order.
  */
-export const familyOf = (
+const familyOf = (
   remoteId: string,
   detail: unknown,
   lists: ReadonlyArray<{ readonly versions: unknown; readonly forks: unknown; readonly site: string }>,

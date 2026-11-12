@@ -189,8 +189,7 @@ export const RemoteCreator = Schema.Struct({
 export type RemoteCreator = typeof RemoteCreator.Type
 
 /** How a card in a card's family on the source is related to it. */
-export const RemoteRelation = Schema.Literals(["parent", "earlier", "version", "fork"])
-export type RemoteRelation = typeof RemoteRelation.Type
+const RemoteRelation = Schema.Literals(["parent", "earlier", "version", "fork"])
 
 /** A card in another card's family (§3.7, §10 item 9): what it was forked from or listed as, its versions, its forks. */
 export const RemoteRelative = Schema.Struct({
