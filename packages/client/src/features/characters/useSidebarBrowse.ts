@@ -39,14 +39,14 @@ export function useSidebarBrowse() {
         resetScroll: false
       })
   }, [marked, ready, navigate, state])
-  const update = (change: Partial<HomeBrowse>) => {
+  const update = (change: Partial<HomeBrowse>, options?: { replace?: boolean }) => {
     if (change.sort !== undefined || change.reversed !== undefined || change.withPersonas !== undefined)
       remember(changeHomeBrowse(state, change))
     void navigate({
       to: ".",
       search: (prev: Record<string, unknown>) => ({ ...prev, ...write(changeHomeBrowse(read(prev), change)) }),
       state: (prev) => ({ ...prev, sidebarBrowse: true }),
-      replace: true,
+      replace: options?.replace ?? true,
       resetScroll: false
     })
   }

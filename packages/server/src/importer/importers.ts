@@ -328,7 +328,7 @@ const MAX_LINKS = 50
 const MAX_LINK = 2048
 
 /** A card's `source` entries and its extensions' `url`s: what card sources recognize it by (§3.7). */
-export const linksOf = (doc: unknown): ReadonlyArray<string> => {
+const linksOf = (doc: unknown): ReadonlyArray<string> => {
   if (typeof doc !== "object" || doc === null) return []
   const { source, extensions } = doc as { source?: unknown; extensions?: unknown }
   const found = Array.isArray(source) ? source.filter((entry): entry is string => typeof entry === "string") : []

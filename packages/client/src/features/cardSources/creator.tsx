@@ -28,8 +28,8 @@ const creatorFilterId = (browse: SourceBrowse) =>
 /** Narrows the view to one creator's cards; with no creator filter, searches for the name. */
 export const showCreator = (browse: SourceBrowse, creator: string) => {
   const filterId = creatorFilterId(browse)
-  if (filterId) browse.change({ filters: { ...browse.remote.filters, [filterId]: creator } })
-  else browse.change({ text: creator })
+  if (filterId) browse.change({ filters: { ...browse.remote.filters, [filterId]: creator } }, { replace: false })
+  else browse.change({ text: creator }, { replace: false })
 }
 
 /** Whether the source can leave a creator's cards out. */
@@ -45,7 +45,7 @@ export const hideCreator = (browse: SourceBrowse, creator: string) => {
   const listed = typeof current === "string" && current !== "" ? current.split(/(?<!\\),/) : []
   const entry = escapeListed(creator)
   filters[creators.excludeFilterId] = listed.includes(entry) ? listed.join(",") : [...listed, entry].join(",")
-  browse.change({ filters })
+  browse.change({ filters }, { replace: false })
 }
 
 const monthYear = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short" })

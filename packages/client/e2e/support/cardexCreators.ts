@@ -88,6 +88,7 @@ export function cardexCreatorTests() {
             await expectLayout(page, info, `cardex-creator-${place}-${width}-${theme}`, {
               scope: place === "home" ? "main" : "[data-shell-list]"
             })
+            await page.screenshot({ path: info.outputPath("creator.png") })
             // Every sort still applies to their cards.
             if (place === "home")
               await scope
@@ -132,6 +133,16 @@ export function cardexCreatorTests() {
                 )
               )
               .toBe(false)
+            // Creator navigation is reversible. Back restores the URL's creator; Forward
+            // restores the exclusion, in both home and the sidebar.
+            const excludedUrl = page.url()
+            await page.goBack()
+            if (place === "sidebar") await navigation(page)
+            await expect(header.getByRole("heading", { name: `Cards by ${creator} (synthetic)` })).toBeVisible()
+            await page.goForward()
+            if (place === "sidebar") await navigation(page)
+            await expect(page).toHaveURL(excludedUrl)
+            await expect(header).toHaveCount(0)
             // From a card's page, its creator's name opens the same view on home.
             if (place === "home") {
               await page.goto(

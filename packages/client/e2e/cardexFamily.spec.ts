@@ -63,8 +63,12 @@ for (const width of [1440, 390])
           `/cards/${added.entityId}`
         )
         await expect(family.locator("[data-family-card]").filter({ hasText: "Earlier listing" })).toHaveCount(1)
+        await from.scrollIntoViewIfNeeded()
         await expectLayout(page, info, `cardex-family-page-${width}-${theme}`)
+        await family.locator("[data-family-card]").last().scrollIntoViewIfNeeded()
+        await expectLayout(page, info, `cardex-family-page-end-${width}-${theme}`)
 
+        await page.screenshot({ path: info.outputPath("family-page.png") })
         // Inspect opens the relative's page, which lists this card among its forks.
         await from.getByRole("link", { name: "Inspect", exact: true }).click()
         await expect(page).toHaveURL(new RegExp(`/sources/cardex/cards/${parent}$`))
@@ -81,7 +85,9 @@ for (const width of [1440, 390])
         await expect(page.locator(`[data-card-source-family] [data-family-card="${fork}"]`)).toBeVisible({
           timeout: 30_000
         })
+        await page.locator("[data-card-source-family] [data-family-card]").first().scrollIntoViewIfNeeded()
         await expectLayout(page, info, `cardex-family-metadata-${width}-${theme}`)
+        await page.screenshot({ path: info.outputPath("family-metadata.png") })
       } finally {
         await server.stop()
       }

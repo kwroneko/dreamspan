@@ -157,7 +157,7 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
       const k = keyString(key)
       const entry = index.get(k)
       if (!entry) return null
-      if (expired(entry) && !pins.has(k)) {
+      if (expired(entry) && !pins.has(k) && !keeping.has(k)) {
         await drop(k)
         return null
       }

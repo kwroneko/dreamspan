@@ -211,8 +211,7 @@ export function CheckForNewer({ entityId, name }: { entityId: string; name: stri
   const registry = useContext(RegistryContext)
   const [pending, setPending] = useState(false)
   const [said, setSaid] = useState<string | null>(null)
-  // A card recognized by its Sources has no version recorded to compare with.
-  if (!origin || origin.recognized) return null
+  if (!origin) return null
   const check = async () => {
     setPending(true)
     setSaid(null)

@@ -26,7 +26,7 @@ function Home({ data }: { data: ShellLibrary }) {
   const [browse, setBrowse] = useHomeBrowse()
   const { search } = browse
   // A card source shown in place of the user's cards; nothing is asked of it otherwise (§5.1).
-  const sources = useSourceBrowse(browse.source, browse.remote, (remote) => setBrowse({ remote }))
+  const sources = useSourceBrowse(browse.source, browse.remote, (remote, options) => setBrowse({ remote }, options))
   const source = sources.info
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0

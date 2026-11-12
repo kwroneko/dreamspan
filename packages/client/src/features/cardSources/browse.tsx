@@ -250,7 +250,11 @@ const requirementMet = (filter: SourceFilter, filters: SourceQuery["filters"]) =
  * Everything a place (home, the sidebar) needs while a source may be shown: the sources Show
  * offers, and for the one open, its capabilities, results and the controls' state.
  */
-export function useSourceBrowse(source: string | null, remote: RemoteBrowse, onRemote: (remote: RemoteBrowse) => void) {
+export function useSourceBrowse(
+  source: string | null,
+  remote: RemoteBrowse,
+  onRemote: (remote: RemoteBrowse, options?: { replace?: boolean }) => void
+) {
   const sources = useEnabledSources()
   const info = sources.find((s) => s.id === source) ?? null
   const sourceId = info?.id ?? null
@@ -259,14 +263,14 @@ export function useSourceBrowse(source: string | null, remote: RemoteBrowse, onR
   const { results, more, retry, waitMs } = useResults(sourceId, query)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const action = useAction()
-  const change = (next: Partial<RemoteBrowse>) => {
+  const change = (next: Partial<RemoteBrowse>, options?: { replace?: boolean }) => {
     const merged = { ...remote, ...next }
     if (next.filters) {
       const filters = { ...next.filters }
       for (const filter of caps?.filters ?? []) if (!requirementMet(filter, filters)) delete filters[filter.id]
       merged.filters = filters
     }
-    onRemote(merged)
+    onRemote(merged, options)
     // The content rating is remembered on the account (§5.3).
     const ratingId = caps?.ratings?.filterId
     if (info && ratingId && next.filters && next.filters[ratingId] !== remote.filters[ratingId]) {

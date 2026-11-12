@@ -189,8 +189,7 @@ export const RemoteCreator = Schema.Struct({
 export type RemoteCreator = typeof RemoteCreator.Type
 
 /** How a card in a card's family on the source is related to it. */
-export const RemoteRelation = Schema.Literals(["parent", "earlier", "version", "fork"])
-export type RemoteRelation = typeof RemoteRelation.Type
+const RemoteRelation = Schema.Literals(["parent", "earlier", "version", "fork"])
 
 /** A card in another card's family (§3.7, §10 item 9): what it was forked from or listed as, its versions, its forks. */
 export const RemoteRelative = Schema.Struct({
@@ -384,8 +383,8 @@ export const CardOrigin = Schema.Struct({
   /** The newest version the source reported, when it isn't that one: an update is waiting. */
   newerVersion: Schema.NullOr(Schema.String),
   /**
-   * Recognized by the source's id or page in an imported file's Sources (§3.7), not added from
-   * the source: its family can be shown, but no version was recorded to check against.
+   * Imported as a file and confirmed by a matching archive hash (§3.7), rather than added
+   * directly from the source. Its recorded archive version supports the usual update checks.
    */
   recognized: Schema.optionalKey(Schema.Boolean)
 })

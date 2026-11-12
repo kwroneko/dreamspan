@@ -1609,9 +1609,9 @@ export class WriteOps extends RpcGroup.make(
       stageMerge: Schema.optionalKey(Schema.Boolean),
       replace: Schema.optionalKey(Schema.Struct({ expectedHeadRevisionId: Schema.String })),
       /**
-       * Card-source cards this card names in its Sources (spec/CARD-SOURCES.md §3.7), found on
-       * the main thread: each becomes the card's `recognized` origin, unless the user already has
-       * a live card from there (an origin left by a card in the bin or purged is let go).
+       * Card-source identities named in Sources (§3.7), found locally by the registered adapter.
+       * These are unverified hints (empty remote_version); only a trusted matching file hash
+       * can confirm a hint, mark the card as held or enable update tracking.
        */
       recognized: Schema.optionalKey(
         Schema.Array(Schema.Struct({ sourceId: Schema.String, remoteId: Schema.String })).check(Schema.isMaxLength(40))
@@ -1637,6 +1637,18 @@ export class WriteOps extends RpcGroup.make(
    * newer version; spec/CARD-SOURCES.md §3.8): each becomes the origin's `seen_version`, null
    * when it's the version the user has. A version already recorded writes nothing.
    */
+  /** Binds an imported file only after its bytes match a trusted archive response. */
+  Rpc.make("RecognizeRemoteCards", {
+    payload: {
+      userId: UserId,
+      sourceId: Schema.String,
+      items: Schema.Array(
+        Schema.Struct({ remoteId: Schema.String, version: Schema.String, sha256: Schema.String })
+      ).check(Schema.isMaxLength(100))
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
   Rpc.make("NoteRemoteVersions", {
     payload: {
       userId: UserId,
@@ -3946,7 +3958,7 @@ export class ReadOps extends RpcGroup.make(
         remoteVersion: Schema.NullOr(Schema.String),
         /** The newest version the source reported, when it isn't that one. */
         seenVersion: Schema.NullOr(Schema.String),
-        /** Found by an added card's origin row, which records versions (not by a file's hash or Sources). */
+        /** Found by a confirmed origin row, which records versions (not an unverified Sources hint). */
         tracked: Schema.Boolean
       })
     ),
@@ -3961,7 +3973,7 @@ export class ReadOps extends RpcGroup.make(
         remoteId: Schema.String,
         remoteVersion: Schema.String,
         seenVersion: Schema.NullOr(Schema.String),
-        /** Recognized from an imported file's Sources, not added from the source: no update tracking. */
+        /** An imported file confirmed by its archive hash, rather than added from the source. */
         recognized: Schema.Boolean
       })
     ),

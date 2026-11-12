@@ -884,45 +884,106 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       Effect.map((body) => body.library.ref.entityId as EntityId)
     )
 
-  it.effect("a card naming a source's page in its Sources is that card: results mark it, adding returns it", () =>
+  it.effect("a Sources claim cannot hold another card, block Add, or receive its updates", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)
       const card = archive.cards[30]!
-      const response = yield* importFile(namingFile("Recognized one", [`${archive.origin}/c/${card.slug}`]), {
-        name: "recognized.json"
+      const response = yield* importFile(namingFile("Unrelated import", [`${archive.origin}/c/${card.slug}`]), {
+        name: "unrelated.json"
       })
-      assert.strictEqual(response.status, 200, yield* Effect.promise(() => response.clone().text()))
+      assert.strictEqual(response.status, 200)
       const entityId = yield* importedEntity(response)
-      // Its origin is the source's card, recognized: there is no version to check against.
+      assert.isNull(yield* api.CardOrigin({ entityId }))
+      assert.isUndefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held)
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.isFalse(added.existing)
+      assert.notStrictEqual(added.entityId, entityId)
+      archive.publish(card.slug)
+      yield* api.CheckRemoteVersion({ entityId: added.entityId })
+      assert.isNull(yield* api.CardOrigin({ entityId }))
+      assert.strictEqual(yield* outcome(api.CheckRemoteVersion({ entityId })), "NotFound")
+      assert.isUndefined(
+        (yield* (yield* client(bob)).SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held
+      )
+    })
+  )
+
+  it.effect("a matching imported file is recognized with its version and can review an update", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const me = yield* api.Whoami()
+      const card = archive.cards[31]!
+      // A mistaken Sources claim must not reserve this identity against the real file.
+      yield* importFile(namingFile("Mistaken claim", [`cardex:${card.slug}`]), { name: "mistaken.json" })
+      const response = yield* importFile(new TextEncoder().encode(card.json), { name: "exact-original.json" })
+      assert.strictEqual(response.status, 200)
+      const entityId = yield* importedEntity(response)
+      const query = { ...emptySourceQuery, text: card.name }
+      const result = yield* api.SourceSearch({ sourceId: "cardex", query, page: null })
+      assert.strictEqual(result.items.find((c) => c.remoteId === card.slug)?.held?.entityId, entityId)
       const origin = yield* api.CardOrigin({ entityId })
-      assert.deepStrictEqual([origin?.remoteId, origin?.recognized], [card.slug, true])
-      assert.strictEqual(
-        (yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held?.entityId,
-        entityId
+      assert.deepStrictEqual(
+        [origin?.remoteId, origin?.remoteVersion, origin?.recognized],
+        [card.slug, card.sha256, true]
       )
       const again = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
       assert.deepStrictEqual([again.existing, again.entityId], [true, entityId])
-      const me = yield* api.Whoami()
+      const next = archive.publish(card.slug)
+      assert.strictEqual((yield* api.CheckRemoteVersion({ entityId })).newerVersion, next.sha256)
+      const file = yield* newerFile(entityId, alice)
+      assert.strictEqual(file.status, 200)
+      const bytes = new Uint8Array(yield* Effect.promise(() => file.arrayBuffer()))
+      const stage = yield* importFile(bytes, { name: "recognized-update.json", into: again.refId, mode: "merge" })
+      assert.strictEqual(stage.status, 200)
+      yield* api.TakeRemoteVersion({ entityId, version: next.sha256 })
+      assert.isNull((yield* api.CardOrigin({ entityId }))!.newerVersion)
+      // A re-import cannot reset the verified archive version to a local file hash.
+      const repeat = yield* importFile(new TextEncoder().encode(card.json), {
+        name: "exact-original.json",
+        into: again.refId,
+        mode: "merge"
+      })
+      assert.strictEqual(repeat.status, 200)
+      assert.strictEqual((yield* api.CardOrigin({ entityId }))!.remoteVersion, next.sha256)
+      // A trusted hash still cannot recognize another user's file.
+      const other = yield* client(bob)
+      const theirs = yield* other.Whoami()
+      yield* (yield* Writer).RecognizeRemoteCards({
+        userId: theirs.id,
+        sourceId: "cardex",
+        items: [{ remoteId: card.slug, version: card.sha256, sha256: card.sha256 }]
+      })
+      assert.lengthOf(
+        yield* (yield* Reader).HeldRemoteCards({
+          userId: theirs.id,
+          sourceId: "cardex",
+          items: [{ remoteId: card.slug, sha256: card.sha256 }]
+        }),
+        0
+      )
       const [held] = yield* (yield* Reader).HeldRemoteCards({
         userId: me.id,
         sourceId: "cardex",
         items: [{ remoteId: card.slug, sha256: null }]
       })
-      assert.isFalse(held!.tracked)
-      // `cardex:<slug>` names one too; a page on another site names none.
-      const other = archive.cards[31]!
-      const elsewhere = archive.cards[32]!
-      const second = yield* importFile(
-        namingFile("Recognized two", [`cardex:${other.slug}`, `https://elsewhere.example/c/${elsewhere.slug}`]),
-        { name: "recognized-two.json" }
+      assert.isTrue(held!.tracked)
+    })
+  )
+
+  it.effect("adding an exact imported file before browsing returns that import", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[34]!
+      // Match the actual mirrored bytes, which can differ from the archive's version hash.
+      const file = yield* Effect.promise(() =>
+        fetch(`${archive.origin}/api/v1/download/${card.sha256}?mode=mirrored`).then((r) => r.arrayBuffer())
       )
-      assert.strictEqual(second.status, 200)
-      assert.isDefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: other.slug })).summary.held)
-      assert.isUndefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: elsewhere.slug })).summary.held)
-      // Nobody else holds them.
-      assert.isUndefined(
-        (yield* (yield* client(bob)).SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held
-      )
+      const response = yield* importFile(new Uint8Array(file), { name: "before-browsing.png" })
+      assert.strictEqual(response.status, 200)
+      const entityId = yield* importedEntity(response)
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.deepStrictEqual([added.existing, added.entityId], [true, entityId])
+      assert.strictEqual((yield* api.CardOrigin({ entityId }))!.remoteVersion, card.sha256)
     })
   )
 
@@ -938,15 +999,30 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
         nickname: "",
         characterVersion: ""
       })
+      const newest = yield* api.ForkCard({
+        refId: fork.id,
+        name: `${card.name} (newest)`,
+        nickname: "",
+        characterVersion: ""
+      })
       yield* (yield* Writer).DeleteEntity({ userId: me.id, entityId: added.entityId as EntityId })
+      assert.strictEqual(
+        (yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held?.entityId,
+        newest.entityId
+      )
+      assert.strictEqual(
+        (yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })).entityId,
+        newest.entityId
+      )
+      yield* (yield* Writer).DeleteEntity({ userId: me.id, entityId: newest.entityId as EntityId })
       const shown = (yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held
       assert.strictEqual(shown?.entityId, fork.entityId)
       const again = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
       assert.deepStrictEqual([again.existing, again.entityId], [true, fork.entityId])
-      // With the fork gone too, nothing holds it: a file naming it is recognized as it.
+      // With the fork gone too, nothing holds it: an exact file can take the origin over.
       yield* (yield* Writer).DeleteEntity({ userId: me.id, entityId: fork.entityId as EntityId })
       assert.isUndefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held)
-      const response = yield* importFile(namingFile("Back again", [`${archive.origin}/c/${card.slug}`]), {
+      const response = yield* importFile(new TextEncoder().encode(card.json), {
         name: "back.json"
       })
       const entityId = yield* importedEntity(response)
@@ -1407,9 +1483,35 @@ describe("the cache (§4.1)", () => {
       yield* cache.sweep
       assert.isTrue(cache.has(key("a", "card", "edited")))
       assert.isFalse(cache.has(key("a", "card", "more")))
+      // Reading an expired original must respect the same edit pin as the sweeper.
+      assert.isNotNull(yield* cache.get(key("a", "card", "edited")))
+      now += 30 * DAY
       // Saved or reverted: the next sweep names it no longer, and it goes with its age.
       yield* cache.sweepKeeping([])
       assert.isFalse(cache.has(key("a", "card", "edited")))
+    })
+  )
+
+  it.effect("many edited drafts remain subject to the cache cap", () =>
+    Effect.gen(function* () {
+      let now = 0
+      const { cache } = fresh(
+        () => now,
+        () => 2_000
+      )
+      yield* cache.load
+      const edited = Array.from({ length: 40 }, (_, i) => key("a", "card", `edited-${i}`))
+      yield* cache.sweepKeeping(edited)
+      for (const [i, entry] of edited.entries()) {
+        now++
+        yield* cache.put(entry, { bytes: new Uint8Array(600).fill(i) })
+        assert.isAtMost(cache.usedBytes(), 2_000)
+      }
+      assert.isFalse(cache.has(edited[0]!))
+      assert.isTrue(cache.has(edited.at(-1)!))
+      now += 30 * DAY
+      yield* cache.sweepKeeping([])
+      assert.strictEqual(cache.usedBytes(), 0)
     })
   )
 

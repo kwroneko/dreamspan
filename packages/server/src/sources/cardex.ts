@@ -34,7 +34,7 @@ import type {
   SourceFilter,
   SourceQuery
 } from "@rp/shared/cardSources.ts"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import type { AdapterSummary, CardSourceAdapter, SourceHttp, SourceResponse } from "./adapter.ts"
 
 export const CARDEX_ORIGIN = "https://cardex.zip"
@@ -44,28 +44,31 @@ const PAGE_SIZE = 48
 const BATCH_MAX = 100
 
 /** v1's `CardSummary` (frozen); unknown fields are ignored. */
-interface Summary {
-  readonly slug: string
-  readonly url?: string | null
-  readonly name?: string | null
-  readonly tagline?: string | null
-  readonly creator?: {
-    readonly name?: string | null
-    readonly source?: string | null
-    readonly handle?: string | null
-  } | null
-  readonly tags?: ReadonlyArray<string> | null
-  readonly nsfw?: boolean | null
-  readonly token_count?: number | null
-  readonly stats?: { readonly popularity?: number | null } | null
-  readonly thumbnail_url?: string | null
-  readonly image_url?: string | null
-  readonly version?: string | null
-  readonly updated_at?: string | null
-  readonly superseded_by?: string | null
-  /** The download modes that answer 200 for this card; absent from older answers. */
-  readonly download_modes?: ReadonlyArray<string> | null
-}
+const nullableText = Schema.optionalKey(Schema.NullOr(Schema.String))
+const SummaryShape = Schema.Struct({
+  slug: Schema.String.check(Schema.isMaxLength(500)),
+  url: nullableText,
+  name: nullableText,
+  tagline: nullableText,
+  creator: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ name: nullableText, source: nullableText, handle: nullableText }))
+  ),
+  // Invalid tag values are omitted in the projection below.
+  tags: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  nsfw: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+  token_count: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  stats: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ popularity: Schema.optionalKey(Schema.NullOr(Schema.Number)) }))
+  ),
+  thumbnail_url: nullableText,
+  image_url: nullableText,
+  version: nullableText,
+  updated_at: nullableText,
+  superseded_by: nullableText,
+  download_modes: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+})
+type Summary = typeof SummaryShape.Type
+const isSummary = Schema.is(SummaryShape)
 
 /** v1's capabilities: each filter by its parameter name. */
 interface Capabilities {
@@ -103,8 +106,8 @@ const authorOf = (creator: Summary["creator"]) =>
   creator?.source && creator.handle ? `${creator.source}/${creator.handle}` : undefined
 
 /** A v1 `CardSummary` as ours, its pictures and page resolved against `origin`; null when it has no slug. */
-export const summaryOf = (item: Summary, origin = CARDEX_ORIGIN): AdapterSummary | null => {
-  if (typeof item?.slug !== "string" || item.slug === "") return null
+export const summaryOf = (item: unknown, origin = CARDEX_ORIGIN): AdapterSummary | null => {
+  if (!isSummary(item) || item.slug === "") return null
   const updated = item.updated_at ? Date.parse(item.updated_at) : Number.NaN
   const thumb = onOrigin(origin, item.thumbnail_url)
   const image = onOrigin(origin, item.image_url)
@@ -497,7 +500,13 @@ const count = (value: unknown) =>
 /** v1's `/authors/<site>/<handle>` envelope's `author` as a creator profile; the avatar stays a path. */
 export const creatorOf = (raw: unknown, query: string, origin = CARDEX_ORIGIN): RemoteCreator => {
   const author = isRecord(raw) && isRecord(raw.author) ? raw.author : null
-  if (author === null) throw bad()
+  if (
+    author === null ||
+    typeof author.source !== "string" ||
+    typeof author.handle !== "string" ||
+    `${author.source}/${author.handle}` !== query
+  )
+    throw bad()
   const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
   const avatar = isRecord(author.avatar)
     ? onOrigin(origin, text(author.avatar.thumb_url) ?? text(author.avatar.url))
@@ -511,7 +520,7 @@ export const creatorOf = (raw: unknown, query: string, origin = CARDEX_ORIGIN): 
   const bio = text(author.bio)
   return {
     query,
-    name: text(author.display_name) ?? text(author.handle) ?? query,
+    name: (text(author.display_name) ?? text(author.handle) ?? query).slice(0, 300),
     ...(site ? { site } : {}),
     ...(bio ? { bio: bio.slice(0, 4000) } : {}),
     ...(avatar ? { avatar } : {}),
@@ -569,7 +578,7 @@ export const searchParams = (query: SourceQuery, token: string | null) => {
  * The cardex cards a card names: `cardex:<slug>` entries and pages `<origin>/c/<slug>` (the
  * adapter's origin: cardex.zip, or the fake archive's in tests), each slug once.
  */
-export const recognizeCardex = (links: ReadonlyArray<string>, origin = CARDEX_ORIGIN): ReadonlyArray<string> => {
+const recognizeCardex = (links: ReadonlyArray<string>, origin = CARDEX_ORIGIN): ReadonlyArray<string> => {
   const slugs = new Set<string>()
   for (const link of links) {
     const id = /^cardex:(.+)$/.exec(link.trim())?.[1]?.trim()
@@ -662,14 +671,51 @@ export const familyOf = (
   lists: ReadonlyArray<{ readonly versions: unknown; readonly forks: unknown; readonly site: string }>,
   origin = CARDEX_ORIGIN
 ): { readonly items: ReadonlyArray<RemoteRelative>; readonly more: boolean } => {
-  if (!isRecord(detail)) throw bad()
+  if (
+    !isRecord(detail) ||
+    !isRecord(detail.card) ||
+    detail.card.slug !== remoteId ||
+    !Array.isArray(detail.origins) ||
+    !detail.origins.every(isRecord) ||
+    !Array.isArray(detail.earlier_origins) ||
+    !detail.earlier_origins.every(isRecord)
+  )
+    throw bad()
+  for (const { versions, forks } of lists) {
+    if (
+      versions !== null &&
+      (!isRecord(versions) ||
+        !Array.isArray(versions.items) ||
+        !versions.items.every(
+          (item) => isRecord(item) && isRecord(item.version) && typeof item.version.slug === "string"
+        ))
+    )
+      throw bad()
+    if (
+      forks !== null &&
+      (!isRecord(forks) ||
+        !Array.isArray(forks.children) ||
+        !forks.children.every(isRecord) ||
+        (forks.parent !== null && !isRecord(forks.parent)))
+    )
+      throw bad()
+  }
   const name =
     (isRecord(detail.top) && isRecord(detail.top.name) ? textOf(detail.top.name.value) : undefined) ?? remoteId
   const items: Array<RemoteRelative> = []
   const seen = new Set([remoteId])
-  let more = false
+  let more = detail.origins.length > FAMILY_ORIGINS
   const add = (item: RemoteRelative | null) => {
-    if (item === null || seen.has(item.remoteId)) return
+    if (item === null) return
+    if (seen.has(item.remoteId)) {
+      const at = items.findIndex((previous) => previous.remoteId === item.remoteId)
+      if (at >= 0) {
+        const previous = items[at]!
+        // Detail origins can name only a slug; forks/versions often have the missing facts.
+        items[at] = { ...item, ...previous, name: previous.name === previous.remoteId ? item.name : previous.name }
+      }
+      return
+    }
     if (items.length >= FAMILY_MAX) {
       more = true
       return

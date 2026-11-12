@@ -13,6 +13,7 @@ import {
   cardexAdapter,
   cardSourceSetup,
   creatorOf,
+  familyOf,
   cursorRefused,
   downloadModeOf,
   detailMetadata,
@@ -197,6 +198,82 @@ describe("v1 as card sources", () => {
     )
     assert.deepStrictEqual(profile, { query: "chub/h", name: "h", site: "Chub", url: `${CARDEX_ORIGIN}/u/chub/h` })
     assert.throws(() => creatorOf({ results: [] }, "chub/h"))
+  })
+
+  it("malformed summaries are rejected without throwing", () => {
+    for (const fields of [
+      { name: 12 },
+      { creator: "wrong" },
+      { creator: { name: 12 } },
+      { version: {} },
+      { stats: { popularity: "many" } },
+      { thumbnail_url: [] },
+      { download_modes: "json" }
+    ])
+      assert.isNull(summaryOf({ slug: "synthetic", ...fields } as never))
+  })
+
+  it("family duplicates enrich sparse parent rows without losing their relationship", () => {
+    const detail = {
+      card: { slug: "viewed" },
+      origins: [{ fork: { forked_from: { card_slug: "parent" } } }],
+      earlier_origins: []
+    }
+    const family = familyOf("viewed", detail, [
+      {
+        site: "chub",
+        versions: null,
+        forks: {
+          parent: {
+            card: {
+              slug: "parent",
+              name: "Synthetic parent",
+              thumb_url: "/t/parent.webp",
+              creator: { name: "Synthetic author", source: "chub", handle: "synthetic-author" }
+            }
+          },
+          children: [],
+          next: null
+        }
+      }
+    ])
+    assert.lengthOf(family.items, 1)
+    assert.deepInclude(family.items[0], {
+      relation: "parent",
+      remoteId: "parent",
+      name: "Synthetic parent",
+      creator: "Synthetic author",
+      creatorQuery: "chub/synthetic-author",
+      thumb: `${CARDEX_ORIGIN}/t/parent.webp`
+    })
+  })
+
+  it("creator and family envelopes refuse malformed or mismatched identities", () => {
+    for (const author of [{}, { source: "other", handle: "h" }, { source: "chub", handle: "different" }])
+      assert.throws(() => creatorOf({ author }, "chub/h"))
+    for (const detail of [
+      {},
+      { card: { slug: "other" }, origins: [], earlier_origins: [] },
+      { card: { slug: "synthetic" }, origins: "wrong" }
+    ])
+      assert.throws(() => familyOf("synthetic", detail, []))
+    const detail = { card: { slug: "synthetic" }, origins: [], earlier_origins: [] }
+    assert.isTrue(
+      familyOf(
+        "synthetic",
+        {
+          ...detail,
+          origins: Array.from({ length: 4 }, (_, i) => ({ source: "chub", external_id: `synthetic-${i}` }))
+        },
+        []
+      ).more
+    )
+    for (const lists of [
+      [{ site: "chub", versions: {}, forks: null }],
+      [{ site: "chub", versions: { items: [false] }, forks: null }],
+      [{ site: "chub", versions: null, forks: {} }]
+    ])
+      assert.throws(() => familyOf("synthetic", detail, lists))
   })
 
   it("a filter or sort v1 no longer lists is left out, and a body without filters is refused", () => {

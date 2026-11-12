@@ -809,7 +809,9 @@ function Browser({ data }: { data: ShellLibrary }) {
   const search = browse.search
   const setSearch = (search: string) => setBrowse({ search })
   // A card source shown in the character grid; asked nothing unless it's shown (§5.1).
-  const sources = useSourceBrowse(grid ? browse.source : null, browse.remote, (remote) => setBrowse({ remote }))
+  const sources = useSourceBrowse(grid ? browse.source : null, browse.remote, (remote, options) =>
+    setBrowse({ remote }, options)
+  )
   const source = grid ? sources.info : null
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })

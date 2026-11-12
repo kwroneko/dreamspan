@@ -907,8 +907,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             if (flag?.fav !== null && flag?.fav !== undefined)
               yield* importFavourite(sql, userId, upstream.entity_id, isFav(flag.fav))
           }
-          // Recognized by its Sources (§3.7): the card is the user's card from there, unless a
-          // live card already is. A card keeps one origin.
+          // Sources name candidates, never authenticated identities. An empty version keeps
+          // the claim inert until the archive supplies a matching hash. A card keeps one origin.
           if (kind === "card")
             for (const { sourceId, remoteId } of input.recognized ?? []) {
               const [held] = yield* sql<{ entity_id: string; gone: number }>`
@@ -923,7 +923,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
                 owner_user_id: userId,
                 source_id: sourceId,
                 remote_id: remoteId,
-                remote_version: input.sourceHash,
+                remote_version: "",
                 remote_sha256: input.sourceHash,
                 recognized_by: "recognized",
                 created_at: Date.now()

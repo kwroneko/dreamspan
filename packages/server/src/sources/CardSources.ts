@@ -223,8 +223,8 @@ export interface CardSourcesShape {
   readonly recent: (user: User, sourceId: string) => Effect.Effect<ReadonlyArray<RecentRemote>, ServerError>
   readonly clearRecent: (user: User, sourceId: string) => Effect.Effect<void, ServerError>
   /**
-   * The registered sources' cards an imported card names among its links (§3.7), so the import
-   * records it as theirs (`recognized`). Local: nothing is sent to a source.
+   * Source identities an import names among its links (§3.7): unverified hints until a
+   * trusted archive hash matches the file. Local: nothing is sent to a source.
    */
   readonly recognize: (
     links: ReadonlyArray<string>
@@ -513,20 +513,47 @@ const make = (options: CardSourcesOptions = {}) =>
      * The user's own cards among `items` (§3.7), marked on each; nothing is sent to the source.
      * `reported`: the items came from the source just now, so their versions are recorded (§3.8).
      */
-    const withHeld = (user: User, sourceId: string, items: ReadonlyArray<RemoteSummary>, reported = false) =>
+    const withHeld = (
+      user: User,
+      sourceId: string,
+      items: ReadonlyArray<RemoteSummary>,
+      reported = false,
+      fileHash?: string
+    ) =>
       Effect.gen(function* () {
         if (items.length === 0) return items
-        const held = yield* reader
+        const hashes = items.flatMap((item) =>
+          [...new Set([item.version.id, fileHash])]
+            .filter((hash): hash is string => typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash))
+            .map((sha256) => ({ remoteId: item.remoteId, sha256 }))
+        )
+        // Keep hashless ids too, since an adopted card can have a non-hash version id.
+        const readHeld = reader
           .HeldRemoteCards({
             userId: user.id,
             sourceId,
-            items: items.map((item) => ({
-              remoteId: item.remoteId,
-              sha256: /^[0-9a-f]{64}$/.test(item.version.id) ? item.version.id : null
-            }))
+            items: [...items.map((item) => ({ remoteId: item.remoteId, sha256: null })), ...hashes]
           })
           .pipe(Effect.catch(storage("finding your cards among the results")))
+        let held = yield* readHeld
         if (held.length === 0) return items
+        // Ordinary browsing stays reader-only. Only byte-matched imports need an origin write.
+        const verifiable = held.flatMap((card) => {
+          const sha256 = card.remoteVersion
+          const item = items.find((item) => item.remoteId === card.remoteId)
+          return !card.tracked &&
+            item &&
+            sha256 &&
+            hashes.some((hash) => hash.remoteId === card.remoteId && hash.sha256 === sha256)
+            ? [{ remoteId: card.remoteId, version: item.version.id, sha256 }]
+            : []
+        })
+        if (verifiable.length) {
+          yield* writer
+            .RecognizeRemoteCards({ userId: user.id, sourceId, items: verifiable })
+            .pipe(Effect.catch(storage("recognizing an imported card")))
+          held = yield* readHeld
+        }
         const byId = new Map(held.map((card) => [card.remoteId, card]))
         if (reported)
           yield* noteVersions(
@@ -731,7 +758,7 @@ const make = (options: CardSourcesOptions = {}) =>
         Effect.gen(function* () {
           const { summary, parsed, fetched } = yield* cardFile(user, sourceId, remoteId)
           const card = parsed.library?.kind === "card" ? parsed.library : null
-          const [shown] = yield* withHeld(user, sourceId, [forClient(user, sourceId, summary)], fetched)
+          const [shown] = yield* withHeld(user, sourceId, [forClient(user, sourceId, summary)], fetched, parsed.sha256)
           yield* writer
             .RecordRecentRemote({
               userId: user.id,

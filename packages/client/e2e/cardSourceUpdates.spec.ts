@@ -24,9 +24,7 @@ const freePort = () =>
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
-    test(`${width} ${theme}: a newer version on cardex, checked, merged, replaced and added`, async ({
-      page
-    }, info) => {
+    test(`${width} ${theme}: a recognized import, checked, merged, replaced and added`, async ({ page }, info) => {
       const port = await freePort()
       const fake = `http://127.0.0.1:${port}`
       const server = await startServer({ ...withAdmin, FAKE_CARD_SOURCE: String(port) })
@@ -37,7 +35,23 @@ for (const width of [1440, 390])
           items: ReadonlyArray<{ slug: string; name: string }>
         }
         const card = listed.items[0]!
+        // Import the exact synthetic archive file, then recognize it through the source page.
+        await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+        const batch = (await (await fetch(`${fake}/api/v1/cards/batch?ids=${card.slug}`)).json()) as {
+          items: Array<{ file_sha256: string }>
+        }
+        const bytes = await (
+          await fetch(`${fake}/api/v1/download/${batch.items[0]!.file_sha256}?mode=mirrored`)
+        ).arrayBuffer()
+        const imported = await page.request.post(`${server.url}/library/import?name=recognized.png`, {
+          headers: { "content-type": "application/octet-stream" },
+          data: Buffer.from(bytes)
+        })
+        expect(imported.status()).toBe(200)
+        await admin((api) => api.SourceCard({ sourceId: "cardex", remoteId: card.slug }))
         const added = await admin((api) => api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug }))
+        expect(added.existing).toBe(true)
+        expect((await admin((api) => api.CardOrigin({ entityId: added.entityId })))?.recognized).toBe(true)
         const publish = async () => {
           const response = await fetch(`${fake}/__fake/publish?slug=${card.slug}`)
           expect(response.status).toBe(200)
@@ -64,6 +78,7 @@ for (const width of [1440, 390])
         await expect(notice).toHaveCount(0)
         await checkNow()
         await expectLayout(page, info, `source-update-notice-${width}-${theme}`)
+        await page.screenshot({ path: info.outputPath("recognized-update.png") })
 
         // More choices…: the comparison with the newer version, then Add as a separate card.
         await page.getByRole("button", { name: "More choices…", exact: true }).click()
@@ -71,8 +86,9 @@ for (const width of [1440, 390])
         const dialog = page.getByRole("dialog", { name: /^The newer .+ on /u })
         await expect(dialog.getByRole("heading", { name: "What the newer version changes" })).toBeVisible()
         await expect(dialog.getByRole("button", { name: "Choose another file", exact: true })).toHaveCount(0)
-        // The card's link back to cardex stays: the newer file doesn't name it, and it isn't a change.
-        await expect(dialog.getByText("Source", { exact: true })).toHaveCount(0)
+        // A raw imported file has no archive link yet. Review offers adding it; taking
+        // a newer version below must retain exactly one canonical source link.
+        await expect(dialog.getByText("Source", { exact: true })).toHaveCount(1)
         await expectLayout(page, info, `source-update-choices-${width}-${theme}`)
         await dialog.getByRole("button", { name: "Add as a separate card", exact: true }).click()
         await expect(dialog).toHaveCount(0)
