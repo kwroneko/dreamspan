@@ -38,6 +38,7 @@ for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: scheme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), scheme)
+      const tooltip = page.locator('[data-layout-overlay="Tooltip floats above the page"]')
       const tag = `${width}${scheme}`
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
 
@@ -46,17 +47,28 @@ for (const width of [1440, 390]) {
       const cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
       const run = await admin((api) => api.StartStImport({ unsupported: [] }))
       const files = new Map<string, Uint8Array>([
-        [`characters/Wren ${tag}.png`, card(`Wren ${tag}`, "The lamp turns.", { world: linked }, ownBook(`Wren's notes ${tag}`))],
+        [
+          `characters/Wren ${tag}.png`,
+          card(`Wren ${tag}`, "The lamp turns.", { world: linked }, ownBook(`Wren's notes ${tag}`))
+        ],
         [`worlds/${linked}.json`, encode(world(linked))],
         [
           `chats/Wren ${tag}/${linked}.jsonl`,
-          jsonl([header({ world_info: linked }), message({ name: `Wren ${tag}`, mes: "The lamp turns.", minute: 1 })])
+          jsonl([
+            header({ world_info: linked }),
+            message({ name: `Wren ${tag}`, mes: "The lamp turns.", minute: 1 }),
+            message({ name: "Visitor", user: true, mes: "I can see the harbour.", minute: 2 })
+          ])
         ]
       ])
       for (const [path, body] of files) {
         const response = await fetch(
           `${server().url}/st-import/file?${new URLSearchParams({ import: run.importId, path })}`,
-          { method: "POST", headers: { cookie, "content-type": "application/octet-stream" }, body: new Uint8Array(body) }
+          {
+            method: "POST",
+            headers: { cookie, "content-type": "application/octet-stream" },
+            body: new Uint8Array(body)
+          }
         )
         expect(response.status).toBe(200)
         expect((await response.json()).outcome).not.toBe("failed")
@@ -72,6 +84,11 @@ for (const width of [1440, 390]) {
       let panel = await openPanel(page, "Lorebooks")
       let rows = panel.getByRole("list", { name: "Lorebooks in this chat" })
       await expect(rows).toContainText(`replaced by ${linked}, linked to Wren ${tag}`, { timeout: 60_000 })
+      const linkedOwn = rows.getByRole("button").filter({ hasText: `Wren's notes ${tag}` })
+      await linkedOwn.hover()
+      await expect(tooltip).toContainText(`This chat reads ${linked} instead of Wren ${tag}’s own lorebook.`)
+      await page.mouse.move(0, 0)
+      await expect(tooltip).toBeHidden()
       if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "lorebooks-replaced-linked")
 
       // By name: a card naming a file as its world, the file added to a chat of its own.
@@ -80,7 +97,7 @@ for (const width of [1440, 390]) {
       await upload(page, `Pip ${tag}`, {
         spec: "chara_card_v2",
         spec_version: "2.0",
-        data: { name: `Pip ${tag}`, first_mes: "Hello.", extensions: { world: named }, ...ownBook(`Pip's notes ${tag}`) }
+        data: { name: `Pip ${tag}`, first_mes: "Hello.", extensions: { world: named }, ...ownBook(named) }
       })
       const chatId = await admin((api) =>
         Effect.gen(function* () {
@@ -105,7 +122,31 @@ for (const width of [1440, 390]) {
         })
       )
       await expect(rows).toContainText(`replaced by ${named}, linked to Pip ${tag}`, { timeout: 60_000 })
+      await expect(rows).not.toContainText(`Also active as Pip ${tag}'s own lorebook`)
+      const ownRow = rows.getByRole("listitem").filter({ hasText: `Pip ${tag}'s own lorebook` })
+      const worldRow = rows
+        .getByRole("listitem")
+        .filter({ has: page.getByRole("button", { name: `More for ${named}`, exact: true }) })
+      const names = await rows.getByRole("listitem").allTextContents()
+      await worldRow.getByRole("switch").click()
+      await expect(rows).not.toContainText("replaced by")
+      await expect(rows.getByRole("listitem")).toHaveCount(names.length)
+      await expect(ownRow.getByRole("switch")).toBeChecked()
+      await worldRow.getByRole("switch").click()
+      await expect(rows).toContainText(`replaced by ${named}, linked to Pip ${tag}`)
+      await ownRow.getByRole("button").hover()
+      await expect(tooltip).toContainText(`This chat reads ${named} instead of Pip ${tag}’s own lorebook.`)
+      await page.mouse.move(0, 0)
+      await expect(tooltip).toBeHidden()
+      // Archiving hides a book from pickers, but a chat already reading it still uses it.
+      await admin((api) => api.SetRefArchived({ refId: chatId.book.id, archived: true }))
+      await expect(rows).toContainText(`replaced by ${named}, linked to Pip ${tag}`)
+      await page.reload()
+      panel = await openPanel(page, "Lorebooks")
+      rows = panel.getByRole("list", { name: "Lorebooks in this chat" })
+      await expect(rows).toContainText(`replaced by ${named}, linked to Pip ${tag}`)
       if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "lorebooks-replaced-named")
+      await page.screenshot({ path: test.info().outputPath(`lorebooks-${width}-${scheme}.png`) })
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
     })
   }

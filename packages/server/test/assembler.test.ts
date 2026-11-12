@@ -1749,6 +1749,29 @@ describe("lorebook assembly", () => {
     }
     expect(contents(await assembled(backOn)).join("\n")).toContain("CARD_LORE")
   })
+  it.each([
+    [undefined, false],
+    ["book", false],
+    [null, true],
+    ["missing", true]
+  ] as const)("resolves primary lore with stored binding %s before the world name", async (binding, ownSent) => {
+    const doc = loreBook([loreEntry({ constant: true, content: "OWN_LORE" })]).document
+    const f = fixture({
+      lorebooks: [{ ...attached, sourceName: "Primary world" }],
+      cards: [{ entity: "mira", doc: { ...mira, character_book: doc, extensions: { world: "Primary world" } } }],
+      events: [
+        ...fixture().events!,
+        ...(binding === undefined
+          ? []
+          : [at(null, { key: "lorebook.binding", value: { entity: "mira" as never, ref: binding as never } })])
+      ]
+    })
+    expect(
+      contents(await assembled(f))
+        .join("\n")
+        .includes("OWN_LORE")
+    ).toBe(ownSent)
+  })
   it("counts message delays across the path independently of the scan window", async () => {
     const doc = loreBook([loreEntry({ constant: true, delay: 1100, content: "DELAY_LORE" })]).document
     const f = fixture({

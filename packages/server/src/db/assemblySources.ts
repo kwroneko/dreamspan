@@ -291,7 +291,13 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
    */
   const refHead = (refId: string, kind: string, entity?: string) =>
     sql
-      .unsafe<{ id: string; entity_id: string; head_revision_id: string; doc_json: string; source_path: string | null }>(
+      .unsafe<{
+        id: string
+        entity_id: string
+        head_revision_id: string
+        doc_json: string
+        source_path: string | null
+      }>(
         `SELECT r.id, r.entity_id, r.head_revision_id, h.doc_json, ${refSourcePathSql} AS source_path
       FROM entity_refs r
       JOIN entities e ON e.id = r.entity_id JOIN entity_revisions h ON h.id = r.head_revision_id

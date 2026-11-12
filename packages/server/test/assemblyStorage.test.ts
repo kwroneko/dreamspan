@@ -803,7 +803,7 @@ describe("context assembly from the database", () => {
 
   it.live("resolves legacy primary lore by its imported filename and pins that identity", () =>
     Effect.gen(function* () {
-      const { writer, reader, state, userId, assemble, mira } = yield* setup()
+      const { writer, reader, state, userId, assemble, mira, chat } = yield* setup()
       const doc = loreBook([loreEntry({ constant: true, content: "PRIMARY_LORE" })], {
         name: "Different display name"
       }).document
@@ -825,6 +825,25 @@ describe("context assembly from the database", () => {
         message: null,
         commitDraft: null
       })
+      const cast = yield* reader.CastCards({
+        userId,
+        entityIds: [mira.entityId],
+        chat: { chatId: chat.id, bindings: {} }
+      })
+      assert.strictEqual(cast[0]?.lorebookWorld, "Primary file")
+      assert.strictEqual(cast[0]?.lorebookName, doc.name)
+      const pinned = yield* reader.CastCards({
+        userId,
+        entityIds: [mira.entityId],
+        chat: {
+          chatId: chat.id,
+          bindings: { [mira.entityId]: { ref: mira.ref.id, revision: mira.ref.headRevisionId } }
+        }
+      })
+      assert.isFalse(pinned[0]?.lorebook)
+      assert.isUndefined(pinned[0]?.lorebookWorld)
+      assert.isUndefined(pinned[0]?.lorebookName)
+      assert.isUndefined(pinned[0]?.lorebookEntries)
       yield* state({ key: "lorebook.attach", value: { ref: book.ref.id } })
       const first = yield* assemble()
       assert.lengthOf(
@@ -834,6 +853,8 @@ describe("context assembly from the database", () => {
         1
       )
       assert.strictEqual(first.sources?.lorebooks?.[0]?.found[0]?.sourceName, "Primary file")
+      const library = yield* reader.ListLibrary({ userId, kind: "lorebook", tag: null, archived: false })
+      assert.strictEqual(library.find((ref) => ref.id === book.ref.id)?.lorebookSource, "Primary file")
       yield* writer.EditRef({
         userId,
         refId: book.ref.id,
@@ -844,6 +865,19 @@ describe("context assembly from the database", () => {
       })
       assert.lengthOf(
         texts(yield* assemble())
+          .join("\n")
+          .match(/PRIMARY_LORE/g)!,
+        1
+      )
+      const fork = yield* writer.ForkRef({ userId, refId: book.ref.id, label: "Local world", subtitle: "" })
+      const child = yield* writer.ForkRef({ userId, refId: fork.id, label: "Local world again", subtitle: "" })
+      assert.strictEqual((yield* reader.GetRef({ userId, refId: child.id })).ref.lorebookSource, "Primary file")
+      yield* state({ key: "lorebook.detach", value: { ref: book.ref.id } })
+      yield* state({ key: "lorebook.attach", value: { ref: child.id } })
+      const forked = yield* assemble()
+      assert.strictEqual(forked.sources?.lorebooks?.[0]?.found[0]?.sourceName, "Primary file")
+      assert.lengthOf(
+        texts(forked)
           .join("\n")
           .match(/PRIMARY_LORE/g)!,
         1

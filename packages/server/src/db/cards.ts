@@ -74,6 +74,7 @@ const parse = (row: CardRow): CardText => {
       ? (doc.character_book as Record<string, unknown>)
       : null
   const bookName = text(book?.name).trim()
+  const world = text((doc.extensions as { world?: unknown } | null | undefined)?.world)
   return {
     card: new CastCard({
       entityId: row.entity_id as EntityId,
@@ -87,10 +88,7 @@ const parse = (row: CardRow): CardText => {
       lorebook: book !== null,
       ...(bookName === "" ? {} : { lorebookName: bookName }),
       ...(book === null ? {} : { lorebookEntries: Array.isArray(book.entries) ? book.entries.length : 0 }),
-      ...(typeof (doc.extensions as { world?: unknown } | undefined)?.world === "string" &&
-      (doc.extensions as { world: string }).world !== ""
-        ? { lorebookWorld: (doc.extensions as { world: string }).world }
-        : {}),
+      ...(world === "" ? {} : { lorebookWorld: world }),
       avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null,
       ...avatarCropField(doc.avatar_media_id, doc.avatar_crop)
     }),
@@ -228,12 +226,14 @@ export const loadCards = (sql: SqlClient.SqlClient, userId: UserId, ids: Readonl
  * the chat reads, `cardInChat` in library.ts). Its persona mark stays the library's.
  */
 export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId: string) =>
-  sql<CardSummaryRow>`SELECT fields AS card_fields, book AS card_book, book_entries AS card_book_entries
-    FROM card_summaries WHERE revision_id = ${revisionId}`.pipe(
+  sql<CardSummaryRow & { card_world: unknown }>`SELECT cs.fields AS card_fields, cs.book AS card_book,
+      cs.book_entries AS card_book_entries, json_extract(r.doc_json, '$.extensions.world') AS card_world
+    FROM card_summaries cs JOIN entity_revisions r ON r.id = cs.revision_id
+    WHERE cs.revision_id = ${revisionId}`.pipe(
     Effect.map(([row]) => {
       if (!row) return card
       const summary = cardSummary(row)
-      return new CastCard({
+      const next = {
         ...card,
         name: summary.name,
         label: summary.name,
@@ -242,8 +242,14 @@ export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId:
         avatarMediaId: summary.avatarMediaId,
         ...summary.crop,
         talkativeness: summary.talkativeness,
-        lorebook: summary.book
-      })
+        ...cardSummaryBook(summary)
+      }
+      // All lorebook metadata follows the revision the chat reads, including absent fields.
+      if (!summary.book || summary.bookName === "") delete next.lorebookName
+      if (!summary.book) delete next.lorebookEntries
+      if (typeof row.card_world === "string" && row.card_world !== "") next.lorebookWorld = row.card_world
+      else delete next.lorebookWorld
+      return new CastCard(next)
     })
   )
 
