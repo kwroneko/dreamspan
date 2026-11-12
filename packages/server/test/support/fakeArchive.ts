@@ -747,17 +747,49 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       const { status, body } = search(url.searchParams)
       return json(res, status, body)
     }
-    if (path === "/api/v1/tags") {
-      // A page of 200 by card count; `limit` isn't a v1 parameter here.
+    if (path === "/api/v1/tags" || path === "/api/v1/search/authors") {
+      const tags = path.endsWith("/tags")
       const prefix = (url.searchParams.get("q") ?? "").toLowerCase()
       const counts = new Map<string, number>()
-      for (const c of cards) for (const t of c.tags) if (t.startsWith(prefix)) counts.set(t, (counts.get(t) ?? 0) + 1)
-      const all = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      for (const c of cards)
+        for (const value of tags ? c.tags : [`${c.site}/${c.creator}`])
+          if (tags ? value.toLowerCase().startsWith(prefix) : value.toLowerCase().includes(prefix))
+            counts.set(value, (counts.get(value) ?? 0) + 1)
+      const all = [...counts].sort(([a], [b]) => a.localeCompare(b))
+      const cursor = url.searchParams.get("cursor")
+      let after = ""
+      if (cursor) {
+        try {
+          const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString()) as {
+            prefix: string
+            after: string
+            tags: boolean
+          }
+          if (decoded.prefix !== prefix || decoded.tags !== tags || typeof decoded.after !== "string") throw new Error()
+          after = decoded.after
+        } catch {
+          return json(res, 400, error("invalid_cursor", "suggestion cursor expired"))
+        }
+      }
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 10)))
+      const rest = all.filter(([value]) => value.localeCompare(after) > 0)
+      const items = rest.slice(0, limit)
+      const next =
+        rest.length > limit
+          ? Buffer.from(JSON.stringify({ prefix, tags, after: items.at(-1)![0] })).toString("base64url")
+          : null
       return json(res, 200, {
-        q: prefix,
-        tags: all.slice(0, 200).map(([slug, card_count]) => ({ slug, label: slug, card_count })),
-        page: 1,
-        pages: Math.max(1, Math.ceil(all.length / 200)),
+        [tags ? "tags" : "authors"]: items.map(([value, card_count]) =>
+          tags
+            ? { slug: value, label: value, card_count }
+            : {
+                source: value.split("/")[0],
+                handle: value.split("/")[1],
+                display_name: value.split("/")[1],
+                card_count
+              }
+        ),
+        next,
         total: all.length
       })
     }

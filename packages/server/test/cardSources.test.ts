@@ -169,6 +169,39 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("suggestion cursors stay behind consent, guards, the per-user cache and retry", () =>
+    Effect.gen(function* () {
+      const api = yield* client({ "Remote-User": "suggestion-reader" })
+      yield* api.SetCardSourceEnabled({ sourceId: "cardex", enabled: false })
+      const before = archive.hits()
+      assert.strictEqual(
+        yield* outcome(api.SourceSuggestions({ sourceId: "cardex", kind: "creators", prefix: "", page: null })),
+        "SourceFailed:disabled"
+      )
+      assert.strictEqual(archive.hits(), before)
+      yield* api.SetCardSourceEnabled({ sourceId: "cardex", enabled: true })
+      const first = yield* api.SourceSuggestions({ sourceId: "cardex", kind: "creators", prefix: "", page: null })
+      assert.isString(first.next)
+      const second = yield* api.SourceSuggestions({
+        sourceId: "cardex",
+        kind: "creators",
+        prefix: "",
+        page: first.next
+      })
+      assert.isFalse(second.items.some((item) => first.items.some((old) => old.value === item.value)))
+      const hits = archive.hits()
+      yield* api.SourceSuggestions({ sourceId: "cardex", kind: "creators", prefix: "", page: first.next })
+      assert.strictEqual(archive.hits(), hits)
+      archive.failNext(503)
+      assert.strictEqual(
+        yield* outcome(api.SourceSuggestions({ sourceId: "cardex", kind: "tags", prefix: "f", page: null })),
+        "SourceFailed:unreachable"
+      )
+      const retried = yield* api.SourceSuggestions({ sourceId: "cardex", kind: "tags", prefix: "f", page: null })
+      assert.isAbove(retried.items.length, 0)
+    })
+  )
+
   it.effect("a regional file restriction is a plain regional state and can be retried", () =>
     Effect.gen(function* () {
       const api = yield* client({ "Remote-User": "regional-reader" })

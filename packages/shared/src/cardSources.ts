@@ -45,6 +45,7 @@ const SourceFilter = Schema.Union([
     id: Schema.String,
     label: Schema.String,
     kind: Schema.Literal("text"),
+    suggestions: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("creators"), multiple: Schema.Boolean })),
     about: Schema.optionalKey(Schema.String)
   })
 ])
@@ -148,6 +149,16 @@ export const SourceTag = Schema.Struct({
   label: Schema.optionalKey(Schema.String),
   count: Schema.optionalKey(Schema.Number)
 })
+
+/** Paged values for the existing filter fields; the archive owns the opaque cursor. */
+export const SourceSuggestions = Schema.Struct({
+  items: Schema.Array(
+    Schema.Struct({ value: Schema.String, label: Schema.String, count: Schema.optionalKey(Schema.Number) })
+  ),
+  next: Schema.NullOr(Schema.String),
+  reset: Schema.optionalKey(Schema.Boolean)
+})
+export type SourceSuggestions = typeof SourceSuggestions.Type
 
 /** Why a request to a source failed, so the UI can word each case (§5.4). */
 export const SourceFailure = Schema.Literals([
@@ -360,6 +371,16 @@ export class CardSourcesApi extends RpcGroup.make(
   Rpc.make("SourceTags", {
     payload: { sourceId: SourceId, prefix: Schema.String.check(Schema.isMaxLength(100)) },
     success: Schema.Array(SourceTag),
+    error: sourceErrors
+  }),
+  Rpc.make("SourceSuggestions", {
+    payload: {
+      sourceId: SourceId,
+      kind: Schema.Literals(["tags", "creators"]),
+      prefix: Schema.String.check(Schema.isMaxLength(100)),
+      page: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000)))
+    },
+    success: SourceSuggestions,
     error: sourceErrors
   }),
   /** Opens a remote card: fetched (or read from the cache) and parsed; recorded as recently viewed. */

@@ -27,7 +27,8 @@ import {
   type SourceInfo,
   type SourcePage,
   type SourcePrefs,
-  type SourceQuery
+  type SourceQuery,
+  type SourceSuggestions
 } from "@rp/shared/cardSources.ts"
 import { CastCard, type EntityId } from "@rp/shared/chat.ts"
 import { CardForChat } from "@rp/shared/chatSetupApi.ts"
@@ -116,6 +117,13 @@ export interface CardSourcesShape {
     ReadonlyArray<{ tag: string; label?: string; count?: number }>,
     SourceFailed | NotFound | ServerError
   >
+  readonly suggestions: (
+    user: User,
+    sourceId: string,
+    kind: "tags" | "creators",
+    prefix: string,
+    page: string | null
+  ) => Effect.Effect<SourceSuggestions, SourceFailed | NotFound | ServerError>
   readonly card: (
     user: User,
     sourceId: string,
@@ -645,6 +653,25 @@ const make = (options: CardSourcesOptions = {}) =>
           if (!suggest) return []
           return yield* cached(user, sourceId, "tags", prefix.trim().toLowerCase(), (http) =>
             suggest(http, prefix.trim())
+          )
+        }),
+      suggestions: (user, sourceId, kind, prefix, page) =>
+        Effect.gen(function* () {
+          const { adapter } = yield* usable(user, sourceId)
+          const suggest = adapter.suggestions
+          if (!suggest) {
+            const tags = kind === "tags" && page === null ? yield* service.tags(user, sourceId, prefix) : []
+            return {
+              items: tags.map((tag) => ({
+                value: tag.tag,
+                label: tag.label ?? tag.tag,
+                ...(tag.count === undefined ? {} : { count: tag.count })
+              })),
+              next: null
+            }
+          }
+          return yield* cached(user, sourceId, "tags", JSON.stringify([kind, prefix.trim(), page]), (http) =>
+            suggest(http, kind, prefix.trim(), page)
           )
         }),
       card: (user, sourceId, remoteId) =>

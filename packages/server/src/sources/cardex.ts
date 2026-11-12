@@ -292,6 +292,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       id: "author",
       label: "Creator",
       kind: "text",
+      suggestions: { kind: "creators", multiple: false },
       about: "One creator's cards, written as site/name, for example chub/someone."
     })
   }
@@ -367,6 +368,9 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       filters.push({
         ...common,
         kind: "text",
+        ...(["any_author", "not_author"].includes(name)
+          ? { suggestions: { kind: "creators" as const, multiple: true } }
+          : {}),
         about: FILTER_HELP[name] ?? description ?? `Filters by ${common.label.toLowerCase()}.`
       })
     }
@@ -560,6 +564,48 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
             ...(typeof t.label === "string" ? { label: t.label } : {}),
             ...(typeof t.card_count === "number" ? { count: t.card_count } : {})
           }))
+      }),
+    suggestions: (http, kind, prefix, page) =>
+      Effect.gen(function* () {
+        const params = new URLSearchParams({ limit: "10" })
+        if (prefix.trim()) params.set("q", prefix.trim())
+        if (page) params.set("cursor", page)
+        let reset = false
+        const raw = yield* getJson(http, api(kind === "tags" ? "/tags" : "/search/authors", params)).pipe(
+          Effect.catchIf(
+            (failure) => page !== null && cursorRefused(failure),
+            () => {
+              reset = true
+              params.delete("cursor")
+              return getJson(http, api(kind === "tags" ? "/tags" : "/search/authors", params))
+            }
+          )
+        )
+        if (!isRecord(raw)) return yield* bad()
+        const entries = kind === "tags" ? raw.tags : raw.authors
+        if (!Array.isArray(entries)) return yield* bad()
+        const items = entries.filter(isRecord).flatMap((entry) => {
+          const value =
+            kind === "tags"
+              ? entry.slug
+              : typeof entry.source === "string" && typeof entry.handle === "string"
+                ? `${entry.source}/${entry.handle}`
+                : undefined
+          if (typeof value !== "string") return []
+          const label = kind === "tags" ? entry.label : entry.display_name
+          return [
+            {
+              value,
+              label: typeof label === "string" ? label : value,
+              ...(typeof entry.card_count === "number" ? { count: entry.card_count } : {})
+            }
+          ]
+        })
+        return {
+          items,
+          next: typeof raw.next === "string" && raw.next ? raw.next : null,
+          ...(reset ? { reset: true } : {})
+        }
       }),
     card: (http, remoteId) =>
       Effect.gen(function* () {

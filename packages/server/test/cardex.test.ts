@@ -3,7 +3,7 @@
 // No request ever goes to cardex.zip: the adapter is pointed at the fake's origin, and the
 // pure checks make none.
 import { afterAll, assert, describe, it } from "@effect/vitest"
-import { emptySourceQuery, SourceFailed } from "@rp/shared/cardSources.ts"
+import { emptySourceQuery, SourceFailed, type SourceSuggestions } from "@rp/shared/cardSources.ts"
 import { Effect } from "effect"
 import type { SourceHttp } from "../src/sources/adapter.ts"
 import {
@@ -348,6 +348,39 @@ describe("v1 as card sources", () => {
           )
       )
     }).pipe(Effect.scoped)
+  )
+
+  it.effect("tag and creator suggestions traverse keyset pages and replace an expired cursor", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      for (const kind of ["tags", "creators"] as const) {
+        const seen = new Set<string>()
+        let page: string | null = null
+        let pages = 0
+        do {
+          const result: SourceSuggestions = yield* adapter.suggestions!(direct(), kind, "", page)
+          assert.isFalse(result.reset === true)
+          for (const item of result.items) {
+            assert.isFalse(seen.has(item.value))
+            seen.add(item.value)
+            assert.isNumber(item.count)
+          }
+          pages++
+          page = result.next
+        } while (page !== null)
+        assert.isAbove(pages, 1)
+        assert.strictEqual(
+          seen.size,
+          kind === "tags"
+            ? new Set(archive.cards.flatMap((card) => card.tags)).size
+            : new Set(archive.cards.map((card) => `${card.site}/${card.creator}`)).size
+        )
+        const expired = yield* adapter.suggestions!(direct(), kind, "", "expired")
+        const first = yield* adapter.suggestions!(direct(), kind, "", null)
+        assert.isTrue(expired.reset)
+        assert.deepStrictEqual(expired.items, first.items)
+      }
+    })
   )
 
   it("a batch URL is in v1's canonical form: sorted, without duplicates, joined by %2C", () => {

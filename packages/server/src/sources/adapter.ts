@@ -2,7 +2,14 @@
 // Adapters never fetch on their own: every request goes through the `SourceHttp` they're
 // given, which keeps them on their declared hosts, under the response caps and timeouts, and
 // behind the source's rate limit (guard.ts, limiter.ts).
-import type { RemoteSummary, SourceCapabilities, SourceFailed, SourceQuery, SourceTag } from "@rp/shared/cardSources.ts"
+import type {
+  RemoteSummary,
+  SourceCapabilities,
+  SourceFailed,
+  SourceQuery,
+  SourceTag,
+  SourceSuggestions
+} from "@rp/shared/cardSources.ts"
 import type { Effect } from "effect"
 
 /** A response, read whole under its cap. */
@@ -82,6 +89,12 @@ export interface CardSourceAdapter {
     http: SourceHttp,
     prefix: string
   ) => Effect.Effect<ReadonlyArray<typeof SourceTag.Type>, SourceFailed>
+  readonly suggestions?: (
+    http: SourceHttp,
+    kind: "tags" | "creators",
+    prefix: string,
+    page: string | null
+  ) => Effect.Effect<SourceSuggestions, SourceFailed>
   readonly card: (http: SourceHttp, remoteId: string) => Effect.Effect<RemoteCardFile, SourceFailed>
   /** An image a summary referenced (`thumb` or `image`), as bytes. */
   readonly image: (http: SourceHttp, ref: string) => Effect.Effect<Uint8Array, SourceFailed>

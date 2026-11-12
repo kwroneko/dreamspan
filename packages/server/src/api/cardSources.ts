@@ -27,6 +27,8 @@ export const makeCardSourceHandlers = Effect.gen(function* () {
     SourceCapabilities: ({ sourceId }) => withUser((user) => sources.capabilities(user, sourceId)),
     SourceSearch: ({ sourceId, query, page }) => withUser((user) => sources.search(user, sourceId, query, page)),
     SourceTags: ({ sourceId, prefix }) => withUser((user) => sources.tags(user, sourceId, prefix)),
+    SourceSuggestions: ({ sourceId, kind, prefix, page }) =>
+      withUser((user) => sources.suggestions(user, sourceId, kind, prefix, page)),
     SourceCard: ({ sourceId, remoteId }) => withUser((user) => sources.card(user, sourceId, remoteId)),
     SourceCardForChat: ({ sourceId, remoteId }) => withUser((user) => sources.forChat(user, sourceId, remoteId)),
     AdoptRemoteCard: ({ sourceId, remoteId }) => withUser((user) => sources.adopt(user, sourceId, remoteId)),

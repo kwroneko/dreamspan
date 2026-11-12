@@ -40,7 +40,8 @@ import {
   sourcesAtom,
   type SourceProblem,
   useAdoptRemote,
-  useSourceCall
+  useSourceCall,
+  problemText
 } from "./remote.ts"
 
 /** The sources this user has on, in the registry's order: what Show offers after the filters. */
@@ -460,28 +461,139 @@ function RangeFilter({
   )
 }
 
-/** The tag field: typing suggests the source's tags with their counts; Enter adds what's typed. */
-function TagField({ browse }: { browse: SourceBrowse }) {
+/** Suggestions share the existing inline buttons for tags and capability-declared text fields. */
+function useSuggestions(browse: SourceBrowse, kind: "tags" | "creators", prefix: string, enabled = true) {
   const call = useSourceCall()
-  const [text, setText] = useState("")
-  const [suggestions, setSuggestions] = useState<ReadonlyArray<{ tag: string; label?: string; count?: number }>>([])
-  const suggest = browse.caps?.tags.suggest === true
   const sourceId = browse.info?.id ?? null
-  const prefix = text.trim()
-  useEffect(() => {
-    if (!suggest || sourceId === null || prefix === "") return
+  const key = `${sourceId}:${kind}:${prefix}`
+  const [state, setState] = useState<{
+    key: string
+    items: ReadonlyArray<{ value: string; label: string; count?: number }>
+    next: string | null
+    problem?: SourceProblem
+    loading?: boolean
+  }>({ key: "", items: [], next: null })
+  const [attempt, setAttempt] = useState(0)
+  const active = useRef<AbortController | null>(null)
+  const request = (page: string | null) => {
+    active.current?.abort()
     const controller = new AbortController()
-    const timer = setTimeout(() => {
-      void call((client) => client("SourceTags", { sourceId, prefix }), controller.signal).then((out) => {
-        if (out?.ok) setSuggestions(out.value.slice(0, 12))
+    active.current = controller
+    setState((old) => ({ key, items: old.key === key ? old.items : [], next: page, loading: true }))
+    void call(
+      (client) => client("SourceSuggestions", { sourceId: sourceId!, kind, prefix, page }),
+      controller.signal
+    ).then((out) => {
+      if (!out || controller.signal.aborted) return
+      setState((old) => {
+        if (!out.ok) return { ...old, loading: false, problem: out.problem }
+        const previous = page && !out.value.reset && old.key === key ? old.items : []
+        const seen = new Set(previous.map((item) => item.value))
+        return {
+          key,
+          items: [...previous, ...out.value.items.filter((item) => !seen.has(item.value))],
+          next: out.value.next
+        }
       })
-    }, 200)
+    })
+  }
+  useEffect(() => {
+    if (sourceId === null || !enabled) return
+    const timer = setTimeout(() => request(null), 200)
     return () => {
       clearTimeout(timer)
-      controller.abort()
+      active.current?.abort()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `call` is a fresh closure each render
-  }, [suggest, sourceId, prefix])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the key identifies the request; call is a fresh closure
+  }, [key, enabled, attempt])
+  const current = enabled && state.key === key ? state : { items: [], next: null, problem: undefined, loading: false }
+  return {
+    ...current,
+    more: () => request(current.next),
+    retry: () => (current.next ? request(current.next) : setAttempt((n) => n + 1))
+  }
+}
+
+function SuggestedValues({
+  suggestions,
+  kind,
+  onChoose
+}: {
+  suggestions: ReturnType<typeof useSuggestions>
+  kind: "tags" | "creators"
+  onChoose: (value: string) => void
+}) {
+  return (
+    <div aria-label={`Suggested ${kind}`} className="flex min-w-0 flex-wrap gap-1">
+      {suggestions.items.map((item) => (
+        <Button
+          key={item.value}
+          variant="ghost"
+          className="h-auto min-h-7 max-w-full px-2 text-left text-xs whitespace-normal break-words"
+          hint={`Uses ${item.value} in this filter.`}
+          onClick={() => onChoose(item.value)}
+        >
+          {kind === "creators" ? `${item.label} (${item.value})` : item.label}
+          {item.count !== undefined && (
+            <span className="text-muted tabular-nums">{numberFormat.format(item.count)}</span>
+          )}
+        </Button>
+      ))}
+      {suggestions.problem ? (
+        <div className="w-full text-sm text-muted">
+          {problemText("the archive", suggestions.problem)}{" "}
+          <Button variant="ghost" hint="Asks for these suggestions again." onClick={suggestions.retry}>
+            Retry
+          </Button>
+        </div>
+      ) : suggestions.next ? (
+        <Button
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          hint={`Shows more ${kind} matching what you typed.`}
+          disabled={suggestions.loading}
+          onClick={suggestions.more}
+        >
+          More {kind}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+function TextFilter({
+  filter,
+  value,
+  onChange,
+  browse
+}: {
+  filter: Extract<SourceFilter, { kind: "text" }>
+  value: string
+  onChange: (value: string | undefined) => void
+  browse: SourceBrowse
+}) {
+  const parts = filter.suggestions?.multiple ? value.split(/(?<!\\),/) : [value]
+  const prefix = (parts.at(-1) ?? "").trim().replace(/\\(.)/g, "$1")
+  const suggestions = useSuggestions(browse, "creators", prefix, !!filter.suggestions && !!prefix)
+  const choose = (chosen: string) => {
+    if (!filter.suggestions?.multiple) return onChange(chosen)
+    const escaped = chosen.replace(/\\/g, "\\\\").replace(/,/g, "\\,")
+    onChange([...parts.slice(0, -1), escaped].join(","))
+  }
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <Field label={filter.label} about={filter.about}>
+        <Input value={value} onChange={(event) => onChange(event.currentTarget.value || undefined)} />
+      </Field>
+      {filter.suggestions && <SuggestedValues suggestions={suggestions} kind="creators" onChoose={choose} />}
+    </div>
+  )
+}
+
+/** The tag field: typing suggests the source's tags with their counts; Enter adds what's typed. */
+function TagField({ browse }: { browse: SourceBrowse }) {
+  const [text, setText] = useState("")
+  const suggestions = useSuggestions(browse, "tags", text.trim(), browse.caps?.tags.suggest === true)
   const add = (tag: string) => {
     const clean = tag.trim()
     if (clean === "" || browse.remote.tags.includes(clean)) return
@@ -490,9 +602,7 @@ function TagField({ browse }: { browse: SourceBrowse }) {
       excludeTags: browse.remote.excludeTags.filter((t) => t !== clean)
     })
     setText("")
-    setSuggestions([])
   }
-  const shown = prefix === "" ? [] : suggestions.filter((s) => s.tag.toLowerCase().startsWith(prefix.toLowerCase()))
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <Field
@@ -511,22 +621,7 @@ function TagField({ browse }: { browse: SourceBrowse }) {
           }}
         />
       </Field>
-      {shown.length > 0 && (
-        <div aria-label="Suggested tags" className="flex flex-wrap gap-1">
-          {shown.map((s) => (
-            <Button
-              key={s.tag}
-              variant="ghost"
-              className="h-7 px-2 text-xs"
-              hint={`Adds the ${s.tag} tag.`}
-              onClick={() => add(s.tag)}
-            >
-              {s.label ?? s.tag}
-              {s.count !== undefined && <span className="text-muted tabular-nums">{numberFormat.format(s.count)}</span>}
-            </Button>
-          ))}
-        </div>
-      )}
+      <SuggestedValues suggestions={suggestions} kind="tags" onChoose={add} />
     </div>
   )
 }
@@ -611,12 +706,13 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
               )
             case "text":
               return (
-                <Field key={filter.id} label={filter.label} about={filter.about}>
-                  <Input
-                    value={typeof value === "string" ? value : ""}
-                    onChange={(event) => set(filter.id, event.currentTarget.value || undefined)}
-                  />
-                </Field>
+                <TextFilter
+                  key={filter.id}
+                  filter={filter}
+                  browse={browse}
+                  value={typeof value === "string" ? value : ""}
+                  onChange={(next) => set(filter.id, next)}
+                />
               )
           }
         })}

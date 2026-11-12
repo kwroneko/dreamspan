@@ -64,6 +64,19 @@ export function cardexCriteriaTests() {
               )
               await clear()
             }
+            // Both existing picker fields can reach values beyond their first keyset page.
+            const suggestedTags = panel.getByLabel("Suggested tags", { exact: true })
+            await expect(suggestedTags.getByRole("button", { name: "More tags", exact: true })).toBeVisible()
+            await suggestedTags.getByRole("button", { name: "More tags", exact: true }).click()
+            await expect(suggestedTags.getByRole("button")).toHaveCount(21)
+            const creator = panel.getByRole("textbox", { name: "Creator", exact: true })
+            await creator.fill("/")
+            const suggestedCreators = panel.getByLabel("Suggested creators", { exact: true }).first()
+            await suggestedCreators.getByRole("button", { name: "More creators", exact: true }).click()
+            await expect(suggestedCreators.getByRole("button")).toHaveCount(21)
+            await suggestedCreators.getByRole("button").first().click()
+            await expect(creator).toHaveValue(/^[a-z_]+\//)
+            await clear()
             // Each choice kind, including lists, has a chip and can be cleared again.
             for (const [group, option, chip] of [
               ["Rating", "Safe", "Rating: Safe"],
