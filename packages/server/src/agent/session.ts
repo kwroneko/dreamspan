@@ -38,6 +38,7 @@ import {
 } from "./tools.ts"
 import { rolloutRequest } from "./wire.ts"
 import { liveSuffix } from "./messages.ts"
+import { loadedSet, loadPoints, type Skill, type ToolLoadingWire } from "./toolLoading.ts"
 
 /** What an agent turn needs beyond a plain reply's. */
 export interface AgentRun {
@@ -49,8 +50,14 @@ export interface AgentRun {
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
   readonly onState?: () => void
-  /** The tool definitions to offer as a snapshot froze them (a resume); absent: `tools`' own. */
+  /** The tool definitions to offer as frozen into the snapshot; absent: `tools`' own. */
   readonly offered?: ReadonlyArray<FrozenTool>
+  /** The chat kind, for the loading tools' skill lookups (spec/TOOL-LOADING.md). */
+  readonly kind?: string
+  /** The workshop cards' own skills, frozen with the run. */
+  readonly cardSkills?: ReadonlyArray<Skill>
+  /** How this model's wire API carries deferred tools; absent: every tool is sent from the start. */
+  readonly loadingWire?: ToolLoadingWire
   /** Carrying on a stopped run (resume.ts): its kept transcript, and text cut off to continue. */
   readonly resume?: {
     readonly transcript: ReadonlyArray<unknown>
@@ -196,14 +203,22 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         : sendMessageTool(send)
       // A resume offers the definitions its snapshot froze, exactly as they were sent.
       const frozen = (run.offered ?? tools.map(frozenTool)).filter((t) => t.name !== SEND_MESSAGE)
+      // Deferred tools (spec/TOOL-LOADING.md): declared from the first request where the wire API
+      // declares them (Anthropic), else sent only at their load points (Responses). Without a wire
+      // for this model they're all sent from the start, as before.
+      const loadingWire = run.loadingWire
+      const deferred = new Set(loadingWire ? frozen.filter((t) => t.deferred === true).map((t) => t.name) : [])
+      const definition = (t: FrozenTool): Tool => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters as Tool["parameters"]
+      })
       const piTools: ReadonlyArray<Tool> = [
-        ...frozen.map((t) => ({
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters as Tool["parameters"]
-        })),
-        ...(sends ? [{ name: sendTool.name, description: sendTool.description, parameters: sendTool.parameters }] : [])
+        ...frozen.filter((t) => !deferred.has(t.name)).map(definition),
+        ...(sends ? [{ name: sendTool.name, description: sendTool.description, parameters: sendTool.parameters }] : []),
+        ...(loadingWire?.declaresDeferred ? frozen.filter((t) => deferred.has(t.name)).map(definition) : [])
       ]
+      const deferredDefinitions = frozen.filter((t) => deferred.has(t.name)).map(definition)
       const emit = (chunk: GenerationChunk) => void Queue.offerUnsafe(queue, chunk)
       if (several) emit({ several: true })
 
@@ -233,6 +248,12 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         continuation = undefined
         const last = requests >= plan.turnCap || carried !== undefined
         const suffix = liveSuffix(transcript.messages)
+        // Where each deferred tool was loaded, for the provider transform. A request sent without
+        // tools (the cap's) has no load points either: its history can't name undeclared tools.
+        const toolLoading =
+          deferred.size > 0 && !last
+            ? { api: model.api, deferred: deferredDefinitions, loads: loadPoints(suffix, deferred) }
+            : undefined
         const wire = rolloutRequest(
           prefix,
           model.api,
@@ -273,7 +294,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 payload: wire.payload,
                 breakpoints: wire.breakpoints,
                 ...(run.checkpoints?.length ? { preserveBreakpoints: true } : {}),
-                ...(wire.stable ? { stable: wire.stable } : {})
+                ...(wire.stable ? { stable: wire.stable } : {}),
+                ...(toolLoading ? { toolLoading } : {})
               },
               attribution: {
                 purpose: input.purpose ?? "generation",
@@ -387,6 +409,12 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         toolCallId,
         leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
         viewers: generation.viewers,
+        offer: {
+          kind: run.kind ?? "",
+          tools: frozen,
+          loaded: loadedSet(agent.state.messages, deferred),
+          cardSkills: run.cardSkills ?? []
+        },
         reader: run.reader,
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)
@@ -412,13 +440,30 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               details: null,
               isError: true
             }
+          // A deferred tool runs only once a loading call made it callable; loading grants nothing,
+          // so everything below applies to it exactly as to a tool sent from the start.
+          if (deferred.has(tool.id) && !loadedSet(agent.state.messages, deferred).has(tool.id))
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `“${tool.id}” isn't loaded yet. Load it with tool_search or load_skill first.`
+                }
+              ],
+              details: null,
+              isError: true
+            }
           const dangling = seed !== undefined && danglingCalls(seed).some((call) => call.id === toolCallId)
           // The capability's standing decides, asking the user first where it says so; without
           // a permit, a dangling call with outside effects may already have happened.
           const permitted: Effect.Effect<ToolOutput> = run.permit
             ? run
                 .permit({
-                  tool,
+                  // A call-specific capability (a card's own skill) is checked as the tool's.
+                  tool: (() => {
+                    const capability = tool.capabilityFor?.(context(toolCallId), params as never)
+                    return capability ? { ...tool, capability } : tool
+                  })(),
                   context: context(toolCallId),
                   args: params,
                   dangling,
@@ -476,7 +521,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           if (tool.effect === "chat_state" && !result.isError) run.onState?.()
           return {
             content: [{ type: "text", text: budgetResult(result.text) }],
-            details: null,
+            // What a loading call loaded is part of the transcript: replay derives the loaded set from it.
+            details: result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : null,
             ...(result.isError ? { isError: true } : {})
           }
         }

@@ -89,7 +89,11 @@ export const OfferedTool = Schema.Struct({
   label: Schema.String,
   description: Schema.String,
   parameters: Schema.Unknown,
-  effect: EffectClass
+  effect: EffectClass,
+  /** Declared but not sent from the start: a loading call made it callable (spec/TOOL-LOADING.md). */
+  deferred: Schema.optionalKey(Schema.Boolean),
+  /** The loading call that loaded it in this run, when one did. */
+  loadedBy: Schema.optionalKey(Schema.String)
 })
 export type OfferedTool = typeof OfferedTool.Type
 

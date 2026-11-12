@@ -50,7 +50,7 @@
 | Decision models: System-One `{model, state, questions}`, points routing/records/checks/audit/late_addition/implicit_reply/memory, `DecisionEngine.evaluate(point, input, ctx)`, a heuristic fallback per point, every billed attempt accounted | The same engine shape and the same wire body, with RP points `presence` and `lore` (§7) and the existing refusal judge kept as it is. Every call is opt-in per connection | Provider-send consent (owner rule) |
 | Console: `LiveRollout`/`Rollout` views, SSE `rollout_seed`, tentative deltas | Steps inline in the version (§7.4 [D]), live over the chat's existing subscription, with a `Steps` seed on subscribe | |
 
-reference-harness mechanisms not taken, and why: dynamic tool loading (`load_skill`, `tool_search`), since RP toolsets are small and stable, which keeps the cache intact; session records, follow-up folding and session claims, which are chat-platform concerns; image cap, since the provider boundary already caps images (ARCHITECTURE §16 "Images").
+reference-harness mechanisms not taken, and why: dynamic tool loading (`load_skill`, `tool_search`) for RP, since RP toolsets are small and stable, which keeps the cache intact (workshops take it: [TOOL-LOADING.md](TOOL-LOADING.md)); session records, follow-up folding and session claims, which are chat-platform concerns; image cap, since the provider boundary already caps images (ARCHITECTURE §16 "Images").
 
 ## 2. Timeline and rollouts; the commit pipeline
 

@@ -40,6 +40,17 @@ export interface ToolContext {
   readonly cache: Map<string, unknown>
   /** A one-call approval, checked again in the change's transaction. */
   readonly approvalDigest?: string
+  /**
+   * The run's frozen offer and what of it is loaded at this call (spec/TOOL-LOADING.md), for the
+   * loading tools. Absent outside an agent run.
+   */
+  readonly offer?: {
+    readonly kind: string
+    readonly tools: ReadonlyArray<FrozenTool>
+    readonly loaded: ReadonlySet<string>
+    /** The skills written in the workshop's cards, frozen with the run. */
+    readonly cardSkills: ReadonlyArray<import("./toolLoading.ts").Skill>
+  }
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */
@@ -48,6 +59,8 @@ export interface ToolOutput {
   readonly effects?: ReadonlyArray<RolloutEffectRecord>
   readonly text: string
   readonly isError?: boolean
+  /** Deferred tools this call loaded (spec/TOOL-LOADING.md): stored as the result's `details.loaded`. */
+  readonly loaded?: ReadonlyArray<string>
 }
 
 export interface RolloutTool<A = never> {
@@ -60,6 +73,11 @@ export interface RolloutTool<A = never> {
   /** User-facing, the chat settings' tools list: what it lets the model do, as a checkbox label. */
   readonly explanation?: string
   readonly capability?: string
+  /**
+   * A capability that applies to this call only, from its arguments and the run's offer: the
+   * permit then decides as for a tool with that capability (`load_skill` for a card's own skill).
+   */
+  readonly capabilityFor?: (context: ToolContext, args: A) => string | undefined
   /** Argument used as the plain step title, frozen with setup-tool metadata. */
   readonly titleField?: string
   readonly effect: EffectClass
@@ -110,6 +128,8 @@ export interface FrozenTool {
   readonly titleField?: string
   readonly effect: EffectClass
   readonly label: string
+  /** Declared but not loaded from the start: a loading tool makes it callable (spec/TOOL-LOADING.md). */
+  readonly deferred?: true
 }
 
 export const frozenTool = (tool: RolloutTool<never>): FrozenTool => ({

@@ -21,6 +21,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { type PlacedStep, placedSteps, stepsOf } from "../agent/steps.ts"
 import type { FrozenTool } from "../agent/tools.ts"
+import { loadPoints } from "../agent/toolLoading.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { placedInsertions } from "./displayPath.ts"
 import { shownIn, slotDeletedIn } from "./forkState.ts"
@@ -538,6 +539,11 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
               SELECT reason, fork_index, messages_json FROM rollout_branches
               WHERE rollout_id = ${row.rollout_id} ORDER BY branch_no`
           : []
+        const loadedBy = new Map(
+          loadPoints(messages, new Set(tools.filter((t) => t.deferred).map((t) => t.name))).flatMap((p) =>
+            p.names.map((name) => [name, p.toolCallId] as const)
+          )
+        )
         return {
           tools: tools.map((t) => ({
             name: t.name,
@@ -546,7 +552,9 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             parameters: t.parameters,
             ...(t.capability ? { capability: t.capability } : {}),
             ...(t.titleField ? { titleField: t.titleField } : {}),
-            effect: t.effect
+            effect: t.effect,
+            ...(t.deferred ? { deferred: true } : {}),
+            ...(loadedBy.has(t.name) ? { loadedBy: loadedBy.get(t.name)! } : {})
           })),
           entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true, versionId)),
           cut: cutSpans(messages, branches, tools.length, turnCap)
