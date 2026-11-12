@@ -103,7 +103,7 @@ export class ExecutionRegistry extends Context.Service<
       }
       for (const tool of [
         ...historyTools,
-        ...libraryTools.filter((tool) => !builtinOperationExposures.some((entry) => entry.id === tool.id)),
+        ...libraryTools,
         ...setupTools,
         lookupLore,
         listNotes,
@@ -158,7 +158,7 @@ export const executionRegistry = Effect.gen(function* () {
 
 /** A kind may replace an ambiguous public tool name without changing story semantics. */
 export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string, name: string) => {
-  const exposure = registry.operationTools.get(name)
+  const exposure = registry.chatKinds.get(kind)?.allowsOutside ? registry.operationTools.get(name) : undefined
   const common = exposure ? registry.operationTool(exposure) : registry.rolloutTools.get(name)
   const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
   const tool = common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)

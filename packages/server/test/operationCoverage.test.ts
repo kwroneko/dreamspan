@@ -58,9 +58,9 @@ it.effect("requires one registered capability and restores plugin exposures when
     assert.strictEqual(unknown._tag, "Failure")
     yield* Effect.scoped(
       Effect.gen(function* () {
+        yield* registry.operationTools.disable("rename_chat")
         yield* registry.operationTools.register({ ...original, id: "plugin_rename" })
         assert.strictEqual(toolForKind(registry, "workshop", "plugin_rename")!.capability, "chats.setup")
-        yield* registry.operationTools.disable("rename_chat")
         assert.isUndefined(toolForKind(registry, "workshop", "rename_chat"))
       })
     )
@@ -76,3 +76,31 @@ it("bounds nested and crafted argument trees", () => {
   assert.isFalse(boundedArguments({ value: Number.NaN }))
   assert.isTrue(boundedArguments({ key: "display", value: { reasoning: "collapsed" } }))
 })
+
+it.effect("keeps workshop operations out of story and unknown kind tool catalogs", () =>
+  Effect.gen(function* () {
+    const registry = yield* ExecutionRegistry
+    for (const name of ["history_search", "list_chats", "get_cast", "generate_reply", "rename_chat"])
+      for (const kind of ["rp", "unknown"]) assert.isUndefined(toolForKind(registry, kind, name), `${kind}: ${name}`)
+    assert.isDefined(toolForKind(registry, "rp", "read_messages"))
+    assert.strictEqual(
+      toolForKind(registry, "rp", "list_library")!.parameters,
+      registry.rolloutTools.get("list_library")!.parameters
+    )
+  }).pipe(Effect.provide(ExecutionRegistry.layer))
+)
+
+it.effect("refuses operation aliases and excluded RPC or command exposures", () =>
+  Effect.gen(function* () {
+    const registry = yield* ExecutionRegistry
+    const original = registry.operationTools.get("rename_chat")!
+    for (const entry of [
+      { ...original, id: "rename_alias" },
+      { ...original, id: "excluded", operation: { rpc: "GetRevision" } },
+      { ...original, id: "excluded_command", operation: { command: "chat.merge" } }
+    ]) {
+      assert.strictEqual((yield* Effect.exit(registry.operationTools.register(entry)))._tag, "Failure", entry.id)
+      assert.isUndefined(registry.operationTools.get(entry.id))
+    }
+  }).pipe(Effect.provide(ExecutionRegistry.layer))
+)

@@ -232,32 +232,34 @@ export const layer = Layer.effect(
             .GetSlot({ userId, slotId, forkId })
             .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetSlot")))
           const parent = slot.entry.parentSlotId
-          const partialBatch = parent
-            ? yield* summaries.beforeReply({
-                userId,
-                chatId,
-                leafSlotId: parent,
-                ...(forkId === null ? {} : { forkId })
-              })
-            : false
+          const partialBatch =
+            parent && !request.replyOnly
+              ? yield* summaries.beforeReply({
+                  userId,
+                  chatId,
+                  leafSlotId: parent,
+                  ...(forkId === null ? {} : { forkId })
+                })
+              : false
           // The registered planner combines the chat settings at this point (spec/AGENTIC.md §6).
           const events = yield* reader
             .StateEventsAt({ userId, chatId, slotId: parent, forkId })
             .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("StateEventsAt")))
           // Points that act before the reply is written (spec/AGENTIC.md §7): "Who replies next" may
           // give a reply Auto picked another speaker, which every tab hears before its first word.
-          const changed = Option.isSome(decisions)
-            ? yield* decisions.value.beforeReply({
-                userId,
-                chatId,
-                slotId,
-                versionId,
-                forkId,
-                parentSlotId: parent,
-                version: slot.entry.version,
-                events
-              })
-            : false
+          const changed =
+            !request.replyOnly && Option.isSome(decisions)
+              ? yield* decisions.value.beforeReply({
+                  userId,
+                  chatId,
+                  slotId,
+                  versionId,
+                  forkId,
+                  parentSlotId: parent,
+                  version: slot.entry.version,
+                  events
+                })
+              : false
           // A reply the decision model was to choose a speaker for shows none until it's chosen:
           // when it wasn't (nothing to ask, no sure answer, no point to ask it), Auto's pick stands.
           const settled =
@@ -375,7 +377,12 @@ export const layer = Layer.effect(
           // Lorebook entries the keys left out but that ask a decision model (spec/AGENTIC.md §7):
           // only when the user turned the point on for a connection. A yes is assembled in, and
           // frozen in the snapshot.
-          if (assembled.loreDecision && Option.isSome(decisions) && decisions.value.points.get("lore")) {
+          if (
+            !request.replyOnly &&
+            assembled.loreDecision &&
+            Option.isSome(decisions) &&
+            decisions.value.points.get("lore")
+          ) {
             const outcome = yield* decisions.value.evaluate<LoreInput, ReadonlyArray<LoreAdmission>>(
               "lore",
               assembled.loreDecision,

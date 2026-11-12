@@ -1,3 +1,4 @@
+import { chatKinds } from "@rp/shared/chatKinds.ts"
 // Worker-only undo policies for operation exposures. No non-database work in a transaction.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -45,6 +46,7 @@ const policy = <I, B>(entry: Policy<I, B>): OperationPolicy => entry as unknown 
 interface ChatSnapshot {
   id: ChatId
   title: string
+  kind: string
   title_source: string
   row_version: number
   state_seq: number
@@ -54,7 +56,7 @@ interface ChatSnapshot {
 const snapshotChat = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
   Effect.gen(function* () {
     const [row] =
-      yield* sql<ChatSnapshot>`SELECT id, title, title_source, row_version, state_seq, current_fork_id, active_leaf_slot_id
+      yield* sql<ChatSnapshot>`SELECT id, title, kind, title_source, row_version, state_seq, current_fork_id, active_leaf_slot_id
     FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
     if (!row) return yield* new NotFound({ entity: "chat", id: chatId })
     return row
@@ -357,7 +359,16 @@ export const operationPolicies = makeRegistry<OperationPolicy>([
       Effect.gen(function* () {
         if (input.kind !== "generate" || input.branch || input.round?.length || input.autoPick)
           return yield* refuseOperation("Only one explicit reply in the chosen chat is allowed.")
-        return yield* snapshotChat(sql, userId, input.chatId)
+        const chat = yield* snapshotChat(sql, userId, input.chatId)
+        if (chatKinds.get(chat.kind)?.allowsOutside !== false)
+          return yield* refuseOperation("Replies in another workshop or an unavailable chat kind are not allowed.")
+        const queued = yield* sql`SELECT 1 FROM queued_messages WHERE chat_id = ${chat.id}
+          AND (fork_id IS ${input.forkId ?? chat.current_fork_id} OR fork_id IS NULL) LIMIT 1`
+        if (queued.length)
+          return yield* refuseOperation(
+            "That chat has queued messages or a saved round. Finish or clear it there before asking for a reply; Undo cannot restore its queue."
+          )
+        return chat
       }),
     undo: (sql, ops, userId, input, before, after) =>
       Effect.gen(function* () {
@@ -413,9 +424,18 @@ export const operationInfo = (sql: SqlClient.SqlClient, input: { userId: UserId;
       const state = foldState(
         rows.map((r) => ({ scope: r.scope, data: { key: r.key, value: JSON.parse(r.value_json) } })) as never
       )
-      const chosen =
-        state.modelBindings[""] ?? (yield* readSetting(sql, "user", input.userId, "generation.model")).value
-      proof = { ...chat, model: chosen }
+      const chosen = (state.modelBindings[""] ??
+        (yield* readSetting(sql, "user", input.userId, "generation.model")).value) as {
+        readonly connection: string
+        readonly model: string
+      } | null
+      const [provider] = chosen
+        ? yield* sql`SELECT c.row_version AS connectionRevision, c.cache_revision AS connectionCacheRevision,
+          m.row_version AS modelRevision FROM connections c JOIN models m ON m.connection_id = c.id
+          WHERE c.id = ${chosen.connection} AND m.id = ${chosen.model} AND c.owner_user_id = ${input.userId}
+          AND c.deleted_at IS NULL AND c.purged_at IS NULL`
+        : []
+      proof = { ...chat, model: chosen, provider: provider ?? null }
     }
     return {
       user: new User({ id: input.userId, handle: row.handle, displayName: row.display_name, role: row.role }),

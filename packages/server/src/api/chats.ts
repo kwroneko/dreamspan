@@ -223,6 +223,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           slotId: result.slotId,
           versionId: result.version.id,
           ...(proof?.model ? { model: proof.model } : {}),
+          ...(operation ? { replyOnly: true } : {}),
           forkId: result.forkId
         })
       }

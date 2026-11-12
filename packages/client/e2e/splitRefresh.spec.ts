@@ -102,6 +102,9 @@ test("a workshop's first-message split has bounded reads, heap and DOM at 1440",
   await showActions(opening)
   stats.armed = true
   await opening.getByRole("button", { name: "Generate another version", exact: true }).click()
+  const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
+  await expect(warning).toBeVisible()
+  await warning.getByRole("button", { name: "Keep them and make a new version", exact: true }).click()
   await expect.poll(() => stats.slotFrames).toBeGreaterThan(0)
   await steady(page, stats)
   await page.getByRole("button", { name: "Chat panel", exact: true }).first().click()
