@@ -1,3 +1,5 @@
+import { workshopLimits } from "../../workshopLimits.ts"
+import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { chatCursor } from "@rp/shared/chatApi.ts"
 import type { Chat } from "@rp/shared/chat.ts"
 import { AppApi } from "@rp/shared/api.ts"
@@ -29,8 +31,10 @@ export const resolveChat = (ctx: ToolContext, value: unknown) =>
     const wanted = String(value)
     let before: ReturnType<typeof chatCursor> | null = null
     const matches: Chat[] = []
+    const candidates: Chat[] = []
     do {
       const page: readonly Chat[] = yield* ctx.reader.ListChats({ userId: ctx.userId, limit: 500, before })
+      candidates.push(...page.slice(0, Math.max(0, 5 - candidates.length)))
       const exact = page.find((chat) => chat.id === wanted)
       if (exact) return exact
       matches.push(...page.filter((chat) => chat.title.toLocaleLowerCase() === wanted.toLocaleLowerCase()))
@@ -41,7 +45,7 @@ export const resolveChat = (ctx: ToolContext, value: unknown) =>
       return yield* fail(
         matches.length
           ? `Several chats match. Choose an id: ${JSON.stringify(matches.map((chat) => ({ id: chat.id, name: chat.title })))}`
-          : `No chat matches ${JSON.stringify(wanted)}. Use list_chats.`
+          : `No chat matches ${JSON.stringify(wanted)}. Candidates: ${JSON.stringify(candidates.map((chat) => ({ id: chat.id, name: chat.title })))}. Use list_chats.`
       )
     return matches[0]!
   })
@@ -223,7 +227,25 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
   {
     ...exposure("history_rename", "RenameHistory", "chats.rewrite", "setup", "Rename text in history"),
     operation: { command: "history.rename" },
-    parameters: AppApi.requests.get("RenameHistory")!.payloadSchema
+    parameters: AppApi.requests.get("RenameHistory")!.payloadSchema,
+    adapt: (args, ctx) =>
+      Effect.gen(function* () {
+        const targets = yield* ctx.reader.RenameHistoryTargets({ userId: ctx.userId, entityId: args.entityId as never })
+        const selected = targets
+          .filter(
+            (target) =>
+              args.scope === "all" ||
+              (args.scope === "this" && target.chatId === args.chatId && target.forkId === args.forkId)
+          )
+          .sort((a, b) => a.chatId.localeCompare(b.chatId) || a.forkId.localeCompare(b.forkId))
+        if (selected.length > workshopLimits.listItems)
+          return yield* fail("This rename affects too many branches. Choose one chat and branch instead.")
+        const chats = yield* Effect.forEach([...new Set(selected.map((target) => target.chatId))], (chatId) =>
+          ctx.reader.WorkshopOperationInfo({ userId: ctx.userId, chatId }).pipe(Effect.map((info) => info.proof))
+        )
+        ctx.cache.set(`operation:proof:${ctx.toolCallId}`, { chats, historyTargets: selected })
+        return args
+      })
   },
   {
     ...exposure("read_settings", "GetGenerationDefaults", "settings", "read", "Read your agent-changeable settings"),
@@ -256,6 +278,9 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
           const { chatId, forkId, slotId } = yield* chatPayload(ctx, args)
           if (chatId === ctx.chatId)
             return yield* fail("Choose another chat; this workshop is already writing a reply.")
+          const target = yield* ctx.reader.GetChat({ userId: ctx.userId, chatId })
+          if (chatKinds.get(target.kind)?.allowsOutside !== false)
+            return yield* fail("Replies in another workshop or an unavailable chat kind are not allowed.")
           const proof = ctx.cache.get(`operation:proof:${ctx.toolCallId}`) as { chat?: { model?: unknown } }
           if (!proof.chat?.model) return yield* fail("Choose a model in that chat before asking for a reply.")
           return {

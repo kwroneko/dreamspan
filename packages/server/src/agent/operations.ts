@@ -1,6 +1,6 @@
 import type { RolloutEffectRecord } from "@rp/shared/workshopApi.ts"
 import { WriteOps } from "../db/ops.ts"
-import { operationExclusions } from "./exposures/exclusions.ts"
+import { operationExclusions, commandExclusions } from "./exposures/exclusions.ts"
 // Registered, capability-bound adapters for the same operations the UI uses.
 import { AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { Effect, Context, Schema } from "effect"
@@ -93,8 +93,17 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
     ...entries,
     register: (entry: OperationExposure) =>
       Effect.sync(() => {
-        if ("rpc" in entry.operation && operationExclusions[entry.operation.rpc]?.startsWith("User-only"))
-          throw new Error(`Operation ${entry.operation.rpc} is reserved for the user.`)
+        const operation = "rpc" in entry.operation ? entry.operation.rpc : entry.operation.command
+        const exclusions = "rpc" in entry.operation ? operationExclusions : commandExclusions
+        if (exclusions[operation]) throw new Error(`Operation ${operation} is excluded: ${exclusions[operation]}`)
+        if (
+          entries
+            .list()
+            .some(
+              (other) => other.id !== entry.id && JSON.stringify(other.operation) === JSON.stringify(entry.operation)
+            )
+        )
+          throw new Error(`Operation ${operation} already has a tool name.`)
         if (!entry.capability || !capabilities.workshopCapabilities.get(entry.capability))
           throw new Error(`Tool ${entry.id} needs exactly one registered capability.`)
       }).pipe(Effect.andThen(entries.register(entry)))
@@ -138,12 +147,15 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
                     model: import("@rp/shared/providers.ts").ModelId
                   }
                 }
+                chats?: ReadonlyArray<{ id: string; title: string }>
               }
             | undefined
           const rows = Object.entries(payload as object).map(([label, value]) => ({
             label,
             value: typeof value === "string" ? value : JSON.stringify(value)
           }))
+          for (const chat of proof?.chats ?? [])
+            rows.unshift({ label: "affected chat", value: `${chat.title} (${chat.id})` })
           if (proof?.chat) rows.unshift({ label: "chat", value: proof.chat.title })
           if (entry.capability === "generate" && proof?.chat?.model) {
             const connection = yield* ctx.reader.GetConnection({
@@ -185,7 +197,11 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
           const output: ToolOutput = entry.after
             ? yield* entry.after(result, args, ctx)
             : { text: budgetResult(entry.render?.(result, args) ?? JSON.stringify(result) ?? "Done.") }
-          const final: ToolOutput = entry.effects ? { ...output, effects: entry.effects(result, args) } : output
+          const final: ToolOutput = {
+            ...output,
+            text: budgetResult(output.text),
+            ...(entry.effects ? { effects: entry.effects(result, args) } : {})
+          }
           if (entry.effect !== "read")
             yield* ctx.writer
               .RecordRolloutEffects({

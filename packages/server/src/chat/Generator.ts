@@ -21,6 +21,8 @@ export interface GenerationRequest {
   readonly forkId?: ForkId
   /** "Retry with…": generates with this model instead of the chat's. */
   readonly model?: { readonly connection: ConnectionId; readonly model: ModelId }
+  /** An approved workshop send permits this reply only, without auxiliary provider workflows. */
+  readonly replyOnly?: boolean
   readonly onWaitingCache?: (waiting: boolean) => void
   /**
    * Continue: the version starts with this text and reasoning (the version it continues),
