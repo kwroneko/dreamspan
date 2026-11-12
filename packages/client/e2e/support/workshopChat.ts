@@ -321,8 +321,10 @@ export function workshopChatTests() {
           await page.goto(`${server().url}/chats/${workshopId}`)
 
           // Keep the base branch's step-edit coverage after checking ordinary continuity.
-          await reply.locator("[data-steps-badge]").click()
-          await reply.getByRole("link", { name: "Open the run" }).click()
+          const cardMessage = page.getByRole("article").filter({ hasText: WORKSHOP_SECOND }).last()
+          if (!(await cardMessage.getByRole("link", { name: "Open the run" }).isVisible()))
+            await cardMessage.locator("[data-steps-badge]").click()
+          await cardMessage.getByRole("link", { name: "Open the run" }).click()
           const result = page.getByRole("region", { name: "Result of read_card", exact: true }).first()
           await result.getByRole("button", { name: "Edit", exact: true }).click()
           const edited = "Synthetic edited card result."

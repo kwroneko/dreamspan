@@ -115,6 +115,15 @@ describe("workshop messages and continuity", () => {
           [["list_library"], ["read_card"], ["read_preset"]][index]
         )
         assert.strictEqual(entry.version.steps?.count, 1)
+        const inspected = yield* api.GetRunTranscript({ versionId: entry.version.id })
+        const local = inspected.entries.flatMap((e) =>
+          e.role === "toolResult" && e.step !== undefined ? [[e.tool, e.step]] : []
+        )
+        assert.deepStrictEqual(
+          local,
+          [[["list_library", "read_card", "read_preset"][index], 0]],
+          "inspector uses the viewed message's step indices"
+        )
       }
       const transcript = JSON.parse(materials[0]!.transcript!) as Array<{
         role: string

@@ -54,10 +54,14 @@ const transcriptEntries = (
 ): Array<TranscriptEntry> => {
   let request = requests
   const stepAt = new Map(steps.map((s, i) => [`${s.message}:${s.part}`, i]))
-  const callStep = new Map(steps.flatMap((s, i) => (s.step.kind === "tool" ? [[s.step.id, i] as const] : [])))
+  const callStep = new Map(
+    steps.flatMap((s, i) => (s.step.kind === "tool" ? [[`${s.message}:${s.step.id}`, i] as const] : []))
+  )
+  let assistantAt = -1
   const index = (step: number | undefined) => (step === undefined ? {} : { step })
   return messages.flatMap((m, at): Array<TranscriptEntry> => {
-    if (m.role === "assistant")
+    if (m.role === "assistant") {
+      assistantAt = at
       return [
         {
           role: "assistant",
@@ -76,6 +80,7 @@ const transcriptEntries = (
           ...(m.errorMessage ? { error: m.errorMessage } : {})
         }
       ]
+    }
     if (m.role === "toolResult")
       return [
         {
@@ -84,7 +89,7 @@ const transcriptEntries = (
           tool: m.toolName,
           text: textOf(m.content),
           isError: m.isError,
-          ...index(callStep.get(m.toolCallId))
+          ...index(callStep.get(`${assistantAt}:${m.toolCallId}`))
         }
       ]
     if (m.role === "rpUser") {
@@ -493,7 +498,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             parameters: t.parameters,
             effect: t.effect
           })),
-          entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true)),
+          entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true, versionId)),
           cut: cutSpans(messages, branches, tools.length, turnCap)
         }
       }).pipe(query("RolloutTranscript")),
