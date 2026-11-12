@@ -1,6 +1,7 @@
 // The regenerate warning's dialog (spec/WORKSHOP.md §3.6), shown by the host registered in
-// `appTools` for a request from `askBeforeReply`. It reads the reply's changes first; with none
-// still standing the new version goes ahead at once. Otherwise it lists them and offers "Undo them,
+// `appTools` for a request from `askBeforeReply`. It reads the reply's changes (its own and its
+// run's later messages'), leaves out those of the calls the new version keeps, and with none still
+// standing the new version goes ahead at once. Otherwise it lists them and offers "Undo them,
 // then make a new version" (newest first, stopping at the first refused), "Keep them and make a new
 // version", or Cancel.
 import { useEffect, useRef, useState } from "react"
@@ -10,10 +11,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { EFFECTS_KEY, effectId, effectKey, outstanding, type RolloutEffect } from "./effects.ts"
-import { useWarningRequest, type WarningRequest } from "./regenerateWarning.ts"
-
-/** What the dialog says a new version does and doesn't do. */
-const WARNING_TEXT = "A new version won’t undo them, and the assistant may make them again."
+import { keptCalls, useWarningRequest, warningText, type WarningRequest } from "./regenerateWarning.ts"
 
 function Warning({ asked }: { asked: WarningRequest }) {
   const call = useCaller()
@@ -28,7 +26,15 @@ function Warning({ asked }: { asked: WarningRequest }) {
     void (async () => {
       const read = await call((client) => client("ListVersionEffects", { versionId: asked.request.versionId }))
       // It couldn't be read: asking about nothing would only stand in the way.
-      const left = read.ok ? outstanding(read.value) : []
+      let left = read.ok ? outstanding(read.value) : []
+      // The new version keeps the reply's own calls (before the step it carries on from).
+      if (left.length > 0) {
+        const steps = await call((client) => client("GetRolloutSteps", { versionId: asked.request.versionId }))
+        if (steps.ok) {
+          const kept = keptCalls(steps.value, asked.request)
+          left = left.filter((effect) => !kept.has(effect.toolCallId))
+        }
+      }
       if (left.length === 0) return asked.settle(true)
       setStanding(left)
     })()
@@ -58,7 +64,7 @@ function Warning({ asked }: { asked: WarningRequest }) {
       open
       onOpenChange={(open) => !open && pending === null && asked.settle(false)}
       title="This reply changed things outside the chat"
-      description={WARNING_TEXT}
+      description={warningText(asked.request.action)}
     >
       <ul
         aria-label="Changes it made"

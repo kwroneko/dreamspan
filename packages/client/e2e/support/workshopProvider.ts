@@ -6,11 +6,16 @@ import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 
 export const WORKSHOP_ANSWER = "I read the Assistant and created the card Mara Quill in your library."
+export const WORKSHOP_FIRST = "I’ll look through the library first."
+export const WORKSHOP_SECOND = "The Assistant card is practical and brief. I’ll check the preset too."
 export const STORY_REPLY = "The harbor bell rings twice."
 
 const CALLS = [
   { name: "list_library", arguments: { kind: "card" } },
+  { name: "send_message", arguments: { message: WORKSHOP_FIRST } },
   { name: "read_card", arguments: { card: "Assistant", fields: ["description"] } },
+  { name: "send_message", arguments: { message: WORKSHOP_SECOND } },
+  { name: "read_preset", arguments: { preset: "Workshop" } },
   { name: "create_card", arguments: { name: "Mara Quill", description: "A synthetic lighthouse keeper." } }
 ]
 
@@ -19,7 +24,20 @@ interface Body {
   readonly tools?: ReadonlyArray<{ readonly function: { readonly name: string } }>
 }
 
-export const startWorkshopProvider = async () => {
+interface Script {
+  readonly name: string
+  readonly arguments: object
+}
+
+/**
+ * `calls`: the tool calls a request offering the library tools gets, one a request, then the
+ * answer. `perTask`: count them from the latest user message, so every task runs them again
+ * (a carried turn holds the earlier ones too); by default from the start of the request.
+ */
+export const startWorkshopProvider = async (
+  options: { readonly calls?: ReadonlyArray<Script>; readonly perTask?: boolean } = {}
+) => {
+  const calls = options.calls ?? CALLS
   const bodies: Array<Body> = []
   let holding: number | null = null
   const held: Array<() => void> = []
@@ -60,8 +78,9 @@ export const startWorkshopProvider = async () => {
       const usage = { prompt_tokens: 300, completion_tokens: 10 }
       const library = body.tools?.some((tool) => tool.function.name === "list_library") === true
       if (!library) return stream(res, [...words(STORY_REPLY), chunk({}, "stop"), chunk({}, null, usage)])
-      const done = body.messages.filter((m) => m.role === "tool").length
-      const call = CALLS[done]
+      const from = options.perTask ? body.messages.findLastIndex((m) => m.role === "user") : 0
+      const done = body.messages.slice(Math.max(0, from)).filter((m) => m.role === "tool").length
+      const call = calls[done]
       const answer = () =>
         call
           ? stream(res, [

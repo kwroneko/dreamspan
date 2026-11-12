@@ -129,6 +129,7 @@ export interface RequestTransform {
       readonly target: RequestTarget
       readonly messages: ReadonlyArray<Message>
       readonly breakpoints: ReadonlyArray<number>
+      readonly preserveBreakpoints?: boolean
       readonly cacheLayout?: import("@rp/shared/providers.ts").CacheLayout
       /** Set for the automatic layout (no explicit breakpoints) when the assembly has an endpoint. */
       readonly stable?: StableEndpoint

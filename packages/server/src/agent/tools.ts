@@ -124,6 +124,13 @@ export const sendMessageDefinition = {
   effect: "read"
 } satisfies FrozenTool
 
+/** Several-message contracts share the tool shape, with instructions matching their loop. */
+export const severalMessageDefinition: FrozenTool = {
+  ...sendMessageDefinition,
+  description:
+    "Posts a message exactly as it should appear, then carries on working. You may call it several times. End the turn with a plain-text answer, which is posted as the last message."
+}
+
 /** Per-result cap on what a tool sends back, with the marker telling the model to narrow it. */
 const RESULT_CHARS = 16_000
 export const budgetResult = (text: string, limit = RESULT_CHARS) =>

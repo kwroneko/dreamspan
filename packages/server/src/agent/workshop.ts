@@ -1,6 +1,6 @@
 import type { OrchestrationMode } from "./modes.ts"
 
-// W1 uses fresh assembly and one message. Several messages and continuity belong to W5.
+// What a capability turned off in this workshop is (spec/WORKSHOP.md §3.4) is named in the instructions.
 const workshopInstructions = (off: ReadonlyArray<string>) =>
   `Use the tools to look things up and to make changes. Before a long piece of work, tell {{user}} in a short message (send_message) what you'll do. Everything you change can be undone by {{user}}. Some tools ask {{user}} first: call them anyway; if {{user}} declines, say so and carry on. Turned off in this workshop: ${off.length > 0 ? off.join("; ") : "nothing"}.`
 
@@ -22,7 +22,8 @@ export const workshopMode: OrchestrationMode = {
       "clone_card",
       "start_chat"
     ],
-    contract: state.outputContract ?? "both",
+    contract: state.outputContract ?? "several",
+    continuity: state.rolloutContinuity ?? "resume_previous",
     turnCap: 40,
     assembly: {
       instructions: (_offered, _contract, context) => workshopInstructions(context?.off ?? []),

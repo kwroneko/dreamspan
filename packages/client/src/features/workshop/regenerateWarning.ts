@@ -4,6 +4,7 @@
 // here; the one host in `appTools` (RegenerateWarning.tsx) reads the reply's changes and, when any
 // still stand, asks in a dialog, so the asking survives the menu that asked closing.
 import { useSyncExternalStore } from "react"
+import type { RolloutStep } from "@rp/shared/agent.ts"
 import type { ReplyGuardRequest } from "../chat/replyGuards.ts"
 import { kindShows } from "../chat/kindLooks.ts"
 import { CHANGES } from "./effects.ts"
@@ -20,6 +21,28 @@ const listeners = new Set<() => void>()
 const notify = () => {
   for (const listener of listeners) listener()
 }
+
+/**
+ * What a new version does and doesn't do (spec/WORKSHOP.md §3.4, §3.6, W5's merged rules): it
+ * keeps the reply's own calls (before the step it carries on from) and their changes, undoes
+ * nothing, and the run may make the later changes again.
+ */
+export const warningText = (action: "regenerate" | "resume-step") =>
+  action === "regenerate"
+    ? "Made by the replies its run wrote after this one. A new version keeps this reply’s own steps and changes and undoes none of these, but the assistant may make them again."
+    : "Made from this step on, or by the replies its run wrote after this one. Carrying on keeps the steps before it and their changes and undoes none of these, but the assistant may make them again."
+
+/**
+ * The calls a new version keeps, by id, from the version's own steps: all of them for a new
+ * version of the reply (only its message is written again); for carrying on from a step, those
+ * before it, and the step's own call when its result is edited in place.
+ */
+export const keptCalls = (steps: ReadonlyArray<RolloutStep>, request: ReplyGuardRequest) =>
+  new Set(
+    steps
+      .slice(0, request.fromStep ? request.fromStep.index + (request.fromStep.keepsCall ? 1 : 0) : steps.length)
+      .flatMap((step) => (step.kind === "tool" ? [step.id] : []))
+  )
 
 /** Whether a request can need the warning: a reply that made tool calls, in a kind with changes. */
 export const mayWarn = (request: ReplyGuardRequest) =>

@@ -20,7 +20,7 @@ import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { loadCards } from "./cards.ts"
 import { forkRecency, forkThrough, onForkPath } from "./forks.ts"
-import { selectedIn, slotDeletedIn } from "./forkState.ts"
+import { selectedIn, slotDeletedIn, nextSeq } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts"
@@ -657,7 +657,75 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           else yield* sql`DELETE FROM entity_tags WHERE entity_id = ${entityId} AND tag = 'persona'`
         }).pipe(transaction("SetPersona")),
 
-      FinishGeneration: ({ userId, versionId, content, reasoning, replySections, status, error, rewrite }) =>
+      PostRolloutMessage: ({ userId, rolloutId, versionId, toolCallId, content, reasoning, replySections, rewrite }) =>
+        Effect.gen(function* () {
+          const row = yield* graph.ownedVersion(userId, versionId, true)
+          const [run] = yield* sql<{ fork_id: string; chat_id: string }>`
+            SELECT r.fork_id, r.chat_id FROM rollouts r JOIN rollout_payloads p ON p.rollout_id = r.id
+            WHERE r.id = ${rolloutId} AND r.status = 'running'
+              AND json_extract(p.context_snapshot_json, '$.agent.contract') = 'several'`
+          const [receipt] = yield* sql<{ result_json: string }>`SELECT result_json FROM rollout_receipts
+            WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
+          if (run && row.rollout_id === rolloutId && receipt)
+            return JSON.parse(JSON.parse(receipt.result_json) as string) as {
+              slotId: SlotId
+              versionId: VersionId
+              postedVersionId: VersionId
+            }
+          if (!run || row.rollout_id !== rolloutId || row.status !== "generating")
+            return yield* new NotFound({ entity: "working message", id: versionId })
+          const columns = rewriteColumns(rewrite)
+          yield* sql`UPDATE version_records SET content = ${content}, reasoning = ${reasoning || null},
+            reply_sections = ${replySections ? JSON.stringify(replySections) : null}, status = 'complete',
+            raw_content = ${columns.raw_content}, raw_reasoning = ${columns.raw_reasoning},
+            raw_sections = ${columns.raw_sections}, rewrite_json = ${columns.rewrite_json}, updated_at = ${Date.now()}
+            WHERE id = ${versionId}`
+          const [parent] = yield* sql<{
+            id: string
+            depth: number
+          }>`SELECT id, depth FROM slots WHERE id = ${row.slot_id}`
+          const next = yield* graph.insertSlot(
+            run.chat_id,
+            parent!,
+            {
+              speakerEntityId: row.speaker_entity_id as never,
+              writer: "model",
+              content: "",
+              status: "generating",
+              macroMode: "verbatim",
+              origin: "generated"
+            },
+            Date.now(),
+            run.fork_id
+          )
+          yield* sql`UPDATE version_records SET rollout_id = ${rolloutId}, connection_id = (SELECT connection_id FROM versions WHERE id = ${versionId}),
+            model_id = (SELECT model_id FROM versions WHERE id = ${versionId}), cast_json = (SELECT cast_json FROM version_records WHERE id = ${versionId})
+            WHERE id = ${next.version.id}`
+          yield* sql`UPDATE forks SET tip_slot_id = ${next.slotId}, row_version = row_version + 1 WHERE id = ${run.fork_id}`
+          // Queued user input waits for the whole run, including after this message.
+          yield* sql`UPDATE queued_messages SET reply_slot_id = ${next.slotId} WHERE reply_slot_id = ${row.slot_id}
+            AND fork_id IS ${run.fork_id}`
+          const result = {
+            slotId: next.slotId as SlotId,
+            versionId: next.version.id as VersionId,
+            postedVersionId: versionId
+          }
+          yield* sql`INSERT INTO rollout_receipts (rollout_id, tool_call_id, result_json, created_at)
+            VALUES (${rolloutId}, ${toolCallId}, ${JSON.stringify(JSON.stringify(result))}, ${Date.now()})`
+          return result
+        }).pipe(transaction("PostRolloutMessage")),
+
+      FinishGeneration: ({
+        userId,
+        versionId,
+        content,
+        reasoning,
+        replySections,
+        status,
+        error,
+        rewrite,
+        discardEmpty
+      }) =>
         Effect.gen(function* () {
           const row = yield* graph.ownedVersion(userId, versionId, false)
           // A version deleted for good stays empty, whatever was still generating into it.
@@ -699,6 +767,68 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                       AND action.round = 0 AND action.seq < q.seq))
                 RETURNING id`
               : []
+          if (
+            discardEmpty &&
+            status === "complete" &&
+            !content.trim() &&
+            !replySections?.sections.some((section) => section.text.trim())
+          ) {
+            const [safe] = yield* sql<{ parent_slot_id: string | null }>`SELECT parent_slot_id FROM slots s
+              WHERE s.id = ${row.slot_id} AND s.bin_item_id IS NULL
+                AND (SELECT count(*) FROM versions WHERE slot_id = s.id) = 1
+                AND NOT EXISTS (SELECT 1 FROM slots WHERE parent_slot_id = s.id)
+                AND NOT EXISTS (SELECT 1 FROM state_events WHERE slot_id = s.id
+                  AND (origin <> 'rollout' OR version_id IS NOT ${versionId}))`
+            if (safe) {
+              const events = yield* sql<{
+                key: string
+                scope: string | null
+                value_json: string
+                origin_ref: string | null
+                fork_id: string | null
+                created_at: number
+              }>`
+                SELECT key, scope, value_json, origin_ref, fork_id, created_at FROM state_events WHERE slot_id = ${row.slot_id} ORDER BY seq`
+              if (events.length && safe.parent_slot_id) {
+                const [parent] = yield* sql<{
+                  selected_version_id: string
+                }>`SELECT selected_version_id FROM slots WHERE id = ${safe.parent_slot_id}`
+                const [last] = yield* sql<{
+                  n: number
+                }>`SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE slot_id = ${safe.parent_slot_id}`
+                for (const [i, event] of events.entries())
+                  yield* sql`INSERT INTO state_events ${sql.insert({
+                    id: uuidv7(),
+                    chat_id: slot!.chat_id,
+                    slot_id: safe.parent_slot_id,
+                    version_id: parent!.selected_version_id,
+                    seq: last!.n + i,
+                    key: event.key,
+                    scope: event.scope,
+                    value_json: event.value_json,
+                    origin: "rollout",
+                    origin_ref: event.origin_ref,
+                    fork_id: event.fork_id,
+                    fork_seq: event.fork_id ? yield* nextSeq(sql, slot!.chat_id) : null,
+                    created_at: event.created_at
+                  })}`
+              }
+              yield* sql`UPDATE forks SET tip_slot_id = ${safe.parent_slot_id}, row_version = row_version + 1 WHERE tip_slot_id = ${row.slot_id}`
+              yield* sql`UPDATE rollouts SET slot_id = ${safe.parent_slot_id} WHERE slot_id = ${row.slot_id}`
+              yield* sql`UPDATE queued_messages SET reply_slot_id = ${safe.parent_slot_id} WHERE reply_slot_id = ${row.slot_id}`
+              yield* sql`DELETE FROM slots WHERE id = ${row.slot_id}`
+              const queue = safe.parent_slot_id ? yield* afterReply(safe.parent_slot_id, "reply") : nothing
+              const [parent] = safe.parent_slot_id
+                ? yield* sql<{
+                    selected_version_id: string
+                  }>`SELECT selected_version_id FROM slots WHERE id = ${safe.parent_slot_id}`
+                : []
+              const last = parent
+                ? toVersion(yield* graph.ownedVersion(userId, parent.selected_version_id as VersionId, false))
+                : version
+              return { version: last, chatId: slot!.chat_id as ChatId, ...queue, removedSlotId: row.slot_id as SlotId }
+            }
+          }
           // A reply interrupted by the server going down leaves its queue to the next start.
           const queue = status === "interrupted" ? nothing : yield* afterReply(row.slot_id, "reply")
           // A round held here changed the queue too, though nothing posted.

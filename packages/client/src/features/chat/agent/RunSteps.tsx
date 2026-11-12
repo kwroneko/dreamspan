@@ -406,7 +406,8 @@ function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): Ste
       kind: undefined,
       versionId: run.versionId as VersionId,
       hasSteps: true,
-      action: "resume-step"
+      action: "resume-step",
+      fromStep: { index: step, keepsCall: edit?.kind === "result" }
     })
     if (!go) return false
     const result = await action.run((client) =>

@@ -303,7 +303,8 @@ describe("workshop approvals", () => {
               .find((r) => r.path === "/v1/chat/completions")!.body as unknown as Body
           })
         const names = (body: Body) => (body.tools ?? []).map((t) => t.function.name)
-        const instructions = (body: Body) => JSON.stringify(body.messages.at(-1)?.content)
+        // A carried turn keeps the instructions in its frozen prefix: read the whole request.
+        const instructions = (body: Body) => JSON.stringify(body.messages)
         const allowed = yield* turn("first")
         assert.includeMembers(names(allowed), ["create_card", "edit_card", "clone_card", "start_chat"])
         assert.include(instructions(allowed), "Turned off in this workshop: nothing.")

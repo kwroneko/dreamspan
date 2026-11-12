@@ -10,10 +10,18 @@ export interface ReplyGuardRequest {
   readonly kind: string | undefined
   /** The version a new one would replace in its slot. */
   readonly versionId: VersionId
-  /** Its run made tool calls: only such a reply can have changed anything. */
+  /**
+   * Written by a run that can have made tool calls (its own, or a later message of the same run's):
+   * only such a reply can have changed anything.
+   */
   readonly hasSteps: boolean
   /** Regenerate or a swipe to a new version, or carrying on from one of its steps. */
   readonly action: "regenerate" | "resume-step"
+  /**
+   * Carrying on from one of its steps: the step's index in the version's steps, and whether that
+   * step's call is kept (a result edited in place) rather than made again.
+   */
+  readonly fromStep?: { readonly index: number; readonly keepsCall: boolean }
 }
 
 export interface ReplyGuard {

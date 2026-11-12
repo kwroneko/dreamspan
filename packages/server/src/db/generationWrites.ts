@@ -106,7 +106,9 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       mode,
       issues,
       variables,
-      frozenMessages
+      frozenMessages,
+      parentRolloutId,
+      transcript
     }) =>
       Effect.gen(function* () {
         const [version] = yield* sql<{ status: string; writer: string }>`
@@ -144,6 +146,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           slot_id: slotId,
           leaf_slot_id: leafSlotId,
           role: "narrator",
+          ...(parentRolloutId ? { parent_rollout_id: parentRolloutId } : {}),
           mode: mode ?? null,
           connection_id: connectionId,
           model_id: modelId,
@@ -153,7 +156,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           started_at: now,
           updated_at: now
         })}`
-        yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
+        yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot, ...(transcript ? { transcript_json: transcript } : {}) })}`
         yield* sql`INSERT INTO lore_activations (rollout_id, entries_json, message_offset)
           SELECT ${rolloutId}, coalesce(json_extract(${snapshot}, '$.loreTiming'), '[]'),
             CASE WHEN json_extract(${snapshot}, '$.inputs.type') = 'continue' THEN 1 ELSE 0 END`

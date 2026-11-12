@@ -1638,7 +1638,8 @@ export class ChatSession {
       chatId: this.chatId,
       kind: this.view.chat?.kind,
       versionId: entry.version.id,
-      hasSteps: (entry.version.steps?.count ?? 0) > 0,
+      // A message of a several-message run without steps of its own may still have later ones'.
+      hasSteps: (entry.version.steps?.count ?? 0) > 0 || entry.version.agent === true,
       action: "regenerate"
     })
     if (!go) return { ok: true, value: null }

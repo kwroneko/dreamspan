@@ -9,6 +9,8 @@ import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
+import { callsFrom } from "../agent/steps.ts"
 
 type Sql = SqlClient.SqlClient
 
@@ -120,17 +122,6 @@ const lineage = (sql: Sql, rolloutId: string) =>
         WHERE src.rollout_id IS NOT NULL AND up.depth < ${RESUME_DEPTH}
     ) SELECT id, min(depth) AS depth FROM up GROUP BY id ORDER BY depth`
 
-/** The tool call ids a stored transcript holds. */
-const callIds = (transcript: string | null) => {
-  const ids = new Set<string>()
-  if (transcript === null) return ids
-  for (const message of JSON.parse(transcript) as ReadonlyArray<{ role?: string; content?: unknown }>)
-    if (message.role === "assistant" && Array.isArray(message.content))
-      for (const part of message.content as ReadonlyArray<{ type?: string; id?: string }>)
-        if (part.type === "toolCall" && typeof part.id === "string") ids.add(part.id)
-  return ids
-}
-
 export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
@@ -166,14 +157,34 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
         if (!version) return yield* new NotFound({ entity: "version", id: versionId })
         if (version.rollout_id === null) return []
-        // Its own run's changes, and those of the calls it kept from the runs it was resumed from.
+        // The changes of the calls its message and the run's later messages made (an earlier
+        // message's are left out): its own run's, and those of calls it kept from the runs it
+        // was resumed from. A kept call carries its result over; a call made again under the
+        // same id has a result of its own, so an earlier run's change isn't listed for it.
         const runs = yield* lineage(sql, version.rollout_id)
-        const kept = callIds(version.transcript)
+        const calls =
+          version.transcript === null
+            ? new Map<string, string | null>()
+            : callsFrom(JSON.parse(version.transcript) as ReadonlyArray<AgentMessage>, versionId)
         const rows = yield* sql<Parameters<typeof toRolloutEffect>[0]>`SELECT e.* FROM rollout_effects e
           WHERE e.rollout_id IN ${sql.in(runs.map((r) => r.id))}
           ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC`
+        const earlier = [...new Set(rows.map((r) => r.rollout_id))].filter((id) => id !== version.rollout_id)
+        const results = new Map<string, Map<string, string | null>>()
+        if (earlier.length > 0)
+          for (const run of yield* sql<{ rollout_id: string; transcript: string | null }>`SELECT rollout_id,
+              transcript_json AS transcript FROM rollout_payloads WHERE rollout_id IN ${sql.in(earlier)}`)
+            results.set(
+              run.rollout_id,
+              run.transcript === null ? new Map() : callsFrom(JSON.parse(run.transcript) as ReadonlyArray<AgentMessage>)
+            )
         return rows
-          .filter((row) => row.rollout_id === version.rollout_id || kept.has(row.tool_call_id))
+          .filter((row) => {
+            if (!calls.has(row.tool_call_id)) return false
+            if (row.rollout_id === version.rollout_id) return true
+            const there = results.get(row.rollout_id)?.get(row.tool_call_id)
+            return there !== undefined && there !== null && there === calls.get(row.tool_call_id)
+          })
           .map(toRolloutEffect)
       }).pipe(query("VersionEffects"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>

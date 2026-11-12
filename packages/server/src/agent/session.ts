@@ -10,7 +10,6 @@ import {
   createAssistantMessageEventStream,
   type Api,
   type AssistantMessage,
-  type Message,
   type Model,
   type Tool
 } from "@earendil-works/pi-ai"
@@ -32,24 +31,18 @@ import {
   type FrozenTool,
   frozenTool,
   sendMessageDefinition,
+  severalMessageDefinition,
   type RolloutTool,
   type ToolOutput,
   toolWriter
 } from "./tools.ts"
 import { rolloutRequest } from "./wire.ts"
-
-declare module "@earendil-works/pi-agent-core" {
-  interface CustomAgentMessages {
-    /** Stands for the frozen assembled request: everything the model is sent before its own turns. */
-    rpRequest: { readonly role: "rpRequest"; readonly timestamp: number }
-    /** A message the app adds (the turn cap's "write now"), sent as the user's and labelled as the app's. */
-    rpHarness: { readonly role: "rpHarness"; readonly content: string; readonly timestamp: number }
-  }
-}
+import { liveSuffix } from "./messages.ts"
 
 /** What an agent turn needs beyond a plain reply's. */
 export interface AgentRun {
   readonly allowsOutside?: boolean
+  readonly checkpoints?: ReadonlyArray<number>
   readonly plan: AgentPlan
   readonly mode: string
   readonly tools: ReadonlyArray<RolloutTool<never>>
@@ -59,7 +52,11 @@ export interface AgentRun {
   /** The tool definitions to offer as a snapshot froze them (a resume); absent: `tools`' own. */
   readonly offered?: ReadonlyArray<FrozenTool>
   /** Carrying on a stopped run (resume.ts): its kept transcript, and text cut off to continue. */
-  readonly resume?: { readonly transcript: ReadonlyArray<unknown>; readonly continuation?: string }
+  readonly resume?: {
+    readonly transcript: ReadonlyArray<unknown>
+    readonly continuation?: string
+    readonly historical?: number
+  }
   /**
    * Whether a call may run now (approvals.ts): its capability's standing, asking the user first
    * where it says so. Absent: every offered call runs.
@@ -98,16 +95,6 @@ const sendMessageTool = (onSend: (message: string) => boolean): AgentTool => ({
     }
   }
 })
-
-/** The messages the model sees after the frozen request: its turns, tool results and the app's notes. */
-const liveSuffix = (messages: ReadonlyArray<AgentMessage | Message>): Array<Message> => {
-  const start = messages.findIndex((m) => m.role === "rpRequest")
-  return messages.slice(start + 1).flatMap((m): Array<Message> => {
-    if (m.role === "rpHarness") return [{ role: "user", content: m.content, timestamp: m.timestamp }]
-    if (m.role === "assistant" || m.role === "toolResult" || m.role === "user") return [m]
-    return []
-  })
-}
 
 const emptyAssistant = (model: Model<Api>): AssistantMessage => ({
   role: "assistant",
@@ -148,8 +135,14 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       const runPromise = Effect.runPromiseWith(services)
       // A turn that may call tools can't be prefilled (spec/AGENTIC.md §3.2).
       const resolved = yield* input.resolveImages({ ...generation.request, prefill: null })
-      const prefix = providerRequest(resolved, model)
+      const basePrefix = providerRequest(resolved, model)
+      const prefix = run.checkpoints?.length
+        ? { ...basePrefix, breakpoints: [...new Set([...basePrefix.breakpoints, ...run.checkpoints])] }
+        : basePrefix
       const sends = plan.contract !== "final_text"
+      const several = plan.contract === "several"
+      let working = { slotId: request.slotId, versionId: request.versionId }
+      const historical = run.resume?.historical ?? 0
       let sent: string | undefined
       const send = (message: string) => {
         if (sent !== undefined) return false
@@ -157,7 +150,50 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         emit(message)
         return true
       }
-      const sendTool = sendMessageTool(send)
+      const sendTool: AgentTool = several
+        ? {
+            ...(run.offered?.find((t) => t.name === SEND_MESSAGE) ?? severalMessageDefinition),
+            parameters: sendMessageDefinition.parameters,
+            executionMode: "sequential",
+            execute: async (id, params, signal) => {
+              const receipt = await runPromise(
+                run.reader.RolloutReceipt({ userId: request.userId, rolloutId, toolCallId: id })
+              )
+              if (receipt !== null) {
+                const previous = JSON.parse(receipt) as { postedVersionId: string }
+                return { content: [{ type: "text", text: "Sent." }], details: { versionId: previous.postedVersionId } }
+              }
+              if (signal?.aborted)
+                return { content: [{ type: "text", text: "Stopped." }], details: INTERRUPTED, isError: true }
+              const message = (params as { message: string }).message
+              emit(message)
+              const next = await new Promise<{
+                slotId: typeof request.slotId
+                versionId: typeof request.versionId
+                postedVersionId: typeof request.versionId
+              }>((resolve, reject) => {
+                const abort = () => reject(new Error("Stopped."))
+                signal?.addEventListener("abort", abort, { once: true })
+                emit({
+                  post: {
+                    rolloutId,
+                    toolCallId: id,
+                    resolve: (value) => {
+                      signal?.removeEventListener("abort", abort)
+                      resolve(value)
+                    },
+                    reject: (error) => {
+                      signal?.removeEventListener("abort", abort)
+                      reject(error)
+                    }
+                  }
+                })
+              })
+              working = next
+              return { content: [{ type: "text", text: "Sent." }], details: { versionId: next.postedVersionId } }
+            }
+          }
+        : sendMessageTool(send)
       // A resume offers the definitions its snapshot froze, exactly as they were sent.
       const frozen = (run.offered ?? tools.map(frozenTool)).filter((t) => t.name !== SEND_MESSAGE)
       const piTools: ReadonlyArray<Tool> = [
@@ -169,12 +205,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         ...(sends ? [{ name: sendTool.name, description: sendTool.description, parameters: sendTool.parameters }] : [])
       ]
       const emit = (chunk: GenerationChunk) => void Queue.offerUnsafe(queue, chunk)
+      if (several) emit({ several: true })
 
       /** The typed failure behind an `error` turn, for the version's failure class. */
       let failure: GenerationFailed | undefined
       const seed = run.resume?.transcript as ReadonlyArray<AgentMessage> | undefined
       // A resumed run counts the requests it made before, so its turn cap still holds.
-      let requests = seed?.filter((m) => m.role === "assistant").length ?? 0
+      let requests = seed?.slice(historical).filter((m) => m.role === "assistant").length ?? 0
       /** Text a stop cut off: the first request sends it as the reply's start, and its output goes on from it. */
       let continuation = run.resume?.continuation
       /** What this turn streamed into the body: any output, and text in particular. */
@@ -203,7 +240,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             ? suffix
             : [...suffix, { ...emptyAssistant(piModel), content: [{ type: "text", text: carried }] }],
           last ? undefined : piTools,
-          { explicitTail: model.cacheBreakpoints === "explicit" }
+          {
+            explicitTail: model.cacheBreakpoints === "explicit",
+            replayReasoning: several || plan.continuity === "resume_previous",
+            reasoningTarget: model
+          }
         )
         // Text streams into the body as it comes; a tool call in the same turn makes it an
         // intermediate step, and the body starts over (DESIGN §7.2: not the message).
@@ -231,13 +272,14 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 sessionId: request.chatId,
                 payload: wire.payload,
                 breakpoints: wire.breakpoints,
+                ...(run.checkpoints?.length ? { preserveBreakpoints: true } : {}),
                 ...(wire.stable ? { stable: wire.stable } : {})
               },
               attribution: {
                 purpose: input.purpose ?? "generation",
                 chatId: request.chatId,
                 rolloutId,
-                versionId: request.versionId
+                versionId: working.versionId
               }
             })
             .pipe(
@@ -339,8 +381,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         userId: request.userId,
         chatId: request.chatId,
         forkId: request.forkId ?? null,
-        slotId: request.slotId,
-        versionId: request.versionId,
+        slotId: working.slotId,
+        versionId: working.versionId,
         rolloutId,
         toolCallId,
         leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
@@ -461,7 +503,34 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                   : [])
               ]
         },
-        convertToLlm: (messages) => liveSuffix(messages),
+        convertToLlm: async (messages) => {
+          if (!messages.some((m) => m.role === "rpUser")) return liveSuffix(messages)
+          const hydrated: Array<AgentMessage> = []
+          for (const message of messages) {
+            if (message.role !== "rpUser") {
+              hydrated.push(message)
+              continue
+            }
+            const resolved = await runPromise(
+              input.resolveImages({ ...generation.request, prefill: null, messages: [message.message] })
+            )
+            if (model.api === "openai-completions") {
+              const user = resolved.messages[0]!
+              const images = (user.images ?? []).flatMap((image) =>
+                image.data && image.mimeType
+                  ? [{ type: "image" as const, data: image.data, mimeType: image.mimeType }]
+                  : []
+              )
+              hydrated.push({
+                role: "user",
+                content: images.length ? [{ type: "text", text: user.content }, ...images] : user.content,
+                timestamp: message.timestamp,
+                ...(user.name ? { name: user.name } : {})
+              } as AgentMessage)
+            } else hydrated.push(providerRequest(resolved, model).context.messages[0]!)
+          }
+          return liveSuffix(hydrated)
+        },
         streamFn,
         toolExecution: "sequential",
         beforeToolCall: async ({ toolCall }) => {
@@ -469,7 +538,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           if (tool && outsideEffect(tool.effect) && run.allowsOutside !== true)
             return { block: true, reason: "This chat does not allow tools with outside effects." }
           if (requests >= plan.turnCap) return { block: true, reason: "The final turn cannot use tools." }
-          if (sent !== undefined) return { block: true, reason: "The reply has already been sent." }
+          if (!several && sent !== undefined) return { block: true, reason: "The reply has already been sent." }
           // A process kill after an effect commits must leave its call ID durable,
           // so recovery can replay the receipt instead of sampling a duplicate call.
           const saved = await flush()
@@ -523,19 +592,35 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         flushing = saving.then(() => undefined)
         return saving
       }
-      let shown = "[]"
+      const shown = new Map<string, string>()
       const showSteps = (final: boolean) => {
-        const steps = stepsOf(agent.state.messages, frozen, final).map((step) => {
-          const approval = step.kind === "tool" ? waiting.get(step.id) : undefined
-          return approval && step.kind === "tool" ? { ...step, status: "waiting" as const, approval } : step
-        })
-        const json = JSON.stringify(steps)
-        if (json === shown) return
-        shown = json
-        emit({ steps })
+        const posted = several
+          ? agent.state.messages
+              .slice(historical)
+              .flatMap((m) =>
+                m.role === "toolResult" &&
+                m.toolName === SEND_MESSAGE &&
+                !m.isError &&
+                (m.details as { versionId?: string } | null)?.versionId
+                  ? [(m.details as { versionId: typeof request.versionId }).versionId]
+                  : []
+              )
+          : []
+        for (const id of [...new Set([...posted, working.versionId])]) {
+          // A call waiting for the user shows as waiting, with what it asks.
+          const steps = stepsOf(agent.state.messages, frozen, final, several ? id : undefined).map((step) => {
+            const approval = step.kind === "tool" ? waiting.get(step.id) : undefined
+            return approval && step.kind === "tool" ? { ...step, status: "waiting" as const, approval } : step
+          })
+          const json = JSON.stringify(steps)
+          if (json === shown.get(id)) continue
+          shown.set(id, json)
+          emit({ steps, ...(several ? { versionId: id } : {}) })
+        }
       }
       agent.subscribe((event) => {
-        if (event.type === "turn_end" || event.type === "agent_end") void flush()
+        if (event.type === "turn_end" || event.type === "agent_end")
+          void flush().then(() => showSteps(event.type === "agent_end"))
         if (event.type === "message_end" || event.type === "tool_execution_end" || event.type === "turn_end")
           showSteps(false)
       })
@@ -551,13 +636,15 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       // chat-state call already written answer as it did), then goes on as the loop would.
       // A terminal send may have been flushed before the process died, while the version's
       // completion was not. Restore it through the ordinary output pipeline without a new turn.
-      if (sends && seed) {
+      if (sends && seed && !several) {
         const delivered = new Set(
-          seed.flatMap((m) =>
-            m.role === "toolResult" && m.toolName === SEND_MESSAGE && !m.isError ? [m.toolCallId] : []
-          )
+          seed
+            .slice(historical)
+            .flatMap((m) =>
+              m.role === "toolResult" && m.toolName === SEND_MESSAGE && !m.isError ? [m.toolCallId] : []
+            )
         )
-        for (const message of seed) {
+        for (const message of seed.slice(historical)) {
           if (message.role !== "assistant") continue
           for (const part of message.content)
             if (

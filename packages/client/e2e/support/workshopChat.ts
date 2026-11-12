@@ -13,8 +13,14 @@ import { closePanel, openPanel } from "./panel.ts"
 import { asUser } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { nextReply } from "./strip.ts"
+import {
+  startWorkshopProvider,
+  STORY_REPLY,
+  WORKSHOP_ANSWER,
+  WORKSHOP_FIRST,
+  WORKSHOP_SECOND
+} from "./workshopProvider.ts"
 import { messageMenu, showActions } from "./message.ts"
-import { startWorkshopProvider, STORY_REPLY, WORKSHOP_ANSWER } from "./workshopProvider.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 
@@ -249,7 +255,7 @@ export function workshopChatTests() {
           expect(provider.bodies[beforeResume]!.tools).toEqual(provider.bodies[offeredAt]!.tools)
           expect(provider.bodies[beforeResume]!.messages.at(-1)?.role).toBe("tool")
           provider.release()
-          const reply = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })
+          const reply = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()
           await expect(reply).toBeVisible({ timeout: 30_000 })
           await expect
             .poll(() =>
@@ -263,17 +269,26 @@ export function workshopChatTests() {
           await page.evaluate(() => Reflect.deleteProperty(document, "visibilityState"))
           const steps = reply.locator("[data-steps-panel]")
           await expect(steps).toHaveAttribute("data-steps-panel", "done")
-          await expect(reply.locator("[data-steps-badge]")).toHaveText(/^3 steps/)
+          await expect(reply.locator("[data-steps-badge]")).toHaveText(/^2 steps/)
           await reply.locator("[data-steps-badge]").click()
           const rows = steps.locator('[data-step="tool"]')
-          await expect(rows).toHaveCount(3)
-          await expect(rows.nth(0)).toContainText("Looked in your library")
-          await expect(rows.nth(1)).toContainText("Read a card")
-          await expect(rows.nth(1)).toContainText("Assistant")
-          await expect(rows.nth(2)).toContainText("Created the card Mara Quill")
+          await expect(rows).toHaveCount(2)
+          await expect(rows.nth(0)).toContainText("Read a preset")
+          for (const [text, label] of [
+            [WORKSHOP_FIRST, "Looked in your library"],
+            [WORKSHOP_SECOND, "Read a card"]
+          ]) {
+            const message = page.getByRole("article").filter({ hasText: text! }).last()
+            await expect(message).toBeVisible()
+            await expect(message.locator("[data-steps-badge]")).toHaveText(/^1 step/)
+            await message.locator("[data-steps-badge]").click()
+            await expect(message.locator('[data-step="tool"]')).toHaveCount(1)
+            await expect(message.locator('[data-step="tool"]')).toContainText(label!)
+          }
+          await expect(rows.nth(1)).toContainText("Created the card Mara Quill")
           // The change it made, with Undo and Open under its step (W4).
-          await expect(rows.nth(2).getByRole("button", { name: "Undo", exact: true })).toHaveCount(1)
-          await expect(rows.nth(2).getByRole("link", { name: "Open", exact: true })).toHaveCount(1)
+          await expect(rows.nth(1).getByRole("button", { name: "Undo", exact: true })).toHaveCount(1)
+          await expect(rows.nth(1).getByRole("link", { name: "Open", exact: true })).toHaveCount(1)
           const created = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
             api.ListRolloutEffects({ chatId: workshopId })
           )
@@ -286,11 +301,65 @@ export function workshopChatTests() {
           // The run's request names the workshop's instructions.
           await steps.getByRole("link", { name: "Open the run" }).click()
           await expect(page.getByText("Workshop instructions").first()).toBeVisible()
+          await expect(page.getByText("First request", { exact: true })).toHaveCount(0)
+          await expectLayout(page, info, `workshop-run-${width}-${theme}`)
+          await page.goBack()
+
+          // The next turn retains the whole run; its inspector links the previous one.
+          await page.getByLabel("Message", { exact: true }).fill("Carry on from that work.")
+          await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toHaveCount(2)
+          const lastVersion = () =>
+            asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+              Effect.gen(function* () {
+                const chat = yield* api.GetChat({ chatId: workshopId })
+                const path = yield* api.ReadPath({
+                  chatId: workshopId,
+                  leafSlotId: chat.activeLeafSlotId,
+                  range: { _tag: "Bottom" },
+                  limit: 100
+                })
+                return path.entries.at(-1)!.version
+              })
+            )
+          const secondVersion = (await lastVersion()).id
+          await page.goto(`${server().url}/chats/${workshopId}/context/${secondVersion}`)
+          await expect(
+            page.getByText("The previous run was resumed or edited, so this request was put together again.")
+          ).toBeVisible()
+          await page.goto(`${server().url}/chats/${workshopId}`)
+          const beforeCarry = provider.bodies.length
+          await page.getByLabel("Message", { exact: true }).fill("Keep going from this turn.")
+          await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeCarry)
+          // Older messages can leave the phone's virtualized DOM as this reply grows.
+          await expect
+            .poll(async () => {
+              const version = await lastVersion()
+              return (
+                version.id !== secondVersion && version.content === WORKSHOP_ANSWER && version.status === "complete"
+              )
+            })
+            .toBe(true)
+          const thirdVersion = (await lastVersion()).id
+          await page.goto(`${server().url}/chats/${workshopId}/context/${thirdVersion}`)
+          await expect(page.getByRole("link", { name: "Carried on from the previous turn’s run" })).toBeVisible()
+          await expectLayout(page, info, `workshop-carried-request-${width}-${theme}`)
+          await page.goto(`${server().url}/chats/${workshopId}`)
+
+          // Keep the base branch's step-edit coverage after checking ordinary continuity.
+          const cardMessage = page.getByRole("article").filter({ hasText: WORKSHOP_SECOND }).last()
+          if (!(await cardMessage.getByRole("link", { name: "Open the run" }).isVisible()))
+            await cardMessage.locator("[data-steps-badge]").click()
+          await cardMessage.getByRole("link", { name: "Open the run" }).click()
           const result = page.getByRole("region", { name: "Result of read_card", exact: true }).first()
           await result.getByRole("button", { name: "Edit", exact: true }).click()
           const edited = "Synthetic edited card result."
           await result.locator('.cm-content[aria-label="Edit Result of read_card"]').fill(edited)
           await expectLayout(page, info, `workshop-step-edit-${width}-${theme}`, { scope: '[aria-label="Steps"]' })
+          const beforeEditEffects = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            api.ListRolloutEffects({ chatId: workshopId })
+          )
           const beforeEdit = provider.bodies.length
           await result.getByRole("button", { name: "Resume", exact: true }).click()
           // The card it created still stands: carrying on from an earlier step warns first.
@@ -299,14 +368,15 @@ export function workshopChatTests() {
           await warning.getByRole("button", { name: "Keep them and make a new version", exact: true }).click()
           await expect(page).toHaveURL(new RegExp(`/chats/${workshopId}\\?`))
           await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeEdit)
-          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toBeVisible()
+          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()).toBeVisible()
           expect(provider.bodies[beforeEdit]!.messages.at(-1)?.content).toBe(edited)
           expect(provider.bodies[beforeEdit]!.tools).toEqual(provider.bodies[offeredAt]!.tools)
           const afterEdit = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
             api.ListRolloutEffects({ chatId: workshopId })
           )
-          expect(afterEdit).toHaveLength(2)
-          expect(afterEdit.find((effect) => effect.rolloutId === created[0]!.rolloutId)).toEqual(created[0])
+          expect(afterEdit).toHaveLength(beforeEditEffects.length + 1)
+          for (const original of beforeEditEffects)
+            expect(afterEdit.find((effect) => effect.rolloutId === original.rolloutId)).toEqual(original)
 
           // This chat leaves out the story's settings; the URL alone brings the workshop back.
           const settings = await openPanel(page, "This chat")
@@ -323,7 +393,7 @@ export function workshopChatTests() {
           })
           await page.goto(`${server().url}/chats/${workshopId}`)
           await expect(page.locator('[data-chat-kind="workshop"]').first()).toBeVisible()
-          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toBeVisible()
+          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()).toBeVisible()
           await expect(main.locator('[data-kind-badge="workshop"]').first()).toBeVisible()
           await shot("reloaded")
           await expectLayout(page, info, `workshop-chat-${width}-${theme}`)

@@ -17,7 +17,7 @@ import { asUser, type Client } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { showActions } from "./message.ts"
 import { nextReply } from "./strip.ts"
-import { startWorkshopProvider, WORKSHOP_ANSWER } from "./workshopProvider.ts"
+import { startWorkshopProvider, WORKSHOP_ANSWER, WORKSHOP_FIRST } from "./workshopProvider.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 const CREATED = "Created the card Mara Quill"
@@ -29,7 +29,14 @@ export function workshopApprovalTests() {
     const admin = <A>(use: (client: Client) => Effect.Effect<A, unknown>) =>
       asUser(server(), ADMIN.handle, ADMIN.password, use)
     test.beforeAll(async () => {
-      provider = await startWorkshopProvider()
+      // Each task: a first message, then the card made in the answer (two messages of one run).
+      provider = await startWorkshopProvider({
+        perTask: true,
+        calls: [
+          { name: "send_message", arguments: { message: WORKSHOP_FIRST } },
+          { name: "create_card", arguments: { name: "Mara Quill", description: "A synthetic lighthouse keeper." } }
+        ]
+      })
       await admin((api) =>
         Effect.gen(function* () {
           yield* api.SetDisplayPrefs({ prefs: { steps: "expanded" } })
@@ -152,7 +159,9 @@ export function workshopApprovalTests() {
           expect(await effects()).toHaveLength(2)
           const latest = page.getByRole("article").last()
           await openSteps(latest)
-          const created = latest.locator('[data-step="tool"]').nth(2)
+          // The change is under the step of the message that made it (the answer), once.
+          const created = latest.locator('[data-step="tool"]').nth(0)
+          await expect(page.locator("[data-effect]")).toHaveCount(1)
           await expect(created.locator("[data-effect]")).toContainText(CREATED)
           await expect(created.getByRole("button", { name: "Undo", exact: true })).toBeVisible()
           await expect(created.getByRole("link", { name: "Open", exact: true })).toBeVisible()
@@ -161,10 +170,13 @@ export function workshopApprovalTests() {
             scope: "article:last-of-type"
           })
 
-          // A new version of that reply warns first: Cancel leaves everything as it was.
+          // A new version of the answer keeps its own call, so it doesn't warn. A new version of
+          // the run's first message does: the answer's change after it stands, and may be made
+          // again. Cancel leaves everything as it was.
+          const opening = page.getByRole("article").filter({ hasText: WORKSHOP_FIRST }).last()
           const regenerate = async () => {
-            await showActions(latest)
-            await latest
+            await showActions(opening)
+            await opening
               .getByRole("group", { name: "Versions", exact: true })
               .getByRole("button", { name: "Generate another version", exact: true })
               .click()
@@ -173,15 +185,17 @@ export function workshopApprovalTests() {
           await regenerate()
           const warning = page.getByRole("dialog", { name: "This reply changed things outside the chat" })
           await expect(warning).toContainText(CREATED)
-          await expect(warning).toContainText("A new version won’t undo them, and the assistant may make them again.")
+          await expect(warning).toContainText(
+            "A new version keeps this reply’s own steps and changes and undoes none of these, but the assistant may make them again."
+          )
           await shot("warning")
           await expectLayout(page, info, `workshop-approvals-warning-${width}-${theme}`, { scope: '[role="dialog"]' })
           await warning.getByRole("button", { name: "Cancel", exact: true }).click()
           await expect(warning).toHaveCount(0)
           expect(provider.bodies.length).toBe(before)
 
-          // Undo them, then make a new version: the card is undone, and the new version runs
-          // without asking (allowed in this workshop now).
+          // Undo them, then make a new version: the card is undone, and the run carries on from
+          // the new first message without asking (allowed in this workshop now).
           await regenerate()
           await warning.getByRole("button", { name: "Undo them, then make a new version", exact: true }).click()
           await expect.poll(async () => (await effects()).filter((e) => e.undoneAt !== null).length).toBe(1)

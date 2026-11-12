@@ -672,6 +672,22 @@ function Inspector({ run }: { run: RunContext }) {
           title="Request"
           description={`Built ${new Date(run.builtAt).toLocaleString()}: ${counted(run.messages.length, "message")}, about ${counted(tokens, "token")}. ${run.tokenizer ? tokenizerText(run.tokenizer) : ""}`}
         />
+        {run.continuity && (
+          <p className="text-sm text-muted">
+            {run.continuity.parentVersionId ? (
+              <Link
+                to="/chats/$chatId/context/$versionId"
+                params={{ chatId: run.chatId, versionId: run.continuity.parentVersionId }}
+                className="underline underline-offset-2"
+                title="Open the previous turn’s run"
+              >
+                Carried on from the previous turn’s run
+              </Link>
+            ) : (
+              run.continuity.reason
+            )}
+          </p>
+        )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
           <dt className="text-muted">Model</dt>
           <dd>{run.model ? `${run.model.model} on ${run.model.connection} (${run.model.kind})` : "none"}</dd>
