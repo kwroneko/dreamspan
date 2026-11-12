@@ -145,3 +145,6 @@ export const budgetResult = (text: string, limit = RESULT_CHARS) =>
   text.length <= limit
     ? text
     : `${text.slice(0, limit)}\n[Result cut at ${limit} characters: ask for less, or narrow the search.]`
+
+/** A failed server preparation is a tool result, before any approval is requested. */
+export class ToolInputRefused extends Error {}

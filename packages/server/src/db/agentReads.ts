@@ -1,3 +1,4 @@
+import { recoveredOperationText } from "./operationReceipts.ts"
 import { continuityEffectsReason, toRolloutEffect } from "./workshopEffects.ts"
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { WorkerAssembler } from "../assembler/assembler.ts"
@@ -436,7 +437,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "rollout", id: rolloutId })
         return row.result_json === null
           ? null
-          : { text: JSON.parse(row.result_json) as string, isError: row.is_error === 1 }
+          : { text: recoveredOperationText(JSON.parse(row.result_json) as string), isError: row.is_error === 1 }
       }).pipe(query("RolloutToolReceipt")),
     RolloutReceipt: ({ userId, rolloutId, toolCallId }) =>
       Effect.gen(function* () {

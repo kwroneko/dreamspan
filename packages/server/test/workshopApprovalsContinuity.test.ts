@@ -146,7 +146,12 @@ const approvals = (dataDir: string, toolCallId: string) =>
 const setup = (url?: string) =>
   Effect.gen(function* () {
     const api = yield* client()
-    if (url) yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${url}/v1` }, model: {} })
+    if (url)
+      yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${url}/v1` },
+        model: {},
+        preset: { openai_max_context: 32768 }
+      })
     return api
   })
 const material = (api: Api, versionId: string) =>

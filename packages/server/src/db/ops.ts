@@ -1836,10 +1836,25 @@ export class WriteOps extends RpcGroup.make(
       toolCallId: Schema.String,
       result: Schema.String,
       isError: Schema.optionalKey(Schema.Boolean),
+      completeOperation: Schema.optionalKey(Schema.Boolean),
       effects: Schema.optionalKey(Schema.Array(RolloutEffectRecord))
     },
     success: Schema.String,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("RunWorkshopOperation", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      capability: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expected: Schema.Unknown,
+      operation: Schema.String,
+      payload: Schema.Unknown
+    },
+    success: Schema.Unknown,
+    error: Schema.Union([NotFound, EffectUndoRefused, InvalidDocument, StaleWrite, StorageError])
   }),
   Rpc.make("AgentCreateEntity", {
     payload: {
@@ -4089,6 +4104,17 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("VersionEffects", {
     payload: { userId: UserId, versionId: Schema.String },
     success: Schema.Array(RolloutEffect),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("WorkshopOperationInfo", {
+    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId) },
+    success: Schema.Struct({
+      user: User,
+      settings: Schema.Array(
+        Schema.Struct({ key: Schema.String, description: Schema.String, value: Schema.Unknown, revision: Schema.Int })
+      ),
+      proof: Schema.Unknown
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("RolloutToolReceipt", {

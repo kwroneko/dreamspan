@@ -22,7 +22,7 @@ export const resolveLibrary = (context: ToolContext, kind: EntityKind, name: str
       : {
           error:
             matches.length === 0
-              ? `No ${kind} matches ${JSON.stringify(name)}. Use list_library to find it.`
+              ? `No ${kind} matches ${JSON.stringify(name)}. Candidates: ${JSON.stringify(refs.slice(0, 5).map(identity))}. Use list_library to find it.`
               : `Several entries match ${JSON.stringify(name)}. Choose an id: ${JSON.stringify(matches.map(identity))}`
         }
   })

@@ -14,9 +14,10 @@ import { StaleWrite } from "@rp/shared/errors.ts"
 import { StorageError } from "./ops.ts"
 
 type SettingScope = "app" | "user" | "device"
-interface SettingDefinition {
+export interface SettingDefinition {
   readonly id: string
   readonly scope: SettingScope
+  readonly agent?: { readonly description: string }
   readonly schema: Schema.Top
 }
 
@@ -31,9 +32,14 @@ const definitions: ReadonlyArray<SettingDefinition> = [
     })
   },
   { id: "media.external", scope: "user", schema: ExternalMediaPrefs },
-  { id: "display", scope: "user", schema: DisplayPrefs },
+  { id: "display", scope: "user", schema: DisplayPrefs, agent: { description: "How chats are displayed." } },
   { id: "notices", scope: "user", schema: Schema.Record(Schema.String, Schema.Array(Schema.String)) },
-  { id: "shell.pinsCollapsed", scope: "user", schema: Schema.Boolean },
+  {
+    id: "shell.pinsCollapsed",
+    scope: "user",
+    schema: Schema.Boolean,
+    agent: { description: "Collapse pinned chats." }
+  },
   { id: "cost", scope: "user", schema: CostRules },
   { id: "workshop.defaults", scope: "user", schema: Schema.Struct({ card: Schema.String, preset: Schema.String }) },
   { id: "chat.persona", scope: "user", schema: Schema.NullOr(Schema.String) },

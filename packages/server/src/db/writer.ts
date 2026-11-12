@@ -86,7 +86,17 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
                   ...providers,
                   ...accounts,
                   ...chatSetup,
-                  ...(yield* makeWorkshopEffectHandlers({ ...library, ...chatSetup, ...graph }, bin)),
+                  ...(yield* makeWorkshopEffectHandlers(
+                    {
+                      ...library,
+                      ...chatSetup,
+                      ...graph,
+                      ...binOps,
+                      ...generation,
+                      ...(yield* makeHistoryWriteHandlers)
+                    },
+                    bin
+                  )),
                   ...(yield* makeWorkshopGrantWriteHandlers),
                   ...stImport,
                   ...(yield* makeStImportJobWriteHandlers),
