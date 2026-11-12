@@ -33,8 +33,9 @@ const config = testConfig({ authMode: "proxy" })
 // but this is where the key's write-only path is tested.
 // Functional RPC tests use Effect's virtual clock. Keep the synthetic archive's burst
 // above this suite's request count; the real rate and waiting/backoff are tested below.
+const functionalRate = { perSecond: 10, burst: 1000 }
 const sources = CardSources.layerWith({
-  adapters: [{ ...fakeCardexAdapter(archive), key: "optional", rate: { perSecond: 10, burst: 1000 } }]
+  adapters: [{ ...fakeCardexAdapter(archive), key: "optional", rate: functionalRate }]
 })
 const testServer = serverLayer(config, undefined, undefined, sources)
 const base = Effect.map(serverPort, (port) => `http://127.0.0.1:${port}`)
@@ -637,6 +638,8 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       const adapter = fakeCardexAdapter(archive)
       yield* service.registry.register({
         ...adapter,
+        // Functional tests use a virtual clock: this override must not shrink the shared bucket.
+        rate: functionalRate,
         card: (http, id) =>
           adapter
             .card(http, id)
@@ -712,7 +715,7 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       const next = archive.publish(card.slug)
       const checked = yield* api.CheckRemoteVersion({ entityId })
       assert.strictEqual(checked.newerVersion, next.sha256)
-      assert.isTrue(archive.paths().every((path) => path.startsWith("/api/v1/cards/batch")))
+      assert.isTrue(archive.paths().every((path) => path.startsWith("/api/v1/origins/")))
       assert.isTrue((yield* api.ListLibrary({ kind: "card" })).find((r) => r.id === added.refId)!.updateAvailable)
       // The newer file, fetched when the update is opened, goes on the import line like a file from disk.
       const response = yield* newerFile(entityId, alice)
@@ -970,6 +973,133 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("confirmed imports take successor files, keep current identity, and retain race-safe receipts", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const root = archive.cards[70]!
+      const download = (hash: string) =>
+        Effect.promise(() =>
+          fetch(`${archive.origin}/api/v1/download/${hash}?mode=mirrored`).then((r) => r.arrayBuffer())
+        )
+      const response = yield* importFile(new Uint8Array(yield* download(root.sha256)), {
+        name: "successor-original.png"
+      })
+      assert.strictEqual(response.status, 200)
+      const entityId = yield* importedEntity(response)
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: root.slug })
+      assert.deepStrictEqual([added.entityId, added.existing], [entityId, true])
+      assert.isTrue((yield* api.CardOrigin({ entityId }))!.recognized)
+      const first = archive.publishSuccessor(root.slug)
+      const head = archive.publishSuccessor(first.slug, "chub")
+      archive.reset()
+      assert.strictEqual((yield* api.CheckRemoteVersion({ entityId })).newerVersion, head.sha256)
+      assert.lengthOf(archive.paths(), 1)
+      assert.match(archive.paths()[0]!, /^\/api\/v1\/origins\//)
+      const conditionalBefore = archive.conditionalHits()
+      const notModifiedBefore = archive.notModified()
+      yield* api.CheckRemoteVersion({ entityId })
+      assert.strictEqual(archive.conditionalHits(), conditionalBefore + 1)
+      assert.strictEqual(archive.notModified(), notModifiedBefore + 1)
+      const newer = yield* newerFile(entityId, alice)
+      const receipt = newer.headers.get("x-source-version-receipt")!
+      assert.isString(receipt)
+      assert.strictEqual(
+        yield* outcome(api.TakeRemoteVersion({ entityId, version: head.sha256, receipt: `${receipt}x` })),
+        "ServerError"
+      )
+      const other = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: archive.cards[71]!.slug })
+      assert.strictEqual(
+        yield* outcome(api.TakeRemoteVersion({ entityId: other.entityId, version: head.sha256, receipt })),
+        "ServerError"
+      )
+      const bytes = new Uint8Array(yield* Effect.promise(() => newer.arrayBuffer()))
+      assert.deepStrictEqual(bytes, new Uint8Array(yield* download(head.sha256)))
+      const link = decodeURIComponent(newer.headers.get("x-source-link")!)
+      assert.strictEqual(link, `${archive.origin}/c/${head.slug}`)
+      const staged = yield* importFile(bytes, { name: "successor.png", into: added.refId, mode: "merge", link })
+      assert.strictEqual(staged.status, 200)
+      const newest = archive.publishSuccessor(head.slug)
+      yield* api.CheckRemoteVersion({ entityId })
+      // Take exactly the file reviewed, even after another tab checked a later head.
+      yield* api.TakeRemoteVersion({ entityId, version: head.sha256, receipt })
+      assert.deepStrictEqual(
+        [(yield* api.CardOrigin({ entityId }))!.remoteId, (yield* api.CardOrigin({ entityId }))!.remoteVersion],
+        [head.slug, head.sha256]
+      )
+      assert.strictEqual((yield* api.CardOrigin({ entityId }))!.newerVersion, newest.sha256)
+      archive.reset()
+      assert.strictEqual((yield* api.CheckRemoteVersion({ entityId })).newerVersion, newest.sha256)
+      assert.lengthOf(archive.paths(), 1)
+      assert.include(archive.paths()[0]!, "/origins/chub/")
+      const separate = yield* api.AddRemoteVersionAsCard({ entityId })
+      assert.notStrictEqual(separate.entityId, entityId)
+      assert.strictEqual((yield* api.CardOrigin({ entityId }))!.remoteId, newest.slug)
+      assert.isNull((yield* api.CardOrigin({ entityId }))!.newerVersion)
+      yield* api.ClearSourceCache({ sourceId: "cardex" })
+      const historical = yield* api.SourceCard({ sourceId: "cardex", remoteId: root.slug })
+      assert.strictEqual(historical.summary.version.id, root.sha256)
+      assert.strictEqual(historical.summary.held!.entityId, entityId)
+      assert.isFalse(historical.summary.held!.update)
+      assert.strictEqual((yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: newest.slug })).entityId, entityId)
+      const bobApi = yield* client(bob)
+      assert.strictEqual(
+        yield* outcome(bobApi.TakeRemoteVersion({ entityId, version: head.sha256, receipt })),
+        "NotFound"
+      )
+      const theirs = yield* bobApi.AdoptRemoteCard({ sourceId: "cardex", remoteId: root.slug })
+      assert.strictEqual(
+        yield* outcome(bobApi.TakeRemoteVersion({ entityId: theirs.entityId, version: head.sha256, receipt })),
+        "ServerError"
+      )
+      assert.strictEqual((yield* bobApi.CardOrigin({ entityId: theirs.entityId }))!.remoteId, root.slug)
+    })
+  )
+
+  it.effect("deleted and regional successor heads clear update markers and explain that no file is available", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const root = archive.cards[74]!
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: root.slug })
+      const head = archive.publishSuccessor(root.slug)
+      assert.strictEqual((yield* api.CheckRemoteVersion({ entityId: added.entityId })).newerVersion, head.sha256)
+      archive.deleteCard(head.slug)
+      assert.strictEqual(
+        yield* outcome(api.CheckRemoteVersion({ entityId: added.entityId })),
+        "SourceFailed:no_newer_file"
+      )
+      assert.isNull((yield* api.CardOrigin({ entityId: added.entityId }))!.newerVersion)
+      const regional = archive.publishSuccessor(head.slug)
+      archive.blockRegion(regional.slug)
+      assert.strictEqual(
+        yield* outcome(api.CheckRemoteVersion({ entityId: added.entityId })),
+        "SourceFailed:no_newer_file"
+      )
+      assert.strictEqual((yield* newerFile(added.entityId, alice)).status, 404)
+      const shown = yield* api.SourceSearch({
+        sourceId: "cardex",
+        query: { ...emptySourceQuery, text: root.name },
+        page: null
+      })
+      assert.isFalse(shown.items.find((c) => c.remoteId === root.slug)!.held!.update)
+    })
+  )
+
+  it.effect("an unconfirmed Sources hint cannot follow a successor or gain its update tracking", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const root = archive.cards[76]!
+      archive.publishSuccessor(root.slug)
+      const imported = yield* importFile(namingFile("Only an untrusted claim", [`cardex:${root.slug}`]), {
+        name: "inert-successor.json"
+      })
+      const entityId = yield* importedEntity(imported)
+      archive.reset()
+      assert.isUndefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: root.slug })).summary.held)
+      assert.isFalse(archive.paths().some((path) => path.startsWith("/api/v1/origins/")))
+      assert.strictEqual(yield* outcome(api.CheckRemoteVersion({ entityId })), "NotFound")
+    })
+  )
+
   it.effect("adding an exact imported file before browsing returns that import", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)
@@ -1084,9 +1214,9 @@ describe("the fake archive keeps cardex v1's rules", () => {
       assert.strictEqual(yield* status(`/api/v1/search?mode=semantic&cursor=${first.next_cursor}`), 400)
       const semantic = (yield* Effect.promise(() =>
         get("/api/v1/search?mode=semantic&q=quiet&limit=100&page=2").then((r) => r.json())
-      )) as { next_cursor: string | null; items: ReadonlyArray<unknown> }
+      )) as { next_cursor: string | null; items: ReadonlyArray<unknown>; total: number }
       assert.isNull(semantic.next_cursor)
-      assert.lengthOf(semantic.items, 20)
+      assert.lengthOf(semantic.items, Math.max(0, Math.min(240, semantic.total) - 100))
       const [a, b] = [archive.cards[5]!.slug, archive.cards[2]!.slug].sort()
       for (const raw of [`${b}%2C${a}%2C${b}`, `${a},${b}`]) {
         const redirected = yield* Effect.promise(() => get(`/api/v1/cards/batch?ids=${raw}`))

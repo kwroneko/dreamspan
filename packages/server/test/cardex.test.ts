@@ -46,15 +46,17 @@ const direct = (seen: Array<string> = []): SourceHttp => ({
       const response = yield* Effect.promise(() => fetch(url, { redirect: "manual" }))
       const bytes = new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))
       const reason =
-        response.status === 404
-          ? "not_found"
-          : response.status === 429
-            ? "rate_limited"
-            : response.status >= 500
-              ? "unreachable"
-              : response.status < 200 || response.status > 299
-                ? "bad_response"
-                : null
+        response.status === 451
+          ? "region_unavailable"
+          : response.status === 404
+            ? "not_found"
+            : response.status === 429
+              ? "rate_limited"
+              : response.status >= 500
+                ? "unreachable"
+                : response.status < 200 || response.status > 299
+                  ? "bad_response"
+                  : null
       const code = reason === "bad_response" ? errorCode(bytes) : undefined
       if (reason)
         return yield* new SourceFailed({
@@ -213,6 +215,102 @@ describe("v1 as card sources", () => {
       assert.isNull(summaryOf({ slug: "synthetic", ...fields } as never))
   })
 
+  it.effect("origin-keyed updates skip a three-version chain and keep historical files unchanged", () =>
+    Effect.gen(function* () {
+      const local = yield* Effect.promise(() => startFakeArchive({ cards: 6 }))
+      try {
+        const adapter = fakeCardexAdapter(local)
+        const root = local.cards[0]!
+        const first = local.publishSuccessor(root.slug)
+        const head = local.publishSuccessor(first.slug, "chub")
+        const seen: string[] = []
+        const transport = direct(seen)
+        const http: SourceHttp = {
+          ...transport,
+          get: (url, kind, headers) => {
+            assert.strictEqual(url.origin, local.origin)
+            return transport.get(url, kind, headers)
+          }
+        }
+        const historical = yield* adapter.card(http, root.slug)
+        assert.strictEqual(historical.summary.version.id, root.sha256)
+        assert.isString(historical.locator)
+        seen.length = 0
+        const [latest] = yield* adapter.versions!(http, [root.slug], { [root.slug]: historical.locator! })
+        assert.strictEqual(latest!.version.id, head.sha256)
+        assert.strictEqual(latest!.currentId, head.slug)
+        assert.lengthOf(seen, 1)
+        assert.match(seen[0]!, /^\/api\/v1\/origins\//)
+        assert.strictEqual((yield* adapter.card(http, root.slug)).summary.version.id, root.sha256)
+        const fork = local.publishFork(head.slug)
+        const currentFile = yield* adapter.card(http, head.slug)
+        const [again] = yield* adapter.versions!(http, [head.slug], { [head.slug]: currentFile.locator! })
+        assert.strictEqual(again!.currentId, head.slug)
+        assert.notStrictEqual(again!.currentId, fork.slug)
+        local.deleteCard(head.slug)
+        const [deleted] = yield* adapter.versions!(http, [root.slug], { [root.slug]: historical.locator! })
+        assert.isFalse(deleted!.available)
+      } finally {
+        yield* Effect.promise(() => local.close())
+      }
+    })
+  )
+
+  it.effect("successor fallback has one bounded request budget, rejects cycles, and never follows a URL", () =>
+    Effect.gen(function* () {
+      const local = yield* Effect.promise(() => startFakeArchive({ cards: 6 }))
+      try {
+        const adapter = fakeCardexAdapter(local)
+        const root = local.cards[0]!
+        const second = local.publishSuccessor(root.slug)
+        local.withoutOrigins(root.slug)
+        local.withoutOrigins(second.slug)
+        const head = local.publishSuccessor(second.slug)
+        local.withoutOrigins(head.slug)
+        let requests = 0
+        const transport = direct()
+        const http: SourceHttp = {
+          ...transport,
+          get: (url, kind, headers) => {
+            assert.strictEqual(url.origin, local.origin)
+            requests++
+            return transport.get(url, kind, headers)
+          }
+        }
+        const [latest] = yield* adapter.versions!(http, [root.slug])
+        assert.strictEqual(latest!.currentId, head.slug)
+        assert.strictEqual(latest!.version.id, head.sha256)
+        assert.isAtMost(requests, 8)
+        local.pointSuccessor(head.slug, root.slug)
+        requests = 0
+        const cycle = yield* Effect.flip(adapter.versions!(http, [root.slug]))
+        assert.strictEqual(cycle.reason, "bad_response")
+        assert.isAtMost(requests, 8)
+        local.pointSuccessor(head.slug, "https://untrusted.example/a-card")
+        requests = 0
+        const [missing] = yield* adapter.versions!(http, [root.slug])
+        assert.isFalse(missing!.available)
+        assert.isAtMost(requests, 8)
+        let last = head
+        for (let i = 0; i < 6; i++) {
+          last = local.publishSuccessor(last.slug)
+          local.withoutOrigins(last.slug)
+        }
+        requests = 0
+        const long = yield* Effect.flip(adapter.versions!(http, [root.slug]))
+        assert.strictEqual(long.reason, "bad_response")
+        assert.isAtMost(requests, 8)
+        const regional = local.cards[3]!
+        const file = yield* adapter.card(http, regional.slug)
+        const regionalHead = local.publishSuccessor(regional.slug)
+        local.blockRegion(regionalHead.slug)
+        const [unavailable] = yield* adapter.versions!(http, [regional.slug], { [regional.slug]: file.locator! })
+        assert.isFalse(unavailable!.available)
+      } finally {
+        yield* Effect.promise(() => local.close())
+      }
+    })
+  )
   it("family duplicates enrich sparse parent rows without losing their relationship", () => {
     const detail = {
       card: { slug: "viewed" },

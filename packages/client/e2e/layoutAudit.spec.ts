@@ -1,3 +1,4 @@
+import { cardSourceUpdateTests } from "./support/cardSourceUpdates.ts"
 import { googleConnectionTests } from "./support/googleConnection.ts"
 import { agentResumeTests } from "./support/agentResumeFlows.ts"
 import { cardexCriteriaTests } from "./support/cardexCriteria.ts"
@@ -39,6 +40,7 @@ if (process.env.LAYOUT_AUDIT_CARDEX_ONLY === "1") {
   cardexCriteriaTests()
   cardexCreatorTests()
 }
+if (process.env.LAYOUT_AUDIT_CARDEX_UPDATES_ONLY === "1") cardSourceUpdateTests()
 if (process.env.LAYOUT_AUDIT_NEWFLOWS_ONLY === "1") newflowTests()
 if (process.env.LAYOUT_AUDIT_RESUME_ONLY === "1") agentResumeTests()
 

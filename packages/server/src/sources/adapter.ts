@@ -50,6 +50,8 @@ interface RemoteCardFile {
   readonly bytes: Uint8Array
   readonly fileName: string
   readonly summary: AdapterSummary
+  /** Opaque, archive-owned stable origin key for later update checks. */
+  readonly locator?: string
 }
 
 interface AdapterPage {
@@ -61,6 +63,14 @@ interface AdapterPage {
   readonly totalCapped?: boolean
   readonly total?: number
   readonly totalEstimated?: boolean
+}
+
+export interface SourceVersion {
+  readonly remoteId: string
+  readonly version: AdapterSummary["version"]
+  readonly currentId?: string
+  readonly locator?: string
+  readonly available?: boolean
 }
 
 export interface CardSourceAdapter {
@@ -119,9 +129,7 @@ export interface CardSourceAdapter {
   /** Current versions for many ids at once, for update checks (phase 5). */
   readonly versions?: (
     http: SourceHttp,
-    ids: ReadonlyArray<string>
-  ) => Effect.Effect<
-    ReadonlyArray<{ readonly remoteId: string; readonly version: AdapterSummary["version"] }>,
-    SourceFailed
-  >
+    ids: ReadonlyArray<string>,
+    locators?: Readonly<Record<string, string>>
+  ) => Effect.Effect<ReadonlyArray<SourceVersion>, SourceFailed>
 }

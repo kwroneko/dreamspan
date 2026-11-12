@@ -121,7 +121,7 @@ interface FakeCard {
   readonly json: string
   readonly sha256: string
   readonly color: readonly [number, number, number]
-  readonly supersededBy?: string
+  readonly supersededBy?: string | undefined
   /** The card it was forked from on its site (a fork's parent: the card before it). */
   readonly parent?: string
   /** An earlier version, its own card on the archive under a slug of its own, not in searches. */
@@ -421,6 +421,12 @@ export interface FakeArchive {
   readonly failNext: (status: number, times?: number, retryAfterSeconds?: number) => void
   /** The card's author publishes a newer version: a changed description, the next `character_version`. */
   readonly publish: (slug: string) => FakeCard
+  readonly publishSuccessor: (slug: string, site?: string) => FakeCard
+  readonly publishFork: (slug: string) => FakeCard
+  readonly pointSuccessor: (slug: string, target: string) => void
+  readonly withoutOrigins: (slug: string) => void
+  readonly deleteCard: (slug: string) => void
+  readonly blockRegion: (slug: string) => void
   /** From now on the archive refuses downloads of this card: no `download_modes`, 403 on a try. */
   readonly refuseDownloads: (slug: string) => void
   readonly close: () => Promise<void>
@@ -449,19 +455,45 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     doc.data.character_version = "0.9"
     const json = JSON.stringify(doc)
     const sha256 = createHash("sha256").update(json).digest("hex")
-    return [{ ...card, slug: `${card.slug}-v09`, json, sha256, addedAt: card.addedAt - 30 * 86_400_000, older: true }]
+    return [
+      {
+        ...card,
+        slug: `${card.slug}-v09`,
+        json,
+        sha256,
+        addedAt: card.addedAt - 30 * 86_400_000,
+        older: true,
+        supersededBy: card.slug
+      }
+    ]
   })
-  const olderOf = new Map(olderVersions.map((c) => [c.slug.slice(0, -4), c]))
   let countCap = options.countCap ?? 100_000
   let cursorEpoch = 0
   const bySlug = new Map([...cards, ...olderVersions].map((c) => [c.slug, c]))
   const bySha = new Map([...cards, ...olderVersions].map((c) => [c.sha256, c]))
   /** A card's listing on its site, as v1's origins name it. */
   const externalOf = (c: FakeCard) => `ext-${c.slug}`
+  const originKeys = new Map<string, readonly [string, string]>()
+  const originHeads = new Map<string, string>()
+  const roots = new Map<string, string>()
+  const deleted = new Set<string>()
+  const regional = new Set<string>()
+  const noOrigins = new Set<string>()
+  const originKey = (pair: readonly [string, string]) => JSON.stringify(pair)
+  for (const c of cards) {
+    const pair = [c.site, externalOf(c)] as const
+    originKeys.set(c.slug, pair)
+    originHeads.set(originKey(pair), c.slug)
+    roots.set(c.slug, c.slug)
+  }
+  for (const c of olderVersions) {
+    const root = c.slug.slice(0, -4)
+    originKeys.set(c.slug, originKeys.get(root)!)
+    roots.set(c.slug, root)
+  }
   const byExternal = (site: string, external: string) => {
-    const slug = external.startsWith("ext-") ? external.slice(4) : ""
-    const c = bySlug.get(slug)
-    return c && c.site === site && !c.older ? c : undefined
+    const slug = originHeads.get(originKey([site, external]))
+    return slug && !deleted.has(slug) ? bySlug.get(slug) : undefined
   }
   /** v1's short card in a family listing (`/forks`' parent and children). */
   const familyEntry = (c: FakeCard, viewed: FakeCard) => ({
@@ -528,6 +560,60 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     bySlug.set(slug, next)
     bySha.set(sha256, next)
     return next
+  }
+  let successorSerial = 0
+  const pointSuccessor = (slug: string, target: string) => {
+    const old = bySlug.get(slug)!
+    const next = { ...old, supersededBy: target }
+    bySlug.set(slug, next)
+    bySha.set(old.sha256, next)
+    const at = cards.findIndex((c) => c.slug === slug)
+    if (at >= 0) cards[at] = next
+  }
+  const publishSuccessor = (slug: string, site?: string) => {
+    const original = bySlug.get(slug)!
+    const changed = publish(slug)
+    const nextSlug = `${roots.get(slug) ?? slug}-successor-${++successorSerial}`
+    const next = { ...changed, slug: nextSlug, site: site ?? original.site, supersededBy: undefined }
+    cards[cards.findIndex((c) => c.slug === slug)] = original
+    bySlug.set(slug, original)
+    bySha.set(original.sha256, original)
+    pointSuccessor(slug, nextSlug)
+    cards.push(next)
+    bySlug.set(nextSlug, next)
+    bySha.set(next.sha256, next)
+    const previousKey = originKeys.get(slug)!
+    const pair = next.site === original.site ? previousKey : ([next.site, externalOf(next)] as const)
+    originKeys.set(nextSlug, pair)
+    roots.set(nextSlug, roots.get(slug) ?? slug)
+    for (const [key, head] of originHeads) if (head === slug) originHeads.set(key, nextSlug)
+    originHeads.set(originKey(pair), nextSlug)
+    return next
+  }
+  const publishFork = (slug: string) => {
+    const parent = bySlug.get(slug)!
+    const doc = JSON.parse(parent.json) as { data: { name: string } }
+    doc.data.name += " (synthetic fork)"
+    const json = JSON.stringify(doc)
+    const sha256 = createHash("sha256").update(json).digest("hex")
+    const fork = {
+      ...parent,
+      slug: `${slug}-fork-${++successorSerial}`,
+      name: doc.data.name,
+      json,
+      sha256,
+      parent: slug,
+      fork: true,
+      supersededBy: undefined
+    }
+    cards.push(fork)
+    bySlug.set(fork.slug, fork)
+    bySha.set(sha256, fork)
+    const pair = [fork.site, externalOf(fork)] as const
+    originKeys.set(fork.slug, pair)
+    originHeads.set(originKey(pair), fork.slug)
+    roots.set(fork.slug, fork.slug)
+    return fork
   }
   const seen: Array<string> = []
   let failure: { status: number; times: number; retryAfter?: number; path?: string; sort?: string } | null = null
@@ -736,6 +822,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
   }
 
   const download = (res: ServerResponse, c: FakeCard, mode: string) => {
+    if (deleted.has(c.slug)) return json(res, 404, error("not_found", "no card"))
+    if (regional.has(c.slug)) return json(res, 451, error("region_unavailable", "not available here"))
     if (!capabilitiesBody.download_modes.includes(mode)) return json(res, 400, error("bad_request", "unknown mode"))
     // A CHARX original has no mirrored or self-contained file, but its JSON, as every card's.
     // These synthetic originals are themselves JSON.
@@ -780,6 +868,12 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         ...(url.searchParams.has("sort") ? { sort: url.searchParams.get("sort")! } : {})
       }
       return json(res, 200, { ok: true })
+    }
+    if (path === "/__fake/successor") {
+      const slug = url.searchParams.get("slug") ?? ""
+      if (!bySlug.has(slug)) return json(res, 404, error("not_found", "no such card"))
+      const next = publishSuccessor(slug, url.searchParams.get("site") ?? undefined)
+      return json(res, 200, { slug: next.slug, version: next.sha256 })
     }
     if (path === "/__fake/publish") {
       const slug = url.searchParams.get("slug") ?? ""
@@ -882,7 +976,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       return json(res, 200, {
         items: canonical.flatMap((id) => {
           const c = bySlug.get(id)
-          return c ? [{ ...summary(c), file_sha256: c.sha256 }] : []
+          return c && !deleted.has(c.slug) ? [{ ...summary(c), file_sha256: c.sha256 }] : []
         }),
         missing: canonical.filter((id) => !bySlug.has(id))
       })
@@ -919,88 +1013,26 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         link_map: []
       })
     }
+    const originRoute = /^\/api\/v1\/origins\/([^/]+)\/([^/]+)$/.exec(path)
+    if (originRoute) {
+      const site = decodeURIComponent(originRoute[1]!)
+      const external = decodeURIComponent(originRoute[2]!)
+      const c = byExternal(site, external)
+      if (!c) return json(res, 404, error("not_found", "no current card"))
+      if (regional.has(c.slug)) return json(res, 451, error("region_unavailable", "not available here"))
+      return json(res, 200, {
+        ...detailOf(c),
+        view: { path: `/o/${site}/${external}`, canonical_path: `/c/${c.slug}`, version: null }
+      })
+    }
     const detail = /^\/api\/v1\/cards\/([^/]+)$/.exec(path)
     if (detail) {
       // v1's card page envelope: its `card` is the archive's record, not a summary.
       const c = bySlug.get(decodeURIComponent(detail[1]!))
-      if (!c) return json(res, 404, error("not_found", "no such card"))
-      const at = cards.findIndex((card) => card.slug === c.slug)
-      const forkedFrom = c.parent ? bySlug.get(c.parent) : undefined
-      const children = cards.filter((card) => card.parent === c.slug)
-      const origin = {
-        source: c.site,
-        external_id: externalOf(c),
-        path: `/o/${c.site}/${externalOf(c)}`,
-        card_slug: c.slug,
-        author: { source: c.site, handle: c.creator, display_name: c.creator, path: `/u/${c.site}/${c.creator}` },
-        name: c.name,
-        tagline: c.tagline,
-        tags: c.tags,
-        fork: {
-          parent_known: forkedFrom !== undefined,
-          is_fork: c.fork,
-          forked_from: forkedFrom
-            ? { source: forkedFrom.site, external_id: externalOf(forkedFrom), card_slug: forkedFrom.slug }
-            : null,
-          child_count: children.length,
-          children: []
-        }
-      }
-      // An earlier listing of the card's, which the archive now files under a card further on.
-      const next = cards[(at + 7) % cards.length]!
-      return json(res, 200, {
-        card: {
-          slug: c.slug,
-          kind: "character",
-          nsfw: c.nsfw,
-          tags: c.tags,
-          path: `/c/${c.slug}`,
-          content_hash: c.sha256,
-          token_counts: {
-            model: "o200k_base",
-            fields: { description: 40, personality: 9, scenario: 12, creator_notes: 7 },
-            mes_example: 0,
-            greetings: [18, 15],
-            permanent: 61,
-            total_budget_estimate: c.tokens
-          }
-        },
-        creator: summary(c).creator,
-        files: [
-          {
-            sha256: c.sha256,
-            ext: c.originalOnly ? "charx" : "json",
-            is_original: true,
-            url: `/i/${c.sha256}.png`,
-            ...(options.omitDownloadModes ? {} : { download_modes: downloadModes(c) })
-          }
-        ],
-        origins: [origin],
-        main_origin: { source: c.site, source_label: `Synthetic ${c.site}`, path: origin.path },
-        top: { name: { value: c.name, from: null } },
-        earlier_origins: [
-          {
-            listing: {
-              source: c.site,
-              source_label: "Synthetic site",
-              external_id: `previous-${c.slug}`,
-              path: `/o/${c.site}/previous-${c.slug}`,
-              source_url: "https://synthetic.example/previous"
-            },
-            origin: {
-              source: c.site,
-              external_id: `previous-${c.slug}`,
-              path: `/o/${c.site}/previous-${c.slug}`,
-              card_slug: next.slug
-            },
-            active_from: "2025-01-01T00:00:00Z",
-            active_to: "2026-01-01T00:00:00Z"
-          }
-        ],
-        related: [],
-        variants: []
-      })
+      if (!c || deleted.has(c.slug)) return json(res, 404, error("not_found", "no such card"))
+      return json(res, 200, detailOf(c))
     }
+
     const family = /^\/api\/v1\/(versions|forks)\/([^/]+)\/([^/]+)$/.exec(path)
     if (family) {
       const c = byExternal(decodeURIComponent(family[2]!), decodeURIComponent(family[3]!))
@@ -1029,9 +1061,11 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
           nsfw: v.nsfw,
           json_url: `/api/v1/download/${v.sha256}?mode=json`
         })
-        const older = olderOf.get(c.slug)
+        const history = [...bySlug.values()]
+          .filter((v) => roots.get(v.slug) === roots.get(c.slug))
+          .sort((a, b) => b.addedAt - a.addedAt)
         return json(res, 200, {
-          items: [version(c, true, 2), ...(older ? [version(older, false, 1)] : [])],
+          items: history.map((v, i) => version(v, v.slug === c.slug, history.length - i)),
           next: null
         })
       }
@@ -1067,6 +1101,106 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     json(res, 404, error("not_found", "no such path"))
   }
 
+  const detailOf = (c: FakeCard) => {
+    const at = cards.findIndex((card) => card.slug === c.slug)
+    const forkedFrom = c.parent ? bySlug.get(c.parent) : undefined
+    const children = cards.filter((card) => card.parent === c.slug)
+    const pair = originKeys.get(c.slug) ?? [c.site, externalOf(c)]
+    const head = byExternal(pair[0]!, pair[1]!)
+    const origin = {
+      source: pair[0]!,
+      external_id: pair[1]!,
+      path: `/o/${pair[0]}/${pair[1]}`,
+      removal: null,
+      serves_card: true,
+      card_slug: c.slug,
+      author: { source: c.site, handle: c.creator, display_name: c.creator, path: `/u/${c.site}/${c.creator}` },
+      name: c.name,
+      tagline: c.tagline,
+      tags: c.tags,
+      fork: {
+        parent_known: forkedFrom !== undefined,
+        is_fork: c.fork,
+        forked_from: forkedFrom
+          ? { source: forkedFrom.site, external_id: externalOf(forkedFrom), card_slug: forkedFrom.slug }
+          : null,
+        child_count: children.length,
+        children: []
+      }
+    }
+    // An earlier listing of the card's, which the archive now files under a card further on.
+    const next = cards[(at + 7) % cards.length]!
+    return {
+      card: {
+        slug: c.slug,
+        kind: "character",
+        nsfw: c.nsfw,
+        tags: c.tags,
+        path: `/c/${c.slug}`,
+        content_hash: c.sha256,
+        token_counts: {
+          model: "o200k_base",
+          fields: { description: 40, personality: 9, scenario: 12, creator_notes: 7 },
+          mes_example: 0,
+          greetings: [18, 15],
+          permanent: 61,
+          total_budget_estimate: c.tokens
+        }
+      },
+      creator: summary(c).creator,
+      files: [
+        {
+          sha256: c.sha256,
+          ext: c.originalOnly ? "charx" : "json",
+          is_original: true,
+          current: true,
+          url: `/i/${c.sha256}.png`,
+          ...(options.omitDownloadModes ? {} : { download_modes: downloadModes(c) })
+        }
+      ],
+      origins: noOrigins.has(c.slug) || head?.slug !== c.slug ? [] : [origin],
+      main_origin: noOrigins.has(c.slug) || head?.slug !== c.slug ? null : { source: pair[0], path: origin.path },
+      top: { name: { value: c.name, from: null } },
+      earlier_origins: noOrigins.has(c.slug)
+        ? []
+        : head?.slug !== c.slug
+          ? [
+              {
+                origin: {
+                  source: pair[0],
+                  external_id: pair[1],
+                  path: origin.path,
+                  card_slug: head?.slug ?? c.supersededBy
+                },
+                listing: { ...origin, card_slug: head?.slug ?? c.supersededBy },
+                active_from: new Date(c.addedAt).toISOString(),
+                active_to: new Date(c.addedAt + 1).toISOString()
+              }
+            ]
+          : [
+              {
+                listing: {
+                  source: c.site,
+                  source_label: "Synthetic site",
+                  external_id: `previous-${c.slug}`,
+                  path: `/o/${c.site}/previous-${c.slug}`,
+                  source_url: "https://synthetic.example/previous"
+                },
+                origin: {
+                  source: c.site,
+                  external_id: `previous-${c.slug}`,
+                  path: `/o/${c.site}/previous-${c.slug}`,
+                  card_slug: next.slug
+                },
+                active_from: "2025-01-01T00:00:00Z",
+                active_to: "2026-01-01T00:00:00Z"
+              }
+            ],
+      related: [],
+      variants: []
+    }
+  }
+
   const server = createServer(handle)
   await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve))
   const port = (server.address() as AddressInfo).port
@@ -1096,6 +1230,12 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       failure = { status, times, ...(retryAfterSeconds === undefined ? {} : { retryAfter: retryAfterSeconds }) }
     },
     publish,
+    publishSuccessor,
+    publishFork,
+    pointSuccessor,
+    withoutOrigins: (slug) => void noOrigins.add(slug),
+    deleteCard: (slug) => void deleted.add(slug),
+    blockRegion: (slug) => void regional.add(slug),
     refuseDownloads: (slug) => void refused.add(slug),
     close: () =>
       new Promise((resolve) => {

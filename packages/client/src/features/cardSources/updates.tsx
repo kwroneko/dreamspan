@@ -5,7 +5,12 @@
 // merge review, or into the new-version dialog (Replace, Merge…, Add as a separate card).
 // Nothing is sent to the source in the background (§9 D4).
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
-import { type CardOrigin, REMOTE_VERSION_HEADER, SOURCE_LINK_HEADER } from "@rp/shared/cardSources.ts"
+import {
+  type CardOrigin,
+  REMOTE_VERSION_HEADER,
+  SOURCE_LINK_HEADER,
+  SOURCE_VERSION_RECEIPT_HEADER
+} from "@rp/shared/cardSources.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 import { lazy, Suspense, useContext, useMemo, useState } from "react"
@@ -35,7 +40,13 @@ export function useOrigin(entityId: string): CardOrigin | null {
 }
 
 type Fetched =
-  | { readonly _tag: "Done"; readonly file: File; readonly version: string; readonly link: string }
+  | {
+      readonly _tag: "Done"
+      readonly file: File
+      readonly version: string
+      readonly link: string
+      readonly receipt: string
+    }
   | { readonly _tag: "Failed"; readonly message: string }
 
 /** The file's name from `Content-Disposition` (`filename*=UTF-8''…`), else a name of the card's. */
@@ -68,7 +79,13 @@ async function fetchNewerFile(origin: CardOrigin): Promise<Fetched> {
   // The card's link back to its page there, which the version taken keeps (the file doesn't name it).
   const link = decodeURIComponent(response.headers.get(SOURCE_LINK_HEADER) ?? "")
   const bytes = await response.blob()
-  return { _tag: "Done", file: new File([bytes], fileNameOf(response, `${origin.remoteId}.png`)), version, link }
+  return {
+    _tag: "Done",
+    file: new File([bytes], fileNameOf(response, `${origin.remoteId}.png`)),
+    version,
+    link,
+    receipt: response.headers.get(SOURCE_VERSION_RECEIPT_HEADER) ?? ""
+  }
 }
 
 /** The notice's entry in `editorNotices`: only for a card with a revision of its own. */
@@ -82,7 +99,13 @@ export function SourceUpdateNotice({ store }: { store: EditorStore }) {
 
 type Open =
   | { readonly _tag: "Merge"; readonly revisionId: RevisionId; readonly fileName: string }
-  | { readonly _tag: "Choices"; readonly file: File; readonly version: string; readonly link: string }
+  | {
+      readonly _tag: "Choices"
+      readonly file: File
+      readonly version: string
+      readonly link: string
+      readonly receipt: string
+    }
 
 function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: RefId; label: string }) {
   const origin = useOrigin(entityId)
@@ -91,8 +114,8 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
   const [problem, setProblem] = useState<string | null>(null)
   const action = useAction()
 
-  const take = async (version: string) => {
-    await action.run((client) => client("TakeRemoteVersion", { entityId, version }), ORIGIN_KEYS)
+  const take = async (version: string, receipt: string) => {
+    await action.run((client) => client("TakeRemoteVersion", { entityId, version, receipt }), ORIGIN_KEYS)
   }
 
   const fetched = async (which: "merge" | "choices") => {
@@ -121,7 +144,7 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
       )
     }
     // It waits on the import line now (the merge notice offers it until it's merged).
-    await take(file.version)
+    await take(file.version, file.receipt)
     setBusy(null)
     setOpen({ _tag: "Merge", revisionId, fileName: file.file.name })
   }
@@ -129,7 +152,8 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
   const choices = async () => {
     const file = await fetched("choices")
     setBusy(null)
-    if (file) setOpen({ _tag: "Choices", file: file.file, version: file.version, link: file.link })
+    if (file)
+      setOpen({ _tag: "Choices", file: file.file, version: file.version, link: file.link, receipt: file.receipt })
   }
 
   const addSeparate = async () => {
@@ -193,7 +217,7 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
               name: sourceName,
               file: open.file,
               link: open.link,
-              taken: () => take(open.version),
+              taken: () => take(open.version, open.receipt),
               addSeparate
             }}
             onClose={() => setOpen(null)}
@@ -218,9 +242,9 @@ export function CheckForNewer({ entityId, name }: { entityId: string; name: stri
     const outcome = await call((client) => client("CheckRemoteVersion", { entityId }))
     setPending(false)
     if (outcome === null) return
-    if (!outcome.ok) return setSaid(problemText(origin.sourceName, outcome.problem))
-    // The notice above and the library's badge read it again.
+    // An unavailable successor also clears the existing update marker.
     invalidateKeys(registry, ORIGIN_KEYS)
+    if (!outcome.ok) return setSaid(problemText(origin.sourceName, outcome.problem))
     setSaid(
       outcome.value.newerVersion
         ? `A newer version is on ${origin.sourceName}: the notice above offers it.`

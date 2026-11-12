@@ -480,6 +480,7 @@ const AdoptFields = {
   sourceId: Schema.String,
   remoteId: Schema.String,
   /** The source's version id, and the SHA-256 of the file as the source gave it. */
+  locator: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2048))),
   remoteVersion: Schema.String,
   file: Schema.Struct({
     label: Schema.String,
@@ -1643,7 +1644,12 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       sourceId: Schema.String,
       items: Schema.Array(
-        Schema.Struct({ remoteId: Schema.String, version: Schema.String, sha256: Schema.String })
+        Schema.Struct({
+          remoteId: Schema.String,
+          version: Schema.String,
+          sha256: Schema.String,
+          locator: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2048)))
+        })
       ).check(Schema.isMaxLength(100))
     },
     success: Schema.Void,
@@ -1653,16 +1659,28 @@ export class WriteOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       sourceId: Schema.String,
-      items: Schema.Array(Schema.Struct({ remoteId: Schema.String, version: Schema.String })).check(
-        Schema.isMaxLength(200)
-      )
+      items: Schema.Array(
+        Schema.Struct({
+          remoteId: Schema.String,
+          version: Schema.String,
+          currentId: Schema.optionalKey(Schema.String),
+          locator: Schema.optionalKey(Schema.String)
+        })
+      ).check(Schema.isMaxLength(200))
     },
     success: Schema.Struct({ noted: Schema.Int }),
     error: StorageError
   }),
   /** The source's version the user took into their card (Review and merge, Replace): the origin's `remote_version`. */
   Rpc.make("TakeRemoteVersion", {
-    payload: { userId: UserId, entityId: EntityId, version: Schema.String },
+    payload: {
+      userId: UserId,
+      entityId: EntityId,
+      version: Schema.String,
+      currentId: Schema.optionalKey(Schema.String),
+      locator: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      sha256: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -1672,7 +1690,14 @@ export class WriteOps extends RpcGroup.make(
    * first card, in one transaction.
    */
   Rpc.make("AdoptRemoteVersionAsCard", {
-    payload: { userId: UserId, entityId: EntityId, version: Schema.String, file: AdoptFields.file },
+    payload: {
+      userId: UserId,
+      entityId: EntityId,
+      version: Schema.String,
+      file: AdoptFields.file,
+      currentId: Schema.optionalKey(Schema.String),
+      locator: Schema.optionalKey(Schema.NullOr(Schema.String))
+    },
     success: Schema.Struct({ entityId: EntityId, refId: RefId }),
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
@@ -3959,7 +3984,9 @@ export class ReadOps extends RpcGroup.make(
         /** The newest version the source reported, when it isn't that one. */
         seenVersion: Schema.NullOr(Schema.String),
         /** Found by a confirmed origin row, which records versions (not an unverified Sources hint). */
-        tracked: Schema.Boolean
+        tracked: Schema.Boolean,
+        currentRemoteId: Schema.String,
+        locator: Schema.NullOr(Schema.String)
       })
     ),
     error: StorageError
@@ -3972,6 +3999,9 @@ export class ReadOps extends RpcGroup.make(
         sourceId: Schema.String,
         remoteId: Schema.String,
         remoteVersion: Schema.String,
+        currentRemoteId: Schema.String,
+        locator: Schema.NullOr(Schema.String),
+        seenRemoteId: Schema.NullOr(Schema.String),
         seenVersion: Schema.NullOr(Schema.String),
         /** An imported file confirmed by its archive hash, rather than added from the source. */
         recognized: Schema.Boolean

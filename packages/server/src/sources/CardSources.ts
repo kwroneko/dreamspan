@@ -190,7 +190,8 @@ export interface CardSourcesShape {
   readonly takeVersion: (
     user: User,
     entityId: string,
-    version: string
+    version: string,
+    receipt?: string
   ) => Effect.Effect<CardOrigin, SourceFailed | NotFound | ServerError>
   /**
    * The source's newest file of the card (the reported version, fetched again when the cache has
@@ -200,7 +201,7 @@ export interface CardSourcesShape {
     user: User,
     entityId: string
   ) => Effect.Effect<
-    { bytes: Uint8Array; fileName: string; version: string; link: string },
+    { bytes: Uint8Array; fileName: string; version: string; link: string; receipt: string; currentId: string },
     SourceFailed | NotFound | ServerError
   >
   /** Add as a separate card: the source's newest file as a new card, that version taken on this one. */
@@ -243,7 +244,7 @@ export interface CardSourcesOptions {
   readonly now?: () => number
 }
 
-const sha = (text: string) => createHash("sha256").update(text).digest("hex")
+const sha = (text: string | Uint8Array) => createHash("sha256").update(text).digest("hex")
 
 /** A card's link back to its page on the source (§4.5): the page it named, else `<source>:<remoteId>`. */
 const linkOf = (sourceId: string, remoteId: string, summary: { readonly url?: string | undefined }) =>
@@ -459,14 +460,18 @@ const make = (options: CardSourcesOptions = {}) =>
           bytes = new Uint8Array(file.bytes)
           entry = yield* cache.put(key, {
             bytes: file.bytes,
-            value: { summary: file.summary, fileName: file.fileName }
+            value: { summary: file.summary, fileName: file.fileName, locator: file.locator ?? null }
           })
         } else {
           yield* usable(user, sourceId)
           bytes = new Uint8Array(yield* cache.readBlob(entry.blob!))
         }
-        const { summary, fileName } = entry.value as { summary: AdapterSummary; fileName: string }
-        return { summary, fileName, bytes, fetched }
+        const { summary, fileName, locator } = entry.value as {
+          summary: AdapterSummary
+          fileName: string
+          locator?: string | null
+        }
+        return { summary, fileName, bytes, fetched, locator: locator ?? null }
       })
 
     /** The card's file, parsed. Parsing transfers its bytes to a worker: they aren't returned. */
@@ -501,7 +506,12 @@ const make = (options: CardSourcesOptions = {}) =>
     const noteVersions = (
       user: User,
       sourceId: string,
-      items: ReadonlyArray<{ readonly remoteId: string; readonly version: string }>
+      items: ReadonlyArray<{
+        readonly remoteId: string
+        readonly version: string
+        readonly currentId?: string
+        readonly locator?: string
+      }>
     ) =>
       items.length === 0
         ? Effect.void
@@ -518,7 +528,8 @@ const make = (options: CardSourcesOptions = {}) =>
       sourceId: string,
       items: ReadonlyArray<RemoteSummary>,
       reported = false,
-      fileHash?: string
+      fileHash?: string,
+      fileLocator?: string | null
     ) =>
       Effect.gen(function* () {
         if (items.length === 0) return items
@@ -545,7 +556,14 @@ const make = (options: CardSourcesOptions = {}) =>
             item &&
             sha256 &&
             hashes.some((hash) => hash.remoteId === card.remoteId && hash.sha256 === sha256)
-            ? [{ remoteId: card.remoteId, version: item.version.id, sha256 }]
+            ? [
+                {
+                  remoteId: card.remoteId,
+                  version: item.version.id,
+                  sha256,
+                  ...(fileLocator ? { locator: fileLocator } : {})
+                }
+              ]
             : []
         })
         if (verifiable.length) {
@@ -555,15 +573,68 @@ const make = (options: CardSourcesOptions = {}) =>
           held = yield* readHeld
         }
         const byId = new Map(held.map((card) => [card.remoteId, card]))
+        const currentVersions = new Map(
+          items.map((item) => [
+            item.remoteId,
+            {
+              version: item.version.id,
+              currentId: item.remoteId,
+              available: true,
+              locator: undefined as string | undefined
+            }
+          ])
+        )
+        const adapter = yield* known(sourceId)
+        const versions = adapter.versions
+        const checks =
+          reported && versions
+            ? items.filter((item) => {
+                const card = byId.get(item.remoteId)
+                return card?.tracked && (item.version.supersededBy || card.currentRemoteId !== item.remoteId)
+              })
+            : []
+        if (checks.length && versions) {
+          const ids = [...new Set(checks.map((item) => byId.get(item.remoteId)!.currentRemoteId))].sort()
+          const locators = Object.fromEntries(
+            checks.flatMap((item) => {
+              const card = byId.get(item.remoteId)!
+              return card.locator ? [[card.currentRemoteId, card.locator]] : []
+            })
+          )
+          const latest = yield* ask(user, sourceId, `versions:${JSON.stringify([ids, locators])}`, (http) =>
+            versions(http, ids, locators)
+          )
+          const byCurrent = new Map(latest.map((item) => [item.remoteId, item]))
+          for (const item of checks) {
+            const card = byId.get(item.remoteId)!
+            const found = byCurrent.get(card.currentRemoteId)
+            currentVersions.set(item.remoteId, {
+              version: found?.available === false || !found ? (card.remoteVersion ?? "") : found.version.id,
+              currentId: found?.currentId ?? card.currentRemoteId,
+              available: found?.available !== false && found !== undefined,
+              locator: found?.locator
+            })
+          }
+        }
         if (reported)
           yield* noteVersions(
             user,
             sourceId,
             items.flatMap((item) => {
               const card = byId.get(item.remoteId)
-              const version = item.version.id
-              return card?.tracked && version !== "" && (card.seenVersion ?? card.remoteVersion) !== version
-                ? [{ remoteId: item.remoteId, version }]
+              const current = currentVersions.get(item.remoteId)!
+              return card?.tracked &&
+                current.version !== "" &&
+                ((card.seenVersion ?? card.remoteVersion) !== current.version ||
+                  (current.locator !== undefined && card.locator !== current.locator))
+                ? [
+                    {
+                      remoteId: item.remoteId,
+                      version: current.version,
+                      currentId: current.currentId,
+                      ...(current.locator ? { locator: current.locator } : {})
+                    }
+                  ]
                 : []
             })
           )
@@ -571,7 +642,10 @@ const make = (options: CardSourcesOptions = {}) =>
           const card = byId.get(item.remoteId)
           if (!card) return item
           // Just reported, the item's version decides; from the cache, the recorded one does.
-          const newest = reported && item.version.id !== "" ? item.version.id : (card.seenVersion ?? card.remoteVersion)
+          const newest =
+            reported && currentVersions.get(item.remoteId)!.version !== ""
+              ? currentVersions.get(item.remoteId)!.version
+              : (card.seenVersion ?? card.remoteVersion)
           return {
             ...item,
             held: {
@@ -607,7 +681,7 @@ const make = (options: CardSourcesOptions = {}) =>
       entityId,
       sourceId: row.sourceId,
       sourceName: adapter.name,
-      remoteId: row.remoteId,
+      remoteId: row.currentRemoteId,
       remoteVersion: row.remoteVersion,
       newerVersion: row.seenVersion !== null && row.seenVersion !== row.remoteVersion ? row.seenVersion : null,
       ...(row.recognized ? { recognized: true } : {})
@@ -627,6 +701,45 @@ const make = (options: CardSourcesOptions = {}) =>
         if (row === null) return yield* noOrigin(entityId)
         return originOf(entityId, adapter, row)
       })
+
+    const receiptSchema = Schema.Struct({
+      userId: Schema.String,
+      entityId: Schema.String,
+      sourceId: Schema.String,
+      currentId: Schema.String.check(Schema.isMaxLength(500)),
+      version: Schema.String,
+      locator: Schema.NullOr(Schema.String.check(Schema.isMaxLength(2048))),
+      sha256: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+    })
+    const decodeReceipt = Schema.decodeUnknownOption(receiptSchema)
+    const receiptPurpose = "card-source-version"
+    const issueReceipt = (value: typeof receiptSchema.Type) => {
+      const payload = Buffer.from(JSON.stringify(value)).toString("base64url")
+      return `${payload}.${secrets.sign(payload, receiptPurpose)}`
+    }
+    const readReceipt = (ticket: string, user: User, entityId: string, sourceId: string, version: string) => {
+      try {
+        const at = ticket.lastIndexOf(".")
+        if (at < 1) return null
+        const payload = ticket.slice(0, at)
+        const expected = Buffer.from(secrets.sign(payload, receiptPurpose))
+        const given = Buffer.from(ticket.slice(at + 1))
+        if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null
+        const decoded = decodeReceipt(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")))
+        if (decoded._tag === "None") return null
+        const value = decoded.value
+        return value.userId === user.id &&
+          value.entityId === entityId &&
+          value.sourceId === sourceId &&
+          value.version === version
+          ? value
+          : null
+      } catch {
+        return null
+      }
+    }
+    const unavailable = (sourceId: string) =>
+      new SourceFailed({ sourceId, reason: "no_newer_file", message: "No newer file is available." })
 
     const service: CardSourcesShape = {
       registry,
@@ -756,9 +869,16 @@ const make = (options: CardSourcesOptions = {}) =>
         }),
       card: (user, sourceId, remoteId) =>
         Effect.gen(function* () {
-          const { summary, parsed, fetched } = yield* cardFile(user, sourceId, remoteId)
+          const { summary, parsed, fetched, locator } = yield* cardFile(user, sourceId, remoteId)
           const card = parsed.library?.kind === "card" ? parsed.library : null
-          const [shown] = yield* withHeld(user, sourceId, [forClient(user, sourceId, summary)], fetched, parsed.sha256)
+          const [shown] = yield* withHeld(
+            user,
+            sourceId,
+            [forClient(user, sourceId, summary)],
+            fetched,
+            parsed.sha256,
+            locator
+          )
           yield* writer
             .RecordRecentRemote({
               userId: user.id,
@@ -806,7 +926,7 @@ const make = (options: CardSourcesOptions = {}) =>
         }),
       prepareAdoption: (user, sourceId, remoteId) =>
         Effect.gen(function* () {
-          const { summary, fileName, parsed } = yield* cardFile(user, sourceId, remoteId)
+          const { summary, fileName, parsed, locator } = yield* cardFile(user, sourceId, remoteId)
           const card = parsed.library?.kind === "card" ? parsed.library : null
           if (card === null)
             return yield* new SourceFailed({
@@ -824,6 +944,7 @@ const make = (options: CardSourcesOptions = {}) =>
               sourceId,
               remoteId,
               remoteVersion: summary.version.id,
+              ...(locator ? { locator } : {}),
               file: {
                 label: card.label,
                 docJson: stored.docJson,
@@ -910,54 +1031,102 @@ const make = (options: CardSourcesOptions = {}) =>
         Effect.gen(function* () {
           const { row, adapter } = yield* heldOrigin(user, entityId)
           const versions = adapter.versions
-          const version = versions
-            ? (yield* ask(user, row.sourceId, `versions:${row.remoteId}`, (http) =>
-                versions(http, [row.remoteId])
-              )).find((item) => item.remoteId === row.remoteId)?.version.id
-            : (yield* cardBytes(user, row.sourceId, row.remoteId, true)).summary.version.id
-          if (!version)
-            return yield* new SourceFailed({
-              sourceId: row.sourceId,
-              reason: "not_found",
-              message: `${adapter.name} no longer has this card.`
-            })
-          yield* noteVersions(user, row.sourceId, [{ remoteId: row.remoteId, version }])
+          const currentId = row.currentRemoteId
+          const latest = versions
+            ? (yield* ask(user, row.sourceId, `versions:${JSON.stringify([currentId, row.locator])}`, (http) =>
+                versions(http, [currentId], row.locator ? { [currentId]: row.locator } : {})
+              )).find((item) => item.remoteId === currentId)
+            : {
+                remoteId: currentId,
+                currentId,
+                version: (yield* cardBytes(user, row.sourceId, currentId, true)).summary.version
+              }
+          if (!latest || latest.available === false || !latest.version.id) {
+            yield* noteVersions(user, row.sourceId, [{ remoteId: row.remoteId, version: row.remoteVersion, currentId }])
+            return yield* unavailable(row.sourceId)
+          }
+          yield* noteVersions(user, row.sourceId, [
+            {
+              remoteId: row.remoteId,
+              version: latest.version.id,
+              currentId: latest.currentId ?? currentId,
+              ...(latest.locator ? { locator: latest.locator } : {})
+            }
+          ])
           return yield* originAgain(user, entityId, adapter)
         }),
-      takeVersion: (user, entityId, version) =>
+      takeVersion: (user, entityId, version, receipt) =>
         Effect.gen(function* () {
-          const { adapter } = yield* heldOrigin(user, entityId)
+          const { row, adapter } = yield* heldOrigin(user, entityId)
+          const ticket = receipt ? readReceipt(receipt, user, entityId, row.sourceId, version) : null
+          if (receipt && !ticket)
+            return yield* new ServerError({
+              message: "This version belongs to another card or can no longer be verified. Open it again."
+            })
+          if (
+            !ticket &&
+            ((row.seenRemoteId ?? row.currentRemoteId) !== row.currentRemoteId ||
+              (version !== row.remoteVersion && version !== row.seenVersion))
+          )
+            return yield* new ServerError({ message: "Open the newer version again before taking it." })
           yield* writer
-            .TakeRemoteVersion({ userId: user.id, entityId: entityId as EntityId, version })
+            .TakeRemoteVersion({
+              userId: user.id,
+              entityId: entityId as EntityId,
+              version,
+              currentId: ticket?.currentId ?? row.currentRemoteId,
+              locator: ticket ? ticket.locator : row.locator,
+              ...(ticket ? { sha256: ticket.sha256 } : {})
+            })
             .pipe(Effect.catchIf((error) => error._tag !== "NotFound", storage("recording the version taken")))
           return yield* originAgain(user, entityId, adapter)
         }),
       newerFile: (user, entityId) =>
         Effect.gen(function* () {
+          yield* service.checkVersion(user, entityId)
           const { row } = yield* heldOrigin(user, entityId)
           const wanted = row.seenVersion ?? row.remoteVersion
-          const cachedFile = yield* cardBytes(user, row.sourceId, row.remoteId)
+          const currentId = row.seenRemoteId ?? row.currentRemoteId
+          const cached = yield* cardBytes(user, row.sourceId, currentId)
           const file =
-            cachedFile.summary.version.id === wanted
-              ? cachedFile
-              : yield* cardBytes(user, row.sourceId, row.remoteId, true)
-          const version = file.summary.version.id
-          // The source may have moved on again since it was checked.
-          if (version !== "" && version !== wanted)
-            yield* noteVersions(user, row.sourceId, [{ remoteId: row.remoteId, version }])
+            cached.summary.version.id === wanted ? cached : yield* cardBytes(user, row.sourceId, currentId, true)
+          const version = file.summary.version.id || wanted
+          if (version !== wanted)
+            yield* noteVersions(user, row.sourceId, [{ remoteId: row.remoteId, version, currentId }])
+          const receipt = issueReceipt({
+            userId: user.id,
+            entityId,
+            sourceId: row.sourceId,
+            currentId,
+            version,
+            locator: file.locator,
+            sha256: sha(file.bytes)
+          })
           return {
             bytes: file.bytes,
             fileName: file.fileName,
-            version: version || wanted,
-            link: linkOf(row.sourceId, row.remoteId, file.summary)
+            version,
+            currentId,
+            receipt,
+            link: linkOf(row.sourceId, currentId, file.summary)
           }
-        }),
+        }).pipe(
+          Effect.catchTag("SourceFailed", (failure) => {
+            if (failure.reason !== "not_found" && failure.reason !== "region_unavailable") return Effect.fail(failure)
+            return Effect.gen(function* () {
+              const { row } = yield* heldOrigin(user, entityId)
+              yield* noteVersions(user, row.sourceId, [
+                { remoteId: row.remoteId, version: row.remoteVersion, currentId: row.currentRemoteId }
+              ])
+              return yield* unavailable(row.sourceId)
+            })
+          })
+        ),
       addVersionAsCard: (user, entityId) =>
         Effect.gen(function* () {
           const { row } = yield* heldOrigin(user, entityId)
-          // The newest file into the cache, then made ready as an adoption is.
-          yield* service.newerFile(user, entityId)
-          const prepared = yield* service.prepareAdoption(user, row.sourceId, row.remoteId)
+          const newest = yield* service.newerFile(user, entityId)
+          const prepared = yield* service.prepareAdoption(user, row.sourceId, newest.currentId)
           const added = yield* service.storingAdoptions(
             [prepared],
             writer
@@ -965,6 +1134,8 @@ const make = (options: CardSourcesOptions = {}) =>
                 userId: user.id,
                 entityId: entityId as EntityId,
                 version: prepared.payload.remoteVersion,
+                currentId: newest.currentId,
+                locator: prepared.payload.locator ?? null,
                 file: prepared.payload.file
               })
               .pipe(Effect.catchIf((error) => error._tag !== "NotFound", storage("adding the new version"))),

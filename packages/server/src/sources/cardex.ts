@@ -35,7 +35,7 @@ import type {
   SourceQuery
 } from "@rp/shared/cardSources.ts"
 import { Effect, Schema } from "effect"
-import type { AdapterSummary, CardSourceAdapter, SourceHttp, SourceResponse } from "./adapter.ts"
+import type { AdapterSummary, CardSourceAdapter, SourceHttp, SourceResponse, SourceVersion } from "./adapter.ts"
 
 export const CARDEX_ORIGIN = "https://cardex.zip"
 /** Results per page: a multiple of the grid's usual 2 to 6 columns. */
@@ -793,6 +793,50 @@ export const familyOf = (
   return { items, more }
 }
 
+/** Stable listing keys come from metadata, never by fetching its path or source_url. */
+const originLocator = (detail: unknown): string | undefined => {
+  if (!isRecord(detail)) return undefined
+  const origins = Array.isArray(detail.origins) ? detail.origins.filter(isRecord) : []
+  const main = isRecord(detail.main_origin) ? detail.main_origin : null
+  const earlier = Array.isArray(detail.earlier_origins)
+    ? detail.earlier_origins
+        .filter(isRecord)
+        .sort((a, b) => String(b.active_to ?? "").localeCompare(String(a.active_to ?? "")))
+    : []
+  const candidates = [
+    origins.find((o) => main && o.path === main.path),
+    ...origins,
+    ...earlier.flatMap((e) => [e.origin, e.listing])
+  ]
+  for (const entry of candidates) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.source !== "string" ||
+      !/^[a-z0-9_]{1,40}$/.test(entry.source) ||
+      typeof entry.external_id !== "string" ||
+      !entry.external_id ||
+      entry.external_id.length > 500
+    )
+      continue
+    return JSON.stringify([entry.source, entry.external_id])
+  }
+  return undefined
+}
+const locatorParts = (locator: string): readonly [string, string] => {
+  const pair: unknown = JSON.parse(locator)
+  if (
+    !Array.isArray(pair) ||
+    pair.length !== 2 ||
+    typeof pair[0] !== "string" ||
+    !/^[a-z0-9_]{1,40}$/.test(pair[0]) ||
+    typeof pair[1] !== "string" ||
+    !pair[1] ||
+    pair[1].length > 500
+  )
+    throw bad()
+  return [pair[0], pair[1]]
+}
+
 /** cardex's batch URL in its canonical form: sorted, without duplicates, joined by `%2C`. */
 export const batchUrl = (ids: ReadonlyArray<string>, origin = CARDEX_ORIGIN) => {
   const url = new URL("/api/v1/cards/batch", origin)
@@ -1036,7 +1080,8 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         return {
           bytes: file.bytes,
           fileName: fileNameOf(file, remoteId),
-          summary: { ...summary, ...detailMetadata(detail, origin) }
+          summary: { ...summary, ...detailMetadata(detail, origin) },
+          ...(originLocator(detail) ? { locator: originLocator(detail)! } : {})
         }
       }),
     recognize: (links) => recognizeCardex(links, origin),
@@ -1086,17 +1131,128 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         const href = onOrigin(origin, ref)
         return href ? Effect.map(http.get(new URL(href), "image"), (response) => response.bytes) : Effect.fail(bad())
       }),
-    versions: (http, ids) =>
+    versions: (http, ids, locators = {}) =>
       Effect.gen(function* () {
-        const unique = [...new Set(ids)].sort()
-        const out: Array<{ remoteId: string; version: AdapterSummary["version"] }> = []
-        for (let start = 0; start < unique.length; start += BATCH_MAX) {
-          const raw = yield* getJson(http, batchUrl(unique.slice(start, start + BATCH_MAX), origin))
-          const items = isRecord(raw) ? summaries(raw.items, origin) : null
-          if (items === null) return yield* bad()
-          for (const item of items) out.push({ remoteId: item.remoteId, version: item.version })
+        // One budget covers this entire check, including bootstrap, batches and fallback hops.
+        let requests = 0
+        const bounded: SourceHttp = {
+          ...http,
+          get: (url, kind, headers) =>
+            ++requests > 8
+              ? Effect.fail(bad("cardex's version lookup exceeded its request budget"))
+              : http.get(url, kind, headers)
         }
-        return out
+        const read = (url: URL) =>
+          getJson(bounded, url).pipe(
+            Effect.catchIf(
+              (failure) => failure.reason === "not_found" || failure.reason === "region_unavailable",
+              () => Effect.succeed(null)
+            )
+          )
+        const unique = [...new Set(ids)].sort()
+        const absent = (id: string): SourceVersion => ({
+          remoteId: id,
+          currentId: id,
+          version: { id: "" },
+          available: false
+        })
+        if (unique.length === 1) {
+          const id = unique[0]!
+          let locator = locators[id]
+          if (!locator) locator = originLocator(yield* read(api(`/cards/${encodeURIComponent(id)}`)))
+          if (locator) {
+            const [site, external] = yield* Effect.try({ try: () => locatorParts(locator!), catch: () => bad() })
+            const detail = yield* read(api(`/origins/${encodeURIComponent(site)}/${encodeURIComponent(external)}`))
+            if (detail === null) return [absent(id)]
+            if (
+              !isRecord(detail) ||
+              !isRecord(detail.card) ||
+              typeof detail.card.slug !== "string" ||
+              !detail.card.slug ||
+              detail.card.slug.length > 500 ||
+              !Array.isArray(detail.files)
+            )
+              return yield* bad()
+            const currentId = detail.card.slug
+            const files = detail.files
+              .filter(isRecord)
+              .filter(
+                (f) =>
+                  f.current !== false &&
+                  f.is_original === true &&
+                  typeof f.sha256 === "string" &&
+                  /^[0-9a-f]{64}$/.test(f.sha256)
+              )
+            if (detail.card.hidden === true || files.length === 0) return [absent(id)]
+            if (files.length === 1) {
+              const file = files[0]!
+              const mode = downloadModeOf(file.download_modes)
+              if (file.hidden === true || mode === "refused" || mode === null) return [absent(id)]
+              return [{ remoteId: id, currentId, locator, version: { id: file.sha256 as string }, available: true }]
+            }
+            // With several originals, batch lookup is the archive's canonical file choice.
+            const raw = yield* read(batchUrl([currentId], origin))
+            const items = isRecord(raw) ? summaries(raw.items, origin) : null
+            const item = items?.find((item) => item.remoteId === currentId)
+            if (!item) return [absent(id)]
+            return [
+              {
+                remoteId: id,
+                currentId,
+                locator,
+                version: item.version,
+                available:
+                  downloadModeOf(
+                    (isRecord(raw) && Array.isArray(raw.items) ? raw.items : []).find(
+                      (v) => isRecord(v) && v.slug === currentId
+                    )?.download_modes
+                  ) !== "refused"
+              }
+            ]
+          }
+        }
+        const lookup = (wanted: ReadonlyArray<string>) =>
+          Effect.gen(function* () {
+            const found = new Map<string, AdapterSummary>()
+            for (let offset = 0; offset < wanted.length; offset += BATCH_MAX) {
+              const raw = yield* read(batchUrl(wanted.slice(offset, offset + BATCH_MAX), origin))
+              if (raw === null) continue
+              const items = isRecord(raw) ? summaries(raw.items, origin) : null
+              if (items === null) return yield* bad()
+              for (const item of items) found.set(item.remoteId, item)
+            }
+            return found
+          })
+        const first = yield* lookup(unique)
+        const resolved = new Map<string, { item: AdapterSummary; seen: Set<string>; missing: boolean }>()
+        for (const id of unique) {
+          const item = first.get(id)
+          if (item) resolved.set(id, { item, seen: new Set([id]), missing: false })
+        }
+        for (let hop = 0; ; hop++) {
+          const pending = [...resolved.values()].filter((e) => !e.missing && e.item.version.supersededBy)
+          if (!pending.length) break
+          if (hop >= 4) return yield* bad("cardex listed too many successive versions")
+          for (const e of pending) {
+            const target = e.item.version.supersededBy!
+            if (target.length > 500 || e.seen.has(target)) return yield* bad("cardex listed a version cycle")
+            e.seen.add(target)
+          }
+          const next = yield* lookup([...new Set(pending.map((e) => e.item.version.supersededBy!))].sort())
+          for (const e of pending) {
+            const item = next.get(e.item.version.supersededBy!)
+            if (item) e.item = item
+            else e.missing = true
+          }
+        }
+        return unique
+          .filter((id) => resolved.has(id))
+          .map((remoteId): SourceVersion => {
+            const e = resolved.get(remoteId)
+            return !e || e.missing
+              ? absent(remoteId)
+              : { remoteId, currentId: e.item.remoteId, version: e.item.version, available: true }
+          })
       })
   }
 }

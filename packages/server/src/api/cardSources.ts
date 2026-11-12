@@ -2,7 +2,12 @@
 // file's route (§3.8): authenticated and owner-scoped like every RPC. The source is reached
 // only through the CardSources service.
 import { CurrentUser } from "@rp/shared/api.ts"
-import { type CardSourcesApi, REMOTE_VERSION_HEADER, SOURCE_LINK_HEADER } from "@rp/shared/cardSources.ts"
+import {
+  type CardSourcesApi,
+  REMOTE_VERSION_HEADER,
+  SOURCE_LINK_HEADER,
+  SOURCE_VERSION_RECEIPT_HEADER
+} from "@rp/shared/cardSources.ts"
 import { Effect, Layer, Option } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"
@@ -34,7 +39,8 @@ export const makeCardSourceHandlers = Effect.gen(function* () {
     AdoptRemoteCard: ({ sourceId, remoteId }) => withUser((user) => sources.adopt(user, sourceId, remoteId)),
     CardOrigin: ({ entityId }) => withUser((user) => sources.origin(user, entityId)),
     CheckRemoteVersion: ({ entityId }) => withUser((user) => sources.checkVersion(user, entityId)),
-    TakeRemoteVersion: ({ entityId, version }) => withUser((user) => sources.takeVersion(user, entityId, version)),
+    TakeRemoteVersion: ({ entityId, version, receipt }) =>
+      withUser((user) => sources.takeVersion(user, entityId, version, receipt)),
     AddRemoteVersionAsCard: ({ entityId }) => withUser((user) => sources.addVersionAsCard(user, entityId)),
     SourceCreator: ({ sourceId, creator }) => withUser((user) => sources.creator(user, sourceId, creator)),
     SourceFamily: ({ sourceId, remoteId }) => withUser((user) => sources.family(user, sourceId, remoteId)),
@@ -52,7 +58,7 @@ const sourceStatus = (reason: string) =>
       ? 429
       : reason === "disabled"
         ? 403
-        : reason === "not_found"
+        : reason === "not_found" || reason === "no_newer_file"
           ? 404
           : 502
 
@@ -84,7 +90,8 @@ export const newerFileRoute = Layer.unwrap(
             "x-content-type-options": "nosniff",
             "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
             [REMOTE_VERSION_HEADER]: encodeURIComponent(file.version),
-            [SOURCE_LINK_HEADER]: encodeURIComponent(file.link)
+            [SOURCE_LINK_HEADER]: encodeURIComponent(file.link),
+            [SOURCE_VERSION_RECEIPT_HEADER]: file.receipt
           }
         })
       }).pipe(
@@ -136,7 +143,12 @@ export const imageRoute = Layer.unwrap(
         Effect.catchTags({
           NotFound: () => Effect.succeed(jsonError(404, "there's no such image")),
           SourceFailed: (error) =>
-            Effect.succeed(jsonError(error.reason === "not_found" ? 502 : sourceStatus(error.reason), error.message)),
+            Effect.succeed(
+              jsonError(
+                error.reason === "not_found" || error.reason === "no_newer_file" ? 502 : sourceStatus(error.reason),
+                error.message
+              )
+            ),
           ServerError: (error) => Effect.succeed(jsonError(500, error.message))
         })
       )
