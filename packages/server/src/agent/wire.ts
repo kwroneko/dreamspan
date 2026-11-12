@@ -2,7 +2,7 @@
 // the rollout's own transcript after it. pi-ai converts the suffix for the APIs it converts the
 // prefix for; Chat Completions gets the assembled messages exactly in `payload`, so the suffix
 // is added there in the wire's own form. The summarizer's tool loop shares this.
-import type { Message, Tool } from "@earendil-works/pi-ai"
+import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai"
 import type { ProviderRequest } from "../assembler/wire.ts"
 import type { ModelInput } from "../assembler/types.ts"
 type ReasoningTarget = Pick<ModelInput, "api" | "kind" | "key">
@@ -88,6 +88,27 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
   }
   return { role: "system", content: typeof m.content === "string" ? m.content : m.content.map((p) => p.text).join("") }
 }
+
+/**
+ * The suffix as `target` may be sent it (spec/AGENTIC.md §12.3): thinking another model wrote,
+ * and the signatures that go with it, are left out of its turns. A provider accepts signed
+ * reasoning only from the model that signed it, and pi-ai would otherwise turn unsigned
+ * thinking into the turn's visible text. Text, tool calls and results stay as they were.
+ */
+export const forTarget = (suffix: ReadonlyArray<Message>, target: Pick<ModelInput, "api" | "key">): Array<Message> =>
+  suffix.map((m) => {
+    if (m.role !== "assistant" || (m.api === target.api && m.model === target.key)) return m
+    if (!m.content.some((p) => p.type === "thinking" || (p.type === "toolCall" && p.thoughtSignature))) return m
+    const content: AssistantMessage["content"] = []
+    for (const p of m.content) {
+      if (p.type === "thinking") continue
+      if (p.type === "toolCall" && p.thoughtSignature) {
+        const { thoughtSignature: _signature, ...call } = p
+        content.push(call)
+      } else content.push(p)
+    }
+    return { ...m, content }
+  })
 
 /**
  * The request for one step of a rollout: the frozen prefix, then `suffix`, with `tools`.

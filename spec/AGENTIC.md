@@ -334,3 +334,48 @@ Each unit is sized for one agent session, ships with its tests, moves its text i
 | U10 | **Decision models**: engine, `system-one` provider kind, `presence` and `lore` points, settings | U1 (independent of U2–U9) | `decision/*`, `providers/builtins.ts`, `assembler/loreStages.ts`, client connection settings | reference-harness's decision tests ported (parsing, malformed billing, timeout fallback, disabled points send nothing); lore admission frozen in the snapshot; presence events attached |
 
 Order: U1, then U2, U3 and U4 in parallel, then U5, then U6. U7 can start after U2. U8 comes after U6. U9 waits for `noteoverrides`. U10 is independent after U1.
+
+## 12. Resuming anything stopped midway (resume1, 2026-11-12)
+
+**Status:** the owner's requirement is **[D]** (owner, 2026-11-12): "Our harness needs to support resuming anything that was stopped midway. If the system crashes mid rollout, you have to prompt with a new message. No reason for that to be the case. Same with model errors. It must be possible to resume mid-rollout. Whatever request failed to send will be sent with eg, a new model when the user resumes." Everything else in this section is **[P]**. Built with it: ARCHITECTURE §16, "Agent rollouts", "Resume".
+
+### 12.1 The audit
+
+Each case was reproduced against a scripted provider (`test/resumeAudit.test.ts`; kills in the slow `test/resumeKill.test.ts`). "Before" is master `44c46181`.
+
+| Case | Before | Now |
+|---|---|---|
+| Stopped while the final text streams | Resume keeps the text and continues it through a prefill on a model that takes one; else resamples the turn | Same |
+| Stopped while text streams on a model without prefill, or while thinking streams | Resume samples the turn again from the identical request | Same |
+| Stopped between tool calls, the next request unanswered | Resume sends that request again | Same |
+| Stopped during the second of two parallel calls | The finished call keeps its result; the cut one runs again | Same |
+| Stopped before the first word | Server resumes from the saved request; the client's Resume was disabled ("stopped before its first step") | Resume enabled |
+| Provider refusal before any text (400, 401, context overflow, content filter, 429 and 5xx after retries) | Version `failed` with the provider's words; Resume disabled in the client when nothing was written, so a failed first request needed a new message or a swipe | Resume enabled; it sends the same request |
+| Connection dropped before an answer | Classed "overloaded" ("Connection error.") | Classed "network" |
+| The app killed while text streams | Version `interrupted`; the transcript on disk had only the turns before the cut, so Resume resampled the turn and the text was lost from the run | The turn being streamed is saved every 2 s and 2 s after its last delta; Resume continues it |
+| The app killed while a request after a tool call waits | Version `interrupted`; Resume sends that request again | Same, now covered by a kill test |
+| Nothing sent after a restart until the user resumes | Yes | Same, covered by the kill tests |
+| The user changes the chat's model, then resumes | Resume sent the run to the model it started with | It goes to the model the chat uses now (§12.3) |
+| The user changes the model, then swipes or continues the last reply | The swipe or Continue used the model from before the change | Uses the model the composer shows |
+| A tab closes mid-run | The run goes on; another tab sees it finish | Same |
+| Plain (non-agent) reply stopped or failed | Text saved every 2 s; Continue (latest message) and › (new version) carry it on | Same; both now go to the model the composer shows |
+| Workshop reply stopped or failed | Same paths as agent replies; approvals re-asked after a restart | Same |
+
+### 12.2 What a resume keeps
+
+- **[P]** The turn being written is saved with the transcript while it streams: at most every 2 s, and once more 2 s after its last delta, marked as a stop would mark it. A crash then loses at most the last 2 s of the turn.
+- **[P]** Text cut off is kept and continued through a prefill when the model takes one; otherwise the turn is sampled again. Thinking cut off is never continued: the turn is sampled again. A tool call cut off is dropped and resampled; a call without its result runs again.
+- **[P]** A restart never sends anything by itself (reference-harness: no auto-resume). The reply reads "interrupted" until the user resumes it.
+
+### 12.3 Resume on the model chosen now
+
+- **[P]** Resume, Continue and a new version use the model the composer shows with the reply last: a model chosen while the stopped reply is the last message applies to it. Resume reads the chat's binding at the reply (`StateEventsAt` with `displayEnd`), because a generation's own assembly reads the state before the reply. "Retry with…" (a named model) still wins.
+- **[P]** With the same model, the frozen request is sent byte for byte, so the provider's cache still holds. With another model, the run keeps its messages and transcript, and takes the new model's settings: samplers, context budget and cache layout. The old request's cache checkpoints are dropped, since they index the old model's wire.
+- **[P]** Thinking another model wrote, and its signatures (Anthropic's signed thinking, Gemini's thought signatures, OpenRouter's reasoning details), are left out of the new model's request. Text, tool calls and tool results are converted into the new API's own form. The transcript records which model wrote each turn.
+
+### 12.4 Left for later
+
+- No stall timeout: a provider that accepts the request and then sends nothing waits until the user stops it. Example: a gateway that holds the socket open for ten minutes; the reply shows "Writing…" all that time.
+- An assembly that fails now (a deleted card, say) blocks Resume, with the assembly's message, though the frozen request could still be sent.
+- The tools stay as the run froze them, even when the user changed the Tools setting before resuming.
+- The model's binding taken off at the reply (back to the default) isn't seen by Resume: it uses the binding from before the reply.

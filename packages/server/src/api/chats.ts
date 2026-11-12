@@ -16,6 +16,7 @@ import { conditionOf } from "@rp/shared/presetConditions.ts"
 import { foldState, swappedCard } from "@rp/shared/state.ts"
 import { Effect, Option, Stream } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
+import { shownModel } from "../chat/shownModel.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Generations } from "../chat/Generations.ts"
@@ -377,13 +378,15 @@ export const makeChatHandlers = Effect.gen(function* () {
         return outcome.queue
       }).pipe(Effect.uninterruptible, internal("Round")),
 
-    Regenerate: ({ slotId, forkId, expectedRowVersion, model, direction }) =>
+    Regenerate: ({ slotId, forkId, expectedRowVersion, model: named, direction }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
         // A swipe keeps the speaker and the direction of the version it replaces (DESIGN §2.2,
         // guidance on swipes), unless a direction is given now: an empty one is none.
         const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
+        // "Regenerate with…" names a model; otherwise it's the one the composer shows here.
+        const model = named ?? (yield* shownModel(reader, { userId: id, chatId, slotId, forkId: forkId ?? null }))
         if (before.version.context) {
           const resumed = yield* regenerateSeveral({
             versionId: before.version.id,
@@ -448,10 +451,18 @@ export const makeChatHandlers = Effect.gen(function* () {
           slotId: source.slotId,
           forkId: forkId ?? null
         })
+        // The model the composer shows here, one chosen after the version stopped included.
+        const model = yield* shownModel(reader, {
+          userId: id,
+          chatId,
+          slotId: source.slotId,
+          forkId: forkId ?? null
+        })
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId: source.slotId,
           forkId: forkId ?? null,
+          ...(model ? { model } : {}),
           version: {
             ...generating,
             content: source.content,
@@ -470,6 +481,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           slotId: source.slotId,
           versionId: added.version.id,
           forkId: added.forkId,
+          ...(model ? { model } : {}),
           initial: {
             text: added.version.content,
             reasoning: added.version.reasoning ?? "",

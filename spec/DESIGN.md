@@ -1049,6 +1049,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
   - midway through a tool call: discard it and resample
   - midway through text: continue it through prefill where supported, otherwise discard it
 - **[P]** Any step of a rollout can be edited before resuming. **Built** (server 2026-11-05, `ResumeFromStep`; the inspector's Edit and Resume from here, resumeui 2026-11-12; ARCHITECTURE §16).
+- **[D]** Anything stopped midway can be resumed without a new message: a crash mid-rollout, a model error. The request that failed is sent when the user resumes, to a new model if the user chose one (owner, 2026-11-12). Design and audit: AGENTIC §12. **Built** (resume1, 2026-11-12; ARCHITECTURE §16).
+- **[P]** (resume1) The turn being written is saved while it streams, so a crash loses at most its last 2 s; a restart sends nothing until the user resumes.
+- **[P]** (resume1) Resume, Continue and a new version use the model the composer shows with the reply last. With the same model the frozen request is sent byte for byte; with another, the messages and transcript are kept, the new model's settings and cache layout apply, and other models' thinking and signatures are left out.
 
 ### 7.6 Decision models
 - **[D]** Jev and similar decision models are integrated as in reference-harness (`spec/DECISION-MODEL.md`), but are **never mandatory**. Each decision point has a heuristic fallback. Phase 4 design: AGENTIC §7 (points `presence` and `lore`, opt-in per connection). **Built** (phase4decide, 2026-11-05; ARCHITECTURE §16 "Decision models").
