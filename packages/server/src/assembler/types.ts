@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 59
+export const ASSEMBLER_VERSION = 60
 
 export type Role = "system" | "user" | "assistant"
 
@@ -243,6 +243,8 @@ export interface HistoryStart {
     readonly revision: number
     /** Digest at the last assembled history marker, for exact-position cache reads. */
     readonly cacheHistory?: string
+    /** The same for each separate context's character, by card (unit C7); absent in a shared context. */
+    readonly cacheHistoryByView?: Readonly<Record<string, string>>
     /**
      * Lore entries placed above the history, kept activated until its start next moves
      * (DESIGN §1.3); absent when lore goes only below the history.

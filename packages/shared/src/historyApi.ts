@@ -73,7 +73,17 @@ export const HistoryRecord = Schema.Struct({
 const HistoryTarget = Schema.Struct({ chatId: ChatId, forkId: ForkId })
 export const historyReadRpcs = [
   Rpc.make("PreviewHistory", {
-    payload: { chatId: ChatId, forkId: ForkId, search: HistorySearch, cursor: Schema.optionalKey(HistoryCursor) },
+    payload: {
+      chatId: ChatId,
+      forkId: ForkId,
+      search: HistorySearch,
+      cursor: Schema.optionalKey(HistoryCursor),
+      /**
+       * In a chat set to separate contexts, a character whose own summaries to search too
+       * (spec/CHARACTER-CONTEXT.md §2.3, unit C7). Absent: the shared summaries only.
+       */
+      viewer: Schema.optionalKey(EntityId)
+    },
     success: HistoryPreview,
     error: Schema.Union([NotFound, HistoryRejected, ServerError])
   }),

@@ -45,7 +45,9 @@ export const viewerAudience = Effect.fnUntraced(function* (
 ) {
   const rows = yield* stateEventsThrough(sql, chatId as ChatId, leaf as SlotId, yield* viewAt(sql, chatId, leaf))
   const events = rows.map((e) => ({ scope: e.scope, data: { key: e.key, value: JSON.parse(e.value_json) } }))
-  const identities = identitiesOf(events as Array<FoldableEvent>).get(viewer) ?? [viewer]
+  // Any of the character's identities names it: its card now, or one it replaced.
+  const replaced = identitiesOf(events as Array<FoldableEvent>)
+  const identities = replaced.get(viewer) ?? [...replaced.values()].find((ids) => ids.includes(viewer)) ?? [viewer]
   return { identities, audience: audienceKey(identities) }
 })
 

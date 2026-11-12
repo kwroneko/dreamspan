@@ -214,9 +214,13 @@ it.live("a separate context's viewer opens and searches only summaries of what i
       assert.isTrue(opened.isError, `${covering} covers message 3`)
     }
     assert.include((yield* run(wren, "expand_summary", { messages: "1–2" })).text, "Message 2")
-    assert.include((yield* run(wren, "expand_summary", { messages: "5–6" })).text, "Message 6")
+    // Summaries kept per view (unit C7): the shared summaries are Wren's only before her first
+    // missed message; after it she has her own (none written here), since a shared request
+    // there may have carried what she missed.
+    assert.isTrue((yield* run(wren, "expand_summary", { messages: "5–6" })).isError)
     assert.include((yield* run(wren, "search_summaries", { query: "SECOND" })).text, "No summaries match")
-    assert.include((yield* run(wren, "search_summaries", { query: "LAST" })).text, "Messages 5–6")
+    assert.include((yield* run(wren, "search_summaries", { query: "LAST" })).text, "No summaries match")
+    assert.include((yield* run(null, "search_summaries", { query: "LAST" })).text, "Messages 5–6")
     assert.include((yield* run(null, "search_summaries", { query: "SECOND" })).text, "Messages 3–4")
     assert.isUndefined((yield* run(null, "expand_summary", { messages: "1–6" })).isError)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

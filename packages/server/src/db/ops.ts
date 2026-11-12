@@ -2844,7 +2844,14 @@ export class ReadOps extends RpcGroup.make(
     .setPayload(Schema.Struct({ ...historyReadRpcs[3].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   historyReadRpcs[0]
-    .setPayload(Schema.Struct({ ...historyReadRpcs[0].payloadSchema.fields, userId: UserId }))
+    .setPayload(
+      Schema.Struct({
+        ...historyReadRpcs[0].payloadSchema.fields,
+        userId: UserId,
+        /** Every view's summaries, for a rename across the history; the server's own. */
+        allViews: Schema.optionalKey(Schema.Boolean)
+      })
+    )
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   historyReadRpcs[1]
     .setPayload(Schema.Struct({ ...historyReadRpcs[1].payloadSchema.fields, userId: UserId }))
