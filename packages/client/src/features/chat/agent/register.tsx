@@ -1,6 +1,7 @@
 // Agent replies in the client (spec/AGENTIC.md §5, §6), as registered parts a plugin can replace:
 // a stopped reply's Resume, the steps inside a reply and its header badge, the run inspector's
-// tools and steps (with their edits), the Activity tab, and the Tools setting.
+// tools and steps (with their edits), the Activity tab, the Tools setting, and the answer to a
+// call that waits for the user, under its step.
 import { lazy, Suspense, type ComponentProps } from "react"
 import { Loading } from "../../../ui/Spinner.tsx"
 import { chatPanels, lazyPanel, type PanelProps } from "../panels.tsx"
@@ -9,6 +10,8 @@ import { Steps, StepsBadge } from "./Steps.tsx"
 import { cardDefinitionSections } from "../../editor/cardSections.ts"
 import { invokeMessageAction, messageActions, viewOf } from "../messageActions.tsx"
 import { resumeOffer } from "./resume.ts"
+import { stepActions } from "./stepActions.ts"
+import { ApprovalPanel } from "./ApprovalPanel.tsx"
 
 const RunSteps = lazy(() => import("./RunSteps.tsx").then((m) => ({ default: m.RunSteps })))
 const ToolsSection = lazy(() => import("./ToolsSection.tsx").then((m) => ({ default: m.ToolsSection })))
@@ -39,6 +42,8 @@ export const registerAgent = () => [
   // Above the reasoning: the steps came before the final turn's reasoning and text.
   reasoningPanels.register({ id: "agent.steps", order: 5, component: Steps }),
   messageHeaderDetails.register({ id: "message.steps-badge", order: 15, component: StepsBadge }),
+  // A call that asks the user first: what it will do, and Allow, Allow in this workshop, Decline.
+  stepActions.register({ id: "agent.approval", order: 10, component: ApprovalPanel }),
   runInspectorSections.register({
     id: "inspector.run-steps",
     order: 10,

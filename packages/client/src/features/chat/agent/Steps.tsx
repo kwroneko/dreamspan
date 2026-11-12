@@ -3,7 +3,8 @@
 // by default; folded once the reply is done, as "3 steps · 14 s". Folding or opening it during a
 // run becomes the user's choice for every reply after (`steps` in the display preferences), as
 // reasoning's does. A finished reply's steps are read from its transcript when first opened. The
-// header badge (`StepsBadge`) opens the same element.
+// header badge (`StepsBadge`) opens the same element. A call waiting for the user keeps the element
+// open, and the badge says so; what a step offers under its row is registered (`stepActions`).
 import { useAtom, useAtomValue } from "@effect/atom-react"
 import type { RolloutStep } from "@rp/shared/agent.ts"
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
@@ -16,6 +17,7 @@ import { Tooltip } from "../../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../../ui/viewPrefs.ts"
 import { liveSteps, type ChatSession } from "../session.ts"
 import { excerpt, isOpen, statusText, stepsChoice, stepsText, stepsView } from "./steps.ts"
+import { useStepActions, waitsForUser } from "./stepActions.ts"
 
 const effectIcon: Record<Extract<RolloutStep, { kind: "tool" }>["effect"], IconName> = {
   read: "search",
@@ -58,8 +60,19 @@ function useStoredSteps(session: ChatSession, version: Version, wanted: boolean)
   return stored?.id === id ? stored : null
 }
 
-function StepRow({ step, index }: { step: RolloutStep; index: number }) {
+function StepRow({
+  step,
+  index,
+  version,
+  session
+}: {
+  step: RolloutStep
+  index: number
+  version: Version
+  session: ChatSession
+}) {
   const [open, setOpen] = useState(false)
+  const actions = useStepActions()
   const id = useId()
   const body = step.kind === "tool" ? (step.result ?? "") : step.text
   const canOpen = body.trim() !== ""
@@ -100,6 +113,8 @@ function StepRow({ step, index }: { step: RolloutStep; index: number }) {
           <span className="mt-0.5 ml-auto flex shrink-0 items-center" data-step-status={step.status}>
             {step.status === "running" ? (
               <Spinner className="size-3.5" />
+            ) : step.status === "waiting" ? (
+              <Icon name="help" size={14} className="text-warning" />
             ) : (
               <Icon
                 name={step.status === "done" ? "check" : "close"}
@@ -119,6 +134,8 @@ function StepRow({ step, index }: { step: RolloutStep; index: number }) {
           {body}
         </pre>
       )}
+      {step.kind === "tool" &&
+        actions.map((action) => <action.component key={action.id} step={step} version={version} session={session} />)}
     </li>
   )
 }
@@ -135,20 +152,25 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
   const preferred: ReasoningDisplay = viewer.prefs.steps
   const [chosen, setChosen] = useAtom(stepsChoice(version.id))
   const streaming = view?.running ?? false
-  const open = view !== null && isOpen(chosen, streaming, preferred)
+  // A call waiting for the user stays in sight: the answer is in its row.
+  const waiting = waitsForUser(view?.live)
+  const open = view !== null && (waiting || isOpen(chosen, streaming, preferred))
   const stored = useStoredSteps(session, version, open && view !== null && !view.running)
   const id = useId()
   const hintId = useId()
   if (view === null) return null
 
-  const hint = open
-    ? streaming
-      ? "Click to hide the steps. Replies after this one show them folded too."
-      : "Click to hide the steps"
-    : streaming
-      ? "Click to show the steps as they happen. Replies after this one show them open too."
-      : "Click to show the steps behind this reply"
+  const hint = waiting
+    ? "The assistant is waiting for your answer below."
+    : open
+      ? streaming
+        ? "Click to hide the steps. Replies after this one show them folded too."
+        : "Click to hide the steps"
+      : streaming
+        ? "Click to show the steps as they happen. Replies after this one show them open too."
+        : "Click to show the steps behind this reply"
   const toggle = () => {
+    if (waiting) return
     setChosen({ open: !open, streaming })
     // During a run the choice sticks: later replies show their steps that way too (DESIGN §7.4).
     if (streaming) {
@@ -167,6 +189,7 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
             aria-expanded={open}
             aria-controls={id}
             aria-describedby={hintId}
+            aria-disabled={waiting || undefined}
             onClick={toggle}
             className="-ml-1 flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-xs text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
           >
@@ -174,9 +197,15 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
             <Icon name="tool" size={14} />
             {streaming ? (
               <>
-                <span className="animate-pulse font-medium motion-reduce:animate-none" data-working="">
-                  Working…
-                </span>
+                {waiting ? (
+                  <span className="font-medium text-text" data-waiting="">
+                    Waiting for you
+                  </span>
+                ) : (
+                  <span className="animate-pulse font-medium motion-reduce:animate-none" data-working="">
+                    Working…
+                  </span>
+                )}
                 {view.count > 0 && (
                   <>
                     <span aria-hidden="true">·</span>
@@ -214,7 +243,13 @@ export function Steps({ version, session }: { version: Version; session: ChatSes
           ) : (
             <ol className="flex flex-col gap-1" aria-label="Steps of this reply">
               {steps.map((step, i) => (
-                <StepRow key={step.kind === "tool" ? step.id : `${step.kind}-${i}`} step={step} index={i} />
+                <StepRow
+                  key={step.kind === "tool" ? step.id : `${step.kind}-${i}`}
+                  step={step}
+                  index={i}
+                  version={version}
+                  session={session}
+                />
               ))}
             </ol>
           )}
@@ -255,14 +290,28 @@ export function StepsBadge({ entry }: { entry: PathEntry; session: ChatSession; 
   const [chosen, setChosen] = useAtom(stepsChoice(version.id))
   if (view === null || view.count === 0) return null
   const streaming = view.running
-  const open = isOpen(chosen, streaming, viewer.prefs.steps)
+  const waiting = waitsForUser(view.live)
+  const open = waiting || isOpen(chosen, streaming, viewer.prefs.steps)
   return (
-    <Tooltip label={open ? "Click to hide the steps" : "Click to show the steps behind this reply"}>
+    <Tooltip
+      label={
+        waiting
+          ? "The assistant is waiting for your answer. Click to go to it."
+          : open
+            ? "Click to hide the steps"
+            : "Click to show the steps behind this reply"
+      }
+    >
       <button
         type="button"
         aria-pressed={open}
         data-steps-badge=""
         onClick={(event) => {
+          if (waiting) {
+            const asked = event.currentTarget.closest("article")?.querySelector("[data-approval]")
+            asked?.scrollIntoView({ block: "nearest" })
+            return
+          }
           setChosen({ open: !open, streaming })
           if (streaming) {
             const steps: ReasoningDisplay = open ? "collapsed" : "expanded"
@@ -275,8 +324,8 @@ export function StepsBadge({ entry }: { entry: PathEntry; session: ChatSession; 
         }}
         className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs font-medium whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:text-text"
       >
-        <Icon name="tool" size={12} />
-        {stepsText(view.count, view.ms)}
+        <Icon name={waiting ? "help" : "tool"} size={12} />
+        {waiting ? "Waiting for you" : stepsText(view.count, view.ms)}
       </button>
     </Tooltip>
   )

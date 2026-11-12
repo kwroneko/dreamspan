@@ -52,6 +52,20 @@ const findRef = (ctx: ToolContext, kind: "card" | "preset", name: string) =>
   resolveLibrary(ctx, kind, name).pipe(
     Effect.flatMap((found) => ("error" in found ? Effect.fail({ message: found.error }) : Effect.succeed(found.ref)))
   )
+/** A value as the approval shows it: the text as given, a list one item a line. */
+const shown = (value: unknown) =>
+  typeof value === "string" ? value : Array.isArray(value) ? value.map(String).join("\n") : JSON.stringify(value)
+/** The fields an approval lists: those the call sets, labelled as the arguments name them. */
+const rowsOf = (args: object, skip: ReadonlyArray<string> = []) =>
+  Object.entries(args)
+    .filter(([key, value]) => !skip.includes(key) && value !== undefined && value !== "")
+    .map(([label, value]) => ({ label: label.replaceAll("_", " "), value: shown(value) }))
+/** A name as the library has it, or the name asked for when nothing matches. */
+const realName = (ctx: ToolContext, kind: "card" | "preset", name: string) =>
+  resolveLibrary(ctx, kind, name).pipe(
+    Effect.map((found) => ("error" in found ? `${name} (not in your library)` : found.ref.label)),
+    Effect.orElseSucceed(() => name)
+  )
 const text = Type.String({ maxLength: limits.textChars })
 const name = Type.String({ minLength: 1, maxLength: limits.nameChars })
 const shortText = Type.String({ maxLength: limits.nameChars })
@@ -92,6 +106,7 @@ const createCard: RolloutTool<CreateArgs> = {
     "Creates a card in the library, with one agent revision. Use first_message for her greeting. Returns its library and entity ids. Undo moves it to the bin if untouched.",
   parameters: Type.Object({ name, ...cardFields }, strict),
   summarize: ({ name }) => name,
+  describe: (_ctx, args) => Effect.succeed({ title: `Create the card “${args.name}”`, rows: rowsOf(args, ["name"]) }),
   execute: (ctx, args) =>
     !Schema.is(LibraryLabel)(args.name)
       ? Effect.succeed({
@@ -135,14 +150,33 @@ const fields = [
   "creator_notes",
   "creator"
 ]
+type CardChanges = ReadonlyArray<{
+  readonly field: string
+  readonly text?: string
+  readonly find?: string
+  readonly replace?: string
+}>
+/** A card's saved document with the changes made, or why they can't be. */
+const changed = (saved: Record<string, unknown>, changes: CardChanges) => {
+  const doc = { ...saved }
+  for (const change of changes) {
+    const field =
+      ({ first_message: "first_mes", example_messages: "mes_example" } as Record<string, string>)[change.field] ??
+      change.field
+    if (!fields.includes(field)) return { error: `The text field ${change.field} cannot be edited by this tool.` }
+    if (change.text !== undefined) doc[field] = change.text
+    else {
+      const current = String(doc[field] ?? "")
+      if (!change.find || current.split(change.find).length !== 2)
+        return { error: `Find must occur exactly once in ${field}. Read the card again.` }
+      doc[field] = current.replace(change.find, () => change.replace ?? "")
+    }
+  }
+  return { doc }
+}
 const editCard: RolloutTool<{
   readonly card: string
-  readonly changes: ReadonlyArray<{
-    readonly field: string
-    readonly text?: string
-    readonly find?: string
-    readonly replace?: string
-  }>
+  readonly changes: CardChanges
 }> = {
   id: "edit_card",
   label: "Edited the card",
@@ -169,26 +203,29 @@ const editCard: RolloutTool<{
     strict
   ),
   summarize: ({ card }) => card,
+  // The saved card's fields as they are and as the edit would leave them.
+  describe: (ctx, args) =>
+    Effect.gen(function* () {
+      const found = yield* resolveLibrary(ctx, "card", args.card)
+      if ("error" in found)
+        return { title: `Edit the card “${args.card}”`, rows: [{ label: "card", value: found.error }] }
+      const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: found.ref.id })
+      const result = changed(saved.doc, args.changes)
+      const title = `Edit the card “${found.ref.label}”`
+      if ("error" in result) return { title, rows: [{ label: "changes", value: result.error }] }
+      const changes = Object.keys(result.doc)
+        .filter((field) => fields.includes(field) && String(saved.doc[field] ?? "") !== String(result.doc[field] ?? ""))
+        .map((field) => ({ field, before: String(saved.doc[field] ?? ""), after: String(result.doc[field] ?? "") }))
+      return { title, rows: [], changes }
+    }),
   execute: (ctx, args) =>
     safely(
       Effect.gen(function* () {
         const ref = yield* findRef(ctx, "card", args.card)
         const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id })
-        const doc = { ...saved.doc }
-        for (const change of args.changes) {
-          const field =
-            ({ first_message: "first_mes", example_messages: "mes_example" } as Record<string, string>)[change.field] ??
-            change.field
-          if (!fields.includes(field))
-            return { text: `The text field ${change.field} cannot be edited by this tool.`, isError: true }
-          if (change.text !== undefined) doc[field] = change.text
-          else {
-            const current = String(doc[field] ?? "")
-            if (!change.find || current.split(change.find).length !== 2)
-              return { text: `Find must occur exactly once in ${field}. Read the card again.`, isError: true }
-            doc[field] = current.replace(change.find, () => change.replace ?? "")
-          }
-        }
+        const result = changed(saved.doc, args.changes)
+        if ("error" in result) return { text: result.error, isError: true }
+        const doc = result.doc
         const text = yield* ctx.writer.AgentReviseEntity({
           ...key(ctx),
           refId: ref.id,
@@ -223,6 +260,11 @@ const cloneCard: RolloutTool<{
     strict
   ),
   summarize: ({ name }) => name,
+  describe: (ctx, args) =>
+    Effect.map(realName(ctx, "card", args.card), (source) => ({
+      title: `Copy the card “${source}” as “${args.name}”`,
+      rows: rowsOf(args, ["card", "name"])
+    })),
   execute: (ctx, args) =>
     safely(
       Effect.gen(function* () {
@@ -266,6 +308,20 @@ const startChat: RolloutTool<{
     strict
   ),
   summarize: ({ title, cards }) => title ?? cards.join(", "),
+  describe: (ctx, args) =>
+    Effect.gen(function* () {
+      const cards: Array<string> = []
+      for (const card of args.cards) cards.push(yield* realName(ctx, "card", card))
+      return {
+        title: args.title ? `Start the chat “${args.title}”` : "Start a chat",
+        rows: [
+          { label: "cards", value: cards.join("\n") },
+          ...(args.persona ? [{ label: "persona", value: yield* realName(ctx, "card", args.persona) }] : []),
+          ...(args.preset ? [{ label: "preset", value: yield* realName(ctx, "preset", args.preset) }] : []),
+          ...rowsOf(args, ["cards", "persona", "preset", "title"])
+        ]
+      }
+    }),
   execute: (ctx, args) =>
     safely(
       Effect.gen(function* () {

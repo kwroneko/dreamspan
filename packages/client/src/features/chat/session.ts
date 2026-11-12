@@ -49,6 +49,7 @@ import type { ComposerSource } from "./composerDraft.ts"
 import { type Copy, copiesOf, pendingOf } from "../editor/backup.ts"
 import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf } from "./messageDraft.ts"
 import { beforeReply, chatStateChanged } from "./replyHooks.ts"
+import { guardReply } from "./replyGuards.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -1632,6 +1633,15 @@ export class ChatSession {
    * this slot's guidance explicitly (the guidance editor's box, guidanceEdit.tsx).
    */
   async regenerate(entry: PathEntry): Promise<Outcome<unknown>> {
+    // A guard may hold it back (a reply that changed things outside the chat warns first).
+    const go = await guardReply({
+      chatId: this.chatId,
+      kind: this.view.chat?.kind,
+      versionId: entry.version.id,
+      hasSteps: (entry.version.steps?.count ?? 0) > 0,
+      action: "regenerate"
+    })
+    if (!go) return { ok: true, value: null }
     await beforeReply()
     const direction = this.guidance({ slotId: entry.slotId, kind: "version" })
     return this.slotWrite(entry.slotId, (client) =>

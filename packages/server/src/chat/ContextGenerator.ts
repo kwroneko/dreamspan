@@ -19,6 +19,7 @@ import { foldState } from "@rp/shared/state.ts"
 import { planTurn } from "../agent/modes.ts"
 import type { OutputContract } from "../agent/modes.ts"
 import { type FrozenTool, frozenTool, sendMessageDefinition } from "../agent/tools.ts"
+import { makePermit, offeredByGrants } from "../agent/approvals.ts"
 import { DecisionEngine } from "../decision/engine.ts"
 import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
 
@@ -178,6 +179,14 @@ export const layer = Layer.effect(
             offered: frozen.tools,
             reader,
             writer,
+            permit: makePermit({
+              registries: execution,
+              reader,
+              writer,
+              userId: request.userId,
+              chatId: request.chatId,
+              rolloutId
+            }),
             onState: () => hub.publish(request.chatId, { _tag: "State" }),
             resume: {
               transcript: resume.transcript,
@@ -273,11 +282,13 @@ export const layer = Layer.effect(
             ? { ...planned.plan, strategy: "reply", tools: [], contract: "final_text" as const }
             : planned.plan
           const agentic = plan.strategy !== "reply"
-          const tools = plan.tools.flatMap((id) => {
+          const candidates = plan.tools.flatMap((id) => {
             const tool = toolForKind(execution, chat.kind, id)
             // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
             return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
           })
+          // A capability turned off in the workshop isn't offered (spec/WORKSHOP.md §3.4).
+          const { tools, off } = yield* offeredByGrants({ registries: execution, reader, userId, chatId }, candidates)
           const assemblyNow = Date.now()
           const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>
             reader
@@ -299,7 +310,8 @@ export const layer = Layer.effect(
                         instructions:
                           plan.assembly?.instructions(
                             tools.map((t) => t.id),
-                            plan.contract
+                            plan.contract,
+                            { off }
                           ) ?? "",
                         speakerCardOnly: plan.assembly?.speakerCardOnly ?? false,
                         ...(plan.assembly?.workshop ? { workshop: true } : {})
@@ -436,6 +448,7 @@ export const layer = Layer.effect(
                     tools,
                     reader,
                     writer,
+                    permit: makePermit({ registries: execution, reader, writer, userId, chatId, rolloutId }),
                     onState: () => hub.publish(chatId, { _tag: "State" })
                   }
                 }

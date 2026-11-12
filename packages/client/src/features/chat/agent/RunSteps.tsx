@@ -11,7 +11,7 @@
 // from the run it carried on shows folded where it was cut. Step edits use server-kept drafts;
 // the URL records which editor is open, so reloading restores both the editor and its text.
 import type { CutSpan, OfferedTool, StepEdit, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
-import type { ForkId } from "@rp/shared/chat.ts"
+import type { ForkId, VersionId } from "@rp/shared/chat.ts"
 import type { InspectorUsage, RunContext } from "@rp/shared/inspectorApi.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
@@ -27,6 +27,7 @@ import { Card, CardHeader, Disclosure } from "../../../ui/Surface.tsx"
 import { requestStatusText } from "../requestWords.ts"
 import { editableText, stepEdit, type StepTarget } from "./resume.ts"
 import { turnsOf } from "./steps.ts"
+import { guardReply } from "../replyGuards.ts"
 
 const json = (value: unknown) => JSON.stringify(value, null, 2)
 
@@ -399,6 +400,15 @@ function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): Ste
   const [missing, setMissing] = useState<string | null>(null)
   const resume = async (step: number, edit: StepEdit | undefined) => {
     setMissing(null)
+    // A guard may hold it back (a reply that changed things outside the chat warns first).
+    const go = await guardReply({
+      chatId: run.chatId,
+      kind: undefined,
+      versionId: run.versionId as VersionId,
+      hasSteps: true,
+      action: "resume-step"
+    })
+    if (!go) return false
     const result = await action.run((client) =>
       Effect.gen(function* () {
         const window = yield* client("ReadPath", {

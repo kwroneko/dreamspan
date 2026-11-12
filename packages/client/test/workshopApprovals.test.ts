@@ -1,0 +1,127 @@
+// The workshop's approvals and undo in the client (spec/WORKSHOP.md §3.4, §3.6), apart from React:
+// where a change opens, what's still undoable, which replies warn before a new version, how the
+// warning settles, and that a waiting call keeps the steps in sight.
+import { describe, expect, it, vi } from "vitest"
+import type { RolloutStep } from "@rp/shared/agent.ts"
+import type { VersionId } from "@rp/shared/chat.ts"
+import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
+import { waitsForUser } from "../src/features/chat/agent/stepActions.ts"
+import { statusText } from "../src/features/chat/agent/steps.ts"
+import { guardReply, replyGuards, type ReplyGuardRequest } from "../src/features/chat/replyGuards.ts"
+import { chatKindLooks } from "../src/features/chat/kindLooks.ts"
+import { openTarget, outstanding, undoable, undoHint } from "../src/features/workshop/effects.ts"
+import { workshopLook } from "../src/features/workshop/kinds.ts"
+import { askBeforeReply, mayWarn } from "../src/features/workshop/regenerateWarning.ts"
+
+vi.hoisted(() => {
+  vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
+})
+
+const effect = (over: Partial<RolloutEffect>): RolloutEffect => ({
+  rolloutId: "r1",
+  toolCallId: "c1",
+  seq: 0,
+  kind: "library.revise",
+  targetKind: "entity",
+  targetId: "e1",
+  title: "Edited the card Mara Quill",
+  undo: { refId: "ref1" },
+  undoResult: null,
+  undoneAt: null,
+  createdAt: 1,
+  ...over
+})
+
+const request = (over: Partial<ReplyGuardRequest> = {}): ReplyGuardRequest => ({
+  chatId: "chat1",
+  kind: "workshop",
+  versionId: "v1" as VersionId,
+  hasSteps: true,
+  action: "regenerate",
+  ...over
+})
+
+const tool = (status: Extract<RolloutStep, { kind: "tool" }>["status"]): RolloutStep => ({
+  kind: "tool",
+  id: "c1",
+  tool: "edit_card",
+  label: "Edited a card",
+  title: "Mara Quill",
+  args: {},
+  status,
+  effect: "external",
+  effectClass: "library"
+})
+
+describe("a workshop change", () => {
+  it("opens the item it made or edited, by its library entry when known, or the chat it started", () => {
+    expect(openTarget(effect({}))).toEqual({ to: "/library/$refId", params: { refId: "ref1" } })
+    expect(openTarget(effect({ undo: null }))).toEqual({ to: "/cards/$entityId", params: { entityId: "e1" } })
+    expect(openTarget(effect({ kind: "chat.create", targetKind: "chat", targetId: "chat2" }))).toEqual({
+      to: "/chats/$chatId",
+      params: { chatId: "chat2" }
+    })
+    expect(openTarget(effect({ targetKind: "setting" }))).toBeNull()
+  })
+
+  it("can be undone while it stands and the app kept how; a new version leaves the standing ones", () => {
+    const undone = effect({ seq: 1, undoneAt: 5 })
+    const fixed = effect({ seq: 2, undo: null })
+    expect([effect({}), undone, fixed].map(undoable)).toEqual([true, false, false])
+    expect(outstanding([effect({}), undone, fixed]).map((e) => e.seq)).toEqual([0, 2])
+    expect(undoHint(effect({ kind: "library.create" }))).toMatch(/bin/)
+    expect(undoHint(effect({}))).toMatch(/as it was before/)
+  })
+})
+
+describe("the regenerate warning", () => {
+  it("is only for a reply that made tool calls, in a kind with changes", () => {
+    const close = chatKindLooks.register(workshopLook)
+    try {
+      expect(mayWarn(request())).toBe(true)
+      expect(mayWarn(request({ hasSteps: false }))).toBe(false)
+      expect(mayWarn(request({ kind: "rp" }))).toBe(false)
+      // Carrying on from a step, where the kind isn't known: the host reads its changes to decide.
+      expect(mayWarn(request({ kind: undefined, action: "resume-step" }))).toBe(true)
+    } finally {
+      close()
+    }
+  })
+
+  it("lets a story reply through at once, and a second ask cancels the first", async () => {
+    const close = chatKindLooks.register(workshopLook)
+    try {
+      expect(await askBeforeReply(request({ kind: "rp" }))).toBe(true)
+      const first = askBeforeReply(request())
+      const second = askBeforeReply(request({ versionId: "v2" as VersionId }))
+      expect(await first).toBe(false)
+      // Nothing answers the second here; it stays open until the dialog settles it.
+      void second
+    } finally {
+      close()
+    }
+  })
+
+  it("holds back a new version when any guard refuses, in order", async () => {
+    const seen: Array<string> = []
+    const closeA = replyGuards.register({ id: "a", check: async () => (seen.push("a"), false) })
+    const closeB = replyGuards.register({ id: "b", check: async () => (seen.push("b"), true) })
+    try {
+      expect(await guardReply(request())).toBe(false)
+      expect(seen).toEqual(["a"])
+    } finally {
+      closeB()
+      closeA()
+    }
+    expect(await guardReply(request())).toBe(true)
+  })
+})
+
+describe("a call waiting for the user", () => {
+  it("keeps the steps in sight, and its row says so", () => {
+    expect(waitsForUser([tool("done"), tool("waiting")])).toBe(true)
+    expect(waitsForUser([tool("running"), { kind: "text", text: "x" }])).toBe(false)
+    expect(waitsForUser(null)).toBe(false)
+    expect(statusText.waiting).toBe("Waiting for you")
+  })
+})

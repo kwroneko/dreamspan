@@ -15,8 +15,15 @@ export interface AgentPlan {
   readonly turnCap: number
   /** What the mode changes in the context; absent: the plain reply's. */
   readonly assembly?: {
-    /** Told with the end of the request, given the tools actually offered. */
-    readonly instructions: (offered: ReadonlyArray<string>, contract: OutputContract) => string
+    /**
+     * Told with the end of the request, given the tools actually offered and the capabilities
+     * the chat turned off (their labels).
+     */
+    readonly instructions: (
+      offered: ReadonlyArray<string>,
+      contract: OutputContract,
+      context?: { readonly off: ReadonlyArray<string> }
+    ) => string
     /** Card-swap: only the speaking character's card is sent, where the preset puts cards. */
     readonly speakerCardOnly: boolean
     readonly workshop?: boolean

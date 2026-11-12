@@ -47,6 +47,30 @@ const watch = (api: Api, chat: Chat) =>
     yield* eventually(() => events.length > 0)
     return events
   })
+/** The waiting step of a version, once its call asks the user first. */
+const waitingStep = (events: ReadonlyArray<ChatEvent>, versionId: string) =>
+  events
+    .flatMap((e) => (e._tag === "Steps" && e.versionId === versionId ? e.steps : []))
+    .findLast((step) => step.kind === "tool" && step.status === "waiting")
+/** Waits for a version's call to ask, answers it, and returns what it asked. */
+const answerWaiting = (
+  api: Api,
+  events: ReadonlyArray<ChatEvent>,
+  versionId: string,
+  answer: "allow" | "allow_chat" | "deny"
+) =>
+  Effect.gen(function* () {
+    yield* eventually(() => waitingStep(events, versionId) !== undefined)
+    const asked = waitingStep(events, versionId)
+    if (asked?.kind !== "tool" || !asked.approval) return assert.fail("no approval")
+    yield* api.AnswerToolApproval({
+      rolloutId: asked.approval.rolloutId,
+      toolCallId: asked.approval.toolCallId,
+      digest: asked.approval.digest,
+      answer
+    })
+    return asked.approval
+  })
 const edit = (api: Api, refId: RefId, content: string, key = "description") =>
   Effect.gen(function* () {
     const field = textField([key])
@@ -110,15 +134,17 @@ describe("workshop setup effects", () => {
         capabilities.map((c) => c.id),
         ["library.read", "library.write", "chats.setup"]
       )
-      assert.isTrue(capabilities.every((c) => c.mode === "allow" && c.always))
+      assert.isTrue(capabilities.every((c) => c.mode === "allow"))
+      assert.deepStrictEqual(
+        capabilities.map((c) => c.modes),
+        [["allow"], ["off", "ask", "allow"], ["off", "ask", "allow"]]
+      )
       const registry = yield* ExecutionRegistry
       yield* registry.workshopCapabilities.register({
         id: "library.write",
         order: 5,
         label: "Synthetic library changes",
-        explanation: "A registered replacement.",
-        mode: "allow",
-        always: true
+        explanation: "A registered replacement."
       })
       assert.strictEqual(
         (yield* api.ListWorkshopCapabilities({ chatId: f.chat.id }))[0]!.label,
@@ -152,8 +178,8 @@ describe("workshop setup effects", () => {
               if (!JSON.stringify(messages).includes("Build a synthetic keeper"))
                 return sse(res, completionChunks(["Ready."], {}))
               if (
-                String(JSON.stringify(messages.filter((m) => m.role === "tool").at(-1))).includes(
-                  "may already have happened"
+                String(JSON.stringify(messages.filter((m) => m.role === "tool").at(-1))).match(
+                  /may already have happened|declined/
                 )
               )
                 return sse(res, completionChunks(["That call needs checking first."], {}))
@@ -240,10 +266,11 @@ describe("workshop setup effects", () => {
           edit: { kind: "arguments", arguments: { name: "Needs checking" } },
           expectedRowVersion: beforeArguments.entry.rowVersion
         })
+        assert.isTrue((yield* answerWaiting(api, events, argumentsEdit.version.id, "deny")).uncertain)
         yield* eventually(() => finished(events, argumentsEdit.version.id) !== undefined)
         assert.isTrue(
           (yield* api.GetRunTranscript({ versionId: argumentsEdit.version.id })).entries.some(
-            (e) => e.role === "toolResult" && e.isError && e.text.includes("may already have happened")
+            (e) => e.role === "toolResult" && e.isError && e.text.includes("declined")
           )
         )
         assert.deepStrictEqual(
@@ -633,7 +660,7 @@ describe("workshop setup effects", () => {
                 return sse(res, completionChunks(["Ready."], {}))
               const toolResults = messages.filter((m) => m.role === "tool")
               const last = toolResults.at(-1)?.tool_call_id
-              if (String(toolResults.at(-1)?.content).includes("may already have happened"))
+              if (/may already have happened|declined/.test(String(toolResults.at(-1)?.content)))
                 return sse(res, completionChunks(["That call needs checking first."], {}))
               sse(
                 res,
@@ -765,10 +792,13 @@ describe("workshop setup effects", () => {
           edit: { kind: "arguments", arguments: { cards: ["Mara Quill"], title: "Should not run" } },
           expectedRowVersion: currentSlot.entry.rowVersion
         })
+        // A call re-run without a receipt may already have happened: it asks first, with that
+        // warning, even though chat setup is allowed.
+        assert.isTrue((yield* answerWaiting(api, events, uncertain.version.id, "deny")).uncertain)
         yield* eventually(() => finished(events, uncertain.version.id) !== undefined)
         assert.isTrue(
           (yield* api.GetRunTranscript({ versionId: uncertain.version.id })).entries.some(
-            (e) => e.role === "toolResult" && e.isError && e.text.includes("may already have happened")
+            (e) => e.role === "toolResult" && e.isError && e.text.includes("declined")
           )
         )
         assert.lengthOf(yield* api.ListRolloutEffects({ chatId: chat.id }), 2)

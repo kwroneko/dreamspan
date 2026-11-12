@@ -19,5 +19,6 @@ export const workshopLook: ChatKindLook = {
     "settings.agent-permissions",
     "settings.who-replies"
   ],
-  shows: [CAPABILITY_CHIP]
+  // The capability chip, the Changes tab and the step rows’ Undo and Open (§2.5, §3.6).
+  shows: [CAPABILITY_CHIP, "workshop.changes"]
 }

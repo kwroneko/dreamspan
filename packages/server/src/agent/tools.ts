@@ -1,4 +1,5 @@
 import type { RolloutEffectRecord } from "@rp/shared/workshopApi.ts"
+import type { ApprovalPrompt } from "@rp/shared/agent.ts"
 // The tools a rollout may offer (spec/AGENTIC.md §4.1): a registered catalog, each tool with
 // its effect class (DESIGN §7.3). Tools run on the main thread and reach storage only through
 // the reader and writer operations, owner-scoped and causal: nothing at or after the slot
@@ -27,7 +28,8 @@ export interface ToolContext {
   /** The message before the one being generated: nothing after it is visible. */
   readonly leafSlotId: SlotId | null
   readonly reader: Reader["Service"]
-  readonly writer: Writer["Service"]
+  /** The writer, without what only the user may do: grants and approvals (`toolWriter`). */
+  readonly writer: ToolWriter
   /** Values a tool works out once per rollout (the path, the summaries), by key. */
   readonly cache: Map<string, unknown>
 }
@@ -58,7 +60,37 @@ export interface RolloutTool<A = never> {
   readonly parameters: TSchema
   /** The step's one-line title from its arguments: “lighthouse”. */
   readonly summarize?: (args: A) => string
+  /**
+   * What the call will do, for its approval (spec/WORKSHOP.md §3.4), worked out by the server from
+   * the real arguments and the items they name: the target's own name, an edit's fields before
+   * and after. Absent: the arguments as they are.
+   */
+  readonly describe?: (
+    context: ToolContext,
+    args: A
+  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes">, unknown>
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
+}
+
+/**
+ * Operations only the user may run (spec/WORKSHOP.md §3.2: the agent can't give itself
+ * anything): what the assistant may do, and answers to its requests.
+ */
+export const USER_ONLY_WRITES = [
+  "SetWorkshopGrant",
+  "AnswerToolApproval",
+  "RequestToolApproval",
+  "SettleToolApproval"
+] as const
+export type ToolWriter = Omit<Writer["Service"], (typeof USER_ONLY_WRITES)[number]>
+
+/** The writer a tool is given: the same client, without the user-only operations. */
+export const toolWriter = (writer: Writer["Service"]): ToolWriter => {
+  const hidden = new Set<string | symbol>(USER_ONLY_WRITES)
+  return new Proxy(writer, {
+    get: (target, key, receiver) => (hidden.has(key) ? undefined : Reflect.get(target, key, receiver)),
+    has: (target, key) => !hidden.has(key) && Reflect.has(target, key)
+  })
 }
 
 /** The definition frozen into a rollout's snapshot: exactly what the model was offered. */
