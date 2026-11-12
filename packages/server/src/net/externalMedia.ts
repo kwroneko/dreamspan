@@ -98,13 +98,17 @@ const mediaSample = (bytes: Buffer) => {
 const resolveOffPool =
   (servers?: ReadonlyArray<string>) =>
   async (hostname: string, signal: AbortSignal): Promise<ReadonlyArray<string>> => {
+    signal.throwIfAborted()
     const resolver = new Resolver({ timeout: 2_000, tries: 2 })
     if (servers) resolver.setServers([...servers])
     const cancel = () => resolver.cancel()
     signal.addEventListener("abort", cancel, { once: true })
     if (signal.aborted) cancel()
     try {
-      const answers = await Promise.allSettled([resolver.resolve4(hostname), resolver.resolve6(hostname)])
+      const answers = await Promise.allSettled([
+        resolver.resolve4(`${hostname.replace(/\.$/, "")}.`),
+        resolver.resolve6(`${hostname.replace(/\.$/, "")}.`)
+      ])
       return answers.flatMap((answer) => (answer.status === "fulfilled" ? answer.value : []))
     } finally {
       signal.removeEventListener("abort", cancel)
@@ -151,7 +155,10 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
         credentials: "omit",
         redirect: "manual",
         signal: controller.signal,
-        headers: { accept: [...TYPES].join(", "), "accept-encoding": "identity" }
+        headers: {
+          accept: [...TYPES].join(", "),
+          "accept-encoding": "identity"
+        }
       })
       const mime = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? ""
       const length = Number(response.headers.get("content-length"))
