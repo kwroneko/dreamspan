@@ -32,19 +32,12 @@ const mergeKnowersSql = (slot: string) => `(SELECT json_group_array(candidate.en
   WHERE m.slot_id = ${slot} AND mm.included = 'verbatim' AND mm.knowers_json IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM json_each(mm.knowers_json) k WHERE k.value = candidate.entity)))`
 
-/** Everyone who knew any of a merge's join at slot expression `slot`, as a JSON array. */
-const mergePeopleSql = (slot: string) => `(SELECT json_group_array(DISTINCT candidate.entity) FROM (
-  SELECT c.value ->> 'entity' AS entity FROM chat_merges m, json_each(m.cast_json) c
-    WHERE m.slot_id = ${slot} AND c.value ->> 'from' <> 'destination'
-  UNION SELECT k.value FROM chat_merges m JOIN chat_merge_messages mm ON mm.merge_id = m.id,
-    json_each(mm.knowers_json) k WHERE m.slot_id = ${slot}) candidate)`
-
 /**
  * Whether the viewer knew the version `v` of slot `s` (SQL, both aliases in scope). `viewers` is
  * the viewer's identities: itself and the cards it replaced on this fork (`card.swap`). In fork
  * `fork` (when given), a card the fork counts not present for the message (`correctedAwaySql`)
- * didn't know it, unless it's the message's speaker; a message with no cast recorded stays
- * known to everyone. A merge's join: known when the viewer's identities together knew every
+ * didn't know it, unless it's the message's speaker. No recorded cast means everyone except
+ * those explicitly absent in this fork. A merge's join: known when the viewer's identities together knew every
  * row of it, or (`partialMerges`) any row.
  */
 export const knowsSql = (
@@ -72,18 +65,18 @@ export const knowsSql = (
         SELECT 1 FROM json_each(coalesce(mm.knowers_json, (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c WHERE c.value ->> 'from' <> 'destination'))) k
         WHERE k.value IN (SELECT value FROM json_each(${ids}))))`
     } AND ${kept}
-    ELSE v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(${ids}) viewer WHERE viewer.value = v.speaker_entity_id)
-      OR (EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${ids}))
+    ELSE EXISTS (SELECT 1 FROM json_each(${ids}) viewer WHERE viewer.value = v.speaker_entity_id)
+      OR ((v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${ids}))
         AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
-          WHERE a.value = c.value)) AND ${kept}) END`
+          WHERE a.value = c.value))) AND ${kept}) END`
 }
 
 /**
  * Each version's knowers, in the order asked; null: known to everyone (or not found). Point
  * lookups by version id: the requested ids drive the query, never a scan of the chat. In fork
  * `fork` (when given), the cards it counts not present for a message are left out of its
- * knowers, its speaker apart (`knowsSql`'s rule): one probe per recorded knower, and none at
- * all in a chat without such corrections.
+ * knowers, its speaker apart (`knowsSql`'s rule). The existing query projects corrected cards
+ * by slot, skipping the projection when the chat has no corrections.
  */
 export const readKnowers = (
   sql: SqlClient.SqlClient,
@@ -101,16 +94,24 @@ export const readKnowers = (
       presence_json: string | null
       speaker_entity_id: string | null
       merge_cast: string | null
-      merge_people: string | null
       merge_id: string | null
       merge_title: string | null
       content: string
+      away_json: string | null
     }>`SELECT metadata.id, metadata.slot_id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
-
+        ${
+          fork == null
+            ? sql`NULL`
+            : sql`CASE WHEN EXISTS (SELECT 1 FROM fork_overrides WHERE chat_id = ${chatId} AND kind = 'presence_away') THEN
+          (SELECT json_group_array(c.card) FROM (
+            SELECT DISTINCT substr(o.target_id, length(o.slot_id) + 2) AS card
+            FROM fork_overrides o WHERE o.slot_id = metadata.slot_id AND o.kind = 'presence_away'
+          ) c WHERE c.card IS NOT metadata.speaker_entity_id
+            AND ${correctedAwaySql(sql, fork, "metadata.slot_id", "c.card")}) END`
+        } AS away_json,
         (SELECT m.id FROM chat_merges m WHERE m.slot_id = metadata.slot_id) AS merge_id,
         (SELECT m.title FROM chat_merges m WHERE m.slot_id = metadata.slot_id) AS merge_title, payload.cast_json, payload.presence_json, metadata.speaker_entity_id,
-        CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = metadata.slot_id) THEN ${sql.literal(mergeKnowersSql("metadata.slot_id"))} END AS merge_cast,
-        CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = metadata.slot_id) THEN ${sql.literal(mergePeopleSql("metadata.slot_id"))} END AS merge_people
+        CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = metadata.slot_id) THEN ${sql.literal(mergeKnowersSql("metadata.slot_id"))} END AS merge_cast
       FROM json_each(${JSON.stringify(versionIds)}) requested
       CROSS JOIN versions metadata ON metadata.id = requested.value
       CROSS JOIN version_texts payload ON payload.version_seq = metadata.seq
@@ -133,18 +134,11 @@ export const readKnowers = (
             })
       ])
     )
-    // A join's candidates are everyone who knew any of it; a message's, its recorded knowers.
-    const candidates = new Map(
-      rows.map((row) => [
-        row.id,
-        row.merge_people !== null ? (JSON.parse(row.merge_people) as Array<string>) : recorded.get(row.id)!
-      ])
-    )
-    const corrected = yield* correctedKnowers(sql, chatId, fork, rows, candidates)
     return versionIds.map((versionId) => {
       const row = byId.get(versionId)
       const all = row === undefined ? null : recorded.get(versionId)!
-      const away = corrected.get(versionId)
+      const absent = row?.away_json ? (JSON.parse(row.away_json) as Array<string>) : []
+      const away = absent.length > 0 ? absent : undefined
       const knowers = all === null || away === undefined ? all : [...all].filter((id) => !away.includes(id))
       const merge = row?.merge_id ? merged.get(row.merge_id) : undefined
       const view =
@@ -158,38 +152,6 @@ export const readKnowers = (
         ...(view ? { content: view.content, readable: view.rows.length > 0 || !view.partial } : {})
       }
     })
-  })
-
-/**
- * Of each version's candidates (its speaker apart), those fork `fork` counts not present for
- * the message, by version id: nothing to probe unless the chat has such a correction at all
- * (`fork_overrides_chat`).
- */
-const correctedKnowers = (
-  sql: SqlClient.SqlClient,
-  chatId: string,
-  fork: ForkRef | undefined,
-  rows: ReadonlyArray<{ readonly id: string; readonly slot_id: string; readonly speaker_entity_id: string | null }>,
-  recorded: ReadonlyMap<string, Iterable<string> | null>
-) =>
-  Effect.gen(function* () {
-    const none = new Map<string, Array<string>>()
-    if (fork === undefined || fork === null || rows.length === 0) return none
-    const [any] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM (SELECT 1 FROM fork_overrides
-      WHERE chat_id = ${chatId} AND kind = 'presence_away' LIMIT 1)`
-    if ((any?.n ?? 0) === 0) return none
-    const pairs = rows.flatMap((row) =>
-      [...(recorded.get(row.id) ?? [])]
-        .filter((card) => card !== row.speaker_entity_id)
-        .map((card) => ({ v: row.id, s: row.slot_id, e: card }))
-    )
-    if (pairs.length === 0) return none
-    const found = yield* sql<{ v: string; e: string }>`SELECT p.value ->> 'v' AS v, p.value ->> 'e' AS e
-      FROM json_each(${JSON.stringify(pairs)}) p
-      WHERE ${correctedAwaySql(sql, fork, "(p.value ->> 's')", "(p.value ->> 'e')")}`
-    const away = new Map<string, Array<string>>()
-    for (const row of found) away.set(row.v, [...(away.get(row.v) ?? []), row.e])
-    return away
   })
 
 /**

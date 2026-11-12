@@ -35,7 +35,7 @@ import {
 } from "@rp/shared/mergeApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { AwayMark } from "@rp/shared/contextsApi.ts"
-import { StartedThreads, ThreadSet, ThreadStart, ThreadsRefused } from "@rp/shared/threads.ts"
+import { StartedThreads, ThreadName, ThreadSet, ThreadStarts, ThreadsRefused } from "@rp/shared/threads.ts"
 import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
@@ -1087,7 +1087,7 @@ export class WriteOps extends RpcGroup.make(
       forkId: ForkId,
       slotId: SlotId,
       expectedRowVersion: Schema.Int,
-      threads: Schema.Array(ThreadStart)
+      threads: ThreadStarts
     },
     success: Schema.Struct({ ...StartedThreads.fields, chat: Chat }),
     error: Schema.Union([NotFound, StaleWrite, ThreadsRefused, StorageError])
@@ -1099,7 +1099,7 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       splitId: Schema.String,
       ordinal: Schema.Int,
-      name: Schema.String,
+      name: ThreadName,
       rowVersion: Schema.Int
     },
     success: Schema.Int,

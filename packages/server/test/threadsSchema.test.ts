@@ -12,10 +12,18 @@ import { writerConnection } from "../src/db/connection.ts"
 import { rebuildForkLabels } from "../src/db/forkLabels.ts"
 import { insertFork, nextSeq } from "../src/db/forkState.ts"
 import { migrations } from "../src/db/migrations.ts"
+import { knowsSql, readKnowers } from "../src/db/knowers.ts"
 import type { ForkRow } from "../src/db/rows.ts"
 import { installStorageKindValidation } from "../src/db/storageKinds.ts"
 import { transaction } from "../src/db/tx.ts"
-import { insertSplit, insertThreadMember, placesOf, shownSplits, threadCandidates } from "../src/db/threads.ts"
+import {
+  insertCorrections,
+  insertSplit,
+  insertThreadMember,
+  placesOf,
+  shownSplits,
+  threadCandidates
+} from "../src/db/threads.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 const CHAT = "c"
@@ -86,6 +94,35 @@ const refused = <A, E>(effect: Effect.Effect<A, E>) => {
 }
 
 describe("thread tables", () => {
+  it.effect("an explicit absence also protects messages whose cast was not recorded", () =>
+    Effect.gen(function* () {
+      const sql = yield* setup
+      const one = yield* split(sql, CHAT, "s1", 2)
+      yield* insertCorrections(sql, { id: one.id, chatId: CHAT, forkId: CHAT }, ["s2"], ["card"])
+      const [found] = yield* readKnowers(sql, CHAT, sql`1`, ["v-s2"], null, CHAT)
+      assert.deepStrictEqual(found!.away, ["card"])
+      const [known] = yield* sql<{ knows: number }>`SELECT ${knowsSql(sql, ["card"], CHAT)} AS knows
+        FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE v.id = 'v-s2'`
+      assert.strictEqual(known!.knows, 0)
+    }).pipe(Effect.provide(writerConnection(join(tempDir("threads-unknown-cast"), "db.sqlite"))))
+  )
+
+  it.effect("knowledge windows in chats without threads use one query", () =>
+    Effect.gen(function* () {
+      const sql = yield* setup
+      let queries = 0
+      const measured = new Proxy(sql, {
+        apply(target, receiver, args) {
+          if (/^\s*SELECT\b/.test(args[0][0])) queries++
+          return Reflect.apply(target, receiver, args)
+        }
+      })
+      const found = yield* readKnowers(measured, CHAT, sql`1`, ["v-s1"], null, CHAT)
+      assert.deepStrictEqual(found, [{ versionId: "v-s1", knowers: null }])
+      assert.strictEqual(queries, 1)
+    }).pipe(Effect.provide(writerConnection(join(tempDir("threads-no-queries"), "db.sqlite"))))
+  )
+
   it.effect("keep a split's message, branch and members consistent and frozen", () =>
     Effect.gen(function* () {
       const sql = yield* setup
@@ -152,7 +189,7 @@ describe("thread tables", () => {
       yield* refused(binAs("bad", "thread"))
       yield* binAs("ok", "threads")
       yield* tx(sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag)
-        VALUES ('away', ${CHAT}, ${CHAT}, 1, 'presence_away', 's1:card', 's1', 1, 'rollout', 1)`)
+        VALUES ('away', ${CHAT}, ${CHAT}, 1, 'presence_away', 's1:card', 's1', 1, '{"rollout":true}', 1)`)
       const [merge] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM pragma_table_info('chat_merges')
         WHERE name IN ('timelines', 'split_id')`
       assert.strictEqual(merge!.n, 2)
@@ -166,7 +203,7 @@ describe("thread tables", () => {
       const seq = yield* nextSeq(sql, CHAT)
       const correction = (id: string, target: string, slot: string | null, depth: number | null, flag: number | null) =>
         sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag)
-          VALUES (${id}, ${CHAT}, ${CHAT}, ${seq}, 'presence_away', ${target}, ${slot}, ${depth}, ${one.id}, ${flag})`
+          VALUES (${id}, ${CHAT}, ${CHAT}, ${seq}, 'presence_away', ${target}, ${slot}, ${depth}, ${JSON.stringify({ [one.id]: true })}, ${flag})`
       yield* correction("ok", "s2:card", "s2", 2, 1)
       yield* refused(correction("no-flag", "s2:card", "s2", 2, null))
       yield* refused(correction("no-slot", "s2:card", null, null, 1))

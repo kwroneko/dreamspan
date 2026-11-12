@@ -12,7 +12,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import type { ThreadPlace } from "@rp/shared/threads.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { nextSeq, writeOverride } from "./forkState.ts"
+import { effectiveOverride, nextSeq, writeOverride } from "./forkState.ts"
 
 /**
  * A split of fork `forkId` at slot `slotId`, writer only, inside the caller's transaction, with
@@ -96,17 +96,22 @@ export const threadCandidates = (sql: SqlClient.SqlClient, forkIds: ReadonlyArra
         WHERE x.fork_label <= g.point AND g.point < f.label_end`
 
 /**
- * The threads fork `forkId` is in, innermost first (the deepest S first, then the newest
- * split), from its candidates and whether its display path holds each S.
+ * The threads fork `forkId` is in, innermost first (the last S in display order first, then
+ * the newest split), from its candidates and whether its display path holds each S.
  */
 export const placesOf = (
   candidates: ReadonlyArray<ThreadCandidate>,
   forkId: string,
-  onPath: (slotId: string) => boolean
+  onPath: (slotId: string) => boolean,
+  positions?: ReadonlyMap<string, number>
 ): ReadonlyArray<ThreadPlace> =>
   candidates
     .filter((c) => c.forkId === forkId && c.ordinal !== null && onPath(c.slotId))
-    .sort((a, b) => b.depth - a.depth || (a.splitId < b.splitId ? 1 : a.splitId > b.splitId ? -1 : 0))
+    .sort(
+      (a, b) =>
+        (positions?.get(b.slotId) ?? b.depth) - (positions?.get(a.slotId) ?? a.depth) ||
+        (a.splitId < b.splitId ? 1 : a.splitId > b.splitId ? -1 : 0)
+    )
     .map((c) => ({ splitId: c.splitId, ordinal: c.ordinal }))
 
 /**
@@ -135,7 +140,8 @@ interface SplitRef {
 /**
  * The played stretch's correction (spec/THREADS.md §5.2 step 5, [D] 2026-11-12): in split
  * `split`'s branch F, each of `cards` counts not present for each of `slotIds` (messages F
- * shows after S), as `presence_away` overrides of F with flag 1 naming the split, all at one
+ * shows after S), as `presence_away` overrides of F with flag 1. `value_id` holds the JSON
+ * object of split ids and whether each applies, so overlapping splits can be undone independently, all at one
  * seq. Written after the threads' forks, so they don't inherit it; forks made from F later do.
  */
 export const insertCorrections = (
@@ -151,8 +157,10 @@ export const insertCorrections = (
     for (let at = 0; at < rows.length; at += 2000)
       yield* sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag)
         SELECT r.value ->> 0, ${split.chatId}, ${split.forkId}, ${seq}, 'presence_away',
-          (r.value ->> 1) || ':' || (r.value ->> 2), s.id, s.depth, ${split.id}, 1
-        FROM json_each(${JSON.stringify(rows.slice(at, at + 2000))}) r CROSS JOIN slots s ON s.id = r.value ->> 1`
+          (r.value ->> 1) || ':' || (r.value ->> 2), s.id, s.depth,
+          json_patch(coalesce(o.value_id, '{}'), ${JSON.stringify({ [split.id]: true })}), 1
+        FROM json_each(${JSON.stringify(rows.slice(at, at + 2000))}) r CROSS JOIN slots s ON s.id = r.value ->> 1
+        LEFT JOIN fork_overrides o ON o.id = ${effectiveOverride(sql, "presence_away", split.forkId, "(r.value ->> 1) || ':' || (r.value ->> 2)")}`
     return rows.length
   })
 
@@ -161,7 +169,7 @@ export const insertCorrections = (
  * `itemId`, is in the bin): its away events there are suppressed or not, and its corrections
  * of the played stretch count or not. Both are F's own rows as `writeOverride` keeps them: one
  * updated in place unless a fork was made from F since, else a new row, so a fork made from F
- * keeps what it saw. A key a newer row of F's governs (another split's) is left to it.
+ * keeps what it saw. Only this split's contribution changes; other splits' absences stay.
  */
 export const setSplitApplied = (sql: SqlClient.SqlClient, split: SplitRef, applied: boolean, itemId: string | null) =>
   Effect.gen(function* () {
@@ -177,24 +185,31 @@ export const setSplitApplied = (sql: SqlClient.SqlClient, split: SplitRef, appli
         flag: applied ? 0 : 1,
         binItemId: applied ? null : itemId
       })
-    const flag = applied ? 1 : 0
-    const rows = yield* sql<{ id: string; target_id: string; slot_id: string; slot_depth: number; forked: number }>`
-      SELECT o.id, o.target_id, o.slot_id, o.slot_depth,
+    const found = yield* sql<{ id: string; target_id: string; slot_id: string; value_id: string; forked: number }>`
+      SELECT o.id, o.target_id, o.slot_id, o.value_id,
         EXISTS (SELECT 1 FROM forks c WHERE c.parent_fork_id = o.fork_id AND c.branched_at >= o.seq) AS forked
-      FROM fork_overrides o WHERE o.fork_id = ${split.forkId} AND o.kind = 'presence_away' AND o.value_id = ${split.id}
-        AND o.flag <> ${flag} AND NOT EXISTS (SELECT 1 FROM fork_overrides n WHERE n.fork_id = o.fork_id
-          AND n.kind = o.kind AND n.target_id = o.target_id AND n.seq > o.seq)`
+      FROM (SELECT DISTINCT p.target_id FROM fork_overrides p, json_each(p.value_id) x
+        WHERE p.fork_id = ${split.forkId} AND p.kind = 'presence_away' AND x.key = ${split.id}) targets
+      CROSS JOIN fork_overrides o ON o.id = ${effectiveOverride(sql, "presence_away", split.forkId, "targets.target_id")}`
+    const rows = found.flatMap((row) => {
+      const ids = JSON.parse(row.value_id) as Record<string, boolean>
+      if (ids[split.id] === applied) return []
+      const next = { ...ids, [split.id]: applied }
+      return [{ ...row, value: JSON.stringify(next), flag: Object.values(next).some(Boolean) ? 1 : 0 }]
+    })
     if (rows.length > 0) {
       const seq = yield* nextSeq(sql, split.chatId)
-      const inPlace = rows.filter((row) => row.forked === 0).map((row) => row.id)
+      const inPlace = rows.filter((row) => row.forked === 0).map((row) => [row.id, row.value, row.flag])
       for (let at = 0; at < inPlace.length; at += 2000)
-        yield* sql`UPDATE fork_overrides SET flag = ${flag}, seq = ${seq}
-          WHERE id IN (SELECT value FROM json_each(${JSON.stringify(inPlace.slice(at, at + 2000))}))`
-      const added = rows.filter((row) => row.forked === 1).map((row) => [uuidv7(), row.target_id, row.slot_id])
+        yield* sql`UPDATE fork_overrides AS o SET value_id = r.value ->> 1, flag = r.value ->> 2, seq = ${seq}
+          FROM json_each(${JSON.stringify(inPlace.slice(at, at + 2000))}) r WHERE o.id = r.value ->> 0`
+      const added = rows
+        .filter((row) => row.forked === 1)
+        .map((row) => [uuidv7(), row.target_id, row.slot_id, row.value, row.flag])
       for (let at = 0; at < added.length; at += 2000)
         yield* sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag)
           SELECT r.value ->> 0, ${split.chatId}, ${split.forkId}, ${seq}, 'presence_away', r.value ->> 1, s.id, s.depth,
-            ${split.id}, ${flag}
+            r.value ->> 3, r.value ->> 4
           FROM json_each(${JSON.stringify(added.slice(at, at + 2000))}) r CROSS JOIN slots s ON s.id = r.value ->> 2`
     }
     yield* sql`UPDATE thread_splits SET bin_item_id = ${itemId} WHERE id = ${split.id}`

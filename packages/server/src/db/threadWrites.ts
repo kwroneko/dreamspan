@@ -11,6 +11,7 @@ import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { ThreadsRefused } from "@rp/shared/threads.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { identitiesOf } from "../assembler/knowledge.ts"
 import { type Bin, toBinItem } from "./bin.ts"
 import { displayLength, displaySlots, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import { insertFork, selectionIn, slotDeletedIn } from "./forkState.ts"
@@ -31,15 +32,14 @@ export const makeThreadWriteHandlers = (bin: Bin) =>
     const stateAt = (chatId: string, fork: string, slotId: string) =>
       Effect.gen(function* () {
         const rows = yield* stateEventsThrough(sql, chatId as never, slotId as never, fork)
-        return foldState(
-          yield* withoutPurged(
-            sql,
-            rows.map((e) => ({
-              scope: e.scope,
-              data: { key: e.key, value: JSON.parse(e.value_json) }
-            })) as Array<FoldableEvent>
-          )
+        const events = yield* withoutPurged(
+          sql,
+          rows.map((e) => ({
+            scope: e.scope,
+            data: { key: e.key, value: JSON.parse(e.value_json) }
+          })) as Array<FoldableEvent>
         )
+        return { state: foldState(events), identities: identitiesOf(events) }
       })
 
     const handlers = {
@@ -68,7 +68,7 @@ export const makeThreadWriteHandlers = (bin: Bin) =>
 
           // Who is in each thread: cast members and the user's own cards (narrators are in every
           // one and need no listing). Only cast characters are marked away.
-          const state = yield* stateAt(chatId, fork.id, slotId)
+          const { state, identities } = yield* stateAt(chatId, fork.id, slotId)
           const narrators = new Set(state.participants.filter((id) => state.roles[id] === "narrator"))
           const characters = state.participants.filter((id) => !narrators.has(id))
           const known = new Set<string>([...state.participants, ...state.playedByMe])
@@ -148,11 +148,14 @@ export const makeThreadWriteHandlers = (bin: Bin) =>
                 { origin: "user", ref: split.id }
               )
 
-          // 5. At an earlier message, the played stretch is F's thread's: whom F's marks send away
+          // 5. At an earlier message, the played stretch is F's thread's: characters assigned elsewhere
           // count as not there for the messages F shows after S, deleted ones included.
           const end = displayLength(pieces) - 1
           if (position < end) {
-            const moved = marks(0).flatMap((mark) => (mark.away ? [mark.entity] : []))
+            const cast = new Set<string>(threads[0]!.cast)
+            const moved = [
+              ...new Set(characters.filter((id) => !cast.has(id)).flatMap((id) => identities.get(id) ?? [id]))
+            ]
             const played = yield* sql<{ id: string }>`
               ${displaySlots(sql, pieces, position + 1, end)} SELECT id FROM display_slots ORDER BY position`
             yield* insertCorrections(

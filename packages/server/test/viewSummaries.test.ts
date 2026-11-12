@@ -5,6 +5,7 @@
 // estimate all keep to that view. A shared chat plans and sends exactly what it did before.
 import { assert, describe } from "@effect/vitest"
 import { type EntityId, NewVersion } from "@rp/shared/chat.ts"
+import { uuidv7 } from "@rp/shared/id.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
@@ -124,6 +125,125 @@ const chat = (
   })
 
 describe("summaries kept per view (unit C7)", () => {
+  lcmTest(
+    "thread corrections change exactly their view's summaries in their branch, including Undo",
+    (server) =>
+      Effect.gen(function* () {
+        const { h, wren, rows } = yield* chat(server, "separate")
+        const mira = (yield* h.writer.CreateEntity({
+          userId: h.userId,
+          kind: "card",
+          label: "Mira",
+          subtitle: "",
+          doc: cardDoc("Mira"),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })).entityId as EntityId
+        const forkId = h.chat.currentForkId! as ForkId
+        yield* h.writer.AddStateEvent({
+          userId: h.userId,
+          chatId: h.chat.id,
+          forkId,
+          slotId: null,
+          versionId: null,
+          scope: null,
+          data: { key: "participant.join", value: { entity: mira } }
+        })
+        yield* h.settle
+        const peer = (yield* h.writer.CreateFork({
+          userId: h.userId,
+          chatId: h.chat.id,
+          fromForkId: forkId,
+          atSlotId: h.rows.at(-1)!.slotId
+        })).fork.id
+        const ids = yield* rows(
+          "SELECT id FROM summaries WHERE chat_id=? AND sealed=1 AND status IN ('complete','truncated')",
+          [h.chat.id]
+        )
+        const summaries = (fork: ForkId) =>
+          Effect.forEach(ids, (s) => h.reader.GetSummary({ userId: h.userId, forkId: fork, summaryId: s.id as never }))
+        const before = yield* summaries(forkId)
+        assert.isTrue(before.every((s) => s.fresh))
+        const slotId = h.rows[50]!.slotId
+        const started = yield* h.api.StartThreads({
+          chatId: h.chat.id,
+          forkId,
+          slotId,
+          expectedRowVersion: (yield* h.reader.GetSlot({ userId: h.userId, slotId, forkId })).entry.rowVersion,
+          threads: [
+            { name: null, cast: [mira], writesAs: null },
+            { name: null, cast: [wren], writesAs: null }
+          ]
+        })
+        const after = yield* summaries(forkId)
+        const affected = before.filter((s) => s.audience?.includes(wren) && s.to > 51)
+        assert.isAbove(affected.length, 0)
+        assert.sameMembers(
+          after.filter((s) => !s.fresh).map((s) => s.id),
+          affected.map((s) => s.id)
+        )
+        assert.isTrue(
+          (yield* summaries(peer)).every((s) => s.fresh),
+          "the older branch's summaries stay fresh"
+        )
+        const undone = yield* h.api.UndoThreads({ chatId: h.chat.id, splitId: started.splitId })
+        assert.isTrue((yield* summaries(forkId)).every((s) => s.fresh))
+        yield* h.api.RestoreBinItem({ itemId: undone.id })
+        assert.sameMembers(
+          (yield* summaries(forkId)).filter((s) => !s.fresh).map((s) => s.id),
+          affected.map((s) => s.id)
+        )
+        const fresh = yield* h.reader.GetLcmState({
+          userId: h.userId,
+          chatId: h.chat.id,
+          forkId,
+          leafSlotId: h.rows.at(-1)!.slotId,
+          viewer: wren
+        })
+        assert.isFalse(fresh.layer.some((s) => s.content?.includes("SAW-MISSED")))
+        // A summary written during the split pins the absent messages as null inputs.
+        const inputRows = h.rows.slice(50, 61)
+        const job = { jobId: uuidv7(), rolloutId: uuidv7() }
+        yield* fixtureSql(h.dataDir, [
+          {
+            sql: "INSERT INTO summarization_jobs(id,chat_id,fork_id,level,first_slot_id,last_slot_id,status,target_token_count,created_at,updated_at,audience_json) VALUES(?,?,?,1,?,?,'processing',600,1,1,?)",
+            params: [
+              job.jobId,
+              h.chat.id,
+              forkId,
+              inputRows[0]!.slotId,
+              inputRows.at(-1)!.slotId,
+              JSON.stringify([wren])
+            ]
+          },
+          {
+            sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES(?,?,'summarize','running','summarizer','background',1,1)",
+            params: [job.rolloutId, h.chat.id]
+          }
+        ])
+        const privateSummary = yield* h.writer.CompleteSummary({
+          userId: h.userId,
+          ...job,
+          content: "The road before the split.",
+          status: "complete",
+          children: [],
+          inputs: inputRows.map((row, n) => ({
+            slotId: row.slotId,
+            versionId: n === 0 ? row.version.id : null,
+            amendCount: 0
+          }))
+        })
+        assert.isTrue((yield* h.reader.GetSummary({ userId: h.userId, forkId, summaryId: privateSummary.id })).fresh)
+        yield* h.api.UndoThreads({ chatId: h.chat.id, splitId: started.splitId })
+        assert.isFalse(
+          (yield* h.reader.GetSummary({ userId: h.userId, forkId, summaryId: privateSummary.id })).fresh,
+          "Undo makes summaries written during the absence stale"
+        )
+      }),
+    { timeout: 180_000 }
+  )
+
   lcmTest(
     "a separate chat summarizes the common stretch once and each diverged character's own from there",
     (server) =>
