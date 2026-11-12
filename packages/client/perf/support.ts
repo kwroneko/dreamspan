@@ -33,7 +33,10 @@ export const startServer = async (dataDir: string, env: Record<string, string> =
         DATA_DIR: dataDir,
         DB_READERS: "2",
         DB_WORKERS: "bundle",
-        CLIENT_DIST: resolve(root, "packages/client/dist"),
+        // Paired runs can serve an archived client against the same fixture and server.
+        CLIENT_DIST: process.env.RP_PERF_DIST
+          ? resolve(process.env.RP_PERF_DIST)
+          : resolve(root, "packages/client/dist"),
         FAKE_GENERATOR_TPS: "300",
         // Twenty seconds a stream: every streaming scenario ends while they still run.
         FAKE_GENERATOR_TOKENS: "6000",
