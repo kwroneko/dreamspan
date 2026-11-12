@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { Chat, VersionId } from "@rp/shared/chat.ts"
 import { Effect, Stream } from "effect"
+import { textField } from "@rp/shared/editing.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, generateReply } from "./support/generation.ts"
@@ -456,10 +457,37 @@ for (const ending of ["stop", "failure"] as const)
         after.entries.filter((e) => e.version.content === "Already posted.").map((e) => e.version.id),
         [start.entry.version.id]
       )
+      const next = yield* send(api, chat, "New message after Resume.")
+      yield* eventually(() =>
+        events.some(
+          (e) =>
+            e._tag === "Version" &&
+            e.version.content === "Resumed answer." &&
+            e.version.id !== continued.version.id &&
+            e.version.status === "complete"
+        )
+      )
+      const run = yield* api.GetRunContext({ versionId: next.entry.version.id })
+      assert.isUndefined(run.continuity?.parentVersionId)
+      assert.match(run.continuity?.reason ?? "", /resumed or edited/)
+      assert.include(JSON.stringify(mock.requests().at(-1)!.body), "New message after Resume.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-for (const change of ["edit", "insert", "hide", "changeset", "missing", "fenced", "budget"] as const)
+for (const change of [
+  "edit",
+  "insert",
+  "delete",
+  "swipe",
+  "hide",
+  "changeset",
+  "missing",
+  "fenced",
+  "budget",
+  "preset",
+  "model-settings",
+  "connection-settings"
+] as const)
   it.live(`${change} rebuilds fresh with a visible reason`, () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -478,7 +506,7 @@ for (const change of ["edit", "insert", "hide", "changeset", "missing", "fenced"
         (mock) => Effect.promise(() => mock.close())
       )
       const api = yield* client()
-      yield* generateReply(api, {
+      const fixture = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: { context: 4096 }
       })
@@ -500,7 +528,48 @@ for (const change of ["edit", "insert", "hide", "changeset", "missing", "fenced"
         limit: 100
       })
       const human = path.entries.find((e) => e.version.content === "First request.")!
-      if (change === "edit") {
+      if (change === "model-settings")
+        yield* api.EditModel({
+          modelId: fixture.model.id,
+          expectedRowVersion: fixture.model.rowVersion,
+          overrides: { settings: { samplers: { temperature: 0.23 } } }
+        })
+      if (change === "connection-settings")
+        yield* api.UpdateConnection({
+          connectionId: fixture.connection.id,
+          expectedRowVersion: fixture.connection.rowVersion,
+          settings: {
+            name: fixture.connection.name,
+            baseUrl: fixture.connection.baseUrl,
+            compat: fixture.connection.compat,
+            cacheTtlS: 900,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          }
+        })
+      if (change === "preset") {
+        const material = yield* reader.RolloutMaterial({ userId: user.id, versionId: first.entry.version.id })
+        const refId = JSON.parse(material.snapshot).inputs.preset.ref
+        const field = textField(["prompts", "identifier=main", "content"])
+        const editor = yield* api.OpenEditor({ refId })
+        const draft = yield* api.SaveEditorDraft({
+          refId,
+          field,
+          content: "Changed workshop instructions.",
+          draftId: null,
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevisionId: editor.ref.headRevisionId
+        })
+        yield* api.CommitEditorDrafts({
+          refId,
+          expectedRowVersion: editor.ref.rowVersion,
+          fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+          message: null
+        })
+      }
+      if (change === "delete") yield* api.DeleteMessage({ slotId: human.slotId })
+      if (change === "edit" || change === "swipe") {
         const { Writer } = yield* Effect.promise(() => import("../src/db/Database.ts"))
         yield* (yield* Writer).AddSelectedVersion({
           userId: user.id,
@@ -630,9 +699,18 @@ for (const change of ["edit", "insert", "hide", "changeset", "missing", "fenced"
             ? /no saved transcript/
             : change === "fenced"
               ? /earlier assembler/
-              : /edited, inserted into, hidden or replaced/
+              : change === "preset"
+                ? /preset changed/
+                : change === "model-settings"
+                  ? /model.*changed/
+                  : change === "connection-settings"
+                    ? /connection.*changed/
+                    : /edited, inserted into, hidden or replaced/
       )
       const body = mock.requests()[before]!.body!
+      assert.include(JSON.stringify(body.messages), "Second request.", "the new user message survives every fallback")
+      if (change === "preset") assert.include(JSON.stringify(body.messages), "Changed workshop instructions.")
+      if (change === "model-settings") assert.strictEqual(body.temperature, 0.23)
       assert.notInclude(JSON.stringify(body.messages), "tool_call_id", "a fresh request has no old tool transcript")
       if (change === "budget") {
         assert.include(JSON.stringify(body.messages), "[Steps: Read a card")

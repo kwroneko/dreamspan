@@ -3757,6 +3757,7 @@ export class ReadOps extends RpcGroup.make(
       rolloutId: Schema.String,
       status: Schema.String,
       versionStatus: Schema.String,
+      resumed: Schema.Boolean,
       mode: Schema.NullOr(Schema.String),
       snapshot: Schema.String,
       transcript: Schema.NullOr(Schema.String)

@@ -1,5 +1,6 @@
 // Workshop turn continuity is a delta from reference-harness's loadCompletedSessionMaterial:
 // retain the frozen request and the WHOLE transcript; verify the shown path before reuse.
+import { isDeepStrictEqual } from "node:util"
 import type { PathWindow } from "@rp/shared/chatApi.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { PathEntry } from "@rp/shared/chat.ts"
@@ -79,6 +80,8 @@ export const previousRun = Effect.fnUntraced(function* (
     } as const
   if (!stored.transcript || !snapshot.continuity)
     return { reason: "The previous run has no saved transcript, so this request was put together again." } as const
+  if (stored.resumed)
+    return { reason: "The previous run was resumed or edited, so this request was put together again." } as const
   if (stored.status !== "completed")
     return {
       reason: "The previous run did not finish. This request was put together again; Resume can carry on that run."
@@ -88,6 +91,10 @@ export const previousRun = Effect.fnUntraced(function* (
     snapshot.inputs.model?.modelId !== fresh.inputs.model?.modelId
   )
     return { reason: "The model changed, so this request was put together again." } as const
+  if (!isDeepStrictEqual(snapshot.inputs.model, fresh.inputs.model))
+    return { reason: "The model or connection settings changed, so this request was put together again." } as const
+  if (!isDeepStrictEqual(snapshot.inputs.preset, fresh.inputs.preset))
+    return { reason: "The preset changed, so this request was put together again." } as const
   const transcript = JSON.parse(stored.transcript) as Array<AgentMessage>
   const posts = transcript.flatMap((m) =>
     m.role === "toolResult" && m.toolName === "send_message" && !m.isError

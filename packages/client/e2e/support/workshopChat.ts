@@ -282,19 +282,40 @@ export function workshopChatTests() {
           await page.getByLabel("Message", { exact: true }).fill("Carry on from that work.")
           await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
           await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toHaveCount(2)
-          const secondVersion = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-            Effect.gen(function* () {
-              const chat = yield* api.GetChat({ chatId: workshopId })
-              const path = yield* api.ReadPath({
-                chatId: workshopId,
-                leafSlotId: chat.activeLeafSlotId,
-                range: { _tag: "Bottom" },
-                limit: 100
+          const lastVersion = () =>
+            asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+              Effect.gen(function* () {
+                const chat = yield* api.GetChat({ chatId: workshopId })
+                const path = yield* api.ReadPath({
+                  chatId: workshopId,
+                  leafSlotId: chat.activeLeafSlotId,
+                  range: { _tag: "Bottom" },
+                  limit: 100
+                })
+                return path.entries.at(-1)!.version
               })
-              return path.entries.at(-1)!.version.id
-            })
-          )
+            )
+          const secondVersion = (await lastVersion()).id
           await page.goto(`${server().url}/chats/${workshopId}/context/${secondVersion}`)
+          await expect(
+            page.getByText("The previous run was resumed or edited, so this request was put together again.")
+          ).toBeVisible()
+          await page.goto(`${server().url}/chats/${workshopId}`)
+          const beforeCarry = provider.bodies.length
+          await page.getByLabel("Message", { exact: true }).fill("Keep going from this turn.")
+          await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeCarry)
+          // Older messages can leave the phone's virtualized DOM as this reply grows.
+          await expect
+            .poll(async () => {
+              const version = await lastVersion()
+              return (
+                version.id !== secondVersion && version.content === WORKSHOP_ANSWER && version.status === "complete"
+              )
+            })
+            .toBe(true)
+          const thirdVersion = (await lastVersion()).id
+          await page.goto(`${server().url}/chats/${workshopId}/context/${thirdVersion}`)
           await expect(page.getByRole("link", { name: "Carried on from the previous turn’s run" })).toBeVisible()
           await expectLayout(page, info, `workshop-carried-request-${width}-${theme}`)
           await page.goto(`${server().url}/chats/${workshopId}`)

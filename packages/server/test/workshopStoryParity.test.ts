@@ -96,7 +96,7 @@ it.live("keeps story requests and persisted rows identical to the single-message
       const derived = new Map<string, string>()
       const normalize = (value: unknown, key = ""): unknown => {
         if (typeof value === "string") {
-          if ((key === "configuration" || key === "id") && /^[0-9a-f]{64}$/.test(value)) {
+          if ((key === "configuration" || key === "id" || key === "source") && /^[0-9a-f]{64}$/.test(value)) {
             if (!derived.has(value)) derived.set(value, `derived-id-${derived.size + 1}`)
             return derived.get(value)!
           }

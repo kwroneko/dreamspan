@@ -438,11 +438,13 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly rollout_id: string
           readonly status: string
           readonly version_status: string
+          readonly resumed: number
           readonly mode: string | null
           readonly snapshot: string | null
           readonly transcript: string | null
         }>`
           SELECT r.id AS rollout_id, r.status, v.status AS version_status, r.mode,
+            EXISTS (SELECT 1 FROM versions child WHERE child.rollout_id = r.id AND child.origin = 'resumed') AS resumed,
             p.context_snapshot_json AS snapshot, p.transcript_json AS transcript
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
@@ -453,6 +455,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           rolloutId: row.rollout_id,
           status: row.status,
           versionStatus: row.version_status,
+          resumed: !!row.resumed,
           mode: row.mode,
           snapshot: row.snapshot,
           transcript: row.transcript
