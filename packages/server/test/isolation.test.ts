@@ -2734,6 +2734,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  SourceSuggestions: {
+    probe: (actor) =>
+      refused(
+        actor.api.SourceSuggestions({ sourceId: "cardex", kind: "creators", prefix: "f", page: null }),
+        "NotFound"
+      )
+  },
   SourceTags: { probe: (actor) => refused(actor.api.SourceTags({ sourceId: "cardex", prefix: "f" }), "NotFound") },
   SourceCard: { probe: (actor) => refused(actor.api.SourceCard({ sourceId: "cardex", remoteId: "x" }), "NotFound") },
   SourceCardForChat: {

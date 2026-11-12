@@ -30,9 +30,10 @@ function Home({ data }: { data: ShellLibrary }) {
   const source = sources.info
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
-  // Then the filters and search, having nothing to work on, stay out of the way too.
+  // The source choices also work with an empty library (spec/CARD-SOURCES D1).
   if (
     intro &&
+    sources.options.length === 0 &&
     data.cards.length === 0 &&
     data.personas.length === 0 &&
     data.archived.length === 0 &&

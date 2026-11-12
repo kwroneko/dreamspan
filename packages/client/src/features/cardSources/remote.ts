@@ -78,23 +78,25 @@ export const cardSourceViews = makeRegistry<CardSourceView>()
 
 /** A failed call to a source, as a sentence the user can act on (§5.4). */
 export const problemText = (name: string, problem: SourceProblem) =>
-  problem.reason === "not_found"
-    ? `This card is no longer on ${name}.`
-    : problem.reason === "unreachable"
-      ? `Can't reach ${name} right now.`
-      : problem.reason === "rate_limited"
-        ? `${name} is limiting requests. Try again in a moment.`
-        : problem.reason === "unauthorized"
-          ? `${name} refused the API key.`
-          : problem.reason === "disabled"
-            ? `${name} is turned off in Settings.`
-            : problem.reason === "refused"
-              ? `${name} doesn't allow downloading this card.`
-              : problem.reason === "bad_response"
-                ? `${name} sent something this app can't read.`
-                : "message" in problem
-                  ? problem.message
-                  : `${name} couldn't answer.`
+  problem.reason === "region_unavailable"
+    ? "This card is not available in your region."
+    : problem.reason === "not_found"
+      ? `This card is no longer on ${name}.`
+      : problem.reason === "unreachable"
+        ? `Can't reach ${name} right now.`
+        : problem.reason === "rate_limited"
+          ? `${name} is limiting requests. Try again in a moment.`
+          : problem.reason === "unauthorized"
+            ? `${name} refused the API key.`
+            : problem.reason === "disabled"
+              ? `${name} is turned off in Settings.`
+              : problem.reason === "refused"
+                ? `${name} doesn't allow downloading this card.`
+                : problem.reason === "bad_response"
+                  ? `${name} sent something this app can't read.`
+                  : "message" in problem
+                    ? problem.message
+                    : `${name} couldn't answer.`
 
 export interface Adopted {
   readonly entityId: string
