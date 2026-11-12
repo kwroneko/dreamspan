@@ -7,6 +7,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { textField } from "@rp/shared/editing.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
@@ -318,6 +319,111 @@ describe("starting parallel threads", () => {
           const wrenRestored = yield* t.contextFor(F, tip, t.wren)
           assert.notInclude(wrenRestored, "vault code")
           assert.notInclude(wrenRestored, "finds the boat")
+        })
+      )
+  )
+
+  it.live(
+    "the client's reads: each thread's characters, the left panel's Threads list, and a note copied to a thread",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const t = yield* story(null)
+          const { api, F, S } = t
+          // A branch from before, so the chat has a branch apart from the threads.
+          const { fork: aside } = yield* api.CreateFork({
+            chatId: t.chatId,
+            fromForkId: F,
+            atSlotId: t.made.sent.slotId
+          })
+          const note = yield* api.CreateChatNote({ chatId: t.chatId, forkId: F, title: "Weather" })
+          const started = yield* api.StartThreads({
+            chatId: t.chatId,
+            forkId: F,
+            slotId: S,
+            expectedRowVersion: yield* t.rowVersion(S, F),
+            threads: [
+              { name: null, cast: [t.mira, t.tobin], writesAs: t.tobin },
+              { name: null, cast: [t.wren], writesAs: null }
+            ]
+          })
+          const docks = started.forkIds[1]!
+          const [set] = yield* api.ThreadsOf({ chatId: t.chatId, forkId: F })
+          assert.deepStrictEqual(
+            set!.threads.map((thread) => thread.cast),
+            [[t.mira], [t.wren]]
+          )
+
+          // The panel lists both threads under Threads, the earlier branch under Branches; the
+          // chat's branch count leaves the new thread out.
+          const view = {
+            entity: null,
+            chat: t.chatId,
+            search: "",
+            sort: "recent" as const,
+            sections: [
+              { id: "threads" as const, limit: 100 },
+              { id: "pinnedBranches" as const, limit: 100 },
+              { id: "peers" as const, limit: 100 },
+              { id: "other" as const, limit: 100 }
+            ]
+          }
+          const shell = yield* api.GetShellForks(view)
+          const rows = (id: string) => shell.sections.find((s) => s.id === id)!.rows
+          assert.sameMembers(
+            rows("threads").map((f) => f.forkId),
+            [F, docks]
+          )
+          assert.deepStrictEqual(rows("threads").find((f) => f.forkId === docks)?.threads, [
+            { splitId: started.splitId, ordinal: 1 }
+          ])
+          // Each row says which thread it is: unnamed, called by its characters.
+          assert.deepStrictEqual(rows("threads").find((f) => f.forkId === docks)?.thread, {
+            name: null,
+            cast: [t.wren]
+          })
+          assert.deepStrictEqual(rows("threads").find((f) => f.forkId === F)?.thread, { name: null, cast: [t.mira] })
+          assert.deepStrictEqual(
+            [...rows("pinnedBranches"), ...rows("peers"), ...rows("other")].map((f) => f.forkId),
+            [aside.id]
+          )
+          assert.strictEqual(rows("threads")[0]!.branches, 2)
+
+          // A note saved in this thread, then copied to the other: the same text there, once.
+          const here = { chatId: t.chatId, forkId: F, slotId: null }
+          const opened = yield* api.OpenEditor({ refId: note.id, chatNote: here })
+          const field = textField(["content"])
+          const draft = yield* api.SaveEditorDraft({
+            refId: note.id,
+            field,
+            scope: opened.chatNote!.scope,
+            draftId: null,
+            content: "Fog over the harbor.",
+            expectedRowVersion: null,
+            expectedSession: null,
+            baseRevisionId: opened.ref.headRevisionId
+          })
+          yield* api.CommitEditorDrafts({
+            refId: note.id,
+            chatNote: here,
+            expectedRowVersion: (yield* api.OpenEditor({ refId: note.id, chatNote: here })).ref.rowVersion,
+            fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+            message: null
+          })
+          const textIn = (forkId: ForkId) =>
+            Effect.map(
+              api.ListChatNotes({ chatId: t.chatId, forkId, slotId: forkId === aside.id ? t.made.sent.slotId : S }),
+              (notes) => notes.find((n) => n.ref.id === note.id)?.doc.content
+            )
+          assert.strictEqual(yield* textIn(F), "Fog over the harbor.")
+          assert.notStrictEqual(yield* textIn(docks), "Fog over the harbor.")
+          const copy = { chatId: t.chatId, noteRefId: note.id, fromForkId: F, toForkId: docks }
+          assert.isTrue(yield* api.CopyNoteToBranch(copy))
+          assert.strictEqual(yield* textIn(docks), "Fog over the harbor.")
+          assert.isFalse(yield* api.CopyNoteToBranch(copy), "the same text there already")
+          // Only the branch named: the earlier branch keeps its own.
+          assert.notStrictEqual(yield* textIn(aside.id), "Fog over the harbor.")
+          assert.strictEqual(yield* outcome(api.CopyNoteToBranch({ ...copy, toForkId: F })), "NotFound")
         })
       )
   )

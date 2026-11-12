@@ -1112,6 +1112,15 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
+   * "Also change it in …" (db/noteCopyWrites.ts): a chat's own note as branch `fromForkId` has it
+   * at its latest message, bound in `toForkId` at its latest message; false when it's the same there.
+   */
+  Rpc.make("CopyNoteToBranch", {
+    payload: { userId: UserId, chatId: ChatId, noteRefId: RefId, fromForkId: ForkId, toForkId: ForkId },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
    * Deletes one swipe: the normal delete (owner, 2026-10-10). If it was showing, the
    * previous swipe shows. A message's only remaining version takes the message with it.
    */

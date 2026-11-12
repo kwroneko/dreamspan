@@ -31,6 +31,8 @@ import { type CardSummaryRow, cardSummary, cardSummaryBook } from "./cards.ts"
 import type { ReadOps } from "./ops.ts"
 import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
+import { threadLabels } from "./threadReads.ts"
+import { shownSplits } from "./threads.ts"
 
 type Fork = { -readonly [K in keyof Omit<ShellFork, "cast" | "added">]: Omit<ShellFork, "cast" | "added">[K] } & {
   cast: Array<CastCard>
@@ -164,6 +166,8 @@ const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection):
   const byLast = (list: ReadonlyArray<Fork>) =>
     [...list].sort((a, b) => (b.endAt ?? b.createdAt) - (a.endAt ?? a.createdAt) || b.createdAt - a.createdAt)
   const peer = (f: Fork) => f.pinned || f.named
+  // A fork of a shown set of threads is listed as a thread, never as a branch (DESIGN §3.3).
+  const thread = (f: Fork) => f.threads !== undefined
   switch (id) {
     case "pinned":
       return sortBy(
@@ -194,12 +198,14 @@ const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection):
       }
     case "current":
       return scoped.filter((f) => f.current)
+    case "threads":
+      return byLast(scoped.filter(thread))
     case "pinnedBranches":
-      return byLast(scoped.filter((f) => f.pinned))
+      return byLast(scoped.filter((f) => f.pinned && !thread(f)))
     case "peers":
-      return byLast(scoped.filter((f) => f.named && !f.pinned))
+      return byLast(scoped.filter((f) => f.named && !f.pinned && !thread(f)))
     case "other":
-      return byLast(scoped.filter((f) => !peer(f)))
+      return byLast(scoped.filter((f) => !peer(f) && !thread(f)))
     case "groups": {
       // The home grid's direction toggle turns the order round (oldest first, Z to A).
       const sorted = sortBy(
@@ -467,6 +473,11 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       // A chat's Recent is the latest of its forks' (below), and how many forks it has.
       const chatRecent = new Map<string, number>()
       const branchCount = new Map<string, number>()
+      // The thread sets shown in each chat: those with two threads that still have a live fork.
+      const placesByChat = new Map<string, Array<ForkSummary["threads"]>>()
+      for (const record of joinedRows)
+        placesByChat.set(record.chat_id, [...(placesByChat.get(record.chat_id) ?? []), stored.get(record.id)!.threads])
+      const shownByChat = new Map([...placesByChat].map(([chat, places]) => [chat, shownSplits(places)]))
       const forks: Array<Fork> = joinedRows.map((record) => {
         const physical = chatById.get(record.chat_id)!
         const groupId = groups.get(record.id)!
@@ -485,7 +496,10 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         // chats in a fork: an ST branch file merged into its chat keeps its ST dates.
         const recentAt = Math.max(s.endAt ?? row.created_at, record.last_chatted_at ?? 0)
         chatRecent.set(row.id, Math.max(chatRecent.get(row.id) ?? 0, recentAt))
-        branchCount.set(row.id, (branchCount.get(row.id) ?? 0) + 1)
+        const shown = shownByChat.get(record.chat_id)!
+        const threads = s.threads.filter((place) => shown.has(place.splitId))
+        // Starting threads adds no branches: a new thread's forks aren't counted.
+        if (!threads.some((place) => place.ordinal > 0)) branchCount.set(row.id, (branchCount.get(row.id) ?? 0) + 1)
         return {
           forkId: record.id,
           sourceChatId: record.chat_id as ChatId,
@@ -511,12 +525,13 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           added: s.added.flatMap((id) => byCard.get(id) ?? []),
           joined: s.joined as Array<EntityId>,
           departed: s.departed as Array<EntityId>,
-          activity: s.activity as Array<Activity>
+          activity: s.activity as Array<Activity>,
+          ...(threads.length > 0 ? { threads } : {})
         }
       })
       for (const f of forks) {
         f.chatRecentAt = chatRecent.get(f.chat.id)!
-        f.branches = branchCount.get(f.chat.id)!
+        f.branches = branchCount.get(f.chat.id) ?? 0
       }
       // Newest chat first, each chat's forks together, its current one first.
       forks.sort(
@@ -706,11 +721,22 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("GetSplitChats")),
     ShellForks: ({ userId, view }) =>
-      Effect.map(shellState(userId, false), (state) => {
+      Effect.gen(function* () {
+        const state = yield* shellState(userId, false)
         const sections = view.sections.map(({ id, limit }) => {
           const rows = sectionRows(state, view, id)
           return { id, rows: rows.slice(0, limit), total: rows.length }
         })
+        // The Threads group's rows say which thread each is (§13.6 of spec/THREADS.md).
+        const threadRows = sections.flatMap((section) => (section.id === "threads" ? section.rows : []))
+        const labels = yield* threadLabels(
+          sql,
+          threadRows.map((f) => ({ forkId: f.forkId, chatId: f.sourceChatId ?? f.chat.id, place: f.threads![0]! }))
+        )
+        const labelled = (id: ShellSection, f: Fork) => {
+          const thread = id === "threads" ? labels.get(f.forkId) : undefined
+          return thread ? new ShellFork({ ...wire(f), thread }, trusted) : wire(f)
+        }
         // Scope once without the search. Counts represent chats, even if many branches match.
         const chatIds = view.chats === undefined ? null : new Set<string>(view.chats)
         const scoped = perChat(
@@ -727,7 +753,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             if (inChatFilter(state.chatIndex.get(row.chat.id)!, filter, state.pinnedChats)) filterCounts[filter]++
         return {
           filterCounts,
-          sections: sections.map((section) => ({ ...section, rows: section.rows.map(wire) })),
+          sections: sections.map((section) => ({ ...section, rows: section.rows.map((f) => labelled(section.id, f)) })),
           people: peopleOf(sections.flatMap((section) => section.rows)),
           fresh: state.fresh
         }

@@ -5,6 +5,7 @@
 import { CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { StaleWrite } from "@rp/shared/errors.ts"
+import type { RefId } from "@rp/shared/library.ts"
 import { ThreadsRefused } from "@rp/shared/threads.ts"
 import { type StartThreadsInput, StartThreadsInput as StartInput, ThreadsStarted } from "@rp/shared/threadsApi.ts"
 import { Effect } from "effect"
@@ -70,6 +71,14 @@ export const makeThreadHandlers = Effect.gen(function* () {
         hub.publish(payload.chatId, { _tag: "Reload" })
         yield* changed(id, payload.chatId)
         return item
-      }).pipe(Effect.uninterruptible, internal("UndoThreads"))
+      }).pipe(Effect.uninterruptible, internal("UndoThreads")),
+    CopyNoteToBranch: (payload: { chatId: ChatId; noteRefId: RefId; fromForkId: ForkId; toForkId: ForkId }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const copied = yield* writer.CopyNoteToBranch({ userId: id, ...payload })
+        // The other branch's tabs read their notes and state again.
+        if (copied) hub.publish(payload.chatId, { _tag: "State" })
+        return copied
+      }).pipe(Effect.uninterruptible, internal("CopyNoteToBranch"))
   }
 })

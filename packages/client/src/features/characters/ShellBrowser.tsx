@@ -45,6 +45,7 @@ import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { WindowedList } from "../../ui/WindowedList.tsx"
+import { listNames } from "../chat/cast.ts"
 import { KindBadge } from "../chat/KindBadge.tsx"
 import { useChatKindLook } from "../chat/kindLooks.ts"
 import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
@@ -248,10 +249,20 @@ function SplitBranchButton({ fork, label }: { fork: ShellFork; label: string }) 
 }
 
 /** Branch-list content shares the row's open target without nesting rename controls in it. */
+/**
+ * A row of the Threads group (spec/THREADS.md §13.6): its thread's name, else its characters'
+ * names. Renamed where its threads are listed in the header, never as a branch here.
+ */
+const shellThreadLabel = (fork: ShellFork, thread: NonNullable<ShellFork["thread"]>) =>
+  thread.name ??
+  (listNames(thread.cast.flatMap((id) => fork.cast.find((card) => card.entityId === id)?.name ?? [])) || "Thread")
+
 function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; open: () => void }) {
   const action = useAction()
   const [renaming, setRenaming] = useState(false)
-  const label = shellBranchLabel(fork)
+  const thread = fork.thread
+  const label = thread ? shellThreadLabel(fork, thread) : shellBranchLabel(fork)
+  const kind = thread ? "thread" : "branch"
   const addedNames = `Added characters: ${fork.added.map((c) => c.name).join(", ")}`
   return (
     <div
@@ -292,7 +303,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
       )}
       <div data-row-text className="min-w-0">
         <div data-branch-title-line className="flex h-5 min-w-0 items-center gap-x-1 text-sm">
-          {here ? (
+          {here && !thread ? (
             <InlineRename
               compact
               value={fork.named ? fork.name : ""}
@@ -329,12 +340,12 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
           )}
         </div>
         <Tooltip
-          label={`Opens this branch${here ? ", shown now" : ""}.${fork.current && fork.branches > 1 ? ` ${OPENS_HERE_HINT}` : ""}`}
+          label={`Opens this ${kind}${here ? ", shown now" : ""}.${fork.current && fork.branches > 1 ? ` ${OPENS_HERE_HINT}` : ""}`}
         >
           <button
             type="button"
             onClick={open}
-            aria-label={`Open branch ${label}`}
+            aria-label={`Open ${kind} ${label}`}
             aria-current={here ? "page" : undefined}
             data-chat-id={fork.chat.id}
             data-fork-id={fork.forkId}
@@ -357,7 +368,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
         className="flex shrink-0 flex-col items-end justify-between self-stretch"
       >
         <PinButton fork={fork} branch />
-        {here && !fork.original && <SplitBranchButton fork={fork} label={label} />}
+        {here && !fork.original && !thread && <SplitBranchButton fork={fork} label={label} />}
       </div>
       {action.error && (
         <span
@@ -568,15 +579,18 @@ export function OpenChatBranches() {
     search: "",
     sort: "recent",
     sections: [
+      { id: "threads", limit: 5000 },
       { id: "pinnedBranches", limit: 5000 },
       { id: "peers", limit: 5000 },
       { id: "other", limit: 5000 }
     ]
   })
+  // Threads first, under a heading of their own, then the branches (spec/THREADS.md §13.6).
+  const threads = forks.section("threads").rows
   const pinned = forks.section("pinnedBranches").rows
   const peers = forks.section("peers").rows
   const other = forks.section("other").rows
-  const nextRows = useMemo(() => [...pinned, ...peers, ...other], [pinned, peers, other])
+  const nextRows = useMemo(() => [...threads, ...pinned, ...peers, ...other], [threads, pinned, peers, other])
   // Uncached per-chat reads used to remove the section, stretching the list above it.
   // Commit split metadata and branch rows together; keep the outgoing section meanwhile.
   const [last, setLast] = useState<{
@@ -640,7 +654,7 @@ export function OpenChatBranches() {
           >
             <Icon name={open ? "down" : "right"} size={14} className="shrink-0" />
             <span className="truncate">
-              Branches of {chatLabel} ({rows.length.toLocaleString()})
+              {rows[0]!.thread ? "Threads and branches" : "Branches"} of {chatLabel} ({rows.length.toLocaleString()})
             </span>
           </button>
         </Tooltip>
@@ -661,15 +675,32 @@ export function OpenChatBranches() {
             scrollOffset.current = event.currentTarget.scrollTop
           }}
           className="min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
-          renderItem={(f) => (
-            <ForkRow
-              key={f.forkId}
-              fork={f}
-              perFork
-              branchOnly
-              here={displayedFork ? f.forkId === displayedFork : f.current}
-            />
-          )}
+          renderItem={(f, i) => {
+            // With threads listed, each group has its heading.
+            const grouped = rows[0]?.thread !== undefined
+            const heading =
+              grouped && (i === 0 || (rows[i - 1]!.thread !== undefined) !== (f.thread !== undefined))
+                ? f.thread
+                  ? "Threads"
+                  : "Branches"
+                : null
+            return (
+              <>
+                {heading && (
+                  <h3 className={`mb-1 truncate px-1 text-xs font-semibold text-muted ${i === 0 ? "" : "pt-2"}`}>
+                    {heading}
+                  </h3>
+                )}
+                <ForkRow
+                  key={f.forkId}
+                  fork={f}
+                  perFork
+                  branchOnly
+                  here={displayedFork ? f.forkId === displayedFork : f.current}
+                />
+              </>
+            )
+          }}
         />
       ) : (
         <div data-foot-body inert aria-hidden style={{ height: 0, maxHeight: 0, visibility: "hidden" }} />
@@ -802,7 +833,9 @@ const SECTIONS = {
   // Pinned, named, then the rest, each by last message; the one the chat opens on is
   // marked where it is (owner, 2026-11-01).
   chat: [
+    ["threads", "Threads"],
     ["pinnedBranches", "Pinned branches"],
+
     ["peers", "Named branches"],
     ["other", "Branches"]
   ]

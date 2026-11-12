@@ -1919,6 +1919,30 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.UndoThreads({ chatId: owner.chat.chatId, splitId: "a-split" }), "NotFound")
   },
+  CopyNoteToBranch: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Their note in their chat, and their note into the actor's own branch: both NotFound.
+        yield* refused(
+          actor.api.CopyNoteToBranch({
+            chatId: owner.chat.chatId,
+            noteRefId: owner.chat.noteRefId,
+            fromForkId: owner.chat.forkId,
+            toForkId: owner.chat.forkId
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.CopyNoteToBranch({
+            chatId: actor.chat.chatId,
+            noteRefId: owner.chat.noteRefId,
+            fromForkId: actor.chat.forkId,
+            toForkId: actor.chat.forkId
+          }),
+          "NotFound"
+        )
+      })
+  },
   // Merging another chat in (spec/CHAT-MERGE.md): neither side may be someone else's chat.
   PreviewChatMerge: {
     probe: (actor, owner) =>

@@ -99,6 +99,9 @@ export const forksChanged = (chatId: ChatId, created?: Fork) => {
   for (const listener of listeners) listener()
 }
 
+/** How many times `forksChanged` was called for a chat: what else lists its forks reads again by. */
+export const useForksVersion = (chatId: ChatId) => useSyncExternalStore(subscribe, () => bumps.get(chatId) ?? 0)
+
 export interface ChatForks {
   /** Null until the first read answers. */
   readonly forks: ReadonlyArray<Fork> | null

@@ -7,6 +7,7 @@ import { BinItem } from "./bin.ts"
 import { Chat, ChatId, ForkId, SlotId } from "./chat.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { HistoryRejected } from "./historyApi.ts"
+import { RefId } from "./library.ts"
 import { StartedThreads, ThreadSet, ThreadStart, ThreadsRefused } from "./threads.ts"
 
 /** "Start parallel threads" at message `slotId` of branch `forkId`, as the tab saw it (`expectedRowVersion`). */
@@ -56,6 +57,15 @@ export class ChatThreadsApi extends RpcGroup.make(
   Rpc.make("UndoThreads", {
     payload: { chatId: ChatId, splitId: Schema.String },
     success: BinItem,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * "Also change it in …": this chat's own note as branch `fromForkId` has it now, in branch
+   * `toForkId` from its newest message on; false when it's the same there already.
+   */
+  Rpc.make("CopyNoteToBranch", {
+    payload: { chatId: ChatId, noteRefId: RefId, fromForkId: ForkId, toForkId: ForkId },
+    success: Schema.Boolean,
     error: Schema.Union([NotFound, ServerError])
   })
 ) {}

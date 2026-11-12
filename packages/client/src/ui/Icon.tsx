@@ -46,6 +46,8 @@ const paths = {
   ],
   /** Two lines joining: taking a parent's changes into a fork, or another chat into this one. */
   merge: ["M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M6 21V9a9 9 0 0 0 9 9"],
+  /** Parallel threads: one line parting into two that run side by side, apart from branch's tree. */
+  threads: ["M12 3v4", "M12 7c-5 0-5 3-5 6v8", "M12 7c5 0 5 3 5 6v8"],
   /** A small tree of boxes: a family of forks. */
   family: [
     "M17 16h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z",

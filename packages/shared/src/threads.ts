@@ -21,8 +21,11 @@ const ThreadInfo = Schema.Struct({
   openForkId: Schema.NullOr(ForkId),
   /** How many live forks it has: its own branches included. */
   forks: Schema.Int,
+  /** Its characters at S (not away there), narrators and the user's own cards left out: what an unnamed thread is called by. */
+  cast: Schema.Array(EntityId),
   rowVersion: Schema.Int
 })
+export type ThreadInfo = typeof ThreadInfo.Type
 
 /** A set of threads started together at a message, as one fork sees it (`ThreadsOf`). */
 export const ThreadSet = Schema.Struct({
