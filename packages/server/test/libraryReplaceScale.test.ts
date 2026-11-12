@@ -10,6 +10,7 @@ import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 
 const CARDS = 2000
@@ -38,6 +39,7 @@ const timed = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   })
 
 describe("library search and replace at scale", () => {
+  const config = testConfig()
   it.effect(
     "previews and replaces across 2,000 cards, 40 lorebooks and 50 presets within the budget",
     () =>
@@ -108,10 +110,23 @@ describe("library search and replace at scale", () => {
         assert.strictEqual(applied.value.entries, CARDS + BOOKS)
         assert.isBelow(applied.ms, 10000)
 
+        const storage = yield* fixtureSql(
+          config.dataDir,
+          [
+            {
+              sql: "SELECT count(*) AS entries, sum(length(group_id)+length(ref_id)+length(before_revision_id)+length(after_revision_id)) AS id_bytes FROM library_edit_items"
+            },
+            {
+              sql: "SELECT sum(pgsize) AS bytes FROM dbstat WHERE name IN (SELECT name FROM sqlite_master WHERE tbl_name='library_edit_items')"
+            }
+          ],
+          { readOnly: true }
+        )
+        process.stderr.write(`library edit metadata storage: ${JSON.stringify(storage)}\n`)
         const undone = yield* timed(api.UndoLibraryEdit({ editId: applied.value.editId! }))
         process.stderr.write(`library undo: ${undone.ms.toFixed(0)} ms\n`)
         assert.strictEqual(undone.value.undone, CARDS + BOOKS)
-      }).pipe(Effect.provide(serverLayer(testConfig()))),
+      }).pipe(Effect.provide(serverLayer(config))),
     { timeout: 600_000 }
   )
 })
