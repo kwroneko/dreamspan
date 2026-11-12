@@ -609,6 +609,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
               sql<{ id: string }>`INSERT INTO version_records ${sql.insert({
                 id: uuidv7(),
                 slot_id: slotId,
+                authoring_fork_id: fileFork.id,
                 ordinal,
                 status: "complete",
                 speaker_entity_id: speaker,
@@ -632,7 +633,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
                       SELECT 1 FROM versions v WHERE v.slot_id = s.id AND v.writer = ${writer}
                     ) AS writer_matches FROM slots s WHERE s.id = ${source}`
                   if (position?.writer_matches === 1 && position.parent !== (parent?.id ?? null)) {
-                    copied = yield* forkImportSlot(sql, source, parent?.id ?? null)
+                    copied = yield* forkImportSlot(sql, source, parent?.id ?? null, fileFork.id)
                     priorPath!.set(parent === null ? 0 : parent.depth + 1, copied)
                   }
                 }

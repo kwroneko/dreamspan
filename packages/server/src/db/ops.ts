@@ -3692,9 +3692,19 @@ export class ReadOps extends RpcGroup.make(
    * everyone. The agent's read tools leave out what a separate context's viewer didn't know.
    */
   Rpc.make("KnowersOf", {
-    payload: { userId: UserId, chatId: ChatId, versionIds: Schema.Array(Schema.String) },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      versionIds: Schema.Array(Schema.String),
+      viewers: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+    },
     success: Schema.Array(
-      Schema.Struct({ versionId: Schema.String, knowers: Schema.NullOr(Schema.Array(Schema.String)) })
+      Schema.Struct({
+        versionId: Schema.String,
+        knowers: Schema.NullOr(Schema.Array(Schema.String)),
+        content: Schema.optionalKey(Schema.String),
+        readable: Schema.optionalKey(Schema.Boolean)
+      })
     ),
     error: StorageError
   }),

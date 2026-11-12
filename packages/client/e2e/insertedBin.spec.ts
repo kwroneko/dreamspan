@@ -59,8 +59,8 @@ for (const width of [1440, 390])
       await Effect.runPromise(
         fixtureSql(server().dataDir, [
           {
-            sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) VALUES(?,?,0,'complete','model',?,'verbatim','duplicate',?,?)",
-            params: [version, x, "An inserted reply beside the lantern.", at, at]
+            sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,authoring_fork_id) VALUES(?,?,0,'complete','model',?,'verbatim','duplicate',?,?,?)",
+            params: [version, x, "An inserted reply beside the lantern.", at, at, chat.currentForkId!]
           },
           {
             sql: "INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id,inserted) VALUES(?,?,?,?,?,?,?,1)",

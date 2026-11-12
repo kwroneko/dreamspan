@@ -52,11 +52,11 @@ describe("group read scale", () => {
             params: [now]
           },
           {
-            sql: `INSERT INTO version_records (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
+            sql: `INSERT INTO version_records (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at, authoring_fork_id)
             ${series(5000)}, depths(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM depths WHERE d < 9)
             SELECT 'v-slot-' || i || '-' || d, 'slot-' || i || '-' || d, 0, 'complete', 'human', 'verbatim', 'imported',
               (SELECT json_group_array(DISTINCT json_extract(e.value_json, '$.entity')) FROM state_events e
-                WHERE e.chat_id = printf('c-%05d', i) AND e.key = 'participant.join'), ?, ? FROM n, depths`,
+                WHERE e.chat_id = printf('c-%05d', i) AND e.key = 'participant.join'), ?, ? , printf('c-%05d', i) FROM n, depths`,
             params: [now, now]
           },
           {

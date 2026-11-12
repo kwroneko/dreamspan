@@ -51,8 +51,8 @@ const chat = (ownerId: string, status = "active") => {
   return { chatId }
 }
 
-const versionSql = `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?)`
+const versionSql = `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+  VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?, (SELECT current_fork_id FROM chats WHERE id = ?))`
 
 /** Appends a slot with one version: the version first, then the slot (deferred keys). */
 const slot = (
@@ -75,7 +75,8 @@ const slot = (
       version.content ?? "",
       writer === "model" ? "generated" : "user_written",
       now(),
-      now()
+      now(),
+      c.chatId
     )
     run(
       `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,

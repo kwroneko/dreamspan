@@ -15,6 +15,7 @@ type ProvenancedEventRow = StateEventRow & {
   readonly id: string
   readonly origin: string
   readonly version_id: string | null
+  readonly slot_id: string | null
 }
 
 const eventsOnPath = <A extends StateEventRow>(
@@ -85,7 +86,7 @@ export const stateEventRowsThrough = (sql: SqlClient.SqlClient, chatId: ChatId, 
       chatId,
       slotId,
       fork,
-      "ev.id, ev.origin, ev.version_id, ev.key, ev.scope, ev.value_json",
+      "ev.id, ev.origin, ev.version_id, ev.slot_id, ev.key, ev.scope, ev.value_json",
       shown
     )
   )

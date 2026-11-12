@@ -221,6 +221,12 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const fork = forkId ?? (yield* forkThrough(sql, chatId, leafSlotId, chat.current_fork_id))?.id ?? null
         if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
         if ((yield* placedInsertions(sql, chatId, fork)).length > 0) return null
+        // FTS indexes the whole join. Match only after projecting its rows, before limits,
+        // so hidden text cannot starve visible matches or change excerpts.
+        if (viewers != null) {
+          const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`
+          if (merged!.n > 0) return null
+        }
         // Each token as the start of a word, quoted so FTS syntax in it is only text.
         const match = tokens.length ? tokens.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" AND ") : null
         type Row = {
@@ -276,12 +282,13 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }))
       }).pipe(query("SearchChat")),
 
-    KnowersOf: ({ userId, chatId, versionIds }) =>
+    KnowersOf: ({ userId, chatId, versionIds, viewers }) =>
       readKnowers(
         sql,
         chatId,
         sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`,
-        versionIds
+        versionIds,
+        viewers
       ).pipe(query("KnowersOf")),
 
     LookupLore: ({ userId, rolloutId, query: text, entry, limit }) =>

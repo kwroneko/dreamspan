@@ -1,6 +1,7 @@
 // Durable acceptance regressions from the R4-C review. All data/providers are synthetic.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
@@ -120,6 +121,18 @@ describe("R4-C review acceptance regressions", () => {
         expectedRowVersion: path.entries.at(-1)!.rowVersion
       })
       yield* eventually(() => finished(events, continued.version.id) !== undefined)
+      const [provenance] = yield* fixtureSql(
+        config.dataDir,
+        [
+          {
+            sql: "SELECT v.authoring_fork_id, r.fork_id FROM versions v JOIN rollouts r ON r.id=v.rollout_id WHERE v.id=?",
+            params: [continued.version.id]
+          }
+        ],
+        { readOnly: true }
+      )
+      assert.lengthOf(provenance!, 1)
+      assert.strictEqual(provenance![0]!.authoring_fork_id, provenance![0]!.fork_id)
       const requests = mock.requests().filter((r) => r.path.endsWith("/chat/completions"))
       const body = requests.at(-1)!.body as { messages: Array<{ role: string; prefix?: boolean }> }
       assert.strictEqual(body.messages.at(-1)!.role, "assistant")

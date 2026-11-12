@@ -183,6 +183,26 @@ for (const count of [10, 205]) {
             childBefore.entries.slice(0, 4).map((e) => e.slotId)
           )
           assert.strictEqual(branchAfter.entries[4]!.slotId, childBefore.entries[4]!.slotId)
+          const [provenance] = yield* fixtureSql(
+            config.dataDir,
+            [
+              {
+                sql: "SELECT id,authoring_fork_id FROM versions WHERE id IN (?,?)",
+                params: [branchAfter.entries[0]!.version.id, branchAfter.entries[4]!.version.id]
+              }
+            ],
+            { readOnly: true }
+          )
+          assert.strictEqual(
+            provenance!.find((r) => r.id === branchAfter.entries[0]!.version.id)!.authoring_fork_id,
+            chat.id,
+            "the reused prefix retains its original import fork"
+          )
+          assert.strictEqual(
+            provenance!.find((r) => r.id === branchAfter.entries[4]!.version.id)!.authoring_fork_id,
+            record.forkId,
+            "the new swipe of a shared slot belongs to the reimport's assigned fork"
+          )
           const graphAfter = yield* stImportGraph(config.dataDir, chat.id)
           const shape = (rows: typeof graphBefore) => [...new Map(rows.map((r) => [r.id, [r.id, r.parent]])).values()]
           assert.deepStrictEqual(
