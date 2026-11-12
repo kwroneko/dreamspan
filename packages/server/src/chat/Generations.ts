@@ -26,6 +26,9 @@ import { GenerationFailed, type GenerationRequest, Generator, type GeneratorShap
 
 /** How often a generating version's text so far is saved. */
 const SAVE_EVERY_MS = 2000
+/** How often a stalled stream checks for text not saved yet. */
+const SAVE_TICK_MS = 500
+const SAVE_TICK = Symbol("save")
 
 /** The longest pause between two live rewrites of one reply (see `pump`). */
 const LIVE_PAUSE_MS = 100
@@ -65,6 +68,8 @@ interface Running {
   closed: boolean
   waitingCache: boolean
   savedAt: number
+  /** Text, reasoning or sections changed since the last save. */
+  unsaved: boolean
   /** Stopped by the user (`stopped`), as opposed to the server going down (`interrupted`). */
   stopped: boolean
   fiber: Fiber.Fiber<void, GenerationFailed> | undefined
@@ -453,8 +458,15 @@ export class Generations extends Context.Service<
             }
           })
           .pipe(
+            // A tick in the same loop as the chunks, so a stream that stalls still gets its
+            // text saved, and never after the final save.
+            Stream.merge(
+              Stream.map(Stream.tick(SAVE_TICK_MS), () => SAVE_TICK),
+              { haltStrategy: "left" }
+            ),
             Stream.runForEach((chunk) =>
               Effect.suspend(() => {
+                if (chunk === SAVE_TICK) return saveSoFar(entry)
                 if (typeof chunk === "object" && "several" in chunk) {
                   entry.several = true
                   return Effect.void
@@ -500,6 +512,7 @@ export class Generations extends Context.Service<
                     entry.mode = liveRewrites.list().length > 0 ? "pending" : "direct"
                     entry.dirty = false
                     entry.savedAt = Date.now()
+                    entry.unsaved = false
                     const previous = yield* reader.GetSlot({
                       userId: request.userId,
                       slotId: request.slotId,
@@ -560,6 +573,7 @@ export class Generations extends Context.Service<
                   entry.reasoned = true
                   entry.reasoning += text
                 }
+                entry.unsaved = true
                 return Effect.andThen(
                   changed(entry),
                   Effect.suspend(() => saveSoFar(entry))
@@ -571,8 +585,9 @@ export class Generations extends Context.Service<
 
       /** Saves the text so far now and then, so a crash keeps most of it. */
       const saveSoFar = (entry: Running) => {
-        if (Date.now() - entry.savedAt < SAVE_EVERY_MS) return Effect.void
+        if (!entry.unsaved || Date.now() - entry.savedAt < SAVE_EVERY_MS) return Effect.void
         entry.savedAt = Date.now()
+        entry.unsaved = false
         return save(entry, "generating", null).pipe(
           // Gone for good (purged from the bin): nothing it writes would be kept.
           Effect.catchTag("NotFound", () =>
@@ -617,6 +632,7 @@ export class Generations extends Context.Service<
             closed: false,
             waitingCache: false,
             savedAt: Date.now(),
+            unsaved: false,
             stopped: false,
             fiber: undefined,
             final: undefined

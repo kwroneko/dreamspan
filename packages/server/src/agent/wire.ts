@@ -49,6 +49,9 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
           )
         : undefined
     const reasoningField = field?.type === "thinking" ? field.thinkingSignature : undefined
+    // DeepSeek's thinking mode refuses (400) a replayed call turn without `reasoning_content`,
+    // and takes an empty one (live, 2026-11-12): a turn another model wrote has none to send.
+    const emptyReasoning = target?.kind === "deepseek" && calls.length > 0 && !reasoning
     return {
       role: "assistant",
       content: text,
@@ -57,7 +60,9 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
         ? { reasoning_details: details }
         : reasoning && (calls.length || reasoningField)
           ? { [reasoningField ?? "reasoning_content"]: reasoning }
-          : {})
+          : emptyReasoning
+            ? { reasoning_content: "" }
+            : {})
     }
   }
   if (m.role === "toolResult") {

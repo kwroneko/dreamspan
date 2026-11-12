@@ -46,19 +46,24 @@ const bodies = (requests: ReadonlyArray<Recorded>) =>
  * that never answers. Once resumed, each finishes.
  */
 const provider = () => {
-  const held = { text: 0, wait: 0 }
+  const held = { text: 0, wait: 0, plain: 0 }
   const handler = (request: Recorded, res: ServerResponse) => {
     const body = request.body as unknown as Body
     const user = lastUser(body)
+    const tail = JSON.stringify(body.messages.at(-1)?.content ?? "")
     if (body.messages.at(-1)?.role === "assistant")
-      return sse(res, completionChunks(["ves."], { prompt_tokens: 20, completion_tokens: 2 }))
+      return sse(res, completionChunks([tail.includes("Mira sets") ? " down." : "ves."], { prompt_tokens: 20 }))
+    if (user.includes("Cut the plain.") && held.plain++ === 0) {
+      res.writeHead(200, { "content-type": "text/event-stream" })
+      res.write(`data: ${JSON.stringify(completionChunks(["Mira sets"], {})[0])}\n\n`)
+      return
+    }
     if (!user.includes("Cut the")) return sse(res, completionChunks(["Mira nods."], { prompt_tokens: 9 }))
     if (!hasResult(body)) return sse(res, searchCall)
     if (user.includes("Cut the text.") && held.text++ === 0) {
-      // Text for a little over the 2 s between saves, then nothing more: the app dies here.
+      // One delta, then nothing more: the app dies here. The saves after a stall keep it.
       res.writeHead(200, { "content-type": "text/event-stream" })
-      res.write(`data: ${JSON.stringify(completionChunks(["Ansel"], {})[0])}\n\n`)
-      setTimeout(() => res.write(`data: ${JSON.stringify(completionChunks([" wa"], {})[0])}\n\n`), 2200)
+      res.write(`data: ${JSON.stringify(completionChunks(["Ansel wa"], {})[0])}\n\n`)
       return
     }
     if (user.includes("Cut the wait.") && held.wait++ === 0) return
@@ -102,10 +107,14 @@ const spawnServer = (config: ReturnType<typeof testConfig>) =>
   )
 
 const crashAndResume = (
-  message: "Cut the text." | "Cut the wait.",
+  message: "Cut the text." | "Cut the wait." | "Cut the plain.",
   cutReached: (dataDir: string, held: { text: number; wait: number }) => Effect.Effect<boolean, unknown>
 ) => {
   const config = testConfig()
+  // A plain reply (Tools off) goes on by Continue, the agent's by Resume.
+  const plain = message === "Cut the plain."
+  const kept = plain ? "Mira sets" : message === "Cut the text." ? "Ansel wa" : null
+  const whole = plain ? "Mira sets down." : "Ansel waves."
   return Effect.gen(function* () {
     const script = provider()
     const mock = yield* Effect.acquireRelease(
@@ -119,7 +128,7 @@ const crashAndResume = (
         const { version, chat } = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
           model: { prefill: "assistant" },
-          state: agentOn
+          ...(plain ? {} : { state: agentOn })
         })
         assert.strictEqual(version.content, "Mira nods.")
         return { chatId: chat.id as ChatId, leaf: version.slotId as SlotId }
@@ -159,7 +168,7 @@ const crashAndResume = (
         const path = yield* reader.GetPath({ userId: me.id, chatId: seeded.chatId, leafSlotId: null, limit: 100 })
         const cut = path.entries.at(-1)!
         assert.strictEqual(cut.version.status, "interrupted")
-        if (message === "Cut the text.") assert.strictEqual(cut.version.content, "Ansel wa", "the text so far is kept")
+        if (kept !== null) assert.strictEqual(cut.version.content, kept, "the text so far is kept")
         yield* Effect.sleep(1500)
         assert.lengthOf(bodies(mock.requests()), before.length, "a restart sends nothing by itself")
         const events: Array<ChatEvent> = []
@@ -168,18 +177,19 @@ const crashAndResume = (
           Effect.forkScoped
         )
         yield* eventually(() => events.length > 0)
-        const entry = yield* api.ResumeVersion({ versionId: cut.version.id, expectedRowVersion: cut.rowVersion })
+        const again = { versionId: cut.version.id, expectedRowVersion: cut.rowVersion }
+        const entry = yield* plain ? api.ContinueVersion(again) : api.ResumeVersion(again)
         yield* eventually(() => finished(events, entry.version.id as VersionId) !== undefined)
         const resumed = finished(events, entry.version.id as VersionId)!
         assert.strictEqual(resumed.status, "complete", JSON.stringify(resumed.error))
-        assert.strictEqual(resumed.content, "Ansel waves.")
+        assert.strictEqual(resumed.content, whole)
         const after = bodies(mock.requests()).slice(before.length)
         assert.lengthOf(after, 1, "one request carries the run on")
         const cutRequest = before.at(-1)!
-        if (message === "Cut the text.")
+        if (kept !== null)
           assert.deepStrictEqual(
             after[0]!.messages,
-            [...cutRequest.messages, { role: "assistant", content: "Ansel wa" }],
+            [...cutRequest.messages, { role: "assistant", content: kept }],
             "the request the text was cut in, then the text so far"
           )
         else assert.deepStrictEqual(after[0]!.messages, cutRequest.messages, "the unanswered request, sent again")
@@ -223,6 +233,20 @@ it.live(
   () =>
     crashAndResume("Cut the wait.", (dataDir, held) =>
       held.wait > 0 ? savedText(dataDir, "toolResult") : Effect.succeed(false)
+    ),
+  { timeout: 180_000, tags: ["slow"] }
+)
+
+it.live(
+  "a plain reply killed after one delta: its text is saved, and Continue carries it on",
+  () =>
+    crashAndResume("Cut the plain.", (dataDir) =>
+      Effect.map(
+        fixtureSql(dataDir, [{ sql: "SELECT count(*) AS n FROM version_texts WHERE content = 'Mira sets'" }], {
+          readOnly: true
+        }),
+        ([rows]) => (rows![0] as { n: number }).n > 0
+      )
     ),
   { timeout: 180_000, tags: ["slow"] }
 )
