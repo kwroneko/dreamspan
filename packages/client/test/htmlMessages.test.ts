@@ -67,7 +67,7 @@ describe("inline HTML", () => {
         createElement(StMarkdown, { text: "<b>x</b>", streaming: false })
       )
     )
-    expect(out).toMatch(/class="[^"]*markdown markdown-html message-html"/)
+    expect(out).toMatch(/class="[^"]*markdown markdown-html message-html rpfont-73-6c-6f-74"/)
   })
 
   it("keeps the text of tags it doesn't know, each line on its own", () => {

@@ -468,6 +468,7 @@ describe("content security policy", () => {
         assert.strictEqual(directives.get("default-src"), "'self'")
         assert.strictEqual(directives.get("script-src"), "'self'", "no inline script, none from elsewhere")
         assert.strictEqual(directives.get("img-src"), "'self' blob: data:")
+        assert.strictEqual(directives.get("font-src"), "'self' data:")
         assert.strictEqual(directives.get("connect-src"), `'self' ws://127.0.0.1:${port} wss://127.0.0.1:${port}`)
         assert.strictEqual(directives.get("frame-ancestors"), "'none'")
         // Markup that slipped past sanitizing can't submit a form, embed a plugin or rebase links.

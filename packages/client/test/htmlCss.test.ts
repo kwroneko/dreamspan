@@ -1,6 +1,14 @@
 // A message's CSS under the message-body scope (ui/html/css.ts, spec/HTML-MESSAGES.md §3.2).
 import { describe, expect, it } from "vitest"
-import { cleanPresentation, cleanStyle, scopeCss, type ScopeMode } from "../src/ui/html/css.ts"
+import {
+  cleanPresentation,
+  cleanStyle,
+  scopeCss,
+  scopeStyles,
+  messageFontClass,
+  type ScopeMode
+} from "../src/ui/html/css.ts"
+import { NARROW_TTF, NARROW_WOFF, NARROW_WOFF2 } from "./fixtures/cardFonts.ts"
 import { stylesheetViolations, valueViolations } from "./support/cssInvariants.ts"
 
 const scoped = (css: string, mode: ScopeMode = "prefix") => scopeCss(css, null, mode).css
@@ -266,6 +274,12 @@ describe("cleanPresentation", () => {
 // Negative controls: a checker that merely accepts the current output proves nothing.
 describe("the independent CSS checker", () => {
   it.each([
+    ".message-html .a{@media (background:url(https://example.com/x)){color:red}}",
+    ".message-html .a{.b:attr(title){color:red}}",
+    ".message-html .a{content:attr(data-label)}",
+    ".message-html .a::before{background:attr(data-label)}",
+    ".message-html .a::before{content:attr(data-source-map)}",
+    ".message-html .a::before{content:attr(title, url(/x))}",
     "body{color:red}",
     ".message-html + main{color:red}",
     "@scope (body){body{color:red}}",
@@ -284,4 +298,162 @@ it("scopes many sibling nested rules without rescanning their suffixes", { tags:
   const result = scoped(".a{" + "b{}".repeat(15_000) + "color:red}")
   expect(result).toBe(".message-html .custom-a{" + "b{}".repeat(15_000) + "color: red;}")
   expect(performance.now() - started).toBeLessThan(2000)
+})
+
+describe("classic generated text", () => {
+  it("allows plain attr only as text on before/after", () => {
+    expect(scoped('.label::before { content: "Label: " attr(data-label) }')).toContain(
+      'content: "Label: " attr(data-label)'
+    )
+    expect(scoped(".label::after { content: attr(title) }")).toContain("content: attr(title)")
+    for (const mode of ["prefix", "scope"] as const)
+      expect(
+        stylesheetViolations(
+          scoped('.a::before{content:"text " attr(data-label)}.b{&::after{content:attr(title)}}', mode),
+          false
+        )
+      ).toEqual([])
+  })
+})
+
+describe("attr boundaries", () => {
+  it("accepts only the explicit attribute allow-list, after CSS escape decoding", () => {
+    for (const attribute of ["title", "alt", "data-label", "data-value", "data-text", "data-tooltip"])
+      for (const mode of ["prefix", "scope"] as const)
+        expect(scoped(`.a::before,.b::after{content:attr(${attribute})}`, mode)).toContain(
+          `content: attr(${attribute})`
+        )
+    expect(scoped(String.raw`.a::before{content:a\74tr(data-label)}`)).toContain("attr(data-label)")
+    for (const attribute of [
+      "value",
+      "name",
+      "id",
+      "class",
+      "nonce",
+      "href",
+      "src",
+      "style",
+      "data-source-map",
+      "data-message-id",
+      "data-token",
+      "aria-label",
+      "data-anything"
+    ])
+      expect(scoped(`.a::before{content:attr(${attribute})}`)).not.toContain("content:")
+  })
+  it("refuses typed, fallback, nested, substitution and fetching contexts with or without consent", () => {
+    for (const consent of [null, "chat=synthetic"])
+      for (const value of [
+        "attr(data-label type(<url>))",
+        "attr(data-label string)",
+        "attr(data-label, x)",
+        "attr()",
+        "url(attr(data-label))",
+        "image-set(attr(data-label))",
+        "var(--x,attr(data-label))",
+        "attr(data-label) url(https://example.com/x)",
+        "attr(data-label) / var(--x)"
+      ])
+        expect(scopeCss(`.a::before{content:${value}}`, consent).css).not.toContain("content:")
+    for (const property of [
+      "background",
+      "background-image",
+      "cursor",
+      "src",
+      "list-style",
+      "mask",
+      "--x",
+      "font-family"
+    ])
+      expect(scoped(`.a::before{${property}:attr(data-label)}`)).not.toContain(`${property}:`)
+    for (const selector of [
+      ".a",
+      ".a::marker",
+      ".a:before",
+      ".a::before,.b",
+      ".a::before > span",
+      ":is(.a::before,.b)"
+    ])
+      expect(scoped(`${selector}{content:attr(data-label)}`)).not.toContain("content:")
+    expect(cleanStyle("content:attr(data-label);--x:attr(data-label)").style).toBeNull()
+    expect(cleanPresentation("attr(data-label)")).toBeNull()
+    expect(scoped("@keyframes x{to{content:attr(data-label)}}")).not.toContain("content:")
+    expect(scoped(".a::before{content:counter(x)}")).toContain("counter(x)")
+  })
+})
+
+describe("embedded font envelopes and message ownership", () => {
+  const face = (url: string, family = "Inter") =>
+    `@font-face{font-family:${family};src:url("${url}")} .a{font-family:${family},serif;color:red}`
+  const message = (styles: string[], key = "first", mode: ScopeMode = "prefix") =>
+    scopeStyles(styles, null, mode, key).css
+  it("accepts matching WOFF2/WOFF/TTF signatures and an OTF envelope", () => {
+    for (const data of [
+      NARROW_WOFF2,
+      NARROW_WOFF,
+      NARROW_TTF,
+      "data:font/otf;base64," + btoa("OTTO" + "\0".repeat(8))
+    ]) {
+      const out = message([face(data)])
+      expect(out).toContain(`url("${data}")`)
+      expect(out).toContain(`font-family: ${messageFontClass("first")}-inter`)
+      expect(out).toContain(`.message-html.${messageFontClass("first")} .custom-a{font-family:`)
+    }
+    expect(message([face(NARROW_WOFF2)], "second")).not.toContain(`${messageFontClass("first")}-inter`)
+  })
+  it("shares names across a message's style tags, but never accepts user-written private names", () => {
+    const out = message([face(NARROW_WOFF2), ".b{font:20px INTER}"])
+    expect(out).toContain(`font: 20px ${messageFontClass("first")}-inter`)
+    for (const style of ["font-family:rpfont-61-inter", 'font-family:"rpfont-61-inter"', '--x:"rpfont-61-inter"'])
+      expect(cleanStyle(style).style).toBeNull()
+    expect(message(['@font-face{font-family:Inter;src:var(--f)}.a{--f:url("' + NARROW_WOFF2 + '")}'])).not.toContain(
+      "@font-face"
+    )
+  })
+  it("refuses nonfont, mislabeled, malformed, collection and oversized data in src", () => {
+    const bad = [
+      NARROW_WOFF2.replace("font/woff2", "image/png"),
+      NARROW_WOFF2.replace("font/woff2", "font/ttf"),
+      "data:font/woff2;base64," + btoa("<svg>not a font</svg>"),
+      "data:font/woff2;base64,%%%",
+      "data:font/woff2,abcdef",
+      "data:font/ttf;base64," + btoa("ttcf" + "\0".repeat(8)),
+      "data:text/html;base64," + btoa("<script>1</script>"),
+      "data:image/svg+xml,<svg/>",
+      "data:font/ttf;base64," + btoa("\x00\x01\x00\x00" + "\0".repeat(96 * 1024))
+    ]
+    for (const url of bad) expect(message([face(url)])).not.toContain("@font-face")
+    // data fonts are not enabled without a message identity.
+    expect(scopeStyles([face(NARROW_WOFF2)]).css).not.toContain("@font-face")
+    // Header's claimed expanded size and exact container size are checked too.
+    for (const offset of [8, 16]) {
+      const bytes = atob(NARROW_WOFF2.split(",")[1]!)
+      const changed = bytes.slice(0, offset) + "\x7f\xff\xff\xff" + bytes.slice(offset + 4)
+      expect(message([face("data:font/woff2;base64," + btoa(changed))])).not.toContain("@font-face")
+    }
+  })
+  it("enforces decoded and expanded totals across all style tags", () => {
+    const ttf = (size: number) => "data:font/ttf;base64," + btoa("\x00\x01\x00\x00" + "\0".repeat(size - 4))
+    const out = message([face(ttf(96 * 1024), "A"), face(ttf(96 * 1024), "B"), face(NARROW_TTF, "C")])
+    expect(out.match(/@font-face/g)).toHaveLength(2)
+    const bytes = atob(NARROW_WOFF2.split(",")[1]!)
+    const expanded = bytes.slice(0, 16) + "\0\x20\0\0" + bytes.slice(20)
+    const url = "data:font/woff2;base64," + btoa(expanded)
+    expect(message([face(url, "A"), face(url, "B"), face(url, "C")]).match(/@font-face/g)).toHaveLength(2)
+  })
+  it("confines font properties in both scope modes, including grouping and nesting", () => {
+    for (const mode of ["prefix", "scope"] as const) {
+      const out = message(
+        [face(NARROW_WOFF2), "@media all{.b{& > span{font:20px Inter}}}@keyframes x{to{font-family:Inter}}"],
+        "first",
+        mode
+      )
+      const own =
+        mode === "prefix" ? `.message-html.${messageFontClass("first")}` : `:scope.${messageFontClass("first")}`
+      expect(out).toContain(`${own} .custom-b{& > span{font: 20px ${messageFontClass("first")}-inter;}}`)
+      expect(out).not.toMatch(/@keyframes[^}]*font-family/)
+      expect(out).toContain(".custom-a{color: red;}")
+      expect(stylesheetViolations(out, false)).toEqual([])
+    }
+  })
 })
