@@ -345,6 +345,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         parameters: tool.parameters,
         executionMode: "sequential",
         execute: async (toolCallId, params, signal) => {
+          // Dangling calls on resume execute directly, without pi-agent's beforeToolCall hook.
+          if (tool.effect === "external" && run.allowsOutside !== true)
+            return {
+              content: [{ type: "text", text: "This chat does not allow tools with outside effects." }],
+              details: null,
+              isError: true
+            }
           // A committed call's receipt takes precedence over validation against its own
           // changed state (a note may now exist, or its old passage may already be gone).
           const execute =

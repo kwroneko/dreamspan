@@ -369,6 +369,16 @@ describe("workshop", () => {
           (e) => e.role === "toolResult" && e.isError && e.text.includes("does not allow tools with outside effects")
         )
       )
+      const user = yield* api.Whoami()
+      const slot = yield* (yield* Reader).GetSlot({ userId: user.id, slotId: rp.version.slotId })
+      const resumed = yield* api.ResumeFromStep({
+        versionId: rp.version.id,
+        step: 0,
+        edit: { kind: "arguments", arguments: {} },
+        expectedRowVersion: slot.entry.rowVersion
+      })
+      yield* eventually(() => finished(rp.events, resumed.version.id) !== undefined)
+      assert.strictEqual(ran, 0, "A dangling outside call must also be refused during RP resume.")
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
       const version = yield* answer(api, chat, events)
