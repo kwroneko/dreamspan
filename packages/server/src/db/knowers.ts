@@ -4,6 +4,7 @@
 // (`agentReads.ts`), so both leave out the same messages. The pure rule is `@rp/shared/knowledge.ts`.
 import { knowersOf, parsePresence } from "@rp/shared/knowledge.ts"
 import { Effect } from "effect"
+import { viewedJoin } from "../assembler/mergeKnowledge.ts"
 import type { SqlClient } from "effect/sql"
 import type { Fragment } from "effect/sql/Statement"
 
@@ -27,7 +28,7 @@ const mergeKnowersSql = (slot: string) => `(SELECT json_group_array(candidate.en
  */
 export const knowsSql = (sql: SqlClient.SqlClient, viewers: ReadonlyArray<string>) => {
   const ids = JSON.stringify(viewers)
-  return sql`CASE WHEN v.origin = 'merge' AND EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
+  return sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
     THEN EXISTS (SELECT 1 FROM json_each(${sql.literal(mergeKnowersSql("s.id"))}) k WHERE k.value IN (SELECT value FROM json_each(${ids})))
     ELSE v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(${ids}) viewer WHERE viewer.value = v.speaker_entity_id)
       OR EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${ids}))
@@ -43,7 +44,8 @@ export const readKnowers = (
   sql: SqlClient.SqlClient,
   chatId: string,
   owned: Fragment,
-  versionIds: ReadonlyArray<string>
+  versionIds: ReadonlyArray<string>,
+  viewers?: ReadonlyArray<string> | null
 ) =>
   Effect.gen(function* () {
     const rows = yield* sql<{
@@ -52,13 +54,22 @@ export const readKnowers = (
       presence_json: string | null
       speaker_entity_id: string | null
       merge_cast: string | null
-    }>`SELECT metadata.id, payload.cast_json, payload.presence_json, metadata.speaker_entity_id,
-        CASE WHEN metadata.origin = 'merge' THEN ${sql.literal(mergeKnowersSql("metadata.slot_id"))} END AS merge_cast
+      merge_id: string | null
+      merge_title: string | null
+      content: string
+    }>`SELECT metadata.id, payload.content,
+        (SELECT m.id FROM chat_merges m WHERE m.slot_id = metadata.slot_id) AS merge_id,
+        (SELECT m.title FROM chat_merges m WHERE m.slot_id = metadata.slot_id) AS merge_title, payload.cast_json, payload.presence_json, metadata.speaker_entity_id,
+        CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = metadata.slot_id) THEN ${sql.literal(mergeKnowersSql("metadata.slot_id"))} END AS merge_cast
       FROM json_each(${JSON.stringify(versionIds)}) requested
       CROSS JOIN versions metadata ON metadata.id = requested.value
       CROSS JOIN version_texts payload ON payload.version_seq = metadata.seq
       CROSS JOIN slots s ON s.id = metadata.slot_id
       WHERE s.chat_id = ${chatId} AND ${owned}`
+    const merges = viewers == null ? [] : rows.flatMap((r) => (r.merge_id ? [r.merge_id] : []))
+    const merged = new Map(
+      merges.length ? (yield* readMergeRows(sql, chatId, owned, merges)).map((m) => [m.mergeId, m.rows]) : []
+    )
     const byId = new Map(rows.map((row) => [row.id, row]))
     return versionIds.map((versionId) => {
       const row = byId.get(versionId)
@@ -72,7 +83,16 @@ export const readKnowers = (
                 speaker: row.speaker_entity_id,
                 presence: parsePresence(row.presence_json)
               })
-      return { versionId, knowers: knowers === null ? null : [...knowers] }
+      const merge = row?.merge_id ? merged.get(row.merge_id) : undefined
+      const view =
+        merge && viewers
+          ? viewedJoin(row!.content, row!.merge_title!, merge, (ids) => viewers.some((id) => ids.includes(id)))
+          : null
+      return {
+        versionId,
+        knowers: knowers === null ? null : [...knowers],
+        ...(view ? { content: view.content, readable: view.rows.length > 0 || !view.partial } : {})
+      }
     })
   })
 

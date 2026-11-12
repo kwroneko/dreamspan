@@ -1,5 +1,5 @@
 // Three-way merge of library documents; the rules are in ARCHITECTURE.md §3.9.
-import { diff3Merge } from "node-diff3"
+import { diff3Merge, diffIndices } from "node-diff3"
 import { MergeConflictInfo } from "./library.ts"
 
 type Path = ReadonlyArray<string | number>
@@ -23,6 +23,39 @@ const deepEqual = (a: unknown, b: unknown): boolean => {
 
 /** Words and the whitespace between them, so a merge never splits a word. */
 const tokens = (text: string) => text.split(/(\s+)/).filter((t) => t.length > 0)
+
+/** Carry edits into independently visible text spans. An edit crossing a span boundary is
+ * ambiguous: retain that span's original text rather than disclose its neighbour's text. */
+export const editedSpans = (base: string, edited: string, spans: ReadonlyArray<{ from: number; to: number }>) => {
+  if (base === edited) return { texts: spans.map((s) => base.slice(s.from, s.to)), ambiguous: false }
+  const before = tokens(base)
+  const after = tokens(edited)
+  const offsets = [0]
+  for (const token of before) offsets.push(offsets.at(-1)! + token.length)
+  const changes = diffIndices(before, after).map((d) => ({
+    from: offsets[d.buffer1[0]]!,
+    to: offsets[d.buffer1[0] + d.buffer1[1]]!,
+    text: d.buffer2Content.join("")
+  }))
+  let ambiguous = false
+  const texts = spans.map((span) => {
+    const own = changes.filter(
+      (c) => (c.from < span.to && c.to > span.from) || (c.from === c.to && c.from >= span.from && c.from <= span.to)
+    )
+    if (own.some((c) => c.from < span.from || c.to > span.to)) {
+      ambiguous = true
+      return base.slice(span.from, span.to)
+    }
+    let result = "",
+      at = span.from
+    for (const change of own) {
+      result += base.slice(at, change.from) + change.text
+      at = change.to
+    }
+    return result + base.slice(at, span.to)
+  })
+  return { texts, ambiguous }
+}
 
 /** Merges two edits of one text. Returns undefined if they overlap. */
 export const mergeText = (base: string, ours: string, theirs: string): string | undefined => {

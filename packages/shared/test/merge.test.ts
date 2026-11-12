@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { merge3, mergeText } from "../src/merge.ts"
+import { editedSpans, merge3, mergeText } from "../src/merge.ts"
 
 // The owner's case (DESIGN §4): a preset re-imported after local edits.
 const upstreamV1 = {
@@ -196,5 +196,32 @@ describe("mergeText", () => {
 
   it("returns undefined for overlapping edits", () => {
     expect(mergeText("the red door", "the blue door", "the green door")).toBeUndefined()
+  })
+})
+
+// Projection of an edited merge transcript must not copy an adjacent, hidden row's edits.
+describe("edits of independently visible spans", () => {
+  it("keeps edits in both rows separate, including multiline row bodies", () => {
+    const base = "Mira: tide rises.\nMira listens.\n\nWren: private code."
+    const edited = "Mira: tide ebbs.\nMira listens.\n\nWren: private password."
+    const split = base.indexOf("\n\n")
+    expect(
+      editedSpans(base, edited, [
+        { from: 0, to: split },
+        { from: split + 2, to: base.length }
+      ])
+    ).toEqual({
+      texts: ["Mira: tide ebbs.\nMira listens.", "Wren: private password."],
+      ambiguous: false
+    })
+  })
+  it("retains original rows if a rewrite crosses their boundary", () => {
+    const base = "first row\n\nsecond row"
+    const result = editedSpans(base, "whole transcript rewritten", [
+      { from: 0, to: 9 },
+      { from: 11, to: base.length }
+    ])
+    expect(result.ambiguous).toBe(true)
+    expect(result.texts).toEqual(["first row", "second row"])
   })
 })

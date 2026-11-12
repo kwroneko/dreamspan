@@ -654,6 +654,32 @@ describe("gap lines", () => {
   )
 })
 
+/** A tool run as the reply whose context `snapshot` is, reading as its viewer. */
+const tools = (t: Effect.Success<ReturnType<typeof story>>, snapshot: ContextSnapshot, forcePath = false) => {
+  const leaf = snapshot.inputs.leafSlotId as SlotId
+  const context: ToolContext = {
+    userId: t.userId,
+    chatId: t.chatId,
+    forkId: t.fork(),
+    slotId: leaf,
+    versionId: "unused" as VersionId,
+    leafSlotId: leaf,
+    viewers: generationOf(snapshot).viewers,
+    rolloutId: "test",
+    toolCallId: "test",
+    cache: new Map(),
+    reader: forcePath
+      ? { ...t.reader, SearchChat: (() => Effect.succeed(null)) as typeof t.reader.SearchChat }
+      : t.reader,
+    writer: t.writer
+  }
+  return (id: string, args: object) =>
+    Effect.map(
+      [...historyTools, listNotes].find((tool) => tool.id === id)!.execute(context, args as never),
+      (out) => out.text
+    )
+}
+
 describe("merged chats per viewer (unit C6)", () => {
   type Story = Effect.Success<ReturnType<typeof story>>
   const card = (t: Story, name: string) =>
@@ -730,6 +756,7 @@ describe("merged chats per viewer (unit C6)", () => {
         digest: seen.digest
       })
       yield* t.follow(made.slotId)
+      return made
     })
 
   it.live("a character sees the merged lines it was there for, and a shared context the whole join", () =>
@@ -737,7 +764,7 @@ describe("merged chats per viewer (unit C6)", () => {
       Effect.gen(function* () {
         const t = yield* story("separate")
         // Wren and Mira at the docks; Wren leaves before Mira's second line.
-        yield* mergeIn(
+        const merged = yield* mergeIn(
           t,
           "Private docks",
           [t.mira, t.wren],
@@ -761,6 +788,29 @@ describe("merged chats per viewer (unit C6)", () => {
         assert.strictEqual(again._tag, "Rebuilt")
         if (again._tag === "Rebuilt")
           assert.deepStrictEqual((JSON.parse(again.snapshot) as ContextSnapshot).request, wren.request)
+        const read = tools(t, wren)
+        assert.include(yield* read("read_messages", { from: 1, count: 20 }), "DOCKS-SHARED")
+        assert.include(yield* read("search_chat", { query: "DOCKS-SHARED" }), "tide turns")
+        assert.notInclude(yield* read("search_chat", { query: "MERGED-SECRET" }), "crate")
+        const join = (yield* t.reader.ReadPath({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          leafSlotId: merged.slotId,
+          range: { _tag: "Bottom" },
+          limit: 1
+        })).entries[0]!.version
+        yield* t.writer.AmendVersion({
+          userId: t.userId,
+          versionId: join.id,
+          expectedRowVersion: join.rowVersion,
+          content: "Mira: DOCKS-SHARED: the tide ebbs.\n\nMira: MERGED-SECRET: the crate is hollow.",
+          forkId: t.fork()
+        })
+        const edited = yield* t.contextFor(t.wren)
+        assert.include(sentText(edited), "the tide ebbs.")
+        assert.notInclude(sentText(edited), "crate")
+        assert.include(yield* tools(t, edited)("search_chat", { query: "ebbs" }), "the tide ebbs.")
         // One shared context sends the join as written.
         yield* t.event({ key: "context.per_speaker", value: "shared" })
         const shared = sentText(yield* t.contextFor(t.wren))
@@ -808,30 +858,6 @@ describe("merged chats per viewer (unit C6)", () => {
 })
 
 describe("the agent's read tools in a separate context", () => {
-  /** A tool run as the reply whose context `snapshot` is, reading as its viewer. */
-  const tools = (t: Effect.Success<ReturnType<typeof story>>, snapshot: ContextSnapshot) => {
-    const leaf = snapshot.inputs.leafSlotId as SlotId
-    const context: ToolContext = {
-      userId: t.userId,
-      chatId: t.chatId,
-      forkId: t.fork(),
-      slotId: leaf,
-      versionId: "unused" as VersionId,
-      leafSlotId: leaf,
-      viewers: generationOf(snapshot).viewers,
-      rolloutId: "test",
-      toolCallId: "test",
-      cache: new Map(),
-      reader: t.reader,
-      writer: t.writer
-    }
-    return (id: string, args: object) =>
-      Effect.map(
-        [...historyTools, listNotes].find((tool) => tool.id === id)!.execute(context, args as never),
-        (out) => out.text
-      )
-  }
-
   it.live("search_chat never finds what the viewer missed; read_messages skips it, numbering kept", () =>
     run(
       Effect.gen(function* () {
@@ -856,6 +882,9 @@ describe("the agent's read tools in a separate context", () => {
         assert.deepStrictEqual(numbers(read), [2, 3, 6])
         assert.notInclude(sentText(forWren), "Late again")
         assert.include(yield* wren("read_messages", { from: 4, count: 1 }), "Wren walks back in.")
+        const fallback = tools(t, forWren, true)
+        for (const query of ["vault", "walks", "flooded"])
+          assert.strictEqual(yield* fallback("search_chat", { query }), yield* wren("search_chat", { query }))
       })
     )
   )

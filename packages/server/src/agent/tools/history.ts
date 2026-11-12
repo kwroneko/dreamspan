@@ -43,19 +43,24 @@ const missedBy = (context: ToolContext, entries: ReadonlyArray<PathEntry>) =>
   Effect.gen(function* () {
     const missed = new Set<number>()
     const viewers = context.viewers
-    if (viewers === null) return missed
+    const projected = new Map<number, { content: string; readable: boolean }>()
+    if (viewers === null) return { missed, projected }
     const numberOf = new Map(entries.map((e) => [e.version.id as string, (e.position ?? e.depth) + 1]))
     const ids = [...numberOf.keys()]
     for (let at = 0; at < ids.length; at += KNOWERS_BATCH) {
       const known = yield* context.reader.KnowersOf({
         userId: context.userId,
         chatId: context.chatId,
-        versionIds: ids.slice(at, at + KNOWERS_BATCH)
+        versionIds: ids.slice(at, at + KNOWERS_BATCH),
+        viewers
       })
-      for (const { versionId, knowers } of known)
-        if (knowers !== null && !viewers.some((id) => knowers.includes(id))) missed.add(numberOf.get(versionId)!)
+      for (const { versionId, knowers, content, readable } of known) {
+        const n = numberOf.get(versionId)!
+        if (content !== undefined) projected.set(n, { content, readable: readable === true })
+        if (knowers !== null && !viewers.some((id) => knowers.includes(id))) missed.add(n)
+      }
     }
-    return missed
+    return { missed, projected }
   })
 
 /**
@@ -92,7 +97,7 @@ const pathRead = (context: ToolContext) =>
         context,
         entries.flatMap((e) => (e.version.speakerEntityId ? [e.version.speakerEntityId] : []))
       )
-      const missed = yield* missedBy(context, entries)
+      const { missed, projected } = yield* missedBy(context, entries)
       const messages = entries.flatMap((entry): Array<PathMessage> => {
         const { version } = entry
         const n = (entry.position ?? entry.depth) + 1
@@ -101,10 +106,11 @@ const pathRead = (context: ToolContext) =>
           version.status === "generating" ||
           version.status === "failed" ||
           !version.content.trim() ||
-          missed.has(n)
+          projected.get(n)?.readable === false ||
+          (missed.has(n) && !projected.get(n)?.readable)
         )
           return []
-        return [name({ ...version, n })]
+        return [name({ ...version, content: projected.get(n)?.content ?? version.content, n })]
       })
       return { messages, missed } satisfies PathRead
     })
